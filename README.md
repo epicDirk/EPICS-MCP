@@ -42,7 +42,7 @@ server_params = StdioServerParameters(
     args=["/path/server.py"],
 )
 ```
-- EPICS
+- ### EPICS
 - Before using the EPCIS mcp server, you must successfully install EPCIS on your local machine, ensure that IOC can start normally, and verify that functions such as `caget`, `caput`, and `cainfo` are working properly. For detailed installation instructions, please refer to [https://epics-controls.org/resources-and-support/base/](https://epics-controls.org/resources-and-support/base/).
 - ![softioc](softioc.png)
 - ![tools](tools.png)
