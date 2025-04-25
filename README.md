@@ -43,7 +43,7 @@ server_params = StdioServerParameters(
 - ![tools](tools.png)
   
 # Test Result
-- Prompt:
+- Mcp cilent:
 ```json
 async def run():
     async with stdio_client(server_params) as (read, write):
