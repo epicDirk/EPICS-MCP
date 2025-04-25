@@ -4,3 +4,4 @@ langgraph
 langchain
 flask
 pyepics
+langchain_openai
