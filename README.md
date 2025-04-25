@@ -41,3 +41,45 @@ server_params = StdioServerParameters(
 - Before using the EPCIS mcp server, you must successfully install EPCIS on your local machine, ensure that IOC can start normally, and verify that functions such as `caget`, `caput`, and `cainfo` are working properly. For detailed installation instructions, please refer to [https://epics-controls.org/resources-and-support/base/](https://epics-controls.org/resources-and-support/base/).
 - ![softioc](softioc.png)
 - ![tools](tools.png)
+  
+# Test Result
+- Prompt:
+  ```json
+async def run():
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            # Initialize the connection
+            await session.initialize()
+
+            # Get tools
+            tools = await load_mcp_tools(session)
+
+            # Create and run the agent
+            agent = create_react_agent(model, tools)
+            agent_response = await agent.ainvoke({"messages": "To query the value of a PV (Process Variable) named "temperature:water""})
+            return agent_response
+)
+```
+-Result:
+ ```json
+================================[1m Human Message [0m=================================
+
+To query the value of a PV (Process Variable) named temperature:water
+==================================[1m Ai Message [0m==================================
+Tool Calls:
+  get_pv_value (call_vvbXwi51CyYUxEM0hcyvCFCY)
+ Call ID: call_vvbXwi51CyYUxEM0hcyvCFCY
+  Args:
+    pv_name: temperature:water
+=================================[1m Tool Message [0m=================================
+Name: get_pv_value
+
+{
+  "status": "success",
+  "value": 88.0
+}
+==================================[1m Ai Message [0m==================================
+
+The current value of the PV named `temperature:water` is 88.0.
+```
+
