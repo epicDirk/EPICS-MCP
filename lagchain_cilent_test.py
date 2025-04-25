@@ -23,7 +23,7 @@ model = AzureChatOpenAI(
 server_params = StdioServerParameters(
     command="python",
     # Make sure to update to the full absolute path to your math_server.py file
-    args=["/path/src/epics/server.py"],
+    args=["/path/src/epics-mcp-sever/server.py"],
 )
 
 async def run():
