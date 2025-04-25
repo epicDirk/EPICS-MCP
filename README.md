@@ -29,6 +29,10 @@
   
 # Usage with Langchain
 - To use this with Langchain, you must install langchain_mcp_adapter
+```python
+pip install -r requirements.txt
+```
+
 - ### Langchain
 
 ```python
