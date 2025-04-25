@@ -7,25 +7,21 @@ This tool is particularly useful in environments where EPICS PVs are used for mo
 # Features
 The EPICS MCP Server provides the following tools:
 
-1. Get PV Value
-Description: Retrieves the current value of a specified PV.
-Tool Name: get_pv_value
-Input Parameters:
-pv_name (string): The name of the PV variable.
-Output:
-A JSON object containing the status (success or error) and the retrieved value or an error message.
-2. Set PV Value
-Description: Sets a new value for a specified PV.
-Tool Name: set_pv_value
-Input Parameters:
-pv_name (string): The name of the PV variable.
-pv_value (string): The new value to be set for the PV.
-Output:
-A JSON object containing the status (success or error) and a confirmation message or an error message.
-3. Get PV Information
-Description: Fetches detailed information about a specified PV.
-Tool Name: get_pv_info
-Input Parameters:
-pv_name (string): The name of the PV variable.
-Output:
-A JSON object containing the status (success or error) and the detailed information about the PV or an error message.
+1. **get_pv_value**
+   - Create or update a single file in a repository
+   - Inputs:
+     - `pv_name` (string): The name of the PV variable.
+   - Returns: A JSON object containing the status (`success` or `error`) and the retrieved value or an error message.
+
+2. **set_pv_value**
+   - Set a new value for a specified PV.
+   - Inputs:
+     - `pv_name` (string): The name of the PV variable.
+     - `pv_value` (string): The new value to be set for the PV.
+   - Returns: A JSON object containing the status (`success` or `error`) and a confirmation message or an error message.
+
+3. **get_pv_info**
+   - Fetches detailed information about a specified PV.
+   - Inputs:
+     - `pv_name` (string): The name of the PV variable.
+   - Returns: A JSON object containing the status (`success` or `error`) and the detailed information about the PV or an error message.
