@@ -61,7 +61,7 @@ async def run():
 
             # Create and run the agent
             agent = create_react_agent(model, tools)
-            agent_response = await agent.ainvoke({"messages": "To query the value of a PV (Process Variable) named "temperature:water""})
+            agent_response = await agent.ainvoke({"messages": "To query the value of a PV (Process Variable) named temperature:water"})
             return agent_response
 )
 ```
