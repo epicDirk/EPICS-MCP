@@ -28,7 +28,7 @@
    - Returns: A JSON object containing the status (`success` or `error`) and the detailed information about the PV or an error message.
   
 # Usage with Langchain
-- To use this with Langchain, you must install langchain_mcp_adapter
+- To use this with Langchain, you must install the dependencies required for the project.
 ```python
 pip install -r requirements.txt
 ```
