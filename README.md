@@ -26,3 +26,8 @@
    - Inputs:
      - `pv_name` (string): The name of the PV variable.
    - Returns: A JSON object containing the status (`success` or `error`) and the detailed information about the PV or an error message.
+  
+# Usage with Langchain
+- To use this with Langchain, you must install langchain_mcp_adapter
+- Before using the EPCIS mcp server, you must successfully install EPCIS on your local machine, ensure that IOC can start normally, and verify that functions such as `caget`, `caput`, and `cainfo` are working properly. For detailed installation instructions, please refer to [https://epics-controls.org/resources-and-support/base/](https://epics-controls.org/resources-and-support/base/).
+- 
