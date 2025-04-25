@@ -29,6 +29,14 @@
   
 # Usage with Langchain
 - To use this with Langchain, you must install langchain_mcp_adapter
+- ## Langchain
+
+```json
+server_params = StdioServerParameters(
+    command="python",
+    # Make sure to update to the full absolute path to your math_server.py file
+    args=["/path/server.py"],
+)
 - Before using the EPCIS mcp server, you must successfully install EPCIS on your local machine, ensure that IOC can start normally, and verify that functions such as `caget`, `caput`, and `cainfo` are working properly. For detailed installation instructions, please refer to [https://epics-controls.org/resources-and-support/base/](https://epics-controls.org/resources-and-support/base/).
 - ![softioc](softioc.png)
 - ![tools](tools.png)
