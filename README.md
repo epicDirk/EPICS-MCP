@@ -64,7 +64,7 @@ New : temperature:water              100
 jiangyan@DESKTOP-84CO9VB:~$ cainfo temperature:water
 temperature:water
     State:            connected
-    Host:             172.17.17.198:5064
+    Host:             127.0.0.1:5056
     Access:           read, write
     Native data type: DBF_DOUBLE
     Request type:     DBR_DOUBLE
