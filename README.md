@@ -31,7 +31,7 @@
 - To use this with Langchain, you must install langchain_mcp_adapter
 - ### Langchain
 
-```json
+```python
 server_params = StdioServerParameters(
     command="python",
     # Make sure to update to the full absolute path to your math_server.py file
@@ -64,7 +64,7 @@ async def run():
 
 
 - Result:
- ```json
+ ```python
 ================================[1m Human Message [0m=================================
 
 To query the value of a PV (Process Variable) named temperature:water
