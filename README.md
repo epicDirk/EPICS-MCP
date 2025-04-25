@@ -44,8 +44,33 @@ server_params = StdioServerParameters(
 ```
 - ### EPICS
 - Before using the EPCIS mcp server, you must successfully install EPCIS on your local machine, ensure that IOC can start normally, and verify that functions such as `caget`, `caput`, and `cainfo` are working properly. For detailed installation instructions, please refer to [https://epics-controls.org/resources-and-support/base/](https://epics-controls.org/resources-and-support/base/).
-- ![softioc](softioc.png)
-- ![tools](tools.png)
+```python
+jiangyan@DESKTOP-84CO9VB:~$ softIoc -d ~/EPICS/DB/test.db
+Starting iocInit
+############################################################################
+## EPICS R7.0.8
+## Rev. 2025-02-13T14:29+0800
+## Rev. Date build date/time:
+############################################################################
+iocRun: All initialization complete
+epics>
+```
+```python
+jiangyan@DESKTOP-84CO9VB:~$ caget temperature:water
+temperature:water              88
+jiangyan@DESKTOP-84CO9VB:~$ caput temperature:water 100
+Old : temperature:water              88
+New : temperature:water              100
+jiangyan@DESKTOP-84CO9VB:~$ cainfo temperature:water
+temperature:water
+    State:            connected
+    Host:             172.17.17.198:5064
+    Access:           read, write
+    Native data type: DBF_DOUBLE
+    Request type:     DBR_DOUBLE
+    Element count:    1
+
+```
   
 # Test Result
 - Mcp cilent:
