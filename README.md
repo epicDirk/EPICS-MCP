@@ -73,7 +73,7 @@ temperature:water
 ```
   
 # Test Result
-- Mcp cilent:
+- Mcp client:
 ```python
 async def run():
     async with stdio_client(server_params) as (read, write):
