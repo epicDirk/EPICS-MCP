@@ -44,7 +44,7 @@ server_params = StdioServerParameters(
   
 # Test Result
 - Mcp cilent:
-```json
+```python
 async def run():
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
