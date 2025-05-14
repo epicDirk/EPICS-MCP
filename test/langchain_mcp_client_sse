@@ -31,7 +31,7 @@ async def run_agent():
 
     ) as client:
         agent = create_react_agent(model, client.get_tools())
-        epics_response = await agent.ainvoke({"messages":"首先查询PV名称为temperature:water的值；然后将PV名称为temperature:water的值设置为100；接着再次读取PV名称为temperature:water的值"})
+        epics_response = await agent.ainvoke({"messages":"To query the value of a PV (Process Variable) named temperature:water"})
 
         return epics_response     
 
