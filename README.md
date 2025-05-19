@@ -1,4 +1,6 @@
 # EPICS-MCP-Server
+[![smithery badge](https://smithery.ai/badge/@Jacky1-Jiang/EPICS-MCP-Server)](https://smithery.ai/server/@Jacky1-Jiang/EPICS-MCP-Server)
+
 # Overview
 - The EPICS MCP Server is a Python-based server designed to interact with EPICS (Experimental Physics and Industrial Control System) process variables (PVs). It provides a set of tools to retrieve PV values, set PV values, and fetch detailed information about PVs. The server is built 
   using the mcp framework and communicates over stdio, making it suitable for integration into larger control systems or workflows.
@@ -26,7 +28,7 @@
    - Inputs:
      - `pv_name` (string): The name of the PV variable.
    - Returns: A JSON object containing the status (`success` or `error`) and the detailed information about the PV or an error message.
-  
+
 # Usage with Langchain
 - To use this with Langchain, you must install the dependencies required for the project.
 ```python
@@ -115,4 +117,5 @@ Name: get_pv_value
 
 The current value of the PV named `temperature:water` is 88.0.
 ```
+
 
