@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "epics-pv-mcp"
+version = "0.2.0"
+description = "MCP Server for EPICS PV access via p4p (PVAccess + Channel Access)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "p4p>=4.2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "ruff"]
+
+[project.scripts]
+epics-pv-mcp = "epics_pv_mcp.server:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+asyncio_mode = "auto"

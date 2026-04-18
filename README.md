@@ -1,121 +1,127 @@
-# EPICS-MCP-Server
-[![smithery badge](https://smithery.ai/badge/@Jacky1-Jiang/EPICS-MCP-Server)](https://smithery.ai/server/@Jacky1-Jiang/EPICS-MCP-Server)
+# EPICS PV MCP Server
 
-# Overview
-- The EPICS MCP Server is a Python-based server designed to interact with EPICS (Experimental Physics and Industrial Control System) process variables (PVs). It provides a set of tools to retrieve PV values, set PV values, and fetch detailed information about PVs. The server is built 
-  using the mcp framework and communicates over stdio, making it suitable for integration into larger control systems or workflows.
+MCP server for EPICS Process Variable (PV) access via [p4p](https://mdavidsaver.github.io/p4p/) — supporting both PVAccess and Channel Access protocols.
 
-- This tool is particularly useful in environments where EPICS PVs are used for monitoring and controlling hardware or software parameters.
+Based on a fork of [Jacky1-Jiang/EPICS-MCP-Server](https://github.com/Jacky1-Jiang/EPICS-MCP-Server), extended with [FastMCP](https://github.com/jlowin/fastmcp), the p4p library, a write-safety layer, batch operations, PV monitoring, and OPI file validation.
 
-# Features
-- The EPICS MCP Server provides the following tools:
+## Tools
 
-1. **get_pv_value**
-   - Create or update a single file in a repository
-   - Inputs:
-     - `pv_name` (string): The name of the PV variable.
-   - Returns: A JSON object containing the status (`success` or `error`) and the retrieved value or an error message.
+| Tool | Description |
+|------|-------------|
+| `get_pv_value` | Read a single PV's current value |
+| `get_pvs` | Batch-read multiple PVs in one call |
+| `set_pv_value` | Write a value to a PV (requires safety gate) |
+| `get_pv_info` | Connection state, data type, alarm status, limits |
+| `monitor_pv` | Subscribe to PV updates for a given duration |
+| `validate_pvs` | Extract PV names from a `.bob` display file and check connectivity |
+| `discover_pvs` | Search for PVs matching a glob/regex pattern |
 
-2. **set_pv_value**
-   - Set a new value for a specified PV.
-   - Inputs:
-     - `pv_name` (string): The name of the PV variable.
-     - `pv_value` (string): The new value to be set for the PV.
-   - Returns: A JSON object containing the status (`success` or `error`) and a confirmation message or an error message.
+## Resources
 
-3. **get_pv_info**
-   - Fetches detailed information about a specified PV.
-   - Inputs:
-     - `pv_name` (string): The name of the PV variable.
-   - Returns: A JSON object containing the status (`success` or `error`) and the detailed information about the PV or an error message.
+| URI | Description |
+|-----|-------------|
+| `health://status` | Server health: version, uptime, provider, p4p version |
+| `config://epics` | Non-secret configuration values |
 
-# Usage with Langchain
-- To use this with Langchain, you must install the dependencies required for the project.
-```python
-pip install -r requirements.txt
+## Prompts
+
+| Prompt | Description |
+|--------|-------------|
+| `diagnose_pv` | Step-by-step PV diagnosis workflow (info, read, monitor) |
+| `compare_machine_state` | Compare current PV values against expected state |
+
+## Safety
+
+Writes are **disabled by default** and require explicit opt-in:
+
+- **Environment gate** — `EPICS_MCP_ALLOW_PV_WRITE=true` must be set
+- **Regex allowlist** — `EPICS_MCP_PV_WRITE_PATTERN` limits which PVs can be written (e.g. `^TEST:.*`)
+- **Rate limit** — `EPICS_MCP_WRITE_RATE_LIMIT` caps writes per minute (default: 10)
+- **Audit log** — every write is logged with timestamp, PV name, old/new value, and caller
+
+## Installation
+
+```bash
+pip install -e ".[dev]"
 ```
 
-- ### Langchain
+Run the server:
 
-```python
-server_params = StdioServerParameters(
-    command="python",
-    # Make sure to update to the full absolute path to your math_server.py file
-    args=["/path/server.py"],
-)
-```
-- ### EPICS
-- Before using the EPCIS mcp server, you must successfully install EPCIS on your local machine, ensure that IOC can start normally, and verify that functions such as `caget`, `caput`, and `cainfo` are working properly. For detailed installation instructions, please refer to [https://epics-controls.org/resources-and-support/base/](https://epics-controls.org/resources-and-support/base/).
-```python
-jiangyan@DESKTOP-84CO9VB:~$ softIoc -d ~/EPICS/DB/test.db
-Starting iocInit
-############################################################################
-## EPICS R7.0.8
-## Rev. 2025-02-13T14:29+0800
-## Rev. Date build date/time:
-############################################################################
-iocRun: All initialization complete
-epics>
-```
-```python
-jiangyan@DESKTOP-84CO9VB:~$ caget temperature:water
-temperature:water              88
-jiangyan@DESKTOP-84CO9VB:~$ caput temperature:water 100
-Old : temperature:water              88
-New : temperature:water              100
-jiangyan@DESKTOP-84CO9VB:~$ cainfo temperature:water
-temperature:water
-    State:            connected
-    Host:             127.0.0.1:5056
-    Access:           read, write
-    Native data type: DBF_DOUBLE
-    Request type:     DBR_DOUBLE
-    Element count:    1
-
-```
-  
-# Test Result
-- Mcp client:
-```python
-async def run():
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            # Initialize the connection
-            await session.initialize()
-
-            # Get tools
-            tools = await load_mcp_tools(session)
-
-            # Create and run the agent
-            agent = create_react_agent(model, tools)
-            agent_response = await agent.ainvoke({"messages": "To query the value of a PV (Process Variable) named temperature:water"})
-            return agent_response
-)
+```bash
+epics-pv-mcp
 ```
 
+## Configuration
 
+All settings are read from environment variables with the `EPICS_MCP_` prefix:
 
-- Result:
- ```python
-================================[1m Human Message [0m=================================
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EPICS_MCP_PROVIDER` | `pva` | Protocol provider: `pva` (PVAccess) or `ca` (Channel Access) |
+| `EPICS_MCP_DEFAULT_TIMEOUT` | `5.0` | PV operation timeout in seconds |
+| `EPICS_MCP_MAX_BATCH_SIZE` | `100` | Maximum PVs per batch read |
+| `EPICS_MCP_MAX_MONITOR_DURATION` | `60.0` | Maximum monitor subscription duration in seconds |
+| `EPICS_MCP_MAX_MONITOR_EVENTS` | `1000` | Maximum events per monitor subscription |
+| `EPICS_MCP_ALLOW_PV_WRITE` | `false` | Enable PV writes |
+| `EPICS_MCP_PV_WRITE_PATTERN` | _(empty)_ | Regex allowlist for writable PV names |
+| `EPICS_MCP_WRITE_RATE_LIMIT` | `10` | Maximum writes per minute |
+| `EPICS_MCP_AUDIT_LOG_FILE` | _(empty)_ | Path to audit log file (empty = stderr) |
 
-To query the value of a PV (Process Variable) named temperature:water
-==================================[1m Ai Message [0m==================================
-Tool Calls:
-  get_pv_value (call_vvbXwi51CyYUxEM0hcyvCFCY)
- Call ID: call_vvbXwi51CyYUxEM0hcyvCFCY
-  Args:
-    pv_name: temperature:water
-=================================[1m Tool Message [0m=================================
-Name: get_pv_value
+## Claude Code Integration
 
+Add to your `.mcp.json` or `claude_desktop_config.json`:
+
+```json
 {
-  "status": "success",
-  "value": 88.0
+  "mcpServers": {
+    "epics-pv": {
+      "command": "epics-pv-mcp",
+      "env": {
+        "EPICS_MCP_PROVIDER": "pva",
+        "EPICS_MCP_ALLOW_PV_WRITE": "false"
+      }
+    }
+  }
 }
-==================================[1m Ai Message [0m==================================
-
-The current value of the PV named `temperature:water` is 88.0.
 ```
 
+To enable writes for test PVs:
 
+```json
+{
+  "mcpServers": {
+    "epics-pv": {
+      "command": "epics-pv-mcp",
+      "env": {
+        "EPICS_MCP_PROVIDER": "pva",
+        "EPICS_MCP_ALLOW_PV_WRITE": "true",
+        "EPICS_MCP_PV_WRITE_PATTERN": "^TEST:.*"
+      }
+    }
+  }
+}
+```
+
+## Development
+
+Run tests:
+
+```bash
+pytest tests/ --tb=short
+```
+
+Lint and format:
+
+```bash
+ruff check src/ tests/
+ruff format src/ tests/
+```
+
+## License
+
+MIT
+
+## Credits
+
+- Original server by [Jacky1-Jiang](https://github.com/Jacky1-Jiang/EPICS-MCP-Server)
+- Extended with FastMCP, p4p, safety layer, batch ops, monitoring, and OPI validation by epicDirk

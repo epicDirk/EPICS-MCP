@@ -1,0 +1,257 @@
+"""EPICS PV MCP Server — main entry point."""
+
+from typing import Annotated
+
+from fastmcp.exceptions import ToolError
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+from pydantic import Field
+
+from epics_pv_mcp import __version__
+from epics_pv_mcp.errors import EpicsError
+from epics_pv_mcp.prompts import compare_machine_state as _compare_machine_state
+from epics_pv_mcp.prompts import diagnose_pv as _diagnose_pv
+from epics_pv_mcp.resources import get_epics_config, get_health
+from epics_pv_mcp.tools.discover import _discover_pvs
+from epics_pv_mcp.tools.info import _get_pv_info
+from epics_pv_mcp.tools.monitor import _monitor_pv
+from epics_pv_mcp.tools.read import _get_pv_value, _get_pvs
+from epics_pv_mcp.tools.validate import _validate_pvs
+from epics_pv_mcp.tools.write import _set_pv_value
+
+mcp = FastMCP("epics-pv-mcp")
+mcp._mcp_server.version = __version__
+
+# === Tools ===
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+async def get_pv_value(
+    pv_name: Annotated[str, Field(description="EPICS PV name")],
+    timeout: Annotated[
+        float,
+        Field(description="Timeout in seconds"),
+    ] = 5.0,
+) -> dict:
+    """Get the current value of an EPICS Process Variable."""
+    try:
+        return await _get_pv_value(pv_name, timeout)
+    except EpicsError as e:
+        raise ToolError(f"[{e.error_code}] {e}") from e
+    except Exception as e:
+        raise ToolError(str(e)) from e
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+async def get_pvs(
+    names: Annotated[
+        list[str],
+        Field(description="List of PV names to read (max 100)"),
+    ],
+    timeout: Annotated[
+        float,
+        Field(description="Timeout in seconds per PV"),
+    ] = 5.0,
+) -> dict:
+    """Batch-read multiple EPICS PVs in a single call."""
+    try:
+        return await _get_pvs(names, timeout)
+    except EpicsError as e:
+        raise ToolError(f"[{e.error_code}] {e}") from e
+    except Exception as e:
+        raise ToolError(str(e)) from e
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=True,
+        idempotentHint=False,
+        openWorldHint=True,
+    )
+)
+async def set_pv_value(
+    pv_name: Annotated[str, Field(description="EPICS PV name")],
+    value: Annotated[str, Field(description="New value to set")],
+    timeout: Annotated[
+        float,
+        Field(description="Timeout in seconds"),
+    ] = 5.0,
+) -> dict:
+    """Set a PV value. Requires EPICS_MCP_ALLOW_PV_WRITE=true.
+
+    Protected by safety layer: environment gate, regex allowlist,
+    rate-limit (10/min default), and audit logging.
+    """
+    try:
+        return await _set_pv_value(pv_name, value, timeout)
+    except EpicsError as e:
+        raise ToolError(f"[{e.error_code}] {e}") from e
+    except Exception as e:
+        raise ToolError(str(e)) from e
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+async def get_pv_info(
+    pv_name: Annotated[str, Field(description="EPICS PV name")],
+    timeout: Annotated[
+        float,
+        Field(description="Timeout in seconds"),
+    ] = 5.0,
+) -> dict:
+    """Get detailed PV metadata: value, alarm status, timestamp, display info."""
+    try:
+        return await _get_pv_info(pv_name, timeout)
+    except EpicsError as e:
+        raise ToolError(f"[{e.error_code}] {e}") from e
+    except Exception as e:
+        raise ToolError(str(e)) from e
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=True,
+    )
+)
+async def monitor_pv(
+    name: Annotated[str, Field(description="EPICS PV name to monitor")],
+    duration: Annotated[
+        float,
+        Field(description="Duration in seconds to monitor (max 60)"),
+    ] = 10.0,
+    max_events: Annotated[
+        int,
+        Field(description="Maximum events to collect (max 1000)"),
+    ] = 100,
+) -> dict:
+    """Subscribe to PV changes for a given duration and return collected events."""
+    try:
+        return await _monitor_pv(name, duration, max_events)
+    except EpicsError as e:
+        raise ToolError(f"[{e.error_code}] {e}") from e
+    except Exception as e:
+        raise ToolError(str(e)) from e
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+async def validate_pvs(
+    pvs: Annotated[
+        list[str] | None,
+        Field(description="List of PV names to validate"),
+    ] = None,
+    file_path: Annotated[
+        str | None,
+        Field(
+            description="Path to .bob file (requires phoebus-mcp-core). "
+            "Extracts PVs and checks connectivity."
+        ),
+    ] = None,
+    timeout: Annotated[
+        float,
+        Field(description="Timeout in seconds per PV"),
+    ] = 5.0,
+) -> dict:
+    """Check PV connectivity. Provide PV list or .bob file path."""
+    try:
+        return await _validate_pvs(pvs, file_path, timeout)
+    except EpicsError as e:
+        raise ToolError(f"[{e.error_code}] {e}") from e
+    except Exception as e:
+        raise ToolError(str(e)) from e
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+async def discover_pvs(
+    pattern: Annotated[
+        str,
+        Field(description="PV name or pattern to search for"),
+    ],
+    timeout: Annotated[
+        float,
+        Field(description="Timeout in seconds"),
+    ] = 5.0,
+) -> dict:
+    """Discover PVs by name. Wildcard patterns require ChannelFinder infrastructure."""
+    try:
+        return await _discover_pvs(pattern, timeout)
+    except EpicsError as e:
+        raise ToolError(f"[{e.error_code}] {e}") from e
+    except Exception as e:
+        raise ToolError(str(e)) from e
+
+
+# === Resources ===
+
+
+@mcp.resource("epics-pv://health")
+def health() -> dict:
+    """Server status, p4p version, write configuration."""
+    return get_health()
+
+
+@mcp.resource("epics-pv://config")
+def epics_config() -> dict:
+    """Non-secret configuration values."""
+    return get_epics_config()
+
+
+# === Prompts ===
+
+
+@mcp.prompt()
+def diagnose_pv(pv_name: str) -> str:
+    """Step-by-step PV diagnosis workflow."""
+    return _diagnose_pv(pv_name)
+
+
+@mcp.prompt()
+def compare_machine_state(pv_prefix: str, reference_file: str = "") -> str:
+    """Compare current machine state to expected values."""
+    return _compare_machine_state(pv_prefix, reference_file)
+
+
+def main():
+    """Entry point for the MCP server."""
+    mcp.run()
+
+
+if __name__ == "__main__":
+    main()
