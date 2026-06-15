@@ -39,7 +39,7 @@ async def get_pv_value(
         float,
         Field(description="Timeout in seconds"),
     ] = 5.0,
-) -> dict:
+) -> dict[str, object]:
     """Get the current value of an EPICS Process Variable."""
     try:
         return await _get_pv_value(pv_name, timeout)
@@ -66,7 +66,7 @@ async def get_pvs(
         float,
         Field(description="Timeout in seconds per PV"),
     ] = 5.0,
-) -> dict:
+) -> dict[str, object]:
     """Batch-read multiple EPICS PVs in a single call."""
     try:
         return await _get_pvs(names, timeout)
@@ -91,7 +91,7 @@ async def set_pv_value(
         float,
         Field(description="Timeout in seconds"),
     ] = 5.0,
-) -> dict:
+) -> dict[str, object]:
     """Set a PV value. Requires EPICS_MCP_ALLOW_PV_WRITE=true.
 
     Protected by safety layer: environment gate, regex allowlist,
@@ -119,7 +119,7 @@ async def get_pv_info(
         float,
         Field(description="Timeout in seconds"),
     ] = 5.0,
-) -> dict:
+) -> dict[str, object]:
     """Get detailed PV metadata: value, alarm status, timestamp, display info."""
     try:
         return await _get_pv_info(pv_name, timeout)
@@ -147,7 +147,7 @@ async def monitor_pv(
         int,
         Field(description="Maximum events to collect (max 1000)"),
     ] = 100,
-) -> dict:
+) -> dict[str, object]:
     """Subscribe to PV changes for a given duration and return collected events."""
     try:
         return await _monitor_pv(name, duration, max_events)
@@ -181,7 +181,7 @@ async def validate_pvs(
         float,
         Field(description="Timeout in seconds per PV"),
     ] = 5.0,
-) -> dict:
+) -> dict[str, object]:
     """Check PV connectivity. Provide PV list or .bob file path."""
     try:
         return await _validate_pvs(pvs, file_path, timeout)
@@ -208,7 +208,7 @@ async def discover_pvs(
         float,
         Field(description="Timeout in seconds"),
     ] = 5.0,
-) -> dict:
+) -> dict[str, object]:
     """Discover PVs by name. Wildcard patterns require ChannelFinder infrastructure."""
     try:
         return await _discover_pvs(pattern, timeout)
@@ -222,13 +222,13 @@ async def discover_pvs(
 
 
 @mcp.resource("epics-pv://health")
-def health() -> dict:
+def health() -> dict[str, object]:
     """Server status, p4p version, write configuration."""
     return get_health()
 
 
 @mcp.resource("epics-pv://config")
-def epics_config() -> dict:
+def epics_config() -> dict[str, object]:
     """Non-secret configuration values."""
     return get_epics_config()
 
@@ -248,7 +248,7 @@ def compare_machine_state(pv_prefix: str, reference_file: str = "") -> str:
     return _compare_machine_state(pv_prefix, reference_file)
 
 
-def main():
+def main() -> None:
     """Entry point for the MCP server."""
     mcp.run()
 

@@ -13,7 +13,7 @@ async def _validate_pvs(
     pvs: list[str] | None = None,
     file_path: str | None = None,
     timeout: float = 5.0,
-) -> dict:
+) -> dict[str, object]:
     """Check PV connectivity. Accepts PV list or .bob file path.
 
     file_path mode requires phoebus_mcp_core.bob_parser (optional dependency).

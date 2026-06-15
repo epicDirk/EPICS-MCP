@@ -9,7 +9,7 @@ from epics_pv_mcp.config import get_config
 _start_time = time.monotonic()
 
 
-def get_health() -> dict:
+def get_health() -> dict[str, object]:
     """Server health status."""
     cfg = get_config()
     p4p_version = "unknown"
@@ -17,7 +17,7 @@ def get_health() -> dict:
         import p4p
 
         p4p_version = p4p.__version__
-    except Exception:
+    except (ImportError, AttributeError):
         pass
 
     return {
@@ -34,7 +34,7 @@ def get_health() -> dict:
     }
 
 
-def get_epics_config() -> dict:
+def get_epics_config() -> dict[str, object]:
     """Non-secret configuration values."""
     cfg = get_config()
     return {

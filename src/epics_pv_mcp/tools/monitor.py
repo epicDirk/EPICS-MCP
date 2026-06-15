@@ -4,7 +4,9 @@ from epics_pv_mcp.config import get_config
 from epics_pv_mcp.services.epics_client import pv_monitor
 
 
-async def _monitor_pv(name: str, duration: float = 10.0, max_events: int = 100) -> dict:
+async def _monitor_pv(
+    name: str, duration: float = 10.0, max_events: int = 100
+) -> dict[str, object]:
     """Monitor PV for value changes over a given duration.
 
     Duration and max_events are clamped to configured maximums by the service layer.

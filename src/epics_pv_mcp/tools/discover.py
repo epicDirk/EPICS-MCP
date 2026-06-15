@@ -4,7 +4,7 @@ from epics_pv_mcp.errors import EpicsConnectionError, PVNotFoundError, PVTimeout
 from epics_pv_mcp.services.epics_client import pv_get
 
 
-async def _discover_pvs(pattern: str, timeout: float = 5.0) -> dict:
+async def _discover_pvs(pattern: str, timeout: float = 5.0) -> dict[str, object]:
     """Discover PVs matching a pattern.
 
     Limitations: p4p does not have a universal PV discovery mechanism.

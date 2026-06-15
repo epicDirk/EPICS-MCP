@@ -6,6 +6,7 @@ so the FastMCP event loop is never blocked.
 
 import asyncio
 import atexit
+import logging
 import threading
 
 from p4p.client.thread import Context
@@ -17,6 +18,8 @@ from epics_pv_mcp.errors import (
     PVNotFoundError,
     PVTimeoutError,
 )
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Singleton p4p Context
@@ -63,7 +66,7 @@ def _classify_p4p_error(name: str, exc: BaseException, *, action: str) -> EpicsE
     return EpicsConnectionError(f"Error {action} PV '{name}': {exc}", details={"pv_name": name})
 
 
-async def pv_get(name: str, timeout: float | None = None) -> dict:
+async def pv_get(name: str, timeout: float | None = None) -> dict[str, object]:
     """Get a single PV value. Returns a formatted dict."""
     cfg = get_config()
     timeout = timeout if timeout is not None else cfg.default_timeout
@@ -80,7 +83,7 @@ async def pv_get(name: str, timeout: float | None = None) -> dict:
         raise _classify_p4p_error(name, e, action="accessing") from e
 
 
-async def pv_get_batch(names: list[str], timeout: float | None = None) -> dict:
+async def pv_get_batch(names: list[str], timeout: float | None = None) -> dict[str, object]:
     """Batch-get PVs. Returns ``{"results": [...], "errors": [...]}``."""
     cfg = get_config()
     timeout = timeout if timeout is not None else cfg.default_timeout
@@ -92,19 +95,23 @@ async def pv_get_batch(names: list[str], timeout: float | None = None) -> dict:
         )
 
     ctxt = get_context()
-    results: list[dict] = []
-    errors: list[dict] = []
+    results: list[dict[str, object]] = []
+    errors: list[dict[str, object]] = []
 
     # Try native batch get first
     try:
         values = await asyncio.to_thread(ctxt.get, names, timeout=timeout)
-        for name, value in zip(names, values):
+        for name, value in zip(names, values, strict=False):
             try:
                 results.append(_format_value(name, value))
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
+                # ein kaputter Einzelwert darf den Batch nicht abbrechen
                 errors.append({"pv_name": name, "error": str(exc)})
-    except Exception:
-        # Batch failed — fall back to individual gets
+    except Exception as exc:  # noqa: BLE001
+        # Batch fehlgeschlagen -> Einzelabfrage-Fallback. Die Wurzel des
+        # Batch-Fehlers nicht still verschlucken (für die Diagnose loggen); die
+        # Einzelabfragen liefern danach je PV einen genauen Fehler.
+        logger.debug("Batch get failed, falling back to individual gets: %s", exc)
         for name in names:
             try:
                 result = await pv_get(name, timeout=timeout)
@@ -139,7 +146,7 @@ async def pv_monitor(
     name: str,
     duration: float | None = None,
     max_events: int | None = None,
-) -> list[dict]:
+) -> list[dict[str, object]]:
     """Monitor a PV for *duration* seconds, collecting up to *max_events*.
 
     Runs the p4p subscription in a background thread and uses
@@ -154,7 +161,7 @@ async def pv_monitor(
     max_events = min(max_events, cfg.max_monitor_events)
 
     ctxt = get_context()
-    collected: list[dict] = []
+    collected: list[dict[str, object]] = []
     lock = threading.Lock()
     stop_event = threading.Event()
     error_holder: list[Exception] = []
@@ -171,7 +178,8 @@ async def pv_monitor(
                     return
                 try:
                     collected.append(_format_value(name, value))
-                except Exception:
+                except Exception:  # noqa: BLE001
+                    # ein Monitor-Callback darf den Worker-Thread nie crashen
                     collected.append({"pv_name": name, "value": str(value)})
 
         sub = None
@@ -185,7 +193,8 @@ async def pv_monitor(
                     details={"pv_name": name},
                 )
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
+            # jeden Monitor-Fehler übersetzen + sammeln (eine Schicht fängt)
             error_holder.append(_classify_p4p_error(name, exc, action="monitoring"))
         finally:
             if sub is not None:
@@ -204,13 +213,13 @@ async def pv_monitor(
 # ---------------------------------------------------------------------------
 
 
-def _format_value(pv_name: str, value: object) -> dict:
+def _format_value(pv_name: str, value: object) -> dict[str, object]:
     """Convert a p4p ``Value`` object into a plain dict.
 
     Handles NTScalar, NTTable, and other normative types.  Numpy scalars
     are converted to native Python types.
     """
-    result: dict = {"pv_name": pv_name, "value": None}
+    result: dict[str, object] = {"pv_name": pv_name, "value": None}
     try:
         # Extract the raw scalar / array
         raw = value.value if hasattr(value, "value") else value
@@ -241,7 +250,7 @@ def _format_value(pv_name: str, value: object) -> dict:
         # Display metadata (units, limits)
         if hasattr(value, "display"):
             disp = value.display
-            display_dict: dict = {}
+            display_dict: dict[str, object] = {}
             if hasattr(disp, "units"):
                 display_dict["units"] = str(disp.units)
             if hasattr(disp, "limitLow"):
@@ -251,8 +260,9 @@ def _format_value(pv_name: str, value: object) -> dict:
             if display_dict:
                 result["display"] = display_dict
 
-    except Exception:
-        # Last resort: stringify
+    except Exception:  # noqa: BLE001
+        # _format_value MUSS jeden p4p-Wert robust in ein dict wandeln und darf
+        # nie crashen — Last resort: stringify.
         result["value"] = str(value)
 
     return result
