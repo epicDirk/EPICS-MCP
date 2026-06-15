@@ -49,6 +49,20 @@ def _cleanup() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _classify_p4p_error(name: str, exc: BaseException, *, action: str) -> EpicsError:
+    """Klassifiziere eine generische (Nicht-Timeout-)p4p-Exception.
+
+    p4p hat keinen eigenen „PV not found"-Exceptiontyp — dieser Subfall ist nur
+    an der Fehlermeldung erkennbar. Diese eine Stelle ersetzt die zuvor in
+    pv_get / pv_put / pv_monitor wortgleich duplizierte String-Klassifikation
+    (Low-Level raised, EINE Schicht fängt + übersetzt — QUALITY-STANDARD §1).
+    """
+    msg = str(exc).lower()
+    if "not found" in msg or "search" in msg:
+        return PVNotFoundError(f"PV '{name}' not found", details={"pv_name": name})
+    return EpicsConnectionError(f"Error {action} PV '{name}': {exc}", details={"pv_name": name})
+
+
 async def pv_get(name: str, timeout: float | None = None) -> dict:
     """Get a single PV value. Returns a formatted dict."""
     cfg = get_config()
@@ -57,22 +71,13 @@ async def pv_get(name: str, timeout: float | None = None) -> dict:
     try:
         value = await asyncio.to_thread(ctxt.get, name, timeout=timeout)
         return _format_value(name, value)
-    except TimeoutError:
+    except TimeoutError as e:
         raise PVTimeoutError(
             f"Timeout getting PV '{name}' after {timeout}s",
             details={"pv_name": name, "timeout": timeout},
-        )
+        ) from e
     except Exception as e:
-        msg = str(e).lower()
-        if "not found" in msg or "search" in msg:
-            raise PVNotFoundError(
-                f"PV '{name}' not found",
-                details={"pv_name": name},
-            )
-        raise EpicsConnectionError(
-            f"Error accessing PV '{name}': {e}",
-            details={"pv_name": name},
-        )
+        raise _classify_p4p_error(name, e, action="accessing") from e
 
 
 async def pv_get_batch(names: list[str], timeout: float | None = None) -> dict:
@@ -121,22 +126,13 @@ async def pv_put(name: str, value: object, timeout: float | None = None) -> None
     ctxt = get_context()
     try:
         await asyncio.to_thread(ctxt.put, name, value, timeout=timeout)
-    except TimeoutError:
+    except TimeoutError as e:
         raise PVTimeoutError(
             f"Timeout writing PV '{name}' after {timeout}s",
             details={"pv_name": name, "timeout": timeout},
-        )
+        ) from e
     except Exception as e:
-        msg = str(e).lower()
-        if "not found" in msg or "search" in msg:
-            raise PVNotFoundError(
-                f"PV '{name}' not found",
-                details={"pv_name": name},
-            )
-        raise EpicsConnectionError(
-            f"Error writing PV '{name}': {e}",
-            details={"pv_name": name},
-        )
+        raise _classify_p4p_error(name, e, action="writing") from e
 
 
 async def pv_monitor(
@@ -190,21 +186,7 @@ async def pv_monitor(
                 )
             )
         except Exception as exc:
-            msg = str(exc).lower()
-            if "not found" in msg or "search" in msg:
-                error_holder.append(
-                    PVNotFoundError(
-                        f"PV '{name}' not found",
-                        details={"pv_name": name},
-                    )
-                )
-            else:
-                error_holder.append(
-                    EpicsConnectionError(
-                        f"Error monitoring PV '{name}': {exc}",
-                        details={"pv_name": name},
-                    )
-                )
+            error_holder.append(_classify_p4p_error(name, exc, action="monitoring"))
         finally:
             if sub is not None:
                 sub.close()
