@@ -3,22 +3,25 @@
 import logging
 import re
 import sys
+import threading
 import time
 from collections import deque
 
 from epics_pv_mcp.config import EpicsConfig, get_config
-from epics_pv_mcp.errors import PVWriteDeniedError, RateLimitError
+from epics_pv_mcp.errors import PVWriteDeniedError, RateLimitError, SafetyConfigError
 
 logger = logging.getLogger(__name__)
 
 _safety: "SafetyLayer | None" = None
+_safety_lock = threading.Lock()
 
 
 def get_safety() -> "SafetyLayer":
-    """Return singleton SafetyLayer instance."""
+    """Return singleton SafetyLayer instance (thread-safe)."""
     global _safety
-    if _safety is None:
-        _safety = SafetyLayer(get_config())
+    with _safety_lock:
+        if _safety is None:
+            _safety = SafetyLayer(get_config())
     return _safety
 
 
@@ -34,9 +37,17 @@ class SafetyLayer:
 
     def __init__(self, config: EpicsConfig) -> None:
         self._config = config
-        self._pattern: re.Pattern | None = (
-            re.compile(config.pv_write_pattern) if config.pv_write_pattern else None
-        )
+        # Fail-closed: ein kaputtes Allowlist-Pattern darf die Schreib-Sperre
+        # NICHT still aushebeln — lieber klar scheitern als ungeschützt schreiben.
+        try:
+            self._pattern: re.Pattern[str] | None = (
+                re.compile(config.pv_write_pattern) if config.pv_write_pattern else None
+            )
+        except re.error as exc:
+            raise SafetyConfigError(
+                f"Invalid EPICS_MCP_PV_WRITE_PATTERN regex {config.pv_write_pattern!r}: {exc}",
+                details={"pattern": config.pv_write_pattern},
+            ) from exc
         # Sliding-window timestamps of recent writes
         self._timestamps: deque[float] = deque(maxlen=config.write_rate_limit)
         self._audit_handler: logging.Handler | None = None

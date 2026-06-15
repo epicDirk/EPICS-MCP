@@ -5,8 +5,8 @@ import logging
 import pytest
 
 from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import PVWriteDeniedError, RateLimitError
-from epics_pv_mcp.safety import SafetyLayer
+from epics_pv_mcp.errors import PVWriteDeniedError, RateLimitError, SafetyConfigError
+from epics_pv_mcp.safety import SafetyLayer, get_safety
 
 
 class TestWriteGate:
@@ -86,3 +86,42 @@ class TestAuditWrite:
 
         assert any("PV_WRITE" in record.message for record in caplog.records)
         assert any("TEST:pv" in record.message for record in caplog.records)
+
+
+class TestSafetyConfig:
+    """Fail-closed Konfig-Validierung + thread-sicherer Singleton."""
+
+    def test_invalid_pattern_raises_safety_config_error(self):
+        # Ein kaputtes Allowlist-Regex darf die Schreib-Sperre nicht still
+        # aushebeln, sondern klar scheitern.
+        cfg = EpicsConfig(allow_pv_write=True, pv_write_pattern="[unclosed")
+        with pytest.raises(SafetyConfigError):
+            SafetyLayer(cfg)
+
+    def test_get_safety_singleton_under_threads(self):
+        import threading
+
+        import epics_pv_mcp.safety as safety_mod
+
+        original = safety_mod._safety
+        safety_mod._safety = None
+        try:
+            barrier = threading.Barrier(8)
+            results = []
+            append_lock = threading.Lock()
+
+            def worker():
+                barrier.wait()
+                instance = get_safety()
+                with append_lock:
+                    results.append(instance)
+
+            threads = [threading.Thread(target=worker) for _ in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            assert len(results) == 8
+            assert all(r is results[0] for r in results)
+        finally:
+            safety_mod._safety = original

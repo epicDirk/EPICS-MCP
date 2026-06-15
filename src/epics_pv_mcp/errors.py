@@ -48,3 +48,15 @@ class EpicsConnectionError(EpicsError):
 
     def __init__(self, message: str, details: dict | None = None):
         super().__init__(message, error_code="EPICS_CONNECTION_FAILED", details=details)
+
+
+class SafetyConfigError(EpicsError):
+    """Raised when the safety configuration is invalid (e.g. a malformed
+    ``pv_write_pattern`` regex).
+
+    Fail-closed: the server refuses to start with a broken write-allowlist
+    rather than silently disabling it (which would be fail-open).
+    """
+
+    def __init__(self, message: str, details: dict | None = None):
+        super().__init__(message, error_code="SAFETY_CONFIG_INVALID", details=details)
