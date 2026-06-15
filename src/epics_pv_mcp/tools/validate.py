@@ -21,14 +21,15 @@ async def _validate_pvs(
     """
     if file_path and not pvs:
         try:
-            from phoebus_mcp_core.bob_parser import parse_bob
-        except ImportError:
+            from phoebus_mcp_core.bob_parser import extract_pvs
+        except ImportError as exc:
             raise EpicsError(
                 "file_path mode requires phoebus-mcp-core. Install it or provide pvs list instead.",
                 error_code="MISSING_DEPENDENCY",
-            )
-        parsed = parse_bob(file_path)
-        pvs = parsed.get("pvs", [])
+            ) from exc
+        # extract_pvs liefert direkt die PV-Namensliste (das frühere parse_bob
+        # existierte nicht — die korrekte Funktion ist extract_pvs).
+        pvs = extract_pvs(file_path)
         if not pvs:
             return {
                 "file_path": file_path,

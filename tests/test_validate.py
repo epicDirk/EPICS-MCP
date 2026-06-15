@@ -51,3 +51,29 @@ async def test_validate_pvs_file_path_no_core():
             await _validate_pvs(file_path="test.bob")
 
     assert exc_info.value.error_code == "MISSING_DEPENDENCY"
+
+
+async def test_validate_pvs_file_path_with_core():
+    """file_path mode mit (gefaktem) phoebus_mcp_core: extract_pvs liefert die
+    PV-Liste, die dann validiert wird. (Belegt, dass der Pfad jetzt überhaupt
+    funktioniert — vorher importierte er ein nicht existentes parse_bob.)"""
+    import types
+
+    fake_parser = types.ModuleType("phoebus_mcp_core.bob_parser")
+    fake_parser.extract_pvs = lambda _path: ["PV:1", "PV:2"]
+    fake_core = types.ModuleType("phoebus_mcp_core")
+    fake_core.bob_parser = fake_parser
+
+    with patch.dict(
+        "sys.modules",
+        {"phoebus_mcp_core": fake_core, "phoebus_mcp_core.bob_parser": fake_parser},
+    ):
+        with patch(
+            "epics_pv_mcp.tools.validate.pv_get",
+            new_callable=AsyncMock,
+            return_value={"pv_name": "X", "value": 1},
+        ):
+            result = await _validate_pvs(file_path="test.bob")
+
+    assert result["total"] == 2
+    assert result["connected"] == 2
