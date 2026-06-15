@@ -8,10 +8,13 @@ version = "0.2.0"
 description = "MCP Server for EPICS PV access via p4p (PVAccess + Channel Access)"
 requires-python = ">=3.12"
 dependencies = [
-    "fastmcp",
-    "pydantic>=2.0",
-    "pydantic-settings>=2.0",
-    "p4p>=4.2.0",
+    # mcp ist eine DIREKTE Dependency (server.py: mcp.server.fastmcp.FastMCP +
+    # mcp.types.ToolAnnotations), nicht nur transitiv über fastmcp.
+    "mcp>=1.0,<2",
+    "fastmcp>=3.4.2,<4",
+    "pydantic>=2.0,<3",
+    "pydantic-settings>=2.0,<3",
+    "p4p>=4.2.0,<5",
 ]
 
 [project.optional-dependencies]
