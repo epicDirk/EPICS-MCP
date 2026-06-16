@@ -22,7 +22,7 @@ async def test_validate_pvs_all_connected() -> None:
 
 
 async def test_validate_pvs_mixed() -> None:
-    async def _mock_pv_get(name: str, timeout: float) -> dict[str, object]:
+    async def _mock_pv_get(name: str, timeout: float | None = None) -> dict[str, object]:
         if name == "PV:1":
             return {"pv_name": "PV:1", "value": 1}
         raise PVTimeoutError(f"Timeout getting PV '{name}'")

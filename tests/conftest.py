@@ -1,7 +1,5 @@
 """Shared fixtures for EPICS PV MCP tests."""
 
-from unittest.mock import MagicMock
-
 import pytest
 
 from epics_pv_mcp.config import EpicsConfig
@@ -40,14 +38,3 @@ def safety(write_config: EpicsConfig) -> SafetyLayer:
 def safety_locked(config: EpicsConfig) -> SafetyLayer:
     """SafetyLayer with writes disabled (default)."""
     return SafetyLayer(config)
-
-
-@pytest.fixture
-def mock_pv_value() -> MagicMock:
-    """Mock p4p Value object (NTScalar-like)."""
-    val = MagicMock()
-    val.value = 42.0
-    val.alarm = MagicMock(severity=0, status=0)
-    val.timeStamp = MagicMock(secondsPastEpoch=1713400000, nanoseconds=0)
-    val.display = MagicMock(units="mm", limitLow=0.0, limitHigh=100.0)
-    return val
