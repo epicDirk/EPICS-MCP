@@ -1,0 +1,28 @@
+# Single source of truth für lint/format/type (Parität mit phoebus-display-mcp).
+# Hooks delegieren an die uv-verwalteten, in uv.lock exakt gepinnten Tools — identische
+# Versionen/Config wie im Dev-/CI-Lauf. CI ruft `pre-commit run --all-files`. Scope kommt
+# aus pyproject.toml ([tool.ruff] select/per-file-ignores, [tool.mypy] files).
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check src tests
+        language: system
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+      - id: ruff-format
+        name: ruff format (check)
+        entry: uv run ruff format --check src tests
+        language: system
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+      - id: mypy
+        name: mypy --strict
+        entry: uv run mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+        require_serial: true

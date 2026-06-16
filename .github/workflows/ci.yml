@@ -3,23 +3,33 @@ name: CI
 on: [push, pull_request]
 
 jobs:
+  # Tests auf ubuntu-latest: p4p-Linux-Wheels sind battle-tested (war auch der OS der
+  # bisherigen EPICS-CI). EPICS hat keinen "live"-Marker — alle Tests laufen. Coverage
+  # report-only (kein --cov-fail-under-Gate, wie phoebus-display-mcp).
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.12"
-      - run: pip install -e ".[dev]"
-      - run: pytest tests/ --tb=short
+          enable-cache: true
+      - name: Install dependencies (exakt nach uv.lock)
+        run: uv sync --extra dev --frozen
+      - name: Run tests mit Coverage (report-only)
+        run: uv run pytest tests/ --tb=short --cov=src --cov-branch --cov-report=term
 
+  # Lint + Format + Typen über die pre-commit-Kette — exakt dieselben uv-gepinnten
+  # Tools und Configs wie lokal (single source of truth).
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.12"
-      - run: pip install ruff
-      - run: ruff check src/ tests/
-      - run: ruff format --check src/ tests/
+          enable-cache: true
+      - name: Install dependencies (exakt nach uv.lock)
+        run: uv sync --extra dev --frozen
+      - name: pre-commit (ruff check + format + mypy)
+        run: uv run pre-commit run --all-files --show-diff-on-failure
