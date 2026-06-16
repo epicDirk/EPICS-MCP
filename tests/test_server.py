@@ -17,9 +17,8 @@ async def test_get_pv_value_converts_epics_error_to_tool_error():
         "epics_pv_mcp.tools.read.pv_get",
         new_callable=AsyncMock,
         side_effect=PVNotFoundError("PV 'MISSING:PV' not found"),
-    ):
-        with pytest.raises(ToolError, match="PV_NOT_FOUND"):
-            await get_pv_value("MISSING:PV")
+    ), pytest.raises(ToolError, match="PV_NOT_FOUND"):
+        await get_pv_value("MISSING:PV")
 
 
 @pytest.mark.asyncio
@@ -31,9 +30,8 @@ async def test_get_pv_value_converts_generic_exception_to_tool_error():
         "epics_pv_mcp.tools.read.pv_get",
         new_callable=AsyncMock,
         side_effect=RuntimeError("unexpected"),
-    ):
-        with pytest.raises(ToolError, match="unexpected"):
-            await get_pv_value("ANY:PV")
+    ), pytest.raises(ToolError, match="unexpected"):
+        await get_pv_value("ANY:PV")
 
 
 @pytest.mark.asyncio
@@ -54,6 +52,5 @@ async def test_monitor_pv_converts_timeout_to_tool_error():
         "epics_pv_mcp.tools.monitor.pv_monitor",
         new_callable=AsyncMock,
         side_effect=PVTimeoutError("Timeout monitoring PV 'X'"),
-    ):
-        with pytest.raises(ToolError, match="PV_TIMEOUT"):
-            await monitor_pv("X", duration=1.0)
+    ), pytest.raises(ToolError, match="PV_TIMEOUT"):
+        await monitor_pv("X", duration=1.0)

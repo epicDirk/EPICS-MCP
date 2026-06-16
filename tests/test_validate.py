@@ -67,13 +67,12 @@ async def test_validate_pvs_file_path_with_core():
     with patch.dict(
         "sys.modules",
         {"phoebus_mcp_core": fake_core, "phoebus_mcp_core.bob_parser": fake_parser},
+    ), patch(
+        "epics_pv_mcp.tools.validate.pv_get",
+        new_callable=AsyncMock,
+        return_value={"pv_name": "X", "value": 1},
     ):
-        with patch(
-            "epics_pv_mcp.tools.validate.pv_get",
-            new_callable=AsyncMock,
-            return_value={"pv_name": "X", "value": 1},
-        ):
-            result = await _validate_pvs(file_path="test.bob")
+        result = await _validate_pvs(file_path="test.bob")
 
     assert result["total"] == 2
     assert result["connected"] == 2

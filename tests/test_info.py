@@ -33,6 +33,5 @@ async def test_get_pv_info_timeout():
         "epics_pv_mcp.tools.info.pv_get",
         new_callable=AsyncMock,
         side_effect=PVTimeoutError("Timeout getting PV 'TEST:PV' after 5.0s"),
-    ):
-        with pytest.raises(PVTimeoutError):
-            await _get_pv_info("TEST:PV")
+    ), pytest.raises(PVTimeoutError):
+        await _get_pv_info("TEST:PV")
