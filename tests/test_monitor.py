@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 from epics_pv_mcp.tools.monitor import _monitor_pv
 
 
-async def test_monitor_success():
+async def test_monitor_success() -> None:
     mock_events = [
         {"pv_name": "TEST:PV", "value": 1.0},
         {"pv_name": "TEST:PV", "value": 2.0},
@@ -23,7 +23,7 @@ async def test_monitor_success():
     assert result["truncated"] is False
 
 
-async def test_monitor_clamped_duration():
+async def test_monitor_clamped_duration() -> None:
     """Duration exceeding max_monitor_duration (60.0) should be clamped."""
     mock_monitor = AsyncMock(return_value=[])
     with patch("epics_pv_mcp.tools.monitor.pv_monitor", mock_monitor):
@@ -34,7 +34,7 @@ async def test_monitor_clamped_duration():
     assert call_args[0][1] == 60.0
 
 
-async def test_monitor_truncated():
+async def test_monitor_truncated() -> None:
     """When events == max_events, truncated should be True."""
     mock_events = [{"pv_name": "TEST:PV", "value": float(i)} for i in range(100)]
     with patch(

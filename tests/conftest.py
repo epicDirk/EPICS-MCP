@@ -9,19 +9,19 @@ from epics_pv_mcp.safety import SafetyLayer
 
 
 @pytest.fixture
-def config():
+def config() -> EpicsConfig:
     """Default test config."""
     return EpicsConfig()
 
 
 @pytest.fixture
-def write_config():
+def write_config() -> EpicsConfig:
     """Config with writes enabled."""
     return EpicsConfig(allow_pv_write=True, write_rate_limit=5)
 
 
 @pytest.fixture
-def pattern_config():
+def pattern_config() -> EpicsConfig:
     """Config with writes enabled and pattern allowlist."""
     return EpicsConfig(
         allow_pv_write=True,
@@ -31,19 +31,19 @@ def pattern_config():
 
 
 @pytest.fixture
-def safety(write_config):
+def safety(write_config: EpicsConfig) -> SafetyLayer:
     """SafetyLayer with writes enabled."""
     return SafetyLayer(write_config)
 
 
 @pytest.fixture
-def safety_locked(config):
+def safety_locked(config: EpicsConfig) -> SafetyLayer:
     """SafetyLayer with writes disabled (default)."""
     return SafetyLayer(config)
 
 
 @pytest.fixture
-def mock_pv_value():
+def mock_pv_value() -> MagicMock:
     """Mock p4p Value object (NTScalar-like)."""
     val = MagicMock()
     val.value = 42.0

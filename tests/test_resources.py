@@ -3,7 +3,7 @@
 from epics_pv_mcp.resources import get_epics_config, get_health
 
 
-def test_health_shape():
+def test_health_shape() -> None:
     result = get_health()
     expected_keys = {
         "server",
@@ -18,14 +18,14 @@ def test_health_shape():
     assert expected_keys.issubset(result.keys())
 
 
-def test_health_values():
+def test_health_values() -> None:
     result = get_health()
     assert result["server"] == "epics-pv-mcp"
     assert result["status"] == "ok"
     assert result["write_enabled"] is False
 
 
-def test_config_no_secrets():
+def test_config_no_secrets() -> None:
     result = get_epics_config()
     assert "provider" in result
 

@@ -12,11 +12,11 @@ from epics_pv_mcp.safety import SafetyLayer, get_safety
 class TestWriteGate:
     """Environment gate: allow_pv_write must be True."""
 
-    def test_write_denied_when_disabled(self, safety_locked):
+    def test_write_denied_when_disabled(self, safety_locked: SafetyLayer) -> None:
         with pytest.raises(PVWriteDeniedError):
             safety_locked.check_write_allowed("any:pv")
 
-    def test_write_allowed_when_enabled(self, safety):
+    def test_write_allowed_when_enabled(self, safety: SafetyLayer) -> None:
         # Should not raise
         safety.check_write_allowed("any:pv")
 
@@ -24,7 +24,7 @@ class TestWriteGate:
 class TestPatternAllowlist:
     """PV name must match the configured regex pattern."""
 
-    def test_pattern_mismatch_raises(self):
+    def test_pattern_mismatch_raises(self) -> None:
         cfg = EpicsConfig(
             allow_pv_write=True,
             pv_write_pattern=r"^TEST:.*$",
@@ -34,7 +34,7 @@ class TestPatternAllowlist:
         with pytest.raises(PVWriteDeniedError):
             sl.check_write_allowed("OTHER:pv")
 
-    def test_pattern_match_passes(self):
+    def test_pattern_match_passes(self) -> None:
         cfg = EpicsConfig(
             allow_pv_write=True,
             pv_write_pattern=r"^TEST:.*$",
@@ -44,7 +44,7 @@ class TestPatternAllowlist:
         # Should not raise
         sl.check_write_allowed("TEST:pv")
 
-    def test_empty_pattern_allows_all(self, safety):
+    def test_empty_pattern_allows_all(self, safety: SafetyLayer) -> None:
         # Default empty pattern means no pattern check
         safety.check_write_allowed("ANYTHING:goes")
 
@@ -52,7 +52,7 @@ class TestPatternAllowlist:
 class TestRateLimit:
     """Sliding-window rate limit enforcement."""
 
-    def test_rate_limit_exceeded(self):
+    def test_rate_limit_exceeded(self) -> None:
         cfg = EpicsConfig(allow_pv_write=True, write_rate_limit=5)
         sl = SafetyLayer(cfg)
 
@@ -64,7 +64,7 @@ class TestRateLimit:
         with pytest.raises(RateLimitError):
             sl.check_write_allowed("TEST:pv_overflow")
 
-    def test_rate_limit_error_has_details(self):
+    def test_rate_limit_error_has_details(self) -> None:
         cfg = EpicsConfig(allow_pv_write=True, write_rate_limit=2)
         sl = SafetyLayer(cfg)
         sl.check_write_allowed("A:pv")
@@ -80,7 +80,9 @@ class TestRateLimit:
 class TestAuditWrite:
     """Verify audit_write logs correctly."""
 
-    def test_audit_write_logs_info(self, safety, caplog):
+    def test_audit_write_logs_info(
+        self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture
+    ) -> None:
         with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
             safety.audit_write("TEST:pv", 10.0, 20.0)
 
@@ -91,14 +93,14 @@ class TestAuditWrite:
 class TestSafetyConfig:
     """Fail-closed Konfig-Validierung + thread-sicherer Singleton."""
 
-    def test_invalid_pattern_raises_safety_config_error(self):
+    def test_invalid_pattern_raises_safety_config_error(self) -> None:
         # Ein kaputtes Allowlist-Regex darf die Schreib-Sperre nicht still
         # aushebeln, sondern klar scheitern.
         cfg = EpicsConfig(allow_pv_write=True, pv_write_pattern="[unclosed")
         with pytest.raises(SafetyConfigError):
             SafetyLayer(cfg)
 
-    def test_get_safety_singleton_under_threads(self):
+    def test_get_safety_singleton_under_threads(self) -> None:
         import threading
 
         import epics_pv_mcp.safety as safety_mod
@@ -107,10 +109,10 @@ class TestSafetyConfig:
         safety_mod._safety = None
         try:
             barrier = threading.Barrier(8)
-            results = []
+            results: list[SafetyLayer] = []
             append_lock = threading.Lock()
 
-            def worker():
+            def worker() -> None:
                 barrier.wait()
                 instance = get_safety()
                 with append_lock:

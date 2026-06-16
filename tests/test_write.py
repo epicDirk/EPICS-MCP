@@ -1,6 +1,7 @@
 """Tests for write tool functions (_set_pv_value) with safety checks."""
 
-from unittest.mock import AsyncMock, patch
+from collections.abc import Iterator
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -13,7 +14,7 @@ from epics_pv_mcp.tools.write import _set_pv_value
 
 
 @pytest.fixture(autouse=True)
-def _reset_singletons():
+def _reset_singletons() -> Iterator[None]:
     """Reset config and safety singletons for each test."""
     config_module._config = None
     safety_module._safety = None
@@ -28,7 +29,12 @@ class TestSetPvValueSuccess:
     @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
     @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
     @patch("epics_pv_mcp.tools.write.get_safety")
-    async def test_set_pv_value_success(self, mock_get_safety, mock_pv_get, mock_pv_put):
+    async def test_set_pv_value_success(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+    ) -> None:
         # Configure safety to allow writes
         cfg = EpicsConfig(allow_pv_write=True, write_rate_limit=10)
         sl = SafetyLayer(cfg)
@@ -55,7 +61,7 @@ class TestSetPvValueDenied:
     """Write denied by safety layer (writes disabled)."""
 
     @patch("epics_pv_mcp.tools.write.get_safety")
-    async def test_set_pv_value_denied(self, mock_get_safety):
+    async def test_set_pv_value_denied(self, mock_get_safety: MagicMock) -> None:
         # Configure safety to deny writes
         cfg = EpicsConfig(allow_pv_write=False)
         sl = SafetyLayer(cfg)
@@ -71,7 +77,12 @@ class TestSetPvValueRateLimited:
     @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
     @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
     @patch("epics_pv_mcp.tools.write.get_safety")
-    async def test_set_pv_value_rate_limited(self, mock_get_safety, mock_pv_get, mock_pv_put):
+    async def test_set_pv_value_rate_limited(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+    ) -> None:
         # Configure safety with rate_limit=2
         cfg = EpicsConfig(allow_pv_write=True, write_rate_limit=2)
         sl = SafetyLayer(cfg)

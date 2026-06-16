@@ -1,5 +1,6 @@
 """Tests for read tool functions (_get_pv_value, _get_pvs)."""
 
+from collections.abc import Iterator
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -11,7 +12,7 @@ from epics_pv_mcp.tools.read import _get_pv_value, _get_pvs
 
 
 @pytest.fixture(autouse=True)
-def _reset_config():
+def _reset_config() -> Iterator[None]:
     """Ensure get_config() returns a fresh default config for each test."""
     config_module._config = EpicsConfig()
     yield
@@ -22,7 +23,7 @@ class TestGetPvValue:
     """Single PV read via _get_pv_value."""
 
     @patch("epics_pv_mcp.tools.read.pv_get", new_callable=AsyncMock)
-    async def test_get_pv_value_returns_result(self, mock_pv_get):
+    async def test_get_pv_value_returns_result(self, mock_pv_get: AsyncMock) -> None:
         mock_pv_get.return_value = {
             "pv_name": "TEST:PV",
             "value": 42.0,
@@ -36,7 +37,7 @@ class TestGetPvValue:
         assert result["value"] == 42.0
 
     @patch("epics_pv_mcp.tools.read.pv_get", new_callable=AsyncMock)
-    async def test_get_pv_value_custom_timeout(self, mock_pv_get):
+    async def test_get_pv_value_custom_timeout(self, mock_pv_get: AsyncMock) -> None:
         mock_pv_get.return_value = {"pv_name": "X:PV", "value": 1.0}
 
         await _get_pv_value("X:PV", timeout=10.0)
@@ -48,7 +49,7 @@ class TestGetPvs:
     """Batch PV read via _get_pvs."""
 
     @patch("epics_pv_mcp.tools.read.pv_get_batch", new_callable=AsyncMock)
-    async def test_get_pvs_success(self, mock_batch):
+    async def test_get_pvs_success(self, mock_batch: AsyncMock) -> None:
         mock_batch.return_value = {
             "results": [
                 {"pv_name": "A:PV", "value": 1.0},
@@ -61,16 +62,18 @@ class TestGetPvs:
         result = await _get_pvs(["A:PV", "B:PV", "C:PV"])
 
         mock_batch.assert_awaited_once_with(["A:PV", "B:PV", "C:PV"], 5.0)
-        assert len(result["results"]) == 3
+        results = result["results"]
+        assert isinstance(results, list)
+        assert len(results) == 3
         assert result["errors"] == []
 
-    async def test_get_pvs_empty_list_raises(self):
+    async def test_get_pvs_empty_list_raises(self) -> None:
         with pytest.raises(EpicsError) as exc_info:
             await _get_pvs([])
 
         assert exc_info.value.error_code == "INVALID_INPUT"
 
-    async def test_get_pvs_exceeds_batch_size_raises(self):
+    async def test_get_pvs_exceeds_batch_size_raises(self) -> None:
         names = [f"PV:{i}" for i in range(101)]
 
         with pytest.raises(EpicsError) as exc_info:
@@ -79,7 +82,7 @@ class TestGetPvs:
         assert exc_info.value.error_code == "BATCH_TOO_LARGE"
 
     @patch("epics_pv_mcp.tools.read.pv_get_batch", new_callable=AsyncMock)
-    async def test_get_pvs_at_batch_limit(self, mock_batch):
+    async def test_get_pvs_at_batch_limit(self, mock_batch: AsyncMock) -> None:
         """Exactly max_batch_size PVs should be accepted."""
         mock_batch.return_value = {"results": [], "errors": []}
         names = [f"PV:{i}" for i in range(100)]

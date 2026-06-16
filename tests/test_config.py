@@ -1,5 +1,7 @@
 """Tests for EpicsConfig and get_config singleton."""
 
+import pytest
+
 import epics_pv_mcp.config as config_module
 from epics_pv_mcp.config import EpicsConfig, get_config
 
@@ -7,39 +9,39 @@ from epics_pv_mcp.config import EpicsConfig, get_config
 class TestEpicsConfigDefaults:
     """Verify default configuration values."""
 
-    def test_allow_pv_write_default_false(self):
+    def test_allow_pv_write_default_false(self) -> None:
         cfg = EpicsConfig()
         assert cfg.allow_pv_write is False
 
-    def test_provider_default_pva(self):
+    def test_provider_default_pva(self) -> None:
         cfg = EpicsConfig()
         assert cfg.provider == "pva"
 
-    def test_default_timeout(self):
+    def test_default_timeout(self) -> None:
         cfg = EpicsConfig()
         assert cfg.default_timeout == 5.0
 
-    def test_max_batch_size_default(self):
+    def test_max_batch_size_default(self) -> None:
         cfg = EpicsConfig()
         assert cfg.max_batch_size == 100
 
-    def test_write_rate_limit_default(self):
+    def test_write_rate_limit_default(self) -> None:
         cfg = EpicsConfig()
         assert cfg.write_rate_limit == 10
 
-    def test_pv_write_pattern_default_empty(self):
+    def test_pv_write_pattern_default_empty(self) -> None:
         cfg = EpicsConfig()
         assert cfg.pv_write_pattern == ""
 
-    def test_audit_log_file_default_empty(self):
+    def test_audit_log_file_default_empty(self) -> None:
         cfg = EpicsConfig()
         assert cfg.audit_log_file == ""
 
-    def test_max_monitor_duration_default(self):
+    def test_max_monitor_duration_default(self) -> None:
         cfg = EpicsConfig()
         assert cfg.max_monitor_duration == 60.0
 
-    def test_max_monitor_events_default(self):
+    def test_max_monitor_events_default(self) -> None:
         cfg = EpicsConfig()
         assert cfg.max_monitor_events == 1000
 
@@ -47,22 +49,22 @@ class TestEpicsConfigDefaults:
 class TestEpicsConfigEnvOverride:
     """Verify environment variable overrides via monkeypatch."""
 
-    def test_allow_pv_write_from_env(self, monkeypatch):
+    def test_allow_pv_write_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("EPICS_MCP_ALLOW_PV_WRITE", "true")
         cfg = EpicsConfig()
         assert cfg.allow_pv_write is True
 
-    def test_provider_from_env(self, monkeypatch):
+    def test_provider_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("EPICS_MCP_PROVIDER", "ca")
         cfg = EpicsConfig()
         assert cfg.provider == "ca"
 
-    def test_default_timeout_from_env(self, monkeypatch):
+    def test_default_timeout_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("EPICS_MCP_DEFAULT_TIMEOUT", "10.0")
         cfg = EpicsConfig()
         assert cfg.default_timeout == 10.0
 
-    def test_write_rate_limit_from_env(self, monkeypatch):
+    def test_write_rate_limit_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("EPICS_MCP_WRITE_RATE_LIMIT", "20")
         cfg = EpicsConfig()
         assert cfg.write_rate_limit == 20
@@ -71,7 +73,7 @@ class TestEpicsConfigEnvOverride:
 class TestGetConfigSingleton:
     """Verify get_config returns a singleton."""
 
-    def test_returns_same_instance(self):
+    def test_returns_same_instance(self) -> None:
         # Reset the module-level singleton
         config_module._config = None
         try:
@@ -82,7 +84,7 @@ class TestGetConfigSingleton:
             # Clean up so other tests aren't affected
             config_module._config = None
 
-    def test_returns_epics_config_instance(self):
+    def test_returns_epics_config_instance(self) -> None:
         config_module._config = None
         try:
             cfg = get_config()
