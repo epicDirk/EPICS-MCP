@@ -19,8 +19,9 @@ from pathlib import Path
 _PV_ELEMENTS = frozenset({"pv_name", "pv", "x_pv", "y_pv"})
 # XY-plot trace PVs: trace_N_x_pv / trace_N_y_pv / trace_N_err_pv.
 _TRACE_PV_RE = re.compile(r"^trace_\d+_(?:x|y|err)_pv$")
-# A pure macro-only reference such as "$(pv_name)" — skipped (no concrete PV).
-_PURE_MACRO_RE = re.compile(r"\$\([^)]+\)")
+# A pure macro-only reference such as "$(pv_name)" or "${pv_name}" — skipped (no concrete
+# PV). Both Phoebus macro syntaxes are covered (a .bob may use either form).
+_PURE_MACRO_RE = re.compile(r"\$\([^)]+\)|\$\{[^}]+\}")
 
 
 def _pv_text(elem: ET.Element) -> str | None:

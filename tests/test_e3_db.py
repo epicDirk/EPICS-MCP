@@ -48,9 +48,26 @@ def test_ioc_db_pvs_resolved_and_needs_msi() -> None:
         'record(calc, "LIT:fixed") {}\n'
     )
     resolved, unresolved = ioc_db_pvs(db, {"P": "DEV-TEST01:"})
-    assert "DEV-TEST01:status" in resolved
-    assert "LIT:fixed" in resolved
-    assert any("$(R)" in name for name in unresolved)  # R undefined → needs-msi
+    assert resolved == {"DEV-TEST01:status", "LIT:fixed"}
+    assert unresolved == {"DEV-TEST01:$(R)setpoint"}  # R undefined → needs-msi (exact)
+
+
+def test_parse_st_cmd_no_prefix() -> None:
+    info = parse_st_cmd('dbLoadRecords("x.db")\n')
+    assert info.prefix is None
+    assert info.device_name is None
+
+
+def test_parse_prefix_tie_breaks_lexicographically() -> None:
+    # Two distinct P values, equal counts → lexicographically smallest wins (deterministic).
+    st = 'dbLoadRecords("a.db", "P=Z:")\ndbLoadRecords("b.db", "P=A:")\n'
+    assert parse_st_cmd(st).prefix == "A:"
+
+
+def test_substitute_cyclic_terminates() -> None:
+    # A -> B -> A: must terminate (bounded) and leave a macro literal, never loop.
+    result = substitute("$(A)", {"A": "$(B)", "B": "$(A)"})
+    assert "$(" in result
 
 
 def test_commented_st_cmd_lines_ignored() -> None:

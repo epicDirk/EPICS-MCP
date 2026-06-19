@@ -39,6 +39,13 @@ def main(argv: list[str] | None = None) -> int:
     with contextlib.suppress(AttributeError, ValueError):
         sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 
+    if not Path(args.st_cmd).is_file():
+        sys.stderr.write(f"Error: st.cmd file not found: {args.st_cmd}\n")
+        return 2
+    if not Path(args.displays).is_dir():
+        sys.stderr.write(f"Error: displays directory not found: {args.displays}\n")
+        return 2
+
     display_pvs = extract_pvs_from_dir(args.displays)
     st_info = parse_st_cmd(Path(args.st_cmd).read_text(encoding="utf-8"))
     naming = NamingServiceClient() if args.naming else None

@@ -6,6 +6,7 @@ import pytest
 import requests
 
 from epics_pv_mcp.services.naming_client import NamingServiceClient
+from epics_pv_mcp.services.naming_exceptions import NamingServiceConnectionError
 
 
 def _resp(payload: object, *, ok: bool = True) -> Mock:
@@ -70,3 +71,12 @@ def test_validate_discipline_approved(monkeypatch: pytest.MonkeyPatch) -> None:
         _resp([{"status": "Approved", "type": "Device Structure", "level": "1"}]),
     )
     assert client.validate_discipline("Ctrl") is True
+
+
+def test_check_connectivity_raises_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = NamingServiceClient()
+    monkeypatch.setattr(
+        client.session, "head", Mock(side_effect=requests.exceptions.ConnectionError())
+    )
+    with pytest.raises(NamingServiceConnectionError):
+        client.check_connectivity()
