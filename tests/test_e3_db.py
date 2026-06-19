@@ -1,6 +1,6 @@
 """Tests for the static e3 st.cmd / .db parser (synthetic fixtures, modelled on dln01)."""
 
-from epics_pv_mcp.services.e3_db import ioc_db_pvs, parse_st_cmd, substitute
+from epics_pv_mcp.services.e3_db import StCmdInfo, ioc_db_pvs, parse_st_cmd, substitute
 
 # Modelled on iocs/factory/e3-ioc-evr-fbis-dln01-ctrl-01/st.cmd (read-only spike).
 ST_CMD = """require essioc
@@ -51,3 +51,24 @@ def test_ioc_db_pvs_resolved_and_needs_msi() -> None:
     assert "DEV-TEST01:status" in resolved
     assert "LIT:fixed" in resolved
     assert any("$(R)" in name for name in unresolved)  # R undefined → needs-msi
+
+
+def test_commented_st_cmd_lines_ignored() -> None:
+    # A commented-out dbLoadRecords must NOT inject a ghost prefix / db file.
+    st = '# dbLoadRecords("ghost.db", "P=GHOST:")\ndbLoadRecords("real.db", "P=REAL:")\n'
+    info = parse_st_cmd(st)
+    assert info.prefix == "REAL:"
+    assert info.db_files == ["real.db"]
+
+
+def test_commented_db_records_ignored() -> None:
+    db = '# record(bi, "GHOST:x")\nrecord(ao, "$(P)real")\n'
+    resolved, _unresolved = ioc_db_pvs(db, {"P": "SYS:"})
+    assert "GHOST:x" not in resolved
+    assert "SYS:real" in resolved
+
+
+def test_device_name_strips_single_trailing_colon() -> None:
+    assert StCmdInfo(prefix="X:Y:").device_name == "X:Y"
+    assert StCmdInfo(prefix="SYS::").device_name == "SYS:"  # only ONE colon stripped
+    assert StCmdInfo(prefix=None).device_name is None

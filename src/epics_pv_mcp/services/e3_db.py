@@ -48,6 +48,17 @@ _RECORD_RE = re.compile(r'record\s*\(\s*[A-Za-z0-9_]+\s*,\s*"([^"]+)"\s*\)')
 _MACRO_REF_RE = re.compile(r"\$\{([A-Za-z0-9_]+)\}|\$\(([A-Za-z0-9_]+)\)")
 
 
+def _strip_comment_lines(text: str) -> str:
+    """Blank out full-line comments (a line whose first non-blank char is ``#``).
+
+    EPICS iocsh and ``.db`` both treat ``#`` as a comment. Without this, a commented-out
+    ``dbLoadRecords``/``record(...)`` line would be parsed as if it were live (verified
+    bug). Only FULL-LINE comments are stripped — an inline ``#`` inside a quoted value is
+    left alone so record/field strings are never corrupted. Line structure is preserved.
+    """
+    return "\n".join("" if line.lstrip().startswith("#") else line for line in text.splitlines())
+
+
 def substitute(text: str, macros: dict[str, str], *, max_depth: int = 10) -> str:
     """Expand ``$(NAME)``/``${NAME}`` in *text* from *macros* (bounded, undefined stay literal).
 
@@ -97,8 +108,10 @@ class StCmdInfo:
 
     @property
     def device_name(self) -> str | None:
-        """The ESS device name for the Naming Service (prefix without trailing ':')."""
-        return self.prefix.rstrip(":") if self.prefix else None
+        """The ESS device name for the Naming Service (prefix without ONE trailing ':')."""
+        if not self.prefix:
+            return None
+        return self.prefix[:-1] if self.prefix.endswith(":") else self.prefix
 
     @property
     def db_files(self) -> list[str]:
@@ -111,6 +124,7 @@ class StCmdInfo:
 
 def parse_st_cmd(text: str) -> StCmdInfo:
     """Parse an e3 ``st.cmd`` into a :class:`StCmdInfo` (pure, deterministic)."""
+    text = _strip_comment_lines(text)
     info = StCmdInfo()
     info.requires = _REQUIRE_RE.findall(text)
 
@@ -152,6 +166,7 @@ def ioc_db_pvs(db_text: str, macros: dict[str, str]) -> tuple[set[str], set[str]
     names that still contain ``$(...)``/``${...}`` after substitution (e.g. substitution-
     file driven — "needs-msi"). Never raises.
     """
+    db_text = _strip_comment_lines(db_text)
     resolved: set[str] = set()
     unresolved: set[str] = set()
     for raw_name in _RECORD_RE.findall(db_text):
