@@ -15,6 +15,8 @@ dependencies = [
     "pydantic>=2.0,<3",
     "pydantic-settings>=2.0,<3",
     "p4p>=4.2.0,<5",
+    # requests: read-only HTTP client for the ESS Naming Service (vendored naming_client).
+    "requests>=2.25",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +31,7 @@ dev = [
 
 [project.scripts]
 epics-pv-mcp = "epics_pv_mcp.server:main"
+epics-crossplane = "epics_pv_mcp.cli_crossplane:main"
 
 [tool.ruff]
 line-length = 100
@@ -62,7 +65,7 @@ warn_required_dynamic_aliases = true
 # p4p ist untypisiert (keine Stubs); phoebus_mcp_core ist ein optionaler Lazy-Import
 # in tools/validate.py und im EPICS-venv nicht installiert.
 [[tool.mypy.overrides]]
-module = ["p4p.*", "p4p", "phoebus_mcp_core.*"]
+module = ["p4p.*", "p4p", "phoebus_mcp_core.*", "requests", "requests.*", "urllib3", "urllib3.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -1,0 +1,200 @@
+"""Client for the ESS Naming Service REST API (read-only).
+
+Vendored and slimmed from pvValidator's ``pvValidatorUtils/naming_client.py`` (Alfio
+Rizzo, ESS) so this repo stays standalone — pvValidator itself is Linux/SWIG-only and
+cannot be imported on Windows, but its Naming-Service client is pure Python (``requests``
++ stdlib). The "Did you mean?"/confusable helpers (which pull in pvValidator's ``rules``)
+are intentionally dropped; only the read-only validation calls the cross-plane check needs
+are kept. Endpoints (all GET):
+
+  GET /rest/parts/mnemonic/{mnemonic}  — validate System / Subsystem / Discipline / Device
+  GET /rest/deviceNames/{name}         — check if an ESS device name is registered + status
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import ClassVar, TypedDict
+from urllib.parse import quote as url_quote
+
+import requests
+
+from epics_pv_mcp.services.naming_exceptions import (
+    NamingServiceConnectionError,
+    NamingServiceResponseError,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class NameStatus(TypedDict):
+    """Result of :meth:`NamingServiceClient.validate_name`."""
+
+    registered: bool
+    status: str
+    message: str
+
+
+class NamingServiceClient:
+    """Read-only client for the ESS Naming Service REST API.
+
+    All methods issue ``GET`` requests only — nothing is ever written to the service.
+    Results are cached in-memory for the lifetime of the instance.
+    """
+
+    DEFAULT_URLS: ClassVar[dict[str, str]] = {
+        "prod": "https://naming.example.org/",
+        "test": "https://naming-test.example.org/",
+    }
+
+    def __init__(
+        self,
+        environment: str = "prod",
+        base_url: str | None = None,
+        timeout: float = 5.0,
+    ) -> None:
+        self.environment = environment
+        self.base_url = base_url or self.DEFAULT_URLS.get(environment, self.DEFAULT_URLS["prod"])
+        self.timeout = timeout
+        self.session = requests.Session()
+        self.session.headers.update({"accept": "application/json"})
+
+        # Retry transient failures (502/503/504) with exponential backoff.
+        from requests.adapters import HTTPAdapter
+
+        try:
+            from urllib3.util.retry import Retry
+
+            retry = Retry(total=3, backoff_factor=0.5, status_forcelist=[502, 503, 504])
+            adapter = HTTPAdapter(max_retries=retry)
+            self.session.mount("http://", adapter)
+            self.session.mount("https://", adapter)
+        except ImportError:
+            pass  # urllib3 retry unavailable — proceed without
+
+        self._parts_cache: dict[str, list[dict[str, object]]] = {}
+        self._names_cache: dict[str, dict[str, object]] = {}
+        self._bool_cache: dict[str, bool] = {}
+
+    @property
+    def parts_url(self) -> str:
+        return self.base_url + "rest/parts/mnemonic/"
+
+    @property
+    def names_url(self) -> str:
+        return self.base_url + "rest/deviceNames/"
+
+    # ------------------------------------------------------------------
+    # Connectivity
+    # ------------------------------------------------------------------
+
+    def check_connectivity(self) -> bool:
+        """Return True if the Naming Service is reachable; raise otherwise."""
+        try:
+            self.session.head(self.base_url, timeout=1)
+            return True
+        except (requests.exceptions.ConnectionError, ConnectionError, OSError) as exc:
+            raise NamingServiceConnectionError(
+                f"Failed to connect to Naming Service at {self.base_url}: {exc}"
+            ) from exc
+
+    # ------------------------------------------------------------------
+    # Low-level GETs
+    # ------------------------------------------------------------------
+
+    def _get_parts(self, mnemonic: str) -> list[dict[str, object]]:
+        """``GET /rest/parts/mnemonic/{mnemonic}`` (cached)."""
+        if mnemonic in self._parts_cache:
+            return self._parts_cache[mnemonic]
+        try:
+            resp = self.session.get(
+                self.parts_url + url_quote(mnemonic, safe="-:"), timeout=self.timeout
+            )
+            resp.raise_for_status()
+            data: list[dict[str, object]] = resp.json()
+        except requests.exceptions.RequestException as exc:
+            raise NamingServiceResponseError(
+                f"Failed to query parts for '{mnemonic}': {exc}"
+            ) from exc
+        self._parts_cache[mnemonic] = data
+        return data
+
+    def _get_device_name(self, name: str) -> dict[str, object]:
+        """``GET /rest/deviceNames/{name}`` (cached)."""
+        if name in self._names_cache:
+            return self._names_cache[name]
+        try:
+            resp = self.session.get(
+                self.names_url + url_quote(name, safe="-:"), timeout=self.timeout
+            )
+            resp.raise_for_status()
+            data: dict[str, object] = resp.json()
+        except requests.exceptions.RequestException as exc:
+            raise NamingServiceResponseError(
+                f"Failed to query device name '{name}': {exc}"
+            ) from exc
+        self._names_cache[name] = data
+        return data
+
+    # ------------------------------------------------------------------
+    # High-level validation (read-only)
+    # ------------------------------------------------------------------
+
+    def _approved_part(self, mnemonic: str, *, part_type: str, levels: tuple[str, ...]) -> bool:
+        """True if *mnemonic* has an Approved part of *part_type* at one of *levels*."""
+        try:
+            parts = self._get_parts(mnemonic)
+        except NamingServiceResponseError:
+            return False
+        return any(
+            item.get("status") == "Approved"
+            and item.get("type") == part_type
+            and item.get("level") in levels
+            for item in parts
+        )
+
+    def validate_system(self, system: str) -> bool:
+        """True if *system* is an Approved System-Structure mnemonic (level 1 or 2)."""
+        key = f"sys:{system}"
+        if key not in self._bool_cache:
+            self._bool_cache[key] = self._approved_part(
+                system, part_type="System Structure", levels=("1", "2")
+            )
+        return self._bool_cache[key]
+
+    def validate_discipline(self, discipline: str) -> bool:
+        """True if *discipline* is an Approved Device-Structure mnemonic (level 1)."""
+        key = f"dis:{discipline}"
+        if key not in self._bool_cache:
+            self._bool_cache[key] = self._approved_part(
+                discipline, part_type="Device Structure", levels=("1",)
+            )
+        return self._bool_cache[key]
+
+    def validate_name(self, ess_name: str) -> NameStatus:
+        """Check whether an ESS device name is registered and ACTIVE.
+
+        *ess_name* is the device-name part of a PV (e.g. ``DEV-TEST01:Ctrl-EVR-01``),
+        without the trailing property. Returns ``registered=True`` only for ``ACTIVE``;
+        ``OBSOLETE``/``DELETED``/unknown/unreachable → ``registered=False`` with the
+        status preserved.
+        """
+        try:
+            data = self._get_device_name(ess_name)
+        except NamingServiceResponseError:
+            return NameStatus(
+                registered=False,
+                status="",
+                message=f'The name "{ess_name}" is not registered in the Naming Service',
+            )
+        status = str(data.get("status", ""))
+        messages = {
+            "ACTIVE": f'The name "{ess_name}" is registered (ACTIVE)',
+            "OBSOLETE": f'The name "{ess_name}" is OBSOLETE',
+            "DELETED": f'The name "{ess_name}" is DELETED',
+        }
+        return NameStatus(
+            registered=status == "ACTIVE",
+            status=status,
+            message=messages.get(status, f'The name "{ess_name}" has unknown status "{status}"'),
+        )
