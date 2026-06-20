@@ -23,6 +23,9 @@ def test_health_values() -> None:
     assert result["server"] == "epics-pv-mcp"
     assert result["status"] == "ok"
     assert result["write_enabled"] is False
+    # REST services are disabled by default (localhost isolation preserved).
+    assert result["channelfinder_enabled"] is False
+    assert result["archiver_enabled"] is False
 
 
 def test_config_no_secrets() -> None:

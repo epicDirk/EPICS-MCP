@@ -26,6 +26,14 @@ class EpicsConfig(BaseSettings):
     max_monitor_duration: float = 60.0
     max_monitor_events: int = 1000
 
+    # --- Optional REST services (read-only; empty URL = disabled, no network call) ---
+    # ChannelFinder service root incl. context path, e.g. "http://host:8080/ChannelFinder".
+    channelfinder_url: str = ""
+    channelfinder_auth: str = ""  # optional Authorization header value for secured deployments
+    # Archiver Appliance root, e.g. "http://archiver:17665".
+    archiver_url: str = ""
+    archiver_auth: str = ""  # optional Authorization header value for secured deployments
+
 
 _config: EpicsConfig | None = None
 _config_lock = threading.Lock()

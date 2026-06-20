@@ -12,6 +12,8 @@ from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_pv_mcp.prompts import diagnose_pv as _diagnose_pv
 from epics_pv_mcp.resources import get_epics_config, get_health
+from epics_pv_mcp.tools.archiver import _get_pv_history, _is_archived
+from epics_pv_mcp.tools.channelfinder import _find_channels
 from epics_pv_mcp.tools.crossplane import _crossplane_check
 from epics_pv_mcp.tools.discover import _discover_pvs
 from epics_pv_mcp.tools.info import _get_pv_info
@@ -252,6 +254,93 @@ async def crossplane_check(
     """
     try:
         return await _crossplane_check(displays_dir, st_cmd_path, query_naming)
+    except EpicsError as e:
+        raise ToolError(f"[{e.error_code}] {e}") from e
+    except Exception as e:
+        raise ToolError(str(e)) from e
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+async def find_channels(
+    name_pattern: Annotated[
+        str,
+        Field(description="Channel/PV name glob (ChannelFinder syntax: * and ?)"),
+    ],
+    max_results: Annotated[
+        int,
+        Field(description="Cap on returned channels (a broad glob can match a whole site)"),
+    ] = 500,
+    timeout: Annotated[float, Field(description="Timeout in seconds")] = 5.0,
+) -> dict[str, object]:
+    """Query ChannelFinder: which IOC/host serves a PV, plus its tags/properties.
+
+    Read-only. Disabled by default (set EPICS_MCP_CHANNELFINDER_URL to enable).
+    """
+    try:
+        return await _find_channels(name_pattern, max_results, timeout)
+    except EpicsError as e:
+        raise ToolError(f"[{e.error_code}] {e}") from e
+    except Exception as e:
+        raise ToolError(str(e)) from e
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+async def is_archived(
+    pv: Annotated[str, Field(description="EPICS PV name")],
+    timeout: Annotated[float, Field(description="Timeout in seconds")] = 5.0,
+) -> dict[str, object]:
+    """Report whether a PV is being archived (EPICS Archiver Appliance MGMT getPVStatus).
+
+    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.
+    """
+    try:
+        return await _is_archived(pv, timeout)
+    except EpicsError as e:
+        raise ToolError(f"[{e.error_code}] {e}") from e
+    except Exception as e:
+        raise ToolError(str(e)) from e
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+async def get_pv_history(
+    pv: Annotated[str, Field(description="EPICS PV name")],
+    start: Annotated[
+        str, Field(description="Window start, ISO-8601 (e.g. 2026-06-01T00:00:00.000Z)")
+    ],
+    end: Annotated[str, Field(description="Window end, ISO-8601")],
+    max_points: Annotated[
+        int,
+        Field(description="Cap on returned samples (a wide window on a fast PV is unbounded)"),
+    ] = 5000,
+    timeout: Annotated[float, Field(description="Timeout in seconds")] = 5.0,
+) -> dict[str, object]:
+    """Fetch archived samples for a PV over an ISO-8601 window (Archiver retrieval getData.json).
+
+    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.
+    """
+    try:
+        return await _get_pv_history(pv, start, end, max_points, timeout)
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
