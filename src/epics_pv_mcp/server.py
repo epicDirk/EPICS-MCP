@@ -12,6 +12,7 @@ from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_pv_mcp.prompts import diagnose_pv as _diagnose_pv
 from epics_pv_mcp.resources import get_epics_config, get_health
+from epics_pv_mcp.tools.crossplane import _crossplane_check
 from epics_pv_mcp.tools.discover import _discover_pvs
 from epics_pv_mcp.tools.info import _get_pv_info
 from epics_pv_mcp.tools.monitor import _monitor_pv
@@ -212,6 +213,45 @@ async def discover_pvs(
     """Discover PVs by name. Wildcard patterns require ChannelFinder infrastructure."""
     try:
         return await _discover_pvs(pattern, timeout)
+    except EpicsError as e:
+        raise ToolError(f"[{e.error_code}] {e}") from e
+    except Exception as e:
+        raise ToolError(str(e)) from e
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+async def crossplane_check(
+    displays_dir: Annotated[
+        str,
+        Field(description="Directory of .bob display files (searched recursively)"),
+    ],
+    st_cmd_path: Annotated[
+        str,
+        Field(description="Path to an e3 IOC st.cmd startup script"),
+    ],
+    query_naming: Annotated[
+        bool,
+        Field(
+            description="Query the ESS Naming Service (read-only GET) for the IOC device "
+            "name. Default False keeps the check fully offline and deterministic."
+        ),
+    ] = False,
+) -> dict[str, object]:
+    """Cross-plane PV provenance: join display PVs ↔ e3 IOC (st.cmd) ↔ ESS Naming.
+
+    Read-only. Returns a structured report plus a Markdown rendering. Display PVs that
+    still carry macros are reported as 'indeterminate' (never 'broken') — their per-instance
+    identity needs the display PV-inventory, which is not part of this coarse v1 join.
+    """
+    try:
+        return await _crossplane_check(displays_dir, st_cmd_path, query_naming)
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
