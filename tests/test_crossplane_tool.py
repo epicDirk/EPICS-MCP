@@ -40,12 +40,17 @@ async def test_crossplane_tool_offline_join(tmp_path: Path) -> None:
     assert isinstance(report, dict)
     assert report["ioc_prefix"] == "DEV-TEST01:Ctrl-EVR-01:"
     assert "DEV-TEST01:Ctrl-EVR-01:status" in report["pvs_linked"]
-    assert report["pvs_indeterminate"] == 1
+    # M2: pvs_indeterminate is now the distinct macro-PV list (JSON array) with a separate
+    # occurrence count — pin the shape so a regression to the old scalar fails CI.
+    assert isinstance(report["pvs_indeterminate"], list)
+    assert report["pvs_indeterminate"] == ["$(P)Cmd"]
+    assert report["pvs_indeterminate_occurrences"] == 1
     assert report["naming"] is None  # query_naming=False → never touches the network
 
     markdown = result["markdown"]
     assert isinstance(markdown, str)
     assert "Cross-Plane PV Provenance" in markdown
+    assert "**Macro-templated (distinct):** 1 (1 references)" in markdown
 
 
 @pytest.mark.asyncio

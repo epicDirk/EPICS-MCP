@@ -7,8 +7,9 @@ Service registers (:mod:`naming_client`). Pure + deterministic; all network I/O 
 
 **Honest buckets (v1 is deliberately coarse — see plan):**
 - *linked*  — concrete display PVs that share the IOC device prefix (provenance link).
-- *indeterminate* — display PVs that still contain ``$(...)`` macros: their per-instance
-  identity needs the parked ``opi_navigation`` PV-inventory; never judged here.
+- *indeterminate* — DISTINCT display PVs that still contain ``$(...)`` macros (raw template
+  strings; the true per-instance count needs the parked ``opi_navigation`` PV-inventory /
+  Wedge 0). Their occurrence total is reported alongside. Never judged here.
 - *broken*  — concrete linked PVs absent from the IOC ``.db`` set — ONLY computed when an
   IOC ``.db`` PV set is supplied (module repos are deferred), else left empty.
 Nothing indeterminate is ever called "broken".
@@ -46,7 +47,13 @@ class NamingResult(BaseModel):
 
 
 class CrossPlaneReport(BaseModel):
-    """Deterministic cross-plane provenance report (JSON via ``model_dump_json``)."""
+    """Deterministic cross-plane provenance report (JSON via ``model_dump_json``).
+
+    Note: ``pvs_indeterminate`` is the sorted DISTINCT macro-PV tuple (JSON array) and
+    ``pvs_indeterminate_occurrences`` the scalar reference count. (In the earliest v1
+    ``pvs_indeterminate`` was the scalar occurrence count; M2 made the bucket distinct,
+    symmetric with ``pvs_linked``/``pvs_other_prefix``.)
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -59,8 +66,12 @@ class CrossPlaneReport(BaseModel):
     pvs_linked: tuple[str, ...] = ()
     #: Concrete display PVs that do NOT share this IOC's prefix (likely other IOCs).
     pvs_other_prefix: tuple[str, ...] = ()
-    #: Count of display PVs still carrying macros (need parked Stage-0 expansion).
-    pvs_indeterminate: int = 0
+    #: Distinct display PVs still carrying macros (raw template strings; true per-instance
+    #: count needs the parked opi_navigation PV-inventory / Wedge 0). Symmetric with the
+    #: linked/other buckets above.
+    pvs_indeterminate: tuple[str, ...] = ()
+    #: Total macro-bearing PV references across displays (>= len(pvs_indeterminate)).
+    pvs_indeterminate_occurrences: int = 0
     #: IOC .db PV counts (only when a .db set was supplied; module repos deferred).
     ioc_db_resolved: int = 0
     ioc_db_needs_msi: int = 0
@@ -88,12 +99,14 @@ def crossplane_check(
     linked_displays: set[str] = set()
     linked_pvs: set[str] = set()
     other_prefix_pvs: set[str] = set()
-    indeterminate = 0
+    indeterminate_pvs: set[str] = set()
+    indeterminate_occurrences = 0
 
     for display, pvs in display_pvs.items():
         for pv in pvs:
             if _has_macro(pv):
-                indeterminate += 1
+                indeterminate_pvs.add(pv)
+                indeterminate_occurrences += 1
                 continue
             if prefix and pv.startswith(prefix):
                 linked_pvs.add(pv)
@@ -118,10 +131,11 @@ def crossplane_check(
         broken = {pv for pv in linked_pvs if pv not in resolved}
 
     notes: list[str] = []
-    if indeterminate:
+    if indeterminate_pvs:
         notes.append(
-            f"{indeterminate} display PV reference(s) carry macros — per-instance identity "
-            "needs the parked opi_navigation PV-inventory; not judged here."
+            f"{len(indeterminate_pvs)} distinct macro-templated display PV(s) "
+            f"({indeterminate_occurrences} reference(s)) — raw template strings; per-instance "
+            "identity needs the parked opi_navigation PV-inventory; not judged here."
         )
     if ioc_db is None:
         notes.append(
@@ -141,7 +155,8 @@ def crossplane_check(
         displays_linked=tuple(sorted(linked_displays)),
         pvs_linked=tuple(sorted(linked_pvs)),
         pvs_other_prefix=tuple(sorted(other_prefix_pvs)),
-        pvs_indeterminate=indeterminate,
+        pvs_indeterminate=tuple(sorted(indeterminate_pvs)),
+        pvs_indeterminate_occurrences=indeterminate_occurrences,
         ioc_db_resolved=db_resolved,
         ioc_db_needs_msi=db_needs_msi,
         broken=tuple(sorted(broken)),
@@ -165,7 +180,9 @@ def render_markdown(report: CrossPlaneReport) -> str:
     lines.extend(f"  - {display}" for display in report.displays_linked)
     lines.append(f"- **Concrete PVs sharing the prefix:** {len(report.pvs_linked)}")
     lines.append(f"- **Concrete PVs with other prefixes:** {len(report.pvs_other_prefix)}")
-    lines.append(f"- **Macro-templated (indeterminate):** {report.pvs_indeterminate}")
+    n_macro = len(report.pvs_indeterminate)
+    refs = report.pvs_indeterminate_occurrences
+    lines.append(f"- **Macro-templated (distinct):** {n_macro} ({refs} references)")
     if report.ioc_db_resolved or report.ioc_db_needs_msi:
         lines.append(
             f"- **IOC .db PVs:** {report.ioc_db_resolved} resolved, "

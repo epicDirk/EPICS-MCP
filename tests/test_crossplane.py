@@ -31,10 +31,23 @@ def test_linked_indeterminate_and_other_prefix() -> None:
     report = crossplane_check(displays, _st(), naming=_FakeNaming("ACTIVE"))
     assert "DEV-TEST01:Ctrl-EVR-01:status" in report.pvs_linked
     assert report.displays_linked == ("a.bob",)
-    assert report.pvs_indeterminate == 1
+    assert report.pvs_indeterminate == ("$(P)$(R)foo",)
+    assert report.pvs_indeterminate_occurrences == 1
     assert "OTHER-SYS:thing" in report.pvs_other_prefix
     assert report.naming is not None
     assert report.naming.registered is True
+
+
+def test_indeterminate_distinct_vs_occurrences() -> None:
+    # M2: the same macro PV referenced across TWO displays counts ONCE as distinct but
+    # TWICE as occurrences (symmetric with the distinct linked/other buckets).
+    displays = {
+        "a.bob": ["$(P)$(R)Status"],
+        "b.bob": ["$(P)$(R)Status"],
+    }
+    report = crossplane_check(displays, _st())
+    assert report.pvs_indeterminate == ("$(P)$(R)Status",)
+    assert report.pvs_indeterminate_occurrences == 2
 
 
 def test_offline_no_naming_has_deferred_note() -> None:
@@ -53,9 +66,13 @@ def test_broken_only_with_ioc_db() -> None:
 
 def test_render_markdown_deterministic() -> None:
     report = crossplane_check(
-        {"a.bob": ["DEV-TEST01:Ctrl-EVR-01:x"]}, _st(), naming=_FakeNaming("ACTIVE")
+        {"a.bob": ["DEV-TEST01:Ctrl-EVR-01:x", "$(P)$(R)foo"]},
+        _st(),
+        naming=_FakeNaming("ACTIVE"),
     )
     markdown = render_markdown(report)
     assert "Cross-Plane PV Provenance" in markdown
     assert "ACTIVE" in markdown
+    # M2: distinct macro count + occurrence count both surfaced (here 1 distinct, 1 reference).
+    assert "**Macro-templated (distinct):** 1 (1 references)" in markdown
     assert render_markdown(report) == markdown  # deterministic
