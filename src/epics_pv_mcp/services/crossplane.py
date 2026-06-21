@@ -50,7 +50,8 @@ class CrossPlaneReport(BaseModel):
     """Deterministic cross-plane provenance report (JSON via ``model_dump_json``).
 
     Note: ``pvs_indeterminate`` is the sorted DISTINCT macro-PV tuple (JSON array) and
-    ``pvs_indeterminate_occurrences`` the scalar reference count. (In the earliest v1
+    ``pvs_indeterminate_occurrences`` their count summed across displays (within-display
+    duplicates already collapsed — display/PV pairs, not raw elements). (In the earliest v1
     ``pvs_indeterminate`` was the scalar occurrence count; M2 made the bucket distinct,
     symmetric with ``pvs_linked``/``pvs_other_prefix``.)
     """
@@ -70,7 +71,9 @@ class CrossPlaneReport(BaseModel):
     #: count needs the parked opi_navigation PV-inventory / Wedge 0). Symmetric with the
     #: linked/other buckets above.
     pvs_indeterminate: tuple[str, ...] = ()
-    #: Total macro-bearing PV references across displays (>= len(pvs_indeterminate)).
+    #: Macro-PV references summed across displays; within-display duplicates are already
+    #: collapsed by the extractor, so this counts (display, distinct-macro-PV) pairs — not
+    #: raw XML elements — and is >= len(pvs_indeterminate).
     pvs_indeterminate_occurrences: int = 0
     #: IOC .db PV counts (only when a .db set was supplied; module repos deferred).
     ioc_db_resolved: int = 0
