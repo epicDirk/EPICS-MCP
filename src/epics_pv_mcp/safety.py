@@ -66,6 +66,7 @@ class SafetyLayer:
         """
         # 1. Environment gate
         if not self._config.allow_pv_write:
+            self._audit_deny(pv_name, "PV_WRITE_DENIED")
             raise PVWriteDeniedError(
                 "PV writes are disabled. Set EPICS_MCP_ALLOW_PV_WRITE=true to enable.",
                 details={"pv_name": pv_name},
@@ -73,6 +74,7 @@ class SafetyLayer:
 
         # 2. Pattern allowlist
         if self._pattern is not None and not self._pattern.fullmatch(pv_name):
+            self._audit_deny(pv_name, "PV_WRITE_DENIED")
             raise PVWriteDeniedError(
                 f"PV '{pv_name}' does not match the write allowlist pattern "
                 f"'{self._config.pv_write_pattern}'.",
@@ -83,6 +85,7 @@ class SafetyLayer:
         now = time.monotonic()
         self._purge_old(now)
         if len(self._timestamps) >= self._config.write_rate_limit:
+            self._audit_deny(pv_name, "RATE_LIMIT_EXCEEDED")
             raise RateLimitError(
                 f"Write rate limit exceeded ({self._config.write_rate_limit} "
                 f"writes per {self._WINDOW_SECONDS:.0f}s). Try again later.",
@@ -96,18 +99,65 @@ class SafetyLayer:
         # Record this write timestamp
         self._timestamps.append(now)
 
-    def audit_write(self, pv_name: str, old_value: object, new_value: object) -> None:
-        """Log a completed write for audit purposes."""
-        self._audit_logger.info(
-            "PV_WRITE pv=%s old=%r new=%r",
+    def audit_write(
+        self, pv_name: str, old_value: object, new_value: object, caller: str = "set_pv_value"
+    ) -> None:
+        """Log a completed (ALLOW) write for audit purposes."""
+        self._emit(
+            "PV_WRITE event=ALLOW pv=%s old=%r new=%r caller=%s",
             pv_name,
             old_value,
             new_value,
+            caller,
+        )
+
+    def audit_write_failed(
+        self,
+        pv_name: str,
+        old_value: object,
+        new_value: object,
+        error_code: str,
+        caller: str = "set_pv_value",
+    ) -> None:
+        """Log a write that passed the safety gate but FAILED during ``pv_put``.
+
+        The README promises *every* write is logged; this closes the gap where a
+        failed put (or any non-:class:`EpicsError` raised below the tool layer)
+        left no forensic trace.
+        """
+        self._emit(
+            "PV_WRITE event=FAILED pv=%s old=%r new=%r error_code=%s caller=%s",
+            pv_name,
+            old_value,
+            new_value,
+            error_code,
+            caller,
         )
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _audit_deny(self, pv_name: str, error_code: str, caller: str = "set_pv_value") -> None:
+        """Log a REJECTED write (gate off / pattern mismatch / rate limit).
+
+        Called *before* the ``raise`` in :meth:`check_write_allowed`, i.e. before
+        the rate-limit token is appended — so a denial never consumes a token.
+        """
+        self._emit(
+            "PV_WRITE event=DENY pv=%s error_code=%s caller=%s",
+            pv_name,
+            error_code,
+            caller,
+        )
+
+    def _emit(self, message: str, *args: object) -> None:
+        """Single audit sink. Total function: the stdlib ``logging`` layer absorbs
+        handler I/O/formatting errors via ``Handler.handleError``, so an audit
+        emission never turns a denial/failure into a crash nor hides the original
+        raise — hence no ``try/except`` guard is needed here.
+        """
+        self._audit_logger.info(message, *args)
 
     def _purge_old(self, now: float) -> None:
         """Remove timestamps older than the sliding window."""

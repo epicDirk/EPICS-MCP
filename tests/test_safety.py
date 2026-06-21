@@ -86,8 +86,88 @@ class TestAuditWrite:
         with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
             safety.audit_write("TEST:pv", 10.0, 20.0)
 
+        # Back-compat: line still starts with PV_WRITE and carries the PV name.
         assert any("PV_WRITE" in record.message for record in caplog.records)
         assert any("TEST:pv" in record.message for record in caplog.records)
+
+    def test_audit_write_records_event_and_caller(
+        self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+            safety.audit_write("TEST:pv", 10.0, 20.0)
+
+        assert "event=ALLOW" in caplog.text
+        assert "caller=set_pv_value" in caplog.text
+        assert "old=10.0" in caplog.text
+        assert "new=20.0" in caplog.text
+
+    def test_audit_write_failed_record(
+        self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+            safety.audit_write_failed("TEST:pv", 1, 2, "PV_TIMEOUT")
+
+        assert "event=FAILED" in caplog.text
+        assert "error_code=PV_TIMEOUT" in caplog.text
+        assert "TEST:pv" in caplog.text
+
+
+class TestAuditDeny:
+    """Rejected writes must leave a DENY audit record — and consume no rate token."""
+
+    def test_gate_off_emits_deny(
+        self, safety_locked: SafetyLayer, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with (
+            caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"),
+            pytest.raises(PVWriteDeniedError),
+        ):
+            safety_locked.check_write_allowed("X:pv")
+
+        assert "event=DENY" in caplog.text
+        assert "error_code=PV_WRITE_DENIED" in caplog.text
+        # Negative: a denied write must never emit an ALLOW record.
+        assert "event=ALLOW" not in caplog.text
+
+    def test_pattern_mismatch_emits_deny(self, caplog: pytest.LogCaptureFixture) -> None:
+        sl = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r"^TEST:.*$", write_rate_limit=10)
+        )
+        with (
+            caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"),
+            pytest.raises(PVWriteDeniedError),
+        ):
+            sl.check_write_allowed("OTHER:pv")
+
+        assert "event=DENY" in caplog.text
+        assert "error_code=PV_WRITE_DENIED" in caplog.text
+
+    def test_rate_limit_emits_deny(self, caplog: pytest.LogCaptureFixture) -> None:
+        sl = SafetyLayer(EpicsConfig(allow_pv_write=True, write_rate_limit=1))
+        sl.check_write_allowed("TEST:a")  # consumes the single token
+        with (
+            caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"),
+            pytest.raises(RateLimitError),
+        ):
+            sl.check_write_allowed("TEST:b")
+
+        assert "event=DENY" in caplog.text
+        assert "error_code=RATE_LIMIT_EXCEEDED" in caplog.text
+
+    def test_deny_consumes_no_rate_token(self) -> None:
+        # 3 pattern-denied attempts must NOT consume tokens: exactly
+        # write_rate_limit (=2) real writes still succeed afterwards.
+        sl = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r"^TEST:.*$", write_rate_limit=2)
+        )
+        for _ in range(3):
+            with pytest.raises(PVWriteDeniedError):
+                sl.check_write_allowed("OTHER:denied")
+
+        sl.check_write_allowed("TEST:1")
+        sl.check_write_allowed("TEST:2")
+        with pytest.raises(RateLimitError):
+            sl.check_write_allowed("TEST:3")
 
 
 class TestSafetyConfig:

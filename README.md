@@ -37,7 +37,7 @@ Writes are **disabled by default** and require explicit opt-in:
 - **Environment gate** — `EPICS_MCP_ALLOW_PV_WRITE=true` must be set
 - **Regex allowlist** — `EPICS_MCP_PV_WRITE_PATTERN` limits which PVs can be written (e.g. `^TEST:.*`)
 - **Rate limit** — `EPICS_MCP_WRITE_RATE_LIMIT` caps writes per minute (default: 10)
-- **Audit log** — every write is logged with timestamp, PV name, old/new value, and caller
+- **Audit log** — every write *attempt* is logged with timestamp, PV name and an `event` (`ALLOW` succeeded, `DENY` rejected by gate/allowlist/rate-limit, `FAILED` errored during the put), plus old/new value (on `ALLOW`/`FAILED`), `error_code`, and `caller` (the MCP tool — a stdio server has no authenticated end-user)
 
 ## Installation
 
