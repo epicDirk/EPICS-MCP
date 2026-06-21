@@ -44,9 +44,7 @@ def test_offline_no_naming_has_deferred_note() -> None:
 
 
 def test_broken_only_with_ioc_db() -> None:
-    displays = {
-        "a.bob": ["DEV-TEST01:Ctrl-EVR-01:status", "DEV-TEST01:Ctrl-EVR-01:missing"]
-    }
+    displays = {"a.bob": ["DEV-TEST01:Ctrl-EVR-01:status", "DEV-TEST01:Ctrl-EVR-01:missing"]}
     ioc_db = ({"DEV-TEST01:Ctrl-EVR-01:status"}, set[str]())
     report = crossplane_check(displays, _st(), ioc_db=ioc_db)
     assert report.broken == ("DEV-TEST01:Ctrl-EVR-01:missing",)

@@ -117,8 +117,11 @@ class StCmdInfo:
     def db_files(self) -> list[str]:
         """The ``.db`` files loaded directly via ``dbLoadRecords`` (deterministic order)."""
         return sorted(
-            {load.target for load in self.loads if load.command == "dbLoadRecords"
-             and load.target.endswith(".db")}
+            {
+                load.target
+                for load in self.loads
+                if load.command == "dbLoadRecords" and load.target.endswith(".db")
+            }
         )
 
 
@@ -141,8 +144,9 @@ def parse_st_cmd(text: str) -> StCmdInfo:
             name: substitute(value, info.env)
             for name, value in _parse_macro_string(raw_macros).items()
         }
-        info.loads.append(Load(command=match.group("cmd"), target=match.group("file"),
-                               macros=macros))
+        info.loads.append(
+            Load(command=match.group("cmd"), target=match.group("file"), macros=macros)
+        )
         p_value = macros.get("P")
         if p_value:
             prefixes[p_value] += 1
