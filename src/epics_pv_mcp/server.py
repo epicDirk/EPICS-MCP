@@ -67,7 +67,7 @@ async def get_pv_value(
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
-        raise ToolError(str(e)) from e
+        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
 
 
 @mcp.tool(
@@ -97,7 +97,7 @@ async def get_pvs(
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
-        raise ToolError(str(e)) from e
+        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
 
 
 @mcp.tool(
@@ -126,7 +126,7 @@ async def set_pv_value(
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
-        raise ToolError(str(e)) from e
+        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
 
 
 @mcp.tool(
@@ -154,7 +154,7 @@ async def get_pv_info(
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
-        raise ToolError(str(e)) from e
+        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
 
 
 @mcp.tool(
@@ -185,7 +185,7 @@ async def monitor_pv(
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
-        raise ToolError(str(e)) from e
+        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
 
 
 @mcp.tool(
@@ -219,7 +219,7 @@ async def validate_pvs(
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
-        raise ToolError(str(e)) from e
+        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
 
 
 @mcp.tool(
@@ -246,7 +246,7 @@ async def discover_pvs(
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
-        raise ToolError(str(e)) from e
+        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
 
 
 @mcp.tool(
@@ -285,7 +285,7 @@ async def crossplane_check(
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
-        raise ToolError(str(e)) from e
+        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
 
 
 @mcp.tool(
@@ -316,7 +316,7 @@ async def find_channels(
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
-        raise ToolError(str(e)) from e
+        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
 
 
 @mcp.tool(
@@ -340,7 +340,7 @@ async def is_archived(
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
-        raise ToolError(str(e)) from e
+        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
 
 
 @mcp.tool(
@@ -372,7 +372,7 @@ async def get_pv_history(
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
-        raise ToolError(str(e)) from e
+        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
 
 
 # === Resources ===

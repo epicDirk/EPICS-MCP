@@ -35,7 +35,9 @@ async def test_get_pv_value_converts_generic_exception_to_tool_error() -> None:
             new_callable=AsyncMock,
             side_effect=RuntimeError("unexpected"),
         ),
-        pytest.raises(ToolError, match="unexpected"),
+        # N6: the fallback now preserves the exception class + the original message
+        # ("[INTERNAL] <ClassName>: <message>") instead of a bare str(e).
+        pytest.raises(ToolError, match=r"\[INTERNAL\] RuntimeError: unexpected"),
     ):
         await get_pv_value("ANY:PV")
 
