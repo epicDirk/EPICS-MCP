@@ -22,7 +22,22 @@ from epics_pv_mcp.tools.read import _get_pv_value, _get_pvs
 from epics_pv_mcp.tools.validate import _validate_pvs
 from epics_pv_mcp.tools.write import _set_pv_value
 
-mcp = FastMCP("epics-pv-mcp")
+# Keep in sync with the epics-pv posture in SKILL.md
+mcp = FastMCP(
+    "epics-pv-mcp",
+    instructions=(
+        "Read-only EPICS PV access by default: read live values and metadata, monitor, "
+        "discover, validate the PVs of a .bob display, cross-plane provenance, ChannelFinder "
+        "lookups and Archiver history. The only mutating tool, set_pv_value, is gated OFF by "
+        "default and additionally requires EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, "
+        "a rate limit and an audit log. The REST-backed tools (find_channels, is_archived, "
+        "get_pv_history) stay disabled until their *_URL env vars are set; an empty URL means "
+        "no client and no network call. Network reach is localhost-isolated by default: the "
+        "server opens no non-local connection unless its launcher widens the EPICS address-list "
+        "environment (EPICS_PVA_ADDR_LIST / EPICS_CA_ADDR_LIST and the matching *_AUTO_ADDR_LIST); "
+        "until then it does NOT reach ESS production. See .env.example for the commented template."
+    ),
+)
 mcp._mcp_server.version = __version__
 
 # === Tools ===

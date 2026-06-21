@@ -63,3 +63,11 @@ async def test_monitor_pv_converts_timeout_to_tool_error() -> None:
         pytest.raises(ToolError, match="PV_TIMEOUT"),
     ):
         await monitor_pv("X", duration=1.0)
+
+
+def test_server_advertises_write_gate_posture() -> None:
+    """N1: the server instructions= must advertise the read-only / write-gate posture
+    in the initialize handshake — the one protocol-near place a client learns it."""
+    from epics_pv_mcp.server import mcp
+
+    assert mcp.instructions and "set_pv_value" in mcp.instructions
