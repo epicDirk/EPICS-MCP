@@ -212,44 +212,94 @@ async def pv_monitor(
 # Value formatting
 # ---------------------------------------------------------------------------
 
+# EPICS-Normative-Type Alarm-Enums (pvData-Standard) — Integer -> menschenlesbar.
+# Severity = Schweregrad des Alarms; Status = NT-Kategorie der Quelle (NICHT die
+# CA-STAT-Detail-Liste wie HIHI/HIGH — der Klartext dazu steht in alarm.message).
+_SEVERITY_TEXT: dict[int, str] = {
+    0: "NO_ALARM",
+    1: "MINOR",
+    2: "MAJOR",
+    3: "INVALID",
+    4: "UNDEFINED",
+}
+_ALARM_STATUS_TEXT: dict[int, str] = {
+    0: "NONE",
+    1: "DEVICE",
+    2: "DRIVER",
+    3: "RECORD",
+    4: "DB",
+    5: "CONF",
+    6: "UNDEFINED",
+    7: "CLIENT",
+}
+
 
 def _format_value(pv_name: str, value: object) -> dict[str, object]:
-    """Convert a p4p ``Value`` object into a plain dict.
+    """Convert a p4p value into a plain, JSON-serialisable dict.
 
-    Handles NTScalar, NTTable, and other normative types.  Numpy scalars
-    are converted to native Python types.
+    p4p's ``Context`` unwraps Normative Types by default, so ``ctxt.get`` returns
+    value-wrappers (``ntfloat``/``ntint``/``ntenum``/…) whose meta-data lives on the
+    underlying ``p4p.Value`` exposed via ``.raw`` — NOT directly on the wrapper.
+    We therefore route every field through ``raw`` (``getattr(value, "raw", value)``
+    also handles the un-unwrapped case if a Context is ever built with ``nt=False``).
+
+    Surfaced fields (all best-effort — absent on records that do not define them):
+    ``value`` (scalar/array, or enum index), ``enum`` (index/label/choices for NTEnum),
+    ``alarm`` (severity + severity_text, status + status_text, message),
+    ``timestamp`` (seconds/nanoseconds), ``display`` (units/limits/precision/description),
+    ``control`` (limits/min_step), ``value_alarm`` (low/high alarm + warning limits).
     """
     result: dict[str, object] = {"pv_name": pv_name, "value": None}
     try:
-        # Extract the raw scalar / array
-        raw = value.value if hasattr(value, "value") else value
-        # Convert numpy scalar to Python native
-        if hasattr(raw, "item"):
-            raw = raw.item()
-        # Convert numpy arrays to Python lists
-        elif hasattr(raw, "tolist"):
-            raw = raw.tolist()
-        result["value"] = raw
+        # The unwrapped wrapper exposes the raw p4p.Value under `.raw`; a raw Value
+        # (nt=False) has no `.raw` and is used directly.
+        raw = getattr(value, "raw", value)
+        val_field = raw.value if hasattr(raw, "value") else raw
 
-        # Alarm metadata
-        if hasattr(value, "alarm"):
-            alarm = value.alarm
-            result["alarm"] = {
-                "severity": (int(alarm.severity) if hasattr(alarm, "severity") else 0),
-                "status": int(alarm.status) if hasattr(alarm, "status") else 0,
+        if hasattr(val_field, "choices"):
+            # NTEnum: the value field is a struct {index, choices}.
+            index = int(val_field.index) if hasattr(val_field, "index") else 0
+            choices = [str(c) for c in val_field.choices]
+            label = choices[index] if 0 <= index < len(choices) else None
+            result["value"] = index  # back-compat: `value` stays a number
+            result["enum"] = {"index": index, "label": label, "choices": choices}
+        else:
+            # numpy array/scalar -> native Python. ``tolist`` first: it works for
+            # BOTH (scalar -> Python scalar, array -> list), whereas ``item`` raises
+            # on multi-element arrays. ``item`` stays as a fallback for scalar-only
+            # objects that lack ``tolist``.
+            if hasattr(val_field, "tolist"):
+                val_field = val_field.tolist()
+            elif hasattr(val_field, "item"):
+                val_field = val_field.item()
+            result["value"] = val_field
+
+        # Alarm metadata (severity/status + human-readable text + message).
+        if hasattr(raw, "alarm"):
+            alarm = raw.alarm
+            severity = int(alarm.severity) if hasattr(alarm, "severity") else 0
+            status = int(alarm.status) if hasattr(alarm, "status") else 0
+            alarm_dict: dict[str, object] = {
+                "severity": severity,
+                "severity_text": _SEVERITY_TEXT.get(severity, str(severity)),
+                "status": status,
+                "status_text": _ALARM_STATUS_TEXT.get(status, str(status)),
             }
+            if hasattr(alarm, "message"):
+                alarm_dict["message"] = str(alarm.message)
+            result["alarm"] = alarm_dict
 
-        # Timestamp metadata
-        if hasattr(value, "timeStamp"):
-            ts = value.timeStamp
+        # Timestamp metadata.
+        if hasattr(raw, "timeStamp"):
+            ts = raw.timeStamp
             result["timestamp"] = {
                 "seconds": (int(ts.secondsPastEpoch) if hasattr(ts, "secondsPastEpoch") else 0),
                 "nanoseconds": (int(ts.nanoseconds) if hasattr(ts, "nanoseconds") else 0),
             }
 
-        # Display metadata (units, limits)
-        if hasattr(value, "display"):
-            disp = value.display
+        # Display metadata (units, display limits, precision, description).
+        if hasattr(raw, "display"):
+            disp = raw.display
             display_dict: dict[str, object] = {}
             if hasattr(disp, "units"):
                 display_dict["units"] = str(disp.units)
@@ -257,8 +307,40 @@ def _format_value(pv_name: str, value: object) -> dict[str, object]:
                 display_dict["limit_low"] = float(disp.limitLow)
             if hasattr(disp, "limitHigh"):
                 display_dict["limit_high"] = float(disp.limitHigh)
+            if hasattr(disp, "precision"):
+                display_dict["precision"] = int(disp.precision)
+            if hasattr(disp, "description"):
+                display_dict["description"] = str(disp.description)
             if display_dict:
                 result["display"] = display_dict
+
+        # Control metadata (drive limits + minimum step).
+        if hasattr(raw, "control"):
+            ctrl = raw.control
+            control_dict: dict[str, object] = {}
+            if hasattr(ctrl, "limitLow"):
+                control_dict["limit_low"] = float(ctrl.limitLow)
+            if hasattr(ctrl, "limitHigh"):
+                control_dict["limit_high"] = float(ctrl.limitHigh)
+            if hasattr(ctrl, "minStep"):
+                control_dict["min_step"] = float(ctrl.minStep)
+            if control_dict:
+                result["control"] = control_dict
+
+        # Value-alarm metadata (the HIHI/HIGH/LOW/LOLO limits).
+        if hasattr(raw, "valueAlarm"):
+            va = raw.valueAlarm
+            value_alarm_dict: dict[str, object] = {}
+            if hasattr(va, "lowAlarmLimit"):
+                value_alarm_dict["low_alarm"] = float(va.lowAlarmLimit)
+            if hasattr(va, "lowWarningLimit"):
+                value_alarm_dict["low_warning"] = float(va.lowWarningLimit)
+            if hasattr(va, "highWarningLimit"):
+                value_alarm_dict["high_warning"] = float(va.highWarningLimit)
+            if hasattr(va, "highAlarmLimit"):
+                value_alarm_dict["high_alarm"] = float(va.highAlarmLimit)
+            if value_alarm_dict:
+                result["value_alarm"] = value_alarm_dict
 
     except Exception:  # noqa: BLE001
         # _format_value MUSS jeden p4p-Wert robust in ein dict wandeln und darf

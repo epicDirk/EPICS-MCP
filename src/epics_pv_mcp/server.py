@@ -123,7 +123,9 @@ async def get_pv_info(
         Field(description="Timeout in seconds"),
     ] = 5.0,
 ) -> dict[str, object]:
-    """Get detailed PV metadata: value, alarm status, timestamp, display info."""
+    """Get detailed PV metadata: value, alarm (severity/status incl. text + message),
+    timestamp, display (units/limits/precision/description), control (drive limits),
+    value_alarm (HIHI/HIGH/LOW/LOLO limits), and enum index/label/choices for enum PVs."""
     try:
         return await _get_pv_info(pv_name, timeout)
     except EpicsError as e:
