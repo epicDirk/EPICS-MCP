@@ -171,8 +171,18 @@ class SafetyLayer:
         audit.setLevel(logging.INFO)
         # Avoid duplicate handlers on repeated init
         if not audit.handlers:
+            handler: logging.Handler
             if self._config.audit_log_file:
-                handler: logging.Handler = logging.FileHandler(self._config.audit_log_file)
+                # Fail-closed: ein kaputter/nicht schreibbarer Audit-Pfad darf nicht erst
+                # beim ersten Write als roher FileNotFoundError crashen — symmetrisch zur
+                # Regex-Validierung im __init__ klar als SafetyConfigError scheitern.
+                try:
+                    handler = logging.FileHandler(self._config.audit_log_file)
+                except OSError as exc:
+                    raise SafetyConfigError(
+                        f"Invalid EPICS_MCP_AUDIT_LOG_FILE {self._config.audit_log_file!r}: {exc}",
+                        details={"audit_log_file": self._config.audit_log_file},
+                    ) from exc
             else:
                 handler = logging.StreamHandler(sys.stderr)
             handler.setFormatter(

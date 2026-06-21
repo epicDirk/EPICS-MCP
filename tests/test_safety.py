@@ -1,6 +1,7 @@
 """Tests for the SafetyLayer (write gate, pattern allowlist, rate limiting, audit)."""
 
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -179,6 +180,22 @@ class TestSafetyConfig:
         cfg = EpicsConfig(allow_pv_write=True, pv_write_pattern="[unclosed")
         with pytest.raises(SafetyConfigError):
             SafetyLayer(cfg)
+
+    def test_invalid_audit_path_raises_safety_config_error(self, tmp_path: Path) -> None:
+        # Ein kaputter/nicht schreibbarer Audit-Pfad darf nicht erst beim ersten Write
+        # als roher FileNotFoundError crashen, sondern fail-closed scheitern (symmetrisch
+        # zur Regex-Validierung). Den prozess-globalen Audit-Logger leeren, damit der
+        # FileHandler überhaupt erzeugt wird (sonst greift "if not audit.handlers").
+        audit = logging.getLogger("epics_pv_mcp.audit")
+        saved = audit.handlers[:]
+        audit.handlers.clear()
+        try:
+            cfg = EpicsConfig(audit_log_file=str(tmp_path / "nope" / "audit.log"))
+            with pytest.raises(SafetyConfigError):
+                SafetyLayer(cfg)
+        finally:
+            audit.handlers.clear()
+            audit.handlers.extend(saved)
 
     def test_get_safety_singleton_under_threads(self) -> None:
         import threading
