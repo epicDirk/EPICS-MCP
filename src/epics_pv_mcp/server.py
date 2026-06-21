@@ -43,7 +43,10 @@ async def get_pv_value(
         Field(description="Timeout in seconds"),
     ] = 5.0,
 ) -> dict[str, object]:
-    """Get the current value of an EPICS Process Variable."""
+    """Get the current value of an EPICS Process Variable.
+
+    The result carries the same best-effort metadata as get_pv_info
+    (alarm/timestamp/display/control/value_alarm/enum)."""
     try:
         return await _get_pv_value(pv_name, timeout)
     except EpicsError as e:
@@ -70,7 +73,10 @@ async def get_pvs(
         Field(description="Timeout in seconds per PV"),
     ] = 5.0,
 ) -> dict[str, object]:
-    """Batch-read multiple EPICS PVs in a single call."""
+    """Batch-read multiple EPICS PVs in a single call.
+
+    Each result carries the same best-effort metadata as get_pv_info
+    (alarm/timestamp/display/control/value_alarm/enum)."""
     try:
         return await _get_pvs(names, timeout)
     except EpicsError as e:
@@ -124,8 +130,10 @@ async def get_pv_info(
     ] = 5.0,
 ) -> dict[str, object]:
     """Get detailed PV metadata: value, alarm (severity/status incl. text + message),
-    timestamp, display (units/limits/precision/description), control (drive limits),
-    value_alarm (HIHI/HIGH/LOW/LOLO limits), and enum index/label/choices for enum PVs."""
+    timestamp, display (units/limits/precision OR format/description), control (drive
+    limits), value_alarm (active + HIHI/HIGH/LOW/LOLO limits and per-level severities,
+    only when active), and enum index/label/choices for enum PVs. Unset (zero-width)
+    display/control limit pairs are omitted; DBR_CHAR waveforms come back as int lists."""
     try:
         return await _get_pv_info(pv_name, timeout)
     except EpicsError as e:
@@ -153,7 +161,10 @@ async def monitor_pv(
         Field(description="Maximum events to collect (max 1000)"),
     ] = 100,
 ) -> dict[str, object]:
-    """Subscribe to PV changes for a given duration and return collected events."""
+    """Subscribe to PV changes for a given duration and return collected events.
+
+    Each event carries the same best-effort metadata as get_pv_info
+    (alarm/timestamp/display/control/value_alarm/enum)."""
     try:
         return await _monitor_pv(name, duration, max_events)
     except EpicsError as e:

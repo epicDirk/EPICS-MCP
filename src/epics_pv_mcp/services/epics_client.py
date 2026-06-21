@@ -8,6 +8,7 @@ import asyncio
 import atexit
 import logging
 import threading
+from collections.abc import Callable
 
 from p4p.client.thread import Context
 
@@ -179,8 +180,10 @@ async def pv_monitor(
                 try:
                     collected.append(_format_value(name, value))
                 except Exception:  # noqa: BLE001
-                    # ein Monitor-Callback darf den Worker-Thread nie crashen
-                    collected.append({"pv_name": name, "value": str(value)})
+                    # ein Monitor-Callback darf den Worker-Thread nie crashen; value=None
+                    # statt str(value) — der Wrapper-str() ergäbe ctime-Müll (s. _format_value).
+                    logger.debug("monitor format failed for PV %s", name, exc_info=True)
+                    collected.append({"pv_name": name, "value": None})
 
         sub = None
         try:
@@ -234,117 +237,201 @@ _ALARM_STATUS_TEXT: dict[int, str] = {
 }
 
 
+# A field-mapping spec: (p4p attribute, output key, cast). ``Callable[..., object]`` is
+# the only mypy-strict-clean annotation — bare ``Callable`` needs type args, and
+# ``Callable[[object], object]`` rejects the ``float``/``int`` casts (their __init__ is
+# not object->object).
+_FieldSpec = list[tuple[str, str, Callable[..., object]]]
+
+_DISPLAY_SPEC: _FieldSpec = [
+    ("units", "units", str),
+    ("limitLow", "limit_low", float),
+    ("limitHigh", "limit_high", float),
+    ("precision", "precision", int),
+    ("format", "format", str),  # form=False IOCs carry `format` (e.g. "%.3f") instead of precision
+    ("description", "description", str),
+]
+_CONTROL_SPEC: _FieldSpec = [
+    ("limitLow", "limit_low", float),
+    ("limitHigh", "limit_high", float),
+    ("minStep", "min_step", float),
+]
+_VALUE_ALARM_SPEC: _FieldSpec = [
+    ("lowAlarmLimit", "low_alarm", float),
+    ("lowWarningLimit", "low_warning", float),
+    ("highWarningLimit", "high_warning", float),
+    ("highAlarmLimit", "high_alarm", float),
+    ("lowAlarmSeverity", "low_alarm_severity", int),
+    ("lowWarningSeverity", "low_warning_severity", int),
+    ("highWarningSeverity", "high_warning_severity", int),
+    ("highAlarmSeverity", "high_alarm_severity", int),
+]
+
+
+def _collect(struct: object, spec: _FieldSpec) -> dict[str, object]:
+    """Map present p4p struct fields to output keys via their cast.
+
+    A single malformed field (e.g. an unset limit serialised as ``None``) is skipped,
+    never aborting the whole block — that is the per-field robustness guard.
+    """
+    out: dict[str, object] = {}
+    for attr, key, cast in spec:
+        if not hasattr(struct, attr):
+            continue
+        try:
+            out[key] = cast(getattr(struct, attr))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _drop_degenerate_limits(d: dict[str, object]) -> None:
+    """A zero-width range (``limit_low == limit_high``) is an unset pair — drop both.
+
+    EPICS display/control limits default to ``0.0/0.0`` when unconfigured, which would
+    otherwise read as a real ``[0, 0]`` engineering range. control/display carry no
+    ``active`` flag, so equal bounds are the deterministic "unset" signal.
+    """
+    if "limit_low" in d and "limit_high" in d and d["limit_low"] == d["limit_high"]:
+        del d["limit_low"]
+        del d["limit_high"]
+
+
+def _extract_value(raw: object) -> tuple[object, dict[str, object] | None]:
+    """Return ``(value, enum_or_none)``. For NTEnum the value stays the numeric index."""
+    val_field = getattr(raw, "value", raw)
+    choices = getattr(val_field, "choices", None)
+    if choices is not None:
+        # NTEnum: the value field is a struct {index, choices}.
+        index = int(getattr(val_field, "index", 0))
+        labels = [str(c) for c in choices]
+        label = labels[index] if 0 <= index < len(labels) else None
+        return index, {"index": index, "label": label, "choices": labels}
+    # numpy array -> list (real unwrapped scalars are already plain float/int/str).
+    tolist = getattr(val_field, "tolist", None)
+    if callable(tolist):
+        val_field = tolist()
+    return val_field, None
+
+
+def _extract_alarm(raw: object) -> dict[str, object] | None:
+    """Alarm: severity/status as code + human-readable text, plus the alarm message."""
+    alarm = getattr(raw, "alarm", None)
+    if alarm is None:
+        return None
+    severity = int(getattr(alarm, "severity", 0))
+    status = int(getattr(alarm, "status", 0))
+    out: dict[str, object] = {
+        "severity": severity,
+        "severity_text": _SEVERITY_TEXT.get(severity, str(severity)),
+        "status": status,
+        "status_text": _ALARM_STATUS_TEXT.get(status, str(status)),
+    }
+    # On real p4p the message field is always present (often ""); a fake may omit it.
+    message = getattr(alarm, "message", None)
+    if message is not None:
+        out["message"] = str(message)
+    return out
+
+
+def _extract_timestamp(raw: object) -> dict[str, object] | None:
+    ts = getattr(raw, "timeStamp", None)
+    if ts is None:
+        return None
+    return {
+        "seconds": int(getattr(ts, "secondsPastEpoch", 0)),
+        "nanoseconds": int(getattr(ts, "nanoseconds", 0)),
+    }
+
+
+def _extract_display(raw: object) -> dict[str, object] | None:
+    disp = getattr(raw, "display", None)
+    if disp is None:
+        return None
+    out = _collect(disp, _DISPLAY_SPEC)
+    _drop_degenerate_limits(out)
+    return out or None
+
+
+def _extract_control(raw: object) -> dict[str, object] | None:
+    ctrl = getattr(raw, "control", None)
+    if ctrl is None:
+        return None
+    out = _collect(ctrl, _CONTROL_SPEC)
+    _drop_degenerate_limits(out)
+    return out or None
+
+
+def _extract_value_alarm(raw: object) -> dict[str, object] | None:
+    """value_alarm gated on ``active``: surface limits/severities only when alarming is on.
+
+    Unconfigured valueAlarm structs default to ``active=False`` with ``0.0`` limits, which
+    would otherwise look like real HIHI/HIGH/LOW/LOLO thresholds. A valueAlarm struct that
+    lacks the ``active`` field (non-NT-conformant producer) is treated conservatively as
+    inactive — limits are not shown.
+    """
+    va = getattr(raw, "valueAlarm", None)
+    if va is None:
+        return None
+    active = bool(getattr(va, "active", False))
+    out: dict[str, object] = {"active": active}
+    if active:
+        out.update(_collect(va, _VALUE_ALARM_SPEC))
+    return out
+
+
+# Metadata blocks, each extracted independently so a malformed one cannot corrupt the
+# value or the other blocks (per-block robustness).
+_BLOCK_EXTRACTORS: list[tuple[str, Callable[[object], dict[str, object] | None]]] = [
+    ("alarm", _extract_alarm),
+    ("timestamp", _extract_timestamp),
+    ("display", _extract_display),
+    ("control", _extract_control),
+    ("value_alarm", _extract_value_alarm),
+]
+
+
 def _format_value(pv_name: str, value: object) -> dict[str, object]:
     """Convert a p4p value into a plain, JSON-serialisable dict.
 
     p4p's ``Context`` unwraps Normative Types by default, so ``ctxt.get`` returns
     value-wrappers (``ntfloat``/``ntint``/``ntenum``/…) whose meta-data lives on the
-    underlying ``p4p.Value`` exposed via ``.raw`` — NOT directly on the wrapper.
-    We therefore route every field through ``raw`` (``getattr(value, "raw", value)``
-    also handles the un-unwrapped case if a Context is ever built with ``nt=False``).
+    underlying ``p4p.Value`` exposed via ``.raw`` — NOT directly on the wrapper. Every
+    field is routed through ``raw`` (``getattr(value, "raw", value)`` also handles the
+    un-unwrapped ``nt=False`` case).
 
     Surfaced fields (all best-effort — absent on records that do not define them):
-    ``value`` (scalar/array, or enum index), ``enum`` (index/label/choices for NTEnum),
-    ``alarm`` (severity + severity_text, status + status_text, message),
-    ``timestamp`` (seconds/nanoseconds), ``display`` (units/limits/precision/description),
-    ``control`` (limits/min_step), ``value_alarm`` (low/high alarm + warning limits).
+    ``value`` (scalar/array, or enum index — DBR_CHAR waveforms come back as int lists),
+    ``enum`` (index/label/choices for NTEnum), ``alarm`` (severity/status code + text +
+    message), ``timestamp`` (seconds/nanoseconds), ``display`` (units, precision OR format,
+    description, display limits), ``control`` (drive limits, min_step), ``value_alarm``
+    (``active`` + the HIHI/HIGH/LOW/LOLO limits and per-level severities, only when active).
+    Display/control limit pairs that are equal (zero-width = unset) are omitted.
+
+    Robustness: each block is extracted independently; a malformed block is skipped (logged
+    at debug) and never corrupts the value or the other blocks. The function never raises.
     """
     result: dict[str, object] = {"pv_name": pv_name, "value": None}
+    # The unwrapped wrapper exposes the raw p4p.Value under `.raw`; a raw Value
+    # (nt=False) has no `.raw` and is used directly.
+    raw = getattr(value, "raw", value)
+
     try:
-        # The unwrapped wrapper exposes the raw p4p.Value under `.raw`; a raw Value
-        # (nt=False) has no `.raw` and is used directly.
-        raw = getattr(value, "raw", value)
-        val_field = raw.value if hasattr(raw, "value") else raw
-
-        if hasattr(val_field, "choices"):
-            # NTEnum: the value field is a struct {index, choices}.
-            index = int(val_field.index) if hasattr(val_field, "index") else 0
-            choices = [str(c) for c in val_field.choices]
-            label = choices[index] if 0 <= index < len(choices) else None
-            result["value"] = index  # back-compat: `value` stays a number
-            result["enum"] = {"index": index, "label": label, "choices": choices}
-        else:
-            # numpy array/scalar -> native Python. ``tolist`` first: it works for
-            # BOTH (scalar -> Python scalar, array -> list), whereas ``item`` raises
-            # on multi-element arrays. ``item`` stays as a fallback for scalar-only
-            # objects that lack ``tolist``.
-            if hasattr(val_field, "tolist"):
-                val_field = val_field.tolist()
-            elif hasattr(val_field, "item"):
-                val_field = val_field.item()
-            result["value"] = val_field
-
-        # Alarm metadata (severity/status + human-readable text + message).
-        if hasattr(raw, "alarm"):
-            alarm = raw.alarm
-            severity = int(alarm.severity) if hasattr(alarm, "severity") else 0
-            status = int(alarm.status) if hasattr(alarm, "status") else 0
-            alarm_dict: dict[str, object] = {
-                "severity": severity,
-                "severity_text": _SEVERITY_TEXT.get(severity, str(severity)),
-                "status": status,
-                "status_text": _ALARM_STATUS_TEXT.get(status, str(status)),
-            }
-            if hasattr(alarm, "message"):
-                alarm_dict["message"] = str(alarm.message)
-            result["alarm"] = alarm_dict
-
-        # Timestamp metadata.
-        if hasattr(raw, "timeStamp"):
-            ts = raw.timeStamp
-            result["timestamp"] = {
-                "seconds": (int(ts.secondsPastEpoch) if hasattr(ts, "secondsPastEpoch") else 0),
-                "nanoseconds": (int(ts.nanoseconds) if hasattr(ts, "nanoseconds") else 0),
-            }
-
-        # Display metadata (units, display limits, precision, description).
-        if hasattr(raw, "display"):
-            disp = raw.display
-            display_dict: dict[str, object] = {}
-            if hasattr(disp, "units"):
-                display_dict["units"] = str(disp.units)
-            if hasattr(disp, "limitLow"):
-                display_dict["limit_low"] = float(disp.limitLow)
-            if hasattr(disp, "limitHigh"):
-                display_dict["limit_high"] = float(disp.limitHigh)
-            if hasattr(disp, "precision"):
-                display_dict["precision"] = int(disp.precision)
-            if hasattr(disp, "description"):
-                display_dict["description"] = str(disp.description)
-            if display_dict:
-                result["display"] = display_dict
-
-        # Control metadata (drive limits + minimum step).
-        if hasattr(raw, "control"):
-            ctrl = raw.control
-            control_dict: dict[str, object] = {}
-            if hasattr(ctrl, "limitLow"):
-                control_dict["limit_low"] = float(ctrl.limitLow)
-            if hasattr(ctrl, "limitHigh"):
-                control_dict["limit_high"] = float(ctrl.limitHigh)
-            if hasattr(ctrl, "minStep"):
-                control_dict["min_step"] = float(ctrl.minStep)
-            if control_dict:
-                result["control"] = control_dict
-
-        # Value-alarm metadata (the HIHI/HIGH/LOW/LOLO limits).
-        if hasattr(raw, "valueAlarm"):
-            va = raw.valueAlarm
-            value_alarm_dict: dict[str, object] = {}
-            if hasattr(va, "lowAlarmLimit"):
-                value_alarm_dict["low_alarm"] = float(va.lowAlarmLimit)
-            if hasattr(va, "lowWarningLimit"):
-                value_alarm_dict["low_warning"] = float(va.lowWarningLimit)
-            if hasattr(va, "highWarningLimit"):
-                value_alarm_dict["high_warning"] = float(va.highWarningLimit)
-            if hasattr(va, "highAlarmLimit"):
-                value_alarm_dict["high_alarm"] = float(va.highAlarmLimit)
-            if value_alarm_dict:
-                result["value_alarm"] = value_alarm_dict
-
+        result["value"], enum = _extract_value(raw)
+        if enum is not None:
+            result["enum"] = enum
     except Exception:  # noqa: BLE001
-        # _format_value MUSS jeden p4p-Wert robust in ein dict wandeln und darf
-        # nie crashen — Last resort: stringify.
-        result["value"] = str(value)
+        # Honest fallback: value stays None (NEVER str(value) — the wrapper's __str__
+        # prepends a ctime() and would emit garbage like "Thu Jan  1 1970 4.2").
+        logger.debug("value extraction failed for PV %s", pv_name, exc_info=True)
+
+    for key, extractor in _BLOCK_EXTRACTORS:
+        try:
+            block = extractor(raw)
+        except Exception:  # noqa: BLE001
+            logger.debug("%s extraction failed for PV %s", key, pv_name, exc_info=True)
+            continue
+        if block:
+            result[key] = block
 
     return result
