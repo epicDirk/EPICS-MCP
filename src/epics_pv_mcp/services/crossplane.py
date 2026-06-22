@@ -183,7 +183,7 @@ def crossplane_check(
         broken = {pv for pv in linked_pvs if pv not in resolved}
 
     notes: list[str] = []
-    if prefix is None:
+    if not prefix:  # None or "" — both mean "no usable IOC prefix" (join sends all to other-prefix)
         notes.append(
             "No IOC device prefix parsed from st.cmd — every concrete PV is reported as "
             "other-prefix (no provenance link possible)."

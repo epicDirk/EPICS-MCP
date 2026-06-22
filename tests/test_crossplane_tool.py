@@ -81,6 +81,37 @@ def test_cli_crossplane_rejects_missing_displays(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_crossplane_tool_fragment_not_double_attributed(tmp_path: Path) -> None:
+    """QA-High wired regression (operator-facing-Filter end-to-end): die PV eines reinen Embed-only-
+    Fragments lifted GENAU EINMAL auf das Operator-Eltern-Display; der Standalone-Seed des Fragments
+    (operator_facing=False) wird im Adapter gefiltert → frag.bob erscheint NICHT als eigenes
+    linked-Display, keine Doppel-Attribution. Echt durch analyze_pv_inventory → Adapter → Join.
+    """
+    displays = tmp_path / "displays"
+    displays.mkdir()
+    (displays / "operator.bob").write_text(
+        '<display version="2.0.0"><name>Op</name>'
+        '<widget type="embedded"><name>e</name><file>frag.bob</file></widget></display>',
+        encoding="utf-8",
+    )
+    (displays / "frag.bob").write_text(
+        '<display version="2.0.0"><name>Frag</name>'
+        "<macros><P>DEV-TEST01:Ctrl-EVR-01:</P></macros>"
+        '<widget type="textentry"><name>c</name><pv_name>$(P)Cmd</pv_name></widget></display>',
+        encoding="utf-8",
+    )
+    st_cmd = tmp_path / "st.cmd"
+    st_cmd.write_text(_ST_CMD, encoding="utf-8")
+
+    result = await _crossplane_check(str(displays), str(st_cmd))
+    report = result["report"]
+    assert isinstance(report, dict)
+    # Fragment-PV konkret aufgelöst + prefix-teilend → linked, dem OPERATOR-Eltern zugeschrieben.
+    assert "DEV-TEST01:Ctrl-EVR-01:Cmd" in report["pvs_linked"]
+    assert report["displays_linked"] == ["operator.bob"]  # NICHT frag.bob (Fragment-Seed gefiltert)
+
+
+@pytest.mark.asyncio
 async def test_crossplane_tool_rejects_bad_displays_dir(tmp_path: Path) -> None:
     """A non-existent displays directory is rejected before any work."""
     _, st_cmd = _setup(tmp_path)
