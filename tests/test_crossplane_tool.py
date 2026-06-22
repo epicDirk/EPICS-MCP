@@ -1,27 +1,37 @@
-"""Tests for the crossplane MCP tool wrapper (offline; no network, no running IOC)."""
+"""End-to-end tests for the crossplane tool + CLI (offline; real .bob via analyze_pv_inventory).
+
+These exercise the WIRED path: a real .bob over the macro-aware ``opi_navigation`` inventory →
+JoinPv rows → join → report. The display carries a ``<macros>`` scope so the macro PV ``$(P)Cmd``
+RESOLVES to a concrete channel and lands in ``linked`` (not ``indeterminate``) — the Wedge-1 payoff.
+NOTE: the display ``<macros>`` (P) is the binding namespace, NOT the st.cmd's P= macro; without the
+display ``<macros>`` the PV would stay ``dynamic``.
+"""
 
 from pathlib import Path
 
 import pytest
 from fastmcp.exceptions import ToolError
 
+from epics_pv_mcp.cli_crossplane import main
 from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.tools.crossplane import _crossplane_check
 
-# One display with a concrete prefixed PV and one macro-bearing PV (kept by the extractor
-# because "$(P)Cmd" is not a pure-macro reference), so the join yields linked + indeterminate.
+# Operator-facing root display: a concrete prefixed PV + a macro PV bound by the display's own
+# <macros> scope (so it resolves to DEV-TEST01:Ctrl-EVR-01:Cmd and links to the IOC prefix).
 _BOB = (
-    '<display version="2.0.0">'
-    '<widget type="textupdate"><pv_name>DEV-TEST01:Ctrl-EVR-01:status</pv_name></widget>'
-    '<widget type="textupdate"><pv_name>$(P)Cmd</pv_name></widget>'
+    '<display version="2.0.0"><name>Panel</name>'
+    "<macros><P>DEV-TEST01:Ctrl-EVR-01:</P></macros>"
+    '<widget type="textupdate"><name>s</name>'
+    "<pv_name>DEV-TEST01:Ctrl-EVR-01:status</pv_name></widget>"
+    '<widget type="textentry"><name>c</name><pv_name>$(P)Cmd</pv_name></widget>'
     "</display>"
 )
-# The prefix is derived from a dbLoadRecords P= macro (not from epicsEnvSet alone).
+# The IOC prefix is derived from a dbLoadRecords P= macro (not from epicsEnvSet alone).
 _ST_CMD = 'epicsEnvSet("P", "DEV-TEST01:Ctrl-EVR-01:")\ndbLoadRecords("evr.db", "P=$(P)")\n'
 
 
 def _setup(tmp_path: Path) -> tuple[Path, Path]:
-    """Write a one-display directory and an st.cmd under *tmp_path*; return both paths."""
+    """Write a one-display project root and an st.cmd under *tmp_path*; return both paths."""
     displays = tmp_path / "displays"
     displays.mkdir()
     (displays / "panel.bob").write_text(_BOB, encoding="utf-8")
@@ -31,8 +41,10 @@ def _setup(tmp_path: Path) -> tuple[Path, Path]:
 
 
 @pytest.mark.asyncio
-async def test_crossplane_tool_offline_join(tmp_path: Path) -> None:
-    """The tool joins display PVs with the IOC prefix and renders Markdown, offline."""
+async def test_crossplane_tool_macro_pv_resolves_to_linked(tmp_path: Path) -> None:
+    """The Wedge-1 payoff: the macro PV ``$(P)Cmd`` is now RESOLVED (via the display <macros>) to a
+    concrete linked PV — no longer ``indeterminate``. Both display PVs share the IOC prefix.
+    """
     displays, st_cmd = _setup(tmp_path)
     result = await _crossplane_check(str(displays), str(st_cmd), query_naming=False)
 
@@ -40,17 +52,32 @@ async def test_crossplane_tool_offline_join(tmp_path: Path) -> None:
     assert isinstance(report, dict)
     assert report["ioc_prefix"] == "DEV-TEST01:Ctrl-EVR-01:"
     assert "DEV-TEST01:Ctrl-EVR-01:status" in report["pvs_linked"]
-    # M2: pvs_indeterminate is now the distinct macro-PV list (JSON array) with a separate
-    # occurrence count — pin the shape so a regression to the old scalar fails CI.
-    assert isinstance(report["pvs_indeterminate"], list)
-    assert report["pvs_indeterminate"] == ["$(P)Cmd"]
-    assert report["pvs_indeterminate_occurrences"] == 1
+    assert "DEV-TEST01:Ctrl-EVR-01:Cmd" in report["pvs_linked"]  # was macro-templated, now linked
+    assert report["pvs_indeterminate"] == []
+    assert report["pvs_indeterminate_occurrences"] == 0
     assert report["naming"] is None  # query_naming=False → never touches the network
 
     markdown = result["markdown"]
     assert isinstance(markdown, str)
     assert "Cross-Plane PV Provenance" in markdown
-    assert "**Macro-templated (distinct):** 1 (1 references)" in markdown
+    assert "**Concrete PVs sharing the prefix:** 2" in markdown
+
+
+def test_cli_crossplane_smoke(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """The CLI entry point joins offline and writes the Markdown report to stdout (exit 0)."""
+    displays, st_cmd = _setup(tmp_path)
+    rc = main(["--displays", str(displays), "--st-cmd", str(st_cmd)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Cross-Plane PV Provenance" in out
+    assert "**Concrete PVs sharing the prefix:** 2" in out
+
+
+def test_cli_crossplane_rejects_missing_displays(tmp_path: Path) -> None:
+    """A non-existent displays directory exits 2 with an error on stderr (no join)."""
+    _, st_cmd = _setup(tmp_path)
+    rc = main(["--displays", str(tmp_path / "nope"), "--st-cmd", str(st_cmd)])
+    assert rc == 2
 
 
 @pytest.mark.asyncio

@@ -1,39 +1,62 @@
 """Cross-plane PV provenance: Display (.bob) ↔ e3 IOC (st.cmd/.db) ↔ ESS Naming Service.
 
-The first thread of the "connective tissue": join the raw PVs a set of displays reference
-(:mod:`bob_pvs`) with what an e3 IOC actually serves (:mod:`e3_db`) and what the ESS Naming
-Service registers (:mod:`naming_client`). Pure + deterministic; all network I/O is injected
-(a :class:`NamingChecker`) so the join is testable offline.
+The first thread of the "connective tissue": join the **macro-expanded, per-instance** PVs a set
+of displays reference (Wedge 0 / ``opi_navigation`` PV-inventory, fed in as :class:`JoinPv` rows by
+the tool/CLI edge) with what an e3 IOC actually serves (:mod:`e3_db`) and what the ESS Naming
+Service registers (:mod:`naming_client`). Pure + deterministic; all network I/O is injected (a
+:class:`NamingChecker`) so the join is testable offline. This module stays **free of
+``opi_navigation`` imports** — the ``ExpandedPv`` → :class:`JoinPv` translation happens at the edge.
 
-**Honest buckets (v1 is deliberately coarse — see plan):**
-- *linked*  — concrete display PVs that share the IOC device prefix (provenance link).
-- *indeterminate* — DISTINCT display PVs that still contain ``$(...)`` macros (raw template
-  strings; the true per-instance count needs the parked ``opi_navigation`` PV-inventory /
-  Wedge 0). Their occurrence total is reported alongside. Never judged here.
-- *broken*  — concrete linked PVs absent from the IOC ``.db`` set — ONLY computed when an
-  IOC ``.db`` PV set is supplied (module repos are deferred), else left empty.
+**Honest buckets (Wedge 1 — concrete per-instance PVs, NO IOC .db yet):**
+- *linked*  — concrete (``resolved``, real ca/pva) display PVs that share the IOC device prefix
+  (provenance link); *linked_write* is the writable subset (operator can command the channel).
+- *other_prefix* — concrete display PVs that do NOT share this IOC's prefix (likely other IOCs).
+- *indeterminate* — display PVs the inventory could NOT resolve to a concrete channel: ``dynamic``
+  (best-effort glob-guessed remainder) / ``unresolved`` (cyclic/unresolvable). Honest residue;
+  never judged. (Before Wedge 1 this was every PV carrying a ``$(...)`` macro — a regex proxy; now
+  it is exactly what the macro-expander could not resolve.)
+- *non_channel* — references on non-channel protocols (loc/sim/sys/other), excluded from the IOC
+  join (not real EPICS channels), reported separately rather than silently dropped.
+- *broken*  — concrete linked PVs absent from the IOC ``.db`` set — ONLY computed when an IOC
+  ``.db`` PV set is supplied (module repos are deferred), else left empty.
 Nothing indeterminate is ever called "broken".
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Protocol
+from collections.abc import Iterable
+from typing import Literal, NamedTuple, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
 from epics_pv_mcp.services.e3_db import StCmdInfo
 from epics_pv_mcp.services.naming_client import NameStatus
 
+#: Protocols that are real plant channels (the only ones joined against an IOC). Mirrors
+#: ``opi_navigation.pv_analysis.models.REAL_PROTOCOLS`` (kept local — no foreign import).
+_REAL_PROTOCOLS = frozenset({"ca", "pva"})
+
+
+class JoinPv(NamedTuple):
+    """One macro-expanded, operator-facing display-PV instance fed into the join.
+
+    The narrow seam the join needs from the ``opi_navigation`` PV-inventory: the tool/CLI edge
+    translates each ``ExpandedPv`` of an **operator-facing** display into one of these (embed-only
+    fragment standalone seeds are filtered out at the edge, so they never reach the join). The
+    field literals match ``ExpandedPv.{resolution,role,protocol}`` verbatim.
+    """
+
+    display: str
+    pv: str
+    resolution: Literal["resolved", "dynamic", "unresolved"]
+    role: Literal["read", "write"]
+    protocol: Literal["ca", "pva", "loc", "sim", "sys", "other"]
+
 
 class NamingChecker(Protocol):
     """Minimal read-only Naming-Service contract (so tests can inject a fake)."""
 
     def validate_name(self, ess_name: str) -> NameStatus: ...
-
-
-def _has_macro(pv: str) -> bool:
-    return "$(" in pv or "${" in pv
 
 
 class NamingResult(BaseModel):
@@ -49,11 +72,10 @@ class NamingResult(BaseModel):
 class CrossPlaneReport(BaseModel):
     """Deterministic cross-plane provenance report (JSON via ``model_dump_json``).
 
-    Note: ``pvs_indeterminate`` is the sorted DISTINCT macro-PV tuple (JSON array) and
-    ``pvs_indeterminate_occurrences`` their count summed across displays (within-display
-    duplicates already collapsed — display/PV pairs, not raw elements). (In the earliest v1
-    ``pvs_indeterminate`` was the scalar occurrence count; M2 made the bucket distinct,
-    symmetric with ``pvs_linked``/``pvs_other_prefix``.)
+    All PV tuples are sorted + distinct. ``pvs_indeterminate`` is the union of ``pvs_dynamic`` and
+    ``pvs_unresolved`` (the unresolvable residue); ``pvs_indeterminate_occurrences`` counts
+    distinct ``(display, pv)`` pairs across operator-facing displays (within-display duplicates
+    collapsed), so it is ``>= len(pvs_indeterminate)``.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -61,20 +83,28 @@ class CrossPlaneReport(BaseModel):
     ioc_prefix: str | None
     ioc_device_name: str | None
     naming: NamingResult | None = None
-    #: Displays with ≥1 concrete PV sharing the IOC prefix.
+    #: Operator-facing displays with ≥1 concrete PV sharing the IOC prefix.
     displays_linked: tuple[str, ...] = ()
     #: Distinct concrete display PVs sharing the IOC prefix.
     pvs_linked: tuple[str, ...] = ()
+    #: Writable subset of ``pvs_linked`` (≥1 operator display writes the channel) — owner triage.
+    pvs_linked_write: tuple[str, ...] = ()
     #: Concrete display PVs that do NOT share this IOC's prefix (likely other IOCs).
     pvs_other_prefix: tuple[str, ...] = ()
-    #: Distinct display PVs still carrying macros (raw template strings; true per-instance
-    #: count needs the parked opi_navigation PV-inventory / Wedge 0). Symmetric with the
-    #: linked/other buckets above.
+    #: Distinct display PVs the inventory could NOT resolve to a concrete channel —
+    #: ``sorted(pvs_dynamic | pvs_unresolved)``. Concrete PVs are now linked/other, not here.
     pvs_indeterminate: tuple[str, ...] = ()
-    #: Macro-PV references summed across displays; within-display duplicates are already
-    #: collapsed by the extractor, so this counts (display, distinct-macro-PV) pairs — not
-    #: raw XML elements — and is >= len(pvs_indeterminate).
+    #: Distinct (display, pv) pairs over dynamic+unresolved PVs; ``>= len(pvs_indeterminate)``.
     pvs_indeterminate_occurrences: int = 0
+    #: Distinct PVs with a best-effort glob-guessed remainder (macro not fully resolved).
+    pvs_dynamic: tuple[str, ...] = ()
+    #: Distinct PVs the expander could not resolve at all (cyclic/unresolvable).
+    pvs_unresolved: tuple[str, ...] = ()
+    #: Distinct non-channel references (loc/sim/sys/other) excluded from the IOC join.
+    pvs_non_channel: tuple[str, ...] = ()
+    #: Operator-facing displays whose per-instance PVs are incomplete (inventory context cap) —
+    #: their linked/other counts are a LOWER BOUND.
+    displays_incomplete: tuple[str, ...] = ()
     #: IOC .db PV counts (only when a .db set was supplied; module repos deferred).
     ioc_db_resolved: int = 0
     ioc_db_needs_msi: int = 0
@@ -85,37 +115,56 @@ class CrossPlaneReport(BaseModel):
 
 
 def crossplane_check(
-    display_pvs: Mapping[str, list[str]],
+    join_pvs: Iterable[JoinPv],
     st_cmd: StCmdInfo,
     *,
     naming: NamingChecker | None = None,
     ioc_db: tuple[set[str], set[str]] | None = None,
+    context_capped: tuple[str, ...] = (),
+    glob_capped_count: int = 0,
 ) -> CrossPlaneReport:
-    """Join display PVs with an IOC's st.cmd (+ optional .db) and the Naming Service.
+    """Join macro-expanded display PVs with an IOC's st.cmd (+ optional .db) and the Naming Service.
 
-    *display_pvs* maps display path → raw PV list (from :func:`bob_pvs.extract_pvs_from_dir`).
-    *naming* (optional) is queried for the IOC device name; ``None`` skips the (network) check.
-    *ioc_db* (optional) is ``(resolved, unresolved)`` from :func:`e3_db.ioc_db_pvs`; when
-    supplied, concrete linked PVs missing from *resolved* are reported as ``broken``.
+    *join_pvs* are the per-instance, operator-facing display-PV rows (from the ``opi_navigation``
+    PV-inventory, translated at the tool/CLI edge). *naming* (optional) is queried for the IOC
+    device name; ``None`` skips it. *ioc_db* (optional) is ``(resolved, unresolved)``
+    from :func:`e3_db.ioc_db_pvs`; when supplied, concrete linked PVs missing from *resolved* are
+    reported as ``broken``. *context_capped* / *glob_capped_count* carry the inventory's honest
+    incompleteness signals (linked/other become lower bounds).
     """
     prefix = st_cmd.prefix
     linked_displays: set[str] = set()
     linked_pvs: set[str] = set()
+    linked_write: set[str] = set()
     other_prefix_pvs: set[str] = set()
-    indeterminate_pvs: set[str] = set()
-    indeterminate_occurrences = 0
+    dynamic_pvs: set[str] = set()
+    unresolved_pvs: set[str] = set()
+    non_channel_pvs: set[str] = set()
+    # Distinct (display, pv) pairs for the honest residue — robust against the same PV appearing
+    # under multiple roles/origins within one display (the inventory dedups per display, but a PV
+    # can recur with a different role/origin_file); counts references, not raw rows.
+    indeterminate_pairs: set[tuple[str, str]] = set()
 
-    for display, pvs in display_pvs.items():
-        for pv in pvs:
-            if _has_macro(pv):
-                indeterminate_pvs.add(pv)
-                indeterminate_occurrences += 1
-                continue
-            if prefix and pv.startswith(prefix):
-                linked_pvs.add(pv)
-                linked_displays.add(display)
+    for jp in join_pvs:
+        if jp.protocol not in _REAL_PROTOCOLS:
+            non_channel_pvs.add(jp.pv)
+            continue
+        if jp.resolution == "resolved":
+            if prefix and jp.pv.startswith(prefix):
+                linked_pvs.add(jp.pv)
+                linked_displays.add(jp.display)
+                if jp.role == "write":
+                    linked_write.add(jp.pv)
             else:
-                other_prefix_pvs.add(pv)
+                other_prefix_pvs.add(jp.pv)
+        elif jp.resolution == "dynamic":
+            dynamic_pvs.add(jp.pv)
+            indeterminate_pairs.add((jp.display, jp.pv))
+        else:  # "unresolved"
+            unresolved_pvs.add(jp.pv)
+            indeterminate_pairs.add((jp.display, jp.pv))
+
+    indeterminate_pvs = dynamic_pvs | unresolved_pvs
 
     naming_result: NamingResult | None = None
     if naming is not None and st_cmd.device_name:
@@ -134,11 +183,37 @@ def crossplane_check(
         broken = {pv for pv in linked_pvs if pv not in resolved}
 
     notes: list[str] = []
+    if prefix is None:
+        notes.append(
+            "No IOC device prefix parsed from st.cmd — every concrete PV is reported as "
+            "other-prefix (no provenance link possible)."
+        )
     if indeterminate_pvs:
         notes.append(
-            f"{len(indeterminate_pvs)} distinct macro-templated display PV(s) "
-            f"({indeterminate_occurrences} reference(s)) — raw template strings; per-instance "
-            "identity needs the parked opi_navigation PV-inventory; not judged here."
+            f"{len(indeterminate_pvs)} distinct display PV(s) ({len(indeterminate_pairs)} "
+            "reference(s)) could not be resolved to a concrete channel (dynamic/unresolved) — "
+            "honest residue, never judged here."
+        )
+    if non_channel_pvs:
+        notes.append(
+            f"{len(non_channel_pvs)} distinct non-channel reference(s) (loc/sim/sys/other) "
+            "excluded from the IOC join — not real EPICS channels."
+        )
+    if context_capped:
+        notes.append(
+            f"{len(context_capped)} display(s) hit the inventory's per-instance context cap — "
+            "their resolved PVs are a LOWER BOUND; 'linked'/'other-prefix' may undercount "
+            "(re-run with a higher context cap)."
+        )
+    if glob_capped_count:
+        notes.append(
+            f"{glob_capped_count} template <file> reference(s) hit the glob cap — some embedded "
+            "targets were dropped; coverage is a lower bound."
+        )
+    if not linked_pvs and not other_prefix_pvs and indeterminate_pvs:
+        notes.append(
+            "Almost no concrete PVs resolved — the displays directory may be too narrow "
+            "(macros are bound by operator top-levels; pass the project/dataset ROOT)."
         )
     if ioc_db is None:
         notes.append(
@@ -157,9 +232,14 @@ def crossplane_check(
         naming=naming_result,
         displays_linked=tuple(sorted(linked_displays)),
         pvs_linked=tuple(sorted(linked_pvs)),
+        pvs_linked_write=tuple(sorted(linked_write)),
         pvs_other_prefix=tuple(sorted(other_prefix_pvs)),
         pvs_indeterminate=tuple(sorted(indeterminate_pvs)),
-        pvs_indeterminate_occurrences=indeterminate_occurrences,
+        pvs_indeterminate_occurrences=len(indeterminate_pairs),
+        pvs_dynamic=tuple(sorted(dynamic_pvs)),
+        pvs_unresolved=tuple(sorted(unresolved_pvs)),
+        pvs_non_channel=tuple(sorted(non_channel_pvs)),
+        displays_incomplete=tuple(sorted(context_capped)),
         ioc_db_resolved=db_resolved,
         ioc_db_needs_msi=db_needs_msi,
         broken=tuple(sorted(broken)),
@@ -182,10 +262,26 @@ def render_markdown(report: CrossPlaneReport) -> str:
     lines.append(f"- **Displays linked to this IOC:** {len(report.displays_linked)}")
     lines.extend(f"  - {display}" for display in report.displays_linked)
     lines.append(f"- **Concrete PVs sharing the prefix:** {len(report.pvs_linked)}")
+    if report.pvs_linked:
+        lines.append(f"  - of which writable: {len(report.pvs_linked_write)}")
     lines.append(f"- **Concrete PVs with other prefixes:** {len(report.pvs_other_prefix)}")
-    n_macro = len(report.pvs_indeterminate)
+    n_indet = len(report.pvs_indeterminate)
     refs = report.pvs_indeterminate_occurrences
-    lines.append(f"- **Macro-templated (distinct):** {n_macro} ({refs} references)")
+    lines.append(f"- **Indeterminate (dynamic+unresolved):** {n_indet} ({refs} references)")
+    if n_indet:
+        lines.append(
+            f"  - dynamic: {len(report.pvs_dynamic)}, unresolved: {len(report.pvs_unresolved)}"
+        )
+    if report.pvs_non_channel:
+        lines.append(
+            f"- **Non-channel refs (loc/sim/sys/other, excluded):** {len(report.pvs_non_channel)}"
+        )
+    if report.displays_incomplete:
+        lines.append(
+            f"- **Displays with incomplete inventory (lower bound):** "
+            f"{len(report.displays_incomplete)}"
+        )
+        lines.extend(f"  - {display}" for display in report.displays_incomplete)
     if report.ioc_db_resolved or report.ioc_db_needs_msi:
         lines.append(
             f"- **IOC .db PVs:** {report.ioc_db_resolved} resolved, "

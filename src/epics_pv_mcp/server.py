@@ -12,6 +12,7 @@ from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_pv_mcp.prompts import diagnose_pv as _diagnose_pv
 from epics_pv_mcp.resources import get_epics_config, get_health
+from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
 from epics_pv_mcp.tools.archiver import _get_pv_history, _is_archived
 from epics_pv_mcp.tools.channelfinder import _find_channels
 from epics_pv_mcp.tools.crossplane import _crossplane_check
@@ -260,7 +261,11 @@ async def discover_pvs(
 async def crossplane_check(
     displays_dir: Annotated[
         str,
-        Field(description="Directory of .bob display files (searched recursively)"),
+        Field(
+            description="Project/dataset ROOT directory of .bob displays (searched recursively). "
+            "Must be the root, not a narrow per-IOC subdirectory: display macros are bound by the "
+            "operator top-levels found here, so a too-narrow scope leaves PVs unresolved."
+        ),
     ],
     st_cmd_path: Annotated[
         str,
@@ -273,15 +278,36 @@ async def crossplane_check(
             "name. Default False keeps the check fully offline and deterministic."
         ),
     ] = False,
+    context_cap: Annotated[
+        int,
+        Field(
+            description="Max per-display reachability contexts the PV-inventory explores (higher "
+            "= more complete, slower; a large dataset like fbis takes ~60 s at the default). "
+            "Capped displays are reported as a lower bound in 'displays_incomplete'."
+        ),
+    ] = DEFAULT_PV_CONTEXT_CAP,
+    windows_paths: Annotated[
+        bool,
+        Field(
+            description="Resolve embedded <file> references case-insensitively (Windows host). "
+            "Default False = Linux/ESS-console semantics (deterministic); set True on Windows if "
+            "embed chains under-resolve due to filename case mismatch."
+        ),
+    ] = False,
 ) -> dict[str, object]:
-    """Cross-plane PV provenance: join display PVs ↔ e3 IOC (st.cmd) ↔ ESS Naming.
+    """Cross-plane PV provenance: join macro-expanded display PVs ↔ e3 IOC (st.cmd) ↔ ESS Naming.
 
-    Read-only. Returns a structured report plus a Markdown rendering. Display PVs that
-    still carry macros are reported as 'indeterminate' (never 'broken') — their per-instance
-    identity needs the display PV-inventory, which is not part of this coarse v1 join.
+    Read-only. Returns a structured report plus a Markdown rendering. The display PVs come from the
+    macro-expanded, per-instance PV-inventory (operator-facing displays only); concrete PVs sharing
+    the IOC prefix are 'linked' (writable subset surfaced), others 'other_prefix'. PVs the inventory
+    cannot resolve to a concrete channel are 'indeterminate' (dynamic/unresolved) and never judged
+    'broken'; non-channel protocols (loc/sim/sys/other) are excluded from the join. No IOC .db is
+    consulted yet (no 'broken' verdict — module repos deferred).
     """
     try:
-        return await _crossplane_check(displays_dir, st_cmd_path, query_naming)
+        return await _crossplane_check(
+            displays_dir, st_cmd_path, query_naming, context_cap, windows_paths
+        )
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:

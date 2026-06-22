@@ -12,11 +12,18 @@ dependencies = [
     # mcp.types.ToolAnnotations), nicht nur transitiv über fastmcp.
     "mcp>=1.0,<2",
     "fastmcp>=3.4.2,<4",
-    "pydantic>=2.0,<3",
+    # pydantic>=2.11: Floor von opi_navigation (s.u.); uv erzwingt den Schnitt ohnehin,
+    # hier explizit zur Intent-Klarheit.
+    "pydantic>=2.11,<3",
     "pydantic-settings>=2.0,<3",
     "p4p>=4.2.0,<5",
     # requests: read-only HTTP client for the ESS Naming Service (vendored naming_client).
     "requests>=2.25",
+    # Cross-Plane-Join (Wedge 1): die makro-expandierten Per-Instanz-PVs eines Displays
+    # kommen aus dem Skill-Paket opi_navigation (EINE PV-Engine, Build-once EX/EY) — NICHT
+    # makro-blind nachgebaut. SHA-gepinnt wie der phoebus-MCP (cs-studio-phoebus-mcp);
+    # Bump = Pin + `uv lock` (CI fährt `uv sync --frozen`). Skill bleibt standalone.
+    "opi-navigation @ git+https://github.com/epicDirk/opi-foundry.git@9e60e59da3b6c9bb380fa468f8770bf676fcd836",
 ]
 
 [project.optional-dependencies]
@@ -32,6 +39,12 @@ dev = [
 [project.scripts]
 epics-pv-mcp = "epics_pv_mcp.server:main"
 epics-crossplane = "epics_pv_mcp.cli_crossplane:main"
+
+# Git-Direct-Reference (opi-navigation) erfordert dieses Flag bei hatchling — sonst
+# bricht der Metadaten-Build ("Dependency ... cannot be a direct reference"). Spiegelt
+# cs-studio-phoebus-mcp.
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.ruff]
 line-length = 100
