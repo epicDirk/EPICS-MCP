@@ -189,6 +189,62 @@ async def test_crossplane_tool_rejects_bad_st_cmd(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_crossplane_tool_pva_prefixed_pv_links(tmp_path: Path) -> None:
+    """Wedge-1 mini-fix end-to-end (active bug, crossplane.py:162): an explicitly ``pva://``-prefixed
+    display PV that shares the IOC prefix is normalized to its channel name at the adapter edge → it
+    lands in ``linked``, not ``other_prefix`` (before the fix the raw ``pva://`` broke startswith).
+    """
+    displays = tmp_path / "displays"
+    displays.mkdir()
+    (displays / "panel.bob").write_text(
+        '<display version="2.0.0"><name>Panel</name>'
+        '<widget type="textupdate"><name>s</name>'
+        "<pv_name>pva://DEV-TEST01:Ctrl-EVR-01:status</pv_name></widget></display>",
+        encoding="utf-8",
+    )
+    st_cmd = tmp_path / "st.cmd"
+    st_cmd.write_text(_ST_CMD, encoding="utf-8")
+
+    result = await _crossplane_check(str(displays), str(st_cmd), query_naming=False)
+    report = result["report"]
+    assert isinstance(report, dict)
+    assert report["pvs_linked"] == ["DEV-TEST01:Ctrl-EVR-01:status"]  # channel form, NOT pva://…
+    assert report["pvs_other_prefix"] == []  # before the fix the raw pva:// PV landed here
+
+
+@pytest.mark.asyncio
+async def test_crossplane_tool_pva_prefixed_pv_broken_against_db(tmp_path: Path) -> None:
+    """Wedge-1 mini-fix end-to-end (latent trap, crossplane.py:198): the SAME edge normalization
+    fixes the broken comparison — a ``pva://``-prefixed linked PV absent from a provably complete
+    IOC .db is now correctly ``broken`` (channel-form linked_pvs vs. channel-form .db records, no
+    protocol mismatch). Before the fix the pva:// PV never reached ``linked``, so the trap slept.
+    """
+    displays = tmp_path / "displays"
+    displays.mkdir()
+    (displays / "panel.bob").write_text(
+        '<display version="2.0.0"><name>Panel</name>'
+        '<widget type="textupdate"><name>s</name>'
+        "<pv_name>pva://DEV-TEST01:Ctrl-EVR-01:status</pv_name></widget>"
+        '<widget type="textentry"><name>c</name>'
+        "<pv_name>pva://DEV-TEST01:Ctrl-EVR-01:Cmd</pv_name></widget></display>",
+        encoding="utf-8",
+    )
+    st_cmd = tmp_path / "st.cmd"
+    st_cmd.write_text(_ST_CMD, encoding="utf-8")
+    module_db = tmp_path / "moddb"
+    module_db.mkdir()
+    # evr.db serves only ...:status (NOT ...:Cmd) → Cmd is provably broken once it is linked.
+    (module_db / "evr.db").write_text('record(stringin, "$(P)status") {}\n', encoding="utf-8")
+
+    result = await _crossplane_check(str(displays), str(st_cmd), module_db_root=str(module_db))
+    report = result["report"]
+    assert isinstance(report, dict)
+    assert report["broken"] == ["DEV-TEST01:Ctrl-EVR-01:Cmd"]  # channel-form match against the .db
+    assert "DEV-TEST01:Ctrl-EVR-01:status" not in report["broken"]
+    assert report["broken_write"] == ["DEV-TEST01:Ctrl-EVR-01:Cmd"]  # textentry = write role
+
+
+@pytest.mark.asyncio
 async def test_server_crossplane_converts_error_to_tool_error(tmp_path: Path) -> None:
     """The server wrapper maps EpicsError to ToolError with the error_code tag."""
     from epics_pv_mcp.server import crossplane_check

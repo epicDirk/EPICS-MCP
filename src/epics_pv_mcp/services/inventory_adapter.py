@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from opi_navigation.pv_analysis import DEFAULT_PV_CONTEXT_CAP, analyze_pv_inventory
-from opi_navigation.pv_analysis.models import PvInventory
+from opi_navigation.pv_analysis import DEFAULT_PV_CONTEXT_CAP, analyze_pv_inventory, channel_name
+from opi_navigation.pv_analysis.models import REAL_PROTOCOLS, PvInventory
 
 from epics_pv_mcp.services.crossplane import JoinPv
 
@@ -29,11 +29,20 @@ def inventory_join_pvs(inventory: PvInventory) -> list[JoinPv]:
     Fragment standalone seeds (``operator_facing=False``) are skipped: their PVs already roll up to
     the embedding operator display, so counting the fragment as its own "display" would inflate the
     provenance and the indeterminate-occurrence count.
+
+    The PV is normalized to its **channel name** for the real-channel protocols (ca/pva) — the join
+    compares ``jp.pv`` against the protocol-free IOC prefix and ``.db`` records (``crossplane.py``
+    startswith/broken), so an explicit ``pva://``/``ca://`` prefix would otherwise mis-bucket a
+    prefix-sharing PV as ``other_prefix`` (and dodge ``broken``). This is the edge that keeps the
+    join protocol-agnostic ("translation happens at the edge"); the protocol survives in
+    ``JoinPv.protocol``. ``loc``/``sim``/``sys``/``other`` references are left RAW — they are only
+    displayed in ``non_channel`` (never prefix-compared), so stripping would drop their tag and risk
+    colliding with a real channel of the same bare name.
     """
     return [
         JoinPv(
             display=display.display_path,
-            pv=expanded.pv,
+            pv=channel_name(expanded.pv) if expanded.protocol in REAL_PROTOCOLS else expanded.pv,
             resolution=expanded.resolution,
             role=expanded.role,
             protocol=expanded.protocol,

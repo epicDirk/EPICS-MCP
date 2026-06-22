@@ -23,7 +23,7 @@ dependencies = [
     # kommen aus dem Skill-Paket opi_navigation (EINE PV-Engine, Build-once EX/EY) — NICHT
     # makro-blind nachgebaut. SHA-gepinnt wie der phoebus-MCP (cs-studio-phoebus-mcp);
     # Bump = Pin + `uv lock` (CI fährt `uv sync --frozen`). Skill bleibt standalone.
-    "opi-navigation @ git+https://github.com/epicDirk/opi-foundry.git@9e60e59da3b6c9bb380fa468f8770bf676fcd836",
+    "opi-navigation @ git+https://github.com/epicDirk/opi-foundry.git@8fad86766891aeac177050449f73a3a4fbf554cc",
 ]
 
 [project.optional-dependencies]

@@ -12,13 +12,21 @@ from epics_pv_mcp.services.crossplane import JoinPv
 from epics_pv_mcp.services.inventory_adapter import inventory_join_pvs
 
 
-def _ev(pv: str, top: str, *, origin: str | None = None, role: str = "read") -> ExpandedPv:
+def _ev(
+    pv: str,
+    top: str,
+    *,
+    origin: str | None = None,
+    role: str = "read",
+    protocol: str = "ca",
+    resolution: str = "resolved",
+) -> ExpandedPv:
     return ExpandedPv(
         pv=pv,
         raw_pv="$(DEV):St",
-        resolution="resolved",
+        resolution=resolution,  # type: ignore[arg-type]
         role=role,  # type: ignore[arg-type]
-        protocol="ca",
+        protocol=protocol,  # type: ignore[arg-type]
         top_level_display=top,
         origin_file=origin or top,
     )
@@ -102,4 +110,46 @@ def test_inventory_join_keeps_all_buckets_of_operator_displays() -> None:
         ("SYS:R", "resolved", "ca"),
         ("$(X):Dyn", "dynamic", "ca"),
         ("loc-sig", "resolved", "loc"),
+    }
+
+
+def test_inventory_join_normalizes_real_channel_protocols() -> None:
+    """Wedge-1 mini-fix (Option A) — full protocol × normalization matrix.
+
+    The adapter strips the ca/pva protocol prefix so the join can compare a channel name against the
+    protocol-free IOC prefix/.db (translation at the edge); the protocol survives in
+    ``JoinPv.protocol``. The guard is on PROTOCOL, not resolution (sharp-edge §5): a ``pva://`` PV
+    is normalized even when ``dynamic`` (real channel everywhere), while ``loc``/``sim``/``sys``
+    keep their RAW form regardless (only displayed in ``non_channel``, never prefix-compared —
+    stripping drops the tag and could collide with a real bare channel). A bare ca is idempotent.
+    """
+    pre = "DEV-TEST01:Ctrl-EVR-01:"
+    inv = PvInventory(
+        repo_root="x",
+        displays=(
+            DisplayPvInventory(
+                display_path="op.bob",
+                operator_facing=True,
+                pvs=(
+                    _ev(f"pva://{pre}X", "op.bob", protocol="pva"),  # pva:// stripped
+                    _ev(f"ca://{pre}Y", "op.bob", protocol="ca"),  # ca:// stripped
+                    _ev(f"{pre}Bare", "op.bob", protocol="ca"),  # bare ca untouched (idempotent)
+                    # dynamic pva:// is STILL normalized — the guard is on protocol, not resolution.
+                    _ev(f"pva://{pre}$(N)Dyn", "op.bob", protocol="pva", resolution="dynamic"),
+                    _ev("loc://state", "op.bob", protocol="loc"),  # loc:// kept raw
+                    _ev("sim://ramp", "op.bob", protocol="sim"),  # sim:// kept raw
+                    _ev("sys://TIME", "op.bob", protocol="sys"),  # sys:// kept raw
+                ),
+            ),
+        ),
+    )
+    rows = {(r.pv, r.protocol) for r in inventory_join_pvs(inv)}
+    assert rows == {
+        (f"{pre}X", "pva"),  # pva:// stripped; protocol kept in its own field
+        (f"{pre}Y", "ca"),  # ca:// stripped
+        (f"{pre}Bare", "ca"),  # bare ca untouched (idempotent)
+        (f"{pre}$(N)Dyn", "pva"),  # dynamic pva:// also stripped (protocol-guard, not resolution)
+        ("loc://state", "loc"),  # loc:// kept raw — only displayed, never prefix-compared
+        ("sim://ramp", "sim"),  # sim:// kept raw
+        ("sys://TIME", "sys"),  # sys:// kept raw
     }

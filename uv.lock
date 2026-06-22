@@ -528,7 +528,7 @@ requires-dist = [
     { name = "fastmcp", specifier = ">=3.4.2,<4" },
     { name = "mcp", specifier = ">=1.0,<2" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19" },
-    { name = "opi-navigation", git = "https://github.com/epicDirk/opi-foundry.git?rev=9e60e59da3b6c9bb380fa468f8770bf676fcd836" },
+    { name = "opi-navigation", git = "https://github.com/epicDirk/opi-foundry.git?rev=8fad86766891aeac177050449f73a3a4fbf554cc" },
     { name = "p4p", specifier = ">=4.2.0,<5" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "pydantic", specifier = ">=2.11,<3" },
@@ -1127,7 +1127,7 @@ wheels = [
 [[package]]
 name = "opi-navigation"
 version = "0.1.0"
-source = { git = "https://github.com/epicDirk/opi-foundry.git?rev=9e60e59da3b6c9bb380fa468f8770bf676fcd836#9e60e59da3b6c9bb380fa468f8770bf676fcd836" }
+source = { git = "https://github.com/epicDirk/opi-foundry.git?rev=8fad86766891aeac177050449f73a3a4fbf554cc#8fad86766891aeac177050449f73a3a4fbf554cc" }
 dependencies = [
     { name = "pydantic" },
 ]

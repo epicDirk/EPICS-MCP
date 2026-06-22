@@ -68,6 +68,27 @@ def test_resolved_macro_collapses_to_linked() -> None:
     assert report.pvs_linked_write == ("DEV-TEST01:Ctrl-EVR-01:Cmd",)
 
 
+def test_join_is_string_literal_so_raw_protocol_prefix_misbuckets() -> None:
+    """Join CONTRACT — the reason normalization belongs at the ADAPTER edge, not here.
+
+    crossplane_check buckets a resolved ca/pva PV by a LITERAL ``jp.pv.startswith(prefix)`` (:162);
+    it deliberately does NOT strip protocols (single responsibility — ``crossplane.py`` carries no
+    ``opi_navigation`` import). So a RAW ``pva://``-prefixed PV that shares the IOC device prefix
+    mis-buckets as ``other_prefix``; only its CHANNEL form (what the adapter produces) reaches
+    ``linked``. This pins WHY the adapter must normalize — if the join ever stripped protocols
+    itself, the raw case below would flip to ``linked`` and this test fails (a guard for the
+    responsibility split). NB: bucketing keys on ``jp.protocol`` (:158), so both rows are pva.
+    """
+    raw = "pva://DEV-TEST01:Ctrl-EVR-01:X"
+    channel = "DEV-TEST01:Ctrl-EVR-01:X"
+    raw_report = crossplane_check([_jp("a.bob", raw, protocol="pva")], _st())
+    assert raw_report.pvs_other_prefix == (raw,)  # join does NOT strip — by design
+    assert raw_report.pvs_linked == ()
+    channel_report = crossplane_check([_jp("a.bob", channel, protocol="pva")], _st())
+    assert channel_report.pvs_linked == (channel,)  # channel form (adapter output) links correctly
+    assert channel_report.pvs_other_prefix == ()
+
+
 def test_dynamic_and_unresolved_stay_indeterminate() -> None:
     join = [
         _jp("a.bob", "SYS:Dyn", resolution="dynamic"),
