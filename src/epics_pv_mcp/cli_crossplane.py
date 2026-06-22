@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 from epics_pv_mcp.services.crossplane import crossplane_check, render_markdown
-from epics_pv_mcp.services.e3_db import parse_st_cmd
+from epics_pv_mcp.services.e3_db import load_ioc_db, parse_st_cmd
 from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP, analyze_display_pvs
 from epics_pv_mcp.services.naming_client import NamingServiceClient
 
@@ -52,6 +52,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="resolve embedded <file> refs case-insensitively (Windows host); default Linux",
     )
+    parser.add_argument(
+        "--module-db-root",
+        type=Path,
+        default=None,
+        help="opt-in: local directory of the IOC's e3 module .db files. When given, concrete "
+        "linked PVs are checked against the loaded IOC .db set; a 'broken' verdict is emitted ONLY "
+        "if that set is provably complete (else withheld). Omit to stay at prefix/Naming level.",
+    )
     args = parser.parse_args(argv)
 
     # The report contains Unicode (emoji/en-dash); force UTF-8 so a cp1252 Windows
@@ -65,16 +73,27 @@ def main(argv: list[str] | None = None) -> int:
     if not Path(args.displays).is_dir():
         sys.stderr.write(f"Error: displays directory not found: {args.displays}\n")
         return 2
+    if args.module_db_root is not None and not Path(args.module_db_root).is_dir():
+        sys.stderr.write(f"Error: module-db-root directory not found: {args.module_db_root}\n")
+        return 2
 
     join_pvs, context_capped, glob_capped_count = analyze_display_pvs(
         Path(args.displays), context_cap=args.context_cap, windows_paths=args.windows_paths
     )
     st_info = parse_st_cmd(Path(args.st_cmd).read_text(encoding="utf-8"))
     naming = NamingServiceClient() if args.naming else None
+    ioc_db: tuple[set[str], set[str]] | None = None
+    ioc_db_complete = False
+    if args.module_db_root is not None:
+        db_result = load_ioc_db(st_info, Path(args.module_db_root))
+        ioc_db = (set(db_result.resolved), set(db_result.unresolved))
+        ioc_db_complete = db_result.complete
     report = crossplane_check(
         join_pvs,
         st_info,
         naming=naming,
+        ioc_db=ioc_db,
+        ioc_db_complete=ioc_db_complete,
         context_capped=context_capped,
         glob_capped_count=glob_capped_count,
     )

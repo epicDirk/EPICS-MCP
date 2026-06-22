@@ -20,9 +20,12 @@ module repos (deferred).
 
 from __future__ import annotations
 
+import os
 import re
 from collections import Counter
+from collections.abc import Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 
 # require <module>  (optional quotes, optional version after a comma)
 _REQUIRE_RE = re.compile(r'^\s*require\s+["\']?([A-Za-z0-9_\-]+)', re.MULTILINE)
@@ -34,15 +37,22 @@ _ENV_RE = re.compile(
     re.MULTILINE,
 )
 
-# dbLoadRecords("file", "macros")  /  iocshLoad "file" "macros"  (2nd arg optional)
+# dbLoadRecords("file", "macros") / dbLoadTemplate("subs") / iocshLoad "file" "macros"
+# (2nd arg optional). dbLoadTemplate is captured for DETECTION only (its records need msi); db_files
+# still filters to dbLoadRecords, so the captured command set just lets the loader refuse to claim
+# completeness when a mechanism it cannot statically follow is present.
 _LOAD_RE = re.compile(
-    r"""(?P<cmd>dbLoadRecords|iocshLoad)\s*\(?\s*["'](?P<file>[^"']+)["']"""
+    r"""(?P<cmd>dbLoadRecords|dbLoadTemplate|iocshLoad)\s*\(?\s*["'](?P<file>[^"']+)["']"""
     r"""\s*(?:,\s*)?(?:["'](?P<macros>[^"']*)["'])?""",
     re.MULTILINE,
 )
 
 # record(type, "NAME")  — the record/PV name is the quoted 2nd argument.
 _RECORD_RE = re.compile(r'record\s*\(\s*[A-Za-z0-9_]+\s*,\s*"([^"]+)"\s*\)')
+
+# alias("record", "aliasName")  (standalone)  /  alias("aliasName")  (inside a record body).
+# Either way the ALIAS name is a real PV the IOC serves: 2nd quoted arg if present, else the 1st.
+_ALIAS_RE = re.compile(r'alias\s*\(\s*"([^"]+)"\s*(?:,\s*"([^"]+)"\s*)?\)')
 
 # A macro reference in either $(NAME) or ${NAME} form.
 _MACRO_REF_RE = re.compile(r"\$\{([A-Za-z0-9_]+)\}|\$\(([A-Za-z0-9_]+)\)")
@@ -164,19 +174,122 @@ def _neg_key(text: str) -> tuple[int, ...]:
 
 
 def ioc_db_pvs(db_text: str, macros: dict[str, str]) -> tuple[set[str], set[str]]:
-    """Extract record (PV) names from an EPICS ``.db`` text, substituting *macros*.
+    """Extract record AND alias (PV) names from an EPICS ``.db`` text, substituting *macros*.
 
     Returns ``(resolved, unresolved)``: *resolved* = names fully expanded; *unresolved* =
     names that still contain ``$(...)``/``${...}`` after substitution (e.g. substitution-
-    file driven — "needs-msi"). Never raises.
+    file driven — "needs-msi"). Aliases are included because a display PV may legitimately
+    reference an alias rather than the record name; omitting them would make a real PV look
+    "broken". Never raises.
     """
     db_text = _strip_comment_lines(db_text)
     resolved: set[str] = set()
     unresolved: set[str] = set()
-    for raw_name in _RECORD_RE.findall(db_text):
+    raw_names = list(_RECORD_RE.findall(db_text))
+    # The alias NAME is the 2nd quoted arg (standalone form) or the 1st (in-body form).
+    raw_names += [(grp2 or grp1) for grp1, grp2 in _ALIAS_RE.findall(db_text)]
+    for raw_name in raw_names:
         name = substitute(raw_name, macros)
         if "$(" in name or "${" in name:
             unresolved.add(name)
         else:
             resolved.add(name)
     return resolved, unresolved
+
+
+@dataclass(frozen=True)
+class IocDbResult:
+    """The concrete IOC PV set loaded from a local module/db root (opt-in, read-only).
+
+    ``complete`` is the load-bearing flag: it is True ONLY when the static load is provably
+    complete — every referenced ``.db`` found unambiguously, every name fully resolved (no
+    needs-msi), and NO record-loading mechanism we cannot statically follow (``dbLoadTemplate`` or
+    ``iocshLoad``) present. It gates the cross-plane ``broken`` verdict; conservative by design
+    (in doubt → False → the verdict is withheld, never a false alarm).
+    """
+
+    resolved: frozenset[str]
+    unresolved: frozenset[str]
+    complete: bool
+    missing: tuple[str, ...]  # .db targets referenced but not found under the root
+    ambiguous: tuple[str, ...]  # .db basenames matching >1 file (not loaded — wrong-module risk)
+    unsupported_load: (
+        bool  # dbLoadTemplate / iocshLoad present → records we cannot statically follow
+    )
+
+
+def _iter_files_bounded(root: Path, *, max_depth: int = 8) -> Iterator[Path]:
+    """Yield files under *root* up to *max_depth* levels deep (no unbounded filesystem walk)."""
+    root = root.resolve()
+    root_depth = len(root.parts)
+    for dirpath, dirnames, filenames in os.walk(root):
+        if len(Path(dirpath).parts) - root_depth >= max_depth:
+            dirnames[:] = []  # prune deeper traversal
+        for filename in filenames:
+            yield Path(dirpath) / filename
+
+
+def _locate_db(target: str, root: Path) -> list[Path]:
+    """Resolve a (macro-substituted) ``.db`` *target* to file(s) under *root* (deterministic).
+
+    Primary: the target as a direct path (absolute, or relative to *root* — this resolves the
+    synthesised ``$(<module>_DIR)/...`` form). Secondary: a bounded basename search under *root*.
+    Returns ALL matches sorted; the caller treats 0 = missing and >1 = ambiguous (a same-named
+    ``.db`` in several modules must not silently pick the wrong PV set).
+    """
+    path = Path(target)
+    direct = path if path.is_absolute() else (root / path)
+    if direct.is_file():
+        return [direct.resolve()]
+    name = path.name
+    return sorted({f.resolve() for f in _iter_files_bounded(root) if f.name == name})
+
+
+def load_ioc_db(st_info: StCmdInfo, module_db_root: Path) -> IocDbResult:
+    """Load the IOC's concrete ``.db`` PV set from a local module/db *root* (opt-in, read-only).
+
+    Iterates ``st_info.loads`` (NOT ``db_files`` — the per-load ``P=`` macro lives on the ``Load``
+    and is what makes ``$(P)Foo`` concrete). For each ``dbLoadRecords`` ``.db``: synthesise
+    ``<module>_DIR`` from the ``require``d modules + *root*, resolve the path, read it, and extract
+    record/alias PVs substituting ``st_info.env`` + the synthesised dirs + the per-load macros.
+    Returns an :class:`IocDbResult` whose ``complete`` flag gates the ``broken`` verdict. Pure +
+    deterministic + graceful (a missing/unreadable file is recorded, never raised).
+    """
+    dir_env = {f"{module}_DIR": str(module_db_root / module) for module in st_info.requires}
+    base_env = {**st_info.env, **dir_env}
+    resolved: set[str] = set()
+    unresolved: set[str] = set()
+    missing: list[str] = []
+    ambiguous: list[str] = []
+
+    for load in st_info.loads:
+        if load.command != "dbLoadRecords" or not load.target.endswith(".db"):
+            continue
+        matches = _locate_db(substitute(load.target, base_env), module_db_root)
+        if not matches:
+            missing.append(load.target)
+            continue
+        if len(matches) > 1:
+            ambiguous.append(load.target)  # same basename in several modules → don't guess
+            continue
+        try:
+            text = matches[0].read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            missing.append(load.target)
+            continue
+        file_resolved, file_unresolved = ioc_db_pvs(text, {**base_env, **load.macros})
+        resolved |= file_resolved
+        unresolved |= file_unresolved
+
+    # Any iocshLoad/dbLoadTemplate loads records we cannot statically follow → we cannot claim the
+    # IOC's PV set is complete (the bulk of an e3 EVR's records come in via iocshLoad'ed .iocsh).
+    unsupported = any(load.command in {"iocshLoad", "dbLoadTemplate"} for load in st_info.loads)
+    complete = not missing and not ambiguous and not unresolved and not unsupported
+    return IocDbResult(
+        resolved=frozenset(resolved),
+        unresolved=frozenset(unresolved),
+        complete=complete,
+        missing=tuple(sorted(missing)),
+        ambiguous=tuple(sorted(ambiguous)),
+        unsupported_load=unsupported,
+    )

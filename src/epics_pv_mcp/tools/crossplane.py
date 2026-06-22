@@ -20,7 +20,7 @@ from pathlib import Path
 
 from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.services.crossplane import crossplane_check, render_markdown
-from epics_pv_mcp.services.e3_db import parse_st_cmd
+from epics_pv_mcp.services.e3_db import load_ioc_db, parse_st_cmd
 from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP, analyze_display_pvs
 from epics_pv_mcp.services.naming_client import NamingServiceClient
 
@@ -31,22 +31,33 @@ def _run_check(
     query_naming: bool,
     context_cap: int,
     windows_paths: bool,
+    module_db_root: str,
 ) -> dict[str, object]:
     """Synchronous body of the cross-plane check (run off the event loop in a thread).
 
     Bundles the blocking work — the macro-aware PV-inventory over ``displays_dir`` (the project
-    ROOT), the ``st.cmd`` read, and the optional Naming-Service GET — into one call so the async
-    tool stays non-blocking.
+    ROOT), the ``st.cmd`` read, the optional IOC ``.db`` load (when *module_db_root* is given), and
+    the optional Naming-Service GET — into one call so the async tool stays non-blocking.
     """
     join_pvs, context_capped, glob_capped_count = analyze_display_pvs(
         Path(displays_dir), context_cap=context_cap, windows_paths=windows_paths
     )
     st_info = parse_st_cmd(Path(st_cmd_path).read_text(encoding="utf-8"))
     naming = NamingServiceClient() if query_naming else None
+    # Opt-in IOC .db enumeration: only when a module/db root is given (offline default unchanged).
+    # ``complete`` gates the broken verdict — a partial/templated set withholds it (no false alarm).
+    ioc_db: tuple[set[str], set[str]] | None = None
+    ioc_db_complete = False
+    if module_db_root:
+        db_result = load_ioc_db(st_info, Path(module_db_root))
+        ioc_db = (set(db_result.resolved), set(db_result.unresolved))
+        ioc_db_complete = db_result.complete
     report = crossplane_check(
         join_pvs,
         st_info,
         naming=naming,
+        ioc_db=ioc_db,
+        ioc_db_complete=ioc_db_complete,
         context_capped=context_capped,
         glob_capped_count=glob_capped_count,
     )
@@ -62,14 +73,18 @@ async def _crossplane_check(
     query_naming: bool = False,
     context_cap: int = DEFAULT_PV_CONTEXT_CAP,
     windows_paths: bool = False,
+    module_db_root: str = "",
 ) -> dict[str, object]:
-    """Join macro-aware display PVs with an e3 IOC ``st.cmd`` (+ optional Naming). Read-only.
+    """Join macro-aware display PVs with an e3 IOC ``st.cmd`` (+ optional .db + Naming). Read-only.
 
     *displays_dir* is the project/dataset ROOT (the inventory binds macros via the operator
     top-levels there — a narrow per-IOC subdirectory under-resolves). *context_cap* bounds the
     per-display reachability contexts (higher = more complete, slower; ~60 s for a large dataset
     like fbis at the default). *windows_paths* resolves embedded ``<file>`` refs case-insensitively
-    for a Windows host; default Linux (the ESS-console truth, deterministic).
+    for a Windows host; default Linux (the ESS-console truth, deterministic). *module_db_root*
+    (opt-in) is a local directory holding the IOC's e3 module ``.db`` files: when supplied, concrete
+    linked PVs are checked against the loaded set and a ``broken`` verdict is emitted ONLY if that
+    set is provably complete (else withheld). Empty (default) = no .db, no ``broken`` verdict.
 
     Returns ``{"report": <CrossPlaneReport JSON>, "markdown": <rendered report>}``.
     Raises :class:`EpicsError` (``INVALID_INPUT``) when a path does not exist.
@@ -86,6 +101,17 @@ async def _crossplane_check(
             f"st_cmd_path is not a file: {st_cmd_path}",
             error_code="INVALID_INPUT",
         )
+    if module_db_root and not Path(module_db_root).is_dir():
+        raise EpicsError(
+            f"module_db_root is not a directory: {module_db_root}",
+            error_code="INVALID_INPUT",
+        )
     return await asyncio.to_thread(
-        _run_check, displays_dir, st_cmd_path, query_naming, context_cap, windows_paths
+        _run_check,
+        displays_dir,
+        st_cmd_path,
+        query_naming,
+        context_cap,
+        windows_paths,
+        module_db_root,
     )

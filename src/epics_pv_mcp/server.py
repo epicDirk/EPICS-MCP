@@ -294,6 +294,16 @@ async def crossplane_check(
             "embed chains under-resolve due to filename case mismatch."
         ),
     ] = False,
+    module_db_root: Annotated[
+        str,
+        Field(
+            description="Opt-in: local directory holding the IOC's e3 module .db files. When set, "
+            "concrete linked PVs are checked against the loaded IOC .db set and a 'broken' verdict "
+            "is emitted ONLY if that set is provably complete + fully resolved (else withheld — no "
+            "false alarm; e3 IOCs that load records via iocshLoad/dbLoadTemplate withhold). "
+            "Empty (default) keeps the check at prefix/Naming level (no 'broken' verdict)."
+        ),
+    ] = "",
 ) -> dict[str, object]:
     """Cross-plane PV provenance: join macro-expanded display PVs ↔ e3 IOC (st.cmd) ↔ ESS Naming.
 
@@ -301,12 +311,13 @@ async def crossplane_check(
     macro-expanded, per-instance PV-inventory (operator-facing displays only); concrete PVs sharing
     the IOC prefix are 'linked' (writable subset surfaced), others 'other_prefix'. PVs the inventory
     cannot resolve to a concrete channel are 'indeterminate' (dynamic/unresolved) and never judged
-    'broken'; non-channel protocols (loc/sim/sys/other) are excluded from the join. No IOC .db is
-    consulted yet (no 'broken' verdict — module repos deferred).
+    'broken'; non-channel protocols (loc/sim/sys/other) are excluded from the join. A 'broken'
+    verdict (linked PV absent from the IOC .db) is produced only when 'module_db_root' supplies a
+    provably complete IOC .db set; otherwise it is withheld.
     """
     try:
         return await _crossplane_check(
-            displays_dir, st_cmd_path, query_naming, context_cap, windows_paths
+            displays_dir, st_cmd_path, query_naming, context_cap, windows_paths, module_db_root
         )
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e

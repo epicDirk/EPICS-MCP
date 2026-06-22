@@ -112,6 +112,63 @@ async def test_crossplane_tool_fragment_not_double_attributed(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_crossplane_tool_module_db_root_emits_broken(tmp_path: Path) -> None:
+    """End-to-end Phase-2 payoff: with a provably complete IOC .db (only dbLoadRecords, no iocsh),
+    the linked PV ``$(P)Cmd`` — absent from the .db — is reported ``broken``; ``status`` (present)
+    is not. The IOC .db's $(P) is bound by the st.cmd's per-load macro (P=$(P) → env P).
+    """
+    displays, st_cmd = _setup(tmp_path)
+    module_db = tmp_path / "moddb"
+    module_db.mkdir()
+    # evr.db serves only ...:status (NOT ...:Cmd) → Cmd is provably broken.
+    (module_db / "evr.db").write_text('record(stringin, "$(P)status") {}\n', encoding="utf-8")
+
+    result = await _crossplane_check(str(displays), str(st_cmd), module_db_root=str(module_db))
+    report = result["report"]
+    assert isinstance(report, dict)
+    assert report["broken"] == ["DEV-TEST01:Ctrl-EVR-01:Cmd"]
+    assert "DEV-TEST01:Ctrl-EVR-01:status" not in report["broken"]
+    assert report["ioc_db_resolved"] == 1
+
+
+@pytest.mark.asyncio
+async def test_crossplane_tool_module_db_root_withholds_broken_when_incomplete(
+    tmp_path: Path,
+) -> None:
+    """With an iocshLoad present the IOC .db cannot be proven complete → ``broken`` withheld (the
+    dln01-EVR reality: most records arrive via iocshLoad'ed .iocsh we cannot statically follow)."""
+    displays = tmp_path / "displays"
+    displays.mkdir()
+    (displays / "panel.bob").write_text(_BOB, encoding="utf-8")
+    # st.cmd that DOES load records via iocshLoad → unsupported → never complete.
+    st_cmd = tmp_path / "st.cmd"
+    st_cmd.write_text(
+        'epicsEnvSet("P", "DEV-TEST01:Ctrl-EVR-01:")\n'
+        'iocshLoad("evrEss.iocsh", "P=$(P)")\n'
+        'dbLoadRecords("evr.db", "P=$(P)")\n',
+        encoding="utf-8",
+    )
+    module_db = tmp_path / "moddb"
+    module_db.mkdir()
+    (module_db / "evr.db").write_text('record(stringin, "$(P)status") {}\n', encoding="utf-8")
+
+    result = await _crossplane_check(str(displays), str(st_cmd), module_db_root=str(module_db))
+    report = result["report"]
+    assert isinstance(report, dict)
+    assert report["broken"] == []  # withheld — completeness cannot be proven
+    assert any("withheld" in note.lower() for note in report["notes"])
+
+
+@pytest.mark.asyncio
+async def test_crossplane_tool_rejects_bad_module_db_root(tmp_path: Path) -> None:
+    """A non-existent module_db_root is rejected before any work."""
+    displays, st_cmd = _setup(tmp_path)
+    with pytest.raises(EpicsError) as exc:
+        await _crossplane_check(str(displays), str(st_cmd), module_db_root=str(tmp_path / "nope"))
+    assert exc.value.error_code == "INVALID_INPUT"
+
+
+@pytest.mark.asyncio
 async def test_crossplane_tool_rejects_bad_displays_dir(tmp_path: Path) -> None:
     """A non-existent displays directory is rejected before any work."""
     _, st_cmd = _setup(tmp_path)

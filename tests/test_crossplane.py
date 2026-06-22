@@ -137,15 +137,54 @@ def test_offline_no_naming_has_deferred_note() -> None:
     assert any("module repos deferred" in note for note in report.notes)
 
 
-def test_broken_only_with_ioc_db() -> None:
+def test_broken_only_with_complete_ioc_db() -> None:
+    # broken is emitted ONLY for a provably complete + fully resolved .db set (ioc_db_complete=True,
+    # no needs-msi residue): the missing linked PV is then provably absent.
     join = [
         _jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:status"),
         _jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:missing"),
     ]
     ioc_db = ({"DEV-TEST01:Ctrl-EVR-01:status"}, set[str]())
-    report = crossplane_check(join, _st(), ioc_db=ioc_db)
+    report = crossplane_check(join, _st(), ioc_db=ioc_db, ioc_db_complete=True)
     assert report.broken == ("DEV-TEST01:Ctrl-EVR-01:missing",)
     assert report.ioc_db_resolved == 1
+
+
+def test_broken_withheld_when_db_not_marked_complete() -> None:
+    # Same data, but ioc_db_complete defaults False → absence not proven → broken withheld + note.
+    join = [
+        _jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:status"),
+        _jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:missing"),
+    ]
+    ioc_db = ({"DEV-TEST01:Ctrl-EVR-01:status"}, set[str]())
+    report = crossplane_check(join, _st(), ioc_db=ioc_db)  # complete defaults False
+    assert report.broken == ()
+    assert report.ioc_db_resolved == 1
+    assert any("broken verdict withheld" in note.lower() for note in report.notes)
+
+
+def test_broken_withheld_when_needs_msi_residue() -> None:
+    # ioc_db_complete=True but a needs-msi record remains → still withheld (all-or-nothing) + note.
+    join = [_jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:missing")]
+    ioc_db = ({"DEV-TEST01:Ctrl-EVR-01:status"}, {"DEV-TEST01:Ctrl-EVR-01:$(R)x"})
+    report = crossplane_check(join, _st(), ioc_db=ioc_db, ioc_db_complete=True)
+    assert report.broken == ()
+    markdown = render_markdown(report)
+    assert any("broken verdict withheld" in note.lower() for note in report.notes)
+    assert "**Broken (linked PV absent" not in markdown  # render must not claim a verdict
+
+
+def test_broken_write_surfaced() -> None:
+    # A writable linked PV that is broken is also surfaced as broken_write (dead command target).
+    join = [
+        _jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:Cmd", role="write"),
+        _jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:status"),
+    ]
+    ioc_db = ({"DEV-TEST01:Ctrl-EVR-01:status"}, set[str]())
+    report = crossplane_check(join, _st(), ioc_db=ioc_db, ioc_db_complete=True)
+    assert report.broken == ("DEV-TEST01:Ctrl-EVR-01:Cmd",)
+    assert report.broken_write == ("DEV-TEST01:Ctrl-EVR-01:Cmd",)
+    assert "of which writable (dead command target): 1" in render_markdown(report)
 
 
 def test_render_markdown_deterministic_and_new_branches() -> None:
@@ -176,6 +215,7 @@ def test_render_markdown_broken_db_and_unregistered_naming() -> None:
         _st(),
         naming=_FakeNaming("RESERVED"),
         ioc_db=({"DEV-TEST01:Ctrl-EVR-01:other"}, set[str]()),
+        ioc_db_complete=True,
     )
     assert report.broken == ("DEV-TEST01:Ctrl-EVR-01:gone",)
     markdown = render_markdown(report)

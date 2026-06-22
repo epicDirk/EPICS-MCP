@@ -17,8 +17,11 @@ Service registers (:mod:`naming_client`). Pure + deterministic; all network I/O 
   it is exactly what the macro-expander could not resolve.)
 - *non_channel* — references on non-channel protocols (loc/sim/sys/other), excluded from the IOC
   join (not real EPICS channels), reported separately rather than silently dropped.
-- *broken*  — concrete linked PVs absent from the IOC ``.db`` set — ONLY computed when an IOC
-  ``.db`` PV set is supplied (module repos are deferred), else left empty.
+- *broken*  — concrete linked PVs absent from the IOC ``.db`` set — ONLY computed when a
+  **provably complete + fully resolved** IOC ``.db`` set is supplied (``ioc_db_complete`` and no
+  ``needs-msi`` residue). An incomplete or still-templated set cannot prove a linked PV's ABSENCE
+  (the record may exist under a name not yet expanded), so the verdict is **withheld**, never
+  false-flagged. *broken_write* is the writable subset (a dead command/setpoint target).
 Nothing indeterminate is ever called "broken".
 """
 
@@ -108,8 +111,11 @@ class CrossPlaneReport(BaseModel):
     #: IOC .db PV counts (only when a .db set was supplied; module repos deferred).
     ioc_db_resolved: int = 0
     ioc_db_needs_msi: int = 0
-    #: Concrete linked display PVs absent from the IOC .db (only when .db supplied).
+    #: Concrete linked display PVs absent from the IOC .db (only when a PROVABLY COMPLETE + fully
+    #: resolved .db set is supplied; withheld otherwise — never false-flagged).
     broken: tuple[str, ...] = ()
+    #: Writable subset of ``broken`` (a dead command/setpoint target — owner triage).
+    broken_write: tuple[str, ...] = ()
     #: Honest caveats about coverage limits.
     notes: tuple[str, ...] = ()
 
@@ -120,6 +126,7 @@ def crossplane_check(
     *,
     naming: NamingChecker | None = None,
     ioc_db: tuple[set[str], set[str]] | None = None,
+    ioc_db_complete: bool = False,
     context_capped: tuple[str, ...] = (),
     glob_capped_count: int = 0,
 ) -> CrossPlaneReport:
@@ -127,10 +134,12 @@ def crossplane_check(
 
     *join_pvs* are the per-instance, operator-facing display-PV rows (from the ``opi_navigation``
     PV-inventory, translated at the tool/CLI edge). *naming* (optional) is queried for the IOC
-    device name; ``None`` skips it. *ioc_db* (optional) is ``(resolved, unresolved)``
-    from :func:`e3_db.ioc_db_pvs`; when supplied, concrete linked PVs missing from *resolved* are
-    reported as ``broken``. *context_capped* / *glob_capped_count* carry the inventory's honest
-    incompleteness signals (linked/other become lower bounds).
+    device name; ``None`` skips it. *ioc_db* (optional) is ``(resolved, unresolved)`` from
+    :func:`e3_db.ioc_db_pvs`. A ``broken`` verdict (concrete linked PVs missing from *resolved*) is
+    emitted ONLY when *ioc_db_complete* is True AND *unresolved* is empty — i.e. the supplied IOC
+    .db set is **provably complete and fully resolved**; otherwise the verdict is withheld (absence
+    cannot be proven against a partial/templated set). *context_capped* / *glob_capped_count* carry
+    the inventory's honest incompleteness signals (linked/other become lower bounds).
     """
     prefix = st_cmd.prefix
     linked_displays: set[str] = set()
@@ -176,11 +185,20 @@ def crossplane_check(
         )
 
     broken: set[str] = set()
+    broken_withheld = False
     db_resolved = db_needs_msi = 0
     if ioc_db is not None:
         resolved, unresolved = ioc_db
         db_resolved, db_needs_msi = len(resolved), len(unresolved)
-        broken = {pv for pv in linked_pvs if pv not in resolved}
+        # A linked PV's ABSENCE from the IOC .db can only be proven when that .db set is provably
+        # complete (every load mechanism captured) AND fully resolved (no needs-msi residue);
+        # otherwise the record may exist under a still-templated name. Withhold rather than
+        # false-flag — the verdict's whole value is that it never lies.
+        if ioc_db_complete and not unresolved:
+            broken = {pv for pv in linked_pvs if pv not in resolved}
+        else:
+            broken_withheld = True
+    broken_write = broken & linked_write
 
     notes: list[str] = []
     if not prefix:  # None or "" — both mean "no usable IOC prefix" (join sends all to other-prefix)
@@ -220,6 +238,13 @@ def crossplane_check(
             "No IOC .db PV set supplied (e3 module repos deferred, EM-C-modules): "
             "provenance is at device-prefix + Naming level only; no 'broken' verdict."
         )
+    if broken_withheld:
+        notes.append(
+            "Broken verdict withheld — the IOC .db PV set is not provably complete and fully "
+            "resolved (incomplete load capture or records still macro-templated): a linked PV's "
+            "absence cannot be proven (it may exist under a name not yet expanded). A single "
+            "needs-msi record withholds ALL broken verdicts for this IOC (all-or-nothing)."
+        )
     if db_needs_msi:
         notes.append(
             f"{db_needs_msi} IOC record(s) still macro-templated after substitution "
@@ -243,6 +268,7 @@ def crossplane_check(
         ioc_db_resolved=db_resolved,
         ioc_db_needs_msi=db_needs_msi,
         broken=tuple(sorted(broken)),
+        broken_write=tuple(sorted(broken_write)),
         notes=tuple(notes),
     )
 
@@ -289,6 +315,8 @@ def render_markdown(report: CrossPlaneReport) -> str:
         )
     if report.broken:
         lines.append(f"- **Broken (linked PV absent from IOC .db):** {len(report.broken)}")
+        if report.broken_write:
+            lines.append(f"  - of which writable (dead command target): {len(report.broken_write)}")
         lines.extend(f"  - {pv}" for pv in report.broken)
     if report.notes:
         lines.append("")
