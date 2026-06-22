@@ -187,6 +187,31 @@ def test_broken_write_surfaced() -> None:
     assert "of which writable (dead command target): 1" in render_markdown(report)
 
 
+def test_broken_write_is_strict_subset_of_broken() -> None:
+    # QA C7: broken_write must be exactly the WRITABLE broken PVs, not a copy of broken — a
+    # read-only broken PV stays out of broken_write.
+    join = [
+        _jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:CmdW", role="write"),
+        _jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:ReadR", role="read"),
+        _jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:status"),
+    ]
+    ioc_db = ({"DEV-TEST01:Ctrl-EVR-01:status"}, set[str]())
+    report = crossplane_check(join, _st(), ioc_db=ioc_db, ioc_db_complete=True)
+    assert set(report.broken) == {"DEV-TEST01:Ctrl-EVR-01:CmdW", "DEV-TEST01:Ctrl-EVR-01:ReadR"}
+    assert report.broken_write == (
+        "DEV-TEST01:Ctrl-EVR-01:CmdW",
+    )  # the read-only broken is excluded
+
+
+def test_broken_withheld_over_empty_resolved_set() -> None:
+    # QA C1 (defense-in-depth): even if a caller marks an EMPTY .db set complete, broken must be
+    # withheld — proving absence against zero known PVs would flag every linked PV.
+    join = [_jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:anything")]
+    report = crossplane_check(join, _st(), ioc_db=(set[str](), set[str]()), ioc_db_complete=True)
+    assert report.broken == ()
+    assert any("broken verdict withheld" in note.lower() for note in report.notes)
+
+
 def test_render_markdown_deterministic_and_new_branches() -> None:
     report = crossplane_check(
         [

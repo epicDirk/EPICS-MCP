@@ -52,21 +52,34 @@ _RECORD_RE = re.compile(r'record\s*\(\s*[A-Za-z0-9_]+\s*,\s*"([^"]+)"\s*\)')
 
 # alias("record", "aliasName")  (standalone)  /  alias("aliasName")  (inside a record body).
 # Either way the ALIAS name is a real PV the IOC serves: 2nd quoted arg if present, else the 1st.
-_ALIAS_RE = re.compile(r'alias\s*\(\s*"([^"]+)"\s*(?:,\s*"([^"]+)"\s*)?\)')
+# Leading non-word guard so identifiers ending in "alias" (e.g. setMyalias(...)) are NOT captured.
+# (``_RECORD_RE`` deliberately keeps the substring match so ``grecord(...)`` is still recognised.)
+_ALIAS_RE = re.compile(r'(?<![A-Za-z0-9_])alias\s*\(\s*"([^"]+)"\s*(?:,\s*"([^"]+)"\s*)?\)')
 
 # A macro reference in either $(NAME) or ${NAME} form.
 _MACRO_REF_RE = re.compile(r"\$\{([A-Za-z0-9_]+)\}|\$\(([A-Za-z0-9_]+)\)")
 
 
-def _strip_comment_lines(text: str) -> str:
-    """Blank out full-line comments (a line whose first non-blank char is ``#``).
+def _strip_line_comment(line: str) -> str:
+    """Cut a ``#`` comment to end-of-line, but ONLY when the ``#`` is outside a quoted string.
 
-    EPICS iocsh and ``.db`` both treat ``#`` as a comment. Without this, a commented-out
-    ``dbLoadRecords``/``record(...)`` line would be parsed as if it were live (verified
-    bug). Only FULL-LINE comments are stripped — an inline ``#`` inside a quoted value is
-    left alone so record/field strings are never corrupted. Line structure is preserved.
+    EPICS iocsh and ``.db`` both treat ``#`` as a comment. A leading-``#`` line becomes empty; a
+    trailing ``# ...`` (e.g. ``alias("X") # note``) is cut — so a commented-out, still-templated
+    ``record``/``alias`` no longer pollutes the PV set. A ``#`` INSIDE quotes (a record/field/value)
+    is preserved, so real names are never corrupted.
     """
-    return "\n".join("" if line.lstrip().startswith("#") else line for line in text.splitlines())
+    in_quote = False
+    for index, char in enumerate(line):
+        if char == '"':
+            in_quote = not in_quote
+        elif char == "#" and not in_quote:
+            return line[:index]
+    return line
+
+
+def _strip_comment_lines(text: str) -> str:
+    """Strip ``#`` comments (full-line AND inline-outside-quotes) line by line; structure kept."""
+    return "\n".join(_strip_line_comment(line) for line in text.splitlines())
 
 
 def substitute(text: str, macros: dict[str, str], *, max_depth: int = 10) -> str:
@@ -158,7 +171,10 @@ def parse_st_cmd(text: str) -> StCmdInfo:
             Load(command=match.group("cmd"), target=match.group("file"), macros=macros)
         )
         p_value = macros.get("P")
-        if p_value:
+        # Only record-instantiating loads vote for the IOC device prefix. dbLoadTemplate is captured
+        # in _LOAD_RE for completeness DETECTION only (its records need msi); a stray dbLoadTemplate
+        # P= must not skew the prefix, which drives both bucketing and the Naming-Service query.
+        if p_value and match.group("cmd") != "dbLoadTemplate":
             prefixes[p_value] += 1
 
     if prefixes:
@@ -265,7 +281,14 @@ def load_ioc_db(st_info: StCmdInfo, module_db_root: Path) -> IocDbResult:
     for load in st_info.loads:
         if load.command != "dbLoadRecords" or not load.target.endswith(".db"):
             continue
-        matches = _locate_db(substitute(load.target, base_env), module_db_root)
+        target = substitute(load.target, base_env)
+        if "$(" in target or "${" in target:
+            # Path macro stayed unresolved (e.g. an unsynthesised/versioned module dir). Do NOT fall
+            # back to a basename search — it could load a same-named .db from the WRONG module and
+            # report it as the IOC's authoritative PV set. Force missing → complete=False.
+            missing.append(load.target)
+            continue
+        matches = _locate_db(target, module_db_root)
         if not matches:
             missing.append(load.target)
             continue
@@ -284,7 +307,12 @@ def load_ioc_db(st_info: StCmdInfo, module_db_root: Path) -> IocDbResult:
     # Any iocshLoad/dbLoadTemplate loads records we cannot statically follow → we cannot claim the
     # IOC's PV set is complete (the bulk of an e3 EVR's records come in via iocshLoad'ed .iocsh).
     unsupported = any(load.command in {"iocshLoad", "dbLoadTemplate"} for load in st_info.loads)
-    complete = not missing and not ambiguous and not unresolved and not unsupported
+    # ``bool(resolved)`` is load-bearing: a degenerate st.cmd (no dbLoadRecords, or a comment-/
+    # record-less .db) enumerates ZERO PVs — without this term it would report complete=True over an
+    # EMPTY set and crossplane would flag EVERY linked PV as broken (the exact trap we close).
+    complete = (
+        bool(resolved) and not missing and not ambiguous and not unresolved and not unsupported
+    )
     return IocDbResult(
         resolved=frozenset(resolved),
         unresolved=frozenset(unresolved),

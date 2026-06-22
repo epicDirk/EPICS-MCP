@@ -107,6 +107,35 @@ def test_ioc_db_pvs_captures_aliases() -> None:
     assert unresolved == set()
 
 
+def test_ioc_db_pvs_alias_word_boundary() -> None:
+    # QA C6: an identifier ENDING in "alias" (setMyalias(...)) must NOT be parsed as an alias().
+    db = 'record(bi, "$(P)rec")\nsetMyalias("$(P)ghost")\n'
+    resolved, _unresolved = ioc_db_pvs(db, {"P": "SYS:"})
+    assert resolved == {"SYS:rec"}
+    assert "SYS:ghost" not in resolved
+
+
+def test_ioc_db_pvs_inline_comment_stripped() -> None:
+    # QA C4: a trailing inline #-comment carrying a templated alias()/record() must NOT pollute the
+    # PV set (it would have made unresolved non-empty → withhold ALL broken verdicts for the IOC).
+    db = 'record(bi, "$(P)real")\nrecord(ao, "$(P)x") # alias("$(P)$(R)ghost")\n'
+    resolved, unresolved = ioc_db_pvs(db, {"P": "SYS:"})
+    assert resolved == {"SYS:real", "SYS:x"}
+    assert unresolved == set()
+
+
+def test_ioc_db_pvs_keeps_hash_inside_quotes() -> None:
+    # The inline-comment strip must NOT cut a # that lives inside a quoted name/value.
+    resolved, _unresolved = ioc_db_pvs('record(stringin, "SYS:a#b") {}\n', {})
+    assert resolved == {"SYS:a#b"}
+
+
+def test_parse_prefix_ignores_dbloadtemplate_vote() -> None:
+    # QA C3: dbLoadTemplate is captured for detection only and must not skew the IOC prefix.
+    st = 'dbLoadTemplate("x.substitutions", "P=TPL:")\ndbLoadRecords("a.db", "P=REAL:")\n'
+    assert parse_st_cmd(st).prefix == "REAL:"
+
+
 # --- load_ioc_db (opt-in IOC .db enumeration) -------------------------------------------------
 
 
@@ -184,3 +213,41 @@ def test_load_ioc_db_decode_error_is_graceful_missing(tmp_path: Path) -> None:
     result = load_ioc_db(info, tmp_path)
     assert result.missing == ("bad.db",)
     assert result.complete is False
+
+
+def test_load_ioc_db_no_dbloadrecords_is_incomplete(tmp_path: Path) -> None:
+    # QA C1: a st.cmd that enumerates ZERO concrete PVs must NOT report complete=True (else
+    # crossplane would flag every linked PV as broken against the empty set).
+    info = parse_st_cmd('epicsEnvSet("P", "SYS:")\n')
+    result = load_ioc_db(info, tmp_path)
+    assert result.resolved == frozenset()
+    assert result.complete is False
+
+
+def test_load_ioc_db_empty_db_is_incomplete(tmp_path: Path) -> None:
+    # QA C1: a found-but-record-less .db enumerates nothing → not complete.
+    info = parse_st_cmd('dbLoadRecords("empty.db", "P=SYS:")\n')
+    _write(tmp_path / "empty.db", "# only a comment, no records\n")
+    result = load_ioc_db(info, tmp_path)
+    assert result.resolved == frozenset()
+    assert result.complete is False
+
+
+def test_load_ioc_db_unresolved_path_macro_not_basename_guessed(tmp_path: Path) -> None:
+    # QA C2: an unresolved $(<module>_DIR) must NOT degrade to a basename search that loads a
+    # same-named .db from the WRONG module → force missing, never load foreign PVs, complete=False.
+    info = parse_st_cmd('require modx\ndbLoadRecords("$(othermod_DIR)/foo.db", "P=SYS:")\n')
+    _write(tmp_path / "elsewhere" / "foo.db", 'record(bi, "$(P)wrong") {}\n')
+    result = load_ioc_db(info, tmp_path)
+    assert result.resolved == frozenset()  # the wrong-module foo.db was NOT loaded
+    assert result.missing == ("$(othermod_DIR)/foo.db",)
+    assert result.complete is False
+
+
+def test_load_ioc_db_same_db_two_instances_merged(tmp_path: Path) -> None:
+    # QA C7: two dbLoadRecords of the SAME .db with different macros must both be expanded (the
+    # loader iterates st_info.loads, not the deduped db_files) → per-instance PV sets merge.
+    info = parse_st_cmd('dbLoadRecords("foo.db", "P=A:")\ndbLoadRecords("foo.db", "P=B:")\n')
+    _write(tmp_path / "foo.db", 'record(bi, "$(P)status") {}\n')
+    result = load_ioc_db(info, tmp_path)
+    assert result.resolved == frozenset({"A:status", "B:status"})

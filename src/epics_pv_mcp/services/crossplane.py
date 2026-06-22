@@ -194,9 +194,12 @@ def crossplane_check(
         # complete (every load mechanism captured) AND fully resolved (no needs-msi residue);
         # otherwise the record may exist under a still-templated name. Withhold rather than
         # false-flag — the verdict's whole value is that it never lies.
-        if ioc_db_complete and not unresolved:
+        if ioc_db_complete and resolved and not unresolved:
             broken = {pv for pv in linked_pvs if pv not in resolved}
         else:
+            # Withhold over an empty/partial/templated resolved set — proving a linked PV's absence
+            # against ZERO known PVs would flag every linked PV (defense-in-depth with the loader's
+            # ``bool(resolved)`` completeness term).
             broken_withheld = True
     broken_write = broken & linked_write
 

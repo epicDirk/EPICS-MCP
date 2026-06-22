@@ -54,11 +54,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--module-db-root",
-        type=Path,
-        default=None,
+        default="",
         help="opt-in: local directory of the IOC's e3 module .db files. When given, concrete "
         "linked PVs are checked against the loaded IOC .db set; a 'broken' verdict is emitted ONLY "
-        "if that set is provably complete (else withheld). Omit to stay at prefix/Naming level.",
+        "if that set is provably complete (else withheld). Omit (or empty) = prefix/Naming level.",
     )
     args = parser.parse_args(argv)
 
@@ -73,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     if not Path(args.displays).is_dir():
         sys.stderr.write(f"Error: displays directory not found: {args.displays}\n")
         return 2
-    if args.module_db_root is not None and not Path(args.module_db_root).is_dir():
+    if args.module_db_root and not Path(args.module_db_root).is_dir():
         sys.stderr.write(f"Error: module-db-root directory not found: {args.module_db_root}\n")
         return 2
 
@@ -84,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     naming = NamingServiceClient() if args.naming else None
     ioc_db: tuple[set[str], set[str]] | None = None
     ioc_db_complete = False
-    if args.module_db_root is not None:
+    if args.module_db_root:  # empty string = offline (mirror the MCP tool's truthiness sentinel)
         db_result = load_ioc_db(st_info, Path(args.module_db_root))
         ioc_db = (set(db_result.resolved), set(db_result.unresolved))
         ioc_db_complete = db_result.complete
