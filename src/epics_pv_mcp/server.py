@@ -5,6 +5,7 @@ from typing import Annotated
 from fastmcp.exceptions import ToolError
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
+from opi_navigation.pv_analysis.lookup import MatchMode
 from pydantic import Field
 
 from epics_pv_mcp import __version__
@@ -17,6 +18,7 @@ from epics_pv_mcp.tools.archiver import _get_pv_history, _is_archived
 from epics_pv_mcp.tools.channelfinder import _find_channels
 from epics_pv_mcp.tools.crossplane import _crossplane_check
 from epics_pv_mcp.tools.discover import _discover_pvs
+from epics_pv_mcp.tools.find_device import _find_device
 from epics_pv_mcp.tools.info import _get_pv_info
 from epics_pv_mcp.tools.monitor import _monitor_pv
 from epics_pv_mcp.tools.read import _get_pv_value, _get_pvs
@@ -28,8 +30,9 @@ mcp = FastMCP(
     "epics-pv-mcp",
     instructions=(
         "Read-only EPICS PV access by default: read live values and metadata, monitor, "
-        "discover, validate the PVs of a .bob display, cross-plane provenance, ChannelFinder "
-        "lookups and Archiver history. The only mutating tool, set_pv_value, is gated OFF by "
+        "discover, validate the PVs of a .bob display, cross-plane provenance, device lookup "
+        "(screens + live + source IOC), ChannelFinder lookups and Archiver history. The only "
+        "mutating tool, set_pv_value, is gated OFF by "
         "default and additionally requires EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, "
         "a rate limit and an audit log. The REST-backed tools (find_channels, is_archived, "
         "get_pv_history) stay disabled until their *_URL env vars are set; an empty URL means "
@@ -406,6 +409,49 @@ async def get_pv_history(
     """
     try:
         return await _get_pv_history(pv, start, end, max_points, timeout)
+    except EpicsError as e:
+        raise ToolError(f"[{e.error_code}] {e}") from e
+    except Exception as e:
+        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+async def find_device(
+    query: Annotated[str, Field(description="Device / PV channel (protocol prefix optional)")],
+    displays_dir: Annotated[
+        str, Field(description="Project/dataset ROOT holding the .bob displays")
+    ],
+    match: Annotated[
+        MatchMode, Field(description="Match mode against the protocol-stripped channel")
+    ] = "prefix",
+    timeout: Annotated[float, Field(description="Live-read timeout in seconds")] = 5.0,
+    context_cap: Annotated[
+        int, Field(description="Per-display macro-context cap (higher = more complete, slower)")
+    ] = DEFAULT_PV_CONTEXT_CAP,
+    windows_paths: Annotated[
+        bool, Field(description="Resolve embedded <file> refs case-insensitively (Windows host)")
+    ] = False,
+) -> dict[str, object]:
+    """Find which operator screens show device X, read its channels live, and join the serving IOC.
+
+    Read-only (Wedge-2 live counterpart of the offline find_screen). The reverse-lookup — which
+    operator screens reference the device — is offline + macro-aware. Live values come from p4p,
+    localhost-isolated by default (does NOT reach ESS production until the launcher widens the EPICS
+    address list); the live read is capped to max_batch_size channels (honest note; screens stay
+    complete). Source IOC comes from ChannelFinder, disabled by default (empty
+    EPICS_MCP_CHANNELFINDER_URL → no source IOC, honest note). ca-only PVs are not read under the
+    single pva provider. displays_dir is the project/dataset ROOT. Returns
+    {"report": <DeviceLookupReport JSON>, "markdown": <rendered report>}.
+    """
+    try:
+        return await _find_device(query, displays_dir, match, timeout, context_cap, windows_paths)
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:

@@ -15,6 +15,11 @@ Based on a fork of [Jacky1-Jiang/EPICS-MCP-Server](https://github.com/Jacky1-Jia
 | `monitor_pv` | Subscribe to PV updates for a given duration |
 | `validate_pvs` | Extract PV names from a `.bob` display file and check connectivity |
 | `discover_pvs` | Search for PVs matching a glob/regex pattern |
+| `crossplane_check` | Cross-plane PV provenance: display PVs ↔ e3 IOC `st.cmd` (+ optional `.db`) ↔ Naming Service (read-only) |
+| `find_device` | Find which operator screens show a device, read its channels live (capped), and join the serving IOC |
+| `find_channels` | ChannelFinder lookup: which IOC/host serves a PV + tags/properties (disabled until `EPICS_MCP_CHANNELFINDER_URL` set) |
+| `is_archived` | Whether a PV is archived (EPICS Archiver Appliance; disabled until `EPICS_MCP_ARCHIVER_URL` set) |
+| `get_pv_history` | Archived samples for a PV over an ISO-8601 window (disabled until `EPICS_MCP_ARCHIVER_URL` set) |
 
 ## Resources
 
