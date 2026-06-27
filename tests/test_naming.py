@@ -80,3 +80,13 @@ def test_check_connectivity_raises_on_error(monkeypatch: pytest.MonkeyPatch) -> 
     )
     with pytest.raises(NamingServiceConnectionError):
         client.check_connectivity()
+
+
+def test_check_connectivity_uses_configured_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    # G4: the reachability probe must honor the configured timeout (default 5 s),
+    # not a hardcoded 1 s that falsely reports a slow-but-reachable service down.
+    client = NamingServiceClient(timeout=7.5)
+    head = Mock(return_value=Mock())
+    monkeypatch.setattr(client.session, "head", head)
+    assert client.check_connectivity() is True
+    head.assert_called_once_with(client.base_url, timeout=7.5)

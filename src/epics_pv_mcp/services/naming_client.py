@@ -91,7 +91,11 @@ class NamingServiceClient:
     def check_connectivity(self) -> bool:
         """Return True if the Naming Service is reachable; raise otherwise."""
         try:
-            self.session.head(self.base_url, timeout=1)
+            # Use the configured timeout (default 5 s), not a hardcoded 1 s — a
+            # slow-but-reachable Naming Service (e.g. over the ESS VPN) must not
+            # be falsely reported unreachable while the real GETs (self.timeout)
+            # would have succeeded.
+            self.session.head(self.base_url, timeout=self.timeout)
             return True
         except (requests.exceptions.ConnectionError, ConnectionError, OSError) as exc:
             raise NamingServiceConnectionError(
