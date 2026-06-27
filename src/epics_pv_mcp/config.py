@@ -1,12 +1,22 @@
 """Configuration for the EPICS PV MCP Server, loaded from environment variables."""
 
 import threading
+from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
 class EpicsConfig(BaseSettings):
-    """All settings are read from EPICS_MCP_* environment variables."""
+    """All settings are read from EPICS_MCP_* environment variables.
+
+    Numeric fields carry ``Field`` range constraints and ``provider`` is a
+    ``Literal`` — a nonsensical or out-of-range env value is rejected with a
+    clear ``ValidationError`` at first ``get_config()`` (fail-fast) instead of
+    being silently accepted and producing hidden timeouts or a crashing rate
+    limiter (a negative ``write_rate_limit`` used to abort ``SafetyLayer`` via
+    ``deque(maxlen=-1)``).
+    """
 
     model_config = {"env_prefix": "EPICS_MCP_"}
 
@@ -16,15 +26,16 @@ class EpicsConfig(BaseSettings):
     # aktivem allow_pv_write sind dann alle PVs schreibbar (das env-Gate ist die
     # primäre Kontrolle, das Pattern eine optionale Verschärfung).
     pv_write_pattern: str = ""
-    write_rate_limit: int = 10  # max writes per minute
+    # max writes per minute; ge=1 — "block all" is the allow_pv_write gate, not 0.
+    write_rate_limit: int = Field(default=10, ge=1)
     audit_log_file: str = ""  # path to audit log (empty = stderr)
 
     # --- p4p ---
-    provider: str = "pva"  # "pva" or "ca"
-    default_timeout: float = 5.0
-    max_batch_size: int = 100
-    max_monitor_duration: float = 60.0
-    max_monitor_events: int = 1000
+    provider: Literal["pva", "ca"] = "pva"  # p4p provider; lowercase only
+    default_timeout: float = Field(default=5.0, gt=0)
+    max_batch_size: int = Field(default=100, ge=1)
+    max_monitor_duration: float = Field(default=60.0, gt=0)
+    max_monitor_events: int = Field(default=1000, ge=1)
 
     # --- Optional REST services (read-only; empty URL = disabled, no network call) ---
     # ChannelFinder service root incl. context path, e.g. "http://host:8080/ChannelFinder".

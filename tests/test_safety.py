@@ -50,6 +50,17 @@ class TestPatternAllowlist:
         safety.check_write_allowed("ANYTHING:goes")
 
 
+class TestSafetyConfigGuard:
+    """G5: an out-of-range write_rate_limit fails closed, not as a bare ValueError."""
+
+    def test_negative_rate_limit_raises_safety_config_error(self) -> None:
+        # model_construct bypasses G2's ge=1 validation — the SafetyLayer guard
+        # must convert deque(maxlen=-1)'s bare ValueError into SafetyConfigError.
+        cfg = EpicsConfig.model_construct(write_rate_limit=-1)
+        with pytest.raises(SafetyConfigError):
+            SafetyLayer(cfg)
+
+
 class TestRateLimit:
     """Sliding-window rate limit enforcement."""
 

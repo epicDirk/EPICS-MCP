@@ -1,6 +1,7 @@
 """Tests for EpicsConfig and get_config singleton."""
 
 import pytest
+from pydantic import ValidationError
 
 import epics_pv_mcp.config as config_module
 from epics_pv_mcp.config import EpicsConfig, get_config
@@ -68,6 +69,45 @@ class TestEpicsConfigEnvOverride:
         monkeypatch.setenv("EPICS_MCP_WRITE_RATE_LIMIT", "20")
         cfg = EpicsConfig()
         assert cfg.write_rate_limit == 20
+
+
+class TestEpicsConfigValidation:
+    """G2: nonsensical / out-of-range values are rejected, not silently accepted."""
+
+    def test_invalid_provider_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EPICS_MCP_PROVIDER", "nonsense")
+        with pytest.raises(ValidationError):
+            EpicsConfig()
+
+    def test_uppercase_provider_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # provider is a lowercase Literal — "CA" must fail, not silently mis-provider.
+        monkeypatch.setenv("EPICS_MCP_PROVIDER", "CA")
+        with pytest.raises(ValidationError):
+            EpicsConfig()
+
+    def test_negative_write_rate_limit_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EPICS_MCP_WRITE_RATE_LIMIT", "-1")
+        with pytest.raises(ValidationError):
+            EpicsConfig()
+
+    def test_zero_max_batch_size_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EPICS_MCP_MAX_BATCH_SIZE", "0")
+        with pytest.raises(ValidationError):
+            EpicsConfig()
+
+    def test_nonpositive_default_timeout_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EPICS_MCP_DEFAULT_TIMEOUT", "0")
+        with pytest.raises(ValidationError):
+            EpicsConfig()
+
+    def test_zero_max_monitor_events_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EPICS_MCP_MAX_MONITOR_EVENTS", "0")
+        with pytest.raises(ValidationError):
+            EpicsConfig()
+
+    def test_valid_lowercase_provider_accepted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EPICS_MCP_PROVIDER", "ca")
+        assert EpicsConfig().provider == "ca"
 
 
 class TestGetConfigSingleton:

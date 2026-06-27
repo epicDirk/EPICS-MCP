@@ -48,8 +48,18 @@ class SafetyLayer:
                 f"Invalid EPICS_MCP_PV_WRITE_PATTERN regex {config.pv_write_pattern!r}: {exc}",
                 details={"pattern": config.pv_write_pattern},
             ) from exc
-        # Sliding-window timestamps of recent writes
-        self._timestamps: deque[float] = deque(maxlen=config.write_rate_limit)
+        # Sliding-window timestamps of recent writes. G2 constrains
+        # write_rate_limit to ge=1, so a *validated* config never produces a
+        # negative maxlen. This fail-closed guard catches a config that bypassed
+        # validation (e.g. EpicsConfig.model_construct): a bare ValueError from
+        # deque(maxlen<0) would otherwise escape the fail-closed contract here.
+        try:
+            self._timestamps: deque[float] = deque(maxlen=config.write_rate_limit)
+        except ValueError as exc:
+            raise SafetyConfigError(
+                f"Invalid write_rate_limit {config.write_rate_limit!r}: must be >= 0",
+                details={"write_rate_limit": config.write_rate_limit},
+            ) from exc
         self._audit_handler: logging.Handler | None = None
         self._audit_logger = self._setup_audit_logger()
 
