@@ -37,6 +37,15 @@ def test_nonexistent_raises_invalid_input(tmp_path: Path) -> None:
     assert exc.value.error_code == "INVALID_INPUT"
 
 
+@pytest.mark.parametrize("raw", ["", "   ", "\t"])
+def test_empty_or_blank_raises_invalid_input(raw: str) -> None:
+    # Empty/blank must NOT silently resolve to the server CWD (Path("").resolve()).
+    with pytest.raises(EpicsError) as exc:
+        resolve_user_path(raw, kind="dir", label="myfield")
+    assert exc.value.error_code == "INVALID_INPUT"
+    assert "myfield" in str(exc.value)
+
+
 def test_wrong_kind_labels_the_field(tmp_path: Path) -> None:
     # A directory queried as a file → INVALID_INPUT, and the message names the arg.
     with pytest.raises(EpicsError) as exc:

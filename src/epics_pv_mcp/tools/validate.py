@@ -47,6 +47,9 @@ def _run_validate(file_path: str, displays_dir: str | None) -> tuple[list[str], 
         # No explicit root → walk the file's own directory, but boundary-check that
         # directory too (the path actually walked, not just the file itself).
         root = resolve_user_path(str(f.parent), kind="dir", label="displays_dir")
+    # windows_paths=True: this server runs on a Windows host, so embedded <file>
+    # refs resolve case-insensitively. It does NOT affect the origin_file/rel match
+    # below (always posix), only cross-file embed resolution.
     inventory = analyze_pv_inventory(root, windows_paths=True)
     try:
         rel = f.relative_to(root).as_posix()

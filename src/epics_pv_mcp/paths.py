@@ -47,10 +47,16 @@ def resolve_user_path(raw: str, *, kind: Literal["dir", "file"], label: str) -> 
     caller learns which path was rejected.
 
     Raises:
-        EpicsError(INVALID_INPUT): the path does not exist or is the wrong kind.
+        EpicsError(INVALID_INPUT): the path is empty/blank, does not exist, or is
+            the wrong kind.
         EpicsError(PATH_OUTSIDE_WORKSPACE): an ``allowed_roots`` boundary is
             configured and *raw* resolves outside every root.
     """
+    # Reject empty/blank BEFORE resolve(): Path("")/Path("   ").resolve() collapse to
+    # the process CWD (and is_dir() is then True), which would silently walk the
+    # server's working directory instead of raising.
+    if not raw.strip():
+        raise EpicsError(f"{label} must not be empty", error_code="INVALID_INPUT")
     resolved = Path(raw).resolve()
     noun = "directory" if kind == "dir" else "file"
     exists_as_kind = resolved.is_dir() if kind == "dir" else resolved.is_file()

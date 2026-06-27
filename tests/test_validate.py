@@ -131,6 +131,37 @@ async def test_validate_pvs_file_path_outside_allowed_roots(
         config_module._config = None
 
 
+async def test_validate_pvs_file_path_without_displays_dir_walks_parent(tmp_path: Path) -> None:
+    """displays_dir=None walks the file's own directory (the G3 walked-root path)."""
+    root, _ = _dataset(tmp_path)
+    mock = AsyncMock(return_value={"pv_name": "X", "value": 1})
+    with patch("epics_pv_mcp.tools.validate.pv_get", mock):
+        # The parent display 'overview.bob' is operator-facing in root; querying it
+        # without displays_dir uses file.parent (== root) as the walked root.
+        result = await _validate_pvs(file_path=str(root / "overview.bob"))
+    assert isinstance(result["total"], int)  # resolves (no MISSING_DEPENDENCY / crash)
+
+
+async def test_validate_pvs_no_displays_dir_honors_allowed_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G3: even in file_path-only mode (displays_dir=None) the allowed_roots boundary
+    is enforced — a file_path outside the allowed roots is rejected before any walk."""
+    import epics_pv_mcp.config as config_module
+
+    _, fragment = _dataset(tmp_path)
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("EPICS_MCP_ALLOWED_ROOTS", str(allowed))
+    config_module._config = None
+    try:
+        with pytest.raises(EpicsError) as exc_info:
+            await _validate_pvs(file_path=str(fragment))  # no displays_dir
+        assert exc_info.value.error_code == "PATH_OUTSIDE_WORKSPACE"
+    finally:
+        config_module._config = None
+
+
 async def test_validate_pvs_file_path_context_capped_note(tmp_path: Path) -> None:
     """G1: when the file's macro expansion hit the per-display context cap, the result
     carries an honest 'lower bound' note (a minimal inventory is mocked to flag it)."""

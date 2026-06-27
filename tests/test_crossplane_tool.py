@@ -209,6 +209,29 @@ async def test_crossplane_tool_rejects_displays_dir_outside_allowed_roots(
 
 
 @pytest.mark.asyncio
+async def test_crossplane_tool_st_cmd_honors_allowed_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G3: the boundary covers st_cmd_path too (displays_dir inside, st_cmd outside)."""
+    import epics_pv_mcp.config as config_module
+
+    proj = tmp_path / "proj"
+    displays = proj / "displays"
+    displays.mkdir(parents=True)
+    (displays / "panel.bob").write_text(_BOB, encoding="utf-8")
+    st_cmd = tmp_path / "st.cmd"  # OUTSIDE proj (the allowed root)
+    st_cmd.write_text(_ST_CMD, encoding="utf-8")
+    monkeypatch.setenv("EPICS_MCP_ALLOWED_ROOTS", str(proj))
+    config_module._config = None
+    try:
+        with pytest.raises(EpicsError) as exc:
+            await _crossplane_check(str(displays), str(st_cmd))
+        assert exc.value.error_code == "PATH_OUTSIDE_WORKSPACE"
+    finally:
+        config_module._config = None
+
+
+@pytest.mark.asyncio
 async def test_crossplane_tool_module_db_root_honors_allowed_roots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

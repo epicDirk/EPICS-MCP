@@ -105,6 +105,19 @@ class TestEpicsConfigValidation:
         with pytest.raises(ValidationError):
             EpicsConfig()
 
+    def test_nonpositive_max_monitor_duration_rejected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("EPICS_MCP_MAX_MONITOR_DURATION", "0")
+        with pytest.raises(ValidationError):
+            EpicsConfig()
+
+    def test_whitespace_padded_provider_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # pydantic does not strip a Literal — " ca" must fail, not silently pass.
+        monkeypatch.setenv("EPICS_MCP_PROVIDER", " ca")
+        with pytest.raises(ValidationError):
+            EpicsConfig()
+
     def test_valid_lowercase_provider_accepted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("EPICS_MCP_PROVIDER", "ca")
         assert EpicsConfig().provider == "ca"
