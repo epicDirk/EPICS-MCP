@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from epics_pv_mcp.errors import EpicsError
+from epics_pv_mcp.paths import resolve_user_path
 from epics_pv_mcp.services.crossplane import crossplane_check, render_markdown
 from epics_pv_mcp.services.e3_db import load_ioc_db, parse_st_cmd
 from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP, analyze_display_pvs
@@ -89,23 +89,12 @@ async def _crossplane_check(
     Returns ``{"report": <CrossPlaneReport JSON>, "markdown": <rendered report>}``.
     Raises :class:`EpicsError` (``INVALID_INPUT``) when a path does not exist.
     """
-    displays = Path(displays_dir)
-    st_cmd = Path(st_cmd_path)
-    if not displays.is_dir():
-        raise EpicsError(
-            f"displays_dir is not a directory: {displays_dir}",
-            error_code="INVALID_INPUT",
-        )
-    if not st_cmd.is_file():
-        raise EpicsError(
-            f"st_cmd_path is not a file: {st_cmd_path}",
-            error_code="INVALID_INPUT",
-        )
-    if module_db_root and not Path(module_db_root).is_dir():
-        raise EpicsError(
-            f"module_db_root is not a directory: {module_db_root}",
-            error_code="INVALID_INPUT",
-        )
+    # Canonicalize + existence-check + opt-in allowed_roots boundary (G3) on every
+    # user path before any filesystem walk. module_db_root is optional.
+    resolve_user_path(displays_dir, kind="dir", label="displays_dir")
+    resolve_user_path(st_cmd_path, kind="file", label="st_cmd_path")
+    if module_db_root:
+        resolve_user_path(module_db_root, kind="dir", label="module_db_root")
     return await asyncio.to_thread(
         _run_check,
         displays_dir,

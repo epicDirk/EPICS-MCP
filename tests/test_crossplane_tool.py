@@ -189,6 +189,51 @@ async def test_crossplane_tool_rejects_bad_st_cmd(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_crossplane_tool_rejects_displays_dir_outside_allowed_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G3: an existing displays_dir outside the opt-in allowed_roots is rejected."""
+    import epics_pv_mcp.config as config_module
+
+    displays, st_cmd = _setup(tmp_path)  # both exist, but outside the allowed root
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("EPICS_MCP_ALLOWED_ROOTS", str(allowed))
+    config_module._config = None
+    try:
+        with pytest.raises(EpicsError) as exc:
+            await _crossplane_check(str(displays), str(st_cmd))
+        assert exc.value.error_code == "PATH_OUTSIDE_WORKSPACE"
+    finally:
+        config_module._config = None
+
+
+@pytest.mark.asyncio
+async def test_crossplane_tool_module_db_root_honors_allowed_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G3-S2: the boundary also covers module_db_root (e3_db os.walk + read_text)."""
+    import epics_pv_mcp.config as config_module
+
+    proj = tmp_path / "proj"  # displays + st_cmd live here (inside the allowed root)
+    displays = proj / "displays"
+    displays.mkdir(parents=True)
+    (displays / "panel.bob").write_text(_BOB, encoding="utf-8")
+    st_cmd = proj / "st.cmd"
+    st_cmd.write_text(_ST_CMD, encoding="utf-8")
+    module_db = tmp_path / "moddb"  # sibling of proj → OUTSIDE the allowed root
+    module_db.mkdir()
+    monkeypatch.setenv("EPICS_MCP_ALLOWED_ROOTS", str(proj))
+    config_module._config = None
+    try:
+        with pytest.raises(EpicsError) as exc:
+            await _crossplane_check(str(displays), str(st_cmd), module_db_root=str(module_db))
+        assert exc.value.error_code == "PATH_OUTSIDE_WORKSPACE"
+    finally:
+        config_module._config = None
+
+
+@pytest.mark.asyncio
 async def test_crossplane_tool_pva_prefixed_pv_links(tmp_path: Path) -> None:
     """Wedge-1 mini-fix end-to-end (active bug, crossplane.py:162): an explicitly ``pva://``-prefixed
     display PV that shares the IOC prefix is normalized to its channel name at the adapter edge → it

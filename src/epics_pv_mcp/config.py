@@ -30,6 +30,12 @@ class EpicsConfig(BaseSettings):
     write_rate_limit: int = Field(default=10, ge=1)
     audit_log_file: str = ""  # path to audit log (empty = stderr)
 
+    # --- Path boundary (opt-in; see paths.resolve_user_path) ---
+    # os.pathsep-separated roots that file/dir tool arguments must resolve under.
+    # Empty (default) = NO boundary (future-posture optionality, not "secured" —
+    # the server is read-only + localhost-isolated with a single trusted caller).
+    allowed_roots: str = ""
+
     # --- p4p ---
     provider: Literal["pva", "ca"] = "pva"  # p4p provider; lowercase only
     default_timeout: float = Field(default=5.0, gt=0)

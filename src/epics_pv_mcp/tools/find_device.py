@@ -28,6 +28,7 @@ from opi_navigation.pv_analysis.lookup import MatchMode, PvLookupResult
 
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsError
+from epics_pv_mcp.paths import resolve_user_path
 from epics_pv_mcp.services.device_lookup import (
     build_device_report,
     collect_channels,
@@ -79,10 +80,8 @@ async def _find_device(
     cleaned = query.strip()
     if not cleaned:
         raise EpicsError("query must not be empty", error_code="INVALID_INPUT")
-    if not Path(displays_dir).is_dir():
-        raise EpicsError(
-            f"displays_dir is not a directory: {displays_dir}", error_code="INVALID_INPUT"
-        )
+    # Canonicalize + existence-check + opt-in allowed_roots boundary (G3).
+    resolve_user_path(displays_dir, kind="dir", label="displays_dir")
 
     lookup, channels = await asyncio.to_thread(
         _run_lookup, displays_dir, cleaned, match, context_cap, windows_paths

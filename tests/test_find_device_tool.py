@@ -114,6 +114,26 @@ async def test_find_device_tool_rejects_bad_displays_dir(tmp_path: Path) -> None
 
 
 @pytest.mark.asyncio
+async def test_find_device_tool_rejects_displays_dir_outside_allowed_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G3: an existing displays_dir outside the opt-in allowed_roots is rejected."""
+    import epics_pv_mcp.config as config_module
+
+    displays = _displays(tmp_path)  # exists, but outside the allowed root below
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("EPICS_MCP_ALLOWED_ROOTS", str(allowed))
+    config_module._config = None
+    try:
+        with pytest.raises(EpicsError) as exc:
+            await _find_device("DEV-TEST01", str(displays))
+        assert exc.value.error_code == "PATH_OUTSIDE_WORKSPACE"
+    finally:
+        config_module._config = None
+
+
+@pytest.mark.asyncio
 async def test_server_find_device_maps_error_to_tool_error(tmp_path: Path) -> None:
     """The server wrapper maps EpicsError to ToolError with the error_code tag."""
     from fastmcp.exceptions import ToolError
