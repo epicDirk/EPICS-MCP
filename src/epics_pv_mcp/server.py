@@ -39,7 +39,10 @@ mcp = FastMCP(
         "no client and no network call. Network reach is localhost-isolated by default: the "
         "server opens no non-local connection unless its launcher widens the EPICS address-list "
         "environment (EPICS_PVA_ADDR_LIST / EPICS_CA_ADDR_LIST and the matching *_AUTO_ADDR_LIST); "
-        "until then it does NOT reach ESS production. See .env.example for the commented template."
+        "until then it does NOT reach ESS production. File/dir tool arguments are canonicalized "
+        "and existence-checked; an opt-in EPICS_MCP_ALLOWED_ROOTS (os.pathsep-separated) confines "
+        "them to those roots (empty by default = no boundary). See .env.example for the commented "
+        "template."
     ),
 )
 mcp._mcp_server.version = __version__

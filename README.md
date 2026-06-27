@@ -62,15 +62,16 @@ All settings are read from environment variables with the `EPICS_MCP_` prefix:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `EPICS_MCP_PROVIDER` | `pva` | Protocol provider: `pva` (PVAccess) or `ca` (Channel Access) |
-| `EPICS_MCP_DEFAULT_TIMEOUT` | `5.0` | PV operation timeout in seconds |
-| `EPICS_MCP_MAX_BATCH_SIZE` | `100` | Maximum PVs per batch read |
-| `EPICS_MCP_MAX_MONITOR_DURATION` | `60.0` | Maximum monitor subscription duration in seconds |
-| `EPICS_MCP_MAX_MONITOR_EVENTS` | `1000` | Maximum events per monitor subscription |
+| `EPICS_MCP_PROVIDER` | `pva` | Protocol provider: `pva` (PVAccess) or `ca` (Channel Access). Lowercase only — an invalid value is rejected at startup |
+| `EPICS_MCP_DEFAULT_TIMEOUT` | `5.0` | PV operation timeout in seconds (must be > 0) |
+| `EPICS_MCP_MAX_BATCH_SIZE` | `100` | Maximum PVs per batch read (must be ≥ 1) |
+| `EPICS_MCP_MAX_MONITOR_DURATION` | `60.0` | Maximum monitor subscription duration in seconds (must be > 0) |
+| `EPICS_MCP_MAX_MONITOR_EVENTS` | `1000` | Maximum events per monitor subscription (must be ≥ 1) |
 | `EPICS_MCP_ALLOW_PV_WRITE` | `false` | Enable PV writes |
 | `EPICS_MCP_PV_WRITE_PATTERN` | _(empty)_ | Regex allowlist for writable PV names |
-| `EPICS_MCP_WRITE_RATE_LIMIT` | `10` | Maximum writes per minute |
+| `EPICS_MCP_WRITE_RATE_LIMIT` | `10` | Maximum writes per minute (must be ≥ 1) |
 | `EPICS_MCP_AUDIT_LOG_FILE` | _(empty)_ | Path to audit log file (empty = stderr) |
+| `EPICS_MCP_ALLOWED_ROOTS` | _(empty)_ | Opt-in path boundary: `os.pathsep`-separated roots that file/dir tool arguments (`displays_dir`, `st_cmd_path`, `module_db_root`, `file_path`) must resolve under. Empty = no boundary. Separator is OS-dependent (`;` Windows / `:` Linux) |
 
 ## Claude Code Integration
 
