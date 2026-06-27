@@ -75,10 +75,9 @@ init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
 
-# p4p ist untypisiert (keine Stubs); phoebus_mcp_core ist ein optionaler Lazy-Import
-# in tools/validate.py und im EPICS-venv nicht installiert.
+# p4p ist untypisiert (keine Stubs).
 [[tool.mypy.overrides]]
-module = ["p4p.*", "p4p", "phoebus_mcp_core.*", "requests", "requests.*", "urllib3", "urllib3.*"]
+module = ["p4p.*", "p4p", "requests", "requests.*", "urllib3", "urllib3.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

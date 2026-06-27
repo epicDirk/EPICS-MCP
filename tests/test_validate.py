@@ -110,3 +110,73 @@ async def test_validate_pvs_file_path_zero_real_pvs_is_total_zero(tmp_path: Path
     result = await _validate_pvs(file_path=str(local), displays_dir=str(root))
     assert result["total"] == 0
     assert result["pvs"] == []
+
+
+async def test_validate_pvs_file_path_outside_allowed_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G3: file_path mode honors the opt-in allowed_roots boundary too."""
+    import epics_pv_mcp.config as config_module
+
+    root, fragment = _dataset(tmp_path)  # fragment is inside root, but outside `allowed`
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("EPICS_MCP_ALLOWED_ROOTS", str(allowed))
+    config_module._config = None
+    try:
+        with pytest.raises(EpicsError) as exc_info:
+            await _validate_pvs(file_path=str(fragment), displays_dir=str(root))
+        assert exc_info.value.error_code == "PATH_OUTSIDE_WORKSPACE"
+    finally:
+        config_module._config = None
+
+
+async def test_validate_pvs_file_path_context_capped_note(tmp_path: Path) -> None:
+    """G1: when the file's macro expansion hit the per-display context cap, the result
+    carries an honest 'lower bound' note (a minimal inventory is mocked to flag it)."""
+    from opi_navigation.pv_analysis import (
+        DisplayPvInventory,
+        ExpandedPv,
+        PvDiagnostics,
+        PvInventory,
+    )
+
+    root = tmp_path / "ds"
+    root.mkdir()
+    frag = root / "frag.bob"
+    frag.write_text('<display version="2.0.0"><name>F</name></display>', encoding="utf-8")
+    # One resolved ca PV whose origin is frag.bob, attributed to a top-level the
+    # diagnostics report as context-capped → the extracted list is a lower bound.
+    fake = PvInventory(
+        repo_root=str(root),
+        displays=(
+            DisplayPvInventory(
+                display_path="ov.bob",
+                operator_facing=True,
+                pvs=(
+                    ExpandedPv(
+                        pv="ca://SYSX:X",
+                        raw_pv="$(P):X",
+                        resolution="resolved",
+                        role="read",
+                        protocol="ca",
+                        top_level_display="ov.bob",
+                        origin_file="frag.bob",
+                    ),
+                ),
+            ),
+        ),
+        diagnostics=PvDiagnostics(context_capped=("ov.bob",)),
+    )
+    mock_pv_get = AsyncMock(return_value={"pv_name": "X", "value": 1})
+    with (
+        patch("epics_pv_mcp.tools.validate.analyze_pv_inventory", return_value=fake),
+        patch("epics_pv_mcp.tools.validate.pv_get", mock_pv_get),
+    ):
+        result = await _validate_pvs(file_path=str(frag), displays_dir=str(root))
+
+    assert result["total"] == 1
+    notes = result["notes"]
+    assert isinstance(notes, list)
+    assert any("lower bound" in str(n) for n in notes)
+    mock_pv_get.assert_awaited_once_with("SYSX:X", 5.0)
