@@ -208,8 +208,18 @@ async def validate_pvs(
     file_path: Annotated[
         str | None,
         Field(
-            description="Path to .bob file (requires phoebus-mcp-core). "
-            "Extracts PVs and checks connectivity."
+            description="Path to a .bob file. Extracts the concrete, macro-resolved "
+            "ca/pva channels it references (via the opi_navigation inventory) and "
+            "checks their connectivity."
+        ),
+    ] = None,
+    displays_dir: Annotated[
+        str | None,
+        Field(
+            description="Dataset ROOT for file_path mode — needed to resolve display "
+            "macros (esp. for embedded fragments). Without it the file's own directory "
+            "is used, which under-resolves fragments. NOTE: a full inventory walk is "
+            "~60 s for a large dataset; do not call per-file in a loop."
         ),
     ] = None,
     timeout: Annotated[
@@ -217,9 +227,11 @@ async def validate_pvs(
         Field(description="Timeout in seconds per PV"),
     ] = 5.0,
 ) -> dict[str, object]:
-    """Check PV connectivity. Provide PV list or .bob file path."""
+    """Check PV connectivity. Provide a PV list or a .bob file path (+ displays_dir ROOT)."""
     try:
-        return await _validate_pvs(pvs, file_path, timeout)
+        return await _validate_pvs(
+            pvs=pvs, file_path=file_path, displays_dir=displays_dir, timeout=timeout
+        )
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
