@@ -84,3 +84,10 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 pythonpath = ["tests"]
 asyncio_mode = "auto"
+# `live` = Tests gegen eine laufende lokale EPICS-Sandbox (sandbox/docker-compose).
+# Opt-in: `EPICS_SANDBOX=1 uv run pytest -m live`. Bewusst KEIN `addopts = -m "not live"`
+# (würde das Default-pytest für alle ändern + ist brüchig); die Live-Tests skippen
+# stattdessen selbst via skipif(EPICS_SANDBOX) -> Default-Lauf/CI bleibt ohne Sandbox grün.
+markers = [
+    "live: needs a running local EPICS sandbox (sandbox/docker-compose); opt-in via -m live + EPICS_SANDBOX=1",
+]
