@@ -4,7 +4,8 @@ on: [push, pull_request]
 
 jobs:
   # Tests auf ubuntu-latest: p4p-Linux-Wheels sind battle-tested (war auch der OS der
-  # bisherigen EPICS-CI). EPICS hat keinen "live"-Marker — alle Tests laufen. Coverage
+  # bisherigen EPICS-CI). Die `live`-Tests (IOC-Sandbox) self-skippen ohne EPICS_SANDBOX +
+  # laufendes IOC → in CI läuft die Offline-Suite, die live-Tests werden geskippt. Coverage
   # report-only (kein --cov-fail-under-Gate, wie phoebus-display-mcp).
   test:
     runs-on: ubuntu-latest
