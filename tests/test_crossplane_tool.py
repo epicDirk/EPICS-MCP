@@ -80,6 +80,25 @@ def test_cli_crossplane_rejects_missing_displays(tmp_path: Path) -> None:
     assert rc == 2
 
 
+def test_cli_crossplane_channelfinder_without_url_notes_skip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """CLI --channelfinder threads through (build-once parity); with no URL it prints the honest
+    'skipped' note (offline, no network call)."""
+    import epics_pv_mcp.config as config_module
+
+    displays, st_cmd = _setup(tmp_path)
+    monkeypatch.delenv("EPICS_MCP_CHANNELFINDER_URL", raising=False)
+    config_module._config = None
+    try:
+        rc = main(["--displays", str(displays), "--st-cmd", str(st_cmd), "--channelfinder"])
+    finally:
+        config_module._config = None
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "EPICS_MCP_CHANNELFINDER_URL is unset" in out
+
+
 @pytest.mark.asyncio
 async def test_crossplane_tool_fragment_not_double_attributed(tmp_path: Path) -> None:
     """QA-High wired regression (operator-facing-Filter end-to-end): die PV eines reinen Embed-only-
@@ -320,3 +339,56 @@ async def test_server_crossplane_converts_error_to_tool_error(tmp_path: Path) ->
     _, st_cmd = _setup(tmp_path)
     with pytest.raises(ToolError, match="INVALID_INPUT"):
         await crossplane_check(str(tmp_path / "nope"), str(st_cmd))
+
+
+@pytest.mark.asyncio
+async def test_crossplane_tool_query_channelfinder_without_url_emits_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F5: query_channelfinder=True but EPICS_MCP_CHANNELFINDER_URL unset → honest 'skipped' note,
+    cf_unregistered empty, and NO network call (no checker built)."""
+    import epics_pv_mcp.config as config_module
+
+    displays, st_cmd = _setup(tmp_path)
+    monkeypatch.delenv("EPICS_MCP_CHANNELFINDER_URL", raising=False)
+    config_module._config = None
+    try:
+        result = await _crossplane_check(str(displays), str(st_cmd), query_channelfinder=True)
+    finally:
+        config_module._config = None
+    report = result["report"]
+    assert isinstance(report, dict)
+    assert report["cf_unregistered"] == []
+    assert any("EPICS_MCP_CHANNELFINDER_URL is unset" in note for note in report["notes"])
+
+
+@pytest.mark.asyncio
+async def test_crossplane_tool_query_channelfinder_computes_unregistered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """query_channelfinder=True with a configured URL builds the CF checker and computes
+    cf_unregistered end-to-end. ChannelFinderClient is stubbed (no network): it registers only
+    ...:status, so the linked ...:Cmd (from $(P)Cmd) is cf_unregistered."""
+    import epics_pv_mcp.config as config_module
+    import epics_pv_mcp.tools.crossplane as tool_module
+
+    displays, st_cmd = _setup(tmp_path)
+
+    class _StubClient:
+        def __init__(self, *args: object, **kwargs: object) -> None: ...
+
+        def find_channels(self, name_pattern: str, max_results: int = 500) -> list[dict[str, str]]:
+            return [{"name": "DEV-TEST01:Ctrl-EVR-01:status"}]
+
+    monkeypatch.setenv("EPICS_MCP_CHANNELFINDER_URL", "http://stub:8080/ChannelFinder")
+    config_module._config = None
+    monkeypatch.setattr(tool_module, "ChannelFinderClient", _StubClient)
+    try:
+        result = await _crossplane_check(str(displays), str(st_cmd), query_channelfinder=True)
+    finally:
+        config_module._config = None
+    report = result["report"]
+    assert isinstance(report, dict)
+    assert report["cf_unregistered"] == ["DEV-TEST01:Ctrl-EVR-01:Cmd"]  # $(P)Cmd not registered
+    assert "DEV-TEST01:Ctrl-EVR-01:status" not in report["cf_unregistered"]
+    assert report["cf_registered"] == 1

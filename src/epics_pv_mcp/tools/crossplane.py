@@ -18,11 +18,65 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from epics_pv_mcp.config import get_config
 from epics_pv_mcp.paths import resolve_user_path
-from epics_pv_mcp.services.crossplane import crossplane_check, render_markdown
+from epics_pv_mcp.services.channelfinder_client import DEFAULT_MAX_RESULTS, ChannelFinderClient
+from epics_pv_mcp.services.channelfinder_exceptions import ChannelFinderError
+from epics_pv_mcp.services.crossplane import (
+    CFRegistryCapped,
+    ChannelFinderChecker,
+    crossplane_check,
+    render_markdown,
+)
 from epics_pv_mcp.services.e3_db import load_ioc_db, parse_st_cmd
 from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP, analyze_display_pvs
 from epics_pv_mcp.services.naming_client import NamingServiceClient
+
+
+class _CFRegistryChecker:
+    """Edge adapter: the channel names ChannelFinder registers under an IOC prefix.
+
+    Implements the core's :class:`ChannelFinderChecker` Protocol. Translates ChannelFinder/network
+    errors into ``RuntimeError`` (and a truncated result into ``CFRegistryCapped``) so the pure core
+    can withhold cf_unregistered without importing the ChannelFinder client or catching broad
+    exceptions. Counts **all** registered channels regardless of ``pvStatus`` — a momentarily
+    Inactive-but-present channel (recsync ``cleanOnStart``/reannounce lag) must NOT be flagged
+    unregistered, which would violate the "never false-flag" contract.
+    """
+
+    def __init__(self, url: str, auth: str | None, max_results: int = DEFAULT_MAX_RESULTS) -> None:
+        self._url = url
+        self._auth = auth
+        self._max_results = max_results
+
+    def registered_under(self, prefix: str) -> set[str]:
+        try:
+            client = ChannelFinderClient(self._url, auth_header=self._auth)
+            channels = client.find_channels(f"{prefix}*", max_results=self._max_results)
+            if len(channels) >= self._max_results:
+                # Truncated registry — withhold rather than diff a partial set (would false-flag).
+                # CFRegistryCapped is a RuntimeError, NOT a ChannelFinderError → not caught below.
+                raise CFRegistryCapped(
+                    f"ChannelFinder returned >= {self._max_results} channels for '{prefix}*'"
+                )
+            return {channel["name"] for channel in channels}
+        except ChannelFinderError as exc:
+            raise RuntimeError(f"ChannelFinder query failed: {exc}") from exc
+
+
+def _build_cf_checker(query_channelfinder: bool) -> ChannelFinderChecker | None:
+    """Build the ChannelFinder checker iff requested AND a URL is configured.
+
+    Returns ``None`` when not requested, or requested but ``channelfinder_url`` is unset — in the
+    latter case the caller passes ``cf_requested=True`` so the core emits an honest "skipped — URL
+    unset" note (no silent no-op).
+    """
+    if not query_channelfinder:
+        return None
+    cfg = get_config()
+    if not cfg.channelfinder_url:
+        return None
+    return _CFRegistryChecker(cfg.channelfinder_url, cfg.channelfinder_auth or None)
 
 
 def _run_check(
@@ -32,6 +86,7 @@ def _run_check(
     context_cap: int,
     windows_paths: bool,
     module_db_root: str,
+    query_channelfinder: bool,
 ) -> dict[str, object]:
     """Synchronous body of the cross-plane check (run off the event loop in a thread).
 
@@ -52,12 +107,15 @@ def _run_check(
         db_result = load_ioc_db(st_info, Path(module_db_root))
         ioc_db = (set(db_result.resolved), set(db_result.unresolved))
         ioc_db_complete = db_result.complete
+    channelfinder = _build_cf_checker(query_channelfinder)
     report = crossplane_check(
         join_pvs,
         st_info,
         naming=naming,
         ioc_db=ioc_db,
         ioc_db_complete=ioc_db_complete,
+        channelfinder=channelfinder,
+        cf_requested=query_channelfinder,
         context_capped=context_capped,
         glob_capped_count=glob_capped_count,
     )
@@ -71,11 +129,12 @@ async def _crossplane_check(
     displays_dir: str,
     st_cmd_path: str,
     query_naming: bool = False,
+    query_channelfinder: bool = False,
     context_cap: int = DEFAULT_PV_CONTEXT_CAP,
     windows_paths: bool = False,
     module_db_root: str = "",
 ) -> dict[str, object]:
-    """Join macro-aware display PVs with an e3 IOC ``st.cmd`` (+ optional .db + Naming). Read-only.
+    """Join macro-aware display PVs with an e3 IOC ``st.cmd`` (+ optional .db/Naming/CF). Read-only.
 
     *displays_dir* is the project/dataset ROOT (the inventory binds macros via the operator
     top-levels there — a narrow per-IOC subdirectory under-resolves). *context_cap* bounds the
@@ -85,6 +144,9 @@ async def _crossplane_check(
     (opt-in) is a local directory holding the IOC's e3 module ``.db`` files: when supplied, concrete
     linked PVs are checked against the loaded set and a ``broken`` verdict is emitted ONLY if that
     set is provably complete (else withheld). Empty (default) = no .db, no ``broken`` verdict.
+    *query_channelfinder* (opt-in) checks each concrete linked PV against ChannelFinder and reports
+    those not registered as ``cf_unregistered`` (needs ``EPICS_MCP_CHANNELFINDER_URL``; unset → an
+    honest "skipped" note, no network call).
 
     Returns ``{"report": <CrossPlaneReport JSON>, "markdown": <rendered report>}``.
     Raises :class:`EpicsError` (``INVALID_INPUT``) when a path does not exist.
@@ -103,4 +165,5 @@ async def _crossplane_check(
         context_cap,
         windows_paths,
         module_db_root,
+        query_channelfinder,
     )

@@ -297,6 +297,16 @@ async def crossplane_check(
             "name. Default False keeps the check fully offline and deterministic."
         ),
     ] = False,
+    query_channelfinder: Annotated[
+        bool,
+        Field(
+            description="Check each concrete linked PV against ChannelFinder (the runtime PV "
+            "directory) and report those NOT registered as 'cf_unregistered' — a separate plane "
+            "from 'broken' (CF runtime registry vs. static .db). Needs "
+            "EPICS_MCP_CHANNELFINDER_URL; unset → an honest 'skipped' note (no network call). "
+            "Default False stays offline. Withheld (never false-flagged) on a truncated registry."
+        ),
+    ] = False,
     context_cap: Annotated[
         int,
         Field(
@@ -336,7 +346,13 @@ async def crossplane_check(
     """
     try:
         return await _crossplane_check(
-            displays_dir, st_cmd_path, query_naming, context_cap, windows_paths, module_db_root
+            displays_dir,
+            st_cmd_path,
+            query_naming=query_naming,
+            query_channelfinder=query_channelfinder,
+            context_cap=context_cap,
+            windows_paths=windows_paths,
+            module_db_root=module_db_root,
         )
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e

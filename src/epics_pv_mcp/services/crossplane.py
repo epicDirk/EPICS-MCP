@@ -22,11 +22,17 @@ Service registers (:mod:`naming_client`). Pure + deterministic; all network I/O 
   ``needs-msi`` residue). An incomplete or still-templated set cannot prove a linked PV's ABSENCE
   (the record may exist under a name not yet expanded), so the verdict is **withheld**, never
   false-flagged. *broken_write* is the writable subset (a dead command/setpoint target).
+- *cf_unregistered* — concrete linked PVs (record names) NOT registered in **ChannelFinder** (the
+  runtime PV directory), when a ``ChannelFinderChecker`` is injected. A SEPARATE plane from *broken*
+  (runtime registry vs. static ``.db``): a PV may be in both, one, or neither. Withheld (never
+  false-flagged) when the registry query is truncated/unavailable. Honest against a partial test CF:
+  a high cf_unregistered/linked ratio is surfaced as "likely incomplete CF", not a defect list.
 Nothing indeterminate is ever called "broken".
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from typing import Literal, NamedTuple, Protocol
 
@@ -38,6 +44,28 @@ from epics_pv_mcp.services.naming_client import NameStatus
 #: Protocols that are real plant channels (the only ones joined against an IOC). Mirrors
 #: ``opi_navigation.pv_analysis.models.REAL_PROTOCOLS`` (kept local — no foreign import).
 _REAL_PROTOCOLS = frozenset({"ca", "pva"})
+
+#: A trailing EPICS record-field suffix: one or more ``.FIELD`` segments at the end of a PV name
+#: (``record.EGU``, ``record.OUT``, ``record.FIELD.SUB``). ESS record names carry no dot (their
+#: segments use ``:`` ``-`` ``_``), so a trailing dot-prefixed field-shaped token is always a field.
+_FIELD_SUFFIX_RE = re.compile(r"(?:\.[A-Za-z][A-Za-z0-9_]*)+$")
+
+#: When cf_unregistered is at least this fraction of the linked set, surface the ratio caveat: such
+#: a count almost certainly means an INCOMPLETE ChannelFinder/IOC (e.g. a partial test registry),
+#: not real defects. A fixed constant keeps the verdict deterministic (no runtime judgement).
+_CF_RATIO_CAVEAT_THRESHOLD = 0.5
+
+
+def _record_name(pv: str) -> str:
+    """Strip a trailing record-field suffix (``.EGU``/``.OUT``/``.FIELD.SUB``) to the record name.
+
+    ChannelFinder/recsync and the IOC ``.db`` register the **bare record name**, never
+    ``record.FIELD``; display PVs routinely reference a field (e.g. ``...Delay-SP.EGU``).
+    Normalizing both sides to the record name before a set-diff avoids guaranteed false positives.
+    Idempotent on a bare record name (no dot → unchanged); non-channel forms never reach here
+    (bucketed out by protocol first).
+    """
+    return _FIELD_SUFFIX_RE.sub("", pv)
 
 
 class JoinPv(NamedTuple):
@@ -60,6 +88,28 @@ class NamingChecker(Protocol):
     """Minimal read-only Naming-Service contract (so tests can inject a fake)."""
 
     def validate_name(self, ess_name: str) -> NameStatus: ...
+
+
+class CFRegistryCapped(RuntimeError):
+    """A :class:`ChannelFinderChecker` query was truncated (hit the result cap).
+
+    cf_unregistered is then WITHHELD — diffing against a partial registry would false-flag real
+    channels. A distinct ``RuntimeError`` subclass so the core can set ``cf_capped`` apart from a
+    generic query failure (also surfaced as a withheld verdict).
+    """
+
+
+class ChannelFinderChecker(Protocol):
+    """Minimal read-only ChannelFinder contract (so tests can inject a fake).
+
+    ``registered_under(prefix)`` returns the set of channel NAMES registered under the IOC device
+    prefix, OR raises :class:`RuntimeError` (``CFRegistryCapped`` on a truncated result) — never
+    another type. That narrow contract lets the core's ``except RuntimeError`` degrade to a withheld
+    verdict without swallowing unrelated bugs (the edge translates ChannelFinder/network errors into
+    ``RuntimeError`` before they reach here).
+    """
+
+    def registered_under(self, prefix: str) -> set[str]: ...
 
 
 class NamingResult(BaseModel):
@@ -116,6 +166,19 @@ class CrossPlaneReport(BaseModel):
     broken: tuple[str, ...] = ()
     #: Writable subset of ``broken`` (a dead command/setpoint target — owner triage).
     broken_write: tuple[str, ...] = ()
+    #: Concrete linked PVs (record names, field suffixes normalized away) that resolve to the IOC
+    #: prefix but are NOT registered in ChannelFinder — unregistered/runtime-missing candidates.
+    #: A SEPARATE plane from ``broken`` (CF runtime registry vs. static .db). Only populated when a
+    #: ``ChannelFinderChecker`` is supplied AND the query succeeded (else empty + a withhold note).
+    cf_unregistered: tuple[str, ...] = ()
+    #: Writable subset of ``cf_unregistered`` (an operator can command an unregistered channel).
+    cf_unregistered_write: tuple[str, ...] = ()
+    #: Count of channels ChannelFinder registered under the IOC prefix. Only meaningful WITHOUT a
+    #: cf withhold/cap note (0 both when nothing is registered and when the check was withheld).
+    cf_registered: int = 0
+    #: True when the ChannelFinder query hit the result cap → cf_unregistered withheld (truncated
+    #: registry would false-flag). Meaning is carried by the note, not by an empty cf_unregistered.
+    cf_capped: bool = False
     #: Honest caveats about coverage limits.
     notes: tuple[str, ...] = ()
 
@@ -127,6 +190,8 @@ def crossplane_check(
     naming: NamingChecker | None = None,
     ioc_db: tuple[set[str], set[str]] | None = None,
     ioc_db_complete: bool = False,
+    channelfinder: ChannelFinderChecker | None = None,
+    cf_requested: bool = False,
     context_capped: tuple[str, ...] = (),
     glob_capped_count: int = 0,
 ) -> CrossPlaneReport:
@@ -138,8 +203,13 @@ def crossplane_check(
     :func:`e3_db.ioc_db_pvs`. A ``broken`` verdict (concrete linked PVs missing from *resolved*) is
     emitted ONLY when *ioc_db_complete* is True AND *unresolved* is empty — i.e. the supplied IOC
     .db set is **provably complete and fully resolved**; otherwise the verdict is withheld (absence
-    cannot be proven against a partial/templated set). *context_capped* / *glob_capped_count* carry
-    the inventory's honest incompleteness signals (linked/other become lower bounds).
+    cannot be proven against a partial/templated set). *channelfinder* (optional) is queried for the
+    channels registered under the IOC prefix; concrete linked PVs (record names) absent from it are
+    reported as *cf_unregistered* (a SEPARATE plane from broken — runtime registry vs. static .db).
+    A truncated/failed query withholds cf_unregistered rather than false-flagging. *cf_requested* is
+    True whenever the caller asked for the ChannelFinder check, so an honest "skipped — URL unset"
+    note can be emitted when no checker is wired. *context_capped* / *glob_capped_count* carry the
+    inventory's honest incompleteness signals (linked/other become lower bounds).
     """
     prefix = st_cmd.prefix
     linked_displays: set[str] = set()
@@ -175,6 +245,13 @@ def crossplane_check(
 
     indeterminate_pvs = dynamic_pvs | unresolved_pvs
 
+    # Normalize linked PVs to the bare record name (strip a trailing .FIELD): ChannelFinder and the
+    # IOC .db register record names, never ``record.FIELD`` — so BOTH the cf_unregistered and the
+    # broken set-diffs must compare in record-name space (else ``...Delay-SP.EGU`` is a guaranteed
+    # false miss). Working in record-name space also dedups ``record`` vs. ``record.EGU``.
+    linked_records = {_record_name(pv) for pv in linked_pvs}
+    linked_write_records = {_record_name(pv) for pv in linked_write}
+
     naming_result: NamingResult | None = None
     if naming is not None and st_cmd.device_name:
         status = naming.validate_name(st_cmd.device_name)
@@ -195,13 +272,34 @@ def crossplane_check(
         # otherwise the record may exist under a still-templated name. Withhold rather than
         # false-flag — the verdict's whole value is that it never lies.
         if ioc_db_complete and resolved and not unresolved:
-            broken = {pv for pv in linked_pvs if pv not in resolved}
+            broken = {r for r in linked_records if r not in resolved}
         else:
             # Withhold over an empty/partial/templated resolved set — proving a linked PV's absence
             # against ZERO known PVs would flag every linked PV (defense-in-depth with the loader's
             # ``bool(resolved)`` completeness term).
             broken_withheld = True
-    broken_write = broken & linked_write
+    broken_write = broken & linked_write_records
+
+    # ChannelFinder plane (runtime PV directory) — SEPARATE from the static .db ``broken`` above.
+    # A concrete linked record absent from the channels registered under the IOC prefix is an
+    # unregistered/runtime-missing candidate. Withhold (never false-flag) on a truncated/failed
+    # registry: the verdict's value is that it never lies. Scoped to the record-name-normalized
+    # linked set so a field-suffixed display PV (``...SP.EGU``) is not a guaranteed false positive.
+    cf_unregistered: set[str] = set()
+    cf_unregistered_write: set[str] = set()
+    cf_registered = 0
+    cf_capped = False
+    cf_withheld = False
+    if channelfinder is not None and prefix:
+        try:
+            registered = channelfinder.registered_under(prefix)
+            cf_unregistered = {r for r in linked_records if r not in registered}
+            cf_unregistered_write = cf_unregistered & linked_write_records
+            cf_registered = len(registered)
+        except CFRegistryCapped:
+            cf_withheld = cf_capped = True
+        except RuntimeError:
+            cf_withheld = True
 
     notes: list[str] = []
     if not prefix:  # None or "" — both mean "no usable IOC prefix" (join sends all to other-prefix)
@@ -253,6 +351,39 @@ def crossplane_check(
             f"{db_needs_msi} IOC record(s) still macro-templated after substitution "
             "(needs msi / .substitutions expansion — Linux/Docker)."
         )
+    if cf_requested and channelfinder is None:
+        # Honest no-op: the caller asked for the ChannelFinder check but no URL is configured, so no
+        # checker was built. Surface it in the report (no silent skip) — see tools/channelfinder.
+        notes.append(
+            "ChannelFinder check requested (query_channelfinder=True) but "
+            "EPICS_MCP_CHANNELFINDER_URL is unset — cf_unregistered skipped (no network call)."
+        )
+    if cf_capped:
+        notes.append(
+            "cf_unregistered withheld — ChannelFinder returned a capped (truncated) result for the "
+            "IOC prefix; diffing against a partial registry would false-flag real channels."
+        )
+    elif cf_withheld:
+        notes.append(
+            "cf_unregistered withheld — the ChannelFinder query failed; a linked PV cannot be "
+            "proven unregistered against an unavailable registry."
+        )
+    if cf_unregistered and context_capped:
+        notes.append(
+            "cf_unregistered is a LOWER BOUND — some operator displays hit the inventory context "
+            "cap, so the linked set (and thus cf_unregistered) may undercount."
+        )
+    if (
+        cf_unregistered
+        and linked_records
+        and len(cf_unregistered) / len(linked_records) >= _CF_RATIO_CAVEAT_THRESHOLD
+    ):
+        notes.append(
+            f"{len(cf_unregistered)}/{len(linked_records)} linked PV(s) are unregistered in "
+            "ChannelFinder (>= 50%) — this almost certainly means an INCOMPLETE ChannelFinder/IOC "
+            "(e.g. a partial test registry), not real defects; treat the count as a coverage "
+            "signal, not a defect list."
+        )
 
     return CrossPlaneReport(
         ioc_prefix=prefix,
@@ -272,6 +403,10 @@ def crossplane_check(
         ioc_db_needs_msi=db_needs_msi,
         broken=tuple(sorted(broken)),
         broken_write=tuple(sorted(broken_write)),
+        cf_unregistered=tuple(sorted(cf_unregistered)),
+        cf_unregistered_write=tuple(sorted(cf_unregistered_write)),
+        cf_registered=cf_registered,
+        cf_capped=cf_capped,
         notes=tuple(notes),
     )
 
@@ -321,6 +456,14 @@ def render_markdown(report: CrossPlaneReport) -> str:
         if report.broken_write:
             lines.append(f"  - of which writable (dead command target): {len(report.broken_write)}")
         lines.extend(f"  - {pv}" for pv in report.broken)
+    if report.cf_unregistered:
+        lines.append(
+            f"- **Unregistered in ChannelFinder (linked PV, not in CF):** "
+            f"{len(report.cf_unregistered)} of {report.cf_registered} registered under the prefix"
+        )
+        if report.cf_unregistered_write:
+            lines.append(f"  - of which writable: {len(report.cf_unregistered_write)}")
+        lines.extend(f"  - {pv}" for pv in report.cf_unregistered)
     if report.notes:
         lines.append("")
         lines.append("## Notes")

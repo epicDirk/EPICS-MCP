@@ -8,7 +8,7 @@ only with ``--naming`` (a read-only GET); without it the check is fully offline.
 Usage::
 
     python -m epics_pv_mcp.cli_crossplane --displays <project-root> --st-cmd <st.cmd> \\
-        [--naming] [--context-cap N] [--windows-paths]
+        [--naming] [--channelfinder] [--context-cap N] [--windows-paths]
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from epics_pv_mcp.services.crossplane import crossplane_check, render_markdown
 from epics_pv_mcp.services.e3_db import load_ioc_db, parse_st_cmd
 from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP, analyze_display_pvs
 from epics_pv_mcp.services.naming_client import NamingServiceClient
+from epics_pv_mcp.tools.crossplane import _build_cf_checker
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -39,6 +40,13 @@ def main(argv: list[str] | None = None) -> int:
         "--naming",
         action="store_true",
         help="query the live ESS Naming Service (read-only GET); omit to stay offline",
+    )
+    parser.add_argument(
+        "--channelfinder",
+        action="store_true",
+        help="check each concrete linked PV against ChannelFinder (read-only GET) and report "
+        "those not registered as cf_unregistered; needs EPICS_MCP_CHANNELFINDER_URL (unset → "
+        "honest 'skipped' note). Omit to stay offline",
     )
     parser.add_argument(
         "--context-cap",
@@ -87,12 +95,15 @@ def main(argv: list[str] | None = None) -> int:
         db_result = load_ioc_db(st_info, Path(args.module_db_root))
         ioc_db = (set(db_result.resolved), set(db_result.unresolved))
         ioc_db_complete = db_result.complete
+    channelfinder = _build_cf_checker(args.channelfinder)
     report = crossplane_check(
         join_pvs,
         st_info,
         naming=naming,
         ioc_db=ioc_db,
         ioc_db_complete=ioc_db_complete,
+        channelfinder=channelfinder,
+        cf_requested=args.channelfinder,
         context_capped=context_capped,
         glob_capped_count=glob_capped_count,
     )
