@@ -153,9 +153,10 @@ async def get_pv_info(
 ) -> dict[str, object]:
     """Get detailed PV metadata: value, alarm (severity/status incl. text + message),
     timestamp, display (units/limits/precision OR format/description), control (drive
-    limits), value_alarm (active + HIHI/HIGH/LOW/LOLO limits and per-level severities,
-    only when active), and enum index/label/choices for enum PVs. Unset (zero-width)
-    display/control limit pairs are omitted; DBR_CHAR waveforms come back as int lists."""
+    limits), value_alarm (active flag + the configured HIHI/HIGH/LOW/LOLO limits; NaN/unset
+    limits and the per-PVA-unmapped per-level severities are omitted), and enum index/label/
+    choices for enum PVs. Unset (zero-width) display/control limit pairs are omitted; DBR_CHAR
+    waveforms come back as int lists."""
     try:
         return await _get_pv_info(pv_name, timeout)
     except EpicsError as e:

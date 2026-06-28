@@ -7,6 +7,7 @@ so the FastMCP event loop is never blocked.
 import asyncio
 import atexit
 import logging
+import math
 import threading
 from collections.abc import Callable
 
@@ -363,20 +364,34 @@ def _extract_control(raw: object) -> dict[str, object] | None:
 
 
 def _extract_value_alarm(raw: object) -> dict[str, object] | None:
-    """value_alarm gated on ``active``: surface limits/severities only when alarming is on.
+    """value_alarm: the ``active`` flag plus whichever limits/severities carry a real value.
 
-    Unconfigured valueAlarm structs default to ``active=False`` with ``0.0`` limits, which
-    would otherwise look like real HIHI/HIGH/LOW/LOLO thresholds. A valueAlarm struct that
-    lacks the ``active`` field (non-NT-conformant producer) is treated conservatively as
-    inactive — limits are not shown.
+    ``active`` is surfaced as honest metadata, never as a visibility gate: QSRV2/softIocPVX
+    reports ``active=False`` even when HIHI/HIGH/LOW/LOLO thresholds ARE configured, so gating
+    on it (the old behaviour) hid every real limit. Per-field filtering replaces the gate:
+
+    * ``NaN`` limits are ALWAYS dropped — that is the QSRV2 "unset" marker, never a real value.
+    * when ``active`` is False/absent, ``0``-valued limits/severities are ALSO dropped as unset
+      — a 0.0-sending producer (e.g. QSRV1/CA) would otherwise look like a real ``[0,0]``
+      threshold (preserves the original unconfigured-limit suppression).
+    * when ``active`` is True every non-NaN field is kept, so a legitimately-zero configured
+      limit stays visible (no regression of the prior active=True behaviour).
+
+    Note: over QSRV2 the per-level ``*Severity`` fields arrive structurally ``0`` (the record
+    HSV/HHSV are not mapped into valueAlarm) and are thus dropped here; the live alarm severity
+    is reported separately via the ``alarm`` block.
     """
     va = getattr(raw, "valueAlarm", None)
     if va is None:
         return None
     active = bool(getattr(va, "active", False))
     out: dict[str, object] = {"active": active}
-    if active:
-        out.update(_collect(va, _VALUE_ALARM_SPEC))
+    for key, value in _collect(va, _VALUE_ALARM_SPEC).items():
+        if isinstance(value, float) and math.isnan(value):
+            continue  # NaN = QSRV2 unset marker, never a real limit.
+        if not active and value == 0:
+            continue  # ambiguous 0/0.0 in a non-active struct = unconfigured.
+        out[key] = value
     return out
 
 
@@ -405,8 +420,9 @@ def _format_value(pv_name: str, value: object) -> dict[str, object]:
     ``enum`` (index/label/choices for NTEnum), ``alarm`` (severity/status code + text +
     message), ``timestamp`` (seconds/nanoseconds), ``display`` (units, precision OR format,
     description, display limits), ``control`` (drive limits, min_step), ``value_alarm``
-    (``active`` + the HIHI/HIGH/LOW/LOLO limits and per-level severities, only when active).
-    Display/control limit pairs that are equal (zero-width = unset) are omitted.
+    (``active`` flag plus the configured HIHI/HIGH/LOW/LOLO limits; NaN/unset limits and the
+    per-PVA-unmapped per-level severities are omitted). Display/control limit pairs that are
+    equal (zero-width = unset) are omitted.
 
     Robustness: each block is extracted independently; a malformed block is skipped (logged
     at debug) and never corrupts the value or the other blocks. The function never raises.

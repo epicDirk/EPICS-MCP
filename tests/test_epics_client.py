@@ -218,11 +218,57 @@ def test_value_alarm_active_surfaces_limits_and_severities() -> None:
     }
 
 
-def test_value_alarm_without_active_field_treated_inactive() -> None:
-    # Non-NT-conformant producer: limits present, no ``active`` field -> conservatively hidden.
+def test_value_alarm_without_active_field_surfaces_real_limits() -> None:
+    # No ``active`` field (defaults False): real (non-zero, non-NaN) limits are STILL surfaced —
+    # the active flag is metadata, not a visibility gate.
     raw = SimpleNamespace(
         value=4.2,
         valueAlarm=SimpleNamespace(lowAlarmLimit=-5.0, highAlarmLimit=5.0),
+    )
+
+    result = _format_value("X:Y", _wrap(raw))
+
+    assert result["value_alarm"] == {"active": False, "low_alarm": -5.0, "high_alarm": 5.0}
+
+
+def test_value_alarm_qsrv2_active_false_surfaces_configured_limits() -> None:
+    # The real QSRV2/softIocPVX wire profile: active is present-but-False, configured limits are
+    # non-NaN, unset limits arrive as NaN, and the per-level severities arrive structurally 0.
+    # Expectation: the configured limits ARE surfaced; NaN limits + 0-severities are dropped.
+    raw = SimpleNamespace(
+        value=42.5,
+        valueAlarm=SimpleNamespace(
+            active=False,
+            lowAlarmLimit=float("nan"),
+            lowWarningLimit=float("nan"),
+            highWarningLimit=70.0,
+            highAlarmLimit=80.0,
+            lowAlarmSeverity=0,
+            lowWarningSeverity=0,
+            highWarningSeverity=0,
+            highAlarmSeverity=0,
+        ),
+    )
+
+    result = _format_value("X:Y", _wrap(raw))
+
+    assert result["value_alarm"] == {"active": False, "high_warning": 70.0, "high_alarm": 80.0}
+
+
+def test_value_alarm_all_nan_limits_yields_only_active() -> None:
+    # A record with no alarm thresholds (e.g. 3V3): QSRV2 still emits a full valueAlarm
+    # struct with all-NaN limits + 0-severities -> only the honest ``active`` flag survives.
+    raw = SimpleNamespace(
+        value=3.3,
+        valueAlarm=SimpleNamespace(
+            active=False,
+            lowAlarmLimit=float("nan"),
+            lowWarningLimit=float("nan"),
+            highWarningLimit=float("nan"),
+            highAlarmLimit=float("nan"),
+            lowAlarmSeverity=0,
+            highAlarmSeverity=0,
+        ),
     )
 
     result = _format_value("X:Y", _wrap(raw))
