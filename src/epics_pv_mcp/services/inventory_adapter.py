@@ -18,9 +18,15 @@ from pathlib import Path
 from opi_navigation.pv_analysis import DEFAULT_PV_CONTEXT_CAP, analyze_pv_inventory, channel_name
 from opi_navigation.pv_analysis.models import REAL_PROTOCOLS, PvInventory
 
+from epics_pv_mcp.services.coverage import IndexRow
 from epics_pv_mcp.services.crossplane import JoinPv
 
-__all__ = ["DEFAULT_PV_CONTEXT_CAP", "analyze_display_pvs", "inventory_join_pvs"]
+__all__ = [
+    "DEFAULT_PV_CONTEXT_CAP",
+    "analyze_display_index",
+    "analyze_display_pvs",
+    "inventory_join_pvs",
+]
 
 
 def inventory_join_pvs(inventory: PvInventory) -> list[JoinPv]:
@@ -72,6 +78,40 @@ def analyze_display_pvs(
     )
     return (
         inventory_join_pvs(inventory),
+        inventory.diagnostics.context_capped,
+        len(inventory.diagnostics.glob_capped),
+    )
+
+
+def analyze_display_index(
+    repo_root: Path,
+    *,
+    context_cap: int = DEFAULT_PV_CONTEXT_CAP,
+    windows_paths: bool = False,
+) -> tuple[list[IndexRow], tuple[str, ...], int]:
+    """Run the Wedge-0 inventory over *repo_root*; return the ``PV → [displays]`` index as rows.
+
+    Symmetric to :func:`analyze_display_pvs`, but reads the inventory's ``index`` field (the global
+    operator-facing, resolved, real-protocol PV→[screens] index) instead of the per-display PV lists
+    — the input the coverage audit's display set ``D`` needs. *repo_root* must be the dataset
+    ROOT (the operator top-levels there bind the display macros). Returns ``(index_rows,
+    context_capped, glob_capped_count)``; the latter two carry the inventory's lower-bound signals.
+    The index is real-protocol only, so each ``pv`` is normalized to its protocol-free channel name.
+    """
+    inventory = analyze_pv_inventory(
+        repo_root, context_cap=context_cap, windows_paths=windows_paths
+    )
+    rows = [
+        IndexRow(
+            pv=channel_name(entry.pv),
+            protocol=str(entry.protocol),
+            displays=tuple(str(display) for display in entry.displays),
+            roles=tuple(str(role) for role in entry.roles),
+        )
+        for entry in inventory.index
+    ]
+    return (
+        rows,
         inventory.diagnostics.context_capped,
         len(inventory.diagnostics.glob_capped),
     )

@@ -39,6 +39,7 @@ dev = [
 [project.scripts]
 epics-pv-mcp = "epics_pv_mcp.server:main"
 epics-crossplane = "epics_pv_mcp.cli_crossplane:main"
+epics-coverage = "epics_pv_mcp.cli_coverage:main"
 
 # Git-Direct-Reference (opi-navigation) erfordert dieses Flag bei hatchling — sonst
 # bricht der Metadaten-Build ("Dependency ... cannot be a direct reference"). Spiegelt

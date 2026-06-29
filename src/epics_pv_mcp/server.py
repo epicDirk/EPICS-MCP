@@ -17,6 +17,7 @@ from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
 from epics_pv_mcp.tools.alarm import _is_alarm_configured
 from epics_pv_mcp.tools.archiver import _get_pv_history, _is_archived
 from epics_pv_mcp.tools.channelfinder import _find_channels
+from epics_pv_mcp.tools.coverage_audit import _coverage_audit
 from epics_pv_mcp.tools.crossplane import _crossplane_check
 from epics_pv_mcp.tools.discover import _discover_pvs
 from epics_pv_mcp.tools.find_device import _find_device
@@ -472,6 +473,67 @@ async def is_alarm_configured(
     """
     try:
         return await _is_alarm_configured(pv, config_name, timeout)
+    except EpicsError as e:
+        raise ToolError(f"[{e.error_code}] {e}") from e
+    except Exception as e:
+        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+async def coverage_audit(
+    displays_dir: Annotated[str, Field(description="project/dataset ROOT of .bob displays")],
+    scope: Annotated[
+        str,
+        Field(
+            description="record-name prefix narrowing the ChannelFinder query AND the display set "
+            "(e.g. DEV-TEST01:Ctrl-EVR-01:); '' = whole site (CF cap risk — small-scope only)"
+        ),
+    ] = "",
+    query_channelfinder: Annotated[
+        bool, Field(description="query ChannelFinder for delivered PVs (the coverage anchor)")
+    ] = False,
+    query_archiver: Annotated[
+        bool, Field(description="add the archive plane (per-PV is_archived)")
+    ] = False,
+    query_alarm: Annotated[
+        bool, Field(description="add the alarm plane (per-PV is_alarm_configured)")
+    ] = False,
+    alarm_config: Annotated[
+        str, Field(description="alarm config-tree name (default Accelerator)")
+    ] = "Accelerator",
+    context_cap: Annotated[
+        int, Field(description="max per-display reachability contexts the PV-inventory explores")
+    ] = DEFAULT_PV_CONTEXT_CAP,
+    windows_paths: Annotated[
+        bool, Field(description="resolve embedded <file> refs case-insensitively (Windows host)")
+    ] = False,
+) -> dict[str, object]:
+    """Cross-plane coverage audit: which delivered PV has no display/archive/alarm — and back.
+
+    Read-only. Joins the Wedge-0 display-PV index (PV→[screens]) with ChannelFinder (delivered PVs,
+    the anchor), the Archiver and the Phoebus Alarm config. Each runtime plane is queried only when
+    requested AND its *_URL is set; a missing URL withholds that plane (never a false 'no'). Returns
+    the cross-coverage matrix (cf_and_display / cf_only=blind-spots / display_only) + verdicts
+    + critical_uncovered (delivered AND a proven gap), with honest lower-bound notes.
+    """
+    try:
+        return await _coverage_audit(
+            displays_dir,
+            scope,
+            query_channelfinder,
+            query_archiver,
+            query_alarm,
+            alarm_config,
+            context_cap,
+            windows_paths,
+        )
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
