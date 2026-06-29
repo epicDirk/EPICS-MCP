@@ -76,7 +76,11 @@ def _build_cf_checker(query_channelfinder: bool) -> ChannelFinderChecker | None:
     cfg = get_config()
     if not cfg.channelfinder_url:
         return None
-    return _CFRegistryChecker(cfg.channelfinder_url, cfg.channelfinder_auth or None)
+    return _CFRegistryChecker(
+        cfg.channelfinder_url,
+        cfg.channelfinder_auth or None,
+        max_results=cfg.channelfinder_max_results,
+    )
 
 
 def _run_check(

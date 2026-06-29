@@ -47,6 +47,9 @@ class EpicsConfig(BaseSettings):
     # ChannelFinder service root incl. context path, e.g. "http://host:8080/ChannelFinder".
     channelfinder_url: str = ""
     channelfinder_auth: str = ""  # optional Authorization header value for secured deployments
+    # Cap on channels returned per CF prefix query; raise it for a large device prefix (the full
+    # mTCA-EVR-300 register set). The CF checker withholds its verdict once a query hits this cap.
+    channelfinder_max_results: int = Field(default=500, ge=1)
     # Archiver Appliance root, e.g. "http://archiver:17665".
     archiver_url: str = ""
     archiver_auth: str = ""  # optional Authorization header value for secured deployments

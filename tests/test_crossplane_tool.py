@@ -392,3 +392,89 @@ async def test_crossplane_tool_query_channelfinder_computes_unregistered(
     assert report["cf_unregistered"] == ["DEV-TEST01:Ctrl-EVR-01:Cmd"]  # $(P)Cmd not registered
     assert "DEV-TEST01:Ctrl-EVR-01:status" not in report["cf_unregistered"]
     assert report["cf_registered"] == 1
+
+
+def test_build_cf_checker_passes_configured_max_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W2-Schritt-1: the CF cap is plumbed config → _build_cf_checker → checker.
+
+    Without the env override the default stays 500 (site-safe); the sandbox raises it to 2000 so a
+    large device prefix (the full mTCA-EVR-300 set, ~576 channels) does not trip CFRegistryCapped.
+    """
+    import epics_pv_mcp.config as config_module
+    from epics_pv_mcp.tools.crossplane import _build_cf_checker, _CFRegistryChecker
+
+    monkeypatch.setenv("EPICS_MCP_CHANNELFINDER_URL", "http://stub:8080/ChannelFinder")
+
+    monkeypatch.setenv("EPICS_MCP_CHANNELFINDER_MAX_RESULTS", "2000")
+    config_module._config = None
+    try:
+        checker = _build_cf_checker(True)
+    finally:
+        config_module._config = None
+    # isinstance narrows ChannelFinderChecker | None → _CFRegistryChecker for mypy --strict
+    # (the Protocol declares no _max_results attribute).
+    assert isinstance(checker, _CFRegistryChecker)
+    assert checker._max_results == 2000
+
+    monkeypatch.delenv("EPICS_MCP_CHANNELFINDER_MAX_RESULTS", raising=False)
+    config_module._config = None
+    try:
+        default_checker = _build_cf_checker(True)
+    finally:
+        config_module._config = None
+    assert isinstance(default_checker, _CFRegistryChecker)
+    assert default_checker._max_results == 500  # default stays site-safe
+
+
+@pytest.mark.asyncio
+async def test_crossplane_cap_override_changes_withhold_behaviour(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The configurable cap actually changes behaviour: a stub CF that would return 600 channels is
+    truncated to *max_results*. cap=2000 ⇒ 600 < cap ⇒ NOT withheld (cf_unregistered computed);
+    cap=500 (default) ⇒ 500 >= cap ⇒ CFRegistryCapped ⇒ withheld (cf_capped, cf_unregistered empty).
+    """
+    import epics_pv_mcp.config as config_module
+    import epics_pv_mcp.tools.crossplane as tool_module
+
+    displays, st_cmd = _setup(tmp_path)
+
+    class _Stub600Client:
+        """Emulates ChannelFinder's ~size truncation: never returns more than the cap."""
+
+        def __init__(self, *args: object, **kwargs: object) -> None: ...
+
+        def find_channels(self, name_pattern: str, max_results: int = 500) -> list[dict[str, str]]:
+            return [{"name": f"DEV-TEST01:Ctrl-EVR-01:ch{i}"} for i in range(min(600, max_results))]
+
+    monkeypatch.setenv("EPICS_MCP_CHANNELFINDER_URL", "http://stub:8080/ChannelFinder")
+    monkeypatch.setattr(tool_module, "ChannelFinderClient", _Stub600Client)
+
+    # cap=2000: 600 channels fit under the cap → not withheld.
+    monkeypatch.setenv("EPICS_MCP_CHANNELFINDER_MAX_RESULTS", "2000")
+    config_module._config = None
+    try:
+        big = (await _crossplane_check(str(displays), str(st_cmd), query_channelfinder=True))[
+            "report"
+        ]
+    finally:
+        config_module._config = None
+    assert isinstance(big, dict)
+    assert big["cf_capped"] is False
+    assert big["cf_registered"] == 600
+    assert big["cf_unregistered"]  # linked PVs not among the 600 → genuinely computed
+
+    # cap=500 (default, env removed): the same 600-channel CF truncates to 500 == cap → withheld.
+    monkeypatch.delenv("EPICS_MCP_CHANNELFINDER_MAX_RESULTS", raising=False)
+    config_module._config = None
+    try:
+        capped = (await _crossplane_check(str(displays), str(st_cmd), query_channelfinder=True))[
+            "report"
+        ]
+    finally:
+        config_module._config = None
+    assert isinstance(capped, dict)
+    assert capped["cf_capped"] is True
+    assert capped["cf_unregistered"] == []
