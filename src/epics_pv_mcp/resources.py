@@ -33,6 +33,7 @@ def get_health() -> dict[str, object]:
         "p4p_version": p4p_version,
         "channelfinder_enabled": bool(cfg.channelfinder_url),
         "archiver_enabled": bool(cfg.archiver_url),
+        "alarm_enabled": bool(cfg.alarm_url),
     }
 
 
@@ -50,4 +51,5 @@ def get_epics_config() -> dict[str, object]:
         "write_rate_limit": cfg.write_rate_limit,
         "channelfinder_url": cfg.channelfinder_url or "(disabled)",
         "archiver_url": cfg.archiver_url or "(disabled)",
+        "alarm_url": cfg.alarm_url or "(disabled)",
     }

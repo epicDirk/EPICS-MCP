@@ -14,6 +14,7 @@ from epics_pv_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_pv_mcp.prompts import diagnose_pv as _diagnose_pv
 from epics_pv_mcp.resources import get_epics_config, get_health
 from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
+from epics_pv_mcp.tools.alarm import _is_alarm_configured
 from epics_pv_mcp.tools.archiver import _get_pv_history, _is_archived
 from epics_pv_mcp.tools.channelfinder import _find_channels
 from epics_pv_mcp.tools.crossplane import _crossplane_check
@@ -31,11 +32,12 @@ mcp = FastMCP(
     instructions=(
         "Read-only EPICS PV access by default: read live values and metadata, monitor, "
         "discover, validate the PVs of a .bob display, cross-plane provenance, device lookup "
-        "(screens + live + source IOC), ChannelFinder lookups and Archiver history. The only "
-        "mutating tool, set_pv_value, is gated OFF by "
+        "(screens + live + source IOC), ChannelFinder lookups, Archiver history and Alarm "
+        "configuration. The only mutating tool, set_pv_value, is gated OFF by "
         "default and additionally requires EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, "
         "a rate limit and an audit log. The REST-backed tools (find_channels, is_archived, "
-        "get_pv_history) stay disabled until their *_URL env vars are set; an empty URL means "
+        "get_pv_history, is_alarm_configured) stay disabled until their *_URL env vars are set; "
+        "an empty URL means "
         "no client and no network call. Network reach is localhost-isolated by default: the "
         "server opens no non-local connection unless its launcher widens the EPICS address-list "
         "environment (EPICS_PVA_ADDR_LIST / EPICS_CA_ADDR_LIST and the matching *_AUTO_ADDR_LIST); "
@@ -441,6 +443,35 @@ async def get_pv_history(
     """
     try:
         return await _get_pv_history(pv, start, end, max_points, timeout)
+    except EpicsError as e:
+        raise ToolError(f"[{e.error_code}] {e}") from e
+    except Exception as e:
+        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+async def is_alarm_configured(
+    pv: Annotated[str, Field(description="EPICS PV name")],
+    config_name: Annotated[
+        str, Field(description="Alarm config-tree name (top-level topic, e.g. Accelerator)")
+    ] = "Accelerator",
+    timeout: Annotated[float, Field(description="Timeout in seconds")] = 5.0,
+) -> dict[str, object]:
+    """Report whether a PV has an alarm configuration (Phoebus Alarm Logger /search/alarm/config).
+
+    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ALARM_URL is set.
+    A hit proves the PV is configured in the alarm tree; a miss is a real negative only when the
+    Alarm Logger was running at config-import time (else the config change never reached its index).
+    """
+    try:
+        return await _is_alarm_configured(pv, config_name, timeout)
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:

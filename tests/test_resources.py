@@ -26,6 +26,7 @@ def test_health_values() -> None:
     # REST services are disabled by default (localhost isolation preserved).
     assert result["channelfinder_enabled"] is False
     assert result["archiver_enabled"] is False
+    assert result["alarm_enabled"] is False
 
 
 def test_config_no_secrets() -> None:

@@ -53,6 +53,9 @@ class EpicsConfig(BaseSettings):
     # Archiver Appliance root, e.g. "http://archiver:17665".
     archiver_url: str = ""
     archiver_auth: str = ""  # optional Authorization header value for secured deployments
+    # Phoebus Alarm Logger REST root, e.g. "http://localhost:8081". Activates is_alarm_configured.
+    alarm_url: str = ""
+    alarm_auth: str = ""  # optional Authorization header value for secured deployments
 
 
 _config: EpicsConfig | None = None
