@@ -50,8 +50,13 @@ class EpicsConfig(BaseSettings):
     # Cap on channels returned per CF prefix query; raise it for a large device prefix (the full
     # mTCA-EVR-300 register set). The CF checker withholds its verdict once a query hits this cap.
     channelfinder_max_results: int = Field(default=500, ge=1)
-    # Archiver Appliance root, e.g. "http://archiver:17665".
+    # Archiver Appliance MGMT root, e.g. "http://archiver:17665" — serves /mgmt/bpl (is_archived).
     archiver_url: str = ""
+    # Archiver Appliance RETRIEVAL root, e.g. "http://archiver:17668" — serves /retrieval/data
+    # (get_pv_history). In a single-JVM appliance both webapps share one port, so this may be left
+    # empty and get_pv_history falls back to archiver_url. In the ESS 4-instance topology mgmt
+    # (:17665) and retrieval (:17668) are SEPARATE Tomcats, so this must point at the retrieval one.
+    archiver_retrieval_url: str = ""
     archiver_auth: str = ""  # optional Authorization header value for secured deployments
     # Phoebus Alarm Logger REST root, e.g. "http://localhost:8081". Activates is_alarm_configured.
     alarm_url: str = ""

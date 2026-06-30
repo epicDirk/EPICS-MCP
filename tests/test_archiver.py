@@ -133,3 +133,72 @@ async def test_is_archived_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None
     assert result["enabled"] is True
     assert result["archived"] is True
     assert result["status"] == "Being archived"
+
+
+# --- two-URL routing (ESS 4-instance topology: mgmt :17665 vs retrieval :17668) ---
+
+
+def test_two_url_routing_mgmt_vs_retrieval(monkeypatch: pytest.MonkeyPatch) -> None:
+    """is_archived must hit the MGMT base_url; get_pv_history the separate retrieval_url.
+
+    In the ESS 4-instance appliance /mgmt and /retrieval live on different Tomcats/ports,
+    so the two calls must NOT share one base URL.
+    """
+    client = ArchiverClient("http://arch:17665", retrieval_url="http://arch:17668")
+    captured: list[str] = []
+
+    def _get(url: str, params: object = None, timeout: object = None) -> Mock:
+        captured.append(url)
+        if "getPVStatus" in url:
+            return _resp([{"pvName": "X", "status": "Being archived"}])
+        return _resp([{"meta": {"name": "X"}, "data": []}])
+
+    monkeypatch.setattr(client.session, "get", _get)
+    client.is_archived("X")
+    client.get_pv_history("X", "a", "b")
+    assert captured[0] == "http://arch:17665/mgmt/bpl/getPVStatus"
+    assert captured[1] == "http://arch:17668/retrieval/data/getData.json"
+
+
+def test_retrieval_url_defaults_to_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Single-JVM appliance: no retrieval_url -> get_pv_history falls back to base_url."""
+    client = ArchiverClient("http://arch:17665")
+    assert client.retrieval_url == "http://arch:17665"
+    captured: list[str] = []
+
+    def _get(url: str, params: object = None, timeout: object = None) -> Mock:
+        captured.append(url)
+        return _resp([{"meta": {"name": "X"}, "data": []}])
+
+    monkeypatch.setattr(client.session, "get", _get)
+    client.get_pv_history("X", "a", "b")
+    assert captured[0] == "http://arch:17665/retrieval/data/getData.json"
+
+
+@pytest.mark.asyncio
+async def test_get_pv_history_tool_passes_retrieval_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_get_pv_history must construct ArchiverClient with the configured retrieval URL."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.get_config",
+        lambda: EpicsConfig(
+            archiver_url="http://arch:17665",
+            archiver_retrieval_url="http://arch:17668",
+        ),
+    )
+    captured: dict[str, object] = {}
+
+    class _Fake:
+        def __init__(self, base_url: str, *args: object, **kwargs: object) -> None:
+            captured["base_url"] = base_url
+            captured["retrieval_url"] = kwargs.get("retrieval_url")
+
+        def get_pv_history(
+            self, pv: str, start: str, end: str, max_points: int = 5000
+        ) -> tuple[list[Sample], bool]:
+            return [Sample(secs=1, nanos=0, val=1.0, severity=0, status=0)], False
+
+    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    result = await _get_pv_history("X", "a", "b")
+    assert result["enabled"] is True
+    assert captured["base_url"] == "http://arch:17665"
+    assert captured["retrieval_url"] == "http://arch:17668"

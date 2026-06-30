@@ -51,8 +51,14 @@ async def _get_pv_history(
         return {"enabled": False, "pv": pv, "samples": [], "total": 0, "note": _DISABLED_NOTE}
 
     def _run() -> dict[str, object]:
+        # get_pv_history hits /retrieval/data — in the ESS 4-instance topology that lives on a
+        # separate Tomcat (:17668) from mgmt (:17665). Pass the retrieval URL; it falls back to
+        # archiver_url inside ArchiverClient when the retrieval URL env is unset (single-JVM).
         client = ArchiverClient(
-            cfg.archiver_url, timeout=timeout, auth_header=cfg.archiver_auth or None
+            cfg.archiver_url,
+            timeout=timeout,
+            auth_header=cfg.archiver_auth or None,
+            retrieval_url=cfg.archiver_retrieval_url or None,
         )
         samples, capped = client.get_pv_history(pv, start, end, max_points=max_points)
         return {

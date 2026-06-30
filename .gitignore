@@ -40,3 +40,9 @@ htmlcov/
 # braucht sie für COPY; .gitignore wirkt NICHT auf den Docker-Build-Kontext).
 sandbox/alarm-server/*.tar.gz
 sandbox/alarm-logger/*.jar
+
+# P5 — archiver build artifact REDACTED-VER (~340 MB): Host-Download via
+# sandbox/fetch_archiver_artifact.sh, Reproduzierbarkeit aus Skript + sha256-Pin → NIE einchecken.
+# ⚠ KEIN .dockerignore (der Build-Kontext braucht den Tarball für COPY). Connector/J + Tomcat kommen
+# im Build aus public Mirrors (Maven Central / offizielles Base-Image) → kein Host-Artefakt.
+sandbox/archiver/*.tar.gz

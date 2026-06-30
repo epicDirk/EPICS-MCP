@@ -54,8 +54,15 @@ class ArchiverClient:
         base_url: str,
         timeout: float = 5.0,
         auth_header: str | None = None,
+        retrieval_url: str | None = None,
     ) -> None:
+        # ``base_url`` is the MGMT root (serves /mgmt/bpl — getPVStatus/is_archived).
+        # ``retrieval_url`` is the RETRIEVAL root (serves /retrieval/data — get_pv_history).
+        # They coincide in a single-JVM appliance (one port for all webapps), so retrieval_url
+        # defaults to base_url. In the ESS 4-instance topology mgmt (:17665) and retrieval (:17668)
+        # are SEPARATE Tomcats, so the caller passes a distinct retrieval_url.
         self.base_url = base_url.rstrip("/")
+        self.retrieval_url = (retrieval_url or base_url).rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update({"accept": "application/json"})
@@ -111,7 +118,7 @@ class ArchiverClient:
         Returns ``(samples, capped)`` where ``capped`` is True if the cap truncated the result.
         """
         data = self._get(
-            f"{self.base_url}/retrieval/data/getData.json",
+            f"{self.retrieval_url}/retrieval/data/getData.json",
             {"pv": pv, "from": start, "to": end},
         )
         # getData.json returns [{"meta": {...}, "data": [ {secs,nanos,val,severity,status}, ... ]}]
