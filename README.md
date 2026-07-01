@@ -20,6 +20,9 @@ Based on a fork of [Jacky1-Jiang/EPICS-MCP-Server](https://github.com/Jacky1-Jia
 | `find_channels` | ChannelFinder lookup: which IOC/host serves a PV + tags/properties (disabled until `EPICS_MCP_CHANNELFINDER_URL` set) |
 | `is_archived` | Whether a PV is archived (EPICS Archiver Appliance; disabled until `EPICS_MCP_ARCHIVER_URL` set) |
 | `get_pv_history` | Archived samples for a PV over an ISO-8601 window (disabled until `EPICS_MCP_ARCHIVER_URL` set) |
+| `is_alarm_configured` | Whether a PV has an alarm configuration (Phoebus Alarm Logger; disabled until `EPICS_MCP_ALARM_URL` set) |
+| `coverage_audit` | Cross-plane coverage matrix: delivered PVs (ChannelFinder) ↔ displays ↔ archive ↔ alarm; blind spots + critical-uncovered (withheld where a plane's URL is unset) |
+| `diagnose_connection` | Diagnose WHY a PV is (dis)connected: live-authoritative state + likely cause (healthy/ioc_down/name_typo/unregistered/indeterminate) + per-plane evidence + next steps. Naming plane off by default (needs `EPICS_MCP_NAMING_URL`) |
 
 ## Resources
 

@@ -19,6 +19,7 @@ from epics_pv_mcp.tools.archiver import _get_pv_history, _is_archived
 from epics_pv_mcp.tools.channelfinder import _find_channels
 from epics_pv_mcp.tools.coverage_audit import _coverage_audit
 from epics_pv_mcp.tools.crossplane import _crossplane_check
+from epics_pv_mcp.tools.diagnose_connection import _diagnose_connection
 from epics_pv_mcp.tools.discover import _discover_pvs
 from epics_pv_mcp.tools.find_device import _find_device
 from epics_pv_mcp.tools.info import _get_pv_info
@@ -577,6 +578,69 @@ async def find_device(
     """
     try:
         return await _find_device(query, displays_dir, match, timeout, context_cap, windows_paths)
+    except EpicsError as e:
+        raise ToolError(f"[{e.error_code}] {e}") from e
+    except Exception as e:
+        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+async def diagnose_connection(
+    pv_name: Annotated[str, Field(description="The PV to diagnose")],
+    timeout: Annotated[
+        float | None,
+        Field(description="Live-probe timeout in seconds (default: config diagnose_timeout, 5.0)"),
+    ] = None,
+    check_channelfinder: Annotated[
+        bool,
+        Field(
+            description="Consult ChannelFinder: is the PV registered, its last-known pvStatus, and "
+            "which IOC/host serves it. Withheld when EPICS_MCP_CHANNELFINDER_URL is unset."
+        ),
+    ] = True,
+    check_naming: Annotated[
+        bool,
+        Field(
+            description="Consult the ESS Naming Service to tell a typo apart from an unregistered "
+            "device. Default False + gated on EPICS_MCP_NAMING_URL — no ESS egress unless enabled."
+        ),
+    ] = False,
+    check_archiver: Annotated[
+        bool,
+        Field(description="Corroborate with the Archiver (recent samples ⇒ recently connected)."),
+    ] = False,
+    check_alarm: Annotated[
+        bool,
+        Field(description="Corroborate with the Alarm tree (known ⇒ a real, monitored PV)."),
+    ] = False,
+) -> dict[str, object]:
+    """Diagnose WHY a PV is (dis)connected: state + likely cause + per-plane evidence + next steps.
+
+    Read-only. The live p4p connect is the ONLY truth for connected/disconnected — a disconnected
+    PV is a NORMAL input (this does NOT raise). ChannelFinder/Naming/Archiver/Alarm are explanatory
+    only: they give a likely_cause + evidence, never flip the verdict, and a disabled/errored plane
+    is 'withheld' (never a false negative). likely_cause is one of healthy, ioc_down, name_typo,
+    unregistered, indeterminate; 'indeterminate' is first-class and honest. On a PVA name-server a
+    typo and a dead IOC both time out (PV_NOT_FOUND only under UDP broadcast), so cause is keyed on
+    ChannelFinder/Naming, never the transport error code. No collision/uniqueness claim is made
+    (multi-responder detection is out of scope). Naming is off by default (no ESS egress).
+    """
+    try:
+        return await _diagnose_connection(
+            pv_name,
+            timeout=timeout,
+            check_channelfinder=check_channelfinder,
+            check_naming=check_naming,
+            check_archiver=check_archiver,
+            check_alarm=check_alarm,
+        )
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:

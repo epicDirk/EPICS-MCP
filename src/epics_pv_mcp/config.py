@@ -42,6 +42,9 @@ class EpicsConfig(BaseSettings):
     max_batch_size: int = Field(default=100, ge=1)
     max_monitor_duration: float = Field(default=60.0, gt=0)
     max_monitor_events: int = Field(default=1000, ge=1)
+    # Live-probe timeout for the diagnose_connection tool (fail-fast; a disconnected PV should not
+    # hang the diagnosis). Separate from default_timeout so read latency and diagnosis can differ.
+    diagnose_timeout: float = Field(default=5.0, gt=0)
 
     # --- Optional REST services (read-only; empty URL = disabled, no network call) ---
     # ChannelFinder service root incl. context path, e.g. "http://host:8080/ChannelFinder".
@@ -61,6 +64,11 @@ class EpicsConfig(BaseSettings):
     # Phoebus Alarm Logger REST root, e.g. "http://localhost:8081". Activates is_alarm_configured.
     alarm_url: str = ""
     alarm_auth: str = ""  # optional Authorization header value for secured deployments
+    # ESS Naming Service base URL, e.g. "https://naming.example.org/". Empty (default) = disabled =
+    # withheld: the naming plane stays off and makes NO ESS call unless set (no egress by default).
+    # Only the diagnose tool honours this gate; crossplane_check keeps its own explicit query_naming
+    # flag (built-in prod default) — untouched here.
+    naming_url: str = ""
 
 
 _config: EpicsConfig | None = None
