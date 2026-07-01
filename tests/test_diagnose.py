@@ -415,6 +415,26 @@ async def test_shell_naming_enabled_splits_unregistered(monkeypatch: pytest.Monk
     assert report.likely_cause == "unregistered"
 
 
+@pytest.mark.asyncio
+async def test_shell_gatherer_is_total_on_unexpected_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TOTAL invariant: a NON-EpicsError from a plane helper withholds, never crashes diagnose()."""
+
+    async def fake_pv_get(name: str, timeout: float | None = None) -> dict[str, object]:
+        return {"value": 12, "alarm": {"severity_text": "NO_ALARM"}}
+
+    async def boom_find(name: str, timeout: float = 5.0) -> dict[str, object]:
+        raise ValueError("unexpected client/projection bug")  # NOT an EpicsError
+
+    _patch(monkeypatch, "pv_get", fake_pv_get)
+    _patch(monkeypatch, "_find_channels", boom_find)
+    _patch(monkeypatch, "get_config", lambda: EpicsConfig())
+
+    report = await diagnose("SYS:PV")  # must NOT raise despite the ValueError
+    assert report.state == "connected"
+    assert "channelfinder" in report.withheld
+    assert report.evidence.channelfinder.consulted is False
+
+
 def test_naming_gate_left_shared_client_untouched() -> None:
     """QA-delta 3 guard: the diagnose naming gate lives at config level; the shared client and its
     other callers (crossplane tool + CLI) still use the bare constructor's built-in prod default."""

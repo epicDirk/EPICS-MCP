@@ -350,7 +350,7 @@ async def _gather_channelfinder(
         return ChannelFinderEvidence(consulted=False, note="ChannelFinder not requested.")
     try:
         result = await _find_channels(pv_name, timeout=timeout)
-    except EpicsError as exc:
+    except Exception as exc:  # noqa: BLE001 — TOTAL: any failure withholds, never crashes diagnose()
         return ChannelFinderEvidence(
             consulted=False, withheld=True, note=f"ChannelFinder error: {exc}"
         )
@@ -413,7 +413,7 @@ async def _gather_archiver(pv_name: str, requested: bool, timeout: float) -> Arc
         return ArchiverEvidence(consulted=False, note="Archiver not requested.")
     try:
         result = await _is_archived(pv_name, timeout=timeout)
-    except EpicsError as exc:
+    except Exception as exc:  # noqa: BLE001 — TOTAL: any failure withholds, never crashes diagnose()
         return ArchiverEvidence(consulted=False, withheld=True, note=f"Archiver error: {exc}")
     if not result.get("enabled"):
         return ArchiverEvidence(consulted=False, withheld=True, note="Archiver disabled.")
@@ -429,7 +429,7 @@ async def _gather_alarm(pv_name: str, requested: bool, timeout: float) -> AlarmE
         return AlarmEvidence(consulted=False, note="Alarm not requested.")
     try:
         result = await _is_alarm_configured(pv_name, timeout=timeout)
-    except EpicsError as exc:
+    except Exception as exc:  # noqa: BLE001 — TOTAL: any failure withholds, never crashes diagnose()
         return AlarmEvidence(consulted=False, withheld=True, note=f"Alarm error: {exc}")
     if not result.get("enabled"):
         return AlarmEvidence(consulted=False, withheld=True, note="Alarm logger disabled.")
