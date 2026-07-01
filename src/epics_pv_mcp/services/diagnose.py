@@ -38,6 +38,7 @@ from pydantic import BaseModel, ConfigDict
 
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsError
+from epics_pv_mcp.services.crossplane import _record_name
 from epics_pv_mcp.services.epics_client import pv_get
 from epics_pv_mcp.services.naming_client import NamingServiceClient
 from epics_pv_mcp.tools.alarm import _is_alarm_configured
@@ -345,11 +346,18 @@ def _state_from_live(live: LiveEvidence) -> State:
 async def _gather_channelfinder(
     pv_name: str, requested: bool, timeout: float
 ) -> ChannelFinderEvidence:
-    """Exact-name ChannelFinder lookup. Disabled/errored → withheld (never a false negative)."""
+    """Exact-name ChannelFinder lookup. Disabled/errored → withheld (never a false negative).
+
+    Queries and matches by the BARE record name: ChannelFinder/RecSync register ``…:Val``, never a
+    field reference ``…:Val.EGU`` (display PVs routinely reference a field). Without this the CF
+    plane would false-miss a registered field-suffixed PV and mis-classify the cause — the same
+    ``crossplane._record_name`` normalization the sibling cross-plane tools use.
+    """
     if not requested:
         return ChannelFinderEvidence(consulted=False, note="ChannelFinder not requested.")
+    record = _record_name(pv_name)
     try:
-        result = await _find_channels(pv_name, timeout=timeout)
+        result = await _find_channels(record, timeout=timeout)
     except Exception as exc:  # noqa: BLE001 — TOTAL: any failure withholds, never crashes diagnose()
         return ChannelFinderEvidence(
             consulted=False, withheld=True, note=f"ChannelFinder error: {exc}"
@@ -361,7 +369,7 @@ async def _gather_channelfinder(
         )
     channels = result.get("channels")
     rows = channels if isinstance(channels, list) else []
-    exact = next((c for c in rows if isinstance(c, dict) and c.get("name") == pv_name), None)
+    exact = next((c for c in rows if isinstance(c, dict) and c.get("name") == record), None)
     props = exact.get("properties") if isinstance(exact, dict) else None
     pv_status = props.get("pvStatus") if isinstance(props, dict) else None
     return ChannelFinderEvidence(
@@ -396,6 +404,13 @@ async def _gather_naming(pv_name: str, requested: bool, timeout: float) -> Namin
 
     def _run() -> NamingEvidence:
         client = NamingServiceClient(base_url=cfg.naming_url, timeout=timeout)
+        # Probe reachability FIRST so an unreachable / timing-out service is WITHHELD by the
+        # gatherer's ``except`` below. ``validate_name`` alone would SWALLOW a transport error into
+        # a definitive ``registered=False`` — which the cause tree reads as a confident name_typo, a
+        # false negative that violates "withheld != no". A REACHABLE service that answers "not
+        # found" still yields ``registered=False`` → name_typo, which is correct. (Known narrow gap:
+        # a reachable HEAD but a failing deviceNames GET still swallows — accepted, documented.)
+        client.check_connectivity()
         status = client.validate_name(device_name)
         return NamingEvidence(
             consulted=True, registered=status["registered"], status=status["status"] or None

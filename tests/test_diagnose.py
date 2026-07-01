@@ -24,6 +24,7 @@ from epics_pv_mcp.services.diagnose import (
     diagnose,
 )
 from epics_pv_mcp.services.naming_client import NameStatus
+from epics_pv_mcp.services.naming_exceptions import NamingServiceConnectionError
 
 # --- evidence builders ---
 
@@ -402,6 +403,9 @@ async def test_shell_naming_enabled_splits_unregistered(monkeypatch: pytest.Monk
         def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
+        def check_connectivity(self) -> bool:
+            return True
+
         def validate_name(self, name: str) -> NameStatus:
             return NameStatus(registered=True, status="ACTIVE", message="ok")
 
@@ -443,3 +447,124 @@ def test_naming_gate_left_shared_client_untouched() -> None:
     # A bare NamingServiceClient() (as tools/crossplane.py:105 and cli_crossplane.py:91 call it)
     # must still default to the production URL — the diagnose gate must NOT have rewired it.
     assert NamingServiceClient().base_url == NamingServiceClient.DEFAULT_URLS["prod"]
+
+
+# ---------------------------------------------------------------------------
+# QA regression: the two membership planes must not turn a false negative into a
+# confident wrong cause (Findings A + B) — the state stays correct either way.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_shell_field_suffixed_pv_normalized_for_channelfinder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Finding A: the CF plane must query/match the BARE record name, not the raw field-suffixed PV.
+
+    ChannelFinder/RecSync register ``…:Val``, never a field reference ``…:Val.EGU``. Without
+    normalization a registered field PV whose IOC is down false-misses in CF and the cause is
+    mis-classified away from ioc_down (to unregistered/name_typo/indeterminate).
+    """
+    captured: dict[str, str] = {}
+
+    async def fake_pv_get(name: str, timeout: float | None = None) -> dict[str, object]:
+        raise PVTimeoutError("timeout")  # the field PV is disconnected (IOC down)
+
+    async def fake_find(name: str, timeout: float = 5.0) -> dict[str, object]:
+        captured["name"] = name
+        # CF registers the BARE record, with a last-known status that is not up.
+        return {
+            "enabled": True,
+            "capped": False,
+            "total": 1,
+            "channels": [
+                {
+                    "name": "SYS:DEV:Val",
+                    "ioc_name": "IOC1",
+                    "host_name": "host1",
+                    "properties": {"pvStatus": "Inactive"},
+                }
+            ],
+        }
+
+    _patch(monkeypatch, "pv_get", fake_pv_get)
+    _patch(monkeypatch, "_find_channels", fake_find)
+    _patch(monkeypatch, "get_config", lambda: EpicsConfig())
+
+    report = await diagnose("SYS:DEV:Val.EGU")
+    assert captured["name"] == "SYS:DEV:Val"  # queried by record name (the .EGU suffix stripped)
+    assert report.evidence.channelfinder.registered is True  # matched despite the field suffix
+    assert report.likely_cause == "ioc_down"  # not unregistered/name_typo/indeterminate
+
+
+@pytest.mark.asyncio
+async def test_shell_naming_unreachable_is_withheld_not_false_typo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Finding B: a Naming transport failure must WITHHOLD, never become a confident name_typo.
+
+    The shared client's ``validate_name`` swallows a transport error into a definitive
+    ``registered=False``; the gatherer must probe connectivity first so an UNREACHABLE service is
+    withheld (``withheld != no``) instead of read as a spelling mistake.
+    """
+
+    async def fake_pv_get(name: str, timeout: float | None = None) -> dict[str, object]:
+        raise PVTimeoutError("timeout")
+
+    async def fake_find(name: str, timeout: float = 5.0) -> dict[str, object]:
+        return {"enabled": True, "channels": [], "total": 0, "capped": False}  # CF-miss
+
+    class _DownNaming:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def check_connectivity(self) -> bool:
+            raise NamingServiceConnectionError("connection refused")
+
+        def validate_name(self, name: str) -> NameStatus:
+            # what the shared client does on an outage: swallow to a false 'not registered'.
+            return NameStatus(registered=False, status="", message="not registered")
+
+    _patch(monkeypatch, "pv_get", fake_pv_get)
+    _patch(monkeypatch, "_find_channels", fake_find)
+    _patch(monkeypatch, "NamingServiceClient", _DownNaming)
+    _patch(monkeypatch, "get_config", lambda: EpicsConfig(naming_url="http://naming"))
+
+    report = await diagnose("SYS:DEV:Val", check_naming=True)
+    assert "naming" in report.withheld
+    assert report.evidence.naming.consulted is False
+    assert report.likely_cause != "name_typo"
+    assert report.likely_cause == "indeterminate"
+
+
+@pytest.mark.asyncio
+async def test_shell_naming_reachable_unregistered_stays_name_typo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Finding B guard: a REACHABLE Naming service reporting 'not registered' must still yield
+    name_typo — the connectivity probe must not over-withhold a genuine negative."""
+
+    async def fake_pv_get(name: str, timeout: float | None = None) -> dict[str, object]:
+        raise PVTimeoutError("timeout")
+
+    async def fake_find(name: str, timeout: float = 5.0) -> dict[str, object]:
+        return {"enabled": True, "channels": [], "total": 0, "capped": False}  # CF-miss
+
+    class _UpUnregNaming:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def check_connectivity(self) -> bool:
+            return True
+
+        def validate_name(self, name: str) -> NameStatus:
+            return NameStatus(registered=False, status="", message="not registered")
+
+    _patch(monkeypatch, "pv_get", fake_pv_get)
+    _patch(monkeypatch, "_find_channels", fake_find)
+    _patch(monkeypatch, "NamingServiceClient", _UpUnregNaming)
+    _patch(monkeypatch, "get_config", lambda: EpicsConfig(naming_url="http://naming"))
+
+    report = await diagnose("SYS:DEV:Val", check_naming=True)
+    assert report.likely_cause == "name_typo"
+    assert "naming" not in report.withheld
