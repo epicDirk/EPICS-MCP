@@ -64,10 +64,10 @@ class EpicsConfig(BaseSettings):
     # Phoebus Alarm Logger REST root, e.g. "http://localhost:8081". Activates is_alarm_configured.
     alarm_url: str = ""
     alarm_auth: str = ""  # optional Authorization header value for secured deployments
-    # ESS Naming Service base URL, e.g. "https://naming.example.org/". Empty (default) = disabled =
-    # withheld: the naming plane stays off and makes NO ESS call unless set (no egress by default).
-    # Only the diagnose tool honours this gate; crossplane_check keeps its own explicit query_naming
-    # flag (built-in prod default) — untouched here.
+    # ESS Naming Service base URL (no built-in default host). Empty (default) = disabled = withheld:
+    # the naming plane stays off and makes NO ESS call unless set (no egress by default). BOTH
+    # diagnose_connection AND crossplane_check/CLI honour this gate — neither reaches ESS production
+    # naming unless this is set.
     naming_url: str = ""
 
 

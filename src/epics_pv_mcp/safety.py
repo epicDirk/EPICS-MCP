@@ -48,6 +48,14 @@ class SafetyLayer:
                 f"Invalid EPICS_MCP_PV_WRITE_PATTERN regex {config.pv_write_pattern!r}: {exc}",
                 details={"pattern": config.pv_write_pattern},
             ) from exc
+        # Defense-in-depth: writes ENABLED without a PV-name allowlist leaves only the on/off env
+        # gate — every PV becomes writable. That is deliberate (the env gate is the primary control)
+        # but a sharp footgun, so warn loudly when an operator forgot EPICS_MCP_PV_WRITE_PATTERN.
+        if config.allow_pv_write and self._pattern is None:
+            logging.getLogger(__name__).warning(
+                "PV writes are ENABLED but no EPICS_MCP_PV_WRITE_PATTERN is set — EVERY PV name is "
+                "writable. Set a pattern (e.g. '^MPS:.*$') to restrict writes to specific PVs."
+            )
         # Sliding-window timestamps of recent writes. G2 constrains
         # write_rate_limit to ge=1, so a *validated* config never produces a
         # negative maxlen. This fail-closed guard catches a config that bypassed

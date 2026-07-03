@@ -21,8 +21,7 @@ from pathlib import Path
 from epics_pv_mcp.services.crossplane import crossplane_check, render_markdown
 from epics_pv_mcp.services.e3_db import load_ioc_db, parse_st_cmd
 from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP, analyze_display_pvs
-from epics_pv_mcp.services.naming_client import NamingServiceClient
-from epics_pv_mcp.tools.crossplane import _build_cf_checker
+from epics_pv_mcp.tools.crossplane import _build_cf_checker, _build_naming_client
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -88,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.displays), context_cap=args.context_cap, windows_paths=args.windows_paths
     )
     st_info = parse_st_cmd(Path(args.st_cmd).read_text(encoding="utf-8"))
-    naming = NamingServiceClient() if args.naming else None
+    naming = _build_naming_client(args.naming)
     ioc_db: tuple[set[str], set[str]] | None = None
     ioc_db_complete = False
     if args.module_db_root:  # empty string = offline (mirror the MCP tool's truthiness sentinel)

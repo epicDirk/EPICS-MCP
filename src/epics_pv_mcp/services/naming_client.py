@@ -14,7 +14,7 @@ are kept. Endpoints (all GET):
 from __future__ import annotations
 
 import logging
-from typing import ClassVar, TypedDict
+from typing import TypedDict
 from urllib.parse import quote as url_quote
 
 import requests
@@ -42,19 +42,15 @@ class NamingServiceClient:
     Results are cached in-memory for the lifetime of the instance.
     """
 
-    DEFAULT_URLS: ClassVar[dict[str, str]] = {
-        "prod": "https://naming.example.org/",
-        "test": "https://naming-test.example.org/",
-    }
-
     def __init__(
         self,
-        environment: str = "prod",
-        base_url: str | None = None,
+        base_url: str,
         timeout: float = 5.0,
     ) -> None:
-        self.environment = environment
-        self.base_url = base_url or self.DEFAULT_URLS.get(environment, self.DEFAULT_URLS["prod"])
+        # ``base_url`` is REQUIRED and caller-provided (from ``EPICS_MCP_NAMING_URL`` via config) —
+        # there is deliberately NO built-in default host, so this client never reaches a hard-coded
+        # ESS endpoint. Callers gate on an unset URL (see ``_build_naming_client`` and diagnose).
+        self.base_url = base_url
         self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update({"accept": "application/json"})

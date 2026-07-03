@@ -22,7 +22,7 @@ def _resp(payload: object, *, ok: bool = True) -> Mock:
 
 def _client_with(monkeypatch: pytest.MonkeyPatch, response: Mock) -> NamingServiceClient:
     """A NamingServiceClient whose every GET returns *response* (no network)."""
-    client = NamingServiceClient()
+    client = NamingServiceClient(base_url="http://naming.example/")
     monkeypatch.setattr(client.session, "get", Mock(return_value=response))
     return client
 
@@ -74,7 +74,7 @@ def test_validate_discipline_approved(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_check_connectivity_raises_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = NamingServiceClient()
+    client = NamingServiceClient(base_url="http://naming.example/")
     monkeypatch.setattr(
         client.session, "head", Mock(side_effect=requests.exceptions.ConnectionError())
     )
@@ -85,7 +85,7 @@ def test_check_connectivity_raises_on_error(monkeypatch: pytest.MonkeyPatch) -> 
 def test_check_connectivity_uses_configured_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     # G4: the reachability probe must honor the configured timeout (default 5 s),
     # not a hardcoded 1 s that falsely reports a slow-but-reachable service down.
-    client = NamingServiceClient(timeout=7.5)
+    client = NamingServiceClient(base_url="http://naming.example/", timeout=7.5)
     head = Mock(return_value=Mock())
     monkeypatch.setattr(client.session, "head", head)
     assert client.check_connectivity() is True

@@ -439,14 +439,20 @@ async def test_shell_gatherer_is_total_on_unexpected_error(monkeypatch: pytest.M
     assert report.evidence.channelfinder.consulted is False
 
 
-def test_naming_gate_left_shared_client_untouched() -> None:
-    """QA-delta 3 guard: the diagnose naming gate lives at config level; the shared client and its
-    other callers (crossplane tool + CLI) still use the bare constructor's built-in prod default."""
-    from epics_pv_mcp.services.naming_client import NamingServiceClient
+def test_crossplane_naming_gated_on_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """QA-delta 3 (updated): crossplane tool + CLI now honour the naming_url gate too — the client
+    has NO built-in ESS prod default. Requested but naming_url unset → no client (no egress); set →
+    a client bound to the configured URL."""
+    from epics_pv_mcp.tools import crossplane as xplane_tool
 
-    # A bare NamingServiceClient() (as tools/crossplane.py:105 and cli_crossplane.py:91 call it)
-    # must still default to the production URL — the diagnose gate must NOT have rewired it.
-    assert NamingServiceClient().base_url == NamingServiceClient.DEFAULT_URLS["prod"]
+    monkeypatch.setattr(xplane_tool, "get_config", lambda: EpicsConfig(naming_url=""))
+    assert xplane_tool._build_naming_client(True) is None  # requested, unset → withheld (no egress)
+    assert xplane_tool._build_naming_client(False) is None  # not requested
+
+    monkeypatch.setattr(xplane_tool, "get_config", lambda: EpicsConfig(naming_url="http://naming/"))
+    client = xplane_tool._build_naming_client(True)
+    assert client is not None
+    assert client.base_url == "http://naming/"
 
 
 # ---------------------------------------------------------------------------

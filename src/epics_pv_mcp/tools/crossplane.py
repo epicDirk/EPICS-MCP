@@ -83,6 +83,21 @@ def _build_cf_checker(query_channelfinder: bool) -> ChannelFinderChecker | None:
     )
 
 
+def _build_naming_client(query_naming: bool) -> NamingServiceClient | None:
+    """Build the ESS Naming-Service client iff requested AND a URL is configured.
+
+    Mirrors :func:`_build_cf_checker` and the diagnose gate: requested but ``naming_url`` unset →
+    ``None`` (no client, no egress). The client no longer carries a hard-coded ESS prod default, so
+    crossplane_check never reaches ESS production naming unless ``EPICS_MCP_NAMING_URL`` is set.
+    """
+    if not query_naming:
+        return None
+    cfg = get_config()
+    if not cfg.naming_url:
+        return None
+    return NamingServiceClient(base_url=cfg.naming_url)
+
+
 def _run_check(
     displays_dir: str,
     st_cmd_path: str,
@@ -102,7 +117,7 @@ def _run_check(
         Path(displays_dir), context_cap=context_cap, windows_paths=windows_paths
     )
     st_info = parse_st_cmd(Path(st_cmd_path).read_text(encoding="utf-8"))
-    naming = NamingServiceClient() if query_naming else None
+    naming = _build_naming_client(query_naming)
     # Opt-in IOC .db enumeration: only when a module/db root is given (offline default unchanged).
     # ``complete`` gates the broken verdict — a partial/templated set withholds it (no false alarm).
     ioc_db: tuple[set[str], set[str]] | None = None
