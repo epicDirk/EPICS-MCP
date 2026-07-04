@@ -29,6 +29,30 @@ def test_health_values() -> None:
     assert result["alarm_enabled"] is False
 
 
+def test_health_version_matches_package_version() -> None:
+    """S1-2: the health resource must report the real package ``__version__`` (locks the wiring —
+    the old shape test only checked the key was present, not its value)."""
+    from epics_pv_mcp import __version__
+
+    assert get_health()["version"] == __version__
+
+
+def test_low_level_server_version_attribute_exists() -> None:
+    """S1-2 early-warning guard: server.py sets the MCP handshake version via the PRIVATE FastMCP
+    attribute ``mcp._mcp_server``, reached with ``getattr(..., None)`` — which SILENTLY skips if a
+    FastMCP upgrade renames/removes it, shipping an unset handshake version with no test failure.
+    This asserts the attribute still exists and carries ``__version__``, turning that silent
+    regression into a loud one."""
+    from epics_pv_mcp import __version__
+    from epics_pv_mcp.server import mcp
+
+    low_level = getattr(mcp, "_mcp_server", None)
+    assert low_level is not None, (
+        "mcp._mcp_server vanished (FastMCP upgrade?) — version-set is a no-op"
+    )
+    assert low_level.version == __version__
+
+
 def test_config_no_secrets() -> None:
     result = get_epics_config()
     assert "provider" in result

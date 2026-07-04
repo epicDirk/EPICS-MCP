@@ -17,6 +17,7 @@ import ast
 from pathlib import Path
 
 _SERVICES_DIR = Path(__file__).resolve().parent.parent / "src" / "epics_pv_mcp" / "services"
+_SERVICES_PACKAGE = ("epics_pv_mcp", "services")
 _FORBIDDEN_ROOT = "epics_pv_mcp.tools"
 
 
@@ -25,15 +26,48 @@ def _imports_the_tool_layer(module: str) -> bool:
     return module == _FORBIDDEN_ROOT or module.startswith(f"{_FORBIDDEN_ROOT}.")
 
 
+def _resolve_relative(level: int, module: str | None) -> str | None:
+    """Resolve a relative import (``level > 0``) against the services package to an absolute module.
+
+    All scanned files live in ``epics_pv_mcp.services``, so ``from . import x`` targets that
+    package, ``from ..tools import x`` targets ``epics_pv_mcp.tools`` (the inversion), etc. Returns
+    None if the relative import climbs above the known tree (can't target the tool layer then).
+    """
+    if level <= 0:
+        return module
+    keep = len(_SERVICES_PACKAGE) - (level - 1)
+    if keep <= 0:
+        return None
+    base = ".".join(_SERVICES_PACKAGE[:keep])
+    return f"{base}.{module}" if module else base
+
+
 def _tool_layer_imports(source: str) -> list[str]:
-    """Return the ``epics_pv_mcp.tools*`` module names imported by *source* (both import forms)."""
+    """Return the tool-layer module names imported by *source* — ABSOLUTE and RELATIVE forms.
+
+    Catches ``import epics_pv_mcp.tools…``, ``from epics_pv_mcp.tools… import x``, ``from ..tools
+    import x`` (relative, previously a blind spot), and ``from .. import tools`` (aliased package).
+    """
     tree = ast.parse(source)
     offenders: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            # ``node.module`` is None for a bare relative import (``from . import x``) — ignored.
-            if node.module and _imports_the_tool_layer(node.module):
-                offenders.append(node.module)
+            if node.level > 0:
+                # Relative import: resolve it against the services package first.
+                resolved = _resolve_relative(node.level, node.module)
+                if resolved is None:
+                    continue
+                if node.module is not None and _imports_the_tool_layer(resolved):
+                    offenders.append(resolved)  # from ..tools[.x] import y
+                else:
+                    # from .. import tools — the package is `resolved`, `tools` is an imported name.
+                    offenders.extend(
+                        f"{resolved}.{alias.name}"
+                        for alias in node.names
+                        if _imports_the_tool_layer(f"{resolved}.{alias.name}")
+                    )
+            elif node.module and _imports_the_tool_layer(node.module):
+                offenders.append(node.module)  # absolute from-import
         elif isinstance(node, ast.Import):
             offenders.extend(
                 alias.name for alias in node.names if _imports_the_tool_layer(alias.name)
@@ -54,3 +88,20 @@ def test_services_layer_never_imports_the_tool_layer() -> None:
         "services/ must not import the tool layer "
         f"(server → tools → services → clients): {violations}"
     )
+
+
+def test_tool_layer_import_detector_catches_all_forms() -> None:
+    """The detector must flag EVERY way a services module could reach the tool layer — including the
+    RELATIVE forms the old walker missed (it only matched the absolute ``epics_pv_mcp.tools`` name,
+    so ``from ..tools import x`` slipped through and a regression could ship green)."""
+    # Absolute forms (already covered before).
+    assert _tool_layer_imports("from epics_pv_mcp.tools.archiver import x\n")
+    assert _tool_layer_imports("import epics_pv_mcp.tools.archiver\n")
+    # Relative forms (the fixed blind spot).
+    assert _tool_layer_imports("from ..tools import archiver\n")
+    assert _tool_layer_imports("from ..tools.archiver import is_archived\n")
+    assert _tool_layer_imports("from .. import tools\n")
+    # Must NOT flag legitimate downward/sibling imports.
+    assert not _tool_layer_imports("from ..config import get_config\n")
+    assert not _tool_layer_imports("from .checkers import query_channels\n")
+    assert not _tool_layer_imports("from epics_pv_mcp.services.checkers import query_channels\n")
