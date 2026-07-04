@@ -179,9 +179,11 @@ def parse_st_cmd(text: str) -> StCmdInfo:
         # dbLoadTemplate P= must not skew the prefix (it drives bucketing + the Naming query). A P=
         # that stays templated after env substitution (points at a name NOT in epicsEnvSet, e.g. a
         # require/iocsh argument) is unresolved and must NOT vote for a concrete prefix either
-        # (S7-2), consistent with the "never a still-templated name" discipline.
+        # (S7-2), consistent with the "never a still-templated name" discipline. Truthiness (not
+        # ``is not None``) also excludes an EMPTY ``P=`` — an empty prefix carries no device
+        # information and must never outvote a real prefix in a mixed st.cmd (S7-2).
         if (
-            p_value is not None
+            p_value
             and "$(" not in p_value
             and "${" not in p_value
             and match.group("cmd") != "dbLoadTemplate"

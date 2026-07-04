@@ -274,6 +274,25 @@ def test_parse_st_cmd_only_unresolved_p_yields_no_prefix() -> None:
     assert info.prefix is None
 
 
+def test_parse_st_cmd_empty_p_does_not_outvote_real_prefix() -> None:
+    """S7-2 regression lock: an EMPTY ``P=`` carries no device info and must never win the
+    majority vote over a real prefix. Two empty ``P=`` + one ``P=REAL:`` → ``REAL:`` (not ``""``).
+    Against the pre-fix ``p_value is not None`` code the empties tallied ``{"": 2, "REAL:": 1}`` →
+    ``""`` won and downstream (crossplane ``if prefix and …``) classified ZERO PVs as linked."""
+    info = parse_st_cmd(
+        'dbLoadRecords("a.db", "P=")\n'
+        'dbLoadRecords("b.db", "P=")\n'
+        'dbLoadRecords("c.db", "P=REAL:")\n'
+    )
+    assert info.prefix == "REAL:"
+
+
+def test_parse_st_cmd_only_empty_p_yields_no_prefix() -> None:
+    """S7-2: with only empty ``P=`` loads, no concrete prefix is voted (None, not ``""``)."""
+    info = parse_st_cmd('dbLoadRecords("a.db", "P=")\ndbLoadRecords("b.db", "P=")\n')
+    assert info.prefix is None
+
+
 def test_strip_line_comment_ignores_backslash_escaped_quote() -> None:
     """S7-4: an escaped quote (``\\"``) inside a value must NOT flip the quote tracker, so a later
     ``#`` inside the same value is not mistaken for a comment and the line is not truncated."""
