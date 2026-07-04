@@ -604,3 +604,36 @@ async def test_shell_naming_reachable_unregistered_stays_name_typo(
     report = await diagnose("SYS:DEV:Val", check_naming=True)
     assert report.likely_cause == "name_typo"
     assert "naming" not in report.withheld
+
+
+# --- Phase 4 L-Politur (S6-4 default anchoring / S6-5 exhaustiveness) --------------------------
+
+
+def test_diagnose_and_tool_wrapper_share_the_check_defaults() -> None:
+    """S6-4: diagnose() and the thin _diagnose_connection() tool carry IDENTICAL check_* defaults,
+    both anchored to the module constants — they cannot drift."""
+    import inspect
+
+    from epics_pv_mcp.services.diagnose import (
+        DEFAULT_CHECK_CHANNELFINDER,
+        DEFAULT_CHECK_NAMING,
+    )
+    from epics_pv_mcp.tools.diagnose_connection import _diagnose_connection
+
+    d_sig = inspect.signature(diagnose).parameters
+    t_sig = inspect.signature(_diagnose_connection).parameters
+    for name in ("check_channelfinder", "check_naming", "check_archiver", "check_alarm"):
+        assert d_sig[name].default == t_sig[name].default
+    # anchored to the single-source constants (not stray literals)
+    assert d_sig["check_channelfinder"].default is DEFAULT_CHECK_CHANNELFINDER
+    assert d_sig["check_naming"].default is DEFAULT_CHECK_NAMING
+
+
+def test_derive_cause_unknown_state_fails_loud() -> None:
+    """S6-5: a State value outside the Literal (future growth) hits assert_never — a loud runtime
+    error instead of a silent None that would surface as an AttributeError deep in the caller."""
+    from typing import cast
+
+    bogus = cast(State, "bogus_state")
+    with pytest.raises(AssertionError):
+        derive_cause(bogus, _ev(_live()))

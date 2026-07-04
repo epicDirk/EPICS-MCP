@@ -32,7 +32,7 @@ that case resolves to ``indeterminate`` with a config-oriented note. Reserved fo
 from __future__ import annotations
 
 import asyncio
-from typing import Literal
+from typing import Literal, assert_never
 
 from pydantic import BaseModel, ConfigDict
 
@@ -54,6 +54,15 @@ Confidence = Literal["confirmed", "likely", "indeterminate"]
 
 #: pvStatus values (case-insensitive) that mean the record's IOC is up per ChannelFinder/RecSync.
 _HEALTHY_PV_STATUS = frozenset({"online", "active"})
+
+# The ONE source of the explanatory-plane defaults (S6-4): shared by diagnose() and the thin
+# _diagnose_connection() tool so they cannot drift. CF is on by default (cheap, no egress); Naming
+# is off (needs EPICS_MCP_NAMING_URL — no ESS egress by default); Archiver/Alarm are opt-in
+# corroboration. The CLI derives the same policy from its --no-channelfinder / --naming flags.
+DEFAULT_CHECK_CHANNELFINDER = True
+DEFAULT_CHECK_NAMING = False
+DEFAULT_CHECK_ARCHIVER = False
+DEFAULT_CHECK_ALARM = False
 
 
 class _Model(BaseModel):
@@ -202,6 +211,10 @@ def derive_cause(state: State, ev: DiagnoseEvidence) -> CauseResult:
             )
         case "disconnected":
             return _derive_disconnected(ev)
+    # S6-5: exhaustive over State today (mypy proves it); assert_never makes a future State value
+    # fail LOUD here — a type error at check time and a clear runtime error — instead of returning
+    # None and surfacing as an AttributeError deep in the caller.
+    assert_never(state)
 
 
 def _derive_disconnected(ev: DiagnoseEvidence) -> CauseResult:
@@ -474,10 +487,10 @@ async def diagnose(
     pv_name: str,
     *,
     timeout: float | None = None,
-    check_channelfinder: bool = True,
-    check_naming: bool = False,
-    check_archiver: bool = False,
-    check_alarm: bool = False,
+    check_channelfinder: bool = DEFAULT_CHECK_CHANNELFINDER,
+    check_naming: bool = DEFAULT_CHECK_NAMING,
+    check_archiver: bool = DEFAULT_CHECK_ARCHIVER,
+    check_alarm: bool = DEFAULT_CHECK_ALARM,
 ) -> DiagnoseReport:
     """Diagnose why *pv_name* is (dis)connected — read-only, a disconnect is normal input.
 

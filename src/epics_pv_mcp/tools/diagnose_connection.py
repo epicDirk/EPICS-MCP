@@ -8,17 +8,23 @@ disconnect into an error (only genuine internal errors reach the ``EpicsError ->
 
 from __future__ import annotations
 
-from epics_pv_mcp.services.diagnose import diagnose
+from epics_pv_mcp.services.diagnose import (
+    DEFAULT_CHECK_ALARM,
+    DEFAULT_CHECK_ARCHIVER,
+    DEFAULT_CHECK_CHANNELFINDER,
+    DEFAULT_CHECK_NAMING,
+    diagnose,
+)
 
 
 async def _diagnose_connection(
     pv_name: str,
     *,
     timeout: float | None = None,
-    check_channelfinder: bool = True,
-    check_naming: bool = False,
-    check_archiver: bool = False,
-    check_alarm: bool = False,
+    check_channelfinder: bool = DEFAULT_CHECK_CHANNELFINDER,
+    check_naming: bool = DEFAULT_CHECK_NAMING,
+    check_archiver: bool = DEFAULT_CHECK_ARCHIVER,
+    check_alarm: bool = DEFAULT_CHECK_ALARM,
 ) -> dict[str, object]:
     """Run the live-authoritative diagnosis and return the report as a dict."""
     report = await diagnose(
