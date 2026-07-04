@@ -13,18 +13,16 @@ are kept. Endpoints (all GET):
 
 from __future__ import annotations
 
-import logging
 from typing import TypedDict
 from urllib.parse import quote as url_quote
 
 import requests
 
+from epics_pv_mcp.services._http import build_retrying_session
 from epics_pv_mcp.services.naming_exceptions import (
     NamingServiceConnectionError,
     NamingServiceResponseError,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class NameStatus(TypedDict):
@@ -55,21 +53,8 @@ class NamingServiceClient:
         # without this, ``http://naming:8080/enotify-web`` produced ``…enotify-webrest/…`` → 404).
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.session = requests.Session()
-        self.session.headers.update({"accept": "application/json"})
-
-        # Retry transient failures (502/503/504) with exponential backoff.
-        from requests.adapters import HTTPAdapter
-
-        try:
-            from urllib3.util.retry import Retry
-
-            retry = Retry(total=3, backoff_factor=0.5, status_forcelist=[502, 503, 504])
-            adapter = HTTPAdapter(max_retries=retry)
-            self.session.mount("http://", adapter)
-            self.session.mount("https://", adapter)
-        except ImportError:
-            pass  # urllib3 retry unavailable — proceed without
+        # Shared session builder (accept header + 3-retry/502-503-504 policy); naming needs no auth.
+        self.session = build_retrying_session()
 
         self._parts_cache: dict[str, list[dict[str, object]]] = {}
         self._names_cache: dict[str, dict[str, object]] = {}

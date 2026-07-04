@@ -18,17 +18,13 @@ returned samples — a wide range on a fast PV can otherwise be enormous. Struct
 
 from __future__ import annotations
 
-import logging
 from typing import TypedDict
 
-import requests
-
+from epics_pv_mcp.services._http import build_retrying_session, rest_get_json
 from epics_pv_mcp.services.archiver_exceptions import (
     ArchiverConnectionError,
     ArchiverResponseError,
 )
-
-logger = logging.getLogger(__name__)
 
 # The status string the Archiver MGMT API reports for an actively-archived PV.
 ARCHIVING_STATUS = "Being archived"
@@ -64,35 +60,18 @@ class ArchiverClient:
         self.base_url = base_url.rstrip("/")
         self.retrieval_url = (retrieval_url or base_url).rstrip("/")
         self.timeout = timeout
-        self.session = requests.Session()
-        self.session.headers.update({"accept": "application/json"})
-        if auth_header:
-            self.session.headers.update({"authorization": auth_header})
-
-        from requests.adapters import HTTPAdapter
-
-        try:
-            from urllib3.util.retry import Retry
-
-            retry = Retry(total=3, backoff_factor=0.5, status_forcelist=[502, 503, 504])
-            adapter = HTTPAdapter(max_retries=retry)
-            self.session.mount("http://", adapter)
-            self.session.mount("https://", adapter)
-        except ImportError:
-            pass  # urllib3 retry unavailable — proceed without
+        self.session = build_retrying_session(auth_header=auth_header)
 
     def _get(self, url: str, params: dict[str, str]) -> object:
-        """Issue a GET and return parsed JSON, translating failures to client exceptions."""
-        try:
-            resp = self.session.get(url, params=params, timeout=self.timeout)
-            resp.raise_for_status()
-            return resp.json()
-        except requests.exceptions.ConnectionError as exc:
-            raise ArchiverConnectionError(
-                f"Failed to connect to Archiver Appliance at {self.base_url}: {exc}"
-            ) from exc
-        except requests.exceptions.RequestException as exc:
-            raise ArchiverResponseError(f"Archiver request failed ({url}): {exc}") from exc
+        """Issue a GET and return parsed JSON, translating failures to Archiver exceptions."""
+        return rest_get_json(
+            self.session,
+            url,
+            params,
+            self.timeout,
+            conn_exc=ArchiverConnectionError,
+            resp_exc=ArchiverResponseError,
+        )
 
     def get_pv_status(self, pv: str) -> dict[str, object]:
         """Return the MGMT status record for *pv* (``getPVStatus`` returns a 1-element list)."""

@@ -19,17 +19,13 @@ Structure mirrors :mod:`epics_pv_mcp.services.naming_client` (Session + Retry on
 
 from __future__ import annotations
 
-import logging
 from typing import TypedDict
 
-import requests
-
+from epics_pv_mcp.services._http import build_retrying_session, rest_get_json
 from epics_pv_mcp.services.channelfinder_exceptions import (
     ChannelFinderConnectionError,
     ChannelFinderResponseError,
 )
-
-logger = logging.getLogger(__name__)
 
 # Default upper bound on returned channels — a broad glob (``*``) can match a whole site.
 DEFAULT_MAX_RESULTS = 500
@@ -57,23 +53,7 @@ class ChannelFinderClient:
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.session = requests.Session()
-        self.session.headers.update({"accept": "application/json"})
-        if auth_header:
-            self.session.headers.update({"authorization": auth_header})
-
-        # Retry transient failures (502/503/504) with exponential backoff (as naming_client).
-        from requests.adapters import HTTPAdapter
-
-        try:
-            from urllib3.util.retry import Retry
-
-            retry = Retry(total=3, backoff_factor=0.5, status_forcelist=[502, 503, 504])
-            adapter = HTTPAdapter(max_retries=retry)
-            self.session.mount("http://", adapter)
-            self.session.mount("https://", adapter)
-        except ImportError:
-            pass  # urllib3 retry unavailable — proceed without
+        self.session = build_retrying_session(auth_header=auth_header)
 
     @property
     def channels_url(self) -> str:
@@ -91,18 +71,14 @@ class ChannelFinderClient:
         network/HTTP failures so the tool layer can surface them.
         """
         params = {"~name": name_pattern, "~size": str(max_results)}
-        try:
-            resp = self.session.get(self.channels_url, params=params, timeout=self.timeout)
-            resp.raise_for_status()
-            data: object = resp.json()
-        except requests.exceptions.ConnectionError as exc:
-            raise ChannelFinderConnectionError(
-                f"Failed to connect to ChannelFinder at {self.base_url}: {exc}"
-            ) from exc
-        except requests.exceptions.RequestException as exc:
-            raise ChannelFinderResponseError(
-                f"ChannelFinder query for '{name_pattern}' failed: {exc}"
-            ) from exc
+        data = rest_get_json(
+            self.session,
+            self.channels_url,
+            params,
+            self.timeout,
+            conn_exc=ChannelFinderConnectionError,
+            resp_exc=ChannelFinderResponseError,
+        )
         if not isinstance(data, list):
             raise ChannelFinderResponseError(
                 f"ChannelFinder returned a non-list payload for '{name_pattern}'"

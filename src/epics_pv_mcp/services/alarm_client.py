@@ -24,13 +24,8 @@ Session + Retry on 502/503/504, per-service exceptions).
 
 from __future__ import annotations
 
-import logging
-
-import requests
-
+from epics_pv_mcp.services._http import build_retrying_session, rest_get_json
 from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
-
-logger = logging.getLogger(__name__)
 
 # Default alarm config-tree (topic) name; the leading path segment that selects the ES index.
 DEFAULT_ALARM_CONFIG = "Accelerator"
@@ -47,35 +42,18 @@ class AlarmClient:
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.session = requests.Session()
-        self.session.headers.update({"accept": "application/json"})
-        if auth_header:
-            self.session.headers.update({"authorization": auth_header})
-
-        from requests.adapters import HTTPAdapter
-
-        try:
-            from urllib3.util.retry import Retry
-
-            retry = Retry(total=3, backoff_factor=0.5, status_forcelist=[502, 503, 504])
-            adapter = HTTPAdapter(max_retries=retry)
-            self.session.mount("http://", adapter)
-            self.session.mount("https://", adapter)
-        except ImportError:
-            pass  # urllib3 retry unavailable — proceed without
+        self.session = build_retrying_session(auth_header=auth_header)
 
     def _get(self, url: str, params: dict[str, str]) -> object:
-        """Issue a GET and return parsed JSON, translating failures to client exceptions."""
-        try:
-            resp = self.session.get(url, params=params, timeout=self.timeout)
-            resp.raise_for_status()
-            return resp.json()
-        except requests.exceptions.ConnectionError as exc:
-            raise AlarmConnectionError(
-                f"Failed to connect to Alarm Logger at {self.base_url}: {exc}"
-            ) from exc
-        except requests.exceptions.RequestException as exc:
-            raise AlarmResponseError(f"Alarm Logger request failed ({url}): {exc}") from exc
+        """Issue a GET and return parsed JSON, translating failures to Alarm client exceptions."""
+        return rest_get_json(
+            self.session,
+            url,
+            params,
+            self.timeout,
+            conn_exc=AlarmConnectionError,
+            resp_exc=AlarmResponseError,
+        )
 
     def is_alarm_configured(
         self, pv: str, config_name: str = DEFAULT_ALARM_CONFIG
