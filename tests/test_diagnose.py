@@ -609,24 +609,79 @@ async def test_shell_naming_reachable_unregistered_stays_name_typo(
 # --- Phase 4 L-Politur (S6-4 default anchoring / S6-5 exhaustiveness) --------------------------
 
 
-def test_diagnose_and_tool_wrapper_share_the_check_defaults() -> None:
-    """S6-4: diagnose() and the thin _diagnose_connection() tool carry IDENTICAL check_* defaults,
-    both anchored to the module constants — they cannot drift."""
-    import inspect
+def test_check_defaults_anchored_to_constants_not_stray_literals() -> None:
+    """S6-4 anchor lock (non-tautological): every check_* default at EVERY code site must be a NAME
+    node referencing a DEFAULT_CHECK_* constant, never a bare literal. The prior ``default is True``
+    / ``is False`` assertion could not tell a constant from a stray ``= True`` (bool singletons: any
+    ``True`` is the same object), so a re-introduced literal — un-anchoring the site from the single
+    source — shipped green. This parses the AST and FAILS on any ast.Constant default; against the
+    pre-fix server.py (bare ``= True``/``= False``) it goes red."""
+    import ast
+    from pathlib import Path
 
+    import epics_pv_mcp.server as server_module
+    import epics_pv_mcp.services.diagnose as diagnose_module
+    import epics_pv_mcp.tools.diagnose_connection as tool_module
+
+    checks = ("check_channelfinder", "check_naming", "check_archiver", "check_alarm")
+    sites = [
+        (diagnose_module, "diagnose"),
+        (tool_module, "_diagnose_connection"),
+        (server_module, "diagnose_connection"),
+    ]
+    for module, func_name in sites:
+        assert module.__file__ is not None
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        fn = next(
+            node
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == func_name
+        )
+        defaults: dict[str, ast.expr] = {}
+        positional = fn.args.posonlyargs + fn.args.args
+        for arg, default in zip(
+            positional[len(positional) - len(fn.args.defaults) :], fn.args.defaults, strict=True
+        ):
+            defaults[arg.arg] = default
+        for kwarg, kw_default in zip(fn.args.kwonlyargs, fn.args.kw_defaults, strict=True):
+            if kw_default is not None:
+                defaults[kwarg.arg] = kw_default
+        for check in checks:
+            node = defaults[check]
+            assert isinstance(node, ast.Name), (
+                f"{func_name}.{check} default is {type(node).__name__}, not a constant reference"
+            )
+            assert node.id.startswith("DEFAULT_CHECK_"), (
+                f"{func_name}.{check} default references {node.id}, not a DEFAULT_CHECK_* constant"
+            )
+
+
+def test_cli_diagnose_defaults_match_the_check_constants(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S6-4 CLI value lock: cli_diagnose derives check_* from argparse flags (store_true), so it
+    can't reference the constants directly — but its EMPTY-flag defaults must still equal them. Spy
+    the diagnose() call with no flags set and assert each check_* kwarg == the constant. If someone
+    flips a constant but leaves the CLI's opt-in/opt-out flag structure, this goes red."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import epics_pv_mcp.cli_diagnose as cli_diagnose
     from epics_pv_mcp.services.diagnose import (
+        DEFAULT_CHECK_ALARM,
+        DEFAULT_CHECK_ARCHIVER,
         DEFAULT_CHECK_CHANNELFINDER,
         DEFAULT_CHECK_NAMING,
     )
-    from epics_pv_mcp.tools.diagnose_connection import _diagnose_connection
 
-    d_sig = inspect.signature(diagnose).parameters
-    t_sig = inspect.signature(_diagnose_connection).parameters
-    for name in ("check_channelfinder", "check_naming", "check_archiver", "check_alarm"):
-        assert d_sig[name].default == t_sig[name].default
-    # anchored to the single-source constants (not stray literals)
-    assert d_sig["check_channelfinder"].default is DEFAULT_CHECK_CHANNELFINDER
-    assert d_sig["check_naming"].default is DEFAULT_CHECK_NAMING
+    spy = AsyncMock(return_value=SimpleNamespace(model_dump=lambda mode="json": {}))
+    monkeypatch.setattr(cli_diagnose, "diagnose", spy)
+
+    assert cli_diagnose.main(["SOME:PV", "--json"]) == 0
+    assert spy.await_args is not None
+    kwargs = spy.await_args.kwargs
+    assert kwargs["check_channelfinder"] is DEFAULT_CHECK_CHANNELFINDER
+    assert kwargs["check_naming"] is DEFAULT_CHECK_NAMING
+    assert kwargs["check_archiver"] is DEFAULT_CHECK_ARCHIVER
+    assert kwargs["check_alarm"] is DEFAULT_CHECK_ALARM
 
 
 def test_derive_cause_unknown_state_fails_loud() -> None:

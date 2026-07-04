@@ -11,6 +11,12 @@ from epics_pv_mcp import __version__
 from epics_pv_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_pv_mcp.prompts import diagnose_pv as _diagnose_pv
 from epics_pv_mcp.resources import get_epics_config, get_health
+from epics_pv_mcp.services.diagnose import (
+    DEFAULT_CHECK_ALARM,
+    DEFAULT_CHECK_ARCHIVER,
+    DEFAULT_CHECK_CHANNELFINDER,
+    DEFAULT_CHECK_NAMING,
+)
 from epics_pv_mcp.tool_errors import translate_epics_errors
 from epics_pv_mcp.tools.alarm import _is_alarm_configured
 from epics_pv_mcp.tools.archiver import _get_pv_history, _is_archived
@@ -334,22 +340,22 @@ async def diagnose_connection(
             description="Consult ChannelFinder: is the PV registered, its last-known pvStatus, and "
             "which IOC/host serves it. Withheld when EPICS_MCP_CHANNELFINDER_URL is unset."
         ),
-    ] = True,
+    ] = DEFAULT_CHECK_CHANNELFINDER,
     check_naming: Annotated[
         bool,
         Field(
             description="Consult the ESS Naming Service to tell a typo apart from an unregistered "
             "device. Default False + gated on EPICS_MCP_NAMING_URL — no ESS egress unless enabled."
         ),
-    ] = False,
+    ] = DEFAULT_CHECK_NAMING,
     check_archiver: Annotated[
         bool,
         Field(description="Corroborate with the Archiver (recent samples ⇒ recently connected)."),
-    ] = False,
+    ] = DEFAULT_CHECK_ARCHIVER,
     check_alarm: Annotated[
         bool,
         Field(description="Corroborate with the Alarm tree (known ⇒ a real, monitored PV)."),
-    ] = False,
+    ] = DEFAULT_CHECK_ALARM,
 ) -> dict[str, object]:
     """Diagnose WHY a PV is (dis)connected: state + likely cause + per-plane evidence + next steps.
 
