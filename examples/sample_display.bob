@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Minimal Phoebus/CS-Studio display for the display-aware tools (validate_pvs,
+     find_device, crossplane_check). References the quick-start PV from test.db. -->
+<display version="2.0.0">
+  <name>EPICS PV MCP — example</name>
+  <width>320</width>
+  <height>120</height>
+  <widget type="label" version="2.0.0">
+    <name>Title</name>
+    <text>Example display: TEST:Temperature</text>
+    <x>10</x>
+    <y>10</y>
+    <width>300</width>
+    <height>20</height>
+  </widget>
+  <widget type="textupdate" version="2.0.0">
+    <name>Temperature</name>
+    <pv_name>TEST:Temperature</pv_name>
+    <x>10</x>
+    <y>50</y>
+    <width>140</width>
+    <height>30</height>
+  </widget>
+</display>

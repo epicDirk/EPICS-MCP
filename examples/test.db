@@ -1,0 +1,20 @@
+# Minimal EPICS database for the EPICS PV MCP quick start.
+# Serve over PVAccess with:  softIocPVA -d test.db
+# Then:                      epics-diagnose TEST:Temperature
+
+record(ai, "TEST:Temperature") {
+    field(DESC, "Example scalar for the EPICS PV MCP quick start")
+    field(VAL, "21.5")
+    field(EGU, "C")
+    field(PREC, "1")
+    field(HOPR, "100")
+    field(LOPR, "0")
+    field(HIGH, "80")
+    field(HSV, "MINOR")
+}
+
+record(bo, "TEST:Heater") {
+    field(DESC, "Example writable bit (allowlist ^TEST:.* for set_pv_value)")
+    field(ZNAM, "OFF")
+    field(ONAM, "ON")
+}

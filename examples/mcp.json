@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "epics-pv": {
+      "command": "epics-pv-mcp",
+      "env": {
+        "EPICS_MCP_PROVIDER": "pva"
+      }
+    }
+  }
+}
