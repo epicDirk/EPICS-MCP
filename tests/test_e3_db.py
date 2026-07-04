@@ -1,9 +1,14 @@
 """Tests for the static e3 st.cmd / .db parser (synthetic fixtures, modelled on dln01)."""
 
+from collections.abc import Iterator
 from pathlib import Path
 
+import pytest
+
+import epics_pv_mcp.services.e3_db as e3_db
 from epics_pv_mcp.services.e3_db import (
     StCmdInfo,
+    _strip_line_comment,
     ioc_db_pvs,
     load_ioc_db,
     parse_st_cmd,
@@ -251,3 +256,59 @@ def test_load_ioc_db_same_db_two_instances_merged(tmp_path: Path) -> None:
     _write(tmp_path / "foo.db", 'record(bi, "$(P)status") {}\n')
     result = load_ioc_db(info, tmp_path)
     assert result.resolved == frozenset({"A:status", "B:status"})
+
+
+# --- Phase 4 L-Politur (S7-2 / S7-4 / S7-3) ---------------------------------------------------
+
+
+def test_parse_st_cmd_unresolved_p_macro_does_not_vote_for_prefix() -> None:
+    """S7-2: a P= that stays templated (points at a name not in epicsEnvSet) must not vote for the
+    prefix; a concrete P= from a sibling load still wins."""
+    info = parse_st_cmd('dbLoadRecords("a.db", "P=$(UNDEF):")\ndbLoadRecords("b.db", "P=REAL:")\n')
+    assert info.prefix == "REAL:"
+
+
+def test_parse_st_cmd_only_unresolved_p_yields_no_prefix() -> None:
+    """S7-2: with only a templated P=, no concrete prefix is voted (None, not the raw macro)."""
+    info = parse_st_cmd('dbLoadRecords("a.db", "P=$(UNDEF):")\n')
+    assert info.prefix is None
+
+
+def test_strip_line_comment_ignores_backslash_escaped_quote() -> None:
+    """S7-4: an escaped quote (``\\"``) inside a value must NOT flip the quote tracker, so a later
+    ``#`` inside the same value is not mistaken for a comment and the line is not truncated."""
+    line = 'field(DESC, "a \\" b # c")'  # value contains a literal quote then a '#'
+    assert _strip_line_comment(line) == line  # not cut at the in-value '#'
+
+
+def test_ioc_db_pvs_escaped_quote_does_not_hide_a_later_record() -> None:
+    """S7-4 end-to-end: the escaped quote must not let an in-value '#' cut a record that follows on
+    the same line."""
+    db = 'record(stringin, "SYS:x") { field(DESC, "a \\" b # c") } record(stringin, "SYS:y") {}\n'
+    resolved, _unresolved = ioc_db_pvs(db, {})
+    assert resolved == {"SYS:x", "SYS:y"}
+
+
+def test_load_ioc_db_walks_module_root_once_for_many_basename_loads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S7-3: N basename-fallback loads walk the module root ONCE (index built per load_ioc_db),
+    not once per load."""
+    loads = "".join(f'dbLoadRecords("f{i}.db", "P=SYS:")\n' for i in range(5))
+    info = parse_st_cmd(loads)
+    # Files live in a subdir → each load misses the direct path and uses the basename index.
+    for i in range(5):
+        _write(tmp_path / "sub" / f"f{i}.db", 'record(bi, "$(P)x") {}\n')
+
+    calls = 0
+    real = e3_db._iter_files_bounded
+
+    def counting(root: Path, *, max_depth: int = 8) -> Iterator[Path]:
+        nonlocal calls
+        calls += 1
+        return real(root, max_depth=max_depth)
+
+    monkeypatch.setattr(e3_db, "_iter_files_bounded", counting)
+    result = load_ioc_db(info, tmp_path)
+    assert calls == 1  # ONE walk for all 5 loads (was 5 before S7-3)
+    assert result.resolved == frozenset({"SYS:x"})

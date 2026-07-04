@@ -70,7 +70,10 @@ def _strip_line_comment(line: str) -> str:
     """
     in_quote = False
     for index, char in enumerate(line):
-        if char == '"':
+        # A backslash-escaped quote (``\"``, EPICS allows it inside a field value like
+        # ``field(DESC, "a \"x\" # y")``) is NOT a quote boundary — counting it would flip
+        # ``in_quote`` and mis-cut a trailing ``#`` inside the value (S7-4).
+        if char == '"' and (index == 0 or line[index - 1] != "\\"):
             in_quote = not in_quote
         elif char == "#" and not in_quote:
             return line[:index]
@@ -171,10 +174,18 @@ def parse_st_cmd(text: str) -> StCmdInfo:
             Load(command=match.group("cmd"), target=match.group("file"), macros=macros)
         )
         p_value = macros.get("P")
-        # Only record-instantiating loads vote for the IOC device prefix. dbLoadTemplate is captured
-        # in _LOAD_RE for completeness DETECTION only (its records need msi); a stray dbLoadTemplate
-        # P= must not skew the prefix, which drives both bucketing and the Naming-Service query.
-        if p_value and match.group("cmd") != "dbLoadTemplate":
+        # Only record-instantiating loads vote for the IOC device prefix. dbLoadTemplate is
+        # captured in _LOAD_RE for completeness DETECTION only (its records need msi); a stray
+        # dbLoadTemplate P= must not skew the prefix (it drives bucketing + the Naming query). A P=
+        # that stays templated after env substitution (points at a name NOT in epicsEnvSet, e.g. a
+        # require/iocsh argument) is unresolved and must NOT vote for a concrete prefix either
+        # (S7-2), consistent with the "never a still-templated name" discipline.
+        if (
+            p_value is not None
+            and "$(" not in p_value
+            and "${" not in p_value
+            and match.group("cmd") != "dbLoadTemplate"
+        ):
             prefixes[p_value] += 1
 
     if prefixes:
@@ -245,20 +256,32 @@ def _iter_files_bounded(root: Path, *, max_depth: int = 8) -> Iterator[Path]:
             yield Path(dirpath) / filename
 
 
-def _locate_db(target: str, root: Path) -> list[Path]:
+def _build_basename_index(root: Path) -> dict[str, list[Path]]:
+    """Map each basename under *root* to its resolved paths via ONE bounded walk (S7-3).
+
+    Built once per :func:`load_ioc_db` so N ``dbLoadRecords`` loads that fall back to a basename
+    search no longer each trigger a full ``os.walk``. A same-named ``.db`` in several modules yields
+    multiple paths (the caller treats >1 as ambiguous).
+    """
+    index: dict[str, list[Path]] = {}
+    for f in _iter_files_bounded(root):
+        index.setdefault(f.name, []).append(f.resolve())
+    return index
+
+
+def _locate_db(target: str, root: Path, basename_index: dict[str, list[Path]]) -> list[Path]:
     """Resolve a (macro-substituted) ``.db`` *target* to file(s) under *root* (deterministic).
 
     Primary: the target as a direct path (absolute, or relative to *root* — this resolves the
-    synthesised ``$(<module>_DIR)/...`` form). Secondary: a bounded basename search under *root*.
-    Returns ALL matches sorted; the caller treats 0 = missing and >1 = ambiguous (a same-named
-    ``.db`` in several modules must not silently pick the wrong PV set).
+    synthesised ``$(<module>_DIR)/...`` form). Secondary: a lookup in *basename_index* (prebuilt
+    once per :func:`load_ioc_db` — S7-3). Returns ALL matches sorted; the caller treats 0 = missing
+    and >1 = ambiguous (a same-named ``.db`` in several modules must not silently pick a wrong set).
     """
     path = Path(target)
     direct = path if path.is_absolute() else (root / path)
     if direct.is_file():
         return [direct.resolve()]
-    name = path.name
-    return sorted({f.resolve() for f in _iter_files_bounded(root) if f.name == name})
+    return sorted(set(basename_index.get(path.name, [])))
 
 
 def load_ioc_db(st_info: StCmdInfo, module_db_root: Path) -> IocDbResult:
@@ -273,6 +296,8 @@ def load_ioc_db(st_info: StCmdInfo, module_db_root: Path) -> IocDbResult:
     """
     dir_env = {f"{module}_DIR": str(module_db_root / module) for module in st_info.requires}
     base_env = {**st_info.env, **dir_env}
+    # Walk the module/db root ONCE; every basename fallback below reads this index (S7-3).
+    basename_index = _build_basename_index(module_db_root)
     resolved: set[str] = set()
     unresolved: set[str] = set()
     missing: list[str] = []
@@ -288,7 +313,7 @@ def load_ioc_db(st_info: StCmdInfo, module_db_root: Path) -> IocDbResult:
             # report it as the IOC's authoritative PV set. Force missing → complete=False.
             missing.append(load.target)
             continue
-        matches = _locate_db(target, module_db_root)
+        matches = _locate_db(target, module_db_root, basename_index)
         if not matches:
             missing.append(load.target)
             continue
