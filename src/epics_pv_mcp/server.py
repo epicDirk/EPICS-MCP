@@ -1,11 +1,11 @@
 """EPICS PV MCP Server — main entry point."""
 
+import logging
 from typing import Annotated
 
 from fastmcp.exceptions import ToolError
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
-from opi_navigation.pv_analysis.lookup import MatchMode
 from pydantic import Field
 
 from epics_pv_mcp import __version__
@@ -13,20 +13,17 @@ from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_pv_mcp.prompts import diagnose_pv as _diagnose_pv
 from epics_pv_mcp.resources import get_epics_config, get_health
-from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
 from epics_pv_mcp.tools.alarm import _is_alarm_configured
 from epics_pv_mcp.tools.archiver import _get_pv_history, _is_archived
 from epics_pv_mcp.tools.channelfinder import _find_channels
-from epics_pv_mcp.tools.coverage_audit import _coverage_audit
-from epics_pv_mcp.tools.crossplane import _crossplane_check
 from epics_pv_mcp.tools.diagnose_connection import _diagnose_connection
 from epics_pv_mcp.tools.discover import _discover_pvs
-from epics_pv_mcp.tools.find_device import _find_device
 from epics_pv_mcp.tools.info import _get_pv_info
 from epics_pv_mcp.tools.monitor import _monitor_pv
 from epics_pv_mcp.tools.read import _get_pv_value, _get_pvs
-from epics_pv_mcp.tools.validate import _validate_pvs
 from epics_pv_mcp.tools.write import _set_pv_value
+
+logger = logging.getLogger(__name__)
 
 # Keep in sync with the epics-pv posture in SKILL.md
 mcp = FastMCP(
@@ -208,52 +205,6 @@ async def monitor_pv(
         openWorldHint=True,
     )
 )
-async def validate_pvs(
-    pvs: Annotated[
-        list[str] | None,
-        Field(description="List of PV names to validate"),
-    ] = None,
-    file_path: Annotated[
-        str | None,
-        Field(
-            description="Path to a .bob file. Extracts the concrete, macro-resolved "
-            "ca/pva channels it references (via the opi_navigation inventory) and "
-            "checks their connectivity."
-        ),
-    ] = None,
-    displays_dir: Annotated[
-        str | None,
-        Field(
-            description="Dataset ROOT for file_path mode — needed to resolve display "
-            "macros (esp. for embedded fragments). Without it the file's own directory "
-            "is used, which under-resolves fragments. NOTE: a full inventory walk is "
-            "~60 s for a large dataset; do not call per-file in a loop."
-        ),
-    ] = None,
-    timeout: Annotated[
-        float,
-        Field(description="Timeout in seconds per PV"),
-    ] = 5.0,
-) -> dict[str, object]:
-    """Check PV connectivity. Provide a PV list or a .bob file path (+ displays_dir ROOT)."""
-    try:
-        return await _validate_pvs(
-            pvs=pvs, file_path=file_path, displays_dir=displays_dir, timeout=timeout
-        )
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
-
-
-@mcp.tool(
-    annotations=ToolAnnotations(
-        readOnlyHint=True,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
-    )
-)
 async def discover_pvs(
     pattern: Annotated[
         str,
@@ -267,97 +218,6 @@ async def discover_pvs(
     """Discover PVs by name. Wildcard patterns require ChannelFinder infrastructure."""
     try:
         return await _discover_pvs(pattern, timeout)
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
-
-
-@mcp.tool(
-    annotations=ToolAnnotations(
-        readOnlyHint=True,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
-    )
-)
-async def crossplane_check(
-    displays_dir: Annotated[
-        str,
-        Field(
-            description="Project/dataset ROOT directory of .bob displays (searched recursively). "
-            "Must be the root, not a narrow per-IOC subdirectory: display macros are bound by the "
-            "operator top-levels found here, so a too-narrow scope leaves PVs unresolved."
-        ),
-    ],
-    st_cmd_path: Annotated[
-        str,
-        Field(description="Path to an e3 IOC st.cmd startup script"),
-    ],
-    query_naming: Annotated[
-        bool,
-        Field(
-            description="Query the ESS Naming Service (read-only GET) for the IOC device "
-            "name. Default False keeps the check fully offline and deterministic."
-        ),
-    ] = False,
-    query_channelfinder: Annotated[
-        bool,
-        Field(
-            description="Check each concrete linked PV against ChannelFinder (the runtime PV "
-            "directory) and report those NOT registered as 'cf_unregistered' — a separate plane "
-            "from 'broken' (CF runtime registry vs. static .db). Needs "
-            "EPICS_MCP_CHANNELFINDER_URL; unset → an honest 'skipped' note (no network call). "
-            "Default False stays offline. Withheld (never false-flagged) on a truncated registry."
-        ),
-    ] = False,
-    context_cap: Annotated[
-        int,
-        Field(
-            description="Max per-display reachability contexts the PV-inventory explores (higher "
-            "= more complete, slower; a large dataset like fbis takes ~60 s at the default). "
-            "Capped displays are reported as a lower bound in 'displays_incomplete'."
-        ),
-    ] = DEFAULT_PV_CONTEXT_CAP,
-    windows_paths: Annotated[
-        bool,
-        Field(
-            description="Resolve embedded <file> references case-insensitively (Windows host). "
-            "Default False = Linux/ESS-console semantics (deterministic); set True on Windows if "
-            "embed chains under-resolve due to filename case mismatch."
-        ),
-    ] = False,
-    module_db_root: Annotated[
-        str,
-        Field(
-            description="Opt-in: local directory holding the IOC's e3 module .db files. When set, "
-            "concrete linked PVs are checked against the loaded IOC .db set and a 'broken' verdict "
-            "is emitted ONLY if that set is provably complete + fully resolved (else withheld — no "
-            "false alarm; e3 IOCs that load records via iocshLoad/dbLoadTemplate withhold). "
-            "Empty (default) keeps the check at prefix/Naming level (no 'broken' verdict)."
-        ),
-    ] = "",
-) -> dict[str, object]:
-    """Cross-plane PV provenance: join macro-expanded display PVs ↔ e3 IOC (st.cmd) ↔ ESS Naming.
-
-    Read-only. Returns a structured report plus a Markdown rendering. The display PVs come from the
-    macro-expanded, per-instance PV-inventory (operator-facing displays only); concrete PVs sharing
-    the IOC prefix are 'linked' (writable subset surfaced), others 'other_prefix'. PVs the inventory
-    cannot resolve to a concrete channel are 'indeterminate' (dynamic/unresolved) and never judged
-    'broken'; non-channel protocols (loc/sim/sys/other) are excluded from the join. A 'broken'
-    verdict (linked PV absent from the IOC .db) is produced only when 'module_db_root' supplies a
-    provably complete IOC .db set; otherwise it is withheld.
-    """
-    try:
-        return await _crossplane_check(
-            displays_dir,
-            st_cmd_path,
-            query_naming=query_naming,
-            query_channelfinder=query_channelfinder,
-            context_cap=context_cap,
-            windows_paths=windows_paths,
-            module_db_root=module_db_root,
-        )
     except EpicsError as e:
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
@@ -488,110 +348,6 @@ async def is_alarm_configured(
         openWorldHint=True,
     )
 )
-async def coverage_audit(
-    displays_dir: Annotated[str, Field(description="project/dataset ROOT of .bob displays")],
-    scope: Annotated[
-        str,
-        Field(
-            description="record-name prefix narrowing the ChannelFinder query AND the display set "
-            "(e.g. DEV-TEST01:Ctrl-EVR-01:); '' = whole site (CF cap risk — small-scope only)"
-        ),
-    ] = "",
-    query_channelfinder: Annotated[
-        bool, Field(description="query ChannelFinder for delivered PVs (the coverage anchor)")
-    ] = False,
-    query_archiver: Annotated[
-        bool, Field(description="add the archive plane (per-PV is_archived)")
-    ] = False,
-    query_alarm: Annotated[
-        bool, Field(description="add the alarm plane (per-PV is_alarm_configured)")
-    ] = False,
-    alarm_config: Annotated[
-        str, Field(description="alarm config-tree name (default Accelerator)")
-    ] = "Accelerator",
-    context_cap: Annotated[
-        int, Field(description="max per-display reachability contexts the PV-inventory explores")
-    ] = DEFAULT_PV_CONTEXT_CAP,
-    windows_paths: Annotated[
-        bool, Field(description="resolve embedded <file> refs case-insensitively (Windows host)")
-    ] = False,
-) -> dict[str, object]:
-    """Cross-plane coverage audit: which delivered PV has no display/archive/alarm — and back.
-
-    Read-only. Joins the Wedge-0 display-PV index (PV→[screens]) with ChannelFinder (delivered PVs,
-    the anchor), the Archiver and the Phoebus Alarm config. Each runtime plane is queried only when
-    requested AND its *_URL is set; a missing URL withholds that plane (never a false 'no'). Returns
-    the cross-coverage matrix (cf_and_display / cf_only=blind-spots / display_only) + verdicts
-    + critical_uncovered (delivered AND a proven gap), with honest lower-bound notes.
-    """
-    try:
-        return await _coverage_audit(
-            displays_dir,
-            scope,
-            query_channelfinder,
-            query_archiver,
-            query_alarm,
-            alarm_config,
-            context_cap,
-            windows_paths,
-        )
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
-
-
-@mcp.tool(
-    annotations=ToolAnnotations(
-        readOnlyHint=True,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
-    )
-)
-async def find_device(
-    query: Annotated[str, Field(description="Device / PV channel (protocol prefix optional)")],
-    displays_dir: Annotated[
-        str, Field(description="Project/dataset ROOT holding the .bob displays")
-    ],
-    match: Annotated[
-        MatchMode, Field(description="Match mode against the protocol-stripped channel")
-    ] = "prefix",
-    timeout: Annotated[float, Field(description="Live-read timeout in seconds")] = 5.0,
-    context_cap: Annotated[
-        int, Field(description="Per-display macro-context cap (higher = more complete, slower)")
-    ] = DEFAULT_PV_CONTEXT_CAP,
-    windows_paths: Annotated[
-        bool, Field(description="Resolve embedded <file> refs case-insensitively (Windows host)")
-    ] = False,
-) -> dict[str, object]:
-    """Find which operator screens show device X, read its channels live, and join the serving IOC.
-
-    Read-only (Wedge-2 live counterpart of the offline find_screen). The reverse-lookup — which
-    operator screens reference the device — is offline + macro-aware. Live values come from p4p,
-    localhost-isolated by default (does NOT reach ESS production until the launcher widens the EPICS
-    address list); the live read is capped to max_batch_size channels (honest note; screens stay
-    complete). Source IOC comes from ChannelFinder, disabled by default (empty
-    EPICS_MCP_CHANNELFINDER_URL → no source IOC, honest note). ca-only PVs are not read under the
-    single pva provider. displays_dir is the project/dataset ROOT. Returns
-    {"report": <DeviceLookupReport JSON>, "markdown": <rendered report>}.
-    """
-    try:
-        return await _find_device(query, displays_dir, match, timeout, context_cap, windows_paths)
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
-
-
-@mcp.tool(
-    annotations=ToolAnnotations(
-        readOnlyHint=True,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=True,
-    )
-)
 async def diagnose_connection(
     pv_name: Annotated[str, Field(description="The PV to diagnose")],
     timeout: Annotated[
@@ -645,6 +401,19 @@ async def diagnose_connection(
         raise ToolError(f"[{e.error_code}] {e}") from e
     except Exception as e:
         raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+
+
+# Display-aware tools (validate_pvs / crossplane_check / coverage_audit / find_device) need the
+# opi_navigation PV-inventory — the optional `[displays]` extra. Register them only when it is
+# installed, so the core PV server installs and starts standalone without it.
+try:
+    from epics_pv_mcp.display_tools import register_display_tools
+
+    register_display_tools(mcp)
+except ImportError:
+    logger.info(
+        "Display tools disabled: opi_navigation not installed (pip install epics-pv-mcp[displays])"
+    )
 
 
 # === Resources ===

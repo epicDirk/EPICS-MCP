@@ -506,7 +506,6 @@ source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
     { name = "mcp" },
-    { name = "opi-navigation" },
     { name = "p4p" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -516,19 +515,24 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "opi-navigation" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
+displays = [
+    { name = "opi-navigation" },
+]
 
 [package.metadata]
 requires-dist = [
+    { name = "epics-pv-mcp", extras = ["displays"], marker = "extra == 'dev'" },
     { name = "fastmcp", specifier = ">=3.4.2,<4" },
     { name = "mcp", specifier = ">=1.0,<2" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19" },
-    { name = "opi-navigation", git = "https://github.com/epicDirk/opi-foundry.git?rev=8fad86766891aeac177050449f73a3a4fbf554cc" },
+    { name = "opi-navigation", marker = "extra == 'displays'", git = "https://github.com/epicDirk/opi-foundry.git?rev=8fad86766891aeac177050449f73a3a4fbf554cc" },
     { name = "p4p", specifier = ">=4.2.0,<5" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "pydantic", specifier = ">=2.11,<3" },
@@ -539,7 +543,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.25" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["displays", "dev"]
 
 [[package]]
 name = "epicscorelibs"

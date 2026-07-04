@@ -138,7 +138,7 @@ async def test_server_find_device_maps_error_to_tool_error(tmp_path: Path) -> No
     """The server wrapper maps EpicsError to ToolError with the error_code tag."""
     from fastmcp.exceptions import ToolError
 
-    from epics_pv_mcp.server import find_device
+    from epics_pv_mcp.display_tools import find_device
 
     with pytest.raises(ToolError, match="INVALID_INPUT"):
         await find_device("DEV-TEST01", str(tmp_path / "nope"))

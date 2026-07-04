@@ -1,9 +1,25 @@
 """Shared fixtures for EPICS PV MCP tests."""
 
+import importlib.util
+
 import pytest
 
 from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.safety import SafetyLayer
+
+# The display-aware tools and their opi_navigation-coupled tests need the optional
+# `[displays]` extra. When opi_navigation is not installed (a standalone core install),
+# skip those test modules at collection so the core suite still runs — mirroring
+# server.py, which registers the display tools only when opi_navigation is importable.
+if importlib.util.find_spec("opi_navigation") is None:
+    collect_ignore = [
+        "test_validate.py",
+        "test_crossplane_tool.py",
+        "test_coverage_tool.py",
+        "test_find_device_tool.py",
+        "test_device_lookup.py",
+        "test_inventory_adapter.py",
+    ]
 
 
 @pytest.fixture

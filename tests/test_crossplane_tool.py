@@ -334,7 +334,7 @@ async def test_crossplane_tool_pva_prefixed_pv_broken_against_db(tmp_path: Path)
 @pytest.mark.asyncio
 async def test_server_crossplane_converts_error_to_tool_error(tmp_path: Path) -> None:
     """The server wrapper maps EpicsError to ToolError with the error_code tag."""
-    from epics_pv_mcp.server import crossplane_check
+    from epics_pv_mcp.display_tools import crossplane_check
 
     _, st_cmd = _setup(tmp_path)
     with pytest.raises(ToolError, match="INVALID_INPUT"):

@@ -12,21 +12,26 @@ dependencies = [
     # mcp.types.ToolAnnotations), nicht nur transitiv über fastmcp.
     "mcp>=1.0,<2",
     "fastmcp>=3.4.2,<4",
-    # pydantic>=2.11: Floor von opi_navigation (s.u.); uv erzwingt den Schnitt ohnehin,
-    # hier explizit zur Intent-Klarheit.
+    # pydantic>=2.11: Floor der Kern-Deps (fastmcp/pydantic-settings) und des optionalen
+    # opi_navigation (s. [displays]); hier explizit zur Intent-Klarheit.
     "pydantic>=2.11,<3",
     "pydantic-settings>=2.0,<3",
     "p4p>=4.2.0,<5",
     # requests: read-only HTTP client for the ESS Naming Service (vendored naming_client).
     "requests>=2.25",
-    # Cross-Plane-Join (Wedge 1): die makro-expandierten Per-Instanz-PVs eines Displays
-    # kommen aus dem Skill-Paket opi_navigation (EINE PV-Engine, Build-once EX/EY) — NICHT
-    # makro-blind nachgebaut. SHA-gepinnt wie der phoebus-MCP (cs-studio-phoebus-mcp);
-    # Bump = Pin + `uv lock` (CI fährt `uv sync --frozen`). Skill bleibt standalone.
-    "opi-navigation @ git+https://github.com/epicDirk/opi-foundry.git@8fad86766891aeac177050449f73a3a4fbf554cc",
 ]
 
 [project.optional-dependencies]
+# Display-aware tools (validate_pvs / crossplane_check / coverage_audit / find_device) join live PVs
+# with the macro-expanded per-instance PV-inventory (Wedge 1) from the opi_navigation build-once PV
+# engine (EINE PV-Engine, Build-once EX/EY) — NICHT makro-blind nachgebaut. SHA-gepinnt wie der
+# phoebus-MCP (cs-studio-phoebus-mcp); Bump = Pin + `uv lock` (CI fährt `uv sync --frozen`).
+# OPTIONAL, damit der Kern-Server (PV-Read/Write/Monitor/Diagnose + REST-Planes) OHNE dieses
+# (privat gehostete) Paket standalone installiert; die vier Tools registrieren sich nur, wenn es da
+# ist (server.py: try/except ImportError um register_display_tools).
+displays = [
+    "opi-navigation @ git+https://github.com/epicDirk/opi-foundry.git@8fad86766891aeac177050449f73a3a4fbf554cc",
+]
 dev = [
     "pytest>=9.0",
     "pytest-asyncio>=1.3",
@@ -34,6 +39,8 @@ dev = [
     "ruff>=0.15",
     "mypy>=1.19",
     "pre-commit>=4.0",
+    # dev/CI fahren die volle Suite inkl. der Display-Tools → das [displays]-Extra mitziehen.
+    "epics-pv-mcp[displays]",
 ]
 
 [project.scripts]
