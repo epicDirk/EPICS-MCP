@@ -8,6 +8,8 @@ withheld, no client).
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from epics_pv_mcp.config import EpicsConfig
@@ -311,6 +313,33 @@ async def test_shell_connected_healthy_cf_disabled_withholds(
     assert report.likely_cause == "healthy"
     # CF requested by default but disabled → withheld (never a false negative).
     assert report.withheld == ("channelfinder",)
+
+
+@pytest.mark.asyncio
+async def test_live_probe_runs_concurrently_with_planes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """M7: the live probe shares the single gather with the explanatory planes.
+
+    Proven deterministically with a rendezvous (no wall-clock): pv_get (inside _probe_live)
+    waits for an event that _find_channels (inside the ChannelFinder plane) sets. If the probe
+    still ran SERIALLY before the gather, the CF plane would never start and this would deadlock —
+    which ``asyncio.wait_for`` turns into a clean failure instead of a hang.
+    """
+    cf_started = asyncio.Event()
+
+    async def fake_pv_get(name: str, timeout: float | None = None) -> dict[str, object]:
+        await cf_started.wait()  # only satisfiable if the CF plane runs concurrently
+        return {"value": 1, "alarm": {"severity_text": "NO_ALARM"}}
+
+    async def fake_find(name: str, timeout: float = 5.0) -> dict[str, object]:
+        cf_started.set()
+        return {"enabled": True, "channels": [], "total": 0, "capped": False}
+
+    _patch(monkeypatch, "pv_get", fake_pv_get)
+    _patch(monkeypatch, "_find_channels", fake_find)
+    _patch(monkeypatch, "get_config", lambda: EpicsConfig())
+
+    report = await asyncio.wait_for(diagnose("SYS:PV", check_channelfinder=True), timeout=2.0)
+    assert report.state == "connected"
 
 
 @pytest.mark.asyncio

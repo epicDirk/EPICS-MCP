@@ -485,15 +485,18 @@ async def diagnose(
     cfg = get_config()
     probe_timeout = timeout if timeout is not None else cfg.diagnose_timeout
 
-    live = await _probe_live(pv_name, probe_timeout)
-    state = _state_from_live(live)
-
-    channelfinder, naming, archiver, alarm = await asyncio.gather(
+    # M7: the live probe has NO data dependency on the explanatory planes (derive_cause needs
+    # both, but neither needs the other), so it shares the single gather. Worst case (a
+    # disconnected PV) is then ~1×timeout instead of ~2×timeout. _probe_live is total-catching,
+    # so it never aborts the gather.
+    live, channelfinder, naming, archiver, alarm = await asyncio.gather(
+        _probe_live(pv_name, probe_timeout),
         _gather_channelfinder(pv_name, check_channelfinder, probe_timeout),
         _gather_naming(pv_name, check_naming, probe_timeout),
         _gather_archiver(pv_name, check_archiver, probe_timeout),
         _gather_alarm(pv_name, check_alarm, probe_timeout),
     )
+    state = _state_from_live(live)
     evidence = DiagnoseEvidence(
         live=live, channelfinder=channelfinder, naming=naming, archiver=archiver, alarm=alarm
     )
