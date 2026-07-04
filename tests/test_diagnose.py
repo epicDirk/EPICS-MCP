@@ -452,7 +452,8 @@ def test_crossplane_naming_gated_on_config(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(xplane_tool, "get_config", lambda: EpicsConfig(naming_url="http://naming/"))
     client = xplane_tool._build_naming_client(True)
     assert client is not None
-    assert client.base_url == "http://naming/"
+    # M10: base_url is normalised (trailing slash stripped) so endpoints don't 404.
+    assert client.base_url == "http://naming"
 
 
 # ---------------------------------------------------------------------------

@@ -27,6 +27,16 @@ def _client_with(monkeypatch: pytest.MonkeyPatch, response: Mock) -> NamingServi
     return client
 
 
+@pytest.mark.parametrize("base", ["http://h/enotify-web", "http://h/enotify-web/"])
+def test_base_url_normalised_so_urls_match_with_or_without_trailing_slash(base: str) -> None:
+    """M10: base_url is rstripped like the other REST clients, so a URL configured
+    with OR without a trailing slash yields identical, correct endpoints (no 404)."""
+    client = NamingServiceClient(base_url=base)
+    assert client.base_url == "http://h/enotify-web"
+    assert client.parts_url == "http://h/enotify-web/rest/parts/mnemonic/"
+    assert client.names_url == "http://h/enotify-web/rest/deviceNames/"
+
+
 def test_validate_name_active(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _client_with(monkeypatch, _resp({"status": "ACTIVE"}))
     result = client.validate_name("DEV-TEST01:Ctrl-EVR-01")

@@ -50,7 +50,10 @@ class NamingServiceClient:
         # ``base_url`` is REQUIRED and caller-provided (from ``EPICS_MCP_NAMING_URL`` via config) —
         # there is deliberately NO built-in default host, so this client never reaches a hard-coded
         # ESS endpoint. Callers gate on an unset URL (see ``_build_naming_client`` and diagnose).
-        self.base_url = base_url
+        # Normalise like the other three REST clients (channelfinder/archiver/alarm): strip a
+        # trailing slash so a URL configured with OR without it yields the same endpoints (M10;
+        # without this, ``http://naming:8080/enotify-web`` produced ``…enotify-webrest/…`` → 404).
+        self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update({"accept": "application/json"})
@@ -74,11 +77,11 @@ class NamingServiceClient:
 
     @property
     def parts_url(self) -> str:
-        return self.base_url + "rest/parts/mnemonic/"
+        return f"{self.base_url}/rest/parts/mnemonic/"
 
     @property
     def names_url(self) -> str:
-        return self.base_url + "rest/deviceNames/"
+        return f"{self.base_url}/rest/deviceNames/"
 
     # ------------------------------------------------------------------
     # Connectivity
