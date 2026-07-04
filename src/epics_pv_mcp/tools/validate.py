@@ -134,11 +134,20 @@ async def _validate_pvs(
         batch = await pv_get_batch(chunk, timeout)
         batch_results = batch["results"] if isinstance(batch["results"], list) else []
         batch_errors = batch["errors"] if isinstance(batch["errors"], list) else []
-        results.extend(
-            {"pv_name": r["pv_name"], "status": "connected", "value": r.get("value")}
-            for r in batch_results
-        )
-        results.extend({"pv_name": e["pv_name"], "status": "disconnected"} for e in batch_errors)
+        # Emit in INPUT order (not connected-block-then-disconnected-block): iterate the chunk and
+        # look each PV up in the batch's results/errors. pv_get_batch keys both by pv_name and a PV
+        # lands in exactly one, so the counts are unchanged — only the ``pvs`` ordering is
+        # stabilised to match the caller's list.
+        by_result = {r["pv_name"]: r for r in batch_results}
+        by_error = {e["pv_name"] for e in batch_errors}
+        for name in chunk:
+            if name in by_result:
+                result = by_result[name]
+                results.append(
+                    {"pv_name": name, "status": "connected", "value": result.get("value")}
+                )
+            elif name in by_error:
+                results.append({"pv_name": name, "status": "disconnected"})
         connected += len(batch_results)
         disconnected += len(batch_errors)
 

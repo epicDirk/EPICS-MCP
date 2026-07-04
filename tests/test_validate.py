@@ -95,6 +95,31 @@ async def test_validate_pvs_chunks_by_max_batch_size() -> None:
     assert result["disconnected"] == 2
 
 
+async def test_validate_pvs_preserves_input_order() -> None:
+    """The ``pvs`` output must follow the caller's input order, NOT connected-then-disconnected
+    grouping. Input [A(up), B(down), C(up)] → output in that exact order, each with its own status.
+    Before the fix the output was grouped [A, C, B] (all connected first)."""
+
+    async def fake_batch(names: list[str], timeout: float | None = None) -> dict[str, object]:
+        return {
+            "results": [{"pv_name": n, "value": 1} for n in names if n != "PV:B"],
+            "errors": [{"pv_name": n, "error": "Timeout"} for n in names if n == "PV:B"],
+        }
+
+    with patch("epics_pv_mcp.tools.validate.pv_get_batch", side_effect=fake_batch):
+        result = await _validate_pvs(pvs=["PV:A", "PV:B", "PV:C"])
+
+    pvs = result["pvs"]
+    assert isinstance(pvs, list)
+    assert [(p["pv_name"], p["status"]) for p in pvs] == [
+        ("PV:A", "connected"),
+        ("PV:B", "disconnected"),
+        ("PV:C", "connected"),
+    ]
+    assert result["connected"] == 2
+    assert result["disconnected"] == 1
+
+
 async def test_validate_pvs_no_input() -> None:
     with pytest.raises(EpicsError, match="Provide either pvs list or file_path") as exc_info:
         await _validate_pvs(pvs=None, file_path=None)
