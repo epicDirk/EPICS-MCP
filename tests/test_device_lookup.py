@@ -201,6 +201,34 @@ def test_build_device_report_live_capped_note() -> None:
     assert any("1 of 500 matched channels" in note for note in report.notes)
 
 
+def test_build_device_report_capped_note_counts_attempts_not_responses() -> None:
+    """S7-5 regression lock: the capped note counts live_read (channels ATTEMPTED), not
+    len(channels) (p4p RESPONSES). The two diverge when the native batch silently drops a name
+    (pv_get_batch zips names/values with strict=False) — here 2 attempted, only 1 came back."""
+    live = {"results": [{"pv_name": "DEV:X", "value": 0}], "errors": []}  # only 1 response returned
+    report = build_device_report(
+        PvLookupResult(
+            query="DEV",
+            match="prefix",
+            total_pvs_matched=500,
+            displays=(
+                DisplayMatch(
+                    display_path="a.bob", matched_pvs=("DEV:X",), roles=("read",), count=1
+                ),
+            ),
+        ),
+        live,
+        {"enabled": False, "channels": []},
+        total_matched=500,
+        live_read=2,  # attempted 2, but only 1 came back → live_read != len(channels)
+        live_capped=True,
+        channelfinder_enabled=False,
+    )
+    # the honest attempt count (live_read=2), NOT the response count (len(channels)=1)
+    assert any("2 of 500 matched channels" in note for note in report.notes)
+    assert not any("1 of 500 matched channels" in note for note in report.notes)
+
+
 def test_build_device_report_no_screens_note() -> None:
     empty = PvLookupResult(query="NOPE", match="prefix", total_pvs_matched=0, displays=())
     report = build_device_report(
