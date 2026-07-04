@@ -26,3 +26,9 @@ repos:
         types: [python]
         pass_filenames: false
         require_serial: true
+      - id: no-ess-internal
+        name: no ESS-internal / PII / secrets
+        entry: uv run python scripts/check_no_ess_internal.py
+        language: system
+        pass_filenames: true
+        require_serial: true
