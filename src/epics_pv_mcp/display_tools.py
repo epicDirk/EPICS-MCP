@@ -61,9 +61,9 @@ async def validate_pvs(
         ),
     ] = None,
     timeout: Annotated[
-        float,
-        Field(description="Timeout in seconds per PV"),
-    ] = 5.0,
+        float | None,
+        Field(description="Timeout in seconds per PV (default: EPICS_MCP_DEFAULT_TIMEOUT)"),
+    ] = None,
 ) -> dict[str, object]:
     """Check PV connectivity. Provide a PV list or a .bob file path (+ displays_dir ROOT)."""
     try:

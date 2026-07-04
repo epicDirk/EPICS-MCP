@@ -83,7 +83,7 @@ async def test_validate_pvs_file_path_fragment_resolves_via_origin_file(tmp_path
     assert result["total"] == 1
     assert result["connected"] == 1
     # The resolved channel DEV-TEST01:Spu01:Val, NOT the raw $(PRP):Val.
-    mock.assert_awaited_once_with("DEV-TEST01:Spu01:Val", 5.0)
+    mock.assert_awaited_once_with("DEV-TEST01:Spu01:Val", None)
 
 
 async def test_validate_pvs_file_path_not_under_displays_dir(tmp_path: Path) -> None:
@@ -210,4 +210,4 @@ async def test_validate_pvs_file_path_context_capped_note(tmp_path: Path) -> Non
     notes = result["notes"]
     assert isinstance(notes, list)
     assert any("lower bound" in str(n) for n in notes)
-    mock_pv_get.assert_awaited_once_with("SYSX:X", 5.0)
+    mock_pv_get.assert_awaited_once_with("SYSX:X", None)

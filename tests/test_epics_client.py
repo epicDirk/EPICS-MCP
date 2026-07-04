@@ -421,6 +421,45 @@ async def test_metadata_reaches_get_pv_info_tool(monkeypatch: Any) -> None:
     assert result["value_alarm"] == {"active": True, "low_alarm": 1.0}
 
 
+class _RecordingGetContext:
+    """Like _FakeGetContext, but records the timeout ``ctxt.get`` is called with."""
+
+    def __init__(self, value: object, sink: dict[str, object]) -> None:
+        self._value = value
+        self._sink = sink
+
+    def get(self, name: str, timeout: float | None = None) -> object:
+        self._sink["timeout"] = timeout
+        return self._value
+
+
+async def test_config_default_timeout_reaches_context(monkeypatch: Any) -> None:
+    """M1/C1: with no explicit timeout, EPICS_MCP_DEFAULT_TIMEOUT reaches the p4p context.
+
+    Proves the whole chain end-to-end: the tool wrapper passes ``None`` → ``pv_get``
+    resolves ``cfg.default_timeout`` → ``ctxt.get`` sees it. Previously a hardcoded 5.0
+    in the wrapper shadowed the operator's configured default.
+    """
+    import epics_pv_mcp.config as config_module
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.tools.read import _get_pv_value
+
+    config_module._config = EpicsConfig(default_timeout=0.1)
+    try:
+        sink: dict[str, object] = {}
+        monkeypatch.setattr(
+            epics_client,
+            "get_context",
+            lambda: _RecordingGetContext(_wrap(SimpleNamespace(value=1.0)), sink),
+        )
+
+        await _get_pv_value("X:Y")
+
+        assert sink["timeout"] == 0.1
+    finally:
+        config_module._config = None
+
+
 # --- monitor fallback: a failing _format_value must NOT leak a ctime wrapper string ---
 
 

@@ -5,12 +5,12 @@ from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.services.epics_client import pv_get, pv_get_batch
 
 
-async def _get_pv_value(pv_name: str, timeout: float = 5.0) -> dict[str, object]:
-    """Get single PV value."""
+async def _get_pv_value(pv_name: str, timeout: float | None = None) -> dict[str, object]:
+    """Get single PV value. ``timeout=None`` uses the server ``default_timeout`` (M1)."""
     return await pv_get(pv_name, timeout)
 
 
-async def _get_pvs(names: list[str], timeout: float = 5.0) -> dict[str, object]:
+async def _get_pvs(names: list[str], timeout: float | None = None) -> dict[str, object]:
     """Batch read up to max_batch_size PVs."""
     cfg = get_config()
     if not names:

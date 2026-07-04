@@ -3,7 +3,7 @@
 from epics_pv_mcp.services.epics_client import pv_get
 
 
-async def _get_pv_info(pv_name: str, timeout: float = 5.0) -> dict[str, object]:
+async def _get_pv_info(pv_name: str, timeout: float | None = None) -> dict[str, object]:
     """Get detailed PV metadata.
 
     Returns value plus best-effort meta-data: alarm (severity/status incl. text

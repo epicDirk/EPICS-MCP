@@ -62,9 +62,9 @@ mcp._mcp_server.version = __version__
 async def get_pv_value(
     pv_name: Annotated[str, Field(description="EPICS PV name")],
     timeout: Annotated[
-        float,
-        Field(description="Timeout in seconds"),
-    ] = 5.0,
+        float | None,
+        Field(description="Timeout in seconds (default: EPICS_MCP_DEFAULT_TIMEOUT)"),
+    ] = None,
 ) -> dict[str, object]:
     """Get the current value of an EPICS Process Variable.
 
@@ -92,9 +92,9 @@ async def get_pvs(
         Field(description="List of PV names to read (max 100)"),
     ],
     timeout: Annotated[
-        float,
-        Field(description="Timeout in seconds per PV"),
-    ] = 5.0,
+        float | None,
+        Field(description="Timeout in seconds per PV (default: EPICS_MCP_DEFAULT_TIMEOUT)"),
+    ] = None,
 ) -> dict[str, object]:
     """Batch-read multiple EPICS PVs in a single call.
 
@@ -120,9 +120,9 @@ async def set_pv_value(
     pv_name: Annotated[str, Field(description="EPICS PV name")],
     value: Annotated[str, Field(description="New value to set")],
     timeout: Annotated[
-        float,
-        Field(description="Timeout in seconds"),
-    ] = 5.0,
+        float | None,
+        Field(description="Timeout in seconds (default: EPICS_MCP_DEFAULT_TIMEOUT)"),
+    ] = None,
 ) -> dict[str, object]:
     """Set a PV value. Requires EPICS_MCP_ALLOW_PV_WRITE=true.
 
@@ -148,9 +148,9 @@ async def set_pv_value(
 async def get_pv_info(
     pv_name: Annotated[str, Field(description="EPICS PV name")],
     timeout: Annotated[
-        float,
-        Field(description="Timeout in seconds"),
-    ] = 5.0,
+        float | None,
+        Field(description="Timeout in seconds (default: EPICS_MCP_DEFAULT_TIMEOUT)"),
+    ] = None,
 ) -> dict[str, object]:
     """Get detailed PV metadata: value, alarm (severity/status incl. text + message),
     timestamp, display (units/limits/precision OR format/description), control (drive
@@ -211,9 +211,9 @@ async def discover_pvs(
         Field(description="PV name or pattern to search for"),
     ],
     timeout: Annotated[
-        float,
-        Field(description="Timeout in seconds"),
-    ] = 5.0,
+        float | None,
+        Field(description="Timeout in seconds (default: EPICS_MCP_DEFAULT_TIMEOUT)"),
+    ] = None,
 ) -> dict[str, object]:
     """Discover PVs by name. Wildcard patterns require ChannelFinder infrastructure."""
     try:

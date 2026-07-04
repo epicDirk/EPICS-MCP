@@ -54,8 +54,10 @@ class TestSetPvValueSuccess:
         assert result["old_value"] == 10.0
         assert result["new_value"] == "20.0"
 
-        mock_pv_get.assert_awaited_once_with("TEST:PV", 5.0)
-        mock_pv_put.assert_awaited_once_with("TEST:PV", "20.0", 5.0)
+        # M1/C1: no explicit timeout → the wrapper passes None, so pv_get/pv_put apply
+        # the server's default_timeout (not a hardcoded 5.0).
+        mock_pv_get.assert_awaited_once_with("TEST:PV", None)
+        mock_pv_put.assert_awaited_once_with("TEST:PV", "20.0", None)
 
 
 class TestSetPvValueDenied:
@@ -133,7 +135,7 @@ class TestSetPvValueFailed:
         assert "error_code=PV_TIMEOUT" in caplog.text
         # The failed write must NOT also emit a success record.
         assert "event=ALLOW" not in caplog.text
-        mock_pv_put.assert_awaited_once_with("TEST:PV", "2.0", 5.0)
+        mock_pv_put.assert_awaited_once_with("TEST:PV", "2.0", None)
 
     @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
     @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)

@@ -32,7 +32,8 @@ class TestGetPvValue:
 
         result = await _get_pv_value("TEST:PV")
 
-        mock_pv_get.assert_awaited_once_with("TEST:PV", 5.0)
+        # M1/C1: no explicit timeout → wrapper passes None so pv_get applies default_timeout.
+        mock_pv_get.assert_awaited_once_with("TEST:PV", None)
         assert result["pv_name"] == "TEST:PV"
         assert result["value"] == 42.0
 
@@ -61,7 +62,7 @@ class TestGetPvs:
 
         result = await _get_pvs(["A:PV", "B:PV", "C:PV"])
 
-        mock_batch.assert_awaited_once_with(["A:PV", "B:PV", "C:PV"], 5.0)
+        mock_batch.assert_awaited_once_with(["A:PV", "B:PV", "C:PV"], None)
         results = result["results"]
         assert isinstance(results, list)
         assert len(results) == 3

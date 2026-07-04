@@ -5,7 +5,9 @@ from epics_pv_mcp.safety import get_safety
 from epics_pv_mcp.services.epics_client import pv_get, pv_put
 
 
-async def _set_pv_value(pv_name: str, value: str, timeout: float = 5.0) -> dict[str, object]:
+async def _set_pv_value(
+    pv_name: str, value: str, timeout: float | None = None
+) -> dict[str, object]:
     """Set PV value with safety checks.
 
     Performs pre-write safety validation, reads the old value for audit

@@ -82,7 +82,7 @@ async def _validate_pvs(
     pvs: list[str] | None = None,
     file_path: str | None = None,
     displays_dir: str | None = None,
-    timeout: float = 5.0,
+    timeout: float | None = None,
 ) -> dict[str, object]:
     """Check PV connectivity. Accepts a PV list or a .bob file path.
 
