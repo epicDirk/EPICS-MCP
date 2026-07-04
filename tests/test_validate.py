@@ -62,6 +62,39 @@ async def test_validate_pvs_mixed() -> None:
     assert result["disconnected"] == 1
 
 
+async def test_validate_pvs_chunks_by_max_batch_size() -> None:
+    """M6 coverage gap: with more PVs than ``max_batch_size`` the multi-chunk loop must call
+    pv_get_batch once per chunk and accumulate connected/disconnected ACROSS chunks. All existing
+    tests pass ≤2 PVs (one iteration), so the loop body was never exercised for >1 chunk. Here 5
+    PVs at max_batch_size=2 → 3 chunks [2,2,1]; PV:2 and PV:4 disconnect → connected 3, disc. 2."""
+    import epics_pv_mcp.config as config_module
+    from epics_pv_mcp.config import EpicsConfig
+
+    async def fake_batch(names: list[str], timeout: float | None = None) -> dict[str, object]:
+        return {
+            "results": [{"pv_name": n, "value": 1} for n in names if n not in ("PV:2", "PV:4")],
+            "errors": [{"pv_name": n, "error": "Timeout"} for n in names if n in ("PV:2", "PV:4")],
+        }
+
+    mock = AsyncMock(side_effect=fake_batch)
+    config_module._config = EpicsConfig(max_batch_size=2)
+    try:
+        with patch("epics_pv_mcp.tools.validate.pv_get_batch", mock):
+            result = await _validate_pvs(pvs=["PV:1", "PV:2", "PV:3", "PV:4", "PV:5"])
+    finally:
+        config_module._config = None
+
+    assert mock.await_count == 3  # 5 PVs / max_batch_size 2 → chunks of 2, 2, 1
+    assert [call.args[0] for call in mock.await_args_list] == [
+        ["PV:1", "PV:2"],
+        ["PV:3", "PV:4"],
+        ["PV:5"],
+    ]
+    assert result["total"] == 5
+    assert result["connected"] == 3
+    assert result["disconnected"] == 2
+
+
 async def test_validate_pvs_no_input() -> None:
     with pytest.raises(EpicsError, match="Provide either pvs list or file_path") as exc_info:
         await _validate_pvs(pvs=None, file_path=None)

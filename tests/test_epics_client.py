@@ -550,3 +550,47 @@ async def test_pv_get_batch_fallback_runs_concurrently(monkeypatch: Any) -> None
     assert isinstance(results, list)
     assert {r["pv_name"] for r in results} == {"FIRST", "SECOND"}
     assert out["errors"] == []
+
+
+class _NativeBatchContext:
+    """A p4p Context stand-in whose batch get SUCCEEDS, returning one wrapped value per name — so
+    the NATIVE happy path (ctxt.get(list) → zip → _format_value) is exercised, not the fallback."""
+
+    def get(self, names: list[str], timeout: object = None) -> list[object]:
+        return [_wrap(SimpleNamespace(value=float(i), alarm=None)) for i, _ in enumerate(names)]
+
+
+async def test_pv_get_batch_native_success_path(monkeypatch: Any) -> None:
+    """C5 coverage gap: the native-batch SUCCESS path (epics_client.py:104-108) was never run —
+    both existing batch tests force the fallback via _FailBatchContext. Here the native get returns
+    a list, so every name is formatted and lands in results with NO fallback and NO errors."""
+    monkeypatch.setattr(epics_client, "get_context", _NativeBatchContext)
+
+    out = await epics_client.pv_get_batch(["A:1", "B:2", "C:3"])
+    results, errors = out["results"], out["errors"]
+    assert isinstance(results, list)
+    assert [r["pv_name"] for r in results] == ["A:1", "B:2", "C:3"]
+    assert [r["value"] for r in results] == [0.0, 1.0, 2.0]
+    assert errors == []
+
+
+async def test_pv_get_batch_native_bad_value_isolated(monkeypatch: Any) -> None:
+    """C5 coverage gap: in the native path, a value that _format_value cannot render must be routed
+    to errors per-element (epics_client.py:109-111), NOT crash the whole batch. One PV booms; the
+    others still land in results."""
+    monkeypatch.setattr(epics_client, "get_context", _NativeBatchContext)
+
+    def _boom_on_b(name: str, value: object) -> dict[str, object]:
+        if name == "B:2":
+            raise RuntimeError("malformed value")
+        return {"pv_name": name, "value": "ok"}
+
+    monkeypatch.setattr(epics_client, "_format_value", _boom_on_b)
+
+    out = await epics_client.pv_get_batch(["A:1", "B:2", "C:3"])
+    results, errors = out["results"], out["errors"]
+    assert isinstance(results, list)
+    assert isinstance(errors, list)
+    assert [r["pv_name"] for r in results] == ["A:1", "C:3"]
+    assert [e["pv_name"] for e in errors] == ["B:2"]
+    assert "malformed value" in str(errors[0]["error"])
