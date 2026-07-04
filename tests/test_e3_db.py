@@ -349,3 +349,29 @@ def test_load_ioc_db_walks_module_root_once_for_many_basename_loads(
     result = load_ioc_db(info, tmp_path)
     assert calls == 1  # ONE walk for all 5 loads (was 5 before S7-3)
     assert result.resolved == frozenset({"SYS:x"})
+
+
+def test_load_ioc_db_direct_resolves_never_walk_module_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S7-3 lazy: when every load resolves via the DIRECT path, the basename index is never built —
+    ZERO filesystem walks (eager build walked once even on this happy path). The index is lazy now,
+    built only on the first basename fallback."""
+    loads = "".join(f'dbLoadRecords("f{i}.db", "P=SYS:")\n' for i in range(5))
+    info = parse_st_cmd(loads)
+    # Files at the root itself → each load hits the direct-path branch, no basename fallback.
+    for i in range(5):
+        _write(tmp_path / f"f{i}.db", 'record(bi, "$(P)x") {}\n')
+
+    calls = 0
+    real = e3_db._iter_files_bounded
+
+    def counting(root: Path, *, max_depth: int = 8) -> Iterator[Path]:
+        nonlocal calls
+        calls += 1
+        return real(root, max_depth=max_depth)
+
+    monkeypatch.setattr(e3_db, "_iter_files_bounded", counting)
+    result = load_ioc_db(info, tmp_path)
+    assert calls == 0  # never walked — all loads resolved directly (lazy index)
+    assert result.resolved == frozenset({"SYS:x"})

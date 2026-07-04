@@ -23,7 +23,7 @@ from __future__ import annotations
 import os
 import re
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -268,9 +268,8 @@ def _iter_files_bounded(root: Path, *, max_depth: int = 8) -> Iterator[Path]:
 def _build_basename_index(root: Path) -> dict[str, list[Path]]:
     """Map each basename under *root* to its resolved paths via ONE bounded walk (S7-3).
 
-    Built once per :func:`load_ioc_db` so N ``dbLoadRecords`` loads that fall back to a basename
-    search no longer each trigger a full ``os.walk``. A same-named ``.db`` in several modules yields
-    multiple paths (the caller treats >1 as ambiguous).
+    A same-named ``.db`` in several modules yields multiple paths (the caller treats >1 as
+    ambiguous).
     """
     index: dict[str, list[Path]] = {}
     for f in _iter_files_bounded(root):
@@ -278,19 +277,37 @@ def _build_basename_index(root: Path) -> dict[str, list[Path]]:
     return index
 
 
-def _locate_db(target: str, root: Path, basename_index: dict[str, list[Path]]) -> list[Path]:
+def _lazy_basename_index(root: Path) -> Callable[[str], list[Path]]:
+    """Return a ``basename -> paths`` lookup that builds its index on the FIRST query (S7-3).
+
+    Loads that all resolve via the direct ``$(<module>_DIR)/...`` path never query this, so the
+    common case does ZERO filesystem walks; the (bounded) walk happens once, lazily, only if some
+    load actually falls back to a basename search — and is cached for the remaining loads.
+    """
+    cache: dict[str, list[Path]] | None = None
+
+    def lookup(name: str) -> list[Path]:
+        nonlocal cache
+        if cache is None:
+            cache = _build_basename_index(root)
+        return cache.get(name, [])
+
+    return lookup
+
+
+def _locate_db(target: str, root: Path, basename_lookup: Callable[[str], list[Path]]) -> list[Path]:
     """Resolve a (macro-substituted) ``.db`` *target* to file(s) under *root* (deterministic).
 
     Primary: the target as a direct path (absolute, or relative to *root* — this resolves the
-    synthesised ``$(<module>_DIR)/...`` form). Secondary: a lookup in *basename_index* (prebuilt
-    once per :func:`load_ioc_db` — S7-3). Returns ALL matches sorted; the caller treats 0 = missing
-    and >1 = ambiguous (a same-named ``.db`` in several modules must not silently pick a wrong set).
+    synthesised ``$(<module>_DIR)/...`` form). Secondary: *basename_lookup* (a lazy per-
+    :func:`load_ioc_db` index — S7-3). Returns ALL matches sorted; the caller treats 0 = missing and
+    >1 = ambiguous (a same-named ``.db`` in several modules must not silently pick a wrong set).
     """
     path = Path(target)
     direct = path if path.is_absolute() else (root / path)
     if direct.is_file():
         return [direct.resolve()]
-    return sorted(set(basename_index.get(path.name, [])))
+    return sorted(set(basename_lookup(path.name)))
 
 
 def load_ioc_db(st_info: StCmdInfo, module_db_root: Path) -> IocDbResult:
@@ -305,8 +322,10 @@ def load_ioc_db(st_info: StCmdInfo, module_db_root: Path) -> IocDbResult:
     """
     dir_env = {f"{module}_DIR": str(module_db_root / module) for module in st_info.requires}
     base_env = {**st_info.env, **dir_env}
-    # Walk the module/db root ONCE; every basename fallback below reads this index (S7-3).
-    basename_index = _build_basename_index(module_db_root)
+    # Lazy: walk the module/db root at most ONCE, and only if some load actually falls back to a
+    # basename search — loads that all resolve via the direct $(<module>_DIR)/... path walk 0×
+    # (S7-3).
+    basename_lookup = _lazy_basename_index(module_db_root)
     resolved: set[str] = set()
     unresolved: set[str] = set()
     missing: list[str] = []
@@ -322,7 +341,7 @@ def load_ioc_db(st_info: StCmdInfo, module_db_root: Path) -> IocDbResult:
             # report it as the IOC's authoritative PV set. Force missing → complete=False.
             missing.append(load.target)
             continue
-        matches = _locate_db(target, module_db_root, basename_index)
+        matches = _locate_db(target, module_db_root, basename_lookup)
         if not matches:
             missing.append(load.target)
             continue
