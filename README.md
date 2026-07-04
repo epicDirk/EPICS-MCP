@@ -2,7 +2,7 @@
 
 MCP server for EPICS Process Variable (PV) access via [p4p](https://mdavidsaver.github.io/p4p/) — supporting both PVAccess and Channel Access protocols.
 
-Based on a fork of [Jacky1-Jiang/EPICS-MCP-Server](https://github.com/Jacky1-Jiang/EPICS-MCP-Server), extended with [FastMCP](https://github.com/jlowin/fastmcp), the p4p library, a write-safety layer, batch operations, PV monitoring, and OPI file validation.
+Independently developed EPICS PV MCP server — originally seeded from [Jacky1-Jiang/EPICS-MCP-Server](https://github.com/Jacky1-Jiang/EPICS-MCP-Server) (MIT) and since rewritten on [FastMCP](https://github.com/jlowin/fastmcp) and the p4p library, with a write-safety layer, batch operations, PV monitoring, and OPI file validation.
 
 ## Tools
 
