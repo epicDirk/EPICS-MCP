@@ -16,86 +16,15 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from epics_pv_mcp.config import get_config
 from epics_pv_mcp.paths import resolve_user_path
-from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG, AlarmClient
-from epics_pv_mcp.services.alarm_exceptions import AlarmError
-from epics_pv_mcp.services.archiver_client import ArchiverClient
-from epics_pv_mcp.services.archiver_exceptions import ArchiverError
-from epics_pv_mcp.services.coverage import (
-    AlarmChecker,
-    ArchivedChecker,
-    audit_coverage,
-    render_markdown,
+from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG
+from epics_pv_mcp.services.checkers import (
+    build_alarm_checker,
+    build_archiver_checker,
+    build_cf_checker,
 )
+from epics_pv_mcp.services.coverage import audit_coverage, render_markdown
 from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP, analyze_display_index
-from epics_pv_mcp.tools.crossplane import _build_cf_checker
-
-
-class _ArchiverChecker:
-    """Edge adapter: per-PV 'is this PV archived?' (Archiver MGMT getPVStatus). One reused client.
-
-    Implements the core's :class:`ArchivedChecker` Protocol. Translates Archiver errors into
-    ``RuntimeError`` so the pure core can withhold the per-PV cell (never ``no``) without importing
-    the Archiver client or catching broad exceptions.
-    """
-
-    def __init__(self, url: str, auth: str | None, timeout: float = 5.0) -> None:
-        self._client = ArchiverClient(url, timeout=timeout, auth_header=auth)
-
-    def is_archived(self, pv: str) -> bool:
-        try:
-            archived, _status = self._client.is_archived(pv)
-            return archived
-        except ArchiverError as exc:
-            raise RuntimeError(f"Archiver query failed: {exc}") from exc
-
-
-class _AlarmChecker:
-    """Edge adapter: per-PV 'does this PV have an alarm config?' (Alarm Logger config search).
-
-    Implements the core's :class:`AlarmChecker` Protocol. Translates Alarm errors into
-    ``RuntimeError`` so the pure core withholds the per-PV cell (never ``no``) on a query failure.
-    """
-
-    def __init__(
-        self,
-        url: str,
-        auth: str | None,
-        config_name: str = DEFAULT_ALARM_CONFIG,
-        timeout: float = 5.0,
-    ) -> None:
-        self._client = AlarmClient(url, timeout=timeout, auth_header=auth)
-        self._config_name = config_name
-
-    def is_alarm_configured(self, pv: str) -> bool:
-        try:
-            configured, _detail = self._client.is_alarm_configured(
-                pv, config_name=self._config_name
-            )
-            return configured
-        except AlarmError as exc:
-            raise RuntimeError(f"Alarm query failed: {exc}") from exc
-
-
-def _build_archiver_checker(query_archiver: bool) -> ArchivedChecker | None:
-    """Build the Archiver checker iff requested AND ``EPICS_MCP_ARCHIVER_URL`` set (else None)."""
-    if not query_archiver:
-        return None
-    cfg = get_config()
-    if not cfg.archiver_url:
-        return None
-    return _ArchiverChecker(cfg.archiver_url, cfg.archiver_auth or None)
-
-
-def _build_alarm_checker(query_alarm: bool, alarm_config: str) -> AlarmChecker | None:
-    """Build the Alarm checker iff requested AND ``EPICS_MCP_ALARM_URL`` is set (else None)."""
-    if not query_alarm:
-        return None
-    cfg = get_config()
-    if not cfg.alarm_url:
-        return None
-    return _AlarmChecker(cfg.alarm_url, cfg.alarm_auth or None, config_name=alarm_config)
 
 
 def _run_audit(
@@ -112,9 +41,9 @@ def _run_audit(
     index_rows, context_capped, glob_capped_count = analyze_display_index(
         Path(displays_dir), context_cap=context_cap, windows_paths=windows_paths
     )
-    channelfinder = _build_cf_checker(query_channelfinder)
-    archived = _build_archiver_checker(query_archiver)
-    alarmed = _build_alarm_checker(query_alarm, alarm_config)
+    channelfinder = build_cf_checker(query_channelfinder)
+    archived = build_archiver_checker(query_archiver)
+    alarmed = build_alarm_checker(query_alarm, alarm_config)
     report = audit_coverage(
         index_rows,
         scope=scope,

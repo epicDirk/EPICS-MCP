@@ -18,84 +18,11 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from epics_pv_mcp.config import get_config
 from epics_pv_mcp.paths import resolve_user_path
-from epics_pv_mcp.services.channelfinder_client import DEFAULT_MAX_RESULTS, ChannelFinderClient
-from epics_pv_mcp.services.channelfinder_exceptions import ChannelFinderError
-from epics_pv_mcp.services.crossplane import (
-    CFRegistryCapped,
-    ChannelFinderChecker,
-    crossplane_check,
-    render_markdown,
-)
+from epics_pv_mcp.services.checkers import build_cf_checker, build_naming_client
+from epics_pv_mcp.services.crossplane import crossplane_check, render_markdown
 from epics_pv_mcp.services.e3_db import load_ioc_db, parse_st_cmd
 from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP, analyze_display_pvs
-from epics_pv_mcp.services.naming_client import NamingServiceClient
-
-
-class _CFRegistryChecker:
-    """Edge adapter: the channel names ChannelFinder registers under an IOC prefix.
-
-    Implements the core's :class:`ChannelFinderChecker` Protocol. Translates ChannelFinder/network
-    errors into ``RuntimeError`` (and a truncated result into ``CFRegistryCapped``) so the pure core
-    can withhold cf_unregistered without importing the ChannelFinder client or catching broad
-    exceptions. Counts **all** registered channels regardless of ``pvStatus`` — a momentarily
-    Inactive-but-present channel (recsync ``cleanOnStart``/reannounce lag) must NOT be flagged
-    unregistered, which would violate the "never false-flag" contract.
-    """
-
-    def __init__(self, url: str, auth: str | None, max_results: int = DEFAULT_MAX_RESULTS) -> None:
-        self._url = url
-        self._auth = auth
-        self._max_results = max_results
-
-    def registered_under(self, prefix: str) -> set[str]:
-        try:
-            client = ChannelFinderClient(self._url, auth_header=self._auth)
-            channels = client.find_channels(f"{prefix}*", max_results=self._max_results)
-            if len(channels) >= self._max_results:
-                # Truncated registry — withhold rather than diff a partial set (would false-flag).
-                # CFRegistryCapped is a RuntimeError, NOT a ChannelFinderError → not caught below.
-                raise CFRegistryCapped(
-                    f"ChannelFinder returned >= {self._max_results} channels for '{prefix}*'"
-                )
-            return {channel["name"] for channel in channels}
-        except ChannelFinderError as exc:
-            raise RuntimeError(f"ChannelFinder query failed: {exc}") from exc
-
-
-def _build_cf_checker(query_channelfinder: bool) -> ChannelFinderChecker | None:
-    """Build the ChannelFinder checker iff requested AND a URL is configured.
-
-    Returns ``None`` when not requested, or requested but ``channelfinder_url`` is unset — in the
-    latter case the caller passes ``cf_requested=True`` so the core emits an honest "skipped — URL
-    unset" note (no silent no-op).
-    """
-    if not query_channelfinder:
-        return None
-    cfg = get_config()
-    if not cfg.channelfinder_url:
-        return None
-    return _CFRegistryChecker(
-        cfg.channelfinder_url,
-        cfg.channelfinder_auth or None,
-        max_results=cfg.channelfinder_max_results,
-    )
-
-
-def _build_naming_client(query_naming: bool) -> NamingServiceClient | None:
-    """Build the ESS Naming-Service client iff requested AND a URL is configured.
-
-    Mirrors :func:`_build_cf_checker` and the diagnose gate: requested but ``naming_url`` unset →
-    ``None`` (no client, no egress). The client no longer carries a hard-coded ESS prod default, so
-    crossplane_check never reaches ESS production naming unless ``EPICS_MCP_NAMING_URL`` is set.
-    """
-    if not query_naming:
-        return None
-    cfg = get_config()
-    if not cfg.naming_url:
-        return None
-    return NamingServiceClient(base_url=cfg.naming_url)
 
 
 def _run_check(
@@ -117,7 +44,7 @@ def _run_check(
         Path(displays_dir), context_cap=context_cap, windows_paths=windows_paths
     )
     st_info = parse_st_cmd(Path(st_cmd_path).read_text(encoding="utf-8"))
-    naming = _build_naming_client(query_naming)
+    naming = build_naming_client(query_naming)
     # Opt-in IOC .db enumeration: only when a module/db root is given (offline default unchanged).
     # ``complete`` gates the broken verdict — a partial/templated set withholds it (no false alarm).
     ioc_db: tuple[set[str], set[str]] | None = None
@@ -126,7 +53,7 @@ def _run_check(
         db_result = load_ioc_db(st_info, Path(module_db_root))
         ioc_db = (set(db_result.resolved), set(db_result.unresolved))
         ioc_db_complete = db_result.complete
-    channelfinder = _build_cf_checker(query_channelfinder)
+    channelfinder = build_cf_checker(query_channelfinder)
     report = crossplane_check(
         join_pvs,
         st_info,

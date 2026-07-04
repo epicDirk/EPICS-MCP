@@ -19,10 +19,13 @@ import sys
 from pathlib import Path
 
 from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG
+from epics_pv_mcp.services.checkers import (
+    build_alarm_checker,
+    build_archiver_checker,
+    build_cf_checker,
+)
 from epics_pv_mcp.services.coverage import audit_coverage, render_markdown
 from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP, analyze_display_index
-from epics_pv_mcp.tools.coverage_audit import _build_alarm_checker, _build_archiver_checker
-from epics_pv_mcp.tools.crossplane import _build_cf_checker
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -92,9 +95,9 @@ def main(argv: list[str] | None = None) -> int:
     index_rows, context_capped, glob_capped_count = analyze_display_index(
         Path(args.displays), context_cap=args.context_cap, windows_paths=args.windows_paths
     )
-    channelfinder = _build_cf_checker(args.channelfinder)
-    archived = _build_archiver_checker(args.archiver)
-    alarmed = _build_alarm_checker(args.alarm, args.alarm_config)
+    channelfinder = build_cf_checker(args.channelfinder)
+    archived = build_archiver_checker(args.archiver)
+    alarmed = build_alarm_checker(args.alarm, args.alarm_config)
     report = audit_coverage(
         index_rows,
         scope=args.scope,

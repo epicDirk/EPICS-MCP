@@ -69,7 +69,7 @@ async def test_coverage_tool_cf_stubbed_matrix(
 
     displays = _setup(tmp_path)
     monkeypatch.setenv("EPICS_MCP_CHANNELFINDER_URL", "http://cf")
-    monkeypatch.setattr("epics_pv_mcp.tools.crossplane.ChannelFinderClient", _StubCFClient)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _StubCFClient)
     config_module._config = None
     try:
         result = await _coverage_audit(

@@ -472,14 +472,14 @@ def test_crossplane_naming_gated_on_config(monkeypatch: pytest.MonkeyPatch) -> N
     """QA-delta 3 (updated): crossplane tool + CLI now honour the naming_url gate too — the client
     has NO built-in ESS prod default. Requested but naming_url unset → no client (no egress); set →
     a client bound to the configured URL."""
-    from epics_pv_mcp.tools import crossplane as xplane_tool
+    from epics_pv_mcp.services import checkers
 
-    monkeypatch.setattr(xplane_tool, "get_config", lambda: EpicsConfig(naming_url=""))
-    assert xplane_tool._build_naming_client(True) is None  # requested, unset → withheld (no egress)
-    assert xplane_tool._build_naming_client(False) is None  # not requested
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(naming_url=""))
+    assert checkers.build_naming_client(True) is None  # requested, unset → withheld (no egress)
+    assert checkers.build_naming_client(False) is None  # not requested
 
-    monkeypatch.setattr(xplane_tool, "get_config", lambda: EpicsConfig(naming_url="http://naming/"))
-    client = xplane_tool._build_naming_client(True)
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(naming_url="http://naming/"))
+    client = checkers.build_naming_client(True)
     assert client is not None
     # M10: base_url is normalised (trailing slash stripped) so endpoints don't 404.
     assert client.base_url == "http://naming"
