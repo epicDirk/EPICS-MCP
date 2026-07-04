@@ -16,14 +16,13 @@ A dedicated CS-Studio / Phoebus MCP that complements these tools is in the works
 
 from typing import Annotated
 
-from fastmcp.exceptions import ToolError
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from opi_navigation.pv_analysis.lookup import MatchMode
 from pydantic import Field
 
-from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
+from epics_pv_mcp.tool_errors import translate_epics_errors
 from epics_pv_mcp.tools.coverage_audit import _coverage_audit
 from epics_pv_mcp.tools.crossplane import _crossplane_check
 from epics_pv_mcp.tools.find_device import _find_device
@@ -38,6 +37,7 @@ _READONLY = ToolAnnotations(
 )
 
 
+@translate_epics_errors
 async def validate_pvs(
     pvs: Annotated[
         list[str] | None,
@@ -66,16 +66,12 @@ async def validate_pvs(
     ] = None,
 ) -> dict[str, object]:
     """Check PV connectivity. Provide a PV list or a .bob file path (+ displays_dir ROOT)."""
-    try:
-        return await _validate_pvs(
-            pvs=pvs, file_path=file_path, displays_dir=displays_dir, timeout=timeout
-        )
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+    return await _validate_pvs(
+        pvs=pvs, file_path=file_path, displays_dir=displays_dir, timeout=timeout
+    )
 
 
+@translate_epics_errors
 async def crossplane_check(
     displays_dir: Annotated[
         str,
@@ -143,22 +139,18 @@ async def crossplane_check(
     verdict (linked PV absent from the IOC .db) is produced only when 'module_db_root' supplies a
     provably complete IOC .db set; otherwise it is withheld.
     """
-    try:
-        return await _crossplane_check(
-            displays_dir,
-            st_cmd_path,
-            query_naming=query_naming,
-            query_channelfinder=query_channelfinder,
-            context_cap=context_cap,
-            windows_paths=windows_paths,
-            module_db_root=module_db_root,
-        )
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+    return await _crossplane_check(
+        displays_dir,
+        st_cmd_path,
+        query_naming=query_naming,
+        query_channelfinder=query_channelfinder,
+        context_cap=context_cap,
+        windows_paths=windows_paths,
+        module_db_root=module_db_root,
+    )
 
 
+@translate_epics_errors
 async def coverage_audit(
     displays_dir: Annotated[str, Field(description="project/dataset ROOT of .bob displays")],
     scope: Annotated[
@@ -195,23 +187,19 @@ async def coverage_audit(
     the cross-coverage matrix (cf_and_display / cf_only=blind-spots / display_only) + verdicts
     + critical_uncovered (delivered AND a proven gap), with honest lower-bound notes.
     """
-    try:
-        return await _coverage_audit(
-            displays_dir,
-            scope,
-            query_channelfinder,
-            query_archiver,
-            query_alarm,
-            alarm_config,
-            context_cap,
-            windows_paths,
-        )
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+    return await _coverage_audit(
+        displays_dir,
+        scope,
+        query_channelfinder,
+        query_archiver,
+        query_alarm,
+        alarm_config,
+        context_cap,
+        windows_paths,
+    )
 
 
+@translate_epics_errors
 async def find_device(
     query: Annotated[str, Field(description="Device / PV channel (protocol prefix optional)")],
     displays_dir: Annotated[
@@ -239,12 +227,7 @@ async def find_device(
     single pva provider. displays_dir is the project/dataset ROOT. Returns
     {"report": <DeviceLookupReport JSON>, "markdown": <rendered report>}.
     """
-    try:
-        return await _find_device(query, displays_dir, match, timeout, context_cap, windows_paths)
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+    return await _find_device(query, displays_dir, match, timeout, context_cap, windows_paths)
 
 
 def register_display_tools(mcp: FastMCP) -> None:

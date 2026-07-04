@@ -3,16 +3,15 @@
 import logging
 from typing import Annotated
 
-from fastmcp.exceptions import ToolError
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from epics_pv_mcp import __version__
-from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_pv_mcp.prompts import diagnose_pv as _diagnose_pv
 from epics_pv_mcp.resources import get_epics_config, get_health
+from epics_pv_mcp.tool_errors import translate_epics_errors
 from epics_pv_mcp.tools.alarm import _is_alarm_configured
 from epics_pv_mcp.tools.archiver import _get_pv_history, _is_archived
 from epics_pv_mcp.tools.channelfinder import _find_channels
@@ -59,6 +58,7 @@ mcp._mcp_server.version = __version__
         openWorldHint=True,
     )
 )
+@translate_epics_errors
 async def get_pv_value(
     pv_name: Annotated[str, Field(description="EPICS PV name")],
     timeout: Annotated[
@@ -70,12 +70,7 @@ async def get_pv_value(
 
     The result carries the same best-effort metadata as get_pv_info
     (alarm/timestamp/display/control/value_alarm/enum)."""
-    try:
-        return await _get_pv_value(pv_name, timeout)
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+    return await _get_pv_value(pv_name, timeout)
 
 
 @mcp.tool(
@@ -86,6 +81,7 @@ async def get_pv_value(
         openWorldHint=True,
     )
 )
+@translate_epics_errors
 async def get_pvs(
     names: Annotated[
         list[str],
@@ -100,12 +96,7 @@ async def get_pvs(
 
     Each result carries the same best-effort metadata as get_pv_info
     (alarm/timestamp/display/control/value_alarm/enum)."""
-    try:
-        return await _get_pvs(names, timeout)
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+    return await _get_pvs(names, timeout)
 
 
 @mcp.tool(
@@ -116,6 +107,7 @@ async def get_pvs(
         openWorldHint=True,
     )
 )
+@translate_epics_errors
 async def set_pv_value(
     pv_name: Annotated[str, Field(description="EPICS PV name")],
     value: Annotated[str, Field(description="New value to set")],
@@ -129,12 +121,7 @@ async def set_pv_value(
     Protected by safety layer: environment gate, regex allowlist,
     rate-limit (10/min default), and audit logging.
     """
-    try:
-        return await _set_pv_value(pv_name, value, timeout)
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+    return await _set_pv_value(pv_name, value, timeout)
 
 
 @mcp.tool(
@@ -145,6 +132,7 @@ async def set_pv_value(
         openWorldHint=True,
     )
 )
+@translate_epics_errors
 async def get_pv_info(
     pv_name: Annotated[str, Field(description="EPICS PV name")],
     timeout: Annotated[
@@ -158,12 +146,7 @@ async def get_pv_info(
     limits and the per-PVA-unmapped per-level severities are omitted), and enum index/label/
     choices for enum PVs. Unset (zero-width) display/control limit pairs are omitted; DBR_CHAR
     waveforms come back as int lists."""
-    try:
-        return await _get_pv_info(pv_name, timeout)
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+    return await _get_pv_info(pv_name, timeout)
 
 
 @mcp.tool(
@@ -174,6 +157,7 @@ async def get_pv_info(
         openWorldHint=True,
     )
 )
+@translate_epics_errors
 async def monitor_pv(
     name: Annotated[str, Field(description="EPICS PV name to monitor")],
     duration: Annotated[
@@ -189,12 +173,7 @@ async def monitor_pv(
 
     Each event carries the same best-effort metadata as get_pv_info
     (alarm/timestamp/display/control/value_alarm/enum)."""
-    try:
-        return await _monitor_pv(name, duration, max_events)
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+    return await _monitor_pv(name, duration, max_events)
 
 
 @mcp.tool(
@@ -205,6 +184,7 @@ async def monitor_pv(
         openWorldHint=True,
     )
 )
+@translate_epics_errors
 async def discover_pvs(
     pattern: Annotated[
         str,
@@ -216,12 +196,7 @@ async def discover_pvs(
     ] = None,
 ) -> dict[str, object]:
     """Discover PVs by name. Wildcard patterns require ChannelFinder infrastructure."""
-    try:
-        return await _discover_pvs(pattern, timeout)
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+    return await _discover_pvs(pattern, timeout)
 
 
 @mcp.tool(
@@ -232,6 +207,7 @@ async def discover_pvs(
         openWorldHint=True,
     )
 )
+@translate_epics_errors
 async def find_channels(
     name_pattern: Annotated[
         str,
@@ -247,12 +223,7 @@ async def find_channels(
 
     Read-only. Disabled by default (set EPICS_MCP_CHANNELFINDER_URL to enable).
     """
-    try:
-        return await _find_channels(name_pattern, max_results, timeout)
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+    return await _find_channels(name_pattern, max_results, timeout)
 
 
 @mcp.tool(
@@ -263,6 +234,7 @@ async def find_channels(
         openWorldHint=True,
     )
 )
+@translate_epics_errors
 async def is_archived(
     pv: Annotated[str, Field(description="EPICS PV name")],
     timeout: Annotated[float, Field(description="Timeout in seconds")] = 5.0,
@@ -271,12 +243,7 @@ async def is_archived(
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.
     """
-    try:
-        return await _is_archived(pv, timeout)
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+    return await _is_archived(pv, timeout)
 
 
 @mcp.tool(
@@ -287,6 +254,7 @@ async def is_archived(
         openWorldHint=True,
     )
 )
+@translate_epics_errors
 async def get_pv_history(
     pv: Annotated[str, Field(description="EPICS PV name")],
     start: Annotated[
@@ -303,12 +271,7 @@ async def get_pv_history(
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.
     """
-    try:
-        return await _get_pv_history(pv, start, end, max_points, timeout)
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+    return await _get_pv_history(pv, start, end, max_points, timeout)
 
 
 @mcp.tool(
@@ -319,6 +282,7 @@ async def get_pv_history(
         openWorldHint=True,
     )
 )
+@translate_epics_errors
 async def is_alarm_configured(
     pv: Annotated[str, Field(description="EPICS PV name")],
     config_name: Annotated[
@@ -332,12 +296,7 @@ async def is_alarm_configured(
     A hit proves the PV is configured in the alarm tree; a miss is a real negative only when the
     Alarm Logger was running at config-import time (else the config change never reached its index).
     """
-    try:
-        return await _is_alarm_configured(pv, config_name, timeout)
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+    return await _is_alarm_configured(pv, config_name, timeout)
 
 
 @mcp.tool(
@@ -348,6 +307,7 @@ async def is_alarm_configured(
         openWorldHint=True,
     )
 )
+@translate_epics_errors
 async def diagnose_connection(
     pv_name: Annotated[str, Field(description="The PV to diagnose")],
     timeout: Annotated[
@@ -388,19 +348,14 @@ async def diagnose_connection(
     ChannelFinder/Naming, never the transport error code. No collision/uniqueness claim is made
     (multi-responder detection is out of scope). Naming is off by default (no ESS egress).
     """
-    try:
-        return await _diagnose_connection(
-            pv_name,
-            timeout=timeout,
-            check_channelfinder=check_channelfinder,
-            check_naming=check_naming,
-            check_archiver=check_archiver,
-            check_alarm=check_alarm,
-        )
-    except EpicsError as e:
-        raise ToolError(f"[{e.error_code}] {e}") from e
-    except Exception as e:
-        raise ToolError(f"[INTERNAL] {type(e).__name__}: {e}") from e
+    return await _diagnose_connection(
+        pv_name,
+        timeout=timeout,
+        check_channelfinder=check_channelfinder,
+        check_naming=check_naming,
+        check_archiver=check_archiver,
+        check_alarm=check_alarm,
+    )
 
 
 # Display-aware tools (validate_pvs / crossplane_check / coverage_audit / find_device) need the
