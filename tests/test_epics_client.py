@@ -1,10 +1,11 @@
 """Tests für epics_client-Hilfsfunktionen (ohne EPICS-Verbindung außer dem echten-p4p-Test)."""
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 
 import epics_pv_mcp.services.epics_client as epics_client
-from epics_pv_mcp.errors import EpicsConnectionError, PVNotFoundError
+from epics_pv_mcp.errors import EpicsConnectionError, PVNotFoundError, PVTimeoutError
 from epics_pv_mcp.services.epics_client import _classify_p4p_error, _format_value
 from epics_pv_mcp.tools.info import _get_pv_info
 
@@ -490,3 +491,62 @@ async def test_monitor_format_failure_yields_none(monkeypatch: Any) -> None:
     events = await epics_client.pv_monitor("X:Y", duration=0.2, max_events=1)
 
     assert events == [{"pv_name": "X:Y", "value": None}]
+
+
+# ---------------------------------------------------------------------------
+# pv_get_batch fallback (M5/C5): native batch fails → CONCURRENT individual gets,
+# each outcome classified per element (a bad PV never crashes or serialises the batch).
+# ---------------------------------------------------------------------------
+
+
+class _FailBatchContext:
+    """A p4p Context stand-in whose batch get always fails, forcing the individual fallback."""
+
+    def get(self, names: object, timeout: object = None) -> object:
+        raise RuntimeError("native batch get unsupported")
+
+
+async def test_pv_get_batch_fallback_classifies_each_pv(monkeypatch: Any) -> None:
+    """After the native batch fails, each PV is read individually and sorted good→results,
+    disconnected→errors — one bad PV does not sink the healthy ones."""
+    monkeypatch.setattr(epics_client, "get_context", _FailBatchContext)
+
+    async def fake_pv_get(name: str, timeout: float | None = None) -> dict[str, object]:
+        if name == "BAD":
+            raise PVTimeoutError(f"Timeout getting PV '{name}' after {timeout}s", details={})
+        return {"pv_name": name, "value": 1}
+
+    monkeypatch.setattr(epics_client, "pv_get", fake_pv_get)
+
+    out = await epics_client.pv_get_batch(["GOOD", "BAD"])
+    results, errors = out["results"], out["errors"]
+    assert isinstance(results, list)
+    assert isinstance(errors, list)
+    assert [r["pv_name"] for r in results] == ["GOOD"]
+    assert [e["pv_name"] for e in errors] == ["BAD"]
+    assert "Timeout" in str(errors[0]["error"])
+
+
+async def test_pv_get_batch_fallback_runs_concurrently(monkeypatch: Any) -> None:
+    """M5: the individual fallback reads run CONCURRENTLY (asyncio.gather), not serially.
+
+    Proven deterministically with a rendezvous (no wall-clock): the FIRST read blocks on an event
+    that only the SECOND read sets. A serial for-loop would deadlock (FIRST never returns, so SECOND
+    never starts) — asyncio.wait_for turns that into a clean failure instead of a hang."""
+    monkeypatch.setattr(epics_client, "get_context", _FailBatchContext)
+    second_started = asyncio.Event()
+
+    async def fake_pv_get(name: str, timeout: float | None = None) -> dict[str, object]:
+        if name == "FIRST":
+            await second_started.wait()  # only satisfiable if SECOND runs concurrently
+            return {"pv_name": name, "value": 1}
+        second_started.set()
+        return {"pv_name": name, "value": 2}
+
+    monkeypatch.setattr(epics_client, "pv_get", fake_pv_get)
+
+    out = await asyncio.wait_for(epics_client.pv_get_batch(["FIRST", "SECOND"]), timeout=2.0)
+    results = out["results"]
+    assert isinstance(results, list)
+    assert {r["pv_name"] for r in results} == {"FIRST", "SECOND"}
+    assert out["errors"] == []

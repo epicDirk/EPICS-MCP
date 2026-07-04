@@ -110,20 +110,32 @@ async def pv_get_batch(names: list[str], timeout: float | None = None) -> dict[s
                 # ein kaputter Einzelwert darf den Batch nicht abbrechen
                 errors.append({"pv_name": name, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
-        # Batch fehlgeschlagen -> Einzelabfrage-Fallback. Die Wurzel des
-        # Batch-Fehlers nicht still verschlucken (für die Diagnose loggen); die
-        # Einzelabfragen liefern danach je PV einen genauen Fehler.
-        logger.debug("Batch get failed, falling back to individual gets: %s", exc)
-        for name in names:
-            try:
-                result = await pv_get(name, timeout=timeout)
-                results.append(result)
-            except PVNotFoundError:
+        # Batch fehlgeschlagen -> Einzelabfrage-Fallback. Die Wurzel des Batch-Fehlers nicht still
+        # verschlucken (für die Diagnose loggen); die Einzelabfragen liefern danach je PV einen
+        # genauen Fehler.
+        logger.debug("Batch get failed, falling back to concurrent individual gets: %s", exc)
+        # M5: run the per-PV reads CONCURRENTLY instead of serially, so ONE disconnected channel
+        # degrades the fallback to ~1×timeout instead of n×timeout. return_exceptions=True keeps a
+        # bad PV from cancelling the healthy ones; each outcome is classified per element below.
+        individual = await asyncio.gather(
+            *(pv_get(name, timeout=timeout) for name in names),
+            return_exceptions=True,
+        )
+        for name, outcome in zip(names, individual, strict=False):
+            if not isinstance(outcome, BaseException):
+                results.append(outcome)
+            elif isinstance(outcome, PVNotFoundError):
                 errors.append({"pv_name": name, "error": f"PV '{name}' not found"})
-            except PVTimeoutError:
+            elif isinstance(outcome, PVTimeoutError):
                 errors.append({"pv_name": name, "error": f"Timeout getting PV '{name}'"})
-            except EpicsConnectionError as exc:
-                errors.append({"pv_name": name, "error": str(exc)})
+            elif isinstance(outcome, Exception):
+                # EpicsConnectionError and any other Exception → a per-PV error entry (never crash
+                # the whole batch on one PV, as the serial loop's un-caught branch could).
+                errors.append({"pv_name": name, "error": str(outcome)})
+            else:
+                # A non-Exception BaseException (e.g. CancelledError) is never swallowed. It did not
+                # arise from the native-batch failure, so do not chain it to that context.
+                raise outcome from None
 
     return {"results": results, "errors": errors}
 
