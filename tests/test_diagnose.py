@@ -305,7 +305,7 @@ async def test_shell_connected_healthy_cf_disabled_withholds(
         return {"enabled": False, "channels": [], "total": 0, "note": "disabled"}
 
     _patch(monkeypatch, "pv_get", fake_pv_get)
-    _patch(monkeypatch, "_find_channels", fake_find)
+    _patch(monkeypatch, "query_channels", fake_find)
     _patch(monkeypatch, "get_config", lambda: EpicsConfig())
 
     report = await diagnose("SYS:PV")
@@ -320,7 +320,7 @@ async def test_live_probe_runs_concurrently_with_planes(monkeypatch: pytest.Monk
     """M7: the live probe shares the single gather with the explanatory planes.
 
     Proven deterministically with a rendezvous (no wall-clock): pv_get (inside _probe_live)
-    waits for an event that _find_channels (inside the ChannelFinder plane) sets. If the probe
+    waits for an event that query_channels (inside the ChannelFinder plane) sets. If the probe
     still ran SERIALLY before the gather, the CF plane would never start and this would deadlock —
     which ``asyncio.wait_for`` turns into a clean failure instead of a hang.
     """
@@ -335,7 +335,7 @@ async def test_live_probe_runs_concurrently_with_planes(monkeypatch: pytest.Monk
         return {"enabled": True, "channels": [], "total": 0, "capped": False}
 
     _patch(monkeypatch, "pv_get", fake_pv_get)
-    _patch(monkeypatch, "_find_channels", fake_find)
+    _patch(monkeypatch, "query_channels", fake_find)
     _patch(monkeypatch, "get_config", lambda: EpicsConfig())
 
     report = await asyncio.wait_for(diagnose("SYS:PV", check_channelfinder=True), timeout=2.0)
@@ -351,7 +351,7 @@ async def test_shell_disconnect_is_caught_not_raised(monkeypatch: pytest.MonkeyP
         return {"enabled": True, "channels": [], "total": 0, "capped": False}
 
     _patch(monkeypatch, "pv_get", fake_pv_get)
-    _patch(monkeypatch, "_find_channels", fake_find)
+    _patch(monkeypatch, "query_channels", fake_find)
     _patch(monkeypatch, "get_config", lambda: EpicsConfig())
 
     report = await diagnose("SYS:PV")  # must NOT raise
@@ -368,7 +368,7 @@ async def test_shell_internal_error_is_unknown(monkeypatch: pytest.MonkeyPatch) 
         return {"enabled": False, "channels": [], "total": 0}
 
     _patch(monkeypatch, "pv_get", fake_pv_get)
-    _patch(monkeypatch, "_find_channels", fake_find)
+    _patch(monkeypatch, "query_channels", fake_find)
     _patch(monkeypatch, "get_config", lambda: EpicsConfig())
 
     report = await diagnose("SYS:PV")
@@ -386,7 +386,7 @@ async def test_shell_cf_error_withholds_not_false_negative(monkeypatch: pytest.M
         raise EpicsConnectionError("ChannelFinder down")
 
     _patch(monkeypatch, "pv_get", fake_pv_get)
-    _patch(monkeypatch, "_find_channels", fake_find)
+    _patch(monkeypatch, "query_channels", fake_find)
     _patch(monkeypatch, "get_config", lambda: EpicsConfig())
 
     report = await diagnose("SYS:PV")
@@ -411,7 +411,7 @@ async def test_shell_naming_gate_empty_url_withholds_no_client(
         raise AssertionError("NamingServiceClient must not be constructed when naming_url is empty")
 
     _patch(monkeypatch, "pv_get", fake_pv_get)
-    _patch(monkeypatch, "_find_channels", fake_find)
+    _patch(monkeypatch, "query_channels", fake_find)
     _patch(monkeypatch, "NamingServiceClient", _boom)
     _patch(monkeypatch, "get_config", lambda: EpicsConfig(naming_url=""))
 
@@ -439,7 +439,7 @@ async def test_shell_naming_enabled_splits_unregistered(monkeypatch: pytest.Monk
             return NameStatus(registered=True, status="ACTIVE", message="ok")
 
     _patch(monkeypatch, "pv_get", fake_pv_get)
-    _patch(monkeypatch, "_find_channels", fake_find)
+    _patch(monkeypatch, "query_channels", fake_find)
     _patch(monkeypatch, "NamingServiceClient", _FakeNaming)
     _patch(monkeypatch, "get_config", lambda: EpicsConfig(naming_url="http://naming"))
 
@@ -459,7 +459,7 @@ async def test_shell_gatherer_is_total_on_unexpected_error(monkeypatch: pytest.M
         raise ValueError("unexpected client/projection bug")  # NOT an EpicsError
 
     _patch(monkeypatch, "pv_get", fake_pv_get)
-    _patch(monkeypatch, "_find_channels", boom_find)
+    _patch(monkeypatch, "query_channels", boom_find)
     _patch(monkeypatch, "get_config", lambda: EpicsConfig())
 
     report = await diagnose("SYS:PV")  # must NOT raise despite the ValueError
@@ -524,7 +524,7 @@ async def test_shell_field_suffixed_pv_normalized_for_channelfinder(
         }
 
     _patch(monkeypatch, "pv_get", fake_pv_get)
-    _patch(monkeypatch, "_find_channels", fake_find)
+    _patch(monkeypatch, "query_channels", fake_find)
     _patch(monkeypatch, "get_config", lambda: EpicsConfig())
 
     report = await diagnose("SYS:DEV:Val.EGU")
@@ -562,7 +562,7 @@ async def test_shell_naming_unreachable_is_withheld_not_false_typo(
             return NameStatus(registered=False, status="", message="not registered")
 
     _patch(monkeypatch, "pv_get", fake_pv_get)
-    _patch(monkeypatch, "_find_channels", fake_find)
+    _patch(monkeypatch, "query_channels", fake_find)
     _patch(monkeypatch, "NamingServiceClient", _DownNaming)
     _patch(monkeypatch, "get_config", lambda: EpicsConfig(naming_url="http://naming"))
 
@@ -597,7 +597,7 @@ async def test_shell_naming_reachable_unregistered_stays_name_typo(
             return NameStatus(registered=False, status="", message="not registered")
 
     _patch(monkeypatch, "pv_get", fake_pv_get)
-    _patch(monkeypatch, "_find_channels", fake_find)
+    _patch(monkeypatch, "query_channels", fake_find)
     _patch(monkeypatch, "NamingServiceClient", _UpUnregNaming)
     _patch(monkeypatch, "get_config", lambda: EpicsConfig(naming_url="http://naming"))
 

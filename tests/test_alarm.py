@@ -86,12 +86,16 @@ def test_is_alarm_configured_connection_error(monkeypatch: pytest.MonkeyPatch) -
 async def test_is_alarm_configured_tool_disabled_no_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("epics_pv_mcp.tools.alarm.get_config", lambda: EpicsConfig(alarm_url=""))
+    # Gating + client construction moved to services/checkers.query_alarm_configured (M9);
+    # _is_alarm_configured is a thin delegator, so config/client are patched there.
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config", lambda: EpicsConfig(alarm_url="")
+    )
 
     def _boom(*args: object, **kwargs: object) -> AlarmClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.tools.alarm.AlarmClient", _boom)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.AlarmClient", _boom)
     result = await _is_alarm_configured("X")
     assert result["enabled"] is False
     assert result["configured"] is None
@@ -100,7 +104,7 @@ async def test_is_alarm_configured_tool_disabled_no_network(
 @pytest.mark.asyncio
 async def test_is_alarm_configured_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.alarm.get_config", lambda: EpicsConfig(alarm_url="http://alarm")
+        "epics_pv_mcp.services.checkers.get_config", lambda: EpicsConfig(alarm_url="http://alarm")
     )
 
     class _Fake:
@@ -112,7 +116,7 @@ async def test_is_alarm_configured_tool_enabled(monkeypatch: pytest.MonkeyPatch)
         ) -> tuple[bool, dict[str, object]]:
             return True, {"config": f"config:/{config_name}/C/{pv}"}
 
-    monkeypatch.setattr("epics_pv_mcp.tools.alarm.AlarmClient", _Fake)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.AlarmClient", _Fake)
     result = await _is_alarm_configured("X")
     assert result["enabled"] is True
     assert result["configured"] is True

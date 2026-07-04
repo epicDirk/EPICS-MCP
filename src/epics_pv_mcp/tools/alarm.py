@@ -1,22 +1,15 @@
-"""Tool functions for the Phoebus Alarm Logger (read-only).
+"""MCP adapter for the Phoebus Alarm Logger 'is this PV configured?' query (read-only).
 
-Default-disabled: when ``EPICS_MCP_ALARM_URL`` is unset, returns a structured
-``enabled: false`` result and makes **no** network call (preserves localhost isolation).
+Thin wrapper: the config-gated, off-loop query lives in the services layer
+(:func:`epics_pv_mcp.services.checkers.query_alarm_configured`) so
+:mod:`~epics_pv_mcp.services.diagnose` reuses it without an upward ``services → tools`` import (M9).
+Default-disabled behaviour (no ``EPICS_MCP_ALARM_URL`` → no network call) is enforced there.
 """
 
 from __future__ import annotations
 
-import asyncio
-
-from epics_pv_mcp.config import get_config
-from epics_pv_mcp.errors import EpicsConnectionError
-from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG, AlarmClient
-from epics_pv_mcp.services.alarm_exceptions import AlarmError
-
-_DISABLED_NOTE = (
-    "Phoebus Alarm Logger is disabled. Set EPICS_MCP_ALARM_URL to the logger REST root "
-    "(e.g. http://localhost:8081)."
-)
+from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG
+from epics_pv_mcp.services.checkers import query_alarm_configured
 
 
 async def _is_alarm_configured(
@@ -24,23 +17,8 @@ async def _is_alarm_configured(
     config_name: str = DEFAULT_ALARM_CONFIG,
     timeout: float = 5.0,
 ) -> dict[str, object]:
-    """Report whether *pv* has an alarm configuration (Alarm Logger /search/alarm/config)."""
-    cfg = get_config()
-    if not cfg.alarm_url:
-        return {"enabled": False, "pv": pv, "configured": None, "note": _DISABLED_NOTE}
+    """Report whether *pv* has an alarm configuration (Alarm Logger /search/alarm/config).
 
-    def _run() -> dict[str, object]:
-        client = AlarmClient(cfg.alarm_url, timeout=timeout, auth_header=cfg.alarm_auth or None)
-        configured, detail = client.is_alarm_configured(pv, config_name=config_name)
-        return {
-            "enabled": True,
-            "pv": pv,
-            "config": config_name,
-            "configured": configured,
-            "detail": detail,
-        }
-
-    try:
-        return await asyncio.to_thread(_run)
-    except AlarmError as exc:
-        raise EpicsConnectionError(f"Alarm Logger: {exc}") from exc
+    Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_alarm_configured`.
+    """
+    return await query_alarm_configured(pv, config_name=config_name, timeout=timeout)

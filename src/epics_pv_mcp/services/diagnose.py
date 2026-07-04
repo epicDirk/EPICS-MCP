@@ -38,12 +38,14 @@ from pydantic import BaseModel, ConfigDict
 
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsError
+from epics_pv_mcp.services.checkers import (
+    query_alarm_configured,
+    query_archived,
+    query_channels,
+)
 from epics_pv_mcp.services.crossplane import _record_name
 from epics_pv_mcp.services.epics_client import pv_get
 from epics_pv_mcp.services.naming_client import NamingServiceClient
-from epics_pv_mcp.tools.alarm import _is_alarm_configured
-from epics_pv_mcp.tools.archiver import _is_archived
-from epics_pv_mcp.tools.channelfinder import _find_channels
 
 # --- Enums (Literal so mypy checks exhaustiveness in the ``match`` below) ---
 State = Literal["connected", "disconnected", "unknown"]
@@ -357,7 +359,7 @@ async def _gather_channelfinder(
         return ChannelFinderEvidence(consulted=False, note="ChannelFinder not requested.")
     record = _record_name(pv_name)
     try:
-        result = await _find_channels(record, timeout=timeout)
+        result = await query_channels(record, timeout=timeout)
     except Exception as exc:  # noqa: BLE001 — TOTAL: any failure withholds, never crashes diagnose()
         return ChannelFinderEvidence(
             consulted=False, withheld=True, note=f"ChannelFinder error: {exc}"
@@ -427,7 +429,7 @@ async def _gather_archiver(pv_name: str, requested: bool, timeout: float) -> Arc
     if not requested:
         return ArchiverEvidence(consulted=False, note="Archiver not requested.")
     try:
-        result = await _is_archived(pv_name, timeout=timeout)
+        result = await query_archived(pv_name, timeout=timeout)
     except Exception as exc:  # noqa: BLE001 — TOTAL: any failure withholds, never crashes diagnose()
         return ArchiverEvidence(consulted=False, withheld=True, note=f"Archiver error: {exc}")
     if not result.get("enabled"):
@@ -443,7 +445,7 @@ async def _gather_alarm(pv_name: str, requested: bool, timeout: float) -> AlarmE
     if not requested:
         return AlarmEvidence(consulted=False, note="Alarm not requested.")
     try:
-        result = await _is_alarm_configured(pv_name, timeout=timeout)
+        result = await query_alarm_configured(pv_name, timeout=timeout)
     except Exception as exc:  # noqa: BLE001 — TOTAL: any failure withholds, never crashes diagnose()
         return AlarmEvidence(consulted=False, withheld=True, note=f"Alarm error: {exc}")
     if not result.get("enabled"):

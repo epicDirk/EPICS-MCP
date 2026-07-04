@@ -1,20 +1,32 @@
-"""Edge adapters + factories that build the injected protocol checkers (M8/C2).
+"""The services layer's single downward edge to the four REST planes (M8/M9/C2).
 
-The pure cross-plane cores (:mod:`~.crossplane`, :mod:`~.coverage`) define the checker
-*Protocols* and receive concrete checkers as parameters. Those concrete adapters and
-their config-gated factories used to live in the *tool* layer and were imported cross-layer
-by the CLIs and by one tool from another — a layering inversion. They live here now, in the
-services layer, with public names, so tools **and** CLIs import downward from one expected
-place (and the 5th REST plane's adapter has an obvious home).
+This module is the one place higher layers reach the ChannelFinder / Archiver / Alarm / Naming
+REST clients. It carries two kinds of edge:
 
-Each adapter translates its REST client's errors into ``RuntimeError`` (a truncated
-ChannelFinder registry into :class:`~.crossplane.CFRegistryCapped`) so the pure cores can
-withhold a verdict without importing a client or catching broad exceptions.
+1. **Injected protocol checkers + factories** (M8) — the pure cross-plane cores
+   (:mod:`~.crossplane`, :mod:`~.coverage`) define the checker *Protocols* and receive concrete
+   checkers as parameters. Each adapter translates its REST client's errors into ``RuntimeError``
+   (a truncated ChannelFinder registry into :class:`~.crossplane.CFRegistryCapped`) so the pure
+   cores can withhold a verdict without importing a client or catching broad exceptions.
+
+2. **Per-plane async query functions** (M9) — :func:`query_archived`, :func:`query_alarm_configured`
+   and :func:`query_channels` hold the config-gate (``*_URL`` set?) + off-loop
+   (:func:`asyncio.to_thread`) + error-translation logic that used to live in ``tools/*``. The MCP
+   tool wrappers **and** :mod:`~.diagnose` now call the SAME service function, so ``diagnose`` no
+   longer imports upward from the tool layer (the ``service → tool`` inversion is gone).
+
+Both kinds used to sit in the *tool* layer and were imported cross-layer (CLI → tools, tool →
+tool, service → tool). They live here now, in the services layer, with public names, so tools,
+CLIs and services import downward from one expected place (and the 5th REST plane has an obvious
+home for its adapter, factory and query).
 """
 
 from __future__ import annotations
 
+import asyncio
+
 from epics_pv_mcp.config import get_config
+from epics_pv_mcp.errors import EpicsConnectionError
 from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG, AlarmClient
 from epics_pv_mcp.services.alarm_exceptions import AlarmError
 from epics_pv_mcp.services.archiver_client import ArchiverClient
@@ -156,3 +168,115 @@ def build_alarm_checker(query_alarm: bool, alarm_config: str) -> AlarmChecker | 
     if not cfg.alarm_url:
         return None
     return AlarmConfigChecker(cfg.alarm_url, cfg.alarm_auth or None, config_name=alarm_config)
+
+
+# ---------------------------------------------------------------------------
+# Per-plane async query functions (M9) — the config-gate + off-loop + error-translation logic
+# lifted out of the tool layer. The MCP tool wrappers AND diagnose() call these SAME functions,
+# so services/diagnose no longer imports upward from tools/*. Each returns the exact
+# tool-facing dict shape it did before the lift (lossless — the tool wrappers are now thin).
+# ---------------------------------------------------------------------------
+
+#: Archiver disabled note (mirrored in tools/archiver._get_pv_history, which is tool-only).
+_ARCHIVER_DISABLED_NOTE = (
+    "Archiver Appliance is disabled. Set EPICS_MCP_ARCHIVER_URL to the appliance root "
+    "(e.g. http://archiver:17665)."
+)
+_ALARM_DISABLED_NOTE = (
+    "Phoebus Alarm Logger is disabled. Set EPICS_MCP_ALARM_URL to the logger REST root "
+    "(e.g. http://localhost:8081)."
+)
+_CF_DISABLED_NOTE = (
+    "ChannelFinder is disabled. Set EPICS_MCP_CHANNELFINDER_URL to the "
+    "ChannelFinder service root (e.g. http://host:8080/ChannelFinder)."
+)
+
+
+async def query_archived(pv: str, timeout: float = 5.0) -> dict[str, object]:
+    """Report whether *pv* is being archived (Archiver MGMT getPVStatus). Read-only, config-gated.
+
+    Default-disabled: with ``EPICS_MCP_ARCHIVER_URL`` unset, returns a structured ``enabled: false``
+    result and makes NO network call (preserves localhost isolation). Shared by the ``is_archived``
+    tool and the diagnose Archiver plane.
+    """
+    cfg = get_config()
+    if not cfg.archiver_url:
+        return {"enabled": False, "pv": pv, "archived": None, "note": _ARCHIVER_DISABLED_NOTE}
+
+    def _run() -> dict[str, object]:
+        client = ArchiverClient(
+            cfg.archiver_url, timeout=timeout, auth_header=cfg.archiver_auth or None
+        )
+        archived, status = client.is_archived(pv)
+        return {"enabled": True, "pv": pv, "archived": archived, "status": status}
+
+    try:
+        return await asyncio.to_thread(_run)
+    except ArchiverError as exc:
+        raise EpicsConnectionError(f"Archiver: {exc}") from exc
+
+
+async def query_alarm_configured(
+    pv: str,
+    config_name: str = DEFAULT_ALARM_CONFIG,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    """Report whether *pv* has an alarm configuration (Alarm Logger /search/alarm/config).
+
+    Default-disabled: with ``EPICS_MCP_ALARM_URL`` unset, returns ``enabled: false`` and makes no
+    network call. Shared by the ``is_alarm_configured`` tool and the diagnose Alarm plane.
+    """
+    cfg = get_config()
+    if not cfg.alarm_url:
+        return {"enabled": False, "pv": pv, "configured": None, "note": _ALARM_DISABLED_NOTE}
+
+    def _run() -> dict[str, object]:
+        client = AlarmClient(cfg.alarm_url, timeout=timeout, auth_header=cfg.alarm_auth or None)
+        configured, detail = client.is_alarm_configured(pv, config_name=config_name)
+        return {
+            "enabled": True,
+            "pv": pv,
+            "config": config_name,
+            "configured": configured,
+            "detail": detail,
+        }
+
+    try:
+        return await asyncio.to_thread(_run)
+    except AlarmError as exc:
+        raise EpicsConnectionError(f"Alarm Logger: {exc}") from exc
+
+
+async def query_channels(
+    name_pattern: str,
+    max_results: int = DEFAULT_MAX_RESULTS,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    """Query ChannelFinder for channels whose name matches *name_pattern* (glob ``*``/``?``).
+
+    Default-disabled: with ``EPICS_MCP_CHANNELFINDER_URL`` unset, returns ``enabled: false`` and
+    makes no network call. Shared by the ``find_channels`` tool, ``find_device`` and the diagnose
+    ChannelFinder plane.
+    """
+    cfg = get_config()
+    if not cfg.channelfinder_url:
+        return {"enabled": False, "channels": [], "total": 0, "note": _CF_DISABLED_NOTE}
+
+    def _run() -> dict[str, object]:
+        client = ChannelFinderClient(
+            cfg.channelfinder_url,
+            timeout=timeout,
+            auth_header=cfg.channelfinder_auth or None,
+        )
+        channels = client.find_channels(name_pattern, max_results=max_results)
+        return {
+            "enabled": True,
+            "channels": [dict(channel) for channel in channels],
+            "total": len(channels),
+            "capped": len(channels) >= max_results,
+        }
+
+    try:
+        return await asyncio.to_thread(_run)
+    except ChannelFinderError as exc:
+        raise EpicsConnectionError(f"ChannelFinder: {exc}") from exc

@@ -77,16 +77,20 @@ def test_non_list_payload_raises(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 async def test_tool_disabled_makes_no_network_call(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With no URL configured, the tool returns enabled=false and never constructs a client."""
+    """With no URL configured, the tool returns enabled=false and never constructs a client.
+
+    Gating + client construction moved to services/checkers.query_channels (M9); _find_channels is
+    a thin delegator, so config/client are patched there.
+    """
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.channelfinder.get_config",
+        "epics_pv_mcp.services.checkers.get_config",
         lambda: EpicsConfig(channelfinder_url=""),
     )
 
     def _boom(*args: object, **kwargs: object) -> ChannelFinderClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.tools.channelfinder.ChannelFinderClient", _boom)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _boom)
     result = await _find_channels("X")
     assert result["enabled"] is False
     assert result["channels"] == []
@@ -96,7 +100,7 @@ async def test_tool_disabled_makes_no_network_call(monkeypatch: pytest.MonkeyPat
 @pytest.mark.asyncio
 async def test_tool_enabled_returns_channels(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.channelfinder.get_config",
+        "epics_pv_mcp.services.checkers.get_config",
         lambda: EpicsConfig(channelfinder_url="http://cf"),
     )
 
@@ -116,7 +120,7 @@ async def test_tool_enabled_returns_channels(monkeypatch: pytest.MonkeyPatch) ->
                 )
             ]
 
-    monkeypatch.setattr("epics_pv_mcp.tools.channelfinder.ChannelFinderClient", _Fake)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _Fake)
     result = await _find_channels("P*")
     assert result["enabled"] is True
     assert result["total"] == 1

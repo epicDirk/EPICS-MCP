@@ -1,7 +1,11 @@
 """Tool functions for the EPICS Archiver Appliance (read-only).
 
-Default-disabled: when ``EPICS_MCP_ARCHIVER_URL`` is unset, returns a structured
-``enabled: false`` result and makes **no** network call (preserves localhost isolation).
+``_is_archived`` is a thin MCP adapter over the services-layer query
+(:func:`epics_pv_mcp.services.checkers.query_archived`) so :mod:`~epics_pv_mcp.services.diagnose`
+reuses it without an upward ``services → tools`` import (M9). ``_get_pv_history`` stays here
+(tool-only, not shared with diagnose). Both are default-disabled: with ``EPICS_MCP_ARCHIVER_URL``
+unset they return a structured ``enabled: false`` result and make **no** network call (preserves
+localhost isolation).
 """
 
 from __future__ import annotations
@@ -12,7 +16,10 @@ from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsConnectionError
 from epics_pv_mcp.services.archiver_client import DEFAULT_MAX_POINTS, ArchiverClient
 from epics_pv_mcp.services.archiver_exceptions import ArchiverError
+from epics_pv_mcp.services.checkers import query_archived
 
+#: Used by _get_pv_history below; the sibling _is_archived note lives with query_archived in
+#: services/checkers.py (same string, self-contained per layer — no services ↔ tools coupling).
 _DISABLED_NOTE = (
     "Archiver Appliance is disabled. Set EPICS_MCP_ARCHIVER_URL to the appliance root "
     "(e.g. http://archiver:17665)."
@@ -20,22 +27,11 @@ _DISABLED_NOTE = (
 
 
 async def _is_archived(pv: str, timeout: float = 5.0) -> dict[str, object]:
-    """Report whether *pv* is being archived (Archiver MGMT getPVStatus)."""
-    cfg = get_config()
-    if not cfg.archiver_url:
-        return {"enabled": False, "pv": pv, "archived": None, "note": _DISABLED_NOTE}
+    """Report whether *pv* is being archived (Archiver MGMT getPVStatus).
 
-    def _run() -> dict[str, object]:
-        client = ArchiverClient(
-            cfg.archiver_url, timeout=timeout, auth_header=cfg.archiver_auth or None
-        )
-        archived, status = client.is_archived(pv)
-        return {"enabled": True, "pv": pv, "archived": archived, "status": status}
-
-    try:
-        return await asyncio.to_thread(_run)
-    except ArchiverError as exc:
-        raise EpicsConnectionError(f"Archiver: {exc}") from exc
+    Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_archived`.
+    """
+    return await query_archived(pv, timeout=timeout)
 
 
 async def _get_pv_history(

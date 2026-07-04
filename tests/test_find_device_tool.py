@@ -145,7 +145,7 @@ async def test_server_find_device_maps_error_to_tool_error(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-@patch("epics_pv_mcp.tools.find_device._find_channels", new_callable=AsyncMock)
+@patch("epics_pv_mcp.tools.find_device.query_channels", new_callable=AsyncMock)
 @patch("epics_pv_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
 async def test_find_device_tool_channelfinder_enabled_substring(
     mock_batch: AsyncMock, mock_cf: AsyncMock, tmp_path: Path
@@ -176,7 +176,7 @@ async def test_find_device_tool_channelfinder_enabled_substring(
 
 
 @pytest.mark.asyncio
-@patch("epics_pv_mcp.tools.find_device._find_channels", new_callable=AsyncMock)
+@patch("epics_pv_mcp.tools.find_device.query_channels", new_callable=AsyncMock)
 @patch("epics_pv_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
 async def test_find_device_tool_channelfinder_unreachable_degrades(
     mock_batch: AsyncMock, mock_cf: AsyncMock, tmp_path: Path

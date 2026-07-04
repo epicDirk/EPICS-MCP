@@ -82,14 +82,16 @@ def test_get_pv_history_connection_error(monkeypatch: pytest.MonkeyPatch) -> Non
 
 @pytest.mark.asyncio
 async def test_is_archived_tool_disabled_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The gating + client construction moved to services/checkers.query_archived (M9); _is_archived
+    # is now a thin delegator, so the config/client are patched there.
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="")
+        "epics_pv_mcp.services.checkers.get_config", lambda: EpicsConfig(archiver_url="")
     )
 
     def _boom(*args: object, **kwargs: object) -> ArchiverClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _boom)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.ArchiverClient", _boom)
     result = await _is_archived("X")
     assert result["enabled"] is False
     assert result["archived"] is None
@@ -112,8 +114,10 @@ async def test_get_pv_history_tool_disabled_no_network(monkeypatch: pytest.Monke
 
 @pytest.mark.asyncio
 async def test_is_archived_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    # _is_archived delegates to services/checkers.query_archived (M9) — patch the client there.
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(archiver_url="http://arch"),
     )
 
     class _Fake:
@@ -128,7 +132,7 @@ async def test_is_archived_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None
         ) -> tuple[list[Sample], bool]:
             return [Sample(secs=1, nanos=0, val=1.0, severity=0, status=0)], False
 
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.ArchiverClient", _Fake)
     result = await _is_archived("X")
     assert result["enabled"] is True
     assert result["archived"] is True

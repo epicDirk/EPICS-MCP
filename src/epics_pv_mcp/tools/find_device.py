@@ -29,13 +29,13 @@ from opi_navigation.pv_analysis.lookup import MatchMode, PvLookupResult
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.paths import resolve_user_path
+from epics_pv_mcp.services.checkers import query_channels
 from epics_pv_mcp.services.device_lookup import (
     build_device_report,
     collect_channels,
     render_markdown,
 )
 from epics_pv_mcp.services.epics_client import pv_get_batch
-from epics_pv_mcp.tools.channelfinder import _find_channels
 
 
 def _run_lookup(
@@ -103,7 +103,7 @@ async def _find_device(
     stem = channel_name(cleaned).rstrip(":")
     glob = f"*{stem}*" if match == "substring" else f"{stem}*"
     try:
-        iocs: Mapping[str, object] = await _find_channels(glob)
+        iocs: Mapping[str, object] = await query_channels(glob)
     except EpicsError:
         iocs = {
             "enabled": True,
