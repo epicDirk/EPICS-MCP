@@ -302,14 +302,19 @@ retrieval (`:17668`) are separate ports.
 
 ## Development
 
-The gate chain is [uv](https://docs.astral.sh/uv/)-based (CI runs exactly this):
+The gate chain is [uv](https://docs.astral.sh/uv/)-based:
 
 ```bash
-uv sync --extra dev --frozen              # exact, locked dependencies
+uv sync --extra all --frozen              # full local install (dev tools + display extra)
 uv run pytest                             # test suite
 uv run pytest --cov=src --cov-branch      # with coverage
 uv run pre-commit run --all-files         # ruff check + ruff format + mypy --strict + guards
 ```
+
+The `dev` extra is the core toolchain; `all` adds the `[displays]` extra (the `opi_navigation`
+PV engine) so the display-aware tools and their tests run. CI installs `--extra dev` only —
+`opi_navigation` is privately hosted, so CI tests the standalone core a public user gets, and
+the `opi_navigation`-coupled test modules self-skip when it's absent.
 
 Live tests that need a running EPICS stack are opt-in and skip by default. See
 [CONTRIBUTING.md](CONTRIBUTING.md). Release history is in [CHANGELOG.md](CHANGELOG.md).

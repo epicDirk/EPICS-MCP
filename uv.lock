@@ -513,9 +513,17 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-dev = [
+all = [
     { name = "mypy" },
     { name = "opi-navigation" },
+    { name = "pre-commit" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+dev = [
+    { name = "mypy" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -528,7 +536,7 @@ displays = [
 
 [package.metadata]
 requires-dist = [
-    { name = "epics-pv-mcp", extras = ["displays"], marker = "extra == 'dev'" },
+    { name = "epics-pv-mcp", extras = ["dev", "displays"], marker = "extra == 'all'" },
     { name = "fastmcp", specifier = ">=3.4.2,<4" },
     { name = "mcp", specifier = ">=1.0,<2" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19" },
@@ -543,7 +551,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.25" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15" },
 ]
-provides-extras = ["displays", "dev"]
+provides-extras = ["displays", "dev", "all"]
 
 [[package]]
 name = "epicscorelibs"

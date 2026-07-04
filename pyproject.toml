@@ -43,8 +43,15 @@ dev = [
     "ruff>=0.15",
     "mypy>=1.19",
     "pre-commit>=4.0",
-    # dev/CI fahren die volle Suite inkl. der Display-Tools → das [displays]-Extra mitziehen.
-    "epics-pv-mcp[displays]",
+    # NB: `dev` does NOT pull `[displays]`. CI runs `uv sync --extra dev` on the PUBLIC fork, where
+    # the private `opi-navigation` git dependency cannot be cloned (the default GITHUB_TOKEN is
+    # repo-local) — so CI tests exactly the standalone core a public user gets (conftest.py skips the
+    # 6 display test modules when opi_navigation is absent). For the FULL local suite incl. the
+    # display-aware tools, use the `all` extra below (`uv sync --extra all`).
+]
+# Everything for a full local run: the dev toolchain plus the opi_navigation-backed display tools.
+all = [
+    "epics-pv-mcp[dev,displays]",
 ]
 
 [project.urls]
@@ -94,10 +101,38 @@ init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
 
-# p4p ist untypisiert (keine Stubs).
+# p4p ist untypisiert (keine Stubs). opi_navigation IST getypt (py.typed), aber optional
+# ([displays]) und auf dem PUBLIC-Fork-CI abwesend (private git-Dep) — der Override lässt mypy dort
+# `import-not-found` schlucken (Symbole werden Any). LOKAL ist es ein No-Op: bei installiertem
+# opi_navigation nutzt mypy weiter dessen echte Typen, die Display-Fläche bleibt voll geprüft.
 [[tool.mypy.overrides]]
-module = ["p4p.*", "p4p", "requests", "requests.*", "urllib3", "urllib3.*"]
+module = [
+    "p4p.*",
+    "p4p",
+    "requests",
+    "requests.*",
+    "urllib3",
+    "urllib3.*",
+    "opi_navigation.*",
+]
 ignore_missing_imports = true
+
+# The display-coupled TEST modules carry `# type: ignore[arg-type]` comments that suppress arg-type
+# errors against opi_navigation's REAL types (fully checked when [displays] is installed locally). On
+# the public-fork CI opi_navigation is absent → its symbols become Any (override above) → those
+# ignores become UNUSED and mypy --strict's warn_unused_ignores would fail the lint job. Relax ONLY
+# that one check for ONLY these modules (they are also pytest-skipped without opi_navigation via
+# conftest.collect_ignore); every other strict check on them, and all other modules, is unaffected.
+[[tool.mypy.overrides]]
+module = [
+    "tests.test_validate",
+    "tests.test_crossplane_tool",
+    "tests.test_coverage_tool",
+    "tests.test_find_device_tool",
+    "tests.test_device_lookup",
+    "tests.test_inventory_adapter",
+]
+warn_unused_ignores = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

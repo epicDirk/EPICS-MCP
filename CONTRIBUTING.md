@@ -5,18 +5,23 @@ PRs are welcome.
 
 ## Development setup
 
-The gate chain is [uv](https://docs.astral.sh/uv/)-based; CI runs exactly these steps:
+The gate chain is [uv](https://docs.astral.sh/uv/)-based:
 
 ```bash
-uv sync --extra dev --frozen              # install exact, locked dependencies
+uv sync --extra all --frozen              # full local install (dev tools + display extra)
 uv run pytest                             # run the test suite
 uv run pytest --cov=src --cov-branch      # with coverage
 uv run pre-commit run --all-files         # ruff check + ruff format + mypy --strict + guards
 ```
 
-`uv sync --extra dev` also pulls the `[displays]` extra, so the full suite (including the
-display-aware tools) runs. A checkout without `[displays]` still runs the core suite —
-the opi_navigation-coupled test modules skip themselves.
+**Two extras:** `dev` is the core toolchain (pytest, ruff, mypy, pre-commit); `all` adds the
+`[displays]` extra, which pulls the `opi_navigation` PV engine so the display-aware tools and
+their tests run. Use `--extra all` locally for the full suite.
+
+CI runs `uv sync --extra dev --frozen` (**not** `all`): `opi_navigation` lives in a private
+repository the public-fork CI can't clone, so CI tests exactly the standalone core a public
+user gets. The `opi_navigation`-coupled test modules skip themselves when the package is
+absent, so the core suite stays green. A checkout with `--extra all` runs everything.
 
 ## Definition of done
 
