@@ -229,6 +229,36 @@ def test_build_device_report_capped_note_counts_attempts_not_responses() -> None
     assert not any("1 of 500 matched channels" in note for note in report.notes)
 
 
+def test_render_header_and_capped_note_agree_on_the_attempt_count() -> None:
+    """Consistency (QA): in the S7-5 divergence case (2 attempted, 1 returned) the render header and
+    the capped note must show the SAME quantity — both live_read (2 of 500), never 1 in the header
+    and 2 in the note. Before this fix the header used len(channels)=1 while the note used
+    live_read=2, so the two lines contradicted each other."""
+    live = {"results": [{"pv_name": "DEV:X", "value": 0}], "errors": []}  # only 1 of 2 came back
+    report = build_device_report(
+        PvLookupResult(
+            query="DEV",
+            match="prefix",
+            total_pvs_matched=500,
+            displays=(
+                DisplayMatch(
+                    display_path="a.bob", matched_pvs=("DEV:X",), roles=("read",), count=1
+                ),
+            ),
+        ),
+        live,
+        {"enabled": False, "channels": []},
+        total_matched=500,
+        live_read=2,
+        live_capped=True,
+        channelfinder_enabled=False,
+    )
+    markdown = render_markdown(report)
+    header = next(line for line in markdown.splitlines() if "**Live channels:**" in line)
+    assert "2 of 500 matched" in header  # agrees with the note (live_read), not len(channels)=1
+    assert "1 of 500 matched" not in header
+
+
 def test_build_device_report_no_screens_note() -> None:
     empty = PvLookupResult(query="NOPE", match="prefix", total_pvs_matched=0, displays=())
     report = build_device_report(

@@ -73,6 +73,10 @@ class DeviceLookupReport(_Model):
     screens: tuple[ScreenMatch, ...] = ()
     channels: tuple[ChannelStatus, ...] = ()
     total_matched_channels: int = 0
+    # ``live_read`` = channels the live read ATTEMPTED (the capped coverage count);
+    # ``len(channels)`` = the subset that returned a status row (a silent native-batch drop can make
+    # the latter smaller). Header and capped note both report ``live_read`` so they never disagree.
+    live_read: int = 0
     live_capped: bool = False
     channelfinder_enabled: bool = False
     notes: tuple[str, ...] = ()
@@ -212,6 +216,7 @@ def build_device_report(
         screens=_screen_matches(lookup),
         channels=tuple(channels),
         total_matched_channels=total_matched,
+        live_read=live_read,
         live_capped=live_capped,
         channelfinder_enabled=channelfinder_enabled,
         notes=tuple(notes),
@@ -243,8 +248,11 @@ def render_markdown(report: DeviceLookupReport) -> str:
     for screen in report.screens:
         roles = "/".join(report_roles(screen.roles))
         lines.append(f"  - `{screen.display_path}` — {screen.count} channel(s) [{roles}]")
+    # Use live_read (channels ATTEMPTED), not len(channels) (channels that returned) — so this
+    # header agrees with the capped note, which S7-5 anchored to live_read. They diverge only on a
+    # silent native-batch drop; the per-channel rows below still list exactly what returned.
     lines.append(
-        f"- **Live channels:** {len(report.channels)} of {report.total_matched_channels} matched"
+        f"- **Live channels:** {report.live_read} of {report.total_matched_channels} matched"
     )
     for channel in report.channels:
         if channel.connected:
