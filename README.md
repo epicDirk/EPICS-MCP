@@ -312,7 +312,7 @@ uv run pre-commit run --all-files         # ruff check + ruff format + mypy --st
 ```
 
 Live tests that need a running EPICS stack are opt-in and skip by default. See
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.md). Release history is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Related / roadmap
 
