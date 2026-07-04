@@ -70,11 +70,18 @@ def _strip_line_comment(line: str) -> str:
     """
     in_quote = False
     for index, char in enumerate(line):
-        # A backslash-escaped quote (``\"``, EPICS allows it inside a field value like
-        # ``field(DESC, "a \"x\" # y")``) is NOT a quote boundary — counting it would flip
-        # ``in_quote`` and mis-cut a trailing ``#`` inside the value (S7-4).
-        if char == '"' and (index == 0 or line[index - 1] != "\\"):
-            in_quote = not in_quote
+        if char == '"':
+            # A quote is a real boundary only if the run of backslashes right before it is EVEN
+            # (each ``\\`` is a literal backslash; an odd count means the last ``\`` escapes THIS
+            # quote). A single-char lookback (S7-4) mishandles ``\\"`` — a literal backslash then a
+            # real closing quote — so count the parity of the whole preceding backslash run.
+            backslashes = 0
+            probe = index - 1
+            while probe >= 0 and line[probe] == "\\":
+                backslashes += 1
+                probe -= 1
+            if backslashes % 2 == 0:
+                in_quote = not in_quote
         elif char == "#" and not in_quote:
             return line[:index]
     return line

@@ -308,6 +308,24 @@ def test_ioc_db_pvs_escaped_quote_does_not_hide_a_later_record() -> None:
     assert resolved == {"SYS:x", "SYS:y"}
 
 
+def test_strip_line_comment_escaped_backslash_before_quote_closes_the_string() -> None:
+    """S7-4 robustness: a value ending in a LITERAL backslash (``\\\\`` in the .db text) closes the
+    string at the following quote, so a trailing ``#`` IS a real comment and gets stripped. The old
+    single-char lookback mis-read that closing quote as escaped (prev char is ``\\``) and left the
+    comment in; counting the backslash-run parity fixes it."""
+    line = r'record(bo, "c:\\") # record(bo, "GHOST")'  # value c:\  → quote closes → '#' comments
+    assert _strip_line_comment(line) == r'record(bo, "c:\\") '
+
+
+def test_ioc_db_pvs_escaped_backslash_strips_ghost_comment_record() -> None:
+    """S7-4 end-to-end: with a literal-backslash value the quote closes, so a ``# record(...)``
+    after it is a comment and its ghost record is NOT harvested."""
+    db = 'record(bi, "SYS:real") { field(DESC, "c:\\\\") } # record(bi, "SYS:ghost")\n'
+    resolved, _unresolved = ioc_db_pvs(db, {})
+    assert resolved == {"SYS:real"}
+    assert "SYS:ghost" not in resolved
+
+
 def test_load_ioc_db_walks_module_root_once_for_many_basename_loads(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
