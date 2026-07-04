@@ -119,6 +119,27 @@ async def test_cli_and_tool_render_identical_report(
     assert cli_out == tool_result["markdown"] + "\n"
 
 
+async def test_coverage_passes_canonical_displays_dir_to_walker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S5-7 lock: the orchestrator must hand the inventory walker the RESOLVED (canonical)
+    displays_dir, not the raw string. A non-canonical path (with a ``..`` segment) must reach
+    analyze_display_index as ``Path(raw).resolve()``. Against the pre-fix code (raw Path walked) the
+    ``..`` would survive and this assertion fails."""
+    from unittest.mock import patch
+
+    displays = _setup(tmp_path)  # tmp_path/displays exists
+    (tmp_path / "sub").mkdir()
+    raw = str(tmp_path / "sub" / ".." / "displays")  # non-canonical → resolves to tmp_path/displays
+    assert Path(raw) != Path(raw).resolve()  # guard: the fixture is genuinely non-canonical
+    with patch(
+        "epics_pv_mcp.services.orchestration.analyze_display_index", return_value=([], (), 0)
+    ) as walker:
+        await _coverage_audit(raw)
+    assert walker.call_args.args[0] == Path(raw).resolve()
+    assert displays == Path(raw).resolve()
+
+
 def test_cli_coverage_rejects_missing_dir(tmp_path: Path) -> None:
     """A non-existent displays directory exits 2 with an error on stderr (no join)."""
     rc = main(["--displays", str(tmp_path / "nope")])

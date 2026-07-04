@@ -77,6 +77,27 @@ def test_record_name_normalized_both_sides() -> None:
     assert report.display_only == ()
 
 
+def test_audit_coverage_merges_same_record_rows_order_independent() -> None:
+    """S5-6 / merge-branch lock: two index rows that normalize to the SAME record (DEV:SP and
+    DEV:SP.EGU) must merge into ONE row with UNIONED displays and roles — independent of input
+    order. Exercises the field-suffix merge branch (coverage.py:187-198), which no prior test
+    entered (every other multi-row test used distinct records)."""
+    rows_a = [
+        _row("DEV:SP", displays=("a.bob",), role="read"),
+        _row("DEV:SP.EGU", displays=("b.bob",), role="write"),
+    ]
+    rows_b = list(reversed(rows_a))
+    cf = _FakeCF({"DEV:SP"})
+    report_a = audit_coverage(rows_a, scope="DEV:", channelfinder=cf, cf_requested=True)
+    report_b = audit_coverage(rows_b, scope="DEV:", channelfinder=cf, cf_requested=True)
+
+    assert report_a == report_b  # order-independent (S5-6)
+    merged = [r for r in report_a.rows if r.pv == "DEV:SP"]
+    assert len(merged) == 1
+    assert merged[0].displays == ("a.bob", "b.bob")  # unioned + sorted
+    assert merged[0].roles == ("read", "write")
+
+
 # --- critical_uncovered: proven gap vs withheld gap (withheld != no, H2) ---
 
 
