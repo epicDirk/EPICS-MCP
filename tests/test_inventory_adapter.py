@@ -6,10 +6,17 @@ a fragment path is mis-attributed as a "display" and the lifted PV is double-cou
 operator parent, once via the fragment seed).
 """
 
+from pathlib import Path
+
 from opi_navigation.pv_analysis.models import DisplayPvInventory, ExpandedPv, PvInventory
 
+from epics_pv_mcp.services.coverage import IndexRow
 from epics_pv_mcp.services.crossplane import JoinPv
-from epics_pv_mcp.services.inventory_adapter import inventory_join_pvs
+from epics_pv_mcp.services.inventory_adapter import (
+    analyze_display_index,
+    analyze_display_pvs,
+    inventory_join_pvs,
+)
 
 
 def _ev(
@@ -153,3 +160,39 @@ def test_inventory_join_normalizes_real_channel_protocols() -> None:
         ("sim://ramp", "sim"),  # sim:// kept raw
         ("sys://TIME", "sys"),  # sys:// kept raw
     }
+
+
+def test_analyze_adapters_smoke_over_real_bob(tmp_path: Path) -> None:
+    """L-Arch-5 build-once drift guard: run the REAL analyze_pv_inventory (opi_navigation) through
+    BOTH adapters over a tiny .bob ROOT and assert the consumed JoinPv/IndexRow fields survive.
+
+    Fails LOUD if the SHA-pinned opi_navigation renames/removes a consumed field or changes the
+    analyze_pv_inventory API/return shape — the seam the hand-built model tests above cannot catch
+    (they construct the models directly instead of running the analyzer)."""
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "panel.bob").write_text(
+        '<display version="2.0.0"><name>Panel</name>'
+        '<widget type="textupdate"><name>s</name>'
+        "<pv_name>DEV-TEST01:Ctrl-EVR-01:status</pv_name></widget></display>",
+        encoding="utf-8",
+    )
+    channel = "DEV-TEST01:Ctrl-EVR-01:status"
+
+    join_pvs, context_capped, glob_capped = analyze_display_pvs(root)
+    assert isinstance(context_capped, tuple)
+    assert isinstance(glob_capped, int)
+    jp = next(p for p in join_pvs if p.pv == channel)
+    assert isinstance(jp, JoinPv)
+    assert jp.display == "panel.bob"
+    assert jp.resolution == "resolved"
+    assert jp.protocol in ("ca", "pva")
+    assert jp.role in ("read", "write")
+
+    index_rows, index_capped, index_glob = analyze_display_index(root)
+    assert isinstance(index_capped, tuple)
+    assert isinstance(index_glob, int)
+    ir = next(r for r in index_rows if r.pv == channel)
+    assert isinstance(ir, IndexRow)
+    assert "panel.bob" in ir.displays
+    assert ir.roles  # non-empty roles tuple

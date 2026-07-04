@@ -109,3 +109,23 @@ def test_mixed_case_root_matches_on_windows(
     # is_relative_to folds case on Windows → an upper-cased root still matches.
     monkeypatch.setenv("EPICS_MCP_ALLOWED_ROOTS", str(tmp_path).upper())
     assert resolve_user_path(str(sub), kind="dir", label="d") == sub.resolve()
+
+
+def test_allowed_roots_resolved_once_per_value(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """S2-7: _allowed_roots caches the (filesystem-stat) Path.resolve of each root on the raw
+    string, so repeated resolve_user_path calls don't re-stat the roots (config is immutable)."""
+    from epics_pv_mcp.paths import _allowed_roots, _resolve_roots
+
+    _resolve_roots.cache_clear()
+    monkeypatch.setenv("EPICS_MCP_ALLOWED_ROOTS", str(tmp_path))
+    config_module._config = None  # pick up the env just set (the autouse fixture ran before it)
+
+    _allowed_roots()
+    _allowed_roots()
+    _allowed_roots()
+
+    info = _resolve_roots.cache_info()
+    assert info.misses == 1  # the roots are resolved exactly once
+    assert info.hits >= 2  # every subsequent call hits the cache

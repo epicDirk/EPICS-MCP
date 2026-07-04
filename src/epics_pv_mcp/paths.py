@@ -19,12 +19,25 @@ Two layers, in order:
 
 from __future__ import annotations
 
+import functools
 import os
 from pathlib import Path
 from typing import Literal
 
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsError
+
+
+@functools.lru_cache(maxsize=8)
+def _resolve_roots(raw: str) -> tuple[Path, ...]:
+    """Resolve an ``EPICS_MCP_ALLOWED_ROOTS`` string into roots — cached on the raw string (S2-7).
+
+    ``Path.resolve()`` is a filesystem stat (symlink resolution); the config is an immutable
+    singleton, so the roots never change within its lifetime and re-resolving them on every
+    ``resolve_user_path`` call is wasted work. Keyed on the raw string, so a config reset or a
+    different value recomputes correctly. Returns a tuple (immutable → safe to cache).
+    """
+    return tuple(Path(part).resolve() for part in raw.split(os.pathsep) if part.strip())
 
 
 def _allowed_roots() -> list[Path]:
@@ -37,7 +50,7 @@ def _allowed_roots() -> list[Path]:
     raw = get_config().allowed_roots
     if not raw.strip():
         return []
-    return [Path(part).resolve() for part in raw.split(os.pathsep) if part.strip()]
+    return list(_resolve_roots(raw))
 
 
 def resolve_user_path(raw: str, *, kind: Literal["dir", "file"], label: str) -> Path:

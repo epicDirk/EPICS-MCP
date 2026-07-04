@@ -45,7 +45,12 @@ mcp = FastMCP(
         "template."
     ),
 )
-mcp._mcp_server.version = __version__
+# S1-2: FastMCP exposes no public API to set the server version, so we reach the low-level MCP
+# server defensively — a FastMCP upgrade that renames/removes ``_mcp_server`` then degrades to
+# "version unset" instead of crashing the whole server at import with an AttributeError.
+_low_level_server = getattr(mcp, "_mcp_server", None)
+if _low_level_server is not None:
+    _low_level_server.version = __version__
 
 # === Tools ===
 
@@ -85,7 +90,10 @@ async def get_pv_value(
 async def get_pvs(
     names: Annotated[
         list[str],
-        Field(description="List of PV names to read (max 100)"),
+        Field(
+            description="List of PV names to read (capped at the server's max_batch_size, "
+            "default 100 — EPICS_MCP_MAX_BATCH_SIZE)"
+        ),
     ],
     timeout: Annotated[
         float | None,
@@ -162,11 +170,17 @@ async def monitor_pv(
     name: Annotated[str, Field(description="EPICS PV name to monitor")],
     duration: Annotated[
         float,
-        Field(description="Duration in seconds to monitor (max 60)"),
+        Field(
+            description="Duration in seconds to monitor (clamped to the server's "
+            "max_monitor_duration, default 60 — EPICS_MCP_MAX_MONITOR_DURATION)"
+        ),
     ] = 10.0,
     max_events: Annotated[
         int,
-        Field(description="Maximum events to collect (max 1000)"),
+        Field(
+            description="Maximum events to collect (clamped to the server's max_monitor_events, "
+            "default 1000 — EPICS_MCP_MAX_MONITOR_EVENTS)"
+        ),
     ] = 100,
 ) -> dict[str, object]:
     """Subscribe to PV changes for a given duration and return collected events.

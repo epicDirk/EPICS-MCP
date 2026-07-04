@@ -22,9 +22,13 @@ def diagnose_pv(pv_name: str) -> str:
 def compare_machine_state(pv_prefix: str, reference_file: str = "") -> str:
     """Compare current machine state to expected values."""
     if reference_file:
+        # S1-3: pass the dataset ROOT as displays_dir too — without it validate_pvs walks the
+        # file's own directory and under-resolves embedded fragments (consistent with the tool's
+        # own description).
         file_note = (
-            f'\n1. Extract PVs from "{reference_file}" '
-            f'using validate_pvs(file_path="{reference_file}")\n'
+            f'\n1. Extract PVs from "{reference_file}" using '
+            f'validate_pvs(file_path="{reference_file}", displays_dir="<dataset ROOT>") '
+            "(displays_dir = the project ROOT; without it embedded fragments under-resolve)\n"
         )
     else:
         file_note = (
