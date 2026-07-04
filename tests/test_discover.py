@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock, patch
 
-from epics_pv_mcp.errors import PVNotFoundError
+from epics_pv_mcp.errors import EpicsConnectionError, PVNotFoundError, PVTimeoutError
 from epics_pv_mcp.tools.discover import _discover_pvs
 
 
@@ -42,3 +42,29 @@ async def test_discover_concrete_not_found() -> None:
     pvs = result["pvs"]
     assert isinstance(pvs, list)
     assert pvs[0]["status"] == "not_found"
+
+
+async def test_discover_concrete_timeout_is_distinct_from_not_found() -> None:
+    """S3-5: a timeout (IOC down / network) reports status 'timeout', NOT 'not_found'."""
+    with patch(
+        "epics_pv_mcp.tools.discover.pv_get",
+        new_callable=AsyncMock,
+        side_effect=PVTimeoutError("Timeout getting PV 'SLOW:PV'"),
+    ):
+        result = await _discover_pvs("SLOW:PV")
+    pvs = result["pvs"]
+    assert isinstance(pvs, list)
+    assert pvs[0]["status"] == "timeout"
+
+
+async def test_discover_concrete_connection_error_is_status_error() -> None:
+    """S3-5: a connection error reports status 'error', distinct from 'not_found'/'timeout'."""
+    with patch(
+        "epics_pv_mcp.tools.discover.pv_get",
+        new_callable=AsyncMock,
+        side_effect=EpicsConnectionError("broken pipe"),
+    ):
+        result = await _discover_pvs("BAD:PV")
+    pvs = result["pvs"]
+    assert isinstance(pvs, list)
+    assert pvs[0]["status"] == "error"

@@ -26,7 +26,9 @@ async def _discover_pvs(pattern: str, timeout: float | None = None) -> dict[str,
             ),
         }
 
-    # Treat as concrete PV name — try to connect
+    # Treat as concrete PV name — try to connect. Keep the client's classification distinct (S3-5):
+    # a timeout (IOC down / network) or a connection error must NOT collapse to "not_found", which
+    # would make a diagnosable disconnect indistinguishable from a genuinely non-existent PV.
     try:
         result = await pv_get(pattern, timeout)
         return {
@@ -34,9 +36,14 @@ async def _discover_pvs(pattern: str, timeout: float | None = None) -> dict[str,
             "pvs": [{"pv_name": pattern, "status": "found", "value": result.get("value")}],
             "total": 1,
         }
-    except (PVTimeoutError, PVNotFoundError, EpicsConnectionError):
-        return {
-            "pattern": pattern,
-            "pvs": [{"pv_name": pattern, "status": "not_found"}],
-            "total": 0,
-        }
+    except PVNotFoundError:
+        status = "not_found"
+    except PVTimeoutError:
+        status = "timeout"
+    except EpicsConnectionError:
+        status = "error"
+    return {
+        "pattern": pattern,
+        "pvs": [{"pv_name": pattern, "status": status}],
+        "total": 0,
+    }

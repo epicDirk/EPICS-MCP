@@ -92,6 +92,15 @@ def test_check_connectivity_raises_on_error(monkeypatch: pytest.MonkeyPatch) -> 
         client.check_connectivity()
 
 
+def test_check_connectivity_wraps_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S8-5: a requests.exceptions.Timeout (a RequestException, NOT a ConnectionError) must be
+    wrapped as NamingServiceConnectionError, not left to escape raw as a false 'not registered'."""
+    client = NamingServiceClient(base_url="http://naming.example/")
+    monkeypatch.setattr(client.session, "head", Mock(side_effect=requests.exceptions.Timeout()))
+    with pytest.raises(NamingServiceConnectionError):
+        client.check_connectivity()
+
+
 def test_check_connectivity_uses_configured_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     # G4: the reachability probe must honor the configured timeout (default 5 s),
     # not a hardcoded 1 s that falsely reports a slow-but-reachable service down.

@@ -127,3 +127,40 @@ async def test_tool_enabled_returns_channels(monkeypatch: pytest.MonkeyPatch) ->
     channels = result["channels"]
     assert isinstance(channels, list)
     assert channels[0]["name"] == "P"
+
+
+def _ch(name: str) -> ChannelInfo:
+    return ChannelInfo(name=name, owner="o", ioc_name=None, host_name=None, properties={}, tags=())
+
+
+class _BoundedCFClient:
+    """Emulates CF's ~size truncation: never returns more than the requested max_results."""
+
+    available = 3
+
+    def __init__(self, *args: object, **kwargs: object) -> None: ...
+
+    def find_channels(self, pattern: str, max_results: int = 500) -> list[ChannelInfo]:
+        return [_ch(f"c{i}") for i in range(min(_BoundedCFClient.available, max_results))]
+
+
+async def test_find_channels_capped_is_honest_at_the_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S8-6: exactly max_results real channels → capped False; max_results+1 → capped True. The tool
+    fetches max_results+1 and truncates, so 'capped' is an honest '> max_results', not '>='."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(channelfinder_url="http://cf"),
+    )
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _BoundedCFClient)
+
+    _BoundedCFClient.available = 3  # exactly the cap → NOT capped (the off-by-one case)
+    result = await _find_channels("X*", max_results=3)
+    assert result["capped"] is False
+    assert result["total"] == 3
+
+    _BoundedCFClient.available = 4  # one over the cap → capped, truncated to the cap
+    result = await _find_channels("X*", max_results=3)
+    assert result["capped"] is True
+    assert result["total"] == 3

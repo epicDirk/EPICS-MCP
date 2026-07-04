@@ -81,7 +81,14 @@ class NamingServiceClient:
             # would have succeeded.
             self.session.head(self.base_url, timeout=self.timeout)
             return True
-        except (requests.exceptions.ConnectionError, ConnectionError, OSError) as exc:
+        except (
+            # requests.exceptions.Timeout is a RequestException but NOT a ConnectionError, so a
+            # slow/hanging HEAD would otherwise escape raw and be read (in the diagnose gatherer) as
+            # a definitive "not registered" instead of a withheld transport failure (S8-5).
+            requests.exceptions.RequestException,
+            ConnectionError,
+            OSError,
+        ) as exc:
             raise NamingServiceConnectionError(
                 f"Failed to connect to Naming Service at {self.base_url}: {exc}"
             ) from exc

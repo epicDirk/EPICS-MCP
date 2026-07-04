@@ -268,12 +268,17 @@ async def query_channels(
             timeout=timeout,
             auth_header=cfg.channelfinder_auth or None,
         )
-        channels = client.find_channels(name_pattern, max_results=max_results)
+        # S8-6: fetch one MORE than the cap and truncate, so ``capped`` is an honest
+        # ``fetched > max_results`` (the Archiver pattern) rather than ``>= max_results``, which
+        # false-flags exactly ``max_results`` real channels as truncated (an off-by-one).
+        fetched = client.find_channels(name_pattern, max_results=max_results + 1)
+        capped = len(fetched) > max_results
+        channels = fetched[:max_results]
         return {
             "enabled": True,
             "channels": [dict(channel) for channel in channels],
             "total": len(channels),
-            "capped": len(channels) >= max_results,
+            "capped": capped,
         }
 
     try:
