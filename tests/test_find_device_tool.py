@@ -194,6 +194,24 @@ async def test_find_device_tool_channelfinder_unreachable_degrades(
 
 
 @pytest.mark.asyncio
+@patch("epics_pv_mcp.tools.find_device.query_channels", new_callable=AsyncMock)
+@patch("epics_pv_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
+async def test_find_device_tool_channelfinder_non_epics_error_degrades(
+    mock_batch: AsyncMock, mock_cf: AsyncMock, tmp_path: Path
+) -> None:
+    """S7-6: a NON-EpicsError from ChannelFinder (an unexpected client/projection bug) must ALSO
+    degrade — screens + live still return with an 'unreachable' note, the tool never propagates."""
+    mock_batch.return_value = {"results": [{"pv_name": _STATUS, "value": 1}], "errors": []}
+    mock_cf.side_effect = ValueError("unexpected projection bug")  # NOT an EpicsError
+    result = await _find_device("DEV-TEST01:Ctrl-EVR-01", str(_displays(tmp_path)))
+    report = result["report"]
+    assert isinstance(report, dict)
+    assert [s["display_path"] for s in report["screens"]] == ["panel.bob"]  # screens survive
+    assert any(c["channel"] == _STATUS for c in report["channels"])  # live read survives
+    assert any("unreachable" in n.lower() for n in report["notes"])
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("match", "query"),
     [("exact", _STATUS), ("prefix", "DEV-TEST01:Ctrl-EVR-01"), ("substring", "EVR")],

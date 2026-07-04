@@ -88,7 +88,13 @@ def test_build_device_report_merges_screens_live_and_iocs() -> None:
         ],
     }
     report = build_device_report(
-        _lookup(), live, iocs, total_matched=2, live_capped=False, channelfinder_enabled=True
+        _lookup(),
+        live,
+        iocs,
+        total_matched=2,
+        live_read=2,
+        live_capped=False,
+        channelfinder_enabled=True,
     )
 
     assert tuple(s.display_path for s in report.screens) == ("dln01_overview.bob", "dln01_ctrl.bob")
@@ -129,6 +135,7 @@ def test_build_device_report_channelfinder_disabled_note() -> None:
         live,
         iocs,
         total_matched=1,
+        live_read=1,
         live_capped=False,
         channelfinder_enabled=False,
     )
@@ -160,6 +167,7 @@ def test_build_device_report_channelfinder_unreachable_note() -> None:
         live,
         iocs,
         total_matched=1,
+        live_read=1,
         live_capped=False,
         channelfinder_enabled=True,
     )
@@ -185,6 +193,7 @@ def test_build_device_report_live_capped_note() -> None:
         live,
         iocs,
         total_matched=500,
+        live_read=1,
         live_capped=True,
         channelfinder_enabled=False,
     )
@@ -199,6 +208,7 @@ def test_build_device_report_no_screens_note() -> None:
         {"results": [], "errors": []},
         {"enabled": False, "channels": []},
         total_matched=0,
+        live_read=0,
         live_capped=False,
         channelfinder_enabled=False,
     )
@@ -214,7 +224,13 @@ def test_render_markdown_deterministic() -> None:
     }
     iocs = {"enabled": False, "channels": []}
     report = build_device_report(
-        _lookup(), live, iocs, total_matched=2, live_capped=False, channelfinder_enabled=False
+        _lookup(),
+        live,
+        iocs,
+        total_matched=2,
+        live_read=2,
+        live_capped=False,
+        channelfinder_enabled=False,
     )
     markdown = render_markdown(report)
     assert "# Device Lookup" in markdown
@@ -222,3 +238,30 @@ def test_render_markdown_deterministic() -> None:
     assert "connected (value: 1)" in markdown
     assert "disconnected (Timeout)" in markdown
     assert render_markdown(report) == markdown  # deterministic
+
+
+def test_render_markdown_summarises_waveform_value() -> None:
+    """S7-1: a waveform (large list) value is summarised, never dumped element-by-element."""
+    big = list(range(5000))
+    live = {"results": [{"pv_name": "DEV:WF", "value": big}], "errors": []}
+    lookup = PvLookupResult(
+        query="DEV",
+        match="prefix",
+        total_pvs_matched=1,
+        displays=(
+            DisplayMatch(display_path="a.bob", matched_pvs=("DEV:WF",), roles=("read",), count=1),
+        ),
+    )
+    report = build_device_report(
+        lookup,
+        live,
+        {"enabled": False, "channels": []},
+        total_matched=1,
+        live_read=1,
+        live_capped=False,
+        channelfinder_enabled=False,
+    )
+    markdown = render_markdown(report)
+    assert "5000 values" in markdown  # element count named
+    assert "4999" not in markdown  # NOT the full dump
+    assert all(len(line) < 200 for line in markdown.splitlines())  # no runaway line

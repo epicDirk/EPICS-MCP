@@ -140,6 +140,7 @@ def build_device_report(
     ioc_channels: Mapping[str, object],
     *,
     total_matched: int,
+    live_read: int,
     live_capped: bool,
     channelfinder_enabled: bool,
 ) -> DeviceLookupReport:
@@ -187,8 +188,11 @@ def build_device_report(
     if not lookup.displays:
         notes.append("No operator-facing screen references this device/query.")
     if live_capped:
+        # S7-5: report the number of channels the live read ATTEMPTED (live_read, known in
+        # find_device as len(read)), not len(channels) — the latter counts p4p RESPONSES and
+        # undercounts if the native batch silently drops a name.
         notes.append(
-            f"Live status shown for {len(channels)} of {total_matched} matched channels "
+            f"Live status shown for {live_read} of {total_matched} matched channels "
             "(read capped) — refine the query for full live coverage. The screen list is complete."
         )
     if not channelfinder_enabled:
@@ -214,6 +218,23 @@ def build_device_report(
     )
 
 
+def _format_channel_value(value: object) -> str:
+    """Render a live value compactly — a waveform/array is summarised, not dumped (S7-1).
+
+    A p4p waveform value arrives here as a (potentially multi-thousand-element) list; rendering it
+    raw would produce an unreadable line. Summarise an array as ``[N values: a, b, …]`` and cap a
+    long scalar string to keep the operator-facing report readable.
+    """
+    if isinstance(value, (list, tuple)):
+        count = len(value)
+        if count == 0:
+            return "[0 values]"
+        head = ", ".join(str(v) for v in value[:2])
+        return f"[{count} values: {head}{', …' if count > 2 else ''}]"
+    text = str(value)
+    return text if len(text) <= 80 else text[:79] + "…"
+
+
 def render_markdown(report: DeviceLookupReport) -> str:
     """Render a :class:`DeviceLookupReport` as deterministic Markdown."""
     lines = ["# Device Lookup", ""]
@@ -228,7 +249,7 @@ def render_markdown(report: DeviceLookupReport) -> str:
     for channel in report.channels:
         if channel.connected:
             alarm = f", {channel.severity}" if channel.severity else ""
-            status = f"connected (value: {channel.value}{alarm})"
+            status = f"connected (value: {_format_channel_value(channel.value)}{alarm})"
         else:
             status = f"disconnected ({channel.error or 'no value'})"
         ioc = f" — IOC `{channel.source_ioc}`" if channel.source_ioc else ""

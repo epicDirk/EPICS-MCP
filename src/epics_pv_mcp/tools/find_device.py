@@ -104,7 +104,10 @@ async def _find_device(
     glob = f"*{stem}*" if match == "substring" else f"{stem}*"
     try:
         iocs: Mapping[str, object] = await query_channels(glob)
-    except EpicsError:
+    except Exception:  # noqa: BLE001 — CF is best-effort: ANY failure degrades, never sinks the tool
+        # S7-6: broaden beyond EpicsError. query_channels maps ChannelFinder errors to
+        # EpicsConnectionError, but an unexpected client/projection bug (a non-EpicsError) must also
+        # degrade to "unreachable" rather than propagate and sink the screens+live result.
         iocs = {
             "enabled": True,
             "channels": [],
@@ -116,6 +119,7 @@ async def _find_device(
         live,
         iocs,
         total_matched=len(channels),
+        live_read=len(read),
         live_capped=live_capped,
         channelfinder_enabled=bool(iocs.get("enabled")),
     )
