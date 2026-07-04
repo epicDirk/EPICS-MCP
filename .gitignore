@@ -38,3 +38,6 @@ htmlcov/
 # The local EPICS test sandbox is kept OUTSIDE this repo (in a private workspace); never track it
 # here. This blanket ignore also covers any leftover runtime/build artifacts on disk.
 sandbox/
+
+# Site-specific pre-commit PII/secret patterns (kept out of this public repo by design).
+scripts/.pii_patterns.local
