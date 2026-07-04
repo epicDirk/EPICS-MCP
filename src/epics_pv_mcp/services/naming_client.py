@@ -82,9 +82,12 @@ class NamingServiceClient:
             self.session.head(self.base_url, timeout=self.timeout)
             return True
         except (
-            # requests.exceptions.Timeout is a RequestException but NOT a ConnectionError, so a
-            # slow/hanging HEAD would otherwise escape raw and be read (in the diagnose gatherer) as
-            # a definitive "not registered" instead of a withheld transport failure (S8-5).
+            # Every transport failure — Timeout, ConnectionError, read/HTTP errors — reaches this
+            # arm and becomes a NamingServiceConnectionError (a WITHHELD signal), never a raw escape
+            # that the diagnose gatherer could misread as a definitive "not registered" (S8-5).
+            # requests.exceptions.RequestException ⊂ OSError, so OSError alone would already catch
+            # them all; RequestException and ConnectionError are named explicitly for intent, and to
+            # keep this guard robust if the OSError arm is ever narrowed.
             requests.exceptions.RequestException,
             ConnectionError,
             OSError,

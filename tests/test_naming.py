@@ -93,8 +93,10 @@ def test_check_connectivity_raises_on_error(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_check_connectivity_wraps_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    """S8-5: a requests.exceptions.Timeout (a RequestException, NOT a ConnectionError) must be
-    wrapped as NamingServiceConnectionError, not left to escape raw as a false 'not registered'."""
+    """S8-5 contract guard: a requests.exceptions.Timeout must surface as
+    NamingServiceConnectionError (a withheld transport signal). This is a forward guard — it holds
+    today because RequestException ⊂ OSError, and it FAILS if the except arm is ever narrowed to
+    only ConnectionError, re-opening the raw-escape/false-'not registered' hole."""
     client = NamingServiceClient(base_url="http://naming.example/")
     monkeypatch.setattr(client.session, "head", Mock(side_effect=requests.exceptions.Timeout()))
     with pytest.raises(NamingServiceConnectionError):
