@@ -34,7 +34,7 @@ display_only/D ratio caveat (an incomplete CF, not real defects).
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Literal, NamedTuple, Protocol
 
 from pydantic import BaseModel, ConfigDict
@@ -63,7 +63,6 @@ class IndexRow(NamedTuple):
     """
 
     pv: str
-    protocol: str
     displays: tuple[str, ...]
     roles: tuple[str, ...]
 
@@ -136,17 +135,20 @@ class CoverageReport(BaseModel):
     notes: tuple[str, ...] = ()
 
 
-def _plane_verdict(checker_call: object, pv: str) -> Coverage3:
+def _plane_verdict(checker_call: Callable[[str], bool] | None, pv: str) -> Coverage3:
     """Per-PV runtime verdict with H2 withheld-on-failure (never ``no`` when the query failed).
 
     *checker_call* is the bound method (``is_archived`` / ``is_alarm_configured``) or ``None`` when
     the plane is disabled → ``withheld`` for every PV. A ``RuntimeError`` (the edge's translation of
     a query failure/timeout) withholds THIS cell only — the rest of the plane keeps answering.
+
+    (S5-5: typed as ``Callable[[str], bool] | None`` so mypy checks the call instead of the former
+    ``# type: ignore[operator]`` masking every real type violation at the call site.)
     """
     if checker_call is None:
         return "withheld"
     try:
-        return "yes" if checker_call(pv) else "no"  # type: ignore[operator]
+        return "yes" if checker_call(pv) else "no"
     except RuntimeError:
         return "withheld"
 
@@ -184,17 +186,16 @@ def audit_coverage(
             continue  # scope post-filter on D
         if rec in display_rows:
             # Field-suffix normalization can collapse record + record.EGU into one record: merge.
+            # (S5-6: IndexRow no longer carries an unused ``protocol`` — the channel is already
+            # protocol-free via _record_name, so the merge has no arbitrary first-seen choice.)
             prev = display_rows[rec]
             display_rows[rec] = IndexRow(
                 pv=rec,
-                protocol=prev.protocol,
                 displays=tuple(sorted(set(prev.displays) | set(row.displays))),
                 roles=tuple(sorted(set(prev.roles) | set(row.roles))),
             )
         else:
-            display_rows[rec] = IndexRow(
-                pv=rec, protocol=row.protocol, displays=row.displays, roles=row.roles
-            )
+            display_rows[rec] = IndexRow(pv=rec, displays=row.displays, roles=row.roles)
     display_set = set(display_rows)
 
     # --- ChannelFinder set C (the delivered-PV anchor). Withhold on cap/failure/disabled. ---

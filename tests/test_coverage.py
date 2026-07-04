@@ -7,7 +7,7 @@ from epics_pv_mcp.services.crossplane import CFRegistryCapped
 
 
 def _row(pv: str, *, displays: tuple[str, ...] = ("d.bob",), role: str = "read") -> IndexRow:
-    return IndexRow(pv=pv, protocol="ca", displays=displays, roles=(role,))
+    return IndexRow(pv=pv, displays=displays, roles=(role,))
 
 
 class _FakeCF:

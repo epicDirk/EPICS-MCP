@@ -22,7 +22,6 @@ ignored the boundary and skipped canonicalization.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from epics_pv_mcp.paths import resolve_user_path
 from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG
@@ -71,24 +70,29 @@ def run_crossplane(request: CrossPlaneRequest) -> CrossPlaneReport:
     calls it directly. Raises :class:`EpicsError` (``INVALID_INPUT``) via ``resolve_user_path`` on a
     missing/invalid path.
     """
-    resolve_user_path(request.displays_dir, kind="dir", label="displays_dir")
-    resolve_user_path(request.st_cmd_path, kind="file", label="st_cmd_path")
-    if request.module_db_root:
+    # S5-7: use the CANONICALIZED paths resolve_user_path returns (not the raw request strings), so
+    # the path that is boundary-checked is exactly the one walked/read.
+    displays_dir = resolve_user_path(request.displays_dir, kind="dir", label="displays_dir")
+    st_cmd_path = resolve_user_path(request.st_cmd_path, kind="file", label="st_cmd_path")
+    module_db_root = (
         resolve_user_path(request.module_db_root, kind="dir", label="module_db_root")
+        if request.module_db_root
+        else None
+    )
 
     join_pvs, context_capped, glob_capped_count = analyze_display_pvs(
-        Path(request.displays_dir),
+        displays_dir,
         context_cap=request.context_cap,
         windows_paths=request.windows_paths,
     )
-    st_info = parse_st_cmd(Path(request.st_cmd_path).read_text(encoding="utf-8"))
+    st_info = parse_st_cmd(st_cmd_path.read_text(encoding="utf-8"))
     naming = build_naming_client(request.query_naming)
     # Opt-in IOC .db enumeration: only when a module/db root is given (offline default unchanged).
     # ``complete`` gates the broken verdict — a partial/templated set withholds it (no false alarm).
     ioc_db: tuple[set[str], set[str]] | None = None
     ioc_db_complete = False
-    if request.module_db_root:
-        db_result = load_ioc_db(st_info, Path(request.module_db_root))
+    if module_db_root is not None:
+        db_result = load_ioc_db(st_info, module_db_root)
         ioc_db = (set(db_result.resolved), set(db_result.unresolved))
         ioc_db_complete = db_result.complete
     channelfinder = build_cf_checker(request.query_channelfinder)
@@ -133,9 +137,10 @@ def build_coverage_report(request: CoverageRequest) -> CoverageReport:
     Blocking I/O → the async tool offloads to a thread while the CLI calls it directly. Raises
     :class:`EpicsError` (``INVALID_INPUT``) on a missing ``displays_dir``.
     """
-    resolve_user_path(request.displays_dir, kind="dir", label="displays_dir")
+    # S5-7: walk the canonicalized path resolve_user_path returns, not the raw request string.
+    displays_dir = resolve_user_path(request.displays_dir, kind="dir", label="displays_dir")
     index_rows, context_capped, glob_capped_count = analyze_display_index(
-        Path(request.displays_dir),
+        displays_dir,
         context_cap=request.context_cap,
         windows_paths=request.windows_paths,
     )

@@ -13,6 +13,7 @@ standalone + offline-testable. The build-once PV engine is consumed, never rebui
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from opi_navigation.pv_analysis import DEFAULT_PV_CONTEXT_CAP, analyze_pv_inventory, channel_name
@@ -59,6 +60,41 @@ def inventory_join_pvs(inventory: PvInventory) -> list[JoinPv]:
     ]
 
 
+def _analyze[T](
+    repo_root: Path,
+    project: Callable[[PvInventory], list[T]],
+    *,
+    context_cap: int,
+    windows_paths: bool,
+) -> tuple[list[T], tuple[str, ...], int]:
+    """Run the Wedge-0 inventory ONCE and pair *project*'s rows with the shared incompleteness
+    signals — the common body of :func:`analyze_display_pvs` / :func:`analyze_display_index` that
+    used to be copied verbatim (same inventory call + same diagnostics tail; S4-5)."""
+    inventory = analyze_pv_inventory(
+        repo_root, context_cap=context_cap, windows_paths=windows_paths
+    )
+    return (
+        project(inventory),
+        inventory.diagnostics.context_capped,
+        len(inventory.diagnostics.glob_capped),
+    )
+
+
+def _index_rows(inventory: PvInventory) -> list[IndexRow]:
+    """Project the inventory's global ``PV → [displays]`` index into :class:`IndexRow` rows.
+
+    The index is real-protocol only, so each ``pv`` is normalized to its protocol-free channel name.
+    """
+    return [
+        IndexRow(
+            pv=channel_name(entry.pv),
+            displays=tuple(str(display) for display in entry.displays),
+            roles=tuple(str(role) for role in entry.roles),
+        )
+        for entry in inventory.index
+    ]
+
+
 def analyze_display_pvs(
     repo_root: Path,
     *,
@@ -73,13 +109,8 @@ def analyze_display_pvs(
     honest lower-bound signals into the report. ``windows_paths`` resolves paths case-insensitively
     (Windows hosts); default Linux (= the ESS-console / CI truth, deterministic).
     """
-    inventory = analyze_pv_inventory(
-        repo_root, context_cap=context_cap, windows_paths=windows_paths
-    )
-    return (
-        inventory_join_pvs(inventory),
-        inventory.diagnostics.context_capped,
-        len(inventory.diagnostics.glob_capped),
+    return _analyze(
+        repo_root, inventory_join_pvs, context_cap=context_cap, windows_paths=windows_paths
     )
 
 
@@ -96,22 +127,5 @@ def analyze_display_index(
     — the input the coverage audit's display set ``D`` needs. *repo_root* must be the dataset
     ROOT (the operator top-levels there bind the display macros). Returns ``(index_rows,
     context_capped, glob_capped_count)``; the latter two carry the inventory's lower-bound signals.
-    The index is real-protocol only, so each ``pv`` is normalized to its protocol-free channel name.
     """
-    inventory = analyze_pv_inventory(
-        repo_root, context_cap=context_cap, windows_paths=windows_paths
-    )
-    rows = [
-        IndexRow(
-            pv=channel_name(entry.pv),
-            protocol=str(entry.protocol),
-            displays=tuple(str(display) for display in entry.displays),
-            roles=tuple(str(role) for role in entry.roles),
-        )
-        for entry in inventory.index
-    ]
-    return (
-        rows,
-        inventory.diagnostics.context_capped,
-        len(inventory.diagnostics.glob_capped),
-    )
+    return _analyze(repo_root, _index_rows, context_cap=context_cap, windows_paths=windows_paths)
