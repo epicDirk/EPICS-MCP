@@ -95,6 +95,27 @@ def test_cli_crossplane_rejects_missing_displays(tmp_path: Path) -> None:
     assert rc == 2
 
 
+def test_cli_crossplane_rejects_displays_dir_outside_allowed_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S4-4 CLI boundary lock: the CLI must honor EPICS_MCP_ALLOWED_ROOTS (via resolve_user_path in
+    the shared orchestrator), not just check ``is_dir()``. An EXISTING displays_dir outside the
+    allowed root exits 2. Distinct from the missing-dir test (which the old bare Path.is_dir() code
+    also returned 2 for) — here the dir exists, so only the boundary check produces the exit 2."""
+    import epics_pv_mcp.config as config_module
+
+    displays, st_cmd = _setup(tmp_path)  # both exist, but outside the allowed root
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("EPICS_MCP_ALLOWED_ROOTS", str(allowed))
+    config_module._config = None
+    try:
+        rc = main(["--displays", str(displays), "--st-cmd", str(st_cmd)])
+        assert rc == 2
+    finally:
+        config_module._config = None
+
+
 def test_cli_crossplane_channelfinder_without_url_notes_skip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

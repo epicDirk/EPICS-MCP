@@ -123,3 +123,23 @@ def test_cli_coverage_rejects_missing_dir(tmp_path: Path) -> None:
     """A non-existent displays directory exits 2 with an error on stderr (no join)."""
     rc = main(["--displays", str(tmp_path / "nope")])
     assert rc == 2
+
+
+def test_cli_coverage_rejects_displays_dir_outside_allowed_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S4-4 CLI boundary lock: the CLI must honor EPICS_MCP_ALLOWED_ROOTS (via resolve_user_path in
+    the shared orchestrator). An EXISTING displays_dir outside the allowed root exits 2 — the case
+    the pre-remediation bare Path.is_dir() short-circuit would have let through (it returns 0)."""
+    import epics_pv_mcp.config as config_module
+
+    displays = _setup(tmp_path)  # exists, but outside the allowed root
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("EPICS_MCP_ALLOWED_ROOTS", str(allowed))
+    config_module._config = None
+    try:
+        rc = main(["--displays", str(displays)])
+        assert rc == 2
+    finally:
+        config_module._config = None
