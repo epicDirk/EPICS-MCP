@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from epics_pv_mcp.errors import EpicsError, PVTimeoutError
+from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.tools.validate import _validate_pvs
 
 # An operator-facing parent that embeds a fragment and binds its $(PRP) macro; the
@@ -36,11 +36,10 @@ def _dataset(tmp_path: Path) -> tuple[Path, Path]:
 
 
 async def test_validate_pvs_all_connected() -> None:
-    with patch(
-        "epics_pv_mcp.tools.validate.pv_get",
-        new_callable=AsyncMock,
-        return_value={"pv_name": "X", "value": 1},
-    ):
+    async def fake_batch(names: list[str], timeout: float | None = None) -> dict[str, object]:
+        return {"results": [{"pv_name": n, "value": 1} for n in names], "errors": []}
+
+    with patch("epics_pv_mcp.tools.validate.pv_get_batch", side_effect=fake_batch):
         result = await _validate_pvs(pvs=["PV:1", "PV:2"])
 
     assert result["connected"] == 2
@@ -49,15 +48,14 @@ async def test_validate_pvs_all_connected() -> None:
 
 
 async def test_validate_pvs_mixed() -> None:
-    async def _mock_pv_get(name: str, timeout: float | None = None) -> dict[str, object]:
-        if name == "PV:1":
-            return {"pv_name": "PV:1", "value": 1}
-        raise PVTimeoutError(f"Timeout getting PV '{name}'")
+    async def fake_batch(names: list[str], timeout: float | None = None) -> dict[str, object]:
+        # M6: validate now delegates classification to pv_get_batch (results vs errors).
+        return {
+            "results": [{"pv_name": n, "value": 1} for n in names if n == "PV:1"],
+            "errors": [{"pv_name": n, "error": "Timeout"} for n in names if n != "PV:1"],
+        }
 
-    with patch(
-        "epics_pv_mcp.tools.validate.pv_get",
-        side_effect=_mock_pv_get,
-    ):
+    with patch("epics_pv_mcp.tools.validate.pv_get_batch", side_effect=fake_batch):
         result = await _validate_pvs(pvs=["PV:1", "PV:2"])
 
     assert result["connected"] == 1
@@ -76,14 +74,16 @@ async def test_validate_pvs_file_path_fragment_resolves_via_origin_file(tmp_path
     recovered via origin_file aggregation — the exact case display_path-keying returns
     0 for. The concrete, macro-resolved channel is what gets connectivity-checked."""
     root, fragment = _dataset(tmp_path)
-    mock = AsyncMock(return_value={"pv_name": "X", "value": 1})
-    with patch("epics_pv_mcp.tools.validate.pv_get", mock):
+    mock = AsyncMock(
+        return_value={"results": [{"pv_name": "DEV-TEST01:Spu01:Val", "value": 1}], "errors": []}
+    )
+    with patch("epics_pv_mcp.tools.validate.pv_get_batch", mock):
         result = await _validate_pvs(file_path=str(fragment), displays_dir=str(root))
 
     assert result["total"] == 1
     assert result["connected"] == 1
-    # The resolved channel DEV-TEST01:Spu01:Val, NOT the raw $(PRP):Val.
-    mock.assert_awaited_once_with("DEV-TEST01:Spu01:Val", None)
+    # The resolved channel DEV-TEST01:Spu01:Val, NOT the raw $(PRP):Val — read as one batch.
+    mock.assert_awaited_once_with(["DEV-TEST01:Spu01:Val"], None)
 
 
 async def test_validate_pvs_file_path_not_under_displays_dir(tmp_path: Path) -> None:
@@ -134,8 +134,11 @@ async def test_validate_pvs_file_path_outside_allowed_roots(
 async def test_validate_pvs_file_path_without_displays_dir_walks_parent(tmp_path: Path) -> None:
     """displays_dir=None walks the file's own directory (the G3 walked-root path)."""
     root, _ = _dataset(tmp_path)
-    mock = AsyncMock(return_value={"pv_name": "X", "value": 1})
-    with patch("epics_pv_mcp.tools.validate.pv_get", mock):
+
+    async def fake_batch(names: list[str], timeout: float | None = None) -> dict[str, object]:
+        return {"results": [{"pv_name": n, "value": 1} for n in names], "errors": []}
+
+    with patch("epics_pv_mcp.tools.validate.pv_get_batch", side_effect=fake_batch):
         # The parent display 'overview.bob' is operator-facing in root; querying it
         # without displays_dir uses file.parent (== root) as the walked root.
         result = await _validate_pvs(file_path=str(root / "overview.bob"))
@@ -199,10 +202,12 @@ async def test_validate_pvs_file_path_context_capped_note(tmp_path: Path) -> Non
         ),
         diagnostics=PvDiagnostics(context_capped=("ov.bob",)),
     )
-    mock_pv_get = AsyncMock(return_value={"pv_name": "X", "value": 1})
+    mock_batch = AsyncMock(
+        return_value={"results": [{"pv_name": "SYSX:X", "value": 1}], "errors": []}
+    )
     with (
         patch("epics_pv_mcp.tools.validate.analyze_pv_inventory", return_value=fake),
-        patch("epics_pv_mcp.tools.validate.pv_get", mock_pv_get),
+        patch("epics_pv_mcp.tools.validate.pv_get_batch", mock_batch),
     ):
         result = await _validate_pvs(file_path=str(frag), displays_dir=str(root))
 
@@ -210,4 +215,4 @@ async def test_validate_pvs_file_path_context_capped_note(tmp_path: Path) -> Non
     notes = result["notes"]
     assert isinstance(notes, list)
     assert any("lower bound" in str(n) for n in notes)
-    mock_pv_get.assert_awaited_once_with("SYSX:X", None)
+    mock_batch.assert_awaited_once_with(["SYSX:X"], None)

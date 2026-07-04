@@ -6,14 +6,10 @@ import asyncio
 
 from opi_navigation.pv_analysis import analyze_pv_inventory, channel_name
 
-from epics_pv_mcp.errors import (
-    EpicsConnectionError,
-    EpicsError,
-    PVNotFoundError,
-    PVTimeoutError,
-)
+from epics_pv_mcp.config import get_config
+from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.paths import resolve_user_path
-from epics_pv_mcp.services.epics_client import pv_get
+from epics_pv_mcp.services.epics_client import pv_get_batch
 
 
 def _run_validate(file_path: str, displays_dir: str | None) -> tuple[list[str], bool]:
@@ -92,8 +88,9 @@ async def _validate_pvs(
     ROOT for full macro resolution; without it the file's own directory is used and
     fragments under-resolve. A ``notes`` entry flags when the PV list is a lower bound
     (the macro expansion hit the context cap). NOTE: a full inventory walk is ~60 s for
-    a large dataset, and a file reused across many instances yields many channels read
-    sequentially — do not call this per-file in a tight loop.
+    a large dataset — do not call this per-file in a tight loop. The connectivity reads go
+    through ``pv_get_batch`` (native batch + concurrent fallback) in ``max_batch_size`` chunks,
+    so a disconnected channel no longer serialises the whole check (M6).
     """
     notes: list[str] = []
     if file_path and not pvs:
@@ -124,24 +121,26 @@ async def _validate_pvs(
             error_code="INVALID_INPUT",
         )
 
-    # Try to get each PV, classify as connected or disconnected
-    results = []
+    # M6: reuse the shared batch primitive (native batch + M5's concurrent fallback) in
+    # max_batch_size chunks instead of a serial per-PV read, and drop the duplicated
+    # connected/disconnected classification — pv_get_batch already sorts good vs. disconnected
+    # (results/errors), so a large display no longer takes n×timeout on a disconnected channel.
+    cfg = get_config()
+    results: list[dict[str, object]] = []
     connected = 0
     disconnected = 0
-    for pv_name in pvs:
-        try:
-            result = await pv_get(pv_name, timeout)
-            results.append(
-                {
-                    "pv_name": pv_name,
-                    "status": "connected",
-                    "value": result.get("value"),
-                }
-            )
-            connected += 1
-        except (PVTimeoutError, PVNotFoundError, EpicsConnectionError):
-            results.append({"pv_name": pv_name, "status": "disconnected"})
-            disconnected += 1
+    for start in range(0, len(pvs), cfg.max_batch_size):
+        chunk = pvs[start : start + cfg.max_batch_size]
+        batch = await pv_get_batch(chunk, timeout)
+        batch_results = batch["results"] if isinstance(batch["results"], list) else []
+        batch_errors = batch["errors"] if isinstance(batch["errors"], list) else []
+        results.extend(
+            {"pv_name": r["pv_name"], "status": "connected", "value": r.get("value")}
+            for r in batch_results
+        )
+        results.extend({"pv_name": e["pv_name"], "status": "disconnected"} for e in batch_errors)
+        connected += len(batch_results)
+        disconnected += len(batch_errors)
 
     final: dict[str, object] = {
         "total": len(pvs),
