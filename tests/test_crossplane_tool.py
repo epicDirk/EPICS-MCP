@@ -73,6 +73,21 @@ def test_cli_crossplane_smoke(tmp_path: Path, capsys: pytest.CaptureFixture[str]
     assert "**Concrete PVs sharing the prefix:** 2" in out
 
 
+@pytest.mark.asyncio
+async def test_cli_and_tool_render_identical_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """C2-iii parity: the CLI and the MCP tool drive the SAME orchestrator (run_crossplane), so
+    against one fixture they render byte-identical Markdown — the duplicated join is gone (M2)."""
+    displays, st_cmd = _setup(tmp_path)
+    tool_result = await _crossplane_check(str(displays), str(st_cmd))
+    assert isinstance(tool_result["markdown"], str)
+    rc = main(["--displays", str(displays), "--st-cmd", str(st_cmd)])
+    cli_out = capsys.readouterr().out
+    assert rc == 0
+    assert cli_out == tool_result["markdown"] + "\n"
+
+
 def test_cli_crossplane_rejects_missing_displays(tmp_path: Path) -> None:
     """A non-existent displays directory exits 2 with an error on stderr (no join)."""
     _, st_cmd = _setup(tmp_path)

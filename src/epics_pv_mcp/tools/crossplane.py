@@ -4,7 +4,12 @@ Read-only join of three planes opi-foundry owns separately: the **macro-expanded
 PVs a ``.bob`` project references (via the SHA-pinned ``opi_navigation`` Wedge-0 inventory), the
 device prefix an e3 IOC ``st.cmd`` declares, and (optionally) the ESS Naming Service registration
 status. Pure file I/O + one optional read-only HTTP ``GET``; no running IOC and no PV writes.
-Mirrors the ``epics-crossplane`` CLI as an MCP tool so the join is reachable from an agent.
+
+Thin MCP adapter: the join orchestration lives in
+:func:`epics_pv_mcp.services.orchestration.run_crossplane` (shared verbatim with the
+``epics-crossplane`` CLI, so the two can no longer drift). This wrapper only builds the request,
+offloads the blocking work to a thread so the async tool stays non-blocking, and serializes the
+report + its Markdown rendering.
 
 ``displays_dir`` is the project/dataset ROOT: the inventory binds display macros via the operator
 top-levels found there, so a too-narrow per-IOC subdirectory leaves PVs unresolved. Display PVs the
@@ -16,59 +21,10 @@ See :mod:`epics_pv_mcp.services.crossplane`.
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 
-from epics_pv_mcp.paths import resolve_user_path
-from epics_pv_mcp.services.checkers import build_cf_checker, build_naming_client
-from epics_pv_mcp.services.crossplane import crossplane_check, render_markdown
-from epics_pv_mcp.services.e3_db import load_ioc_db, parse_st_cmd
-from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP, analyze_display_pvs
-
-
-def _run_check(
-    displays_dir: str,
-    st_cmd_path: str,
-    query_naming: bool,
-    context_cap: int,
-    windows_paths: bool,
-    module_db_root: str,
-    query_channelfinder: bool,
-) -> dict[str, object]:
-    """Synchronous body of the cross-plane check (run off the event loop in a thread).
-
-    Bundles the blocking work — the macro-aware PV-inventory over ``displays_dir`` (the project
-    ROOT), the ``st.cmd`` read, the optional IOC ``.db`` load (when *module_db_root* is given), and
-    the optional Naming-Service GET — into one call so the async tool stays non-blocking.
-    """
-    join_pvs, context_capped, glob_capped_count = analyze_display_pvs(
-        Path(displays_dir), context_cap=context_cap, windows_paths=windows_paths
-    )
-    st_info = parse_st_cmd(Path(st_cmd_path).read_text(encoding="utf-8"))
-    naming = build_naming_client(query_naming)
-    # Opt-in IOC .db enumeration: only when a module/db root is given (offline default unchanged).
-    # ``complete`` gates the broken verdict — a partial/templated set withholds it (no false alarm).
-    ioc_db: tuple[set[str], set[str]] | None = None
-    ioc_db_complete = False
-    if module_db_root:
-        db_result = load_ioc_db(st_info, Path(module_db_root))
-        ioc_db = (set(db_result.resolved), set(db_result.unresolved))
-        ioc_db_complete = db_result.complete
-    channelfinder = build_cf_checker(query_channelfinder)
-    report = crossplane_check(
-        join_pvs,
-        st_info,
-        naming=naming,
-        ioc_db=ioc_db,
-        ioc_db_complete=ioc_db_complete,
-        channelfinder=channelfinder,
-        cf_requested=query_channelfinder,
-        context_capped=context_capped,
-        glob_capped_count=glob_capped_count,
-    )
-    return {
-        "report": report.model_dump(mode="json"),
-        "markdown": render_markdown(report),
-    }
+from epics_pv_mcp.services.crossplane import render_markdown
+from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
+from epics_pv_mcp.services.orchestration import CrossPlaneRequest, run_crossplane
 
 
 async def _crossplane_check(
@@ -97,19 +53,14 @@ async def _crossplane_check(
     Returns ``{"report": <CrossPlaneReport JSON>, "markdown": <rendered report>}``.
     Raises :class:`EpicsError` (``INVALID_INPUT``) when a path does not exist.
     """
-    # Canonicalize + existence-check + opt-in allowed_roots boundary (G3) on every
-    # user path before any filesystem walk. module_db_root is optional.
-    resolve_user_path(displays_dir, kind="dir", label="displays_dir")
-    resolve_user_path(st_cmd_path, kind="file", label="st_cmd_path")
-    if module_db_root:
-        resolve_user_path(module_db_root, kind="dir", label="module_db_root")
-    return await asyncio.to_thread(
-        _run_check,
-        displays_dir,
-        st_cmd_path,
-        query_naming,
-        context_cap,
-        windows_paths,
-        module_db_root,
-        query_channelfinder,
+    request = CrossPlaneRequest(
+        displays_dir=displays_dir,
+        st_cmd_path=st_cmd_path,
+        query_naming=query_naming,
+        query_channelfinder=query_channelfinder,
+        context_cap=context_cap,
+        windows_paths=windows_paths,
+        module_db_root=module_db_root,
     )
+    report = await asyncio.to_thread(run_crossplane, request)
+    return {"report": report.model_dump(mode="json"), "markdown": render_markdown(report)}

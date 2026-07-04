@@ -18,10 +18,10 @@ import contextlib
 import sys
 from pathlib import Path
 
-from epics_pv_mcp.services.checkers import build_cf_checker, build_naming_client
-from epics_pv_mcp.services.crossplane import crossplane_check, render_markdown
-from epics_pv_mcp.services.e3_db import load_ioc_db, parse_st_cmd
-from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP, analyze_display_pvs
+from epics_pv_mcp.errors import EpicsError
+from epics_pv_mcp.services.crossplane import render_markdown
+from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
+from epics_pv_mcp.services.orchestration import CrossPlaneRequest, run_crossplane
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -73,39 +73,24 @@ def main(argv: list[str] | None = None) -> int:
     with contextlib.suppress(AttributeError, ValueError):
         sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 
-    if not Path(args.st_cmd).is_file():
-        sys.stderr.write(f"Error: st.cmd file not found: {args.st_cmd}\n")
-        return 2
-    if not Path(args.displays).is_dir():
-        sys.stderr.write(f"Error: displays directory not found: {args.displays}\n")
-        return 2
-    if args.module_db_root and not Path(args.module_db_root).is_dir():
-        sys.stderr.write(f"Error: module-db-root directory not found: {args.module_db_root}\n")
-        return 2
-
-    join_pvs, context_capped, glob_capped_count = analyze_display_pvs(
-        Path(args.displays), context_cap=args.context_cap, windows_paths=args.windows_paths
+    # One request → the SAME orchestrator the MCP tool calls (no duplicated join). Path validation
+    # (canonicalize + existence + allowed_roots) happens inside run_crossplane via
+    # resolve_user_path, so the CLI now honours the same boundary the tool had (S4-4) — a bad path
+    # raises EpicsError, which we map to the CLI's exit-2 contract.
+    request = CrossPlaneRequest(
+        displays_dir=str(args.displays),
+        st_cmd_path=str(args.st_cmd),
+        query_naming=args.naming,
+        query_channelfinder=args.channelfinder,
+        context_cap=args.context_cap,
+        windows_paths=args.windows_paths,
+        module_db_root=args.module_db_root,
     )
-    st_info = parse_st_cmd(Path(args.st_cmd).read_text(encoding="utf-8"))
-    naming = build_naming_client(args.naming)
-    ioc_db: tuple[set[str], set[str]] | None = None
-    ioc_db_complete = False
-    if args.module_db_root:  # empty string = offline (mirror the MCP tool's truthiness sentinel)
-        db_result = load_ioc_db(st_info, Path(args.module_db_root))
-        ioc_db = (set(db_result.resolved), set(db_result.unresolved))
-        ioc_db_complete = db_result.complete
-    channelfinder = build_cf_checker(args.channelfinder)
-    report = crossplane_check(
-        join_pvs,
-        st_info,
-        naming=naming,
-        ioc_db=ioc_db,
-        ioc_db_complete=ioc_db_complete,
-        channelfinder=channelfinder,
-        cf_requested=args.channelfinder,
-        context_capped=context_capped,
-        glob_capped_count=glob_capped_count,
-    )
+    try:
+        report = run_crossplane(request)
+    except EpicsError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 2
     sys.stdout.write(render_markdown(report) + "\n")
     return 0
 

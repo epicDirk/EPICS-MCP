@@ -18,14 +18,11 @@ import contextlib
 import sys
 from pathlib import Path
 
+from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG
-from epics_pv_mcp.services.checkers import (
-    build_alarm_checker,
-    build_archiver_checker,
-    build_cf_checker,
-)
-from epics_pv_mcp.services.coverage import audit_coverage, render_markdown
-from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP, analyze_display_index
+from epics_pv_mcp.services.coverage import render_markdown
+from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
+from epics_pv_mcp.services.orchestration import CoverageRequest, build_coverage_report
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -88,28 +85,25 @@ def main(argv: list[str] | None = None) -> int:
     with contextlib.suppress(AttributeError, ValueError):
         sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 
-    if not Path(args.displays).is_dir():
-        sys.stderr.write(f"Error: displays directory not found: {args.displays}\n")
-        return 2
-
-    index_rows, context_capped, glob_capped_count = analyze_display_index(
-        Path(args.displays), context_cap=args.context_cap, windows_paths=args.windows_paths
-    )
-    channelfinder = build_cf_checker(args.channelfinder)
-    archived = build_archiver_checker(args.archiver)
-    alarmed = build_alarm_checker(args.alarm, args.alarm_config)
-    report = audit_coverage(
-        index_rows,
+    # One request → the SAME orchestrator the MCP tool calls (no duplicated join). Path validation
+    # (canonicalize + existence + allowed_roots) happens inside build_coverage_report via
+    # resolve_user_path, so the CLI honours the same boundary the tool had (S4-4) — a bad path
+    # raises EpicsError, which we map to the CLI's exit-2 contract.
+    request = CoverageRequest(
+        displays_dir=str(args.displays),
         scope=args.scope,
-        channelfinder=channelfinder,
-        cf_requested=args.channelfinder,
-        archived=archived,
-        archive_requested=args.archiver,
-        alarmed=alarmed,
-        alarm_requested=args.alarm,
-        context_capped=context_capped,
-        glob_capped_count=glob_capped_count,
+        query_channelfinder=args.channelfinder,
+        query_archiver=args.archiver,
+        query_alarm=args.alarm,
+        alarm_config=args.alarm_config,
+        context_cap=args.context_cap,
+        windows_paths=args.windows_paths,
     )
+    try:
+        report = build_coverage_report(request)
+    except EpicsError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 2
     sys.stdout.write(render_markdown(report) + "\n")
     return 0
 

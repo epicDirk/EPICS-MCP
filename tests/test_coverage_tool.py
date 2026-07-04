@@ -103,6 +103,22 @@ def test_cli_coverage_smoke(tmp_path: Path, capsys: pytest.CaptureFixture[str]) 
     assert "Cross-Plane Coverage Audit" in out
 
 
+@pytest.mark.asyncio
+async def test_cli_and_tool_render_identical_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """C2-iii parity: the CLI and the MCP tool drive the SAME orchestrator (build_coverage_report),
+    so against one fixture they render identical Markdown — the duplicated join is gone (M2)."""
+    displays = _setup(tmp_path)
+    scope = "DEV-TEST01:Ctrl-EVR-01:"
+    tool_result = await _coverage_audit(str(displays), scope=scope)
+    assert isinstance(tool_result["markdown"], str)
+    rc = main(["--displays", str(displays), "--scope", scope])
+    cli_out = capsys.readouterr().out
+    assert rc == 0
+    assert cli_out == tool_result["markdown"] + "\n"
+
+
 def test_cli_coverage_rejects_missing_dir(tmp_path: Path) -> None:
     """A non-existent displays directory exits 2 with an error on stderr (no join)."""
     rc = main(["--displays", str(tmp_path / "nope")])
