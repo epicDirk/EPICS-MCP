@@ -56,7 +56,7 @@ async def _get_pv_history(
             auth_header=cfg.archiver_auth or None,
             retrieval_url=cfg.archiver_retrieval_url or None,
         )
-        samples, capped = client.get_pv_history(pv, start, end, max_points=max_points)
+        samples, capped, meta = client.get_pv_history(pv, start, end, max_points=max_points)
         return {
             "enabled": True,
             "pv": pv,
@@ -65,6 +65,7 @@ async def _get_pv_history(
             "samples": [dict(sample) for sample in samples],
             "total": len(samples),
             "capped": capped,
+            "meta": meta,  # DS-4A: getData.json meta block (EGU units, PREC precision)
         }
 
     try:

@@ -85,16 +85,43 @@ class ArchiverClient:
         status = str(self.get_pv_status(pv).get("status", "Unknown"))
         return status == ARCHIVING_STATUS, status
 
+    def get_archive_status(self, pv: str) -> dict[str, object]:
+        """Return the archive status of *pv* enriched with the already-fetched MGMT record fields.
+
+        DS-4A: ``getPVStatus`` already returns the FULL MGMT record but ``is_archived`` reads only
+        ``status``. This surfaces the useful extra fields at ~zero cost (the SAME single call):
+        ``connection_state`` (is the source IOC connected right now), ``last_event`` (time of the
+        last archived sample), ``is_monitored`` (monitored vs. scanned), ``sampling_period`` and
+        ``appliance``. Fields the record does not carry (e.g. the ``Unknown``/paused fallback) are
+        OMITTED rather than surfaced as ``null`` noise. ``archived``/``status`` are always present.
+        The Archiver MGMT record carries no person data, so no allowlist redaction is needed here.
+        """
+        record = self.get_pv_status(pv)
+        status = str(record.get("status", "Unknown"))
+        result: dict[str, object] = {"archived": status == ARCHIVING_STATUS, "status": status}
+        for source_key, out_key in (
+            ("connectionState", "connection_state"),
+            ("lastEvent", "last_event"),
+            ("isMonitored", "is_monitored"),
+            ("samplingPeriod", "sampling_period"),
+            ("appliance", "appliance"),
+        ):
+            if source_key in record:
+                result[out_key] = record[source_key]
+        return result
+
     def get_pv_history(
         self,
         pv: str,
         start: str,
         end: str,
         max_points: int = DEFAULT_MAX_POINTS,
-    ) -> tuple[list[Sample], bool]:
+    ) -> tuple[list[Sample], bool, dict[str, object]]:
         """Fetch samples for *pv* in [*start*, *end*] (ISO-8601), capped at *max_points*.
 
-        Returns ``(samples, capped)`` where ``capped`` is True if the cap truncated the result.
+        Returns ``(samples, capped, meta)`` where ``capped`` is True if the cap truncated the
+        result and ``meta`` is the getData.json ``meta`` block — PV metadata (``EGU`` units,
+        ``PREC`` precision) that was previously discarded; ``meta`` is ``{}`` when there is none.
         """
         data = self._get(
             f"{self.retrieval_url}/retrieval/data/getData.json",
@@ -102,10 +129,13 @@ class ArchiverClient:
         )
         # getData.json returns [{"meta": {...}, "data": [ {secs,nanos,val,severity,status}, ... ]}]
         if not isinstance(data, list) or not data or not isinstance(data[0], dict):
-            return [], False
-        raw_samples = data[0].get("data")
+            return [], False, {}
+        block = data[0]
+        raw_meta = block.get("meta")
+        meta: dict[str, object] = raw_meta if isinstance(raw_meta, dict) else {}
+        raw_samples = block.get("data")
         if not isinstance(raw_samples, list):
-            return [], False
+            return [], False, meta
         capped = len(raw_samples) > max_points
         samples: list[Sample] = []
         for point in raw_samples[:max_points]:
@@ -120,4 +150,4 @@ class ArchiverClient:
                     status=int(point.get("status", 0)),
                 )
             )
-        return samples, capped
+        return samples, capped, meta

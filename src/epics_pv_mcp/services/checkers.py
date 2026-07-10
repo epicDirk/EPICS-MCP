@@ -207,7 +207,9 @@ async def query_archived(pv: str, timeout: float = 5.0) -> dict[str, object]:
 
     Default-disabled: with ``EPICS_MCP_ARCHIVER_URL`` unset, returns a structured ``enabled: false``
     result and makes NO network call (preserves localhost isolation). Shared by the ``is_archived``
-    tool and the diagnose Archiver plane.
+    tool and the diagnose Archiver plane. DS-4A: surfaces the enriched MGMT fields
+    (``connection_state``/``last_event``/``is_monitored``/…) alongside ``archived``/``status`` from
+    the SAME single ``getPVStatus`` call (diagnose reads only ``archived``; extras are additive).
     """
     cfg = get_config()
     if not cfg.archiver_url:
@@ -217,8 +219,7 @@ async def query_archived(pv: str, timeout: float = 5.0) -> dict[str, object]:
         client = ArchiverClient(
             cfg.archiver_url, timeout=timeout, auth_header=cfg.archiver_auth or None
         )
-        archived, status = client.is_archived(pv)
-        return {"enabled": True, "pv": pv, "archived": archived, "status": status}
+        return {"enabled": True, "pv": pv, **client.get_archive_status(pv)}
 
     try:
         return await asyncio.to_thread(_run)

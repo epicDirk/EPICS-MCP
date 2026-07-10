@@ -59,13 +59,92 @@ def test_get_pv_history_projects_and_caps(monkeypatch: pytest.MonkeyPatch) -> No
     ]
     client = ArchiverClient("http://arch")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(raw)))
-    samples, capped = client.get_pv_history(
+    samples, capped, meta = client.get_pv_history(
         "X", "2026-06-01T00:00:00Z", "2026-06-02T00:00:00Z", max_points=2
     )
     assert capped is True
     assert len(samples) == 2
     assert samples[0]["secs"] == 1
     assert samples[1]["val"] == 2.0
+    assert meta == {"name": "X"}  # DS-4A: the getData.json meta block (EGU/PREC) is now surfaced
+
+
+def test_get_pv_history_returns_meta_egu_prec(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DS-4A: the getData.json meta block (units/precision) was discarded before; now returned."""
+    raw = [{"meta": {"name": "X", "EGU": "V", "PREC": "2"}, "data": []}]
+    client = ArchiverClient("http://arch")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(raw)))
+    _samples, _capped, meta = client.get_pv_history("X", "a", "b")
+    assert meta == {"name": "X", "EGU": "V", "PREC": "2"}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [{"data": []}],  # no meta key
+        [{"meta": None, "data": []}],  # meta is JSON null
+        [{"meta": ["not", "a", "dict"], "data": []}],  # meta is a list
+        [],  # malformed top-level (empty)
+        "nope",  # malformed top-level (not a list)
+    ],
+)
+def test_get_pv_history_meta_coerced_to_empty_dict(
+    monkeypatch: pytest.MonkeyPatch, payload: object
+) -> None:
+    """DS-4A: an absent / non-dict meta (or a malformed top-level response) must coerce to ``{}`` —
+    never leak a non-mapping to consumers that do ``dict(meta)``. Pins the isinstance guard so a
+    future edit dropping it fails loudly."""
+    client = ArchiverClient("http://arch")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    samples, capped, meta = client.get_pv_history("X", "a", "b")
+    assert meta == {}
+    assert samples == []
+    assert capped is False
+
+
+def test_get_archive_status_enriches_present_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DS-4A: getPVStatus already returns the full MGMT record; get_archive_status surfaces the
+    useful extra fields (connectionState/lastEvent/isMonitored/...) at ~zero cost, plus
+    archived/status derived from the same single call."""
+    client = ArchiverClient("http://arch")
+    record = {
+        "pvName": "X",
+        "status": "Being archived",
+        "connectionState": True,
+        "lastEvent": "Jun/01/2026 10:00:00 UTC",
+        "isMonitored": True,
+        "samplingPeriod": "1.0",
+        "appliance": "appliance0",
+    }
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([record])))
+    result = client.get_archive_status("X")
+    assert result["archived"] is True
+    assert result["status"] == "Being archived"
+    assert result["connection_state"] is True
+    assert result["last_event"] == "Jun/01/2026 10:00:00 UTC"
+    assert result["is_monitored"] is True
+    assert result["sampling_period"] == "1.0"
+    assert result["appliance"] == "appliance0"
+
+
+def test_get_archive_status_omits_absent_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the MGMT record lacks the extra fields (Unknown/fallback / paused PV), they are omitted
+    (not surfaced as null noise); archived/status are always present."""
+    client = ArchiverClient("http://arch")
+    monkeypatch.setattr(
+        client.session, "get", Mock(return_value=_resp([{"pvName": "X", "status": "Paused"}]))
+    )
+    result = client.get_archive_status("X")
+    assert result["archived"] is False
+    assert result["status"] == "Paused"
+    for absent in (
+        "connection_state",
+        "last_event",
+        "is_monitored",
+        "sampling_period",
+        "appliance",
+    ):
+        assert absent not in result
 
 
 def test_get_pv_history_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -124,19 +203,22 @@ async def test_is_archived_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None
         def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
-        def is_archived(self, pv: str) -> tuple[bool, str]:
-            return True, "Being archived"
-
-        def get_pv_history(
-            self, pv: str, start: str, end: str, max_points: int = 5000
-        ) -> tuple[list[Sample], bool]:
-            return [Sample(secs=1, nanos=0, val=1.0, severity=0, status=0)], False
+        def get_archive_status(self, pv: str) -> dict[str, object]:
+            return {
+                "archived": True,
+                "status": "Being archived",
+                "connection_state": True,
+                "last_event": "Jun/01/2026 10:00:00 UTC",
+                "is_monitored": True,
+            }
 
     monkeypatch.setattr("epics_pv_mcp.services.checkers.ArchiverClient", _Fake)
     result = await _is_archived("X")
     assert result["enabled"] is True
     assert result["archived"] is True
     assert result["status"] == "Being archived"
+    assert result["connection_state"] is True  # DS-4A: enriched getPVStatus fields surfaced
+    assert result["is_monitored"] is True
 
 
 # --- two-URL routing (ESS 4-instance topology: mgmt :17665 vs retrieval :17668) ---
@@ -198,11 +280,36 @@ async def test_get_pv_history_tool_passes_retrieval_url(monkeypatch: pytest.Monk
 
         def get_pv_history(
             self, pv: str, start: str, end: str, max_points: int = 5000
-        ) -> tuple[list[Sample], bool]:
-            return [Sample(secs=1, nanos=0, val=1.0, severity=0, status=0)], False
+        ) -> tuple[list[Sample], bool, dict[str, object]]:
+            return [Sample(secs=1, nanos=0, val=1.0, severity=0, status=0)], False, {}
 
     monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
     result = await _get_pv_history("X", "a", "b")
     assert result["enabled"] is True
     assert captured["base_url"] == "http://arch:17665"
     assert captured["retrieval_url"] == "http://arch:17668"
+
+
+@pytest.mark.asyncio
+async def test_get_pv_history_tool_surfaces_meta(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DS-4A: the tool result surfaces the getData.json meta block (EGU/PREC) the client returns."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.get_config",
+        lambda: EpicsConfig(archiver_url="http://arch"),
+    )
+
+    class _Fake:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def get_pv_history(
+            self, pv: str, start: str, end: str, max_points: int = 5000
+        ) -> tuple[list[Sample], bool, dict[str, object]]:
+            samples = [Sample(secs=1, nanos=0, val=1.0, severity=0, status=0)]
+            return samples, False, {"EGU": "V", "PREC": "2"}
+
+    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    result = await _get_pv_history("X", "a", "b")
+    assert result["enabled"] is True
+    assert result["total"] == 1
+    assert result["meta"] == {"EGU": "V", "PREC": "2"}

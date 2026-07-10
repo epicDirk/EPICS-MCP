@@ -107,7 +107,7 @@ async def test_query_archived_translates_error_to_epics_connection(
     class _FailClient:
         def __init__(self, *args: object, **kwargs: object) -> None: ...
 
-        def is_archived(self, pv: str) -> tuple[bool, str]:
+        def get_archive_status(self, pv: str) -> dict[str, object]:
             raise ArchiverConnectionError("down")
 
     monkeypatch.setattr(checkers, "ArchiverClient", _FailClient)
