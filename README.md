@@ -146,8 +146,8 @@ To reach a real control system, set the address list in the launcher's environme
 | Tool | Service | Enabled by |
 |------|---------|-----------|
 | `find_channels` | ChannelFinder — which IOC/host serves a PV + tags/properties | `EPICS_MCP_CHANNELFINDER_URL` |
-| `is_archived` | Archiver Appliance — is a PV being archived? | `EPICS_MCP_ARCHIVER_URL` |
-| `get_pv_history` | Archiver Appliance — archived samples over an ISO-8601 window | `EPICS_MCP_ARCHIVER_URL` |
+| `is_archived` | Archiver Appliance — is a PV being archived? (+ connection_state / last_event / is_monitored from the same getPVStatus call) | `EPICS_MCP_ARCHIVER_URL` |
+| `get_pv_history` | Archiver Appliance — archived samples over an ISO-8601 window (+ the getData.json `meta` block: EGU units, PREC precision) | `EPICS_MCP_ARCHIVER_URL` |
 | `is_alarm_configured` | Phoebus Alarm Logger — is a PV in the alarm tree? | `EPICS_MCP_ALARM_URL` |
 | `get_alarm_history` | Phoebus Alarm Logger — alarm state history of a PV over a window (required start/end; newest-first; user/host stripped) | `EPICS_MCP_ALARM_URL` |
 | `lookup_device_name` | ESS Naming Service — is a device name registered + ACTIVE? (404 = definitive not-registered; a service error is withheld, never a false negative) | `EPICS_MCP_NAMING_URL` |
