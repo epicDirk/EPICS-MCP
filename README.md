@@ -39,6 +39,7 @@ framed in these terms:
 | **History** | EPICS Archiver Appliance | `is_archived`, `get_pv_history`, `get_archive_info` |
 | **Alarm** | Phoebus Alarm Logger | `is_alarm_configured`, `get_alarm_history` |
 | **Naming** | ESS Naming Service | `lookup_device_name`, `diagnose_connection`, `crossplane_check` |
+| **Logbook** | Phoebus Olog | `search_logbook`, `get_log_entry` |
 | **Display** | `.bob` operator screens (CS-Studio / Phoebus) | `validate_pvs`, `crossplane_check`, `coverage_audit`, `find_device` |
 | **IOC** | e3 `st.cmd` (+ optional `.db`) | `crossplane_check` |
 
@@ -152,6 +153,8 @@ To reach a real control system, set the address list in the launcher's environme
 | `is_alarm_configured` | Phoebus Alarm Logger — is a PV in the alarm tree? | `EPICS_MCP_ALARM_URL` |
 | `get_alarm_history` | Phoebus Alarm Logger — alarm state history of a PV over a window (required start/end; newest-first; user/host stripped) | `EPICS_MCP_ALARM_URL` |
 | `lookup_device_name` | ESS Naming Service — is a device name registered + ACTIVE? (404 = definitive not-registered; a service error is withheld, never a false negative) | `EPICS_MCP_NAMING_URL` |
+| `search_logbook` | Phoebus Olog — search log entries (DS-PRIVACY: author dropped, title/description free text withheld, attachments as a count) | `EPICS_MCP_OLOG_URL` |
+| `get_log_entry` | Phoebus Olog — one entry by id (same redaction; 404 = definitive found:false, other errors propagate) | `EPICS_MCP_OLOG_URL` |
 
 **Display-aware** (require the optional `[displays]` extra)
 
@@ -232,6 +235,8 @@ All settings are read from environment variables with the `EPICS_MCP_` prefix.
 | `EPICS_MCP_ALARM_URL` | _(empty)_ | `is_alarm_configured` / `get_alarm_history` (Phoebus Alarm Logger REST root) |
 | `EPICS_MCP_ALARM_AUTH` | _(empty)_ | Optional `Authorization` header for the Alarm Logger |
 | `EPICS_MCP_NAMING_URL` | _(empty)_ | ESS Naming plane for `lookup_device_name` / `diagnose_connection` / `crossplane_check`. **No built-in host — no egress unless set** |
+| `EPICS_MCP_OLOG_URL` | _(empty)_ | Phoebus Olog REST root (incl. context path, e.g. `.../Olog`) for `search_logbook` / `get_log_entry`. **No built-in host — no egress unless set** |
+| `EPICS_MCP_OLOG_AUTH` | _(empty)_ | Optional `Authorization` header for a secured Olog |
 
 **EPICS network** (standard EPICS env; controls what the server can reach)
 
