@@ -73,3 +73,17 @@ def test_server_advertises_write_gate_posture() -> None:
     from epics_pv_mcp.server import mcp
 
     assert mcp.instructions and "set_pv_value" in mcp.instructions
+
+
+@pytest.mark.asyncio
+async def test_lookup_device_name_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The DS-2 lookup_device_name tool is registered and, with EPICS_MCP_NAMING_URL unset, returns
+    a structured enabled:false result and makes no ESS call (no egress by default)."""
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import lookup_device_name
+    from epics_pv_mcp.services import checkers
+
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(naming_url=""))
+    result = await lookup_device_name("DEV-TEST01:Ctrl-EVR-01")
+    assert result["enabled"] is False
+    assert result["registered"] is None

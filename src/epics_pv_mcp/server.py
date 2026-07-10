@@ -25,6 +25,7 @@ from epics_pv_mcp.tools.diagnose_connection import _diagnose_connection
 from epics_pv_mcp.tools.discover import _discover_pvs
 from epics_pv_mcp.tools.info import _get_pv_info
 from epics_pv_mcp.tools.monitor import _monitor_pv
+from epics_pv_mcp.tools.naming import _lookup_device_name
 from epics_pv_mcp.tools.read import _get_pv_value, _get_pvs
 from epics_pv_mcp.tools.write import _set_pv_value
 
@@ -36,12 +37,13 @@ mcp = FastMCP(
     instructions=(
         "Read-only EPICS PV access by default: read live values and metadata, monitor, "
         "discover, validate the PVs of a .bob display, cross-plane provenance, device lookup "
-        "(screens + live + source IOC), ChannelFinder lookups, Archiver history and Alarm "
-        "configuration. The only mutating tool, set_pv_value, is gated OFF by "
+        "(screens + live + source IOC), ChannelFinder lookups, Archiver history, Alarm "
+        "configuration and ESS Naming-Service device-name lookup. The only mutating tool, "
+        "set_pv_value, is gated OFF by "
         "default and additionally requires EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, "
         "a rate limit and an audit log. The REST-backed tools (find_channels, is_archived, "
-        "get_pv_history, is_alarm_configured) stay disabled until their *_URL env vars are set; "
-        "an empty URL means "
+        "get_pv_history, is_alarm_configured, lookup_device_name) stay disabled until their *_URL "
+        "env vars are set; an empty URL means "
         "no client and no network call. Network reach is localhost-isolated by default: the "
         "server opens no non-local connection unless its launcher widens the EPICS address-list "
         "environment (EPICS_PVA_ADDR_LIST / EPICS_CA_ADDR_LIST and the matching *_AUTO_ADDR_LIST); "
@@ -244,6 +246,38 @@ async def find_channels(
     Read-only. Disabled by default (set EPICS_MCP_CHANNELFINDER_URL to enable).
     """
     return await _find_channels(name_pattern, max_results, timeout)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def lookup_device_name(
+    name: Annotated[
+        str,
+        Field(
+            description="ESS device name (the device part of a PV, without the trailing property — "
+            "e.g. DEV-TEST01:Ctrl-EVR-01)"
+        ),
+    ],
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """Look up an ESS device name in the Naming Service: is it registered and ACTIVE?
+
+    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_NAMING_URL is set (no
+    ESS egress otherwise). A reachable service answering "not registered" (HTTP 404) yields
+    registered=false — a DEFINITIVE answer; OBSOLETE/DELETED also yield registered=false with the
+    status preserved. A service/URL failure (unreachable, 5xx, bad JSON, timeout) is WITHHELD
+    (registered=null + withheld=true), never collapsed into a false "not registered". Surfaces only
+    registered/status/message. Unlike diagnose_connection this needs no live PV probe — it answers
+    the pure registry question directly.
+    """
+    return await _lookup_device_name(name, timeout)
 
 
 @mcp.tool(
