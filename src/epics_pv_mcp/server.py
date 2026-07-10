@@ -19,7 +19,7 @@ from epics_pv_mcp.services.diagnose import (
 )
 from epics_pv_mcp.tool_errors import translate_epics_errors
 from epics_pv_mcp.tools.alarm import _get_alarm_history, _is_alarm_configured
-from epics_pv_mcp.tools.archiver import _get_pv_history, _is_archived
+from epics_pv_mcp.tools.archiver import _get_archive_info, _get_pv_history, _is_archived
 from epics_pv_mcp.tools.channelfinder import _find_channels
 from epics_pv_mcp.tools.diagnose_connection import _diagnose_connection
 from epics_pv_mcp.tools.discover import _discover_pvs
@@ -37,12 +37,14 @@ mcp = FastMCP(
     instructions=(
         "Read-only EPICS PV access by default: read live values and metadata, monitor, "
         "discover, validate the PVs of a .bob display, cross-plane provenance, device lookup "
-        "(screens + live + source IOC), ChannelFinder lookups, Archiver history, Alarm "
+        "(screens + live + source IOC), ChannelFinder lookups, Archiver history + archive "
+        "configuration, Alarm "
         "configuration and history, and ESS Naming-Service device-name lookup. The only mutating "
         "tool, set_pv_value, is gated OFF by "
         "default and additionally requires EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, "
         "a rate limit and an audit log. The REST-backed tools (find_channels, is_archived, "
-        "get_pv_history, is_alarm_configured, get_alarm_history, lookup_device_name) stay disabled "
+        "get_pv_history, get_archive_info, is_alarm_configured, get_alarm_history, "
+        "lookup_device_name) stay disabled "
         "until their *_URL env vars are set; an empty URL means "
         "no client and no network call. Network reach is localhost-isolated by default: the "
         "server opens no non-local connection unless its launcher widens the EPICS address-list "
@@ -325,17 +327,50 @@ async def get_pv_history(
     end: Annotated[str, Field(description="Window end, ISO-8601")],
     max_points: Annotated[
         int,
-        Field(description="Cap on returned samples (a wide window on a fast PV is unbounded)"),
+        # ge=1: a non-positive cap is meaningless — it would empty a valid response and the client
+        # would then mislabel it "withheld". le caps an absurd inline pull (page by window instead).
+        Field(
+            description="Cap on returned samples (a wide window on a fast PV is unbounded)",
+            ge=1,
+            le=100000,
+        ),
     ] = 5000,
-    timeout: Annotated[float, Field(description="Timeout in seconds")] = 5.0,
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
 ) -> dict[str, object]:
     """Fetch archived samples for a PV over an ISO-8601 window (Archiver retrieval getData.json).
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set. The
     result includes the getData.json meta block (PV metadata such as EGU units and PREC precision)
-    alongside the samples. capped is true when the window held more than max_points samples.
+    alongside the samples. capped is true when the window held more than max_points samples. status
+    disambiguates an empty result: "ok" (samples returned), "empty" (a valid but sample-less window)
+    or "withheld" (an unreadable response, with a withheld_reason) — so an empty samples list is
+    never mistaken for "no data" when the truth is "could not read".
     """
     return await _get_pv_history(pv, start, end, max_points, timeout)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def get_archive_info(
+    pv: Annotated[str, Field(description="EPICS PV name")],
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """Report HOW a PV is archived — its archive configuration (Archiver MGMT getPVTypeInfo).
+
+    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.
+    Complements is_archived (live connection state) and get_pv_history (the samples): surfaces the
+    archive CONFIGURATION — sampling method/period, retention (the STS/MTS/LTS data_stores),
+    computed event/storage rates, dbr_type, archived fields, source host_name and creation_time.
+    found is false when the appliance has no type-info record for the PV (unknown / never archived).
+    """
+    return await _get_archive_info(pv, timeout)
 
 
 @mcp.tool(

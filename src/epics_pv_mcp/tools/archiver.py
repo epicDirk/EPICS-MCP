@@ -56,17 +56,53 @@ async def _get_pv_history(
             auth_header=cfg.archiver_auth or None,
             retrieval_url=cfg.archiver_retrieval_url or None,
         )
-        samples, capped, meta = client.get_pv_history(pv, start, end, max_points=max_points)
-        return {
+        history = client.get_pv_history(pv, start, end, max_points=max_points)
+        result: dict[str, object] = {
             "enabled": True,
             "pv": pv,
             "from": start,
             "to": end,
-            "samples": [dict(sample) for sample in samples],
-            "total": len(samples),
-            "capped": capped,
-            "meta": meta,  # DS-4A: getData.json meta block (EGU units, PREC precision)
+            "samples": [dict(sample) for sample in history["samples"]],
+            "total": len(history["samples"]),
+            "capped": history["capped"],
+            "meta": history["meta"],  # DS-4A: getData.json meta block (EGU units, PREC precision)
+            # DS-4B: status disambiguates an empty result — "empty" (real empty window) vs.
+            # "withheld" (unreadable response), so a bare [] is never mistaken for "no data".
+            "status": history["status"],
         }
+        if history["note"]:
+            result["note"] = history["note"]
+        if history["withheld_reason"] is not None:
+            result["withheld_reason"] = history["withheld_reason"]
+        return result
+
+    try:
+        return await asyncio.to_thread(_run)
+    except ArchiverError as exc:
+        raise EpicsConnectionError(f"Archiver: {exc}") from exc
+
+
+async def _get_archive_info(pv: str, timeout: float = 5.0) -> dict[str, object]:
+    """Report the archive configuration of *pv* (Archiver MGMT ``getPVTypeInfo``).
+
+    Tool-only (not shared with diagnose), like :func:`_get_pv_history`: builds the client
+    directly against the MGMT root. Default-disabled — with ``EPICS_MCP_ARCHIVER_URL`` unset it
+    returns ``enabled: false`` + ``found: None`` and makes NO network call. ``found`` is ``None``
+    when the plane was NOT checked (disabled), ``False`` when a reachable appliance has no
+    type-info record for *pv* (unknown / never-archived) and ``True`` otherwise — a disabled plane
+    must never masquerade as a definitive "not archived", mirroring the sibling ``archived: None``
+    / ``configured: None`` / ``registered: None`` gates. The MGMT record carries no person data
+    (the client projects it onto its ``_TYPE_INFO_FIELDS`` allowlist).
+    """
+    cfg = get_config()
+    if not cfg.archiver_url:
+        return {"enabled": False, "pv": pv, "found": None, "note": _DISABLED_NOTE}
+
+    def _run() -> dict[str, object]:
+        client = ArchiverClient(
+            cfg.archiver_url, timeout=timeout, auth_header=cfg.archiver_auth or None
+        )
+        return {"enabled": True, "pv": pv, **client.get_pv_type_info(pv)}
 
     try:
         return await asyncio.to_thread(_run)
