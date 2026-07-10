@@ -36,6 +36,7 @@ from epics_pv_mcp.services.channelfinder_exceptions import ChannelFinderError
 from epics_pv_mcp.services.coverage import AlarmChecker, ArchivedChecker
 from epics_pv_mcp.services.crossplane import CFRegistryCapped, ChannelFinderChecker
 from epics_pv_mcp.services.naming_client import NamingServiceClient
+from epics_pv_mcp.services.naming_exceptions import NamingServiceError
 
 
 class CFRegistryChecker:
@@ -135,19 +136,24 @@ def build_cf_checker(query_channelfinder: bool) -> ChannelFinderChecker | None:
     )
 
 
-def build_naming_client(query_naming: bool) -> NamingServiceClient | None:
+def build_naming_client(query_naming: bool, timeout: float = 5.0) -> NamingServiceClient | None:
     """Build the ESS Naming-Service client iff requested AND a URL is configured.
 
     Mirrors :func:`build_cf_checker` and the diagnose gate: requested but ``naming_url`` unset →
     ``None`` (no client, no egress). The client carries no hard-coded ESS prod default, so
     crossplane_check never reaches ESS production naming unless ``EPICS_MCP_NAMING_URL`` is set.
+
+    *timeout* is forwarded to the client (DS-2): the ``lookup_device_name`` tool passes its
+    per-call timeout here, so a slow-but-reachable service over the ESS VPN honours it instead of
+    silently falling back to the 5 s default. The default keeps existing positional callers
+    (``orchestration`` crossplane path) unchanged.
     """
     if not query_naming:
         return None
     cfg = get_config()
     if not cfg.naming_url:
         return None
-    return NamingServiceClient(base_url=cfg.naming_url)
+    return NamingServiceClient(base_url=cfg.naming_url, timeout=timeout)
 
 
 def build_archiver_checker(query_archiver: bool) -> ArchivedChecker | None:
@@ -189,6 +195,10 @@ _ALARM_DISABLED_NOTE = (
 _CF_DISABLED_NOTE = (
     "ChannelFinder is disabled. Set EPICS_MCP_CHANNELFINDER_URL to the "
     "ChannelFinder service root (e.g. http://host:8080/ChannelFinder)."
+)
+_NAMING_DISABLED_NOTE = (
+    "ESS Naming Service is disabled. Set EPICS_MCP_NAMING_URL to the naming service root "
+    "(e.g. http://naming.example) — WITHOUT a trailing /rest — to enable device-name lookup."
 )
 
 
@@ -285,3 +295,62 @@ async def query_channels(
         return await asyncio.to_thread(_run)
     except ChannelFinderError as exc:
         raise EpicsConnectionError(f"ChannelFinder: {exc}") from exc
+
+
+async def query_naming_lookup(name: str, timeout: float = 5.0) -> dict[str, object]:
+    """Look up an ESS device name in the Naming Service: is it registered + ACTIVE?
+
+    Read-only, config-gated. Default-disabled: with ``EPICS_MCP_NAMING_URL`` unset, returns a
+    structured ``enabled: false`` result and makes NO network call (no ESS egress). Backs the
+    standalone ``lookup_device_name`` tool — the one naming plane that had no ``query_*`` sibling
+    (it was only reachable indirectly via ``diagnose_connection``/``crossplane_check``).
+
+    Answer semantics (DS-2 — a service error must NEVER masquerade as "not registered"):
+
+    * **Reachable + registered** → ``registered: true`` with ``status`` (ACTIVE) and ``message``.
+    * **Reachable + not registered** (a genuine 404 on ``deviceNames``) → ``registered: false`` — a
+      DEFINITIVE answer.
+    * **Reachable + OBSOLETE/DELETED/unknown** → ``registered: false`` with the status preserved.
+    * **Unreachable / 5xx / bad JSON / timeout** → ``registered: null`` + ``withheld: true`` with a
+      note; the reachability is probed FIRST (``check_connectivity``, like ``diagnose``) so a
+      down/slow service is withheld rather than read as a definitive answer.
+
+    Surfaces only the privacy-safe :class:`NameStatus` projection (``registered/status/message``);
+    the richer raw ``DeviceNameElement`` (deviceType/discipline/system/subsystem) is deliberately
+    NOT exposed (MVP scope). Shared by the ``lookup_device_name`` tool.
+    """
+    client = build_naming_client(True, timeout=timeout)
+    if client is None:
+        return {"enabled": False, "name": name, "registered": None, "note": _NAMING_DISABLED_NOTE}
+
+    def _run() -> dict[str, object]:
+        # Probe reachability FIRST (mirrors diagnose._gather_naming) so an unreachable/timing-out
+        # service is WITHHELD by the ``except`` below, not read as a definitive answer. A reachable
+        # HEAD plus a 404 on deviceNames = the real "not registered" (validate_name returns
+        # registered=False); a NON-404 deviceNames failure PROPAGATES out of validate_name (DS-2)
+        # and is caught below -> withheld, never a false registered=False.
+        client.check_connectivity()
+        status = client.validate_name(name)
+        return {
+            "enabled": True,
+            "name": name,
+            "registered": status["registered"],
+            "status": status["status"],
+            "message": status["message"],
+        }
+
+    try:
+        return await asyncio.to_thread(_run)
+    except NamingServiceError as exc:
+        # Both check_connectivity (NamingServiceConnectionError) and validate_name
+        # (NamingServiceResponseError on a NON-404 failure) raise NamingServiceError subclasses; a
+        # genuine 404 is handled INSIDE validate_name (returns registered=False, does not raise).
+        # WITHHOLD on any service error — an unexpected bug (non-NamingServiceError) still escapes
+        # to the tool shell's translate_epics_errors as an [INTERNAL] ToolError.
+        return {
+            "enabled": True,
+            "name": name,
+            "registered": None,
+            "withheld": True,
+            "note": f"Naming lookup withheld: {exc}",
+        }
