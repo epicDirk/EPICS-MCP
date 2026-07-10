@@ -161,7 +161,12 @@ async def get_pv_info(
     limits), value_alarm (active flag + the configured HIHI/HIGH/LOW/LOLO limits; NaN/unset
     limits and the per-PVA-unmapped per-level severities are omitted), and enum index/label/
     choices for enum PVs. Unset (zero-width) display/control limit pairs are omitted; DBR_CHAR
-    waveforms come back as int lists."""
+    waveforms come back as int lists.
+
+    Record fields read directly: pass a channel with a field suffix (e.g. get_pv_info("PV.RTYP"),
+    "PV.SCAN", "PV.HIHI") to read individual record metadata / alarm thresholds — useful when a PVA
+    gateway serves the NT value_alarm limits as NaN. A cold (first) connection can need a longer
+    timeout: default_timeout stays 5 s but pass timeout>=8 for the first read of an idle PV."""
     return await _get_pv_info(pv_name, timeout)
 
 
@@ -296,6 +301,9 @@ async def is_archived(
     """Report whether a PV is being archived (EPICS Archiver Appliance MGMT getPVStatus).
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.
+    Beyond archived/status the result surfaces the MGMT record's connection_state (source IOC
+    connected now?), last_event (time of the last archived sample), is_monitored, sampling_period
+    and appliance when present — same single getPVStatus call, no extra cost.
     """
     return await _is_archived(pv, timeout)
 
@@ -323,7 +331,9 @@ async def get_pv_history(
 ) -> dict[str, object]:
     """Fetch archived samples for a PV over an ISO-8601 window (Archiver retrieval getData.json).
 
-    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.
+    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set. The
+    result includes the getData.json meta block (PV metadata such as EGU units and PREC precision)
+    alongside the samples. capped is true when the window held more than max_points samples.
     """
     return await _get_pv_history(pv, start, end, max_points, timeout)
 
