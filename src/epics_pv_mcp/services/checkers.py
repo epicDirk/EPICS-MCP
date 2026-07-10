@@ -257,6 +257,44 @@ async def query_alarm_configured(
         raise EpicsConnectionError(f"Alarm Logger: {exc}") from exc
 
 
+async def query_alarm_history(
+    pv: str,
+    start: str,
+    end: str,
+    max_events: int = 100,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    """Report the alarm history of *pv* over ``[start, end]`` (Alarm Logger ``/search/alarm``).
+
+    Default-disabled: with ``EPICS_MCP_ALARM_URL`` unset, returns ``enabled: false`` and makes no
+    network call. *start*/*end* are required (a defaultless query must not pull the whole history).
+    Events are newest-first and projected onto the technical allowlist — the raw doc's
+    ``user``/``host``/``command`` are stripped (DS-PRIVACY). ``capped`` is True when more than
+    *max_events* matched (the newest are kept). Shared by the ``get_alarm_history`` tool.
+    """
+    cfg = get_config()
+    if not cfg.alarm_url:
+        return {"enabled": False, "pv": pv, "events": [], "note": _ALARM_DISABLED_NOTE}
+
+    def _run() -> dict[str, object]:
+        client = AlarmClient(cfg.alarm_url, timeout=timeout, auth_header=cfg.alarm_auth or None)
+        events, capped = client.get_alarm_history(pv, start, end, max_events)
+        return {
+            "enabled": True,
+            "pv": pv,
+            "start": start,
+            "end": end,
+            "events": events,
+            "total": len(events),
+            "capped": capped,
+        }
+
+    try:
+        return await asyncio.to_thread(_run)
+    except AlarmError as exc:
+        raise EpicsConnectionError(f"Alarm Logger: {exc}") from exc
+
+
 async def query_channels(
     name_pattern: str,
     max_results: int = DEFAULT_MAX_RESULTS,

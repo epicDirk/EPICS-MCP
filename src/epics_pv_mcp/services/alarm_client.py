@@ -67,6 +67,37 @@ def _project_alarm_config(record: dict[str, object]) -> dict[str, object]:
     return {key: value for key, value in record.items() if key in _ALARM_CONFIG_ALLOWLIST}
 
 
+# DS-PRIVACY (DS-3): an alarm STATE/history document (``/search/alarm``) can carry ``user`` and
+# ``host`` — WHO acknowledged / enabled / disabled the alarm — plus a ``command`` (the action taken)
+# and a ``config_msg`` (potentially authored). Returning the raw ES record would leak a person's
+# username. We project onto this allowlist of technical alarm fields (matching the AlarmLogMessage
+# model in the Phoebus alarm-logger). An allowlist (not a denylist) means a NEW person-bearing field
+# a future logger version adds is dropped by default. ``pv``/``config`` are kept so the caller can
+# SEE which PV each event belongs to (the ``pv`` query matches a substring of the config path, so
+# results can include sibling PVs — keeping the identity makes that transparent, not hidden).
+_ALARM_HISTORY_ALLOWLIST = frozenset(
+    {
+        "severity",
+        "message",
+        "value",
+        "time",
+        "current_severity",
+        "current_message",
+        "enabled",
+        "mode",
+        "message_time",
+        "pv",
+        "config",
+    }
+)
+
+
+def _project_alarm_event(record: dict[str, object]) -> dict[str, object]:
+    """Return *record* restricted to the technical allowlist (drops ``user``/``host``/``command``/
+    ``config_msg``/unknown)."""
+    return {key: value for key, value in record.items() if key in _ALARM_HISTORY_ALLOWLIST}
+
+
 class AlarmClient:
     """Read-only client for the Phoebus Alarm Logger REST API. GET-only."""
 
@@ -120,3 +151,43 @@ class AlarmClient:
             if leaf == pv:
                 return True, _project_alarm_config(record)
         return False, {}
+
+    def get_alarm_history(
+        self, pv: str, start: str, end: str, max_events: int = 100
+    ) -> tuple[list[dict[str, object]], bool]:
+        """Return ``(events, capped)`` — the alarm state/history of *pv* over ``[start, end]``.
+
+        Queries ``/search/alarm`` (sibling of the config query above). The server matches ``pv`` as
+        a wildcard substring on the alarm ``config`` path, applies the ``message_time`` range
+        ``[start, end]`` and returns the newest ``size`` records first (``message_time`` DESC).
+        *start* and *end* are REQUIRED (a defaultless query must never pull the whole history); each
+        accepts an absolute time (ISO-8601) or a relative amount (e.g. ``"8 hours"``) — the server's
+        ``TimeParser`` handles both. NOTE: without an index/root restriction ``/search/alarm``
+        returns alarm STATE-change AND alarm CONFIG-change documents; the ``config`` field prefix
+        (``state:`` vs ``config:``) distinguishes them and is kept in the projected event.
+
+        We request ``size = max_events + 1`` so ``capped`` is an honest ``fetched > max_events``
+        (the query_channels pattern) rather than a ``>=`` that false-flags exactly ``max_events``
+        real events; the newest ``max_events`` are kept. Each event is projected onto the technical
+        allowlist (:data:`_ALARM_HISTORY_ALLOWLIST`) — the raw ES doc's ``user``/``host`` (who
+        acknowledged/enabled/disabled) and ``command``/``config_msg`` never leave this method
+        (DS-PRIVACY).
+
+        NOTE (backend limitation, mirrors ``is_alarm_configured``'s size cap): the server clamps
+        the result to ``min(es_max_size, size)`` (``es_max_size`` default 1000). If ``es_max_size``
+        is at or below ``max_events`` the ``+1`` probe record cannot come back, so a full window of
+        exactly ``max_events`` events cannot be told apart from a truncated one and ``capped`` may
+        under-report. The ``get_alarm_history`` tool caps ``max_events`` at 999 so this cannot
+        happen at the DEFAULT ``es_max_size``; only a backend configured with a lower
+        ``es_max_size`` is exposed.
+        """
+        params = {"pv": pv, "start": start, "end": end, "size": str(max_events + 1)}
+        data = self._get(f"{self.base_url}/search/alarm", params)
+        records = data if isinstance(data, list) else []
+        capped = len(records) > max_events
+        events = [
+            _project_alarm_event(record)
+            for record in records[:max_events]
+            if isinstance(record, dict)
+        ]
+        return events, capped

@@ -9,7 +9,7 @@ Default-disabled behaviour (no ``EPICS_MCP_ALARM_URL`` → no network call) is e
 from __future__ import annotations
 
 from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG
-from epics_pv_mcp.services.checkers import query_alarm_configured
+from epics_pv_mcp.services.checkers import query_alarm_configured, query_alarm_history
 
 
 async def _is_alarm_configured(
@@ -22,3 +22,19 @@ async def _is_alarm_configured(
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_alarm_configured`.
     """
     return await query_alarm_configured(pv, config_name=config_name, timeout=timeout)
+
+
+async def _get_alarm_history(
+    pv: str,
+    start: str,
+    end: str,
+    max_events: int = 100,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    """Report the alarm state/history of *pv* over ``[start, end]`` (Alarm Logger /search/alarm).
+
+    Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_alarm_history`.
+    """
+    return await query_alarm_history(
+        pv, start=start, end=end, max_events=max_events, timeout=timeout
+    )
