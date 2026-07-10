@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from epics_pv_mcp.services._http import build_retrying_session, rest_get_json
 from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
+from epics_pv_mcp.services.redact import project_allowlist
 
 # Default alarm config-tree (topic) name; the leading path segment that selects the ES index.
 DEFAULT_ALARM_CONFIG = "Accelerator"
@@ -63,8 +64,14 @@ _ALARM_CONFIG_ALLOWLIST = frozenset(
 
 
 def _project_alarm_config(record: dict[str, object]) -> dict[str, object]:
-    """Return *record* restricted to the technical allowlist (drops ``user``/``host``/unknown)."""
-    return {key: value for key, value in record.items() if key in _ALARM_CONFIG_ALLOWLIST}
+    """Return *record* restricted to the technical allowlist (drops ``user``/``host``/unknown).
+
+    Uses the shared DS-PRIVACY :func:`~epics_pv_mcp.services.redact.project_allowlist` barrier. The
+    authored free-text fields kept here (``guidance``/``commands``/``description``) are a documented
+    Batch-1 residual — ``withhold_freetext`` could redact them, but that is a product decision for
+    ``is_alarm_configured``'s usefulness, deliberately NOT applied retroactively here.
+    """
+    return project_allowlist(record, _ALARM_CONFIG_ALLOWLIST)
 
 
 # DS-PRIVACY (DS-3): an alarm STATE/history document (``/search/alarm``) can carry ``user`` and
@@ -94,8 +101,8 @@ _ALARM_HISTORY_ALLOWLIST = frozenset(
 
 def _project_alarm_event(record: dict[str, object]) -> dict[str, object]:
     """Return *record* restricted to the technical allowlist (drops ``user``/``host``/``command``/
-    ``config_msg``/unknown)."""
-    return {key: value for key, value in record.items() if key in _ALARM_HISTORY_ALLOWLIST}
+    ``config_msg``/unknown) via the shared ``redact.project_allowlist`` barrier."""
+    return project_allowlist(record, _ALARM_HISTORY_ALLOWLIST)
 
 
 class AlarmClient:
