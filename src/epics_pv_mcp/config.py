@@ -81,6 +81,11 @@ class EpicsConfig(BaseSettings):
     # diagnose_connection AND crossplane_check/CLI honour this gate — neither reaches ESS production
     # naming unless this is set.
     naming_url: str = ""
+    # Phoebus Olog (electronic logbook) REST root incl. context path, e.g. "http://host:8080/Olog".
+    # Empty (default) = disabled: the Olog plane makes NO network call and no ESS egress. Read-only;
+    # every returned field passes the DS-PRIVACY allowlist (author/free-text withheld) first.
+    olog_url: str = ""
+    olog_auth: str = ""  # optional Authorization header value for secured deployments
 
 
 _config: EpicsConfig | None = None

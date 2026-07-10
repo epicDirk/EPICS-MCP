@@ -97,3 +97,16 @@ def rest_get_json(
         if isinstance(exc, requests.exceptions.ConnectionError):
             raise conn_exc(f"Failed to connect to {url}: {exc}") from exc
         raise resp_exc(f"Request failed ({url}): {exc}") from exc
+
+
+def is_http_404(exc: BaseException) -> bool:
+    """True iff *exc* wraps an HTTP 404 response.
+
+    :func:`rest_get_json` raises the per-service response error with ``raise ... from <requests
+    error>``, so the chained cause of an HTTP failure is the requests ``HTTPError`` carrying
+    ``.response``. A resource-by-id endpoint (``getPVTypeInfo`` / Olog ``/logs/{id}``) answers a
+    missing item with 404, which callers map to a definitive "not found" while re-raising every
+    other status. Duck-typed (no direct ``requests`` dependency at the call site) and null-safe.
+    """
+    response = getattr(exc.__cause__, "response", None)
+    return getattr(response, "status_code", None) == 404

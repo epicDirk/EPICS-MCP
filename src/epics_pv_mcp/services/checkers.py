@@ -37,6 +37,8 @@ from epics_pv_mcp.services.coverage import AlarmChecker, ArchivedChecker
 from epics_pv_mcp.services.crossplane import CFRegistryCapped, ChannelFinderChecker
 from epics_pv_mcp.services.naming_client import NamingServiceClient
 from epics_pv_mcp.services.naming_exceptions import NamingServiceError
+from epics_pv_mcp.services.olog_client import DEFAULT_MAX_LOGS, OlogClient
+from epics_pv_mcp.services.olog_exceptions import OlogError
 
 
 class CFRegistryChecker:
@@ -199,6 +201,10 @@ _CF_DISABLED_NOTE = (
 _NAMING_DISABLED_NOTE = (
     "ESS Naming Service is disabled. Set EPICS_MCP_NAMING_URL to the naming service root "
     "(e.g. http://naming.example) — WITHOUT a trailing /rest — to enable device-name lookup."
+)
+_OLOG_DISABLED_NOTE = (
+    "Phoebus Olog is disabled. Set EPICS_MCP_OLOG_URL to the Olog REST root "
+    "(e.g. http://host:8080/Olog) to enable logbook search."
 )
 
 
@@ -393,3 +399,59 @@ async def query_naming_lookup(name: str, timeout: float = 5.0) -> dict[str, obje
             "withheld": True,
             "note": f"Naming lookup withheld: {exc}",
         }
+
+
+async def query_olog_search(
+    text: str | None = None,
+    logbooks: str | None = None,
+    tags: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    size: int = DEFAULT_MAX_LOGS,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    """Search the Phoebus Olog logbook, returning DS-PRIVACY-redacted entries. Read-only, gated.
+
+    Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns a structured ``enabled: false``
+    result and makes NO network call (no ESS egress). Every returned entry passes the Olog client's
+    output allowlist (author/free-text withheld) — raw entries never reach this layer. ``capped`` is
+    True when more than *size* matched (the first *size* are kept). Backs ``search_logbook``.
+    """
+    cfg = get_config()
+    if not cfg.olog_url:
+        return {"enabled": False, "entries": [], "total": 0, "note": _OLOG_DISABLED_NOTE}
+
+    def _run() -> dict[str, object]:
+        client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
+        entries, capped = client.search_logbook(
+            text=text, logbooks=logbooks, tags=tags, start=start, end=end, size=size
+        )
+        return {"enabled": True, "entries": entries, "total": len(entries), "capped": capped}
+
+    try:
+        return await asyncio.to_thread(_run)
+    except OlogError as exc:
+        raise EpicsConnectionError(f"Olog: {exc}") from exc
+
+
+async def query_olog_entry(log_id: str, timeout: float = 5.0) -> dict[str, object]:
+    """Return one Olog entry by id (DS-PRIVACY-redacted). Read-only, config-gated.
+
+    Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes no
+    network call. ``found`` is False when the entry does not exist. Backs ``get_log_entry``.
+    """
+    cfg = get_config()
+    if not cfg.olog_url:
+        return {"enabled": False, "id": log_id, "found": False, "note": _OLOG_DISABLED_NOTE}
+
+    def _run() -> dict[str, object]:
+        client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
+        entry = client.get_log_entry(log_id)
+        if entry is None:
+            return {"enabled": True, "id": log_id, "found": False}
+        return {"enabled": True, "id": log_id, "found": True, "entry": entry}
+
+    try:
+        return await asyncio.to_thread(_run)
+    except OlogError as exc:
+        raise EpicsConnectionError(f"Olog: {exc}") from exc

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict
 
-from epics_pv_mcp.services._http import build_retrying_session, rest_get_json
+from epics_pv_mcp.services._http import build_retrying_session, is_http_404, rest_get_json
 from epics_pv_mcp.services.archiver_exceptions import (
     ArchiverConnectionError,
     ArchiverResponseError,
@@ -51,17 +51,6 @@ _TYPE_INFO_FIELDS: tuple[tuple[str, str], ...] = (
     ("applianceIdentity", "appliance"),
     ("paused", "paused"),
 )
-
-
-def _is_http_404(exc: BaseException) -> bool:
-    """True iff *exc* wraps an HTTP 404 response.
-
-    :func:`~epics_pv_mcp.services._http.rest_get_json` raises the per-service response error with
-    ``raise ... from <requests error>``, so the chained cause of an HTTP failure is the requests
-    ``HTTPError`` carrying ``.response``. Duck-typed (no ``requests`` import) and null-safe.
-    """
-    response = getattr(exc.__cause__, "response", None)
-    return getattr(response, "status_code", None) == 404
 
 
 class Sample(TypedDict):
@@ -192,7 +181,7 @@ class ArchiverClient:
             # so a chained 404 is the appliance's definitive "no type-info record" answer. Any
             # other status / bad payload re-raises (a connection failure is an ArchiverConnection-
             # Error and never reaches this handler) — could-not-read must stay could-not-read.
-            if _is_http_404(exc):
+            if is_http_404(exc):
                 return {"found": False}
             raise
         record = self._unwrap_type_info(data)

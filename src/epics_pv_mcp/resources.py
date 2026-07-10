@@ -34,6 +34,8 @@ def get_health() -> dict[str, object]:
         "channelfinder_enabled": bool(cfg.channelfinder_url),
         "archiver_enabled": bool(cfg.archiver_url),
         "alarm_enabled": bool(cfg.alarm_url),
+        # olog as an enabled-boolean only (never the URL — an ESS host, name-capable plane).
+        "olog_enabled": bool(cfg.olog_url),
     }
 
 

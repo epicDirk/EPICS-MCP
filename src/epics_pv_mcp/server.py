@@ -26,6 +26,7 @@ from epics_pv_mcp.tools.discover import _discover_pvs
 from epics_pv_mcp.tools.info import _get_pv_info
 from epics_pv_mcp.tools.monitor import _monitor_pv
 from epics_pv_mcp.tools.naming import _lookup_device_name
+from epics_pv_mcp.tools.olog import _get_log_entry, _search_logbook
 from epics_pv_mcp.tools.read import _get_pv_value, _get_pvs
 from epics_pv_mcp.tools.write import _set_pv_value
 
@@ -39,12 +40,13 @@ mcp = FastMCP(
         "discover, validate the PVs of a .bob display, cross-plane provenance, device lookup "
         "(screens + live + source IOC), ChannelFinder lookups, Archiver history + archive "
         "configuration, Alarm "
-        "configuration and history, and ESS Naming-Service device-name lookup. The only mutating "
+        "configuration and history, ESS Naming-Service device-name lookup, and Phoebus Olog "
+        "logbook search (author/free-text withheld). The only mutating "
         "tool, set_pv_value, is gated OFF by "
         "default and additionally requires EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, "
         "a rate limit and an audit log. The REST-backed tools (find_channels, is_archived, "
         "get_pv_history, get_archive_info, is_alarm_configured, get_alarm_history, "
-        "lookup_device_name) stay disabled "
+        "lookup_device_name, search_logbook, get_log_entry) stay disabled "
         "until their *_URL env vars are set; an empty URL means "
         "no client and no network call. Network reach is localhost-isolated by default: the "
         "server opens no non-local connection unless its launcher widens the EPICS address-list "
@@ -448,6 +450,67 @@ async def get_alarm_history(
     is true when more than max_events matched.
     """
     return await _get_alarm_history(pv, start, end, max_events, timeout)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def search_logbook(
+    text: Annotated[
+        str | None, Field(description="Free-text to search in the log description")
+    ] = None,
+    logbooks: Annotated[
+        str | None, Field(description="Comma-separated logbook names to filter by")
+    ] = None,
+    tags: Annotated[str | None, Field(description="Comma-separated tag names to filter by")] = None,
+    start: Annotated[
+        str | None, Field(description="Window start — ISO-8601 or a relative amount ('7 days')")
+    ] = None,
+    end: Annotated[
+        str | None, Field(description="Window end — ISO-8601 or a relative amount")
+    ] = None,
+    size: Annotated[int, Field(description="Cap on returned entries", ge=1, le=200)] = 50,
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """Search the Phoebus Olog electronic logbook (Olog REST /logs/search).
+
+    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_OLOG_URL is set.
+    DS-PRIVACY: entries are redacted before they leave — technical fields (id, dates, level, state)
+    and logbook/tag NAMES are kept, but author/owner is dropped and the title/description free text
+    is WITHHELD (a person can be named inside it); attachments are surfaced as a count only. capped
+    is true when more than size matched.
+    """
+    return await _search_logbook(
+        text=text, logbooks=logbooks, tags=tags, start=start, end=end, size=size, timeout=timeout
+    )
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def get_log_entry(
+    log_id: Annotated[str, Field(description="Olog log entry id")],
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """Fetch one Phoebus Olog entry by id (Olog REST /logs/{id}).
+
+    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_OLOG_URL is set. Same
+    DS-PRIVACY redaction as search_logbook (author dropped, title/description withheld, attachments
+    as a count). found is false when no entry has that id.
+    """
+    return await _get_log_entry(log_id, timeout)
 
 
 @mcp.tool(
