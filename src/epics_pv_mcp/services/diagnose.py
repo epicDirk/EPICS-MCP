@@ -420,11 +420,11 @@ async def _gather_naming(pv_name: str, requested: bool, timeout: float) -> Namin
     def _run() -> NamingEvidence:
         client = NamingServiceClient(base_url=cfg.naming_url, timeout=timeout)
         # Probe reachability FIRST so an unreachable / timing-out service is WITHHELD by the
-        # gatherer's ``except`` below. ``validate_name`` alone would SWALLOW a transport error into
-        # a definitive ``registered=False`` — which the cause tree reads as a confident name_typo, a
-        # false negative that violates "withheld != no". A REACHABLE service that answers "not
-        # found" still yields ``registered=False`` → name_typo, which is correct. (Known narrow gap:
-        # a reachable HEAD but a failing deviceNames GET still swallows — accepted, documented.)
+        # gatherer's ``except`` below. A REACHABLE service that answers HTTP 404 ("not registered")
+        # yields ``registered=False`` → name_typo, which is correct. Since DS-2, a reachable HEAD
+        # but a NON-404 deviceNames failure (5xx / bad JSON / wrong endpoint) PROPAGATES out of
+        # ``validate_name`` and is caught by the ``except`` below → withheld, not a false
+        # ``registered=False``/name_typo (the former "known narrow gap" is closed).
         client.check_connectivity()
         status = client.validate_name(device_name)
         return NamingEvidence(

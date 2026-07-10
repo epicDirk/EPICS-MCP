@@ -21,6 +21,7 @@ import requests
 from epics_pv_mcp.services._http import build_retrying_session
 from epics_pv_mcp.services.naming_exceptions import (
     NamingServiceConnectionError,
+    NamingServiceNotFound,
     NamingServiceResponseError,
 )
 
@@ -118,7 +119,12 @@ class NamingServiceClient:
         return data
 
     def _get_device_name(self, name: str) -> dict[str, object]:
-        """``GET /rest/deviceNames/{name}`` (cached)."""
+        """``GET /rest/deviceNames/{name}`` (cached).
+
+        A 404 raises :class:`NamingServiceNotFound` (the DEFINITIVE "not registered"); every other
+        HTTP/transport/JSON failure raises the generic :class:`NamingServiceResponseError` so the
+        caller can tell "name not registered" apart from a service/URL error (DS-2).
+        """
         if name in self._names_cache:
             return self._names_cache[name]
         try:
@@ -127,6 +133,18 @@ class NamingServiceClient:
             )
             resp.raise_for_status()
             data: dict[str, object] = resp.json()
+        except requests.exceptions.HTTPError as exc:
+            # A 404 on the deviceNames endpoint is the service's "not registered" answer. Any other
+            # status (5xx, 401/403, or a 404 caused by a WRONG base path) is a service/URL failure
+            # that must NOT collapse into a false "not registered" — split it out here.
+            response = exc.response
+            if response is not None and response.status_code == 404:
+                raise NamingServiceNotFound(
+                    f'The name "{name}" is not registered in the Naming Service'
+                ) from exc
+            raise NamingServiceResponseError(
+                f"Failed to query device name '{name}': {exc}"
+            ) from exc
         except requests.exceptions.RequestException as exc:
             raise NamingServiceResponseError(
                 f"Failed to query device name '{name}': {exc}"
@@ -174,12 +192,16 @@ class NamingServiceClient:
 
         *ess_name* is the device-name part of a PV (e.g. ``DEV-TEST01:Ctrl-EVR-01``),
         without the trailing property. Returns ``registered=True`` only for ``ACTIVE``;
-        ``OBSOLETE``/``DELETED``/unknown/unreachable → ``registered=False`` with the
-        status preserved.
+        ``OBSOLETE``/``DELETED``/unknown → ``registered=False`` with the status preserved. A
+        genuine 404 → ``registered=False`` (definitively not registered). A NON-404 service/URL
+        failure (5xx, bad JSON, wrong endpoint, timeout) is NOT swallowed — it PROPAGATES as a
+        :class:`NamingServiceResponseError` so the caller withholds instead of reporting a false
+        "not registered" (DS-2 / audit S5). Callers that consult naming best-effort (crossplane)
+        catch it; ``diagnose`` already withholds on any naming exception.
         """
         try:
             data = self._get_device_name(ess_name)
-        except NamingServiceResponseError:
+        except NamingServiceNotFound:
             return NameStatus(
                 registered=False,
                 status="",

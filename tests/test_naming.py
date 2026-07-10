@@ -6,17 +6,27 @@ import pytest
 import requests
 
 from epics_pv_mcp.services.naming_client import NamingServiceClient
-from epics_pv_mcp.services.naming_exceptions import NamingServiceConnectionError
+from epics_pv_mcp.services.naming_exceptions import (
+    NamingServiceConnectionError,
+    NamingServiceResponseError,
+)
 
 
-def _resp(payload: object, *, ok: bool = True) -> Mock:
-    """Build a fake ``requests`` response with the given JSON payload."""
+def _resp(payload: object, *, status: int = 200) -> Mock:
+    """Build a fake ``requests`` response with the given JSON payload and HTTP status.
+
+    A status >= 400 makes ``raise_for_status`` raise an ``HTTPError`` carrying this response (as
+    real requests does), so the client can read ``exc.response.status_code`` to split 404 apart.
+    """
     resp = Mock()
+    resp.status_code = status
     resp.json.return_value = payload
-    if ok:
-        resp.raise_for_status.return_value = None
+    if status >= 400:
+        err = requests.exceptions.HTTPError(str(status))
+        err.response = resp
+        resp.raise_for_status.side_effect = err
     else:
-        resp.raise_for_status.side_effect = requests.exceptions.HTTPError("404")
+        resp.raise_for_status.return_value = None
     return resp
 
 
@@ -52,11 +62,34 @@ def test_validate_name_obsolete_not_registered(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_validate_name_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _client_with(monkeypatch, _resp({}, ok=False))
+    """A genuine 404 on the deviceNames endpoint = the DEFINITIVE 'not registered'."""
+    client = _client_with(monkeypatch, _resp({}, status=404))
     result = client.validate_name("NOPE:nope")
     assert result["registered"] is False
     assert result["status"] == ""
     assert "not registered" in result["message"]
+
+
+def test_validate_name_service_error_propagates_not_false_negative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DS-2 / audit S5: a NON-404 failure (here HTTP 500) must NOT collapse into a definitive
+    ``registered=False`` (a false name_typo). It PROPAGATES as NamingServiceResponseError so the
+    caller withholds. Distinguishes 'name not registered' from 'service/URL error'."""
+    client = _client_with(monkeypatch, _resp({}, status=500))
+    with pytest.raises(NamingServiceResponseError):
+        client.validate_name("DEV-TEST01:Ctrl-EVR-01")
+
+
+def test_validate_name_transport_error_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-HTTP GET failure (here a read Timeout during the deviceNames GET, after a successful
+    reachability probe) also propagates as a service error, never a false 'not registered'."""
+    client = NamingServiceClient(base_url="http://naming.example/")
+    monkeypatch.setattr(
+        client.session, "get", Mock(side_effect=requests.exceptions.Timeout("read timeout"))
+    )
+    with pytest.raises(NamingServiceResponseError):
+        client.validate_name("DEV-TEST01:Ctrl-EVR-01")
 
 
 def test_validate_system_approved(monkeypatch: pytest.MonkeyPatch) -> None:

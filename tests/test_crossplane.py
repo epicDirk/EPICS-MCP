@@ -15,6 +15,7 @@ from epics_pv_mcp.services.crossplane import (
 )
 from epics_pv_mcp.services.e3_db import StCmdInfo
 from epics_pv_mcp.services.naming_client import NameStatus
+from epics_pv_mcp.services.naming_exceptions import NamingServiceResponseError
 
 
 class _FakeNaming:
@@ -29,6 +30,14 @@ class _FakeNaming:
             status=self._status,
             message=f"{ess_name}: {self._status}",
         )
+
+
+class _RaisingNaming:
+    """Naming checker whose validate_name fails with a NON-404 service error (DS-2): the report must
+    WITHHOLD the naming verdict (leave it None), not abort the whole cross-plane join."""
+
+    def validate_name(self, ess_name: str) -> NameStatus:
+        raise NamingServiceResponseError("Naming service 500")
 
 
 class _FakeCF:
@@ -85,6 +94,15 @@ def test_linked_indeterminate_and_other_prefix() -> None:
     assert "OTHER-SYS:thing" in report.pvs_other_prefix
     assert report.naming is not None
     assert report.naming.registered is True
+
+
+def test_naming_service_error_withholds_verdict_not_crash() -> None:
+    """A non-404 naming failure must not abort the join — the report has naming=None (withheld) and
+    the rest of the cross-plane buckets are still produced (DS-2 / audit S5)."""
+    join = [_jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:status")]
+    report = crossplane_check(join, _st(), naming=_RaisingNaming())
+    assert report.naming is None
+    assert "DEV-TEST01:Ctrl-EVR-01:status" in report.pvs_linked
 
 
 def test_resolved_macro_collapses_to_linked() -> None:

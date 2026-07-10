@@ -32,6 +32,7 @@ Nothing indeterminate is ever called "broken".
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Iterable
 from typing import Literal, NamedTuple, Protocol
@@ -40,6 +41,9 @@ from pydantic import BaseModel, ConfigDict
 
 from epics_pv_mcp.services.e3_db import StCmdInfo
 from epics_pv_mcp.services.naming_client import NameStatus
+from epics_pv_mcp.services.naming_exceptions import NamingServiceResponseError
+
+logger = logging.getLogger(__name__)
 
 #: Protocols that are real plant channels (the only ones joined against an IOC). Mirrors
 #: ``opi_navigation.pv_analysis.models.REAL_PROTOCOLS`` (kept local — no foreign import).
@@ -254,12 +258,20 @@ def crossplane_check(
 
     naming_result: NamingResult | None = None
     if naming is not None and st_cmd.device_name:
-        status = naming.validate_name(st_cmd.device_name)
-        naming_result = NamingResult(
-            registered=status["registered"],
-            status=status["status"],
-            message=status["message"],
-        )
+        try:
+            status = naming.validate_name(st_cmd.device_name)
+        except NamingServiceResponseError as exc:
+            # A non-404 naming service/URL failure: WITHHOLD the naming verdict (leave it None)
+            # instead of aborting the whole cross-plane report — best-effort provenance, never a
+            # false verdict. A genuine 404 is already mapped to registered=False inside
+            # validate_name and does NOT reach here (DS-2 / audit S5).
+            logger.debug("Naming lookup withheld for %s: %s", st_cmd.device_name, exc)
+        else:
+            naming_result = NamingResult(
+                registered=status["registered"],
+                status=status["status"],
+                message=status["message"],
+            )
 
     broken: set[str] = set()
     broken_withheld = False

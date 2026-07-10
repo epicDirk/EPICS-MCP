@@ -26,3 +26,14 @@ class NamingServiceConnectionError(NamingServiceError, RestConnectionError):
 
 class NamingServiceResponseError(NamingServiceError, RestResponseError):
     """Unexpected response (HTTP error / bad payload) from the Naming Service."""
+
+
+class NamingServiceNotFound(NamingServiceResponseError):
+    """The queried device name returned HTTP 404 — the service's DEFINITIVE "not registered".
+
+    Split out from the generic :class:`NamingServiceResponseError` so a genuine 404 (name not
+    registered) is distinguishable from every other response failure (5xx, bad JSON, a 404 from a
+    WRONG base path, auth/proxy after a successful reachability probe). ``validate_name`` maps a
+    404 to ``registered=False`` but lets the generic error PROPAGATE so the caller withholds
+    instead of reporting a false ``name_typo`` (DS-2 / data-source audit S5).
+    """
