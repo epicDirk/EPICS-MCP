@@ -36,7 +36,7 @@ framed in these terms:
 |-------|--------|-------|
 | **Live** | p4p (PVAccess / Channel Access) | `get_pv_value`, `get_pvs`, `get_pv_info`, `monitor_pv`, `discover_pvs`, `set_pv_value` |
 | **Registry** | ChannelFinder | `find_channels`, `diagnose_connection`, `coverage_audit` |
-| **History** | EPICS Archiver Appliance | `is_archived`, `get_pv_history` |
+| **History** | EPICS Archiver Appliance | `is_archived`, `get_pv_history`, `get_archive_info` |
 | **Alarm** | Phoebus Alarm Logger | `is_alarm_configured`, `get_alarm_history` |
 | **Naming** | ESS Naming Service | `lookup_device_name`, `diagnose_connection`, `crossplane_check` |
 | **Display** | `.bob` operator screens (CS-Studio / Phoebus) | `validate_pvs`, `crossplane_check`, `coverage_audit`, `find_device` |
@@ -147,7 +147,8 @@ To reach a real control system, set the address list in the launcher's environme
 |------|---------|-----------|
 | `find_channels` | ChannelFinder — which IOC/host serves a PV + tags/properties | `EPICS_MCP_CHANNELFINDER_URL` |
 | `is_archived` | Archiver Appliance — is a PV being archived? (+ connection_state / last_event / is_monitored from the same getPVStatus call) | `EPICS_MCP_ARCHIVER_URL` |
-| `get_pv_history` | Archiver Appliance — archived samples over an ISO-8601 window (+ the getData.json `meta` block: EGU units, PREC precision) | `EPICS_MCP_ARCHIVER_URL` |
+| `get_pv_history` | Archiver Appliance — archived samples over an ISO-8601 window (+ the getData.json `meta` block: EGU units, PREC precision; `status` = ok/empty/withheld so an empty result is never mistaken for "could not read") | `EPICS_MCP_ARCHIVER_URL` |
+| `get_archive_info` | Archiver Appliance — how a PV is archived (sampling method/period, STS/MTS/LTS retention, DBRType, archived fields, source host); `found:false` on a 404 (never-archived), errors propagate | `EPICS_MCP_ARCHIVER_URL` |
 | `is_alarm_configured` | Phoebus Alarm Logger — is a PV in the alarm tree? | `EPICS_MCP_ALARM_URL` |
 | `get_alarm_history` | Phoebus Alarm Logger — alarm state history of a PV over a window (required start/end; newest-first; user/host stripped) | `EPICS_MCP_ALARM_URL` |
 | `lookup_device_name` | ESS Naming Service — is a device name registered + ACTIVE? (404 = definitive not-registered; a service error is withheld, never a false negative) | `EPICS_MCP_NAMING_URL` |
@@ -225,7 +226,7 @@ All settings are read from environment variables with the `EPICS_MCP_` prefix.
 | `EPICS_MCP_CHANNELFINDER_URL` | _(empty)_ | `find_channels` + the ChannelFinder plane |
 | `EPICS_MCP_CHANNELFINDER_AUTH` | _(empty)_ | Optional `Authorization` header for a secured ChannelFinder |
 | `EPICS_MCP_CHANNELFINDER_MAX_RESULTS` | `500` | Cap on channels per prefix query |
-| `EPICS_MCP_ARCHIVER_URL` | _(empty)_ | `is_archived` / `get_pv_history` (Archiver MGMT root, `:17665`) |
+| `EPICS_MCP_ARCHIVER_URL` | _(empty)_ | `is_archived` / `get_pv_history` / `get_archive_info` (Archiver MGMT root, `:17665`) |
 | `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` | _(empty)_ | Archiver retrieval root (`:17668`); empty falls back to `ARCHIVER_URL` |
 | `EPICS_MCP_ARCHIVER_AUTH` | _(empty)_ | Optional `Authorization` header for the Archiver |
 | `EPICS_MCP_ALARM_URL` | _(empty)_ | `is_alarm_configured` / `get_alarm_history` (Phoebus Alarm Logger REST root) |
