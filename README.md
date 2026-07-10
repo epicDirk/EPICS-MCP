@@ -37,7 +37,7 @@ framed in these terms:
 | **Live** | p4p (PVAccess / Channel Access) | `get_pv_value`, `get_pvs`, `get_pv_info`, `monitor_pv`, `discover_pvs`, `set_pv_value` |
 | **Registry** | ChannelFinder | `find_channels`, `diagnose_connection`, `coverage_audit` |
 | **History** | EPICS Archiver Appliance | `is_archived`, `get_pv_history` |
-| **Alarm** | Phoebus Alarm Logger | `is_alarm_configured` |
+| **Alarm** | Phoebus Alarm Logger | `is_alarm_configured`, `get_alarm_history` |
 | **Naming** | ESS Naming Service | `lookup_device_name`, `diagnose_connection`, `crossplane_check` |
 | **Display** | `.bob` operator screens (CS-Studio / Phoebus) | `validate_pvs`, `crossplane_check`, `coverage_audit`, `find_device` |
 | **IOC** | e3 `st.cmd` (+ optional `.db`) | `crossplane_check` |
@@ -149,6 +149,7 @@ To reach a real control system, set the address list in the launcher's environme
 | `is_archived` | Archiver Appliance — is a PV being archived? | `EPICS_MCP_ARCHIVER_URL` |
 | `get_pv_history` | Archiver Appliance — archived samples over an ISO-8601 window | `EPICS_MCP_ARCHIVER_URL` |
 | `is_alarm_configured` | Phoebus Alarm Logger — is a PV in the alarm tree? | `EPICS_MCP_ALARM_URL` |
+| `get_alarm_history` | Phoebus Alarm Logger — alarm state history of a PV over a window (required start/end; newest-first; user/host stripped) | `EPICS_MCP_ALARM_URL` |
 | `lookup_device_name` | ESS Naming Service — is a device name registered + ACTIVE? (404 = definitive not-registered; a service error is withheld, never a false negative) | `EPICS_MCP_NAMING_URL` |
 
 **Display-aware** (require the optional `[displays]` extra)
@@ -227,7 +228,7 @@ All settings are read from environment variables with the `EPICS_MCP_` prefix.
 | `EPICS_MCP_ARCHIVER_URL` | _(empty)_ | `is_archived` / `get_pv_history` (Archiver MGMT root, `:17665`) |
 | `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` | _(empty)_ | Archiver retrieval root (`:17668`); empty falls back to `ARCHIVER_URL` |
 | `EPICS_MCP_ARCHIVER_AUTH` | _(empty)_ | Optional `Authorization` header for the Archiver |
-| `EPICS_MCP_ALARM_URL` | _(empty)_ | `is_alarm_configured` (Phoebus Alarm Logger REST root) |
+| `EPICS_MCP_ALARM_URL` | _(empty)_ | `is_alarm_configured` / `get_alarm_history` (Phoebus Alarm Logger REST root) |
 | `EPICS_MCP_ALARM_AUTH` | _(empty)_ | Optional `Authorization` header for the Alarm Logger |
 | `EPICS_MCP_NAMING_URL` | _(empty)_ | ESS Naming plane for `lookup_device_name` / `diagnose_connection` / `crossplane_check`. **No built-in host — no egress unless set** |
 
