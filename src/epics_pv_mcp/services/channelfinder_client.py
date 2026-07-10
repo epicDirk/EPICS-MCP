@@ -92,6 +92,14 @@ class ChannelFinderClient:
         ChannelFinder serializes ``properties`` as a list of ``{name, value, owner}``
         objects (not a flat dict), so the IOC/host live in properties named ``iocName``/
         ``hostName`` (RecSync convention). Deterministic: tags sorted.
+
+        DS-PRIVACY note: ``owner`` and ``properties['recceiverID']`` are surfaced. At ESS these are
+        RecSync service identities — ``owner`` is the ``recceiver`` service account and
+        ``recceiverID`` is a receiver-instance id, NOT a person (empirically confirmed in the
+        2026-07-09 data-source audit). They are kept because they are legitimate technical
+        provenance. If a deployment ever populated ``owner`` with a real username, the Batch-3
+        redactor at the ``services/checkers`` chokepoint strips it (a nested ``properties.*`` strip
+        for ``recceiverID``); this projection stays faithful.
         """
         raw_props = channel.get("properties")
         props: dict[str, str] = {}

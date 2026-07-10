@@ -30,6 +30,38 @@ from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmRe
 # Default alarm config-tree (topic) name; the leading path segment that selects the ES index.
 DEFAULT_ALARM_CONFIG = "Accelerator"
 
+# DS-PRIVACY: a Phoebus alarm config-CHANGE document carries ``user`` and ``host`` — WHO last
+# changed the alarm config — alongside the technical settings. Returning the raw ES record would
+# leak a person's username. We project onto this allowlist of technical fields instead. An allowlist
+# (not a denylist) means a NEW person-bearing field a future logger version adds cannot leak
+# silently — an unknown field is dropped by default. The alarm's technical configuration
+# (enable/latch/delay, operator guidance/commands) is preserved; ``user``/``host`` are not on the
+# list, so they are gone.
+_ALARM_CONFIG_ALLOWLIST = frozenset(
+    {
+        "config",
+        "pv",
+        "enabled",
+        "latching",
+        "annunciating",
+        "delay",
+        "count",
+        "filter",
+        "description",
+        "guidance",
+        "displays",
+        "commands",
+        "actions",
+        "message_time",
+        "time",
+    }
+)
+
+
+def _project_alarm_config(record: dict[str, object]) -> dict[str, object]:
+    """Return *record* restricted to the technical allowlist (drops ``user``/``host``/unknown)."""
+    return {key: value for key, value in record.items() if key in _ALARM_CONFIG_ALLOWLIST}
+
 
 class AlarmClient:
     """Read-only client for the Phoebus Alarm Logger REST API. GET-only."""
@@ -68,6 +100,10 @@ class AlarmClient:
         matching record (``size=1``, ``message_time`` DESC), so a sibling PV whose name strictly
         contains *pv* and changed more recently could mask a real hit — a known backend limitation,
         harmless for the distinct sandbox device set.
+
+        The returned ``detail`` is the config record projected onto the technical allowlist
+        (:data:`_ALARM_CONFIG_ALLOWLIST`) — the raw ES record's ``user``/``host`` (who changed the
+        config) never leave this method (DS-PRIVACY).
         """
         config_query = f"/{config_name}/*{pv}"
         data = self._get(f"{self.base_url}/search/alarm/config", {"config": config_query})
@@ -78,5 +114,5 @@ class AlarmClient:
             # Config docs have NO `pv` field → identity = leaf segment of the `config` path.
             leaf = str(record.get("config", "")).rsplit("/", 1)[-1]
             if leaf == pv:
-                return True, record
+                return True, _project_alarm_config(record)
         return False, {}

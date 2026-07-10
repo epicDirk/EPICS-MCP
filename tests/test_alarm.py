@@ -38,6 +38,32 @@ def test_is_alarm_configured_true(monkeypatch: pytest.MonkeyPatch) -> None:
     assert detail["config"] == "config:/Accelerator/DEV-TEST01/X"
 
 
+def test_is_alarm_configured_detail_strips_person_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DS-PRIVACY: a real config-change doc carries user/host (who changed it) — the returned detail
+    must drop them (and any unknown field) while keeping the technical config."""
+    client = AlarmClient("http://alarm:8081")
+    raw = {
+        "config": "config:/Accelerator/DEV-TEST01/X",
+        "enabled": True,
+        "delay": 5,
+        "guidance": [{"title": "check", "details": "..."}],
+        "user": "jdoe",
+        "host": "opi-console-3.esss",
+        "some_future_field": "leak?",
+    }
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([raw])))
+    configured, detail = client.is_alarm_configured("X")
+    assert configured is True
+    assert detail["config"] == "config:/Accelerator/DEV-TEST01/X"
+    assert detail["enabled"] is True
+    assert detail["delay"] == 5
+    assert "guidance" in detail
+    # person-bearing + unknown fields are gone
+    assert "user" not in detail
+    assert "host" not in detail
+    assert "some_future_field" not in detail
+
+
 def test_is_alarm_configured_false_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     client = AlarmClient("http://alarm")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([])))
