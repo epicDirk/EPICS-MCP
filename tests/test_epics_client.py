@@ -1,6 +1,7 @@
 """Tests für epics_client-Hilfsfunktionen (ohne EPICS-Verbindung außer dem echten-p4p-Test)."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 from typing import Any
 
@@ -42,11 +43,46 @@ def _wrap(raw: SimpleNamespace) -> SimpleNamespace:
 class _FakeArray:
     """Stands in for a numpy array — exposes ``tolist`` (real scalars are plain Python)."""
 
-    def __init__(self, data: list[float]) -> None:
+    def __init__(self, data: list[Any]) -> None:
         self._data = data
 
-    def tolist(self) -> list[float]:
+    def tolist(self) -> list[Any]:
         return list(self._data)
+
+
+class _FakeStruct:
+    """Stands in for a nested p4p ``Value`` struct — exposes BOTH ``todict()`` and ``tolist()``.
+
+    Faithful to the real p4p contract that broke the first DS-6 attempt: a real ``p4p.Value`` has
+    ``tolist()`` too (not numpy-exclusive), and its ``tolist()`` returns raw ``(name, value)``
+    tuples WITHOUT converting nested array leaves. The code must check ``todict``/``getID`` and
+    prefer it; if it regressed to the ``tolist`` branch this fake would surface the
+    raw ``_FakeArray`` tuples and the test would fail. ``getID()`` mirrors the type identifier.
+    """
+
+    def __init__(self, data: dict[str, Any], type_id: str = "structure") -> None:
+        self._data = data
+        self._type_id = type_id
+
+    def getID(self) -> str:
+        return self._type_id
+
+    def todict(self) -> dict[str, Any]:
+        return dict(self._data)
+
+    def tolist(self) -> list[tuple[str, Any]]:
+        return [(k, v) for k, v in self._data.items()]
+
+
+class _FakeNDArrayData:
+    """Stands in for the numpy image array inside an NTNDArray — dtype/size, tolist must NOT run."""
+
+    def __init__(self, dtype: str, size: int) -> None:
+        self.dtype = dtype
+        self.size = size
+
+    def tolist(self) -> list[int]:  # pragma: no cover - asserts the bulk data is never inlined
+        raise AssertionError("NTNDArray pixel data must not be dumped as a list")
 
 
 def test_format_value_full_scalar() -> None:
@@ -131,6 +167,109 @@ def test_format_value_array_uses_tolist() -> None:
     result = _format_value("WF:PV", _wrap(raw))
 
     assert result["value"] == [1.0, 2.0, 3.0]
+
+
+# ---------------------------------------------------------------------------
+# DS-6 — complex PVA types (NTTable / NTNDArray / nested struct) are surfaced as real,
+# JSON-serialisable data instead of value=None or a raw p4p passthrough that fails at the MCP
+# JSON boundary. Every test json.dumps the COMPLETE tool result (the real failure surface).
+# ---------------------------------------------------------------------------
+
+
+def test_format_value_nttable_columns() -> None:
+    """NTTable -> {labels, columns:{name:list}} with numpy columns converted to lists."""
+    columns = _FakeStruct(
+        {"device": _FakeArray(["A", "B"]), "value": _FakeArray([1.0, 2.0])},
+        type_id="structure",
+    )
+    raw = SimpleNamespace(
+        getID=lambda: "epics:nt/NTTable:1.0",
+        labels=["Device", "Value"],
+        value=columns,
+        alarm=SimpleNamespace(severity=0, status=0, message=""),
+    )
+
+    result = _format_value("TBL:PV", _wrap(raw))
+
+    assert result["value"] == {
+        "labels": ["Device", "Value"],
+        "columns": {"device": ["A", "B"], "value": [1.0, 2.0]},
+    }
+    assert "alarm" in result  # block extractors still run alongside the table value
+    json.dumps(result)  # gate: the whole result serialises
+
+
+def test_format_value_ntndarray_shape_dtype_only() -> None:
+    """NTNDArray -> shape/dtype summary with the pixel data OMITTED (never inlined as a list).
+
+    p4p stores ``dimension`` as ``[width, height]`` — REVERSED from numpy's ``(rows, cols)`` —
+    so a 2-row×3-col image has wire dimension sizes ``[3, 2]``; the reported shape is reversed
+    back to numpy order ``[2, 3]``. (A real-p4p test below pins this against an actual NTNDArray.)
+    """
+    raw = SimpleNamespace(
+        getID=lambda: "epics:nt/NTNDArray:1.0",
+        dimension=[SimpleNamespace(size=3), SimpleNamespace(size=2)],  # wire order (width, height)
+        value=_FakeNDArrayData(dtype="uint8", size=6),
+    )
+
+    result = _format_value("IMG:PV", _wrap(raw))
+
+    value = result["value"]
+    assert isinstance(value, dict)
+    assert value["shape"] == [2, 3]  # numpy (rows, cols) order after reversal
+    assert value["dtype"] == "uint8"
+    assert value["element_count"] == 6
+    assert value["data_omitted"] is True
+    assert "note" in value
+    json.dumps(result)  # gate: serialises, and _FakeNDArrayData.tolist was never called
+
+
+def test_format_value_nested_struct_not_raw_passthrough() -> None:
+    """A generic nested struct is serialised via todict(), NOT returned as the raw p4p wrapper
+    (which used to slip through and fail at the MCP JSON boundary)."""
+    nested = _FakeStruct({"x": 1.0, "y": _FakeArray([2.0, 3.0])}, type_id="structure")
+    raw = SimpleNamespace(value=nested)
+
+    result = _format_value("STRUCT:PV", _wrap(raw))
+
+    assert result["value"] == {"x": 1.0, "y": [2.0, 3.0]}
+    json.dumps(result)  # gate: no raw p4p object leaks into the result
+
+
+def test_format_value_unsupported_struct_without_todict_is_summarised() -> None:
+    """A structured value that cannot be converted (no todict) is surfaced as an honest summary,
+    never the raw object and never a crash — the last-resort fallback."""
+
+    class _Opaque:
+        def getID(self) -> str:
+            return "epics:nt/NTUnion:1.0"
+
+    raw = SimpleNamespace(value=_Opaque())
+
+    result = _format_value("OPAQUE:PV", _wrap(raw))
+
+    value = result["value"]
+    assert isinstance(value, dict)
+    assert value["unsupported_type"] == "epics:nt/NTUnion:1.0"
+    assert "note" in value
+    json.dumps(result)
+
+
+def test_format_value_broken_complex_type_falls_back_to_none() -> None:
+    """The None-path: if extraction raises, value stays None (honest 'could not read'), never a
+    crash and never garbage — same contract as before, now covering complex types."""
+
+    class _Boom:
+        def getID(self) -> str:
+            raise RuntimeError("boom")
+
+    raw = SimpleNamespace(value=_Boom(), alarm=SimpleNamespace(severity=1, status=0, message="x"))
+
+    result = _format_value("BOOM:PV", _wrap(raw))
+
+    assert result["value"] is None
+    assert "alarm" in result  # blocks still extracted; only the value failed
+    json.dumps(result)
 
 
 def test_format_value_string_scalar_carries_alarm() -> None:
@@ -393,6 +532,99 @@ def test_format_value_real_p4p() -> None:
     enum = eresult["enum"]
     assert isinstance(enum, dict)
     assert enum["label"] == "ON"
+
+
+# --- DS-6 against REAL p4p complex types (the shapes SimpleNamespace fakes cannot reproduce:
+#     a real p4p Value has BOTH tolist() and todict(), and structure[]/union-array come back as
+#     plain Python lists of Value/ndarray). Each asserts json.dumps(result) succeeds — the real
+#     MCP-boundary failure surface. These are the tests that would have caught the first attempt.
+
+
+def test_format_value_real_p4p_struct_with_array_serialises() -> None:
+    """A generic (non-NT) struct whose value holds an array leaf. p4p does NOT unwrap it, so
+    _format_value gets a raw Value that ALSO has .tolist(); the value must be serialised via
+    todict() and json.dumps(result) must succeed (the exact bug the fakes missed)."""
+    from p4p import Type, Value
+
+    t = Type([("value", ("S", None, [("name", "s"), ("samples", "ad"), ("n", "i")]))])
+    v = Value(t, {"value": {"name": "roi", "samples": [1.0, 2.0, 3.0], "n": 3}})
+
+    result = _format_value("STRUCT:PV", v)
+
+    assert result["value"] == {"name": "roi", "samples": [1.0, 2.0, 3.0], "n": 3}
+    json.dumps(result)
+
+
+def test_format_value_real_p4p_structure_array_serialises() -> None:
+    """A top-level structure[] value -> p4p returns raw.value as a plain list of Value objects;
+    each element must be converted and json.dumps(result) must succeed."""
+    from p4p import Type, Value
+
+    t = Type([("value", ("aS", None, [("x", "d"), ("y", "d")]))])
+    v = Value(t, {"value": [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}]})
+
+    result = _format_value("SARR:PV", v)
+
+    assert result["value"] == [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}]
+    json.dumps(result)
+
+
+def test_format_value_real_p4p_union_array_serialises() -> None:
+    """A variant-union array (av) -> raw.value is a plain list of numpy arrays (the NTMultiChannel
+    top-level shape); each must convert to a list and json.dumps(result) must succeed."""
+    import numpy as np
+    from p4p import Type, Value
+
+    t = Type([("value", "av")])
+    v = Value(t, {"value": [np.array([1, 2, 3], dtype=np.int32), np.array([4.0, 5.0])]})
+
+    result = _format_value("UARR:PV", v)
+
+    assert result["value"] == [[1, 2, 3], [4.0, 5.0]]
+    json.dumps(result)
+
+
+def test_format_value_real_p4p_ntndarray_shape_numpy_order() -> None:
+    """A real NTNDArray reports shape in numpy (rows, cols) order (NOT the reversed wire dimension)
+    and omits the pixel data; json.dumps(result) must succeed."""
+    import numpy as np
+    from p4p.nt import NTNDArray
+
+    img = np.arange(6, dtype=np.uint8).reshape(2, 3)  # 2 rows x 3 cols
+    nt = NTNDArray()
+
+    result = _format_value("IMG:PV", nt.unwrap(nt.wrap(img)))
+
+    value = result["value"]
+    assert isinstance(value, dict)
+    assert value["shape"] == [2, 3]  # numpy order, not the reversed wire dimension [3, 2]
+    assert value["data_omitted"] is True
+    assert value["dtype"] == "uint8"
+    json.dumps(result)
+
+
+def test_format_value_real_p4p_nttable_serialises() -> None:
+    """A real NTTable -> {labels, columns:{name:list}}; json.dumps(result) must succeed.
+
+    p4p's default Context does NOT unwrap NTTable (its unwrap set is NTScalar/NTScalarArray/
+    NTEnum/NTNDArray), so production passes the RAW NTTable Value here — routed by its top-level
+    getID/labels — not the unwrapped list-of-rows that ``NTTable.unwrap`` would produce.
+    """
+    from p4p.nt import NTTable
+
+    nt = NTTable(columns=[("device", "s"), ("value", "d")])
+    v = nt.wrap([{"device": "A", "value": 1.0}, {"device": "B", "value": 2.0}])
+
+    result = _format_value(
+        "TBL:PV", v
+    )  # raw Value, as ctxt.get delivers it (NTTable not unwrapped)
+
+    value = result["value"]
+    assert isinstance(value, dict)
+    assert value["columns"]["device"] == ["A", "B"]
+    assert value["columns"]["value"] == [1.0, 2.0]
+    assert value["labels"] == ["device", "value"]
+    json.dumps(result)
 
 
 # --- seam: the metadata actually reaches the tool layer -----------------------

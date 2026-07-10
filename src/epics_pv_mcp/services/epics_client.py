@@ -310,8 +310,113 @@ def _drop_degenerate_limits(d: dict[str, object]) -> None:
         del d["limit_high"]
 
 
+def _type_id(raw: object) -> str:
+    """The p4p normative-type id (``epics:nt/NTTable:1.0`` …), or ``""`` when unavailable."""
+    get_id = getattr(raw, "getID", None)
+    return str(get_id()) if callable(get_id) else ""
+
+
+def _is_p4p_value(obj: object) -> bool:
+    """True for a p4p ``Value`` (struct / union / wrapper).
+
+    Crucial discriminator: a real p4p ``Value`` exposes BOTH ``todict()`` AND ``tolist()`` — the
+    latter is NOT numpy-exclusive — so a struct cannot be told apart from a numpy array by
+    ``tolist`` alone. A numpy array has ``tolist`` but no ``todict``. Requiring ``todict`` plus a
+    ``getID``/``type`` marker identifies the p4p ``Value`` and routes it through ``todict()`` (a
+    struct's ``tolist()`` yields raw ``(name, value)`` tuples with numpy/Value leaves un-converted).
+    """
+    return callable(getattr(obj, "todict", None)) and (
+        callable(getattr(obj, "getID", None)) or getattr(obj, "type", None) is not None
+    )
+
+
+def _struct_to_dict(value_field: object) -> dict[str, object]:
+    """A p4p struct's ``todict()`` (or a plain mapping) as a dict; ``{}`` when neither applies."""
+    todict = getattr(value_field, "todict", None)
+    if callable(todict):
+        return dict(todict())
+    if isinstance(value_field, dict):
+        return dict(value_field)
+    return {}
+
+
+def _summarize_unknown(obj: object) -> dict[str, object]:
+    """An object that cannot be converted -> an honest summary, never the raw object."""
+    get_id = getattr(obj, "getID", None)
+    type_id = str(get_id()) if callable(get_id) else type(obj).__name__
+    return {
+        "unsupported_type": type_id,
+        "note": "value not JSON-serialisable; surfaced as a summary only",
+    }
+
+
+def _jsonify(obj: object) -> object:
+    """Return a JSON-serialisable form of ANY p4p / numpy / plain value, recursively.
+
+    The single robust converter behind DS-6. A p4p ``Value`` goes via ``todict()`` (NOT
+    ``tolist()``); a numpy array via ``tolist()``; dicts/lists/tuples recurse element-wise (so a
+    ``structure[]`` list-of-Value or a union list-of-ndarray is fully converted — a plain ``list``
+    is never trusted wholesale); scalars pass through; anything else becomes an honest summary.
+    Guarantees the result never contains a raw p4p object or a numpy array.
+    """
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    if _is_p4p_value(obj):
+        return _jsonify(_struct_to_dict(obj))
+    tolist = getattr(obj, "tolist", None)
+    if callable(tolist):  # a numpy array (p4p Values were already handled above)
+        return _jsonify(tolist())
+    if isinstance(obj, dict):
+        return {str(k): _jsonify(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_jsonify(v) for v in obj]
+    return _summarize_unknown(obj)
+
+
+def _extract_nt_table(raw: object) -> dict[str, object]:
+    """NTTable -> ``{labels: [...], columns: {name: [...]}}`` (numpy columns converted to lists)."""
+    labels_field = getattr(raw, "labels", None)
+    labels = [str(x) for x in labels_field] if labels_field is not None else []
+    columns = {str(k): _jsonify(v) for k, v in _struct_to_dict(getattr(raw, "value", None)).items()}
+    return {"labels": labels, "columns": columns}
+
+
+def _extract_nt_ndarray(raw: object) -> dict[str, object]:
+    """NTNDArray -> a shape/dtype summary; the (potentially large) pixel data is OMITTED.
+
+    Inlining a full image as a nested list would blow the MCP payload, so this surfaces the
+    structural metadata with an honest ``data_omitted`` flag + note instead of the raw array.
+    ``shape`` is reported in numpy (rows-first) order: p4p stores ``dimension`` as
+    ``[width, height, …]`` REVERSED from numpy's ``(rows, cols, …)``, so the sizes are reversed
+    back to match the array's natural order.
+    """
+    dims = getattr(raw, "dimension", None)
+    shape = list(reversed([int(getattr(d, "size", 0)) for d in dims])) if dims is not None else []
+    out: dict[str, object] = {
+        "shape": shape,
+        "data_omitted": True,
+        "note": "NTNDArray pixel data omitted (potentially large); shape + dtype only.",
+    }
+    array = getattr(raw, "value", None)
+    dtype = getattr(array, "dtype", None)
+    if dtype is not None:
+        out["dtype"] = str(dtype)
+    size = getattr(array, "size", None)
+    if isinstance(size, int):
+        out["element_count"] = size
+    return out
+
+
 def _extract_value(raw: object) -> tuple[object, dict[str, object] | None]:
-    """Return ``(value, enum_or_none)``. For NTEnum the value stays the numeric index."""
+    """Return ``(value, enum_or_none)`` as JSON-serialisable data.
+
+    Scalars pass through; arrays become lists; NTEnum keeps its numeric index plus an ``enum``
+    block. DS-6: complex normative types that previously slipped through as a raw p4p wrapper
+    (failing at the MCP JSON boundary) or as ``value=None`` are surfaced as real data — NTTable as
+    ``{labels, columns}``, NTNDArray as a shape/dtype summary (pixel data omitted), and every other
+    shape (nested struct, ``structure[]``, variant-union array, numpy array) via the robust
+    :func:`_jsonify` converter. The value is never a raw p4p object or numpy array.
+    """
     val_field = getattr(raw, "value", raw)
     choices = getattr(val_field, "choices", None)
     if choices is not None:
@@ -320,11 +425,16 @@ def _extract_value(raw: object) -> tuple[object, dict[str, object] | None]:
         labels = [str(c) for c in choices]
         label = labels[index] if 0 <= index < len(labels) else None
         return index, {"index": index, "label": label, "choices": labels}
-    # numpy array -> list (real unwrapped scalars are already plain float/int/str).
-    tolist = getattr(val_field, "tolist", None)
-    if callable(tolist):
-        val_field = tolist()
-    return val_field, None
+    type_id = _type_id(raw)
+    # NTNDArray + NTTable get a bespoke shape BEFORE the generic converter (an NTNDArray value IS an
+    # array that must be summarised, not dumped whole; an NTTable gets {labels, columns}).
+    if type_id.startswith("epics:nt/NTNDArray") or getattr(raw, "dimension", None) is not None:
+        return _extract_nt_ndarray(raw), None
+    if type_id.startswith("epics:nt/NTTable") or getattr(raw, "labels", None) is not None:
+        return _extract_nt_table(raw), None
+    # Everything else (scalar, numpy array, nested struct, structure[], union array) — one robust,
+    # recursive converter that discriminates a p4p Value (-> todict) from a numpy array (-> tolist).
+    return _jsonify(val_field), None
 
 
 def _extract_alarm(raw: object) -> dict[str, object] | None:
