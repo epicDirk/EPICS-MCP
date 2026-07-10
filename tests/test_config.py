@@ -46,6 +46,14 @@ class TestEpicsConfigDefaults:
         cfg = EpicsConfig()
         assert cfg.max_monitor_events == 1000
 
+    def test_ca_bundle_default_empty(self) -> None:
+        cfg = EpicsConfig()
+        assert cfg.ca_bundle == ""
+
+    def test_tls_verify_default_true(self) -> None:
+        cfg = EpicsConfig()
+        assert cfg.tls_verify is True
+
 
 class TestEpicsConfigEnvOverride:
     """Verify environment variable overrides via monkeypatch."""
@@ -69,6 +77,16 @@ class TestEpicsConfigEnvOverride:
         monkeypatch.setenv("EPICS_MCP_WRITE_RATE_LIMIT", "20")
         cfg = EpicsConfig()
         assert cfg.write_rate_limit == 20
+
+    def test_ca_bundle_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EPICS_MCP_CA_BUNDLE", "/etc/ssl/ess-root-ca.pem")
+        cfg = EpicsConfig()
+        assert cfg.ca_bundle == "/etc/ssl/ess-root-ca.pem"
+
+    def test_tls_verify_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EPICS_MCP_TLS_VERIFY", "false")
+        cfg = EpicsConfig()
+        assert cfg.tls_verify is False
 
 
 class TestEpicsConfigValidation:

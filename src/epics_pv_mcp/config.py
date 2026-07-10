@@ -47,6 +47,18 @@ class EpicsConfig(BaseSettings):
     diagnose_timeout: float = Field(default=5.0, gt=0)
 
     # --- Optional REST services (read-only; empty URL = disabled, no network call) ---
+    # TLS trust for the HTTPS REST planes (ChannelFinder/Archiver/Alarm/Naming). ``ca_bundle`` is a
+    # path to a CA-bundle PEM — set it when the REST hosts use a certificate signed by an internal
+    # root CA that is NOT in certifi (the default trust store), which otherwise fails with
+    # "self-signed certificate in chain". It is applied to EVERY REST session at the single
+    # ``build_retrying_session`` chokepoint. ``tls_verify=False`` disables verification entirely —
+    # an escape hatch for an internal network only, NOT the default. Precedence: ``ca_bundle``
+    # (path) > ``tls_verify=False`` > default (certifi). When either is set explicitly the session
+    # also pins ``trust_env=False`` so a ``REQUESTS_CA_BUNDLE`` env var cannot silently
+    # override it (requests would otherwise let the env value win); on the plain default
+    # ``trust_env`` stays on, so the zero-code ``REQUESTS_CA_BUNDLE`` path keeps working.
+    ca_bundle: str = ""
+    tls_verify: bool = True
     # ChannelFinder service root incl. context path, e.g. "http://host:8080/ChannelFinder".
     channelfinder_url: str = ""
     channelfinder_auth: str = ""  # optional Authorization header value for secured deployments

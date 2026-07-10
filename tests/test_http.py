@@ -14,6 +14,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.services._http import build_retrying_session, rest_get_json
 from epics_pv_mcp.services.archiver_exceptions import (
     ArchiverConnectionError,
@@ -58,6 +59,70 @@ def test_session_mounts_the_single_3_retry_policy() -> None:
 def test_session_forwards_optional_auth_header() -> None:
     session = build_retrying_session(auth_header="Bearer tok")
     assert session.headers["authorization"] == "Bearer tok"
+
+
+# --- TLS verify resolution at the single chokepoint (DS-1) ---
+
+
+def test_verify_kwarg_true_keeps_default_and_trust_env() -> None:
+    """An explicit ``verify=True`` mirrors the plain default: verify on, trust_env untouched so the
+    zero-code REQUESTS_CA_BUNDLE env path still works."""
+    session = build_retrying_session(verify=True)
+    assert session.verify is True
+    assert session.trust_env is True
+
+
+def test_verify_kwarg_ca_path_sets_verify_and_pins_trust_env() -> None:
+    """A CA-bundle path is applied AND trust_env is pinned off so a REQUESTS_CA_BUNDLE env var
+    cannot override the explicit bundle via requests' per-request environment merge."""
+    session = build_retrying_session(verify="ess-root-ca.pem")
+    assert session.verify == "ess-root-ca.pem"
+    assert session.trust_env is False
+
+
+def test_verify_kwarg_false_disables_and_pins_trust_env() -> None:
+    """tls_verify=False must actually disable verification — pinning trust_env off is what makes the
+    escape hatch real even when REQUESTS_CA_BUNDLE is set in the environment."""
+    session = build_retrying_session(verify=False)
+    assert session.verify is False
+    assert session.trust_env is False
+
+
+def test_verify_resolves_ca_bundle_from_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no kwarg the chokepoint reads ITS OWN get_config
+    (epics_pv_mcp.services._http.get_config, NOT checkers.get_config) → ca_bundle path wins and
+    trust_env is pinned off."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services._http.get_config",
+        lambda: EpicsConfig(ca_bundle="ca.pem"),
+    )
+    session = build_retrying_session()
+    assert session.verify == "ca.pem"
+    assert session.trust_env is False
+
+
+def test_verify_resolves_tls_verify_false_from_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "epics_pv_mcp.services._http.get_config",
+        lambda: EpicsConfig(ca_bundle="", tls_verify=False),
+    )
+    session = build_retrying_session()
+    assert session.verify is False
+    assert session.trust_env is False
+
+
+def test_verify_default_config_verifies_and_keeps_trust_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The plain default (ca_bundle empty, tls_verify True) verifies against certifi and leaves
+    trust_env on — the zero-code REQUESTS_CA_BUNDLE path stays available."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services._http.get_config",
+        lambda: EpicsConfig(ca_bundle="", tls_verify=True),
+    )
+    session = build_retrying_session()
+    assert session.verify is True
+    assert session.trust_env is True
 
 
 # --- rest_exceptions root ---

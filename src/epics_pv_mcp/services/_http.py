@@ -17,13 +17,17 @@ import logging
 import requests
 from requests.adapters import HTTPAdapter
 
+from epics_pv_mcp.config import get_config
 from epics_pv_mcp.services.rest_exceptions import RestConnectionError, RestResponseError
 
 logger = logging.getLogger(__name__)
 
 
 def build_retrying_session(
-    *, accept: str = "application/json", auth_header: str | None = None
+    *,
+    accept: str = "application/json",
+    auth_header: str | None = None,
+    verify: bool | str | None = None,
 ) -> requests.Session:
     """Return a :class:`requests.Session` with the accept header, optional auth, and a retry policy.
 
@@ -31,11 +35,30 @@ def build_retrying_session(
     shared by every REST client — change it here and all planes inherit it. urllib3 ships with
     requests, but the ``Retry`` import stays guarded so a stripped environment degrades to no-retry
     rather than failing at construction.
+
+    TLS trust is resolved HERE, the single place every REST session is built, so all four clients
+    (and the crossplane/coverage adapters and the direct diagnose naming client) inherit it without
+    threading a ``verify`` argument through nine construction sites. ``verify`` defaults to the
+    config (``ca_bundle`` path > ``tls_verify=False`` > ``True``); pass it explicitly only in tests.
+    When the effective ``verify`` is anything other than plain ``True`` (a CA-bundle path, or
+    verification disabled) the session also pins ``trust_env=False`` — otherwise a
+    ``REQUESTS_CA_BUNDLE`` in the environment would win over ``session.verify`` via requests'
+    per-request environment merge. On the plain default (``verify is True``) ``trust_env`` stays on,
+    keeping the zero-code
+    ``REQUESTS_CA_BUNDLE`` path working. Tradeoff: ``trust_env=False`` also disables proxy /
+    ``NO_PROXY`` / netrc environment, which is why it is pinned ONLY when an explicit CA decision is
+    in play (the internal-network REST planes), not on the default.
     """
     session = requests.Session()
     session.headers.update({"accept": accept})
     if auth_header:
         session.headers.update({"authorization": auth_header})
+    if verify is None:
+        cfg = get_config()
+        verify = cfg.ca_bundle or cfg.tls_verify
+    session.verify = verify
+    if verify is not True:
+        session.trust_env = False
     try:
         from urllib3.util.retry import Retry
 
