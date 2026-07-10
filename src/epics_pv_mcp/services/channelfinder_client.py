@@ -30,6 +30,15 @@ from epics_pv_mcp.services.channelfinder_exceptions import (
 # Default upper bound on returned channels — a broad glob (``*``) can match a whole site.
 DEFAULT_MAX_RESULTS = 500
 
+# DS-PRIVACY: ChannelFinder ``owner`` is the account that owns the channel. For RecSync-populated
+# channels it is the ``recceiver`` SERVICE account (audit-observed) — not a person. But a channel
+# created via the CF web UI / cfstore is owned by the logged-in ENGINEER'S ESS username — a personal
+# name — and the two are indistinguishable from the value alone. So we keep ``owner`` ONLY when it
+# is on this conservative service-account allowlist and redact any other value to ``""`` (unknown →
+# redacted, the safe default). The Batch-3 redactor at the ``services/checkers`` chokepoint is the
+# durable form; this is the Batch-1 interim guard.
+_SAFE_OWNER_ACCOUNTS = frozenset({"recceiver"})
+
 
 class ChannelInfo(TypedDict):
     """Projected, read-only view of one ChannelFinder channel."""
@@ -93,13 +102,11 @@ class ChannelFinderClient:
         objects (not a flat dict), so the IOC/host live in properties named ``iocName``/
         ``hostName`` (RecSync convention). Deterministic: tags sorted.
 
-        DS-PRIVACY note: ``owner`` and ``properties['recceiverID']`` are surfaced. At ESS these are
-        RecSync service identities — ``owner`` is the ``recceiver`` service account and
-        ``recceiverID`` is a receiver-instance id, NOT a person (empirically confirmed in the
-        2026-07-09 data-source audit). They are kept because they are legitimate technical
-        provenance. If a deployment ever populated ``owner`` with a real username, the Batch-3
-        redactor at the ``services/checkers`` chokepoint strips it (a nested ``properties.*`` strip
-        for ``recceiverID``); this projection stays faithful.
+        DS-PRIVACY: ``owner`` is kept only when it is a known service account
+        (:data:`_SAFE_OWNER_ACCOUNTS`) and redacted to ``""`` otherwise — a CF-web-UI/cfstore
+        channel is owned by a person's ESS username. ``properties['recceiverID']`` (an opaque
+        receiver-instance id) is dropped as belt-and-braces. IOC/host/tags — the technical
+        provenance — are untouched.
         """
         raw_props = channel.get("properties")
         props: dict[str, str] = {}
@@ -107,15 +114,18 @@ class ChannelFinderClient:
             for prop in raw_props:
                 if isinstance(prop, dict) and "name" in prop:
                     props[str(prop["name"])] = str(prop.get("value", ""))
+        props.pop("recceiverID", None)  # DS-PRIVACY: opaque receiver-instance id, not surfaced
         raw_tags = channel.get("tags")
         tags: list[str] = []
         if isinstance(raw_tags, list):
             tags.extend(
                 str(tag["name"]) for tag in raw_tags if isinstance(tag, dict) and "name" in tag
             )
+        raw_owner = str(channel.get("owner", ""))
+        owner = raw_owner if raw_owner in _SAFE_OWNER_ACCOUNTS else ""
         return ChannelInfo(
             name=str(channel.get("name", "")),
-            owner=str(channel.get("owner", "")),
+            owner=owner,
             ioc_name=props.get("iocName"),
             host_name=props.get("hostName"),
             properties=props,

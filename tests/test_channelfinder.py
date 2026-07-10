@@ -50,6 +50,34 @@ def test_project_extracts_ioc_host_tags(monkeypatch: pytest.MonkeyPatch) -> None
     assert out[0]["tags"] == ("alarm", "archived")  # sorted, deterministic
 
 
+def test_project_redacts_person_owner_and_recceiverid(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DS-PRIVACY: a service-account owner (recceiver) is kept, a person's username owner is
+    redacted to "", and the opaque properties['recceiverID'] is dropped — technical provenance
+    (iocName/hostName) is untouched."""
+    client = ChannelFinderClient("http://cf")
+    payload = [
+        {
+            "name": "SYS:PV1",
+            "owner": "recceiver",
+            "properties": [
+                {"name": "iocName", "value": "IOC1"},
+                {"name": "recceiverID", "value": "abc-123"},
+            ],
+        },
+        {
+            "name": "SYS:PV2",
+            "owner": "jdoe",  # a person's ESS username (CF web-UI channel)
+            "properties": [{"name": "iocName", "value": "IOC2"}],
+        },
+    ]
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    out = client.find_channels("SYS:*")
+    assert out[0]["owner"] == "recceiver"  # service account kept
+    assert "recceiverID" not in out[0]["properties"]  # opaque id dropped
+    assert out[0]["ioc_name"] == "IOC1"  # technical provenance untouched
+    assert out[1]["owner"] == ""  # person's username redacted
+
+
 def test_empty_result(monkeypatch: pytest.MonkeyPatch) -> None:
     client = ChannelFinderClient("http://cf")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([])))

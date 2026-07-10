@@ -37,6 +37,10 @@ DEFAULT_ALARM_CONFIG = "Accelerator"
 # silently — an unknown field is dropped by default. The alarm's technical configuration
 # (enable/latch/delay, operator guidance/commands) is preserved; ``user``/``host`` are not on the
 # list, so they are gone.
+# RESIDUAL (Batch-1 accepted): guidance/displays/commands/actions/description are AUTHORED free text
+# and could embed a person's name in prose (e.g. "call Jane Doe"). Structurally removing the auto
+# audit metadata (user/host) is the Batch-1 guard; general free-text redaction is deferred to the
+# Batch-3/DS-5 redactor (same class as Olog free text).
 _ALARM_CONFIG_ALLOWLIST = frozenset(
     {
         "config",

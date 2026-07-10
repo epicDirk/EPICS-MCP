@@ -21,6 +21,8 @@ from epics_pv_mcp.services.archiver_exceptions import (
     ArchiverError,
     ArchiverResponseError,
 )
+from epics_pv_mcp.services.channelfinder_client import ChannelFinderClient
+from epics_pv_mcp.services.naming_client import NamingServiceClient
 from epics_pv_mcp.services.rest_exceptions import (
     RestClientError,
     RestConnectionError,
@@ -123,6 +125,35 @@ def test_verify_default_config_verifies_and_keeps_trust_env(
     session = build_retrying_session()
     assert session.verify is True
     assert session.trust_env is True
+
+
+def test_channelfinder_client_session_inherits_ca_from_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DS-1 acceptance 3(c): the CF client (which CFRegistryChecker builds for crossplane/coverage)
+    inherits the configured CA via the build_retrying_session chokepoint. A future refactor that
+    constructed its session another way would fail this anti-regression guard."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services._http.get_config",
+        lambda: EpicsConfig(ca_bundle="ca.pem"),
+    )
+    client = ChannelFinderClient("http://cf", auth_header=None)
+    assert client.session.verify == "ca.pem"
+    assert client.session.trust_env is False
+
+
+def test_naming_client_session_inherits_ca_from_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DS-1 acceptance 3(c): the Naming client that diagnose._gather_naming constructs DIRECTLY
+    (bypassing the checkers factory) still inherits the CA — the chokepoint covers it too."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services._http.get_config",
+        lambda: EpicsConfig(ca_bundle="ca.pem"),
+    )
+    client = NamingServiceClient(base_url="http://naming")
+    assert client.session.verify == "ca.pem"
+    assert client.session.trust_env is False
 
 
 # --- rest_exceptions root ---
