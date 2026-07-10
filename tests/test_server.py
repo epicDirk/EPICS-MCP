@@ -87,3 +87,17 @@ async def test_lookup_device_name_disabled_by_default(monkeypatch: pytest.Monkey
     result = await lookup_device_name("DEV-TEST01:Ctrl-EVR-01")
     assert result["enabled"] is False
     assert result["registered"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_alarm_history_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The DS-3 get_alarm_history tool is registered and, with EPICS_MCP_ALARM_URL unset, returns a
+    structured enabled:false result and makes no network call (disabled by default)."""
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import get_alarm_history
+    from epics_pv_mcp.services import checkers
+
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(alarm_url=""))
+    result = await get_alarm_history("DEV-TEST01:X", "2026-06-01", "2026-06-02")
+    assert result["enabled"] is False
+    assert result["events"] == []

@@ -18,7 +18,7 @@ from epics_pv_mcp.services.diagnose import (
     DEFAULT_CHECK_NAMING,
 )
 from epics_pv_mcp.tool_errors import translate_epics_errors
-from epics_pv_mcp.tools.alarm import _is_alarm_configured
+from epics_pv_mcp.tools.alarm import _get_alarm_history, _is_alarm_configured
 from epics_pv_mcp.tools.archiver import _get_pv_history, _is_archived
 from epics_pv_mcp.tools.channelfinder import _find_channels
 from epics_pv_mcp.tools.diagnose_connection import _diagnose_connection
@@ -38,12 +38,12 @@ mcp = FastMCP(
         "Read-only EPICS PV access by default: read live values and metadata, monitor, "
         "discover, validate the PVs of a .bob display, cross-plane provenance, device lookup "
         "(screens + live + source IOC), ChannelFinder lookups, Archiver history, Alarm "
-        "configuration and ESS Naming-Service device-name lookup. The only mutating tool, "
-        "set_pv_value, is gated OFF by "
+        "configuration and history, and ESS Naming-Service device-name lookup. The only mutating "
+        "tool, set_pv_value, is gated OFF by "
         "default and additionally requires EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, "
         "a rate limit and an audit log. The REST-backed tools (find_channels, is_archived, "
-        "get_pv_history, is_alarm_configured, lookup_device_name) stay disabled until their *_URL "
-        "env vars are set; an empty URL means "
+        "get_pv_history, is_alarm_configured, get_alarm_history, lookup_device_name) stay disabled "
+        "until their *_URL env vars are set; an empty URL means "
         "no client and no network call. Network reach is localhost-isolated by default: the "
         "server opens no non-local connection unless its launcher widens the EPICS address-list "
         "environment (EPICS_PVA_ADDR_LIST / EPICS_CA_ADDR_LIST and the matching *_AUTO_ADDR_LIST); "
@@ -351,6 +351,58 @@ async def is_alarm_configured(
     Alarm Logger was running at config-import time (else the config change never reached its index).
     """
     return await _is_alarm_configured(pv, config_name, timeout)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def get_alarm_history(
+    pv: Annotated[
+        str,
+        Field(
+            description="EPICS PV / device name (matched as a wildcard substring on the alarm "
+            "config path; each event carries its own pv/config so over-matches stay visible)"
+        ),
+    ],
+    start: Annotated[
+        str,
+        Field(
+            description="Window start (REQUIRED) — absolute (ISO-8601, e.g. 2026-06-01T00:00:00Z) "
+            "or a relative amount (e.g. '8 hours', '2 days')"
+        ),
+    ],
+    end: Annotated[
+        str,
+        Field(description="Window end (REQUIRED) — absolute (ISO-8601) or a relative amount"),
+    ],
+    max_events: Annotated[
+        int,
+        # le=999, not 1000: the client requests size=max_events+1 so `capped` is an honest
+        # fetched>max_events. The Alarm Logger's default es_max_size is 1000 and it clamps
+        # size=min(es_max_size, requested); capping max_events at 999 keeps size<=1000 so the +1
+        # probe still fits under the DEFAULT ceiling. (A backend configured with a lower es_max_size
+        # can still under-report capped — documented on AlarmClient.get_alarm_history.)
+        Field(description="Cap on returned events, newest first", ge=1, le=999),
+    ] = 100,
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """Fetch the alarm state history of a PV over a window (Phoebus Alarm Logger /search/alarm).
+
+    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ALARM_URL is set. start
+    and end are required (a defaultless query must not pull the whole history). The stream carries
+    alarm STATE changes and also alarm-CONFIG-change messages (the config field prefix
+    state:/config: distinguishes them). Events are newest first and carry only technical fields
+    (severity/message/value/time/current_severity/current_message/enabled/mode/pv/config); the raw
+    doc's user/host (who acknowledged/enabled/disabled) and command are stripped (privacy). capped
+    is true when more than max_events matched.
+    """
+    return await _get_alarm_history(pv, start, end, max_events, timeout)
 
 
 @mcp.tool(
