@@ -66,10 +66,10 @@ def test_is_alarm_configured_detail_strips_person_fields(monkeypatch: pytest.Mon
 
 
 def test_is_alarm_configured_withholds_authored_freetext(monkeypatch: pytest.MonkeyPatch) -> None:
-    """DS-PRIVACY: the pre-live-smoke audit exhibited a person-name leak through the ALLOWED
-    authored free-text fields — a ``mailto:`` in ``actions`` and a name in ``guidance`` prose
-    survived the key-only allowlist. Every authored free-text VALUE must now be withheld (Olog
-    treatment); the key stays so a caller still learns the field exists, technical fields pass."""
+    """DS-PRIVACY (defense-in-depth): if an alarm-logger ever surfaces the authored free-text
+    fields FLAT at top level, each VALUE must be withheld (Olog treatment) — key kept, value gone.
+    NOTE: the CURRENT upstream nests these inside ``config_msg`` (dropped by the allowlist — see
+    ``..._drops_config_msg_person_data``); this only guards the hypothetical flat shape."""
     client = AlarmClient("http://alarm:8081")
     raw = {
         "config": "config:/Accelerator/Vacuum/Vac-VVMC-01:Pos-R",
@@ -94,6 +94,33 @@ def test_is_alarm_configured_withholds_authored_freetext(monkeypatch: pytest.Mon
     assert detail["config"] == "config:/Accelerator/Vacuum/Vac-VVMC-01:Pos-R"
     assert "user" not in detail
     assert "host" not in detail
+
+
+def test_is_alarm_configured_drops_config_msg_person_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DS-PRIVACY (real upstream shape): a ``/search/alarm/config`` doc deserializes to the
+    Phoebus ``AlarmLogMessage`` shape {config, user, host, enabled, config_msg, message_time}. The
+    person data — who changed it (``user``/``host``) and the serialized ``AlarmConfigMessage``
+    (``config_msg``, which embeds guidance prose / ``mailto:`` actions) — rides in fields that are
+    NONE of them on the allowlist. The load-bearing drop is the allowlist projection: assert the
+    three person-bearing fields are absent and only the technical fields remain."""
+    client = AlarmClient("http://alarm:8081")
+    raw = {
+        "config": "config:/Accelerator/Vacuum/Vac-VVMC-01:Pos-R",
+        "user": "eng.smith",
+        "host": "ws-ctrl-042",
+        "enabled": True,
+        "config_msg": '{"guidance":[{"details":"Call Jane Doe (mailto:jane.doe@x.org)"}]}',
+        "message_time": 1746093720000,
+    }
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([raw])))
+    _, detail = client.is_alarm_configured("Vac-VVMC-01:Pos-R")
+    assert detail == {
+        "config": "config:/Accelerator/Vacuum/Vac-VVMC-01:Pos-R",
+        "enabled": True,
+        "message_time": 1746093720000,
+    }
+    for leaked in ("user", "host", "config_msg"):
+        assert leaked not in detail
 
 
 def test_is_alarm_configured_false_empty(monkeypatch: pytest.MonkeyPatch) -> None:
