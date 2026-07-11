@@ -33,6 +33,8 @@ from epics_pv_mcp.services.archiver_exceptions import (
 ARCHIVING_STATUS = "Being archived"
 # Default cap on returned samples (a wide window on a fast PV is otherwise unbounded).
 DEFAULT_MAX_POINTS = 5000
+# Default cap on returned PV NAMES (getAllPVs on a whole appliance can return tens of thousands).
+DEFAULT_MAX_PV_NAMES = 5000
 
 # getPVTypeInfo field -> surfaced snake_case key (the archive CONFIGURATION of a PV). Kept as a
 # projection allowlist so an unexpected/free-text field (e.g. ``userParams``) is never surfaced.
@@ -221,6 +223,48 @@ class ArchiverClient:
         if isinstance(data, list) and data and isinstance(data[0], dict):
             return data[0] or None
         return None
+
+    def get_all_pvs(
+        self, pattern: str | None = None, limit: int = DEFAULT_MAX_PV_NAMES
+    ) -> tuple[list[str], bool]:
+        """List the PV names the WHOLE appliance archives (Archiver MGMT ``getAllPVs``).
+
+        ``getAllPVs`` returns a bare JSON array of PV-name strings. Optional *pattern* is a glob
+        forwarded as the endpoint's ``pv`` param (e.g. ``FBIS-*``); *limit* caps the count. Returns
+        ``(names, capped)`` — ``capped`` is True when the appliance held more than *limit* (we fetch
+        ``limit + 1`` then slice, so the flag is honest even if the server ignores ``limit``). The
+        MGMT enumeration endpoint — NOT ``getMatchingPVs``, which 404s on split/proxied deployments.
+        PV names carry no person data, so no allowlist redaction is needed.
+        """
+        params: dict[str, str] = {"limit": str(limit + 1)}
+        if pattern:
+            params["pv"] = pattern
+        return self._coerce_pv_names(
+            self._get(f"{self.base_url}/mgmt/bpl/getAllPVs", params), limit, "getAllPVs"
+        )
+
+    def get_pvs_for_this_appliance(
+        self, limit: int = DEFAULT_MAX_PV_NAMES
+    ) -> tuple[list[str], bool]:
+        """List the PV names THIS appliance member archives (MGMT ``getPVsForThisAppliance``).
+
+        Like :meth:`get_all_pvs` but scoped to the local cluster member (no pattern). Same
+        ``(names, capped)`` contract; the MGMT enumeration endpoint, NOT ``getMatchingPVs``.
+        """
+        params = {"limit": str(limit + 1)}
+        return self._coerce_pv_names(
+            self._get(f"{self.base_url}/mgmt/bpl/getPVsForThisAppliance", params),
+            limit,
+            "getPVsForThisAppliance",
+        )
+
+    @staticmethod
+    def _coerce_pv_names(data: object, limit: int, endpoint: str) -> tuple[list[str], bool]:
+        """Validate a bare-list PV-name payload → ``(names[:limit], capped)``."""
+        if not isinstance(data, list):
+            raise ArchiverResponseError(f"{endpoint} returned a non-list payload")
+        names = [str(item) for item in data]
+        return (names[:limit], len(names) > limit)
 
     def get_pv_history(
         self,

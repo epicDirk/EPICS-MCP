@@ -19,7 +19,12 @@ from epics_pv_mcp.services.diagnose import (
 )
 from epics_pv_mcp.tool_errors import translate_epics_errors
 from epics_pv_mcp.tools.alarm import _get_alarm_history, _is_alarm_configured
-from epics_pv_mcp.tools.archiver import _get_archive_info, _get_pv_history, _is_archived
+from epics_pv_mcp.tools.archiver import (
+    _get_archive_info,
+    _get_pv_history,
+    _is_archived,
+    _list_archived_pvs,
+)
 from epics_pv_mcp.tools.channelfinder import _find_channels
 from epics_pv_mcp.tools.diagnose_connection import _diagnose_connection
 from epics_pv_mcp.tools.discover import _discover_pvs
@@ -45,8 +50,8 @@ mcp = FastMCP(
         "tool, set_pv_value, is gated OFF by "
         "default and additionally requires EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, "
         "a rate limit and an audit log. The REST-backed tools (find_channels, is_archived, "
-        "get_pv_history, get_archive_info, is_alarm_configured, get_alarm_history, "
-        "lookup_device_name, search_logbook, get_log_entry) stay disabled "
+        "get_pv_history, get_archive_info, list_archived_pvs, is_alarm_configured, "
+        "get_alarm_history, lookup_device_name, search_logbook, get_log_entry) stay disabled "
         "until their *_URL env vars are set; an empty URL means "
         "no client and no network call. Network reach is localhost-isolated by default: the "
         "server opens no non-local connection unless its launcher widens the EPICS address-list "
@@ -311,9 +316,9 @@ async def is_archived(
     connected now?), last_event (time of the last archived sample), is_monitored, sampling_period
     and appliance when present — same single getPVStatus call, no extra cost.
 
-    No tool ENUMERATES archived PVs (this needs a PV name). To list them, call the Archiver MGMT API
-    getAllPVs (whole appliance) or getPVsForThisAppliance (this member), NOT getMatchingPVs (404 on
-    some deployments). See the epics-pv://guide resource.
+    is_archived answers only for a NAMED PV. To ENUMERATE the archived PVs use list_archived_pvs
+    (getAllPVs / getPVsForThisAppliance, NOT getMatchingPVs — it 404s on split/proxied deployments).
+    See the epics-pv://guide resource.
     """
     return await _is_archived(pv, timeout)
 
@@ -378,10 +383,48 @@ async def get_archive_info(
     computed event/storage rates, dbr_type, archived fields, source host_name and creation_time.
     found is false when the appliance has no type-info record for the PV (unknown / never archived).
 
-    To ENUMERATE archived PVs (no tool does — this needs a PV name) call the MGMT API getAllPVs or
-    getPVsForThisAppliance, NOT getMatchingPVs (404 on some deployments). See epics-pv://guide.
+    get_archive_info answers only for a NAMED PV; list_archived_pvs enumerates them
+    (getAllPVs / getPVsForThisAppliance, NOT getMatchingPVs — 404s on split/proxied). See
+    epics-pv://guide.
     """
     return await _get_archive_info(pv, timeout)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def list_archived_pvs(
+    pattern: Annotated[
+        str | None,
+        Field(description="Optional PV-name glob (e.g. 'FBIS-*'); omit for the whole appliance"),
+    ] = None,
+    this_appliance: Annotated[
+        bool,
+        Field(description="List only THIS cluster member (getPVsForThisAppliance) instead of all"),
+    ] = False,
+    limit: Annotated[
+        int,
+        Field(
+            description="Cap on returned PV names (a whole appliance can hold tens of thousands)"
+        ),
+    ] = 5000,
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """List the PV names the Archiver Appliance archives (Archiver MGMT getAllPVs).
+
+    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.
+    Uses getAllPVs (whole appliance) or, with this_appliance=true, getPVsForThisAppliance (this
+    cluster member) — NOT getMatchingPVs, which 404s on split/proxied deployments. pattern is an
+    optional name glob forwarded as the endpoint's pv param. capped is true when the appliance held
+    more than limit names (honest over-fetch). PV names carry no person data — no redaction needed.
+    """
+    return await _list_archived_pvs(pattern, this_appliance, limit, timeout)
 
 
 @mcp.tool(

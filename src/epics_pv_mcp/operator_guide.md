@@ -46,7 +46,8 @@ are simply absent — that is an unmet optional extra, not a bug.
 **Core — live PV + REST planes:**
 `get_pv_value` · `get_pvs` · `set_pv_value` · `get_pv_info` · `monitor_pv` · `discover_pvs` ·
 `find_channels` · `lookup_device_name` · `is_archived` · `get_pv_history` · `get_archive_info` ·
-`is_alarm_configured` · `get_alarm_history` · `diagnose_connection` · `search_logbook` · `get_log_entry`
+`list_archived_pvs` · `is_alarm_configured` · `get_alarm_history` · `diagnose_connection` ·
+`search_logbook` · `get_log_entry`
 
 **Optional `[displays]` — cross-plane with the operator-screen PV inventory:**
 `validate_pvs` · `crossplane_check` · `coverage_audit` · `find_device`
@@ -57,12 +58,13 @@ Composing the display tools: `find_device` (which screens show device X + live v
 
 ## Operational recipes (the non-obvious parts)
 
-### List archived PVs — there is no tool; use the MGMT API directly
-No tool *enumerates* archived PVs — `is_archived`/`get_pv_history`/`get_archive_info` all require a PV
-name. To LIST what an appliance archives, call its MGMT API: `getAllPVs` (whole appliance) or
-`getPVsForThisAppliance` (this member). `getMatchingPVs` is a standard endpoint too, but **may 404 on
-some (proxied/split) deployments** — prefer the first two, which are reliably exposed. Cluster shape:
-`getApplianceInfo` / `getAppliancesInCluster`.
+### List archived PVs — `list_archived_pvs` (or the MGMT API directly)
+`list_archived_pvs` enumerates the archived PV names — the sibling `is_archived`/`get_pv_history`/
+`get_archive_info` tools each require a PV name. Under the hood it calls the MGMT `getAllPVs` (whole
+appliance) or, with `this_appliance=true`, `getPVsForThisAppliance` (this member); an optional
+name-glob `pattern` maps to the endpoint's `pv` param, and `capped` is honest (over-fetch by one).
+It deliberately does **not** use `getMatchingPVs` — a standard endpoint too, but one that **may 404
+on proxied/split deployments**. Cluster shape: `getApplianceInfo` / `getAppliancesInCluster`.
 
 ### Retrieval-cluster-aware appliances
 An Archiver Appliance may run as an **N-member failover cluster**. Such a cluster is retrieval-aware: a
@@ -121,8 +123,8 @@ messages embed the full request URL — an internal host would leak into this fi
 
 A fresh session with only this guide should now handle the four things a live smoke had to re-derive:
 
-1. **Enumerate archived PVs** → `getAllPVs` / `getPVsForThisAppliance` (`getMatchingPVs` may 404 on
-   split/proxied deployments).
+1. **Enumerate archived PVs** → `list_archived_pvs` (uses `getAllPVs` / `getPVsForThisAppliance`, not
+   `getMatchingPVs`, which may 404 on split/proxied deployments).
 2. **A clustered archiver** → one `EPICS_MCP_ARCHIVER_URL` covers all members (retrieval-aware; the
    `appliance` field names the owner). The mgmt/retrieval port split is orthogonal: if retrieval runs on
    `:17668`, still set `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` — clustering does not remove the port split.

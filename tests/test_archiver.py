@@ -12,7 +12,12 @@ from epics_pv_mcp.services.archiver_exceptions import (
     ArchiverError,
     ArchiverResponseError,
 )
-from epics_pv_mcp.tools.archiver import _get_archive_info, _get_pv_history, _is_archived
+from epics_pv_mcp.tools.archiver import (
+    _get_archive_info,
+    _get_pv_history,
+    _is_archived,
+    _list_archived_pvs,
+)
 
 
 def _resp(payload: object, *, ok: bool = True) -> Mock:
@@ -648,3 +653,130 @@ def test_check_connectivity_transport_failure_raises_connection_error(
     )
     with pytest.raises(ArchiverConnectionError):
         client.check_connectivity()
+
+
+# --- client: get_all_pvs / get_pvs_for_this_appliance (E2 list_archived_pvs) ---
+
+
+def test_get_all_pvs_returns_names_not_capped(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = ArchiverClient("http://arch:17665")
+    captured: dict[str, object] = {}
+
+    def fake_get(url: str, params: object = None, timeout: object = None) -> Mock:
+        captured["url"] = url
+        return _resp(["SYS:PV1", "SYS:PV2"])
+
+    monkeypatch.setattr(client.session, "get", fake_get)
+    names, capped = client.get_all_pvs()
+    assert names == ["SYS:PV1", "SYS:PV2"]
+    assert capped is False
+    assert captured["url"] == "http://arch:17665/mgmt/bpl/getAllPVs"
+
+
+def test_get_all_pvs_forwards_pattern_and_caps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A name glob maps to the ``pv`` param; over-fetch by one makes ``capped`` honest."""
+    client = ArchiverClient("http://arch")
+    captured: dict[str, object] = {}
+
+    def fake_get(url: str, params: dict[str, str] | None = None, timeout: object = None) -> Mock:
+        captured["params"] = params or {}
+        return _resp([f"PV{i}" for i in range(5)])  # 5 names, limit 3 → capped
+
+    monkeypatch.setattr(client.session, "get", fake_get)
+    names, capped = client.get_all_pvs(pattern="FBIS-*", limit=3)
+    params = captured["params"]
+    assert isinstance(params, dict)
+    assert params["pv"] == "FBIS-*"
+    assert params["limit"] == "4"  # limit + 1 over-fetch
+    assert names == ["PV0", "PV1", "PV2"]  # sliced to limit
+    assert capped is True
+
+
+def test_get_pvs_for_this_appliance(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = ArchiverClient("http://arch:17665")
+    captured: dict[str, object] = {}
+
+    def fake_get(url: str, params: object = None, timeout: object = None) -> Mock:
+        captured["url"] = url
+        return _resp(["M:PV1"])
+
+    monkeypatch.setattr(client.session, "get", fake_get)
+    names, capped = client.get_pvs_for_this_appliance()
+    assert names == ["M:PV1"]
+    assert capped is False
+    assert captured["url"] == "http://arch:17665/mgmt/bpl/getPVsForThisAppliance"
+
+
+def test_get_all_pvs_non_list_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = ArchiverClient("http://arch")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp({"oops": 1})))
+    with pytest.raises(ArchiverResponseError):
+        client.get_all_pvs()
+
+
+# --- tool: list_archived_pvs ---
+
+
+@pytest.mark.asyncio
+async def test_list_archived_pvs_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.get_config",
+        lambda: EpicsConfig(archiver_url="http://arch:17665"),
+    )
+
+    class _Fake:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def get_all_pvs(
+            self, pattern: str | None = None, limit: int = 5000
+        ) -> tuple[list[str], bool]:
+            return (["A:PV1", "A:PV2"], False)
+
+    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    result = await _list_archived_pvs()
+    assert result["enabled"] is True
+    assert result["pvs"] == ["A:PV1", "A:PV2"]
+    assert result["total"] == 2
+    assert result["capped"] is False
+
+
+@pytest.mark.asyncio
+async def test_list_archived_pvs_this_appliance_variant(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.get_config",
+        lambda: EpicsConfig(archiver_url="http://arch"),
+    )
+
+    class _Fake:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def get_all_pvs(
+            self, pattern: str | None = None, limit: int = 5000
+        ) -> tuple[list[str], bool]:
+            raise AssertionError("this_appliance=True must use getPVsForThisAppliance")
+
+        def get_pvs_for_this_appliance(self, limit: int = 5000) -> tuple[list[str], bool]:
+            return (["M:PV1"], True)
+
+    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    result = await _list_archived_pvs(this_appliance=True)
+    assert result["pvs"] == ["M:PV1"]
+    assert result["capped"] is True
+
+
+@pytest.mark.asyncio
+async def test_list_archived_pvs_tool_disabled_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="")
+    )
+
+    def _boom(*args: object, **kwargs: object) -> ArchiverClient:
+        raise AssertionError("client must not be constructed when disabled")
+
+    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _boom)
+    result = await _list_archived_pvs()
+    assert result["enabled"] is False
+    assert result["pvs"] == []
+    assert result["total"] == 0

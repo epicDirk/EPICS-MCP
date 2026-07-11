@@ -14,7 +14,11 @@ import asyncio
 
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsConnectionError
-from epics_pv_mcp.services.archiver_client import DEFAULT_MAX_POINTS, ArchiverClient
+from epics_pv_mcp.services.archiver_client import (
+    DEFAULT_MAX_POINTS,
+    DEFAULT_MAX_PV_NAMES,
+    ArchiverClient,
+)
 from epics_pv_mcp.services.archiver_exceptions import ArchiverError
 from epics_pv_mcp.services.checkers import query_archived
 
@@ -75,6 +79,40 @@ async def _get_pv_history(
         if history["withheld_reason"] is not None:
             result["withheld_reason"] = history["withheld_reason"]
         return result
+
+    try:
+        return await asyncio.to_thread(_run)
+    except ArchiverError as exc:
+        raise EpicsConnectionError(f"Archiver: {exc}") from exc
+
+
+async def _list_archived_pvs(
+    pattern: str | None = None,
+    this_appliance: bool = False,
+    limit: int = DEFAULT_MAX_PV_NAMES,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    """List the PV names the Archiver Appliance archives (MGMT getAllPVs / getPVsForThisAppliance).
+
+    Default-disabled — with ``EPICS_MCP_ARCHIVER_URL`` unset returns ``enabled: false`` + an empty
+    list and makes NO network call. Uses getAllPVs (whole appliance) or getPVsForThisAppliance (this
+    member, with ``this_appliance=True``) — NOT getMatchingPVs (404 on split/proxied). An optional
+    name-glob ``pattern`` (e.g. ``FBIS-*``) maps to the ``pv`` param; ``capped`` is honest.
+    PV names carry no person data, so no redaction is needed.
+    """
+    cfg = get_config()
+    if not cfg.archiver_url:
+        return {"enabled": False, "pvs": [], "total": 0, "note": _DISABLED_NOTE}
+
+    def _run() -> dict[str, object]:
+        client = ArchiverClient(
+            cfg.archiver_url, timeout=timeout, auth_header=cfg.archiver_auth or None
+        )
+        if this_appliance:
+            names, capped = client.get_pvs_for_this_appliance(limit=limit)
+        else:
+            names, capped = client.get_all_pvs(pattern=pattern, limit=limit)
+        return {"enabled": True, "pvs": names, "total": len(names), "capped": capped}
 
     try:
         return await asyncio.to_thread(_run)
