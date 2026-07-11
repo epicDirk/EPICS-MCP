@@ -30,6 +30,10 @@ absent, so the core suite stays green. A checkout with `--extra all` runs everyt
   no-secrets guard).
 - New behaviour has a test; new tools/config are documented in `README.md` (the resource
   URIs are drift-checked against the server by a test).
+- New operational knowledge (a service/IOC recipe, an endpoint, an error signature) lands in the
+  operator guide (`src/epics_pv_mcp/operator_guide.md`), not just a commit body — see the Knowledge
+  Persistence Policy in `CLAUDE.md`. A new tool must appear in the guide's tool inventory and any new
+  `EPICS_MCP_*` var must be mentioned there; both are drift-checked by `test_guide_matches_code.py`.
 
 ## Live / sandbox tests
 

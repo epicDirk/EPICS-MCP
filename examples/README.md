@@ -3,6 +3,10 @@
 Minimal, self-contained examples. The core ones need nothing but EPICS + this server —
 no Phoebus, no display layer.
 
+> New here? Point the assistant at the `epics-pv://guide` resource (also
+> [`OPERATING.md`](../OPERATING.md)) for the service landscape, the operational recipes and the
+> error signatures — it ships inside the server, so nothing extra to install.
+
 ## 1. A live test PV (core — works for any EPICS user)
 
 Serve a single PVAccess PV with the EPICS base `softIocPVA` tool:
