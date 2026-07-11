@@ -100,8 +100,10 @@ class ArchiverClient:
         # ``base_url`` is the MGMT root (serves /mgmt/bpl — getPVStatus/is_archived).
         # ``retrieval_url`` is the RETRIEVAL root (serves /retrieval/data — get_pv_history).
         # They coincide in a single-JVM appliance (one port for all webapps), so retrieval_url
-        # defaults to base_url. In the ESS 4-instance topology mgmt (:17665) and retrieval (:17668)
-        # are SEPARATE Tomcats, so the caller passes a distinct retrieval_url.
+        # defaults to base_url. In a split deployment mgmt (:17665) and retrieval (:17668) are
+        # SEPARATE Tomcats, so the caller passes a distinct retrieval_url. (A retrieval-cluster-
+        # aware appliance cluster proxies internally, so one URL covers all members — see the
+        # epics-pv://guide resource.)
         self.base_url = base_url.rstrip("/")
         self.retrieval_url = (retrieval_url or base_url).rstrip("/")
         self.timeout = timeout

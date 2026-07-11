@@ -300,13 +300,13 @@ def test_get_pv_type_info_non_404_error_propagates(monkeypatch: pytest.MonkeyPat
         client.get_pv_type_info("X")
 
 
-# --- two-URL routing (ESS 4-instance topology: mgmt :17665 vs retrieval :17668) ---
+# --- two-URL routing (split deployment: mgmt :17665 vs retrieval :17668) ---
 
 
 def test_two_url_routing_mgmt_vs_retrieval(monkeypatch: pytest.MonkeyPatch) -> None:
     """is_archived / get_pv_type_info hit the MGMT base_url; get_pv_history the retrieval_url.
 
-    In the ESS 4-instance appliance /mgmt and /retrieval live on different Tomcats/ports,
+    In a split deployment /mgmt and /retrieval live on different Tomcats/ports,
     so the calls must NOT share one base URL.
     """
     client = ArchiverClient("http://arch:17665", retrieval_url="http://arch:17668")

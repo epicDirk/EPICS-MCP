@@ -307,9 +307,9 @@ diagram and the plane model.
 ## Compatibility
 
 Exercised against a local EPICS stack: an **e3** test IOC (PVAccess), an **EPICS Archiver
-Appliance**, **ChannelFinder**, and the **Phoebus Alarm** server + logger. Archiver
-topology note: in a single-JVM appliance the MGMT and retrieval webapps share a port
-(leave `ARCHIVER_RETRIEVAL_URL` empty); in the ESS 4-instance topology MGMT (`:17665`) and
+Appliance** (single- or multi-instance), **ChannelFinder**, and the **Phoebus Alarm** server +
+logger. Archiver topology note: in a single-JVM appliance the MGMT and retrieval webapps share a
+port (leave `ARCHIVER_RETRIEVAL_URL` empty); in a split/clustered deployment MGMT (`:17665`) and
 retrieval (`:17668`) are separate ports.
 
 ## Development

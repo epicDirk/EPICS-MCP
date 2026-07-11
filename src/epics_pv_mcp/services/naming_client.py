@@ -61,6 +61,8 @@ class NamingServiceClient:
         self._names_cache: dict[str, dict[str, object]] = {}
         self._bool_cache: dict[str, bool] = {}
 
+    # ``base_url`` is the service root WITHOUT a trailing ``/rest``: these properties append it
+    # themselves, so configuring the URL with a trailing ``/rest`` yields ``/rest/rest/…`` → 404.
     @property
     def parts_url(self) -> str:
         return f"{self.base_url}/rest/parts/mnemonic/"

@@ -51,7 +51,10 @@ class EpicsConfig(BaseSettings):
     # path to a CA-bundle PEM — set it when the REST hosts use a certificate signed by an internal
     # root CA that is NOT in certifi (the default trust store), which otherwise fails with
     # "self-signed certificate in chain". It is applied to EVERY REST session at the single
-    # ``build_retrying_session`` chokepoint. ``tls_verify=False`` disables verification entirely —
+    # ``build_retrying_session`` chokepoint. When planes present DIFFERENT trust roots (one
+    # internal CA, another public), a single-root bundle fails one: combine the internal CA
+    # PEM WITH the public roots (certifi's cacert.pem) into ONE PEM — see epics-pv://guide.
+    # ``tls_verify=False`` disables verification entirely —
     # an escape hatch for an internal network only, NOT the default. Precedence: ``ca_bundle``
     # (path) > ``tls_verify=False`` > default (certifi). When either is set explicitly the session
     # also pins ``trust_env=False`` so a ``REQUESTS_CA_BUNDLE`` env var cannot silently
@@ -69,8 +72,10 @@ class EpicsConfig(BaseSettings):
     archiver_url: str = ""
     # Archiver Appliance RETRIEVAL root, e.g. "http://archiver:17668" — serves /retrieval/data
     # (get_pv_history). In a single-JVM appliance both webapps share one port, so this may be left
-    # empty and get_pv_history falls back to archiver_url. In the ESS 4-instance topology mgmt
-    # (:17665) and retrieval (:17668) are SEPARATE Tomcats, so this must point at the retrieval one.
+    # empty and get_pv_history falls back to archiver_url. In a split deployment mgmt (:17665) and
+    # retrieval (:17668) are SEPARATE Tomcats, so this must point at the retrieval one. (A
+    # retrieval-cluster-aware appliance cluster proxies internally — one URL covers all members;
+    # see the epics-pv://guide resource.)
     archiver_retrieval_url: str = ""
     archiver_auth: str = ""  # optional Authorization header value for secured deployments
     # Phoebus Alarm Logger REST root, e.g. "http://localhost:8081". Activates is_alarm_configured.
