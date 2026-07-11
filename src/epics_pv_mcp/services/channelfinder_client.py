@@ -106,6 +106,25 @@ class ChannelFinderClient:
         self._safe_owner_accounts = resolve_safe_owner_accounts(cfg)
         self._safe_property_names = resolve_safe_property_names(cfg)
 
+    def check_connectivity(self) -> bool:
+        """Return True if ChannelFinder is reachable; raise ChannelFinderConnectionError otherwise.
+
+        A HEAD to the service root proves transport + TLS (the CA bundle) — any HTTP response counts
+        as reachable (the status is irrelevant here, as in the Naming client). A transport/TLS
+        failure is re-raised as ChannelFinderConnectionError with the original requests error as
+        ``__cause__``, so a caller (doctor) can inspect it (:func:`is_ssl_error`) to tell a CA
+        problem from a plain unreachable host.
+        """
+        try:
+            self.session.head(self.base_url, timeout=self.timeout)
+            return True
+        except OSError as exc:
+            # requests.exceptions.RequestException ⊂ OSError (see naming_client.check_connectivity),
+            # so this arm catches Timeout/ConnectionError/SSLError; re-raise as the service error.
+            raise ChannelFinderConnectionError(
+                f"Failed to connect to ChannelFinder at {self.base_url}: {exc}"
+            ) from exc
+
     @property
     def channels_url(self) -> str:
         return f"{self.base_url}/resources/channels"

@@ -97,6 +97,23 @@ class OlogClient:
             resp_exc=OlogResponseError,
         )
 
+    def check_connectivity(self) -> bool:
+        """Return True if Olog is reachable; raise OlogConnectionError otherwise.
+
+        A HEAD to the service root proves transport + TLS (the CA bundle) — any HTTP response counts
+        as reachable (status irrelevant, as in the Naming client). A transport/TLS failure re-raises
+        as OlogConnectionError with the original requests error as ``__cause__``, so a caller can
+        inspect it (:func:`is_ssl_error`) to tell a CA problem from a plain unreachable host.
+        """
+        try:
+            self.session.head(self.base_url, timeout=self.timeout)
+            return True
+        except OSError as exc:
+            # requests.exceptions.RequestException ⊂ OSError (see naming_client.check_connectivity).
+            raise OlogConnectionError(
+                f"Failed to connect to Olog at {self.base_url}: {exc}"
+            ) from exc
+
     def search_logbook(
         self,
         text: str | None = None,

@@ -7,7 +7,11 @@ import requests
 
 from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.services.archiver_client import ArchiverClient, HistoryResult, Sample
-from epics_pv_mcp.services.archiver_exceptions import ArchiverConnectionError, ArchiverError
+from epics_pv_mcp.services.archiver_exceptions import (
+    ArchiverConnectionError,
+    ArchiverError,
+    ArchiverResponseError,
+)
 from epics_pv_mcp.tools.archiver import _get_archive_info, _get_pv_history, _is_archived
 
 
@@ -601,3 +605,46 @@ async def test_get_archive_info_tool_enabled(monkeypatch: pytest.MonkeyPatch) ->
     assert result["dbr_type"] == "DBR_SCALAR_DOUBLE"
     assert result["sampling_method"] == "MONITOR"
     assert result["data_stores"] == ["pb://localhost?name=STS"]
+
+
+# --- check_connectivity (E2 doctor probe: getApplianceInfo, 2xx required) ---
+
+
+def test_check_connectivity_probes_appliance_info(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The probe hits /mgmt/bpl/getApplianceInfo (no PV) and returns True on a 2xx."""
+    client = ArchiverClient("http://arch:17665")
+    captured: list[str] = []
+
+    def fake_get(url: str, params: object = None, timeout: object = None) -> Mock:
+        captured.append(url)
+        return _resp([{"identity": "appliance0"}])
+
+    monkeypatch.setattr(client.session, "get", fake_get)
+    assert client.check_connectivity() is True
+    assert captured[0] == "http://arch:17665/mgmt/bpl/getApplianceInfo"
+
+
+def test_check_connectivity_served_non2xx_raises_response_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A served non-2xx (e.g. ARCHIVER_URL points at the wrong webapp) → ArchiverResponseError,
+    NOT ArchiverConnectionError — doctor reads it as 'api_error' (reachable), not 'unreachable'."""
+    client = ArchiverClient("http://arch:17665")
+    resp = Mock()
+    http_error = requests.exceptions.HTTPError("404")
+    http_error.response = Mock(status_code=404)
+    resp.raise_for_status.side_effect = http_error
+    monkeypatch.setattr(client.session, "get", Mock(return_value=resp))
+    with pytest.raises(ArchiverResponseError):
+        client.check_connectivity()
+
+
+def test_check_connectivity_transport_failure_raises_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = ArchiverClient("http://arch:17665")
+    monkeypatch.setattr(
+        client.session, "get", Mock(side_effect=requests.exceptions.ConnectionError())
+    )
+    with pytest.raises(ArchiverConnectionError):
+        client.check_connectivity()

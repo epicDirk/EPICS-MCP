@@ -232,3 +232,22 @@ async def test_get_log_entry_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> No
     entry = result["entry"]
     assert isinstance(entry, dict)
     assert entry["id"] == 7
+
+
+# --- check_connectivity (E2 doctor probe) ---
+
+
+def test_check_connectivity_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Any HTTP response to a HEAD on the root = reachable (transport + CA proven)."""
+    client = OlogClient("http://olog:8080/Olog")
+    monkeypatch.setattr(client.session, "head", Mock(return_value=Mock()))
+    assert client.check_connectivity() is True
+
+
+def test_check_connectivity_raises_on_transport_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = OlogClient("http://olog:8080/Olog")
+    monkeypatch.setattr(
+        client.session, "head", Mock(side_effect=requests.exceptions.ConnectionError())
+    )
+    with pytest.raises(OlogConnectionError):
+        client.check_connectivity()

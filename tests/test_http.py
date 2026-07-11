@@ -15,7 +15,13 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.services._http import build_retrying_session, rest_get_json
+from epics_pv_mcp.services._http import (
+    build_retrying_session,
+    http_status,
+    is_http_404,
+    is_ssl_error,
+    rest_get_json,
+)
 from epics_pv_mcp.services.archiver_exceptions import (
     ArchiverConnectionError,
     ArchiverError,
@@ -222,3 +228,39 @@ def test_rest_get_json_http_error_raises_resp_exc(monkeypatch: pytest.MonkeyPatc
             conn_exc=ArchiverConnectionError,
             resp_exc=ArchiverResponseError,
         )
+
+
+# --- CA / HTTP-status cause predicates (E2 doctor classifier) ---
+
+
+def test_is_ssl_error_detects_chained_sslerror() -> None:
+    """A chained requests.SSLError (the CA-bundle signal) is recognised."""
+    err = ArchiverResponseError("x")
+    err.__cause__ = requests.exceptions.SSLError("self-signed certificate in chain")
+    assert is_ssl_error(err) is True
+
+
+def test_is_ssl_error_false_for_plain_connection_and_no_cause() -> None:
+    """A plain ConnectionError (not SSL) and a cause-less error are NOT CA failures."""
+    conn = ArchiverConnectionError("x")
+    conn.__cause__ = requests.exceptions.ConnectionError("connection refused")
+    assert is_ssl_error(conn) is False
+    assert is_ssl_error(ArchiverConnectionError("x")) is False  # no __cause__
+
+
+def test_http_status_reads_chained_response_code() -> None:
+    """A served non-2xx surfaces its status; is_http_404 stays a thin wrapper over it."""
+    err = ArchiverResponseError("x")
+    http_error = requests.exceptions.HTTPError("404")
+    http_error.response = Mock(status_code=404)
+    err.__cause__ = http_error
+    assert http_status(err) == 404
+    assert is_http_404(err) is True
+
+
+def test_http_status_none_for_transport_failure() -> None:
+    """A transport failure has no chained .response → None (unreachable, not a served error)."""
+    conn = ArchiverConnectionError("x")
+    conn.__cause__ = requests.exceptions.ConnectionError("refused")
+    assert http_status(conn) is None
+    assert is_http_404(conn) is False

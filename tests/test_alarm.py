@@ -358,3 +358,22 @@ async def test_get_alarm_history_tool_enabled(monkeypatch: pytest.MonkeyPatch) -
     events = result["events"]
     assert isinstance(events, list)
     assert events[0]["severity"] == "MAJOR"
+
+
+# --- check_connectivity (E2 doctor probe) ---
+
+
+def test_check_connectivity_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Any HTTP response to a HEAD on the root = reachable (transport + CA proven)."""
+    client = AlarmClient("http://alarm:8081")
+    monkeypatch.setattr(client.session, "head", Mock(return_value=Mock()))
+    assert client.check_connectivity() is True
+
+
+def test_check_connectivity_raises_on_transport_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = AlarmClient("http://alarm:8081")
+    monkeypatch.setattr(
+        client.session, "head", Mock(side_effect=requests.exceptions.ConnectionError())
+    )
+    with pytest.raises(AlarmConnectionError):
+        client.check_connectivity()

@@ -99,14 +99,38 @@ def rest_get_json(
         raise resp_exc(f"Request failed ({url}): {exc}") from exc
 
 
+def http_status(exc: BaseException) -> int | None:
+    """The HTTP status code *exc* wraps, or ``None`` if it wraps no HTTP response.
+
+    :func:`rest_get_json` raises the per-service error with ``raise ... from <requests error>``, so
+    the chained cause of a *served* HTTP failure is the requests ``HTTPError`` with ``.response``
+    with ``.status_code``. A transport failure (unreachable host / TLS) has no ``.response`` →
+    ``None``. Duck-typed (no direct ``requests`` dependency at the call site) and null-safe. Tells
+    "reachable but the API answered with an error status" (a served 4xx/5xx — e.g. an Archiver URL
+    pointing at the wrong webapp) from "the host is unreachable" (no response at all).
+    """
+    response = getattr(exc.__cause__, "response", None)
+    status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
 def is_http_404(exc: BaseException) -> bool:
     """True iff *exc* wraps an HTTP 404 response.
 
-    :func:`rest_get_json` raises the per-service response error with ``raise ... from <requests
-    error>``, so the chained cause of an HTTP failure is the requests ``HTTPError`` carrying
-    ``.response``. A resource-by-id endpoint (``getPVTypeInfo`` / Olog ``/logs/{id}``) answers a
-    missing item with 404, which callers map to a definitive "not found" while re-raising every
-    other status. Duck-typed (no direct ``requests`` dependency at the call site) and null-safe.
+    A resource-by-id endpoint (``getPVTypeInfo`` / Olog ``/logs/{id}``) answers a missing item with
+    404, which callers map to a definitive "not found" while re-raising every other status. Thin
+    wrapper over :func:`http_status`.
     """
-    response = getattr(exc.__cause__, "response", None)
-    return getattr(response, "status_code", None) == 404
+    return http_status(exc) == 404
+
+
+def is_ssl_error(exc: BaseException) -> bool:
+    """True iff *exc* wraps a TLS/CA verification failure.
+
+    :func:`rest_get_json` and the clients' ``check_connectivity`` chain the original requests error
+    via ``from exc``. ``requests.exceptions.SSLError`` (a subclass of ``ConnectionError``, hence
+    otherwise indistinguishable from a plain unreachable host) signals a certificate / CA-bundle
+    problem — the signal a config ``doctor`` needs to say "fix your CA bundle" rather than
+    "host unreachable". Null-safe.
+    """
+    return isinstance(getattr(exc, "__cause__", None), requests.exceptions.SSLError)

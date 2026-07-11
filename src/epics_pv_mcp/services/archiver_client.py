@@ -120,6 +120,20 @@ class ArchiverClient:
             resp_exc=ArchiverResponseError,
         )
 
+    def check_connectivity(self) -> bool:
+        """Return True if the appliance MGMT API answers; raise on failure.
+
+        Probes ``/mgmt/bpl/getApplianceInfo`` (no PV needed) — this proves the MGMT webapp actually
+        ANSWERS, not merely that the port is open. A transport/TLS failure raises
+        ArchiverConnectionError; a *served* non-2xx (e.g. ``EPICS_MCP_ARCHIVER_URL`` points at the
+        RETRIEVAL webapp, or a 5xx) raises ArchiverResponseError with the HTTP status on
+        ``__cause__`` — so a caller (doctor) can tell "unreachable" from "reachable but wrong
+        endpoint" via :func:`is_ssl_error` / :func:`http_status`. This requires a 2xx (unlike the
+        HEAD-based CF/Alarm/Olog probes) — so the archiver has a third "api_error" doctor bucket.
+        """
+        self._get(f"{self.base_url}/mgmt/bpl/getApplianceInfo", {})
+        return True
+
     def get_pv_status(self, pv: str) -> dict[str, object]:
         """Return the MGMT status record for *pv* (``getPVStatus`` returns a 1-element list)."""
         data = self._get(f"{self.base_url}/mgmt/bpl/getPVStatus", {"pv": pv})

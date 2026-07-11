@@ -135,6 +135,23 @@ class AlarmClient:
             resp_exc=AlarmResponseError,
         )
 
+    def check_connectivity(self) -> bool:
+        """Return True if the Alarm Logger is reachable; raise AlarmConnectionError otherwise.
+
+        A HEAD to the service root proves transport + TLS (the CA bundle) — any HTTP response counts
+        as reachable (status irrelevant, as in the Naming client). A transport/TLS failure re-raises
+        as AlarmConnectionError with the original requests error as ``__cause__``, so a caller can
+        inspect it (:func:`is_ssl_error`) to tell a CA problem from a plain unreachable host.
+        """
+        try:
+            self.session.head(self.base_url, timeout=self.timeout)
+            return True
+        except OSError as exc:
+            # requests.exceptions.RequestException ⊂ OSError (see naming_client.check_connectivity).
+            raise AlarmConnectionError(
+                f"Failed to connect to Alarm Logger at {self.base_url}: {exc}"
+            ) from exc
+
     def is_alarm_configured(
         self, pv: str, config_name: str = DEFAULT_ALARM_CONFIG
     ) -> tuple[bool, dict[str, object]]:
