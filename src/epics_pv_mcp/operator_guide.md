@@ -60,16 +60,22 @@ Composing the display tools: `find_device` (which screens show device X + live v
 ### List archived PVs — there is no tool; use the MGMT API directly
 No tool *enumerates* archived PVs — `is_archived`/`get_pv_history`/`get_archive_info` all require a PV
 name. To LIST what an appliance archives, call its MGMT API: `getAllPVs` (whole appliance) or
-`getPVsForThisAppliance` (this member). Do **not** use `getMatchingPVs` — it is not exposed on all
-deployments and returns HTTP 404. Cluster shape: `getApplianceInfo` / `getAppliancesInCluster`.
+`getPVsForThisAppliance` (this member). `getMatchingPVs` is a standard endpoint too, but **may 404 on
+some (proxied/split) deployments** — prefer the first two, which are reliably exposed. Cluster shape:
+`getApplianceInfo` / `getAppliancesInCluster`.
 
 ### Retrieval-cluster-aware appliances
-An Archiver Appliance may run as an **N-member failover cluster**. Such a cluster is
-retrieval-aware: a MGMT/retrieval query to **one** member transparently returns data physically owned by
-**another** member — the response's `appliance` field names the true owner. So a single
-`EPICS_MCP_ARCHIVER_URL` covers the whole cluster; you do **not** need to route per member. Only
-**separate, non-clustered** appliances (or several disjoint clusters) need a distinct
-`EPICS_MCP_ARCHIVER_RETRIEVAL_URL` or per-appliance handling.
+An Archiver Appliance may run as an **N-member failover cluster**. Such a cluster is retrieval-aware: a
+MGMT/retrieval query to **one** member transparently returns data physically owned by **another** member
+— the response's `appliance` field names the true owner. So one `EPICS_MCP_ARCHIVER_URL` covers the whole
+cluster and you do **not** route per member.
+
+This is **orthogonal** to the MGMT/retrieval **port split**. When the mgmt webapp (`:17665`, `/mgmt/bpl`)
+and the retrieval webapp (`:17668`, `/retrieval/data`) run on different ports/hosts — common on a split
+deployment, **clustered or not** — you **must** set `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` to the retrieval
+one, or `get_pv_history` falls back to the mgmt URL and 404s. Clustering removes per-member routing; it
+does **not** remove the port split. Only genuinely separate, non-clustered appliances (or several
+disjoint clusters) need per-appliance handling beyond that.
 
 ### CA-bundle: combine the trust anchors
 When the REST planes present **different** trust roots — e.g. one internal service signed by a private
@@ -104,8 +110,9 @@ messages embed the full request URL — an internal host would leak into this fi
   never a false negative.
 - **Archived? how? history?** `is_archived` / `get_archive_info` / `get_pv_history`. History `status` is
   `ok` / `empty` / `withheld` — a bare `[]` means only a truly empty history, not "could not read".
-- **Alarm configured / history?** `is_alarm_configured` (a miss is a true negative only if the logger ran
-  at config-import time, else withheld) / `get_alarm_history` (`start` + `end` required).
+- **Alarm configured / history?** `is_alarm_configured` (a miss is `configured:false`, a true negative
+  only if the Alarm Logger was running at config-import time — otherwise treat it as unreliable; the tool
+  cannot flag this) / `get_alarm_history` (`start` + `end` required).
 - **Which IOC/host serves a PV?** `find_channels`.
 - **A REST 404 = `found:false`** only where documented (`getPVTypeInfo`, Olog `get_log_entry`); any other
   error propagates — could-not-read is never silently "not there".
@@ -116,7 +123,8 @@ A fresh session with only this guide should now handle the four things a live sm
 
 1. **Enumerate archived PVs** → `getAllPVs` / `getPVsForThisAppliance`, not `getMatchingPVs` (404).
 2. **A clustered archiver** → one `EPICS_MCP_ARCHIVER_URL` covers all members (retrieval-aware; the
-   `appliance` field names the owner; MGMT `:17665` / retrieval `:17668` are separate ports/webapps).
+   `appliance` field names the owner). The mgmt/retrieval port split is orthogonal: if retrieval runs on
+   `:17668`, still set `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` — clustering does not remove the port split.
 3. **TLS fails on one plane but not another** → combine internal CA + public roots (certifi) into one
    `EPICS_MCP_CA_BUNDLE` PEM.
 4. **A service presents a public certificate** → the combined CA bundle already covers it; no separate config.
