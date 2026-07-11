@@ -10,7 +10,7 @@ from pydantic import Field
 from epics_pv_mcp import __version__
 from epics_pv_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_pv_mcp.prompts import diagnose_pv as _diagnose_pv
-from epics_pv_mcp.resources import get_epics_config, get_health
+from epics_pv_mcp.resources import get_epics_config, get_guide, get_health
 from epics_pv_mcp.services.diagnose import (
     DEFAULT_CHECK_ALARM,
     DEFAULT_CHECK_ARCHIVER,
@@ -54,7 +54,9 @@ mcp = FastMCP(
         "until then it does NOT reach ESS production. File/dir tool arguments are canonicalized "
         "and existence-checked; an opt-in EPICS_MCP_ALLOWED_ROOTS (os.pathsep-separated) confines "
         "them to those roots (empty by default = no boundary). See .env.example for the commented "
-        "template."
+        "template. For the service landscape, operational recipes (archiver PV enumeration, "
+        "retrieval-cluster-aware appliances, the combined CA-bundle recipe) and typical error "
+        "signatures, read the epics-pv://guide resource."
     ),
 )
 # S1-2: FastMCP exposes no public API to set the server version, so we reach the low-level MCP
@@ -598,6 +600,12 @@ def health() -> dict[str, object]:
 def epics_config() -> dict[str, object]:
     """Non-secret configuration values."""
     return get_epics_config()
+
+
+@mcp.resource("epics-pv://guide")
+def guide() -> str:
+    """Agent-readable operational cookbook: service planes, recipes, error signatures."""
+    return get_guide()
 
 
 # === Prompts ===

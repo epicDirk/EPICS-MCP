@@ -1,12 +1,31 @@
 """MCP Resources for the EPICS PV MCP Server."""
 
+import importlib.resources
 import sys
 import time
+from functools import lru_cache
 
 from epics_pv_mcp import __version__
 from epics_pv_mcp.config import get_config
 
 _start_time = time.monotonic()
+
+
+@lru_cache(maxsize=1)
+def get_guide() -> str:
+    """The operational cookbook served as ``epics-pv://guide``.
+
+    Reads the package-data file ``operator_guide.md`` (a sibling of ``py.typed`` inside the
+    package, so hatchling ships it in the wheel and ``importlib.resources`` finds it in both an
+    editable and an installed layout). Only invoked at resource-read time, so a missing file
+    surfaces as a read-time error, never an import crash; ``lru_cache`` does not cache exceptions,
+    so a genuinely absent file re-raises on each call.
+    """
+    return (
+        importlib.resources.files("epics_pv_mcp")
+        .joinpath("operator_guide.md")
+        .read_text(encoding="utf-8")
+    )
 
 
 def get_health() -> dict[str, object]:

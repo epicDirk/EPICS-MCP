@@ -9,6 +9,10 @@ carry breaking changes).
 
 ### Added
 
+- `epics-pv://guide` resource + `OPERATING.md`: an operational cookbook (service planes,
+  archiver-enumeration/retrieval-cluster/CA-bundle recipes, error signatures) shipped inside
+  the package, so the server carries its own operational knowledge. Backed by one source file
+  (`src/epics_pv_mcp/operator_guide.md`), drift-guarded against the tool/env surface.
 - Optional `[displays]` extra: the display-aware tools (`validate_pvs`,
   `crossplane_check`, `coverage_audit`, `find_device`) now live behind an optional
   dependency on the `opi_navigation` PV engine. The **core** server (live PV access,

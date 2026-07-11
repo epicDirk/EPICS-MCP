@@ -185,6 +185,10 @@ need the `[displays]` extra. All are read-only and exit `0` even on a disconnect
 |--------------|-------------|
 | `epics-pv://health` | Server health: version, uptime, provider, p4p version |
 | `epics-pv://config` | Non-secret configuration values |
+| `epics-pv://guide` | Operational cookbook: service planes, recipes, error signatures |
+
+The guide's source is `src/epics_pv_mcp/operator_guide.md` — one file, shipped in the wheel and served
+as the resource (and mirrored for human readers by [`OPERATING.md`](OPERATING.md)).
 
 | Prompt | Description |
 |--------|-------------|
