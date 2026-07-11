@@ -3,8 +3,8 @@
 Covers three things E1 promises: the guide loads as package data (works in an editable AND an
 installed layout), it actually answers the four operational questions a live smoke had to
 re-derive, and every committed knowledge file stays facility-agnostic (no site hostnames /
-personal names) — the CI-effective guarantee, since the local commit guard's site patterns are
-git-ignored and absent on a fresh CI checkout.
+personal names) — the CI-effective check (a best-effort denylist), since the local commit guard's
+site patterns are git-ignored and absent on a fresh CI checkout.
 """
 
 from __future__ import annotations
@@ -50,19 +50,24 @@ def test_guide_answers_the_smoke_findings() -> None:
 
 
 # Every knowledge file E1 commits ships to the public fork; the local hostname guard is
-# git-ignored/CI-absent, so THIS test is the enforced facility-agnostic guarantee. Files that do
-# not exist yet (added in a later commit of the same series) are skipped, but the guide is required.
+# git-ignored/CI-absent, so THIS test is the CI-effective facility-agnostic check. It is a
+# best-effort DENYLIST, not a proof — transcribe operationally-learned facts into agnostic form by
+# hand, never paste raw. Files that do not exist yet (added in a later commit) are skipped, but the
+# guide is required.
 _KNOWLEDGE_FILES = (
     "src/epics_pv_mcp/operator_guide.md",
     "OPERATING.md",
     "CLAUDE.md",
 )
+# Site/host identifiers + a filesystem path carrying a username (BOTH Windows \Users\ and Unix
+# /home/<user>/ or /Users/<user>/ — the combined-CA path the guide teaches is the top leak vector).
 _SITE_RE = re.compile(
-    r"esss?\.lu\.se|\.ess\.eu|\.tn\b|\blinac-\d+|\balarm-logger-\d+|\bidmz-|-gw-tn|\\Users\\",
+    r"esss?\.lu\.se|\.esss?\b|\.ess\.eu|\.tn\b|\blinac-\d+|\balarm-logger-\d+|\bidmz-|-gw-tn"
+    r"|\\Users\\|/home/\w+/|/Users/\w+/",
     re.IGNORECASE,
 )
-# The proper name (case-sensitive): decisions must be attributed impersonally in committed docs.
-_PERSON_RE = re.compile(r"\bDirk\b")
+# Personal names (case-insensitive): decisions must be attributed impersonally in committed docs.
+_PERSON_RE = re.compile(r"\bDirk\b|\bNordt\b", re.IGNORECASE)
 
 
 def test_knowledge_files_are_facility_agnostic() -> None:
