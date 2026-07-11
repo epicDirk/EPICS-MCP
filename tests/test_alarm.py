@@ -49,7 +49,7 @@ def test_is_alarm_configured_detail_strips_person_fields(monkeypatch: pytest.Mon
         "delay": 5,
         "guidance": [{"title": "check", "details": "..."}],
         "user": "jdoe",
-        "host": "opi-console-3.esss",
+        "host": "console-host-3.example.org",
         "some_future_field": "leak?",
     }
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([raw])))
@@ -253,7 +253,7 @@ def test_get_alarm_history_strips_person_fields(monkeypatch: pytest.MonkeyPatch)
             "current_message": "OK",
             "enabled": True,
             "user": "jdoe",
-            "host": "opi-console-3",
+            "host": "console-host-3",
             "command": "Disabled",
             "config_msg": "possibly authored text",
             "some_future_field": "leak?",

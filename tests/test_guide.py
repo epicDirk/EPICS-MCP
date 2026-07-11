@@ -49,16 +49,20 @@ def test_guide_answers_the_smoke_findings() -> None:
     assert not missing, f"guide missing required anchors: {missing}"
 
 
-# Every knowledge file E1 commits ships to the public fork; the local hostname guard is
-# git-ignored/CI-absent, so THIS test is the CI-effective facility-agnostic check. It is a
-# best-effort DENYLIST, not a proof — transcribe operationally-learned facts into agnostic form by
-# hand, never paste raw. Files that do not exist yet (added in a later commit) are skipped, but the
-# guide is required.
-_KNOWLEDGE_FILES = (
-    "src/epics_pv_mcp/operator_guide.md",
-    "OPERATING.md",
-    "CLAUDE.md",
+# The facility-agnostic rule covers EVERY committed text file shipping to the fork, not only the
+# guide (CLAUDE.md states it repo-wide). This scan walks source, docs and tests, excluding THIS file
+# (it defines the patterns as literals). The local hostname commit-hook is git-ignored / CI-absent,
+# so THIS test is the CI-effective check. It is a best-effort DENYLIST, not a proof — transcribe
+# operationally-learned facts into agnostic form by hand, never paste raw.
+_SCAN_GLOBS = (
+    "src/**/*.py",
+    "src/**/*.md",
+    "tests/**/*.py",
+    "*.md",
+    "examples/**/*",
+    "sandbox/**/*.md",
 )
+_SCAN_SUFFIXES = {".py", ".md", ".json"}
 # Site/host identifiers + a filesystem path carrying a username (BOTH Windows \Users\ and Unix
 # /home/<user>/ or /Users/<user>/ — the combined-CA path the guide teaches is the top leak vector).
 _SITE_RE = re.compile(
@@ -70,18 +74,34 @@ _SITE_RE = re.compile(
 _PERSON_RE = re.compile(r"\bDirk\b|\bNordt\b", re.IGNORECASE)
 
 
-def test_knowledge_files_are_facility_agnostic() -> None:
-    scanned: list[str] = []
-    for rel in _KNOWLEDGE_FILES:
-        path = _ROOT / rel
-        if not path.exists():
-            continue
-        text = path.read_text(encoding="utf-8")
-        site = {m.group(0) for m in _SITE_RE.finditer(text)}
-        person = set(_PERSON_RE.findall(text))
-        assert not site, f"{rel}: site identifier(s) leaked into a committed knowledge file: {site}"
-        assert not person, f"{rel}: personal name leaked into a committed knowledge file"
-        scanned.append(rel)
-    assert "src/epics_pv_mcp/operator_guide.md" in scanned, (
-        "the guide file must exist and be scanned"
+def _scanned_files() -> list[Path]:
+    """Committed source/doc/test files that ship to the fork, minus this file (pattern literals)."""
+    this = Path(__file__).resolve()
+    found: set[Path] = set()
+    for pattern in _SCAN_GLOBS:
+        found.update(_ROOT.glob(pattern))
+    env = _ROOT / ".env.example"
+    if env.exists():
+        found.add(env)
+    return sorted(
+        f
+        for f in found
+        if f.is_file()
+        and f.resolve() != this
+        and (f.suffix in _SCAN_SUFFIXES or f.name == ".env.example")
     )
+
+
+def test_knowledge_files_are_facility_agnostic() -> None:
+    files = _scanned_files()
+    guide = _ROOT / "src" / "epics_pv_mcp" / "operator_guide.md"
+    assert guide in files, "the guide must exist and be scanned"
+
+    problems: list[str] = []
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        for label, regex in (("site", _SITE_RE), ("person", _PERSON_RE)):
+            match = regex.search(text)
+            if match:
+                problems.append(f"{path.relative_to(_ROOT)} [{label}: {match.group(0)!r}]")
+    assert not problems, f"facility identifier(s) leaked into committed files: {problems}"

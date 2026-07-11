@@ -64,7 +64,7 @@ _ALARM_CONFIG_ALLOWLIST = frozenset(
 # them (guidance prose "call Jane Doe", an ``actions`` ``mailto:jane.doe@…``). Kept for their
 # PRESENCE but their value is withheld (the Olog free-text treatment). This resolves the former
 # accepted Batch-1 residual after the pre-live-smoke privacy audit exhibited the leak against the
-# non-negotiable "no person data" guardrail (Dirk 2026-07-11: withhold all five).
+# non-negotiable "no person data" guardrail (project decision, 2026-07: withhold all five).
 _ALARM_CONFIG_FREETEXT = frozenset({"description", "guidance", "displays", "commands", "actions"})
 
 
