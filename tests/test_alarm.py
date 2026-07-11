@@ -8,6 +8,7 @@ import requests
 from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.services.alarm_client import AlarmClient
 from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError
+from epics_pv_mcp.services.redact import FREETEXT_WITHHELD
 from epics_pv_mcp.tools.alarm import _get_alarm_history, _is_alarm_configured
 
 
@@ -57,11 +58,42 @@ def test_is_alarm_configured_detail_strips_person_fields(monkeypatch: pytest.Mon
     assert detail["config"] == "config:/Accelerator/DEV-TEST01/X"
     assert detail["enabled"] is True
     assert detail["delay"] == 5
-    assert "guidance" in detail
+    assert detail["guidance"] == FREETEXT_WITHHELD  # key kept, authored value withheld
     # person-bearing + unknown fields are gone
     assert "user" not in detail
     assert "host" not in detail
     assert "some_future_field" not in detail
+
+
+def test_is_alarm_configured_withholds_authored_freetext(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DS-PRIVACY: the pre-live-smoke audit exhibited a person-name leak through the ALLOWED
+    authored free-text fields — a ``mailto:`` in ``actions`` and a name in ``guidance`` prose
+    survived the key-only allowlist. Every authored free-text VALUE must now be withheld (Olog
+    treatment); the key stays so a caller still learns the field exists, technical fields pass."""
+    client = AlarmClient("http://alarm:8081")
+    raw = {
+        "config": "config:/Accelerator/Vacuum/Vac-VVMC-01:Pos-R",
+        "enabled": True,
+        "latching": True,
+        "description": "Valve position alarm",
+        "guidance": [{"title": "On-call", "details": "Call Jane Doe (vacuum group), +46 46 888"}],
+        "displays": [{"title": "Vac overview", "details": "vac.bob"}],
+        "commands": [{"title": "notify", "details": "email jane"}],
+        "actions": [{"title": "Notify", "details": "mailto:jane.doe@example.org"}],
+        "user": "eng.smith",
+        "host": "ws-ctrl-042",
+    }
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([raw])))
+    _, detail = client.is_alarm_configured("Vac-VVMC-01:Pos-R")
+    # authored free-text values are withheld — no person can leak inside the prose / a mailto action
+    for field in ("description", "guidance", "displays", "commands", "actions"):
+        assert detail[field] == FREETEXT_WITHHELD, field
+    # technical fields pass through; audit metadata is gone
+    assert detail["enabled"] is True
+    assert detail["latching"] is True
+    assert detail["config"] == "config:/Accelerator/Vacuum/Vac-VVMC-01:Pos-R"
+    assert "user" not in detail
+    assert "host" not in detail
 
 
 def test_is_alarm_configured_false_empty(monkeypatch: pytest.MonkeyPatch) -> None:

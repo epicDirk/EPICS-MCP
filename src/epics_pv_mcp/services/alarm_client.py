@@ -26,22 +26,20 @@ from __future__ import annotations
 
 from epics_pv_mcp.services._http import build_retrying_session, rest_get_json
 from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
-from epics_pv_mcp.services.redact import project_allowlist
+from epics_pv_mcp.services.redact import project_allowlist, redact_record
 
 # Default alarm config-tree (topic) name; the leading path segment that selects the ES index.
 DEFAULT_ALARM_CONFIG = "Accelerator"
 
 # DS-PRIVACY: a Phoebus alarm config-CHANGE document carries ``user`` and ``host`` — WHO last
-# changed the alarm config — alongside the technical settings. Returning the raw ES record would
-# leak a person's username. We project onto this allowlist of technical fields instead. An allowlist
-# (not a denylist) means a NEW person-bearing field a future logger version adds cannot leak
-# silently — an unknown field is dropped by default. The alarm's technical configuration
-# (enable/latch/delay, operator guidance/commands) is preserved; ``user``/``host`` are not on the
-# list, so they are gone.
-# RESIDUAL (Batch-1 accepted): guidance/displays/commands/actions/description are AUTHORED free text
-# and could embed a person's name in prose (e.g. "call Jane Doe"). Structurally removing the auto
-# audit metadata (user/host) is the Batch-1 guard; general free-text redaction is deferred to the
-# Batch-3/DS-5 redactor (same class as Olog free text).
+# changed the alarm config — alongside the technical settings, AND its authored free-text fields
+# (guidance/displays/commands/actions/description) can name a person in prose (e.g. "call Jane Doe")
+# or a ``mailto:`` notification action. Returning the raw ES record would leak a person's username;
+# keeping the free-text VALUES would leak a name inside them. We therefore ``redact_record`` the
+# doc: project onto this allowlist of technical fields (an allowlist, not a denylist — a NEW
+# person-bearing field a future logger version adds is dropped by default), THEN withhold the
+# authored free-text VALUES (:data:`_ALARM_CONFIG_FREETEXT`). ``user``/``host`` are not on the
+# allowlist, so they are gone entirely.
 _ALARM_CONFIG_ALLOWLIST = frozenset(
     {
         "config",
@@ -62,16 +60,24 @@ _ALARM_CONFIG_ALLOWLIST = frozenset(
     }
 )
 
+# DS-PRIVACY: the allowlist fields whose VALUE is AUTHORED free text — a person can be named inside
+# them (guidance prose "call Jane Doe", an ``actions`` ``mailto:jane.doe@…``). Kept for their
+# PRESENCE but their value is withheld (the Olog free-text treatment). This resolves the former
+# accepted Batch-1 residual after the pre-live-smoke privacy audit exhibited the leak against the
+# non-negotiable "no person data" guardrail (Dirk 2026-07-11: withhold all five).
+_ALARM_CONFIG_FREETEXT = frozenset({"description", "guidance", "displays", "commands", "actions"})
+
 
 def _project_alarm_config(record: dict[str, object]) -> dict[str, object]:
-    """Return *record* restricted to the technical allowlist (drops ``user``/``host``/unknown).
+    """Return *record* reduced to the technical allowlist with authored free-text values withheld.
 
-    Uses the shared DS-PRIVACY :func:`~epics_pv_mcp.services.redact.project_allowlist` barrier. The
-    authored free-text fields kept here (``guidance``/``commands``/``description``) are a documented
-    Batch-1 residual — ``withhold_freetext`` could redact them, but that is a product decision for
-    ``is_alarm_configured``'s usefulness, deliberately NOT applied retroactively here.
+    Uses the shared DS-PRIVACY :func:`~epics_pv_mcp.services.redact.redact_record` barrier: it drops
+    ``user``/``host``/unknown (allowlist) and then replaces the authored free-text VALUES
+    (:data:`_ALARM_CONFIG_FREETEXT` — guidance/actions/commands/description/displays) with a
+    withheld marker, so a person named in prose or a ``mailto:`` action cannot leak (the Olog
+    treatment). The key is kept, so a caller still learns the field is present.
     """
-    return project_allowlist(record, _ALARM_CONFIG_ALLOWLIST)
+    return redact_record(record, allowed=_ALARM_CONFIG_ALLOWLIST, freetext=_ALARM_CONFIG_FREETEXT)
 
 
 # DS-PRIVACY (DS-3): an alarm STATE/history document (``/search/alarm``) can carry ``user`` and
@@ -143,9 +149,10 @@ class AlarmClient:
         contains *pv* and changed more recently could mask a real hit — a known backend limitation,
         harmless for the distinct sandbox device set.
 
-        The returned ``detail`` is the config record projected onto the technical allowlist
-        (:data:`_ALARM_CONFIG_ALLOWLIST`) — the raw ES record's ``user``/``host`` (who changed the
-        config) never leave this method (DS-PRIVACY).
+        The returned ``detail`` is the config record reduced by :func:`_project_alarm_config` — the
+        raw ES record's ``user``/``host`` (who changed the config) are dropped and the authored
+        free-text values (guidance/actions/commands/description/displays) are withheld, so no person
+        can leak in the audit metadata OR inside the prose (DS-PRIVACY).
         """
         config_query = f"/{config_name}/*{pv}"
         data = self._get(f"{self.base_url}/search/alarm/config", {"config": config_query})
