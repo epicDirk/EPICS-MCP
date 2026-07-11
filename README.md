@@ -150,6 +150,7 @@ To reach a real control system, set the address list in the launcher's environme
 | `is_archived` | Archiver Appliance — is a PV being archived? (+ connection_state / last_event / is_monitored from the same getPVStatus call) | `EPICS_MCP_ARCHIVER_URL` |
 | `get_pv_history` | Archiver Appliance — archived samples over an ISO-8601 window (+ the getData.json `meta` block: EGU units, PREC precision; `status` = ok/empty/withheld so an empty result is never mistaken for "could not read") | `EPICS_MCP_ARCHIVER_URL` |
 | `get_archive_info` | Archiver Appliance — how a PV is archived (sampling method/period, STS/MTS/LTS retention, DBRType, archived fields, source host); `found:false` on a 404 (never-archived), errors propagate | `EPICS_MCP_ARCHIVER_URL` |
+| `list_archived_pvs` | Archiver Appliance — enumerate archived PV names (getAllPVs / `this_appliance`=getPVsForThisAppliance, not getMatchingPVs); optional name-glob `pattern`, honest `capped` | `EPICS_MCP_ARCHIVER_URL` |
 | `is_alarm_configured` | Phoebus Alarm Logger — is a PV in the alarm tree? | `EPICS_MCP_ALARM_URL` |
 | `get_alarm_history` | Phoebus Alarm Logger — alarm state history of a PV over a window (required start/end; newest-first; user/host stripped) | `EPICS_MCP_ALARM_URL` |
 | `lookup_device_name` | ESS Naming Service — is a device name registered + ACTIVE? (404 = definitive not-registered; a service error is withheld, never a false negative) | `EPICS_MCP_NAMING_URL` |
@@ -171,13 +172,20 @@ The cross-plane analyses are also standalone CLIs — useful in a terminal or CI
 MCP client involved:
 
 ```bash
+epics-doctor                                            # read-only config self-check (all planes)
 epics-diagnose   TEST:Temperature                       # connection diagnosis
 epics-crossplane --displays <project-root> <st.cmd>     # display ↔ IOC ↔ Naming (needs [displays])
 epics-coverage   --displays <project-root> --scope DEV: # coverage matrix (needs [displays])
 ```
 
-`epics-diagnose` is part of the core install; `epics-crossplane` and `epics-coverage`
-need the `[displays]` extra. All are read-only and exit `0` even on a disconnect.
+`epics-doctor` and `epics-diagnose` are part of the core install; `epics-crossplane` and
+`epics-coverage` need the `[displays]` extra. All are read-only.
+
+`epics-diagnose`/`epics-crossplane`/`epics-coverage` exit `0` even on a negative finding (a
+disconnect / a broken link is a result, not a crash). **`epics-doctor` is the deliberate exception**
+— it is a scriptable pass/fail, so it exits `0` when every configured plane is healthy, `1` when a
+configured plane fails (unreachable / CA error / API error / probe-disconnect), and `2` on a usage
+error. Run it first in a new facility to confirm your `.env` (see `docs/deployment.md`).
 
 ## Resources & Prompts
 
@@ -233,7 +241,9 @@ All settings are read from environment variables with the `EPICS_MCP_` prefix.
 | `EPICS_MCP_CHANNELFINDER_URL` | _(empty)_ | `find_channels` + the ChannelFinder plane |
 | `EPICS_MCP_CHANNELFINDER_AUTH` | _(empty)_ | Optional `Authorization` header for a secured ChannelFinder |
 | `EPICS_MCP_CHANNELFINDER_MAX_RESULTS` | `500` | Cap on channels per prefix query |
-| `EPICS_MCP_ARCHIVER_URL` | _(empty)_ | `is_archived` / `get_pv_history` / `get_archive_info` (Archiver MGMT root, `:17665`) |
+| `EPICS_MCP_CHANNELFINDER_SAFE_OWNER_ACCOUNTS` | _(ESS: `recceiver`)_ | DS-PRIVACY owner allowlist — service accounts whose `owner` is surfaced; unset = ESS default, comma-list = override, empty = redact all |
+| `EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES` | _(ESS: `iocName,hostName,iocid,pvStatus,time`)_ | DS-PRIVACY property allowlist — technical property names surfaced; unset = ESS default, comma-list = override, empty = redact all |
+| `EPICS_MCP_ARCHIVER_URL` | _(empty)_ | `is_archived` / `get_pv_history` / `get_archive_info` / `list_archived_pvs` (Archiver MGMT root, `:17665`) |
 | `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` | _(empty)_ | Archiver retrieval root (`:17668`); empty falls back to `ARCHIVER_URL` |
 | `EPICS_MCP_ARCHIVER_AUTH` | _(empty)_ | Optional `Authorization` header for the Archiver |
 | `EPICS_MCP_ALARM_URL` | _(empty)_ | `is_alarm_configured` / `get_alarm_history` (Phoebus Alarm Logger REST root) |

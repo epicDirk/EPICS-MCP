@@ -66,6 +66,15 @@ name-glob `pattern` maps to the endpoint's `pv` param, and `capped` is honest (o
 It deliberately does **not** use `getMatchingPVs` — a standard endpoint too, but one that **may 404
 on proxied/split deployments**. Cluster shape: `getApplianceInfo` / `getAppliancesInCluster`.
 
+### Verify a deployment's config — `epics-doctor`
+The `epics-doctor` CLI (core install) is a read-only self-check: it probes every CONFIGURED plane
+once and reports, per plane, whether it is reachable, whether the CA bundle works, whether the
+service answers, and what the ChannelFinder redaction is set to. A disabled plane (empty `*_URL`) is
+reported honestly, never a failure. Exit `0` = all configured planes healthy, `1` = a configured
+plane failed (`unreachable` / `ca_error` / `api_error` / probe-disconnect), `2` = a usage error. Run
+it first in a new facility to confirm the `.env`; add `--probe-pv NAME` to also pass/fail the live
+PVA plane against a real PV. Full deployment/config guide: `docs/deployment.md`.
+
 ### Retrieval-cluster-aware appliances
 An Archiver Appliance may run as an **N-member failover cluster**. Such a cluster is retrieval-aware: a
 MGMT/retrieval query to **one** member transparently returns data physically owned by **another** member
