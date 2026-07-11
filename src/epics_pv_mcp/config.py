@@ -68,6 +68,15 @@ class EpicsConfig(BaseSettings):
     # Cap on channels returned per CF prefix query; raise it for a large device prefix (the full
     # mTCA-EVR-300 register set). The CF checker withholds its verdict once a query hits this cap.
     channelfinder_max_results: int = Field(default=500, ge=1)
+    # DS-PRIVACY (site-configurable): the ChannelFinder ``owner`` / ``properties`` allowlists decide
+    # which values are surfaced vs. redacted (see channelfinder_client._project). Default = the ESS
+    # RecSync convention (owner ``recceiver``; properties iocName/hostName/iocid/pvStatus/time).
+    # Three-way via ``str | None``: UNSET (None) = built-in ESS default; a comma-separated list =
+    # OVERRIDE (a facility's own service accounts / technical property names); an explicitly EMPTY
+    # string = redact EVERYTHING (empty allowlist). ``str | None`` lets a SET-but-empty env mean
+    # "redact all" as distinct from an UNSET "use the default".
+    channelfinder_safe_owner_accounts: str | None = None
+    channelfinder_safe_property_names: str | None = None
     # Archiver Appliance MGMT root, e.g. "http://archiver:17665" — serves /mgmt/bpl (is_archived).
     archiver_url: str = ""
     # Archiver Appliance RETRIEVAL root, e.g. "http://archiver:17668" — serves /retrieval/data

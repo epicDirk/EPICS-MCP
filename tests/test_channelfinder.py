@@ -6,7 +6,15 @@ import pytest
 import requests
 
 from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.services.channelfinder_client import ChannelFinderClient, ChannelInfo
+from epics_pv_mcp.services.channelfinder_client import (
+    _SAFE_OWNER_ACCOUNTS,
+    _SAFE_PROPERTY_NAMES,
+    ChannelFinderClient,
+    ChannelInfo,
+    _resolve_allowlist,
+    resolve_safe_owner_accounts,
+    resolve_safe_property_names,
+)
 from epics_pv_mcp.services.channelfinder_exceptions import (
     ChannelFinderConnectionError,
     ChannelFinderResponseError,
@@ -106,6 +114,80 @@ def test_project_allowlists_properties_drops_person_property(
     assert "LOCATION" not in props
     assert out[0]["ioc_name"] == "IOC1"  # allowlisted property still feeds the dedicated field
     assert out[0]["host_name"] == "host1"
+
+
+# --- site-configurable DS-PRIVACY allowlists (E2) ---
+
+
+def test_safe_allowlists_default_to_ess_when_unset() -> None:
+    """UNSET config resolves to the built-in ESS RecSync defaults (no behaviour change)."""
+    cfg = EpicsConfig()  # both SAFE vars unset -> None
+    assert resolve_safe_owner_accounts(cfg) == _SAFE_OWNER_ACCOUNTS
+    assert resolve_safe_property_names(cfg) == _SAFE_PROPERTY_NAMES
+
+
+def test_resolve_allowlist_three_way() -> None:
+    """None -> default; ""/whitespace -> empty; "a, b ,," -> {a, b} (trimmed, empties dropped)."""
+    default = frozenset({"x"})
+    assert _resolve_allowlist(None, default) == default
+    assert _resolve_allowlist("", default) == frozenset()
+    assert _resolve_allowlist("   ", default) == frozenset()
+    assert _resolve_allowlist(" a , b ,,", default) == frozenset({"a", "b"})
+
+
+def test_safe_owner_accounts_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A facility override swaps the kept owner: the site account is kept, ESS default redacted."""
+    cfg = EpicsConfig(channelfinder_safe_owner_accounts="ops_svc")
+    monkeypatch.setattr("epics_pv_mcp.services.channelfinder_client.get_config", lambda: cfg)
+    client = ChannelFinderClient("http://cf")
+    payload = [
+        {"name": "SYS:PV1", "owner": "ops_svc", "properties": []},
+        {"name": "SYS:PV2", "owner": "recceiver", "properties": []},
+    ]
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    out = client.find_channels("SYS:*")
+    assert out[0]["owner"] == "ops_svc"  # site service account kept
+    assert out[1]["owner"] == ""  # the ESS default is not on THIS site's allowlist
+
+
+def test_safe_property_names_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A facility override swaps the surfaced technical properties; the ESS default is dropped."""
+    cfg = EpicsConfig(channelfinder_safe_property_names="siteProp")
+    monkeypatch.setattr("epics_pv_mcp.services.channelfinder_client.get_config", lambda: cfg)
+    client = ChannelFinderClient("http://cf")
+    payload = [
+        {
+            "name": "SYS:PV1",
+            "owner": "recceiver",
+            "properties": [
+                {"name": "siteProp", "value": "keepme"},
+                {"name": "iocName", "value": "IOC1"},
+            ],
+        }
+    ]
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    out = client.find_channels("SYS:*")
+    assert out[0]["properties"] == {"siteProp": "keepme"}  # only the site allowlist survives
+    assert "iocName" not in out[0]["properties"]  # ESS default no longer allowed here
+
+
+def test_safe_allowlists_empty_redacts_everything(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicitly EMPTY allowlist redacts ALL owners and ALL properties (maximal privacy)."""
+    cfg = EpicsConfig(channelfinder_safe_owner_accounts="", channelfinder_safe_property_names="")
+    monkeypatch.setattr("epics_pv_mcp.services.channelfinder_client.get_config", lambda: cfg)
+    client = ChannelFinderClient("http://cf")
+    payload = [
+        {
+            "name": "SYS:PV1",
+            "owner": "recceiver",
+            "properties": [{"name": "iocName", "value": "IOC1"}],
+        }
+    ]
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    out = client.find_channels("SYS:*")
+    assert out[0]["owner"] == ""  # even the service account is redacted
+    assert out[0]["properties"] == {}  # everything dropped
+    assert out[0]["ioc_name"] is None  # iocName no longer surfaces -> dedicated field is None
 
 
 def test_empty_result(monkeypatch: pytest.MonkeyPatch) -> None:

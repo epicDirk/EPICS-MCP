@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
+from epics_pv_mcp.config import EpicsConfig, get_config
 from epics_pv_mcp.services._http import build_retrying_session, rest_get_json
 from epics_pv_mcp.services.channelfinder_exceptions import (
     ChannelFinderConnectionError,
@@ -51,6 +52,30 @@ _SAFE_OWNER_ACCOUNTS = frozenset({"recceiver"})
 _SAFE_PROPERTY_NAMES = frozenset({"iocName", "hostName", "iocid", "pvStatus", "time"})
 
 
+def _resolve_allowlist(value: str | None, default: frozenset[str]) -> frozenset[str]:
+    """Resolve a site-configurable allowlist string to a frozenset.
+
+    Three-way (see :class:`~epics_pv_mcp.config.EpicsConfig`): ``None`` (unset) → the built-in
+    *default*; an explicitly EMPTY string → an EMPTY allowlist (redact everything); a comma-
+    separated list → those names (trimmed, empties dropped). This is the SINGLE resolution both
+    the CF client and the doctor privacy report use, so doctor's report and the client's redaction
+    cannot drift.
+    """
+    if value is None:
+        return default
+    return frozenset(token.strip() for token in value.split(",") if token.strip())
+
+
+def resolve_safe_owner_accounts(cfg: EpicsConfig) -> frozenset[str]:
+    """Effective ChannelFinder owner allowlist for *cfg* (site override or the ESS default)."""
+    return _resolve_allowlist(cfg.channelfinder_safe_owner_accounts, _SAFE_OWNER_ACCOUNTS)
+
+
+def resolve_safe_property_names(cfg: EpicsConfig) -> frozenset[str]:
+    """Effective ChannelFinder property allowlist for *cfg* (site override or the ESS default)."""
+    return _resolve_allowlist(cfg.channelfinder_safe_property_names, _SAFE_PROPERTY_NAMES)
+
+
 class ChannelInfo(TypedDict):
     """Projected, read-only view of one ChannelFinder channel."""
 
@@ -74,6 +99,12 @@ class ChannelFinderClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = build_retrying_session(auth_header=auth_header)
+        # DS-PRIVACY: resolve the (site-configurable) allowlists ONCE at construction from config,
+        # falling back to the ESS defaults when unset. ``_project`` reads these instance fields —
+        # a facility can set its own service accounts / technical properties (or redact everything).
+        cfg = get_config()
+        self._safe_owner_accounts = resolve_safe_owner_accounts(cfg)
+        self._safe_property_names = resolve_safe_property_names(cfg)
 
     @property
     def channels_url(self) -> str:
@@ -105,20 +136,20 @@ class ChannelFinderClient:
             )
         return [self._project(channel) for channel in data if isinstance(channel, dict)]
 
-    @staticmethod
-    def _project(channel: dict[str, object]) -> ChannelInfo:
+    def _project(self, channel: dict[str, object]) -> ChannelInfo:
         """Project a raw channel JSON into a :class:`ChannelInfo`.
 
         ChannelFinder serializes ``properties`` as a list of ``{name, value, owner}``
         objects (not a flat dict), so the IOC/host live in properties named ``iocName``/
         ``hostName`` (RecSync convention). Deterministic: tags sorted.
 
-        DS-PRIVACY: ``owner`` is kept only when it is a known service account
-        (:data:`_SAFE_OWNER_ACCOUNTS`) and redacted to ``""`` otherwise — a CF-web-UI/cfstore
-        channel is owned by a person's ESS username. ``properties`` is reduced to the
-        known-technical :data:`_SAFE_PROPERTY_NAMES` allowlist, so a person-bearing property value
-        (ENGINEER/LOCATION or a cfstore custom field) is dropped by default. The per-property
-        ``owner`` is never read. IOC/host/tags — the technical provenance — are untouched.
+        DS-PRIVACY: ``owner`` is kept only when it is on the (site-configurable) owner allowlist
+        ``self._safe_owner_accounts`` (ESS default :data:`_SAFE_OWNER_ACCOUNTS`), else redacted to
+        ``""`` — a CF-web-UI/cfstore channel is owned by a person's ESS username. ``properties`` is
+        reduced to the ``self._safe_property_names`` allowlist (ESS default
+        :data:`_SAFE_PROPERTY_NAMES`), so a person-bearing property value (ENGINEER/LOCATION or a
+        cfstore custom field) is dropped by default. The per-property ``owner`` is never read.
+        IOC/host/tags — the technical provenance — are untouched.
         """
         raw_props = channel.get("properties")
         props: dict[str, str] = {}
@@ -126,8 +157,10 @@ class ChannelFinderClient:
             for prop in raw_props:
                 if isinstance(prop, dict) and "name" in prop:
                     props[str(prop["name"])] = str(prop.get("value", ""))
-        # DS-PRIVACY: allowlist surfaced properties (deny-by-default; see _SAFE_PROPERTY_NAMES).
-        props = {str(k): str(v) for k, v in project_allowlist(props, _SAFE_PROPERTY_NAMES).items()}
+        # DS-PRIVACY: allowlist surfaced properties (deny-by-default; see _safe_property_names).
+        props = {
+            str(k): str(v) for k, v in project_allowlist(props, self._safe_property_names).items()
+        }
         raw_tags = channel.get("tags")
         tags: list[str] = []
         if isinstance(raw_tags, list):
@@ -135,7 +168,7 @@ class ChannelFinderClient:
                 str(tag["name"]) for tag in raw_tags if isinstance(tag, dict) and "name" in tag
             )
         raw_owner = str(channel.get("owner", ""))
-        owner = raw_owner if raw_owner in _SAFE_OWNER_ACCOUNTS else ""
+        owner = raw_owner if raw_owner in self._safe_owner_accounts else ""
         return ChannelInfo(
             name=str(channel.get("name", "")),
             owner=owner,
