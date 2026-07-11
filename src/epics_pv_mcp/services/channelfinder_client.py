@@ -26,6 +26,7 @@ from epics_pv_mcp.services.channelfinder_exceptions import (
     ChannelFinderConnectionError,
     ChannelFinderResponseError,
 )
+from epics_pv_mcp.services.redact import project_allowlist
 
 # Default upper bound on returned channels — a broad glob (``*``) can match a whole site.
 DEFAULT_MAX_RESULTS = 500
@@ -38,6 +39,16 @@ DEFAULT_MAX_RESULTS = 500
 # redacted, the safe default). The Batch-3 redactor at the ``services/checkers`` chokepoint is the
 # durable form; this is the Batch-1 interim guard.
 _SAFE_OWNER_ACCOUNTS = frozenset({"recceiver"})
+
+# DS-PRIVACY: the surfaced ``properties`` were formerly an ALLOW-BY-DEFAULT denylist (only
+# ``recceiverID`` popped) — any OTHER property VALUE passed through verbatim. The reccaster
+# ENGINEER/LOCATION env-var convention (devIocStats) and CF-web-UI/cfstore custom properties carry a
+# person's name in the value. We instead ALLOWLIST the known-technical RecSync property names via
+# :func:`~epics_pv_mcp.services.redact.project_allowlist`, so an unknown/new person-bearing property
+# is dropped by default (the codebase-wide allowlist principle). ``iocName``/``hostName`` also feed
+# the dedicated ``ioc_name``/``host_name`` fields. If a live ESS smoke shows a useful technical
+# property missing here, ADD it to this set — do not fall back to a denylist.
+_SAFE_PROPERTY_NAMES = frozenset({"iocName", "hostName", "iocid", "pvStatus", "time"})
 
 
 class ChannelInfo(TypedDict):
@@ -104,9 +115,10 @@ class ChannelFinderClient:
 
         DS-PRIVACY: ``owner`` is kept only when it is a known service account
         (:data:`_SAFE_OWNER_ACCOUNTS`) and redacted to ``""`` otherwise — a CF-web-UI/cfstore
-        channel is owned by a person's ESS username. ``properties['recceiverID']`` (an opaque
-        receiver-instance id) is dropped as belt-and-braces. IOC/host/tags — the technical
-        provenance — are untouched.
+        channel is owned by a person's ESS username. ``properties`` is reduced to the
+        known-technical :data:`_SAFE_PROPERTY_NAMES` allowlist, so a person-bearing property value
+        (ENGINEER/LOCATION or a cfstore custom field) is dropped by default. The per-property
+        ``owner`` is never read. IOC/host/tags — the technical provenance — are untouched.
         """
         raw_props = channel.get("properties")
         props: dict[str, str] = {}
@@ -114,7 +126,8 @@ class ChannelFinderClient:
             for prop in raw_props:
                 if isinstance(prop, dict) and "name" in prop:
                     props[str(prop["name"])] = str(prop.get("value", ""))
-        props.pop("recceiverID", None)  # DS-PRIVACY: opaque receiver-instance id, not surfaced
+        # DS-PRIVACY: allowlist surfaced properties (deny-by-default; see _SAFE_PROPERTY_NAMES).
+        props = {str(k): str(v) for k, v in project_allowlist(props, _SAFE_PROPERTY_NAMES).items()}
         raw_tags = channel.get("tags")
         tags: list[str] = []
         if isinstance(raw_tags, list):

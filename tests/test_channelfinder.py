@@ -73,9 +73,39 @@ def test_project_redacts_person_owner_and_recceiverid(monkeypatch: pytest.Monkey
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
     out = client.find_channels("SYS:*")
     assert out[0]["owner"] == "recceiver"  # service account kept
-    assert "recceiverID" not in out[0]["properties"]  # opaque id dropped
+    assert "recceiverID" not in out[0]["properties"]  # opaque id dropped (not on allowlist)
     assert out[0]["ioc_name"] == "IOC1"  # technical provenance untouched
     assert out[1]["owner"] == ""  # person's username redacted
+
+
+def test_project_allowlists_properties_drops_person_property(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DS-PRIVACY: the pre-live-smoke audit exhibited a person-name leak through a property VALUE —
+    the reccaster ENGINEER/LOCATION env-var convention (devIocStats) or a cfstore custom field. The
+    surfaced properties must be an ALLOWLIST of known-technical names, dropping any other property
+    by default; the technical iocName/hostName survive (and still feed ioc_name/host_name)."""
+    client = ChannelFinderClient("http://cf")
+    payload = [
+        {
+            "name": "SYS:PV1",
+            "owner": "recceiver",  # safe RecSync service account — owner gives no protection here
+            "properties": [
+                {"name": "iocName", "value": "IOC1", "owner": "recceiver"},
+                {"name": "hostName", "value": "host1", "owner": "recceiver"},
+                {"name": "ENGINEER", "value": "John Smith", "owner": "recceiver"},
+                {"name": "LOCATION", "value": "Hall B, desk of A. Person", "owner": "recceiver"},
+            ],
+        }
+    ]
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    out = client.find_channels("SYS:*")
+    props = out[0]["properties"]
+    assert props == {"iocName": "IOC1", "hostName": "host1"}  # only technical names survive
+    assert "ENGINEER" not in props  # person name in the VALUE dropped by the allowlist
+    assert "LOCATION" not in props
+    assert out[0]["ioc_name"] == "IOC1"  # allowlisted property still feeds the dedicated field
+    assert out[0]["host_name"] == "host1"
 
 
 def test_empty_result(monkeypatch: pytest.MonkeyPatch) -> None:
