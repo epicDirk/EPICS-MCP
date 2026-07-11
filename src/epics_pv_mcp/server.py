@@ -310,6 +310,10 @@ async def is_archived(
     Beyond archived/status the result surfaces the MGMT record's connection_state (source IOC
     connected now?), last_event (time of the last archived sample), is_monitored, sampling_period
     and appliance when present — same single getPVStatus call, no extra cost.
+
+    No tool ENUMERATES archived PVs (this needs a PV name). To list them, call the Archiver MGMT API
+    getAllPVs (whole appliance) or getPVsForThisAppliance (this member), NOT getMatchingPVs (404 on
+    some deployments). See the epics-pv://guide resource.
     """
     return await _is_archived(pv, timeout)
 
@@ -373,6 +377,9 @@ async def get_archive_info(
     archive CONFIGURATION — sampling method/period, retention (the STS/MTS/LTS data_stores),
     computed event/storage rates, dbr_type, archived fields, source host_name and creation_time.
     found is false when the appliance has no type-info record for the PV (unknown / never archived).
+
+    To ENUMERATE archived PVs (no tool does — this needs a PV name) call the MGMT API getAllPVs or
+    getPVsForThisAppliance, NOT getMatchingPVs (404 on some deployments). See epics-pv://guide.
     """
     return await _get_archive_info(pv, timeout)
 
