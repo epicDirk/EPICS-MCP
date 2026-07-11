@@ -10,7 +10,10 @@ site patterns are git-ignored and absent on a fresh CI checkout.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from epics_pv_mcp.resources import get_guide
 
@@ -49,20 +52,25 @@ def test_guide_answers_the_smoke_findings() -> None:
     assert not missing, f"guide missing required anchors: {missing}"
 
 
-# The facility-agnostic rule covers EVERY committed text file shipping to the fork, not only the
-# guide (CLAUDE.md states it repo-wide). This scan walks source, docs and tests, excluding THIS file
-# (it defines the patterns as literals). The local hostname commit-hook is git-ignored / CI-absent,
-# so THIS test is the CI-effective check. It is a best-effort DENYLIST, not a proof — transcribe
-# operationally-learned facts into agnostic form by hand, never paste raw.
-_SCAN_GLOBS = (
-    "src/**/*.py",
-    "src/**/*.md",
-    "tests/**/*.py",
-    "*.md",
-    "examples/**/*",
-    "sandbox/**/*.md",
-)
-_SCAN_SUFFIXES = {".py", ".md", ".json"}
+# The facility-agnostic rule covers EVERY tracked text file shipping to the fork. This enumerates
+# them via ``git ls-files`` (the true shipping set — hermetic, no git-ignored local files like the
+# sandbox), excluding THIS file (it defines the patterns as literals) and LICENSE (whose copyright
+# line legitimately carries the author's name). The local hostname commit-hook is git-ignored /
+# CI-absent, so THIS test is the CI-effective check — a best-effort DENYLIST, not a proof.
+# Transcribe operationally-learned facts into agnostic form by hand, never paste raw.
+_SCAN_SUFFIXES = {
+    ".py",
+    ".md",
+    ".json",
+    ".cfg",
+    ".ini",
+    ".txt",
+    ".yml",
+    ".yaml",
+    ".rst",
+    ".example",
+}
+_EXCLUDED_NAMES = {"LICENSE"}
 # Site/host identifiers + a filesystem path carrying a username (BOTH Windows \Users\ and Unix
 # /home/<user>/ or /Users/<user>/ — the combined-CA path the guide teaches is the top leak vector).
 _SITE_RE = re.compile(
@@ -74,26 +82,36 @@ _SITE_RE = re.compile(
 _PERSON_RE = re.compile(r"\bDirk\b|\bNordt\b", re.IGNORECASE)
 
 
-def _scanned_files() -> list[Path]:
-    """Committed source/doc/test files that ship to the fork, minus this file (pattern literals)."""
+def _tracked_text_files() -> list[Path]:
+    """Every TRACKED text file (``git ls-files``) that ships to the fork — the true repo-wide,
+    hermetic surface. Excludes THIS file (pattern literals) and LICENSE (copyright attribution)."""
+    try:
+        listing = subprocess.run(
+            ["git", "ls-files"],
+            cwd=_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout
+    except (FileNotFoundError, subprocess.SubprocessError) as exc:
+        pytest.skip(f"git unavailable — cannot enumerate tracked files: {exc}")
     this = Path(__file__).resolve()
-    found: set[Path] = set()
-    for pattern in _SCAN_GLOBS:
-        found.update(_ROOT.glob(pattern))
-    env = _ROOT / ".env.example"
-    if env.exists():
-        found.add(env)
-    return sorted(
-        f
-        for f in found
-        if f.is_file()
-        and f.resolve() != this
-        and (f.suffix in _SCAN_SUFFIXES or f.name == ".env.example")
-    )
+    files: list[Path] = []
+    for rel in listing.splitlines():
+        path = _ROOT / rel
+        if (
+            path.is_file()
+            and path.resolve() != this
+            and path.name not in _EXCLUDED_NAMES
+            and path.suffix.lower() in _SCAN_SUFFIXES
+        ):
+            files.append(path)
+    return sorted(files)
 
 
 def test_knowledge_files_are_facility_agnostic() -> None:
-    files = _scanned_files()
+    files = _tracked_text_files()
     guide = _ROOT / "src" / "epics_pv_mcp" / "operator_guide.md"
     assert guide in files, "the guide must exist and be scanned"
 

@@ -121,7 +121,8 @@ messages embed the full request URL — an internal host would leak into this fi
 
 A fresh session with only this guide should now handle the four things a live smoke had to re-derive:
 
-1. **Enumerate archived PVs** → `getAllPVs` / `getPVsForThisAppliance`, not `getMatchingPVs` (404).
+1. **Enumerate archived PVs** → `getAllPVs` / `getPVsForThisAppliance` (`getMatchingPVs` may 404 on
+   split/proxied deployments).
 2. **A clustered archiver** → one `EPICS_MCP_ARCHIVER_URL` covers all members (retrieval-aware; the
    `appliance` field names the owner). The mgmt/retrieval port split is orthogonal: if retrieval runs on
    `:17668`, still set `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` — clustering does not remove the port split.
