@@ -134,3 +134,15 @@ def is_ssl_error(exc: BaseException) -> bool:
     "host unreachable". Null-safe.
     """
     return isinstance(getattr(exc, "__cause__", None), requests.exceptions.SSLError)
+
+
+def is_retry_error(exc: BaseException) -> bool:
+    """True iff *exc* wraps a retry-exhausted 5xx response.
+
+    :func:`build_retrying_session` force-lists 502/503/504, so a served-but-retryable 5xx that
+    exhausts the retry budget surfaces as ``requests.exceptions.RetryError`` — a RequestException
+    that is NOT a ConnectionError and whose ``.response`` is ``None`` (so :func:`http_status` cannot
+    read a code). It means the host DID answer (repeatedly, with a 5xx), so a config ``doctor``
+    should report it as reachable-but-erroring, NOT "unreachable". Null-safe.
+    """
+    return isinstance(getattr(exc, "__cause__", None), requests.exceptions.RetryError)

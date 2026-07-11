@@ -19,6 +19,7 @@ from epics_pv_mcp.services._http import (
     build_retrying_session,
     http_status,
     is_http_404,
+    is_retry_error,
     is_ssl_error,
     rest_get_json,
 )
@@ -264,3 +265,19 @@ def test_http_status_none_for_transport_failure() -> None:
     conn.__cause__ = requests.exceptions.ConnectionError("refused")
     assert http_status(conn) is None
     assert is_http_404(conn) is False
+
+
+def test_is_retry_error_detects_retryerror() -> None:
+    """A retry-exhausted 5xx (502/503/504 force-listed) surfaces as a chained RetryError."""
+    err = ArchiverResponseError("x")
+    err.__cause__ = requests.exceptions.RetryError("too many 503 error responses")
+    assert is_retry_error(err) is True
+    # RetryError has no .response, so http_status can't read a code — hence is_retry_error exists.
+    assert http_status(err) is None
+
+
+def test_is_retry_error_false_for_others() -> None:
+    conn = ArchiverConnectionError("x")
+    conn.__cause__ = requests.exceptions.ConnectionError("refused")
+    assert is_retry_error(conn) is False
+    assert is_retry_error(ArchiverConnectionError("x")) is False  # no __cause__

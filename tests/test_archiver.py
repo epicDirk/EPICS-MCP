@@ -6,6 +6,8 @@ import pytest
 import requests
 
 from epics_pv_mcp.config import EpicsConfig
+from epics_pv_mcp.errors import EpicsConnectionError
+from epics_pv_mcp.services._http import http_status, is_ssl_error
 from epics_pv_mcp.services.archiver_client import ArchiverClient, HistoryResult, Sample
 from epics_pv_mcp.services.archiver_exceptions import (
     ArchiverConnectionError,
@@ -640,8 +642,22 @@ def test_check_connectivity_served_non2xx_raises_response_error(
     http_error.response = Mock(status_code=404)
     resp.raise_for_status.side_effect = http_error
     monkeypatch.setattr(client.session, "get", Mock(return_value=resp))
-    with pytest.raises(ArchiverResponseError):
+    with pytest.raises(ArchiverResponseError) as excinfo:
         client.check_connectivity()
+    # The from-exc chain the doctor classifier depends on: __cause__ carries the served HTTP status,
+    # so a dropped `from exc` would silently mark this reachable-but-erroring host unreachable.
+    assert http_status(excinfo.value) == 404
+
+
+def test_check_connectivity_ssl_error_chains_cause(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real TLS/CA failure chains the SSLError so doctor buckets it ca_error, not unreachable."""
+    client = ArchiverClient("http://arch:17665")
+    monkeypatch.setattr(
+        client.session, "get", Mock(side_effect=requests.exceptions.SSLError("self-signed"))
+    )
+    with pytest.raises(ArchiverConnectionError) as excinfo:
+        client.check_connectivity()
+    assert is_ssl_error(excinfo.value) is True
 
 
 def test_check_connectivity_transport_failure_raises_connection_error(
@@ -683,10 +699,10 @@ def test_get_all_pvs_forwards_pattern_and_caps(monkeypatch: pytest.MonkeyPatch) 
         return _resp([f"PV{i}" for i in range(5)])  # 5 names, limit 3 → capped
 
     monkeypatch.setattr(client.session, "get", fake_get)
-    names, capped = client.get_all_pvs(pattern="FBIS-*", limit=3)
+    names, capped = client.get_all_pvs(pattern="DEV-TEST01:*", limit=3)
     params = captured["params"]
     assert isinstance(params, dict)
-    assert params["pv"] == "FBIS-*"
+    assert params["pv"] == "DEV-TEST01:*"
     assert params["limit"] == "4"  # limit + 1 over-fetch
     assert names == ["PV0", "PV1", "PV2"]  # sliced to limit
     assert capped is True
@@ -712,6 +728,28 @@ def test_get_all_pvs_non_list_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp({"oops": 1})))
     with pytest.raises(ArchiverResponseError):
         client.get_all_pvs()
+
+
+def test_get_all_pvs_capped_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exactly `limit` names → capped False; limit+1 → capped True (pins `len(names) > limit`)."""
+    client = ArchiverClient("http://arch")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(["A", "B", "C"])))
+    names, capped = client.get_all_pvs(limit=3)
+    assert names == ["A", "B", "C"]
+    assert capped is False  # exactly limit — an off-by-one (>=) regression would flip this
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(["A", "B", "C", "D"])))
+    names, capped = client.get_all_pvs(limit=3)
+    assert names == ["A", "B", "C"]  # sliced to limit
+    assert capped is True
+
+
+def test_coerce_pv_names_nonpositive_limit_clamped() -> None:
+    """A non-positive limit is clamped to >=1 — never a negative slice that silently drops the last
+    name (`names[:-1]`) or empties the list, with a falsely-True capped."""
+    for bad in (-1, 0):
+        names, capped = ArchiverClient._coerce_pv_names(["A", "B", "C"], bad, "getAllPVs")
+        assert names == ["A"]  # clamped to limit 1, NOT names[:-1]==["A","B"] nor names[:0]==[]
+        assert capped is True  # honestly capped (3 > 1)
 
 
 # --- tool: list_archived_pvs ---
@@ -780,3 +818,80 @@ async def test_list_archived_pvs_tool_disabled_no_network(monkeypatch: pytest.Mo
     assert result["enabled"] is False
     assert result["pvs"] == []
     assert result["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_list_archived_pvs_forwards_pattern_and_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The tool forwards pattern + limit to the client's get_all_pvs (the tool→client wire)."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
+    )
+    captured: dict[str, object] = {}
+
+    class _Fake:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def get_all_pvs(
+            self, pattern: str | None = None, limit: int = 5000
+        ) -> tuple[list[str], bool]:
+            captured["pattern"] = pattern
+            captured["limit"] = limit
+            return (["X"], False)
+
+    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    await _list_archived_pvs(pattern="DEV-TEST01:*", limit=7)
+    assert captured == {"pattern": "DEV-TEST01:*", "limit": 7}
+
+
+@pytest.mark.asyncio
+async def test_list_archived_pvs_this_appliance_ignores_pattern(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Documented behavior: this_appliance=True routes to getPVsForThisAppliance (no `pv` param), so
+    pattern is deliberately NOT forwarded — only limit is."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
+    )
+    captured: dict[str, object] = {}
+
+    class _Fake:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def get_all_pvs(
+            self, pattern: str | None = None, limit: int = 5000
+        ) -> tuple[list[str], bool]:
+            raise AssertionError("this_appliance=True must not call get_all_pvs")
+
+        def get_pvs_for_this_appliance(self, limit: int = 5000) -> tuple[list[str], bool]:
+            captured["limit"] = limit
+            return (["M"], False)
+
+    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    result = await _list_archived_pvs(pattern="DEV-TEST01:*", this_appliance=True, limit=9)
+    assert result["pvs"] == ["M"]
+    assert captured == {"limit": 9}  # pattern silently dropped (endpoint has no pv param)
+
+
+@pytest.mark.asyncio
+async def test_list_archived_pvs_maps_archiver_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A client ArchiverError surfaces as EpicsConnectionError with the 'Archiver: ' prefix."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
+    )
+
+    class _Fake:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def get_all_pvs(
+            self, pattern: str | None = None, limit: int = 5000
+        ) -> tuple[list[str], bool]:
+            raise ArchiverConnectionError("boom")
+
+    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    with pytest.raises(EpicsConnectionError, match="Archiver:"):
+        await _list_archived_pvs()

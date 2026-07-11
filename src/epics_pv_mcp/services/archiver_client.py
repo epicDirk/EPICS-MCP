@@ -230,7 +230,7 @@ class ArchiverClient:
         """List the PV names the WHOLE appliance archives (Archiver MGMT ``getAllPVs``).
 
         ``getAllPVs`` returns a bare JSON array of PV-name strings. Optional *pattern* is a glob
-        forwarded as the endpoint's ``pv`` param (e.g. ``FBIS-*``); *limit* caps the count. Returns
+        forwarded as the endpoint's ``pv`` param (e.g. ``DEV-TEST01:*``); *limit* caps it. Returns
         ``(names, capped)`` — ``capped`` is True when the appliance held more than *limit* (we fetch
         ``limit + 1`` then slice, so the flag is honest even if the server ignores ``limit``). The
         MGMT enumeration endpoint — NOT ``getMatchingPVs``, which 404s on split/proxied deployments.
@@ -261,6 +261,10 @@ class ArchiverClient:
     @staticmethod
     def _coerce_pv_names(data: object, limit: int, endpoint: str) -> tuple[list[str], bool]:
         """Validate a bare-list PV-name payload → ``(names[:limit], capped)``."""
+        # Clamp a non-positive limit to >=1 (mirrors get_pv_history's max_points guard): a negative
+        # limit would make names[:limit] silently DROP names and len(names) > limit falsely True —
+        # defense-in-depth for a direct caller (the tool boundary also enforces ge=1).
+        limit = max(limit, 1)
         if not isinstance(data, list):
             raise ArchiverResponseError(f"{endpoint} returned a non-list payload")
         names = [str(item) for item in data]

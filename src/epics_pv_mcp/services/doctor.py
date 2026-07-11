@@ -32,7 +32,7 @@ from pydantic import BaseModel, ConfigDict
 
 from epics_pv_mcp.config import EpicsConfig, get_config
 from epics_pv_mcp.errors import EpicsError
-from epics_pv_mcp.services._http import http_status, is_ssl_error
+from epics_pv_mcp.services._http import http_status, is_retry_error, is_ssl_error
 from epics_pv_mcp.services.alarm_client import AlarmClient
 from epics_pv_mcp.services.archiver_client import ArchiverClient
 from epics_pv_mcp.services.channelfinder_client import (
@@ -115,6 +115,16 @@ def _classify_failure(exc: Exception) -> tuple[bool | None, bool | None, str, st
             "api_error",
             f"reachable, but the service returned HTTP {code} — check the URL points at the right "
             "service/webapp (e.g. the Archiver mgmt port, not retrieval).",
+        )
+    if is_retry_error(exc):
+        # A retry-exhausted 502/503/504: the host answered (repeatedly, with a 5xx), so it is
+        # reachable-but-erroring, not unreachable. RetryError has no .response, so no exact code.
+        return (
+            True,
+            True,
+            "api_error",
+            "reachable, but the service kept returning a retryable 5xx (502/503/504) until the "
+            "retry budget was exhausted — the service is up but erroring. Check its health.",
         )
     return (False, None, "unreachable", f"could not reach the service: {exc}")
 

@@ -69,6 +69,7 @@ _SCAN_SUFFIXES = {
     ".yaml",
     ".rst",
     ".example",
+    ".toml",  # pyproject.toml ships to the fork and carries the author line — scan it too
 }
 _EXCLUDED_NAMES = {"LICENSE"}
 # Site/host identifiers + a filesystem path carrying a username (BOTH Windows \Users\ and Unix

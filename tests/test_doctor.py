@@ -80,13 +80,27 @@ def test_classify_served_non2xx_is_api_error_reachable() -> None:
     reachable, ca_ok, status, detail = _classify_failure(exc)
     assert (reachable, ca_ok, status) == (True, True, "api_error")
     assert "404" in detail
+    # the actionable payload: the mgmt/retrieval hint distinguishes api_error from unreachable.
+    assert "mgmt" in detail
+    assert "not retrieval" in detail
+
+
+def test_classify_retry_error_is_api_error() -> None:
+    """A retry-exhausted 502/503/504 (chained RetryError, no .response) is api_error (reachable),
+    NOT unreachable — the host answered repeatedly with a 5xx."""
+    exc = RuntimeError("x")
+    exc.__cause__ = requests.exceptions.RetryError("too many 503 error responses")
+    reachable, ca_ok, status, detail = _classify_failure(exc)
+    assert (reachable, ca_ok, status) == (True, True, "api_error")
+    assert "5xx" in detail
 
 
 def test_classify_transport_failure_is_unreachable() -> None:
     exc = RuntimeError("x")
     exc.__cause__ = requests.exceptions.ConnectionError("refused")
-    reachable, ca_ok, status, _ = _classify_failure(exc)
+    reachable, ca_ok, status, detail = _classify_failure(exc)
     assert (reachable, ca_ok, status) == (False, None, "unreachable")
+    assert "could not reach" in detail
 
 
 # --- run_doctor: disabled / reachable / failing planes ---
@@ -190,15 +204,15 @@ async def test_privacy_report_reflects_override(monkeypatch: pytest.MonkeyPatch)
 async def test_live_plane_info_only_makes_no_live_call(monkeypatch: pytest.MonkeyPatch) -> None:
     """Without --probe-pv the live plane is INFO-only and pv_get is NEVER called."""
     _set_config(monkeypatch)
-    monkeypatch.setattr(
-        "epics_pv_mcp.services.doctor.pv_get",
-        Mock(side_effect=AssertionError("pv_get must not be called without --probe-pv")),
-    )
+    pv_get = Mock(side_effect=AssertionError("pv_get must not be called without --probe-pv"))
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.pv_get", pv_get)
     report = await run_doctor()  # no probe_pv
     live = _plane(report, "live")
     assert live.status == "info"
     assert live.reachable is None
     assert report.ok is True
+    # Direct teeth for the no-egress guarantee, independent of _probe_live_pv's broad except.
+    pv_get.assert_not_called()
 
 
 async def test_live_plane_probe_connected(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -227,6 +241,25 @@ async def test_live_plane_probe_disconnected_fails(monkeypatch: pytest.MonkeyPat
     assert live.status == "disconnected"
     assert live.reachable is False
     assert report.ok is False
+
+
+async def test_live_plane_probe_generic_exception_disconnected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-EpicsError from the probe (internal failure) is still caught → disconnected, keeping
+    doctor total; the exception's type name flows into the detail."""
+    _set_config(monkeypatch)
+
+    async def _boom(pv_name: str, timeout: float) -> dict[str, object]:
+        raise ValueError("boom")
+
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.pv_get", _boom)
+    report = await run_doctor(probe_pv="SIM:PS-01:Cur-RB")
+    live = _plane(report, "live")
+    assert live.status == "disconnected"
+    assert live.reachable is False
+    assert report.ok is False
+    assert live.detail is not None and "ValueError" in live.detail
 
 
 # --- cli_doctor.main: exit codes + render (the deliberate 0/1/2 convention) ---
@@ -266,6 +299,27 @@ def test_cli_json_shape(
     assert "planes" in payload
     assert "privacy" in payload
     assert payload["ok"] is True
+
+
+def test_cli_render_glyphs_and_privacy_block(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The human render shows per-status glyphs and the privacy block incl. the empty-owner line."""
+    _set_config(monkeypatch, alarm_url="http://alarm:8081", channelfinder_safe_owner_accounts="")
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.doctor.AlarmClient",
+        _cause_client(requests.exceptions.ConnectionError("refused")),
+    )
+    code = cli_doctor.main([])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "✗ alarm" in out  # failing-plane glyph
+    assert "· archiver" in out  # disabled-plane glyph
+    assert "i live" in out  # info live-plane glyph
+    assert "owner allowlist:" in out
+    assert "property allowlist:" in out
+    assert "(empty — all owners redacted)" in out  # the empty-owner fallback line
+    assert "Olog free-text:" in out
 
 
 def test_cli_bad_arg_exits_two() -> None:

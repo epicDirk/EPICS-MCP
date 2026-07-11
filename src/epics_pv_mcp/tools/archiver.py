@@ -97,7 +97,7 @@ async def _list_archived_pvs(
     Default-disabled — with ``EPICS_MCP_ARCHIVER_URL`` unset returns ``enabled: false`` + an empty
     list and makes NO network call. Uses getAllPVs (whole appliance) or getPVsForThisAppliance (this
     member, with ``this_appliance=True``) — NOT getMatchingPVs (404 on split/proxied). An optional
-    name-glob ``pattern`` (e.g. ``FBIS-*``) maps to the ``pv`` param; ``capped`` is honest.
+    name-glob ``pattern`` (e.g. ``DEV-TEST01:*``) maps to the ``pv`` param; ``capped`` is honest.
     PV names carry no person data, so no redaction is needed.
     """
     cfg = get_config()

@@ -402,7 +402,7 @@ async def get_archive_info(
 async def list_archived_pvs(
     pattern: Annotated[
         str | None,
-        Field(description="Optional PV-name glob (e.g. 'FBIS-*'); omit for the whole appliance"),
+        Field(description="Optional PV-name glob (e.g. 'DEV-TEST01:*'); omit to list all"),
     ] = None,
     this_appliance: Annotated[
         bool,
@@ -410,8 +410,12 @@ async def list_archived_pvs(
     ] = False,
     limit: Annotated[
         int,
+        # ge=1: a non-positive cap is meaningless — a negative limit would make the client's
+        # names[:limit] slice silently DROP names and falsely report capped. le caps an absurd pull.
         Field(
-            description="Cap on returned PV names (a whole appliance can hold tens of thousands)"
+            description="Cap on returned PV names (a whole appliance can hold tens of thousands)",
+            ge=1,
+            le=100000,
         ),
     ] = 5000,
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,

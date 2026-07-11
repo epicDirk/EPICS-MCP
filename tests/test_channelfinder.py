@@ -6,6 +6,7 @@ import pytest
 import requests
 
 from epics_pv_mcp.config import EpicsConfig
+from epics_pv_mcp.services._http import is_ssl_error
 from epics_pv_mcp.services.channelfinder_client import (
     _SAFE_OWNER_ACCOUNTS,
     _SAFE_PROPERTY_NAMES,
@@ -226,6 +227,18 @@ def test_check_connectivity_raises_on_transport_failure(monkeypatch: pytest.Monk
     )
     with pytest.raises(ChannelFinderConnectionError):
         client.check_connectivity()
+
+
+def test_check_connectivity_ssl_error_chains_cause(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A TLS/CA failure on the HEAD probe chains the SSLError (via `from exc`) so the doctor
+    classifier buckets it ca_error, not unreachable — a dropped `from exc` would misclassify it."""
+    client = ChannelFinderClient("http://cf")
+    monkeypatch.setattr(
+        client.session, "head", Mock(side_effect=requests.exceptions.SSLError("self-signed"))
+    )
+    with pytest.raises(ChannelFinderConnectionError) as excinfo:
+        client.check_connectivity()
+    assert is_ssl_error(excinfo.value) is True
 
 
 # --- tool ---
