@@ -1,18 +1,24 @@
-"""Shared HTTP substrate for the read-only REST clients (M3/M12/L-Logger/C3).
+"""Shared HTTP substrate for the REST clients (M3/M12/L-Logger/C3).
 
 :func:`build_retrying_session` and :func:`rest_get_json` replace the session/retry constructor block
 and the GET-and-translate method that were copied verbatim across the ChannelFinder / Archiver /
 Alarm / Naming clients. A retry-policy or logging change is now ONE edit here instead of four, and a
 5th REST plane reuses both directly.
 
-The single ``logger.debug`` line in :func:`rest_get_json` also wakes the previously-dead
-per-client loggers: a swallowed REST failure (translated to a client exception, then to a withheld
-verdict or an ``EpicsError``) now leaves a server-side trace it did not before.
+Read is the default; the ONE write path (Olog logbook posts) reuses this substrate via
+:func:`rest_put_json` and :func:`basic_auth_header`. Every write is gated separately
+(:mod:`epics_pv_mcp.olog_safety`) — this module only carries the transport.
+
+The single ``logger.debug`` line in :func:`rest_get_json`/:func:`rest_put_json` also wakes the
+previously-dead per-client loggers: a swallowed REST failure (translated to a client exception, then
+to a withheld verdict or an ``EpicsError``) now leaves a server-side trace it did not before.
 """
 
 from __future__ import annotations
 
+import base64
 import logging
+from typing import Any
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -21,6 +27,18 @@ from epics_pv_mcp.config import get_config
 from epics_pv_mcp.services.rest_exceptions import RestConnectionError, RestResponseError
 
 logger = logging.getLogger(__name__)
+
+
+def basic_auth_header(user: str, password: str) -> str | None:
+    """Return an HTTP ``Basic <base64(user:pass)>`` header value, or ``None`` if either is empty.
+
+    ``None`` (empty user OR password) means NO authorization header is sent, so a server that
+    requires auth answers 401 — a clear failure, never a silent unauthenticated write. The single
+    tested place a Basic header is minted (DoD-F1: no ad-hoc base64 scattered across callers)."""
+    if not user or not password:
+        return None
+    token = base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
+    return f"Basic {token}"
 
 
 def build_retrying_session(
@@ -99,6 +117,35 @@ def rest_get_json(
         raise resp_exc(f"Request failed ({url}): {exc}") from exc
 
 
+def rest_put_json(
+    session: requests.Session,
+    url: str,
+    json_body: dict[str, Any],
+    timeout: float,
+    *,
+    params: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
+    conn_exc: type[RestConnectionError],
+    resp_exc: type[RestResponseError],
+) -> object:
+    """PUT *json_body* to *url* and return JSON, translating failures like :func:`rest_get_json`.
+
+    The write mirror of :func:`rest_get_json` (same error contract: a connection failure raises
+    *conn_exc*, any other request/HTTP failure raises *resp_exc*, chained via ``from`` so
+    :func:`http_status` can read the served status code). *params* carries wire query args (Olog's
+    ``inReplyTo``); *headers* carries per-request headers (a static client-info header). Auth, if
+    any, rides on the session (see :func:`basic_auth_header` + :func:`build_retrying_session`)."""
+    try:
+        resp = session.put(url, json=json_body, params=params, headers=headers, timeout=timeout)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.RequestException as exc:
+        logger.debug("REST PUT failed for %s: %s", url, exc)
+        if isinstance(exc, requests.exceptions.ConnectionError):
+            raise conn_exc(f"Failed to connect to {url}: {exc}") from exc
+        raise resp_exc(f"Request failed ({url}): {exc}") from exc
+
+
 def http_status(exc: BaseException) -> int | None:
     """The HTTP status code *exc* wraps, or ``None`` if it wraps no HTTP response.
 
@@ -122,6 +169,16 @@ def is_http_404(exc: BaseException) -> bool:
     wrapper over :func:`http_status`.
     """
     return http_status(exc) == 404
+
+
+def is_http_400(exc: BaseException) -> bool:
+    """True iff *exc* wraps an HTTP 400 response.
+
+    Olog ``PUT /logs`` answers a bad request (a non-existent logbook/tag, an empty title, or an
+    ``inReplyTo`` that identifies no entry) with 400 — distinct from "not found". Thin wrapper over
+    :func:`http_status`.
+    """
+    return http_status(exc) == 400
 
 
 def is_ssl_error(exc: BaseException) -> bool:

@@ -32,9 +32,11 @@ from epics_pv_mcp.tools.info import _get_pv_info
 from epics_pv_mcp.tools.monitor import _monitor_pv
 from epics_pv_mcp.tools.naming import _lookup_device_name
 from epics_pv_mcp.tools.olog import (
+    _create_log_entry,
     _get_log_entry,
     _list_logbooks,
     _list_tags,
+    _reply_to_log,
     _search_logbook,
 )
 from epics_pv_mcp.tools.read import _get_pv_value, _get_pvs
@@ -51,8 +53,11 @@ mcp = FastMCP(
         "(screens + live + source IOC), ChannelFinder lookups, Archiver history + archive "
         "configuration, Alarm "
         "configuration and history, ESS Naming-Service device-name lookup, and Phoebus Olog "
-        "logbook search (author/free-text withheld). The only mutating "
-        "tool, set_pv_value, is gated OFF by "
+        "logbook search (author/free-text withheld). It can also WRITE to the Olog logbook "
+        "(create_log_entry / reply_to_log) behind an OWN gate (EPICS_MCP_ALLOW_OLOG_WRITE + a "
+        "test-server URL boundary + a logbook allowlist + a rate limit; the author is the write "
+        "service account, not spoofable) — ALLOW_PV_WRITE is a separate gate and stays off. The "
+        "PV-mutating tool, set_pv_value, is gated OFF by "
         "default and additionally requires EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, "
         "a rate limit and an audit log. The REST-backed tools (find_channels, is_archived, "
         "get_pv_history, get_archive_info, list_archived_pvs, is_alarm_configured, "
@@ -631,6 +636,91 @@ async def list_tags(
     the tag NAMES only — the valid values for search_logbook(tags=…). Tags carry no owner.
     """
     return await _list_tags(timeout)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def create_log_entry(
+    title: Annotated[str, Field(description="Log entry title (required, non-empty)")],
+    logbooks: Annotated[
+        str, Field(description="Comma-separated target logbook name(s) — must already exist")
+    ],
+    description: Annotated[str | None, Field(description="Log body / description text")] = None,
+    level: Annotated[
+        str | None, Field(description="Entry level (e.g. 'Info'; server default when omitted)")
+    ] = None,
+    tags: Annotated[
+        str | None, Field(description="Comma-separated tag name(s) — must already exist")
+    ] = None,
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """Post a new entry to the Phoebus Olog electronic logbook (Olog REST PUT /logs).
+
+    MUTATING. Disabled by default and behind its OWN gate (separate from set_pv_value): it needs
+    EPICS_MCP_ALLOW_OLOG_WRITE=true AND a test-server URL boundary (only a loopback Olog, or an
+    allowlisted URL with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true) AND a logbook allowlist
+    (EPICS_MCP_OLOG_WRITE_LOGBOOKS) AND a rate limit — ALLOW_PV_WRITE is untouched. The author
+    (owner) is the configured write service account, set server-side; a caller cannot spoof it. The
+    returned entry is DS-PRIVACY-redacted (owner dropped, title/description withheld). With
+    EPICS_MCP_OLOG_URL unset the tool returns enabled=false and makes no network call.
+    """
+    return await _create_log_entry(
+        title=title,
+        logbooks=logbooks,
+        description=description,
+        level=level,
+        tags=tags,
+        timeout=timeout,
+    )
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def reply_to_log(
+    log_id: Annotated[str, Field(description="Id of the existing Olog entry to reply to")],
+    title: Annotated[str, Field(description="Reply title (required, non-empty)")],
+    logbooks: Annotated[
+        str, Field(description="Comma-separated target logbook name(s) — must already exist")
+    ],
+    description: Annotated[str | None, Field(description="Reply body / description text")] = None,
+    level: Annotated[
+        str | None, Field(description="Entry level (e.g. 'Info'; server default when omitted)")
+    ] = None,
+    tags: Annotated[
+        str | None, Field(description="Comma-separated tag name(s) — must already exist")
+    ] = None,
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """Reply to an existing Phoebus Olog entry (Olog REST PUT /logs?inReplyTo=log_id).
+
+    MUTATING. Same gate, service account, and DS-PRIVACY redaction as create_log_entry — it threads
+    the new entry to log_id via the Olog Log Entry Group. A log_id that identifies no existing entry
+    returns a clear HTTP 400 error. Disabled by default (needs EPICS_MCP_OLOG_URL +
+    EPICS_MCP_ALLOW_OLOG_WRITE).
+    """
+    return await _reply_to_log(
+        log_id=log_id,
+        title=title,
+        logbooks=logbooks,
+        description=description,
+        level=level,
+        tags=tags,
+        timeout=timeout,
+    )
 
 
 @mcp.tool(

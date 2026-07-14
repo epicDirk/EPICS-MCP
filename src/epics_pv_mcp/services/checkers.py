@@ -26,7 +26,9 @@ from __future__ import annotations
 import asyncio
 
 from epics_pv_mcp.config import get_config
-from epics_pv_mcp.errors import EpicsConnectionError
+from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
+from epics_pv_mcp.olog_safety import get_olog_safety
+from epics_pv_mcp.services._http import basic_auth_header, http_status
 from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG, AlarmClient
 from epics_pv_mcp.services.alarm_exceptions import AlarmError
 from epics_pv_mcp.services.archiver_client import ArchiverClient
@@ -38,7 +40,7 @@ from epics_pv_mcp.services.crossplane import CFRegistryCapped, ChannelFinderChec
 from epics_pv_mcp.services.naming_client import NamingServiceClient
 from epics_pv_mcp.services.naming_exceptions import NamingServiceError
 from epics_pv_mcp.services.olog_client import DEFAULT_MAX_LOGS, OlogClient
-from epics_pv_mcp.services.olog_exceptions import OlogError
+from epics_pv_mcp.services.olog_exceptions import OlogConnectionError, OlogError, OlogResponseError
 
 
 class CFRegistryChecker:
@@ -512,6 +514,89 @@ async def query_olog_tags(timeout: float = 5.0) -> dict[str, object]:
     def _run() -> dict[str, object]:
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
         return {"enabled": True, "tags": client.list_tags()}
+
+    try:
+        return await asyncio.to_thread(_run)
+    except OlogError as exc:
+        raise EpicsConnectionError(f"Olog: {exc}") from exc
+
+
+def _olog_write_error_code(exc: BaseException) -> str:
+    """A discrete, freetext-free error code for an Olog write FAILED audit (never a message string).
+
+    An :class:`EpicsError` carries its own code; an Olog connection/response error maps to a
+    discrete token (the served HTTP status for a response error, when known); anything else is
+    INTERNAL. Never the exception message — the FAILED audit must stay metadata-only (SEC-5)."""
+    if isinstance(exc, EpicsError):
+        return exc.error_code
+    if isinstance(exc, OlogConnectionError):
+        return "OLOG_CONNECTION_ERROR"
+    if isinstance(exc, OlogResponseError):
+        status = http_status(exc)
+        return f"OLOG_HTTP_{status}" if status is not None else "OLOG_RESPONSE_ERROR"
+    return "INTERNAL"
+
+
+async def query_olog_create(
+    title: str,
+    logbooks: list[str],
+    description: str | None = None,
+    level: str | None = None,
+    tags: list[str] | None = None,
+    in_reply_to: str | None = None,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    """Create (or, with *in_reply_to*, reply to) an Olog log entry. MUTATING, gated, redacted.
+
+    Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes NO
+    network call. When enabled, the :class:`~epics_pv_mcp.olog_safety.OlogWriteGate` (env gate +
+    test-server URL boundary + logbook allowlist + rate limit) runs BEFORE any I/O — a denial raises
+    (audited DENY) before a client is even constructed. The full server response is run through the
+    read redaction before return (owner dropped, title/description withheld). A completed write is
+    audited ALLOW; a write that passes the gate but fails at the HTTP layer is audited FAILED (no
+    entry id/owner) and re-raised. Backs ``create_log_entry`` / ``reply_to_log``."""
+    cfg = get_config()
+    if not cfg.olog_url:
+        return {"enabled": False, "created": False, "note": _OLOG_DISABLED_NOTE}
+
+    caller = "reply_to_log" if in_reply_to is not None else "create_log_entry"
+
+    def _run() -> dict[str, object]:
+        gate = get_olog_safety()
+        # Gate FIRST, before any client construction or I/O. A denial (OlogWriteDeniedError /
+        # RateLimitError) is audited DENY inside the gate and propagates unchanged.
+        gate.check_write_allowed(logbooks, caller=caller)
+        auth = basic_auth_header(cfg.olog_write_user, cfg.olog_write_password)
+        client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=auth)
+        try:
+            entry = client.create_log_entry(
+                title=title,
+                logbooks=logbooks,
+                description=description,
+                level=level,
+                tags=tags,
+                in_reply_to=in_reply_to,
+            )
+        except Exception as exc:  # broad on purpose: audit ANY failed write attempt, then re-raise
+            gate.audit_write_failed(
+                logbooks=logbooks,
+                level=level,
+                title_len=len(title),
+                error_code=_olog_write_error_code(exc),
+                in_reply_to=in_reply_to,
+                caller=caller,
+            )
+            raise
+        gate.audit_write(
+            entry_id=str(entry.get("id", "")),
+            logbooks=logbooks,
+            level=level,
+            title_len=len(title),
+            owner=cfg.olog_write_user,
+            in_reply_to=in_reply_to,
+            caller=caller,
+        )
+        return {"enabled": True, "created": True, "entry": entry}
 
     try:
         return await asyncio.to_thread(_run)

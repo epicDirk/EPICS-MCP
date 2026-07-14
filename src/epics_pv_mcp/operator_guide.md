@@ -15,8 +15,10 @@ operational knowledge (see the Knowledge Persistence Policy in `CLAUDE.md`).
 
 ## Posture (read this first)
 
-- **Read-only by default.** The only mutating tool, `set_pv_value`, is gated OFF: it needs
-  `EPICS_MCP_ALLOW_PV_WRITE=true` **plus** a regex allowlist, a rate limit and an audit log.
+- **Read-only by default.** The mutating tools are gated OFF. `set_pv_value` needs
+  `EPICS_MCP_ALLOW_PV_WRITE=true` **plus** a regex allowlist, a rate limit and an audit log. The Olog
+  logbook writers (`create_log_entry` / `reply_to_log`) sit behind a **separate** gate — see the Olog
+  write posture below; `ALLOW_PV_WRITE` is untouched by it.
 - **Localhost-isolated by default.** The server opens no non-local connection until its launcher
   widens the EPICS address list (`EPICS_PVA_ADDR_LIST` / `EPICS_CA_ADDR_LIST` and the matching
   `*_AUTO_ADDR_LIST`). Until then it does not reach any production network.
@@ -47,7 +49,7 @@ are simply absent — that is an unmet optional extra, not a bug.
 `get_pv_value` · `get_pvs` · `set_pv_value` · `get_pv_info` · `monitor_pv` · `discover_pvs` ·
 `find_channels` · `lookup_device_name` · `is_archived` · `get_pv_history` · `get_archive_info` ·
 `list_archived_pvs` · `is_alarm_configured` · `get_alarm_history` · `diagnose_connection` ·
-`search_logbook` · `get_log_entry` · `list_logbooks` · `list_tags`
+`search_logbook` · `get_log_entry` · `list_logbooks` · `list_tags` · `create_log_entry` · `reply_to_log`
 
 **Optional `[displays]` — cross-plane with the operator-screen PV inventory:**
 `validate_pvs` · `crossplane_check` · `coverage_audit` · `find_device`
@@ -55,6 +57,30 @@ are simply absent — that is an unmet optional extra, not a bug.
 
 Composing the display tools: `find_device` (which screens show device X + live value + serving IOC),
 `coverage_audit` (which delivered PV has no screen/archive/alarm — the blind spots).
+
+### Olog write posture (`create_log_entry` / `reply_to_log`)
+
+Posting to the logbook is the server's first mutating operation against a REST service, so it has its
+own gate — distinct from `set_pv_value`, and it never touches `ALLOW_PV_WRITE`. Four things must line
+up before a write proceeds, each fail-closed and audited as `DENY` before the raise:
+
+- **Env gate.** `EPICS_MCP_ALLOW_OLOG_WRITE=true` (default false = every write denied).
+- **Test-server URL boundary.** Unlike PV write (implicitly safe via the address-list localhost
+  isolation), Olog speaks HTTP to an arbitrary URL. A write is refused unless the `OLOG_URL` host is
+  **loopback** (the local Olog), or the exact base URL is in `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST`
+  **and** `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true`. A private (non-loopback) host is refused by default
+  — a production write is a deliberate, auditable double action. The host is read only from the URL's
+  parsed hostname, so a `user@host` trick cannot smuggle a loopback prefix past a production host.
+- **Logbook allowlist.** Every target logbook must be in `EPICS_MCP_OLOG_WRITE_LOGBOOKS`; an EMPTY
+  allowlist with the gate on is **deny-all** (the inverse of the PV pattern).
+- **Rate limit + audit.** `EPICS_MCP_OLOG_WRITE_RATE_LIMIT` (low; a logbook is human-paced). The audit
+  line is metadata-only — logbook names, level, title LENGTH, entry id, service-account owner — and
+  **never** the `title`/`description` free text.
+
+The author (`owner`) is the write service account (`EPICS_MCP_OLOG_WRITE_USER`, a dedicated account —
+never a personal login), set server-side from the auth Principal; a caller cannot spoof it. Use a
+loopback Olog for testing; the target logbooks must already exist server-side (a non-existent logbook
+is an HTTP 400).
 
 ## Operational recipes (the non-obvious parts)
 

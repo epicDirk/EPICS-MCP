@@ -10,12 +10,20 @@ the tool" anti-pattern is avoided for this name-capable surface). Default-disabl
 from __future__ import annotations
 
 from epics_pv_mcp.services.checkers import (
+    query_olog_create,
     query_olog_entry,
     query_olog_logbooks,
     query_olog_search,
     query_olog_tags,
 )
 from epics_pv_mcp.services.olog_client import DEFAULT_MAX_LOGS
+
+
+def _split_names(value: str | None) -> list[str]:
+    """Split a comma-separated tool argument into a list of stripped, non-empty names."""
+    if not value:
+        return []
+    return [token.strip() for token in value.split(",") if token.strip()]
 
 
 async def _search_logbook(
@@ -68,3 +76,52 @@ async def _list_tags(timeout: float = 5.0) -> dict[str, object]:
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_tags`.
     """
     return await query_olog_tags(timeout=timeout)
+
+
+async def _create_log_entry(
+    title: str,
+    logbooks: str,
+    description: str | None = None,
+    level: str | None = None,
+    tags: str | None = None,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    """Create a Phoebus Olog log entry. MUTATING, gated, DS-PRIVACY-redacted response.
+
+    Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_create`. *logbooks* and
+    *tags* are comma-separated names (split here into the lists the service expects).
+    """
+    return await query_olog_create(
+        title=title,
+        logbooks=_split_names(logbooks),
+        description=description,
+        level=level,
+        tags=_split_names(tags) or None,
+        timeout=timeout,
+    )
+
+
+async def _reply_to_log(
+    log_id: str,
+    title: str,
+    logbooks: str,
+    description: str | None = None,
+    level: str | None = None,
+    tags: str | None = None,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    """Reply to an existing Olog entry (threads via the Log Entry Group). MUTATING, gated, redacted.
+
+    Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_create` with
+    ``in_reply_to=log_id`` — the same client/server code path as a create. A *log_id* that does not
+    identify an existing entry → HTTP 400 (a clear error).
+    """
+    return await query_olog_create(
+        title=title,
+        logbooks=_split_names(logbooks),
+        description=description,
+        level=level,
+        tags=_split_names(tags) or None,
+        in_reply_to=log_id,
+        timeout=timeout,
+    )

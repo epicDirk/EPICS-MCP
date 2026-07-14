@@ -39,7 +39,7 @@ framed in these terms:
 | **History** | EPICS Archiver Appliance | `is_archived`, `get_pv_history`, `get_archive_info` |
 | **Alarm** | Phoebus Alarm Logger | `is_alarm_configured`, `get_alarm_history` |
 | **Naming** | ESS Naming Service | `lookup_device_name`, `diagnose_connection`, `crossplane_check` |
-| **Logbook** | Phoebus Olog | `search_logbook`, `get_log_entry`, `list_logbooks`, `list_tags` |
+| **Logbook** | Phoebus Olog | `search_logbook`, `get_log_entry`, `list_logbooks`, `list_tags`, `create_log_entry`, `reply_to_log` |
 | **Display** | `.bob` operator screens (CS-Studio / Phoebus) | `validate_pvs`, `crossplane_check`, `coverage_audit`, `find_device` |
 | **IOC** | e3 `st.cmd` (+ optional `.db`) | `crossplane_check` |
 
@@ -50,10 +50,18 @@ explanatory and is *withheld* (never a false negative) when its service is not c
 
 This is a controls tool, so the trust questions come first:
 
-- **Read-only by default.** The single mutating tool, `set_pv_value`, is **triple-gated**:
+- **Read-only by default.** The mutating tools are gated off. `set_pv_value` is **triple-gated**:
   `EPICS_MCP_ALLOW_PV_WRITE=true` **and** an optional regex allowlist
   (`EPICS_MCP_PV_WRITE_PATTERN`) **and** a per-minute rate limit — every write *attempt*
   is audit-logged (`ALLOW`/`DENY`/`FAILED`).
+- **Olog logbook write is a *separate* gate.** `create_log_entry` / `reply_to_log` need
+  `EPICS_MCP_ALLOW_OLOG_WRITE=true` **and** a **test-server URL boundary** (only a loopback Olog,
+  or an exact URL in `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` with
+  `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true` — a non-loopback/private host is refused by default, so
+  a production write is a deliberate double action) **and** a logbook allowlist
+  (`EPICS_MCP_OLOG_WRITE_LOGBOOKS`; empty = deny-all) **and** a rate limit. The author is the write
+  service account (`EPICS_MCP_OLOG_WRITE_USER`), set server-side and not spoofable; the audit line
+  is metadata-only (never the title/description free text). **`ALLOW_PV_WRITE` is untouched by it.**
 - **Localhost-isolated by default.** The server opens no non-local connection unless its
   launcher widens the EPICS address list (`EPICS_PVA_ADDR_LIST` / `EPICS_CA_ADDR_LIST` and
   the matching `*_AUTO_ADDR_LIST`). Until then it does **not** reach production IOCs.
@@ -158,6 +166,8 @@ To reach a real control system, set the address list in the launcher's environme
 | `get_log_entry` | Phoebus Olog — one entry by id (same redaction; 404 = definitive found:false, other errors propagate) | `EPICS_MCP_OLOG_URL` |
 | `list_logbooks` | Phoebus Olog — list the valid logbook names (name-only; owners dropped) | `EPICS_MCP_OLOG_URL` |
 | `list_tags` | Phoebus Olog — list the valid tag names | `EPICS_MCP_OLOG_URL` |
+| `create_log_entry` | Phoebus Olog — **post** a log entry (MUTATING; own gate + test-server URL boundary + logbook allowlist + rate limit; author = the service account, not spoofable; response redacted) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` |
+| `reply_to_log` | Phoebus Olog — **reply** to an entry (threads via the Log Entry Group; same gate/redaction as create_log_entry; bad id → 400) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` |
 
 **Display-aware** (require the optional `[displays]` extra)
 
@@ -252,7 +262,14 @@ All settings are read from environment variables with the `EPICS_MCP_` prefix.
 | `EPICS_MCP_ALARM_AUTH` | _(empty)_ | Optional `Authorization` header for the Alarm Logger |
 | `EPICS_MCP_NAMING_URL` | _(empty)_ | ESS Naming plane for `lookup_device_name` / `diagnose_connection` / `crossplane_check`. **No built-in host — no egress unless set** |
 | `EPICS_MCP_OLOG_URL` | _(empty)_ | Phoebus Olog REST root (incl. context path, e.g. `.../Olog`) for `search_logbook` / `get_log_entry`. **No built-in host — no egress unless set** |
-| `EPICS_MCP_OLOG_AUTH` | _(empty)_ | Optional `Authorization` header for a secured Olog |
+| `EPICS_MCP_OLOG_AUTH` | _(empty)_ | Optional `Authorization` header for a secured Olog (READ only) |
+| `EPICS_MCP_ALLOW_OLOG_WRITE` | `false` | Master gate for `create_log_entry` / `reply_to_log` (separate from `ALLOW_PV_WRITE`) |
+| `EPICS_MCP_OLOG_WRITE_USER` | _(empty)_ | Basic-auth service account for Olog writes (a dedicated account, never a personal login — it becomes the record `owner`) |
+| `EPICS_MCP_OLOG_WRITE_PASSWORD` | _(empty)_ | Basic-auth password for the write service account |
+| `EPICS_MCP_OLOG_WRITE_LOGBOOKS` | _(empty)_ | Comma-separated logbook names a write may target; **empty + gate on = deny-all** |
+| `EPICS_MCP_OLOG_WRITE_RATE_LIMIT` | `5` | Max Olog writes per 60 s window |
+| `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` | _(empty)_ | Comma-separated exact base URLs allowed as non-loopback write targets (only with `_ALLOW_REMOTE`) |
+| `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE` | `false` | Permit writes to a non-loopback (allowlisted) Olog. Default false: only loopback is writable. Prefer `https://` for a remote (Basic creds are cleartext otherwise) |
 
 **EPICS network** (standard EPICS env; controls what the server can reach)
 

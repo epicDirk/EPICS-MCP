@@ -36,6 +36,18 @@ class PVWriteDeniedError(EpicsError):
         super().__init__(message, error_code="PV_WRITE_DENIED", details=details)
 
 
+class OlogWriteDeniedError(EpicsError):
+    """Raised when an Olog logbook write is rejected by the Olog write gate.
+
+    A separate gate from the PV write gate (``PVWriteDeniedError``): Olog write has its
+    own env gate (``EPICS_MCP_ALLOW_OLOG_WRITE``), test-server URL boundary and logbook
+    allowlist. ``ALLOW_PV_WRITE`` is untouched by this.
+    """
+
+    def __init__(self, message: str, details: dict[str, object] | None = None) -> None:
+        super().__init__(message, error_code="OLOG_WRITE_DENIED", details=details)
+
+
 class RateLimitError(EpicsError):
     """Raised when write rate limit is exceeded."""
 

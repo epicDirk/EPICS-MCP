@@ -1,4 +1,9 @@
-"""Read-only client for the Phoebus Olog (electronic logbook) REST API.
+"""Client for the Phoebus Olog (electronic logbook) REST API — read plus one gated write path.
+
+The reads are default-disabled and DS-PRIVACY-redacted; the single write
+(:meth:`OlogClient.create_log_entry`, ``PUT /logs``) is gated separately by
+:mod:`epics_pv_mcp.olog_safety` (this module only carries the transport) and its response is run
+through the SAME output redaction as a read.
 
 Read-only jobs:
 
@@ -29,12 +34,23 @@ the redaction is defence-in-depth regardless of which extra fields a given Olog 
 
 from __future__ import annotations
 
-from epics_pv_mcp.services._http import build_retrying_session, is_http_404, rest_get_json
+from epics_pv_mcp.services._http import (
+    build_retrying_session,
+    http_status,
+    is_http_400,
+    is_http_404,
+    rest_get_json,
+    rest_put_json,
+)
 from epics_pv_mcp.services.olog_exceptions import OlogConnectionError, OlogResponseError
 from epics_pv_mcp.services.redact import redact_record
 
 # Default cap on returned log entries (a wide/empty search is otherwise unbounded).
 DEFAULT_MAX_LOGS = 50
+
+# Static, non-identifying client-info header value (server-side only logged, never persisted). NOT a
+# personal username/hostname — a facility-agnostic constant.
+_CLIENT_INFO = "epics-pv-mcp"
 
 # DS-PRIVACY output allowlist: the ONLY entry fields that may leave. ``title``/``description`` are
 # kept for their PRESENCE but their value is withheld (they are free text). Everything not listed —
@@ -96,7 +112,8 @@ def _hit_count(data: object) -> int | None:
 
 
 class OlogClient:
-    """Read-only client for the Phoebus Olog REST API. GET-only, DS-PRIVACY-redacted output."""
+    """Client for the Phoebus Olog REST API. Reads are GET-only; the one write (create_log_entry,
+    PUT /logs) is gated by olog_safety. DS-PRIVACY-redacted output on every path (read + write)."""
 
     def __init__(self, base_url: str, timeout: float = 5.0, auth_header: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
@@ -211,3 +228,70 @@ class OlogClient:
         """
         data = self._get(f"{self.base_url}/tags", {})
         return _names(data)
+
+    def create_log_entry(
+        self,
+        title: str,
+        logbooks: list[str],
+        description: str | None = None,
+        level: str | None = None,
+        tags: list[str] | None = None,
+        in_reply_to: str | None = None,
+    ) -> dict[str, object]:
+        """Create a log entry (``PUT /logs``) and return it DS-PRIVACY-redacted.
+
+        *title* and *logbooks* are mandatory server-side (empty → HTTP 400); the named logbooks and
+        tags MUST already exist (else 400). *in_reply_to* (wire query ``inReplyTo``) threads the new
+        entry as a reply to an existing entry (a bad id → 400, checked server-side BEFORE the
+        logbook validation). Auth rides on the session (Basic, see :func:`basic_auth_header`); the
+        server sets ``owner`` from the auth Principal and IGNORES a caller-supplied owner, so this
+        client never sends one.
+
+        The server's create response is a FULL log (with owner/free text) → it is run through the
+        SAME :func:`_project_log_entry` redaction as a read before it leaves this module (owner
+        dropped, title/description withheld, attachments as a count). HTTP 400 → a clear
+        :class:`OlogResponseError` (a named logbook/tag does not exist, an empty title, or a bad
+        ``inReplyTo`` — explicitly NOT "not found"); 401 → an auth error; 5xx propagates."""
+        body: dict[str, object] = {
+            "title": title,
+            "logbooks": [{"name": name} for name in logbooks],
+        }
+        if description is not None:
+            body["description"] = description
+        if level is not None:
+            body["level"] = level
+        if tags:
+            body["tags"] = [{"name": name} for name in tags]
+        params: dict[str, str] = {}
+        if in_reply_to is not None:
+            params["inReplyTo"] = str(in_reply_to)
+        try:
+            data = rest_put_json(
+                self.session,
+                f"{self.base_url}/logs",
+                body,
+                self.timeout,
+                params=params or None,
+                headers={"X-Olog-Client-Info": _CLIENT_INFO},
+                conn_exc=OlogConnectionError,
+                resp_exc=OlogResponseError,
+            )
+        except OlogResponseError as exc:
+            # Re-raise a clearer message for the two actionable statuses, chaining from the ORIGINAL
+            # transport cause (exc.__cause__, the requests HTTPError) so http_status still reads the
+            # served code downstream (the audit error_code). 5xx / anything else propagates as-is.
+            cause = exc.__cause__ if exc.__cause__ is not None else exc
+            if is_http_400(exc):
+                raise OlogResponseError(
+                    "Olog rejected the entry (HTTP 400): a logbook or tag does not exist, the "
+                    "title is empty, or in_reply_to does not identify an existing entry."
+                ) from cause
+            if http_status(exc) == 401:
+                raise OlogResponseError(
+                    "Olog authentication failed (HTTP 401): check the write service-account "
+                    "credentials (EPICS_MCP_OLOG_WRITE_USER / _PASSWORD)."
+                ) from cause
+            raise
+        if isinstance(data, dict) and data:
+            return _project_log_entry(data)
+        raise OlogResponseError("Olog create returned an unexpected empty response.")
