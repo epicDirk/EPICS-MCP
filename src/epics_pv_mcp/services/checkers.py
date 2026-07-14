@@ -408,14 +408,20 @@ async def query_olog_search(
     start: str | None = None,
     end: str | None = None,
     size: int = DEFAULT_MAX_LOGS,
+    offset: int = 0,
+    sort: str = "down",
     timeout: float = 5.0,
 ) -> dict[str, object]:
     """Search the Phoebus Olog logbook, returning DS-PRIVACY-redacted entries. Read-only, gated.
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns a structured ``enabled: false``
     result and makes NO network call (no ESS egress). Every returned entry passes the Olog client's
-    output allowlist (author/free-text withheld) — raw entries never reach this layer. ``capped`` is
-    True when more than *size* matched (the first *size* are kept). Backs ``search_logbook``.
+    output allowlist (author/free-text withheld) — raw entries never reach this layer. *offset*
+    (Olog wire ``from``) pages past the first *size* results; *sort* orders by create time (``down``
+    newest-first default, ``up`` oldest-first). ``total`` is the number of entries returned;
+    ``total_matches`` is the true total across all pages (Olog ``hitCount``, ``None`` if the Olog
+    version omits it); ``capped`` is True when more than *size* matched on this page. Backs
+    ``search_logbook``.
     """
     cfg = get_config()
     if not cfg.olog_url:
@@ -423,10 +429,23 @@ async def query_olog_search(
 
     def _run() -> dict[str, object]:
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
-        entries, capped = client.search_logbook(
-            text=text, logbooks=logbooks, tags=tags, start=start, end=end, size=size
+        entries, capped, total_matches = client.search_logbook(
+            text=text,
+            logbooks=logbooks,
+            tags=tags,
+            start=start,
+            end=end,
+            size=size,
+            offset=offset,
+            sort=sort,
         )
-        return {"enabled": True, "entries": entries, "total": len(entries), "capped": capped}
+        return {
+            "enabled": True,
+            "entries": entries,
+            "total": len(entries),
+            "total_matches": total_matches,
+            "capped": capped,
+        }
 
     try:
         return await asyncio.to_thread(_run)
@@ -450,6 +469,49 @@ async def query_olog_entry(log_id: str, timeout: float = 5.0) -> dict[str, objec
         if entry is None:
             return {"enabled": True, "id": log_id, "found": False}
         return {"enabled": True, "id": log_id, "found": True, "entry": entry}
+
+    try:
+        return await asyncio.to_thread(_run)
+    except OlogError as exc:
+        raise EpicsConnectionError(f"Olog: {exc}") from exc
+
+
+async def query_olog_logbooks(timeout: float = 5.0) -> dict[str, object]:
+    """List the valid Olog logbook names. Read-only, config-gated, name-only (owners dropped).
+
+    Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes no
+    network call. When enabled, returns the logbook NAMES only — each Olog ``owner`` (PII) is
+    dropped in the client. These names are the valid filter values for
+    ``search_logbook(logbooks=…)``. Backs ``list_logbooks``.
+    """
+    cfg = get_config()
+    if not cfg.olog_url:
+        return {"enabled": False, "logbooks": [], "note": _OLOG_DISABLED_NOTE}
+
+    def _run() -> dict[str, object]:
+        client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
+        return {"enabled": True, "logbooks": client.list_logbooks()}
+
+    try:
+        return await asyncio.to_thread(_run)
+    except OlogError as exc:
+        raise EpicsConnectionError(f"Olog: {exc}") from exc
+
+
+async def query_olog_tags(timeout: float = 5.0) -> dict[str, object]:
+    """List the valid Olog tag names. Read-only, config-gated (a ``Tag`` has no owner — PII-free).
+
+    Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes no
+    network call. These names are the valid filter values for ``search_logbook(tags=…)``. Backs
+    ``list_tags``.
+    """
+    cfg = get_config()
+    if not cfg.olog_url:
+        return {"enabled": False, "tags": [], "note": _OLOG_DISABLED_NOTE}
+
+    def _run() -> dict[str, object]:
+        client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
+        return {"enabled": True, "tags": client.list_tags()}
 
     try:
         return await asyncio.to_thread(_run)

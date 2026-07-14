@@ -31,7 +31,12 @@ from epics_pv_mcp.tools.discover import _discover_pvs
 from epics_pv_mcp.tools.info import _get_pv_info
 from epics_pv_mcp.tools.monitor import _monitor_pv
 from epics_pv_mcp.tools.naming import _lookup_device_name
-from epics_pv_mcp.tools.olog import _get_log_entry, _search_logbook
+from epics_pv_mcp.tools.olog import (
+    _get_log_entry,
+    _list_logbooks,
+    _list_tags,
+    _search_logbook,
+)
 from epics_pv_mcp.tools.read import _get_pv_value, _get_pvs
 from epics_pv_mcp.tools.write import _set_pv_value
 
@@ -51,7 +56,8 @@ mcp = FastMCP(
         "default and additionally requires EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, "
         "a rate limit and an audit log. The REST-backed tools (find_channels, is_archived, "
         "get_pv_history, get_archive_info, list_archived_pvs, is_alarm_configured, "
-        "get_alarm_history, lookup_device_name, search_logbook, get_log_entry) stay disabled "
+        "get_alarm_history, lookup_device_name, search_logbook, get_log_entry, list_logbooks, "
+        "list_tags) stay disabled "
         "until their *_URL env vars are set; an empty URL means "
         "no client and no network call. Network reach is localhost-isolated by default: the "
         "server opens no non-local connection unless its launcher widens the EPICS address-list "
@@ -532,6 +538,12 @@ async def search_logbook(
         str | None, Field(description="Window end — ISO-8601 or a relative amount")
     ] = None,
     size: Annotated[int, Field(description="Cap on returned entries", ge=1, le=200)] = 50,
+    offset: Annotated[
+        int, Field(description="0-based pagination offset — read past the first page", ge=0)
+    ] = 0,
+    sort: Annotated[
+        str, Field(description="Create-time order: 'down' newest-first (default) or 'up'")
+    ] = "down",
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
 ) -> dict[str, object]:
     """Search the Phoebus Olog electronic logbook (Olog REST /logs/search).
@@ -539,11 +551,23 @@ async def search_logbook(
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_OLOG_URL is set.
     DS-PRIVACY: entries are redacted before they leave — technical fields (id, dates, level, state)
     and logbook/tag NAMES are kept, but author/owner is dropped and the title/description free text
-    is WITHHELD (a person can be named inside it); attachments are surfaced as a count only. capped
-    is true when more than size matched.
+    is WITHHELD (a person can be named inside it); attachments are surfaced as a count only.
+
+    Page the history with offset (0-based; Olog wire 'from') and order with sort ('down'=newest
+    first, the default; 'up'=oldest first). total is the number of entries returned; total_matches
+    is the true total across all pages (Olog hitCount); capped is true when more than size matched
+    on this page.
     """
     return await _search_logbook(
-        text=text, logbooks=logbooks, tags=tags, start=start, end=end, size=size, timeout=timeout
+        text=text,
+        logbooks=logbooks,
+        tags=tags,
+        start=start,
+        end=end,
+        size=size,
+        offset=offset,
+        sort=sort,
+        timeout=timeout,
     )
 
 
@@ -567,6 +591,46 @@ async def get_log_entry(
     as a count). found is false when no entry has that id.
     """
     return await _get_log_entry(log_id, timeout)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def list_logbooks(
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """List the valid Phoebus Olog logbook names (Olog REST /logbooks).
+
+    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_OLOG_URL is set. Returns
+    the logbook NAMES only (owners dropped) — the valid values for search_logbook(logbooks=…).
+    """
+    return await _list_logbooks(timeout)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def list_tags(
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """List the valid Phoebus Olog tag names (Olog REST /tags).
+
+    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_OLOG_URL is set. Returns
+    the tag NAMES only — the valid values for search_logbook(tags=…). Tags carry no owner.
+    """
+    return await _list_tags(timeout)
 
 
 @mcp.tool(

@@ -9,7 +9,12 @@ from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.services.olog_client import OlogClient
 from epics_pv_mcp.services.olog_exceptions import OlogConnectionError, OlogError
 from epics_pv_mcp.services.redact import FREETEXT_WITHHELD
-from epics_pv_mcp.tools.olog import _get_log_entry, _search_logbook
+from epics_pv_mcp.tools.olog import (
+    _get_log_entry,
+    _list_logbooks,
+    _list_tags,
+    _search_logbook,
+)
 
 # A raw Olog entry that names people in EVERY person-bearing place: the owner key, the source, the
 # title AND description free text, a logbook owner, an attachment filename, and a property value.
@@ -49,8 +54,9 @@ def test_project_log_entry_withholds_all_person_data(monkeypatch: pytest.MonkeyP
     source, free-text title/description, logbook owner, attachment filename, property) is gone."""
     client = OlogClient("http://olog")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([_RAW_ENTRY])))
-    entries, capped = client.search_logbook(text="vacuum")
+    entries, capped, total_matches = client.search_logbook(text="vacuum")
     assert capped is False
+    assert total_matches is None  # bare-list has no hitCount → honest None (not fabricated)
     assert entries == [
         {
             "id": 42,
@@ -82,7 +88,7 @@ def test_search_logbook_capped_and_query_params(monkeypatch: pytest.MonkeyPatch)
         return _resp([dict(_RAW_ENTRY, id=i) for i in range(3)])
 
     monkeypatch.setattr(client.session, "get", _get)
-    entries, capped = client.search_logbook(text="trip", logbooks="Operations", size=2)
+    entries, capped, _total = client.search_logbook(text="trip", logbooks="Operations", size=2)
     assert capped is True
     assert len(entries) == 2  # truncated to size
     assert captured["url"] == "http://olog/logs/search"
@@ -91,17 +97,19 @@ def test_search_logbook_capped_and_query_params(monkeypatch: pytest.MonkeyPatch)
     assert params["size"] == "3"  # size + 1
     assert params["desc"] == "trip"
     assert params["logbooks"] == "Operations"
+    assert params["sort"] == "down"  # default newest-first ordering is always sent
 
 
 def test_search_logbook_wrapped_response(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An Olog version that wraps the hits in {logs: [...]} is handled like a bare list."""
+    """An Olog {logs, hitCount} wrapper is handled; hitCount → total_matches (the true total)."""
     client = OlogClient("http://olog")
     monkeypatch.setattr(
-        client.session, "get", Mock(return_value=_resp({"logs": [_RAW_ENTRY], "hitCount": 1}))
+        client.session, "get", Mock(return_value=_resp({"logs": [_RAW_ENTRY], "hitCount": 7}))
     )
-    entries, _capped = client.search_logbook()
+    entries, _capped, total_matches = client.search_logbook()
     assert len(entries) == 1
     assert entries[0]["id"] == 42
+    assert total_matches == 7  # authoritative total across all pages, NOT len(entries)
 
 
 def test_get_log_entry_found_and_redacted(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -197,15 +205,19 @@ async def test_search_logbook_tool_enabled_is_redacted(monkeypatch: pytest.Monke
         def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
-        def search_logbook(self, **kwargs: object) -> tuple[list[dict[str, object]], bool]:
+        def search_logbook(
+            self, **kwargs: object
+        ) -> tuple[list[dict[str, object]], bool, int | None]:
             # a REAL client would redact; this fake returns an already-redacted entry to assert the
-            # tool surfaces it faithfully (the redaction itself is pinned by the client tests above)
-            return [{"id": 7, "title": FREETEXT_WITHHELD, "logbooks": ["Ops"]}], False
+            # tool surfaces it faithfully (redaction is pinned by the client tests above). The
+            # 3-tuple mirrors the real client (entries, capped, total_matches).
+            return [{"id": 7, "title": FREETEXT_WITHHELD, "logbooks": ["Ops"]}], False, 1
 
     monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _Fake)
     result = await _search_logbook(text="c.person")
     assert result["enabled"] is True
     assert result["total"] == 1
+    assert result["total_matches"] == 1
     entries = result["entries"]
     assert isinstance(entries, list)
     assert entries[0]["title"] == FREETEXT_WITHHELD
@@ -251,3 +263,139 @@ def test_check_connectivity_raises_on_transport_failure(monkeypatch: pytest.Monk
     )
     with pytest.raises(OlogConnectionError):
         client.check_connectivity()
+
+
+# --- search_logbook pagination + sort (offset -> Olog wire 'from', sort) ---
+
+
+def test_search_logbook_offset_and_sort_wire_params(monkeypatch: pytest.MonkeyPatch) -> None:
+    """offset maps to the Olog wire key 'from' (only when >0); sort passes through unchanged."""
+    client = OlogClient("http://olog")
+    captured: dict[str, object] = {}
+
+    def _get(url: str, params: object = None, timeout: object = None) -> Mock:
+        captured["params"] = params
+        return _resp({"logs": [], "hitCount": 0})
+
+    monkeypatch.setattr(client.session, "get", _get)
+    client.search_logbook(text="x", offset=25, sort="up")
+    params = captured["params"]
+    assert isinstance(params, dict)
+    assert params["from"] == "25"
+    assert params["sort"] == "up"
+
+
+def test_search_logbook_offset_zero_omits_from(monkeypatch: pytest.MonkeyPatch) -> None:
+    """offset=0 (default) sends NO 'from' key; sort defaults to 'down' (newest first)."""
+    client = OlogClient("http://olog")
+    captured: dict[str, object] = {}
+
+    def _get(url: str, params: object = None, timeout: object = None) -> Mock:
+        captured["params"] = params
+        return _resp({"logs": [], "hitCount": 0})
+
+    monkeypatch.setattr(client.session, "get", _get)
+    client.search_logbook(text="x")
+    params = captured["params"]
+    assert isinstance(params, dict)
+    assert "from" not in params
+    assert params["sort"] == "down"
+
+
+# --- list_logbooks / list_tags: client name-only projection (owner dropped) ---
+
+
+def test_list_logbooks_names_only_drops_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GET /logbooks items are {name,owner,state}; only the NAME survives (owner=PII gone)."""
+    client = OlogClient("http://olog")
+    raw = [
+        {"name": "Operations", "owner": "a.person", "state": "Active"},
+        {"name": "Controls", "owner": "b.person", "state": "Active"},
+    ]
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(raw)))
+    names = client.list_logbooks()
+    assert names == ["Operations", "Controls"]
+    blob = str(names)
+    assert "a.person" not in blob and "b.person" not in blob  # no logbook owner leaks
+
+
+def test_list_tags_names_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GET /tags returns {name,state} per item (no owner field); the names survive."""
+    client = OlogClient("http://olog")
+    raw = [{"name": "vacuum", "state": "Active"}, {"name": "rf", "state": "Active"}]
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(raw)))
+    assert client.list_tags() == ["vacuum", "rf"]
+
+
+# --- list_logbooks / list_tags: config gate + enabled path ---
+
+
+@pytest.mark.asyncio
+async def test_list_logbooks_tool_disabled_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config", lambda: EpicsConfig(olog_url="")
+    )
+
+    def _boom(*args: object, **kwargs: object) -> OlogClient:
+        raise AssertionError("client must not be constructed when disabled")
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _boom)
+    result = await _list_logbooks()
+    assert result["enabled"] is False
+    assert result["logbooks"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_tags_tool_disabled_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config", lambda: EpicsConfig(olog_url="")
+    )
+
+    def _boom(*args: object, **kwargs: object) -> OlogClient:
+        raise AssertionError("client must not be constructed when disabled")
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _boom)
+    result = await _list_tags()
+    assert result["enabled"] is False
+    assert result["tags"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_logbooks_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The enabled tool surfaces the client's name-only list (owner-drop pinned separately)."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+
+    class _Fake:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def list_logbooks(self) -> list[str]:
+            return ["Operations", "Controls"]
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _Fake)
+    result = await _list_logbooks()
+    assert result["enabled"] is True
+    assert result["logbooks"] == ["Operations", "Controls"]
+
+
+@pytest.mark.asyncio
+async def test_list_tags_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+
+    class _Fake:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def list_tags(self) -> list[str]:
+            return ["vacuum", "rf"]
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _Fake)
+    result = await _list_tags()
+    assert result["enabled"] is True
+    assert result["tags"] == ["vacuum", "rf"]

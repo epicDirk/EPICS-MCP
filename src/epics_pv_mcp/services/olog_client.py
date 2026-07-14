@@ -1,9 +1,11 @@
 """Read-only client for the Phoebus Olog (electronic logbook) REST API.
 
-Two read-only jobs:
+Read-only jobs:
 
-  GET {root}/logs/search?desc=…&logbooks=…&tags=…&start=…&end=…&size=…  — search log entries
+  GET {root}/logs/search?desc=…&logbooks=…&tags=…&start=…&end=…&size=…&from=…&sort=…  — search
   GET {root}/logs/{id}                                                  — one log entry
+  GET {root}/logbooks                                                   — list logbook names
+  GET {root}/tags                                                       — list tag names
 
 ``olog_url`` is the Olog REST root incl. context path (e.g. ``http://olog:8080/Olog``); the
 ``/logs`` paths are appended. Reading needs no auth by default; an optional ``Authorization``
@@ -78,6 +80,21 @@ def _entries_of(data: object) -> list[object]:
     return []
 
 
+def _hit_count(data: object) -> int | None:
+    """The Olog ``hitCount`` (total matches for the query) from a ``{logs, hitCount}`` wrapper.
+
+    Returns ``None`` for a bare-list response (an Olog version that returns just the page of logs
+    with no total); the caller then falls back to the length of the returned page. ``hitCount`` is
+    the total across ALL pages and need not equal the returned page size — Olog documents this on
+    ``SearchResult`` (it differs whenever ``from``/``size`` paginate).
+    """
+    if isinstance(data, dict):
+        count = data.get("hitCount")
+        if isinstance(count, int) and not isinstance(count, bool):
+            return count
+    return None
+
+
 class OlogClient:
     """Read-only client for the Phoebus Olog REST API. GET-only, DS-PRIVACY-redacted output."""
 
@@ -122,14 +139,23 @@ class OlogClient:
         start: str | None = None,
         end: str | None = None,
         size: int = DEFAULT_MAX_LOGS,
-    ) -> tuple[list[dict[str, object]], bool]:
-        """Search log entries, returning ``(entries, capped)`` — each entry DS-PRIVACY-redacted.
+        offset: int = 0,
+        sort: str = "down",
+    ) -> tuple[list[dict[str, object]], bool, int | None]:
+        """Search log entries → ``(entries, capped, total_matches)`` — DS-PRIVACY-redacted.
 
         *text* searches the description; *logbooks*/*tags* are comma-separated names; *start*/*end*
-        bound the time window. ``capped`` is True when more than *size* matched (one extra is
-        requested to detect it honestly, the Archiver/ChannelFinder pattern).
+        bound the time window. *offset* is the 0-based pagination offset (Olog wire param ``from``;
+        ``from`` is a Python keyword, hence the ``offset`` name — read past the first page).
+        *sort* orders by create time: ``down`` (default) = newest first, ``up`` = oldest first.
+
+        ``capped`` is True when more than *size* matched on this page (one extra is requested to
+        detect it honestly, the Archiver/ChannelFinder pattern). ``total_matches`` is the true total
+        across all pages (Olog ``hitCount``); it is ``None`` only when the Olog version returns a
+        bare list with no count — ``capped`` then still signals honestly whether more matched (no
+        fabricated total).
         """
-        params: dict[str, str] = {"size": str(size + 1)}
+        params: dict[str, str] = {"size": str(size + 1), "sort": sort}
         if text:
             params["desc"] = text
         if logbooks:
@@ -140,11 +166,14 @@ class OlogClient:
             params["start"] = start
         if end:
             params["end"] = end
+        if offset > 0:
+            params["from"] = str(offset)
         data = self._get(f"{self.base_url}/logs/search", params)
         entries = _entries_of(data)
         capped = len(entries) > size
+        total_matches = _hit_count(data)
         projected = [_project_log_entry(e) for e in entries[:size] if isinstance(e, dict)]
-        return projected, capped
+        return projected, capped, total_matches
 
     def get_log_entry(self, log_id: str) -> dict[str, object] | None:
         """Return one log entry by id (DS-PRIVACY-redacted), or ``None`` when it does not exist.
@@ -163,3 +192,22 @@ class OlogClient:
         if isinstance(data, dict) and data:
             return _project_log_entry(data)
         return None
+
+    def list_logbooks(self) -> list[str]:
+        """Return the names of all Olog logbooks (``GET /logbooks``), name-only.
+
+        DS-PRIVACY: each ``Logbook`` carries an ``owner`` (PII); :func:`_names` keeps only the
+        ``name``, so no owner reaches the caller. The names are the valid filter values for
+        ``search_logbook(logbooks=…)``.
+        """
+        data = self._get(f"{self.base_url}/logbooks", {})
+        return _names(data)
+
+    def list_tags(self) -> list[str]:
+        """Return the names of all Olog tags (``GET /tags``), name-only.
+
+        A ``Tag`` has only ``name``/``state`` (no owner), so this is trivially PII-free. The names
+        are the valid filter values for ``search_logbook(tags=…)``.
+        """
+        data = self._get(f"{self.base_url}/tags", {})
+        return _names(data)

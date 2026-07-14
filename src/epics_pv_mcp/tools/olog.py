@@ -9,7 +9,12 @@ the tool" anti-pattern is avoided for this name-capable surface). Default-disabl
 
 from __future__ import annotations
 
-from epics_pv_mcp.services.checkers import query_olog_entry, query_olog_search
+from epics_pv_mcp.services.checkers import (
+    query_olog_entry,
+    query_olog_logbooks,
+    query_olog_search,
+    query_olog_tags,
+)
 from epics_pv_mcp.services.olog_client import DEFAULT_MAX_LOGS
 
 
@@ -20,6 +25,8 @@ async def _search_logbook(
     start: str | None = None,
     end: str | None = None,
     size: int = DEFAULT_MAX_LOGS,
+    offset: int = 0,
+    sort: str = "down",
     timeout: float = 5.0,
 ) -> dict[str, object]:
     """Search the Phoebus Olog logbook (DS-PRIVACY-redacted entries).
@@ -27,7 +34,15 @@ async def _search_logbook(
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_search`.
     """
     return await query_olog_search(
-        text=text, logbooks=logbooks, tags=tags, start=start, end=end, size=size, timeout=timeout
+        text=text,
+        logbooks=logbooks,
+        tags=tags,
+        start=start,
+        end=end,
+        size=size,
+        offset=offset,
+        sort=sort,
+        timeout=timeout,
     )
 
 
@@ -37,3 +52,19 @@ async def _get_log_entry(log_id: str, timeout: float = 5.0) -> dict[str, object]
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_entry`.
     """
     return await query_olog_entry(log_id, timeout=timeout)
+
+
+async def _list_logbooks(timeout: float = 5.0) -> dict[str, object]:
+    """List the valid Olog logbook names (name-only; owners dropped).
+
+    Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_logbooks`.
+    """
+    return await query_olog_logbooks(timeout=timeout)
+
+
+async def _list_tags(timeout: float = 5.0) -> dict[str, object]:
+    """List the valid Olog tag names.
+
+    Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_tags`.
+    """
+    return await query_olog_tags(timeout=timeout)
