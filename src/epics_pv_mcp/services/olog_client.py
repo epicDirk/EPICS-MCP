@@ -255,9 +255,12 @@ class OlogClient:
         body: dict[str, object] = {
             "title": title,
             "logbooks": [{"name": name} for name in logbooks],
+            # Always send a present description string (empty when the caller gave none): Olog's
+            # save path dereferences description WITHOUT a null-guard (unlike source), so a missing
+            # description 500s the server (NPE). A complete payload keeps the write robust.
+            # Verified live (loopback phoebus-olog: a null description NPEs, an empty one succeeds).
+            "description": description if description is not None else "",
         }
-        if description is not None:
-            body["description"] = description
         if level is not None:
             body["level"] = level
         if tags:

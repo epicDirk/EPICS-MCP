@@ -409,11 +409,16 @@ class TestCreateClient:
 
         def _put(url: str, **kwargs: object) -> Mock:
             captured["params"] = kwargs.get("params")
+            captured["json"] = kwargs.get("json")
             return _resp({"id": 6, "title": "t", "logbooks": [{"name": "Ops"}]})
 
         monkeypatch.setattr(client.session, "put", _put)
         client.create_log_entry(title="re", logbooks=["Ops"], in_reply_to="42")
         assert captured["params"] == {"inReplyTo": "42"}
+        # description is ALWAYS sent as a present string (empty here) — Olog save path NPEs on null.
+        body = captured["json"]
+        assert isinstance(body, dict)
+        assert body["description"] == ""
 
     def test_http_400_maps_to_clear_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = OlogClient("http://olog:8080/Olog")
