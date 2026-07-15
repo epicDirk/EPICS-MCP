@@ -17,6 +17,7 @@ from epics_pv_mcp.services.archiver_exceptions import (
     ArchiverResponseError,
 )
 from epics_pv_mcp.services.archiver_time import normalize_archiver_time
+from epics_pv_mcp.services.checkers import _archiver_error_code
 from epics_pv_mcp.tools.archiver import (
     _get_archive_info,
     _get_pv_history,
@@ -924,6 +925,87 @@ def test_get_pv_history_shares_the_wire_format_with_the_alarm_plane() -> None:
     assert normalize_archiver_time(value, param="start") == normalize_alarm_time(
         value, param="start"
     )
+
+
+# --- get_pv_history: the ERROR CLASS at the tool boundary ---
+#
+# The Archiver 500s on a time it cannot read. Reporting that as EPICS_CONNECTION_FAILED sent the
+# reader after VPN/network problems that were not happening — the appliance answered.
+
+
+def _history_client_raising(exc: BaseException) -> type:
+    class _Fake:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def get_pv_history(self, *args: object, **kwargs: object) -> object:
+            raise exc
+
+    return _Fake
+
+
+@pytest.mark.asyncio
+async def test_get_pv_history_served_error_is_not_a_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """THE regression: a served 500 must not claim the appliance is unreachable."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
+    )
+    http_error = requests.exceptions.HTTPError("500")
+    http_error.response = Mock(status_code=500)
+    served = ArchiverResponseError("Request failed")
+    served.__cause__ = http_error
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.ArchiverClient", _history_client_raising(served)
+    )
+    with pytest.raises(EpicsError) as excinfo:
+        await _get_pv_history("X", _T0, _T1)
+    assert excinfo.value.error_code == "ARCHIVER_HTTP_500"
+    # EpicsConnectionError subclasses EpicsError, so a bare pytest.raises(EpicsError) above would
+    # still pass on the bug. This is the assertion that actually pins the fix.
+    assert not isinstance(excinfo.value, EpicsConnectionError)
+
+
+@pytest.mark.asyncio
+async def test_get_pv_history_bad_time_is_not_a_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A window this plane cannot read is a bad ARGUMENT — nothing was ever sent."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
+    )
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.ArchiverClient",
+        _history_client_raising(TimeWindowFormatError("start='7 days': only an absolute time")),
+    )
+    with pytest.raises(EpicsError) as excinfo:
+        await _get_pv_history("X", "7 days", "now")
+    assert excinfo.value.error_code == "INVALID_TIME_WINDOW"
+    assert not isinstance(excinfo.value, EpicsConnectionError)
+
+
+@pytest.mark.asyncio
+async def test_get_pv_history_connection_failure_still_maps_to_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-test: the split must not over-reach — a real outage stays a connection error."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
+    )
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.ArchiverClient",
+        _history_client_raising(ArchiverConnectionError("no route to host")),
+    )
+    with pytest.raises(EpicsConnectionError) as excinfo:
+        await _get_pv_history("X", _T0, _T1)
+    assert excinfo.value.error_code == "EPICS_CONNECTION_FAILED"
+
+
+def test_archiver_error_code_without_a_readable_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A retry-exhausted 502/503/504 arrives as requests.RetryError — not a ConnectionError, and
+    with no readable status. Generic token, but still NOT 'unreachable': the host did answer."""
+    assert _archiver_error_code(ArchiverResponseError("opaque")) == "ARCHIVER_RESPONSE_ERROR"
 
 
 class _NoClient:

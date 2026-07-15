@@ -177,6 +177,17 @@ Set `EPICS_MCP_NAMING_URL` to the service root **without** `/rest` and without a
 client appends `/rest/parts/…` and `/rest/deviceNames/…` itself; a trailing slash is normalized, but
 appending `/rest` yourself yields `/rest/rest/…` → 404.
 
+### Archiver history time window: ISO-with-zone only — and a 500 does not mean unreachable
+Three planes, three different time grammars — this is the narrowest, and the only one that is
+strict. Measured: `2026-07-08T00:00:00.000Z` works; a naive `2026-07-08T00:00:00`, the
+space-separated wall clock Olog *requires*, a bare date, and the `7 days` amount the alarm/logbook
+searches take are each an **HTTP 500**; an inverted window is a 400.
+
+That strictness is a virtue — nothing here is silently wrong. The trap is the diagnosis: a served
+5xx is not an outage, and a caller carrying `7 days` over from `get_alarm_history` gets one. Going
+at the retrieval API directly, always send zone-explicit ISO. `get_pv_history` normalizes every
+absolute notation for you and refuses a relative amount by name.
+
 ### Alarm history time window: ISO without a zone is read as "now" (and will not tell you)
 The Alarm Logger uses the REAL Phoebus parser (no vendored copy), so it reads ISO **with** a zone —
 `2026-07-08T12:45:58Z` and `+02:00` both work, and a bare date works too. But a zone-LESS
@@ -218,6 +229,12 @@ default zone, so a window is silently offset against any deployment not on UTC.
 sees what the client *sent*, never what the server *honoured*. Only a differential live probe
 (same window, several formats, plus a negative control) can.
 
+The converse hides just as well: a mock cannot see a **loud** server-side rejection either. The
+Archiver 500s on four notations a caller may reasonably send, and the offline suite was green
+throughout — it passed `"a"`/`"b"` as the window, values no layer ever looked at. A parameter that
+nothing validates and nothing probes live is *untested*, however many tests name it. Three planes
+were checked this way; **three** carried a defect no mock could reach.
+
 ## Error signatures → which tool answers
 
 Illustrate signatures by the exception **class and shape**, never a copied runtime string (error
@@ -242,6 +259,12 @@ messages embed the full request URL — an internal host would leak into this fi
 - **An Olog search answers 200 with an empty list.** Not necessarily "nothing matched" — an
   unreadable `start`/`end` degrades to *now* server-side and matches nothing (see the recipe
   above). Re-run with a relative amount (`7 days`) to tell a real empty from a dead window.
+- **An Archiver call answers `ARCHIVER_HTTP_5xx` / `INVALID_TIME_WINDOW` / `INVALID_ARGUMENT`.**
+  None of these means the appliance is down — it answered, or the call never left. A 5xx on
+  `get_pv_history` is nearly always the time format (this plane reads zone-explicit ISO and nothing
+  else); `INVALID_TIME_WINDOW` is a window the plane cannot express (e.g. a relative amount);
+  `INVALID_ARGUMENT` is an argument combination that cannot be answered at all. Only
+  `EPICS_CONNECTION_FAILED` means unreachable.
 - **Which IOC/host serves a PV?** `find_channels`.
 - **A REST 404 = `found:false`** only where documented (`getPVTypeInfo`, Olog `get_log_entry`); any other
   error propagates — could-not-read is never silently "not there".

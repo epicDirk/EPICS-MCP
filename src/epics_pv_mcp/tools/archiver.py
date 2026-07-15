@@ -14,13 +14,14 @@ import asyncio
 
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
+from epics_pv_mcp.services._time_window import TimeWindowFormatError
 from epics_pv_mcp.services.archiver_client import (
     DEFAULT_MAX_POINTS,
     DEFAULT_MAX_PV_NAMES,
     ArchiverClient,
 )
-from epics_pv_mcp.services.archiver_exceptions import ArchiverError
-from epics_pv_mcp.services.checkers import query_archived
+from epics_pv_mcp.services.archiver_exceptions import ArchiverConnectionError, ArchiverError
+from epics_pv_mcp.services.checkers import _archiver_error_code, query_archived
 
 #: Used by _get_pv_history below; the sibling _is_archived note lives with query_archived in
 #: services/checkers.py (same string, self-contained per layer — no services ↔ tools coupling).
@@ -80,10 +81,17 @@ async def _get_pv_history(
             result["withheld_reason"] = history["withheld_reason"]
         return result
 
+    # Three outcomes, three classes — see _archiver_error_code. Collapsing them into
+    # EpicsConnectionError sent readers after a network problem that was not happening: the
+    # Archiver 500s on a time it cannot read, and answering IS not being unreachable.
     try:
         return await asyncio.to_thread(_run)
-    except ArchiverError as exc:
+    except TimeWindowFormatError as exc:
+        raise EpicsError(f"Archiver: {exc}", error_code="INVALID_TIME_WINDOW") from exc
+    except ArchiverConnectionError as exc:
         raise EpicsConnectionError(f"Archiver: {exc}") from exc
+    except ArchiverError as exc:
+        raise EpicsError(f"Archiver: {exc}", error_code=_archiver_error_code(exc)) from exc
 
 
 async def _list_archived_pvs(
@@ -141,8 +149,11 @@ async def _list_archived_pvs(
 
     try:
         return await asyncio.to_thread(_run)
-    except ArchiverError as exc:
+    except ArchiverConnectionError as exc:
         raise EpicsConnectionError(f"Archiver: {exc}") from exc
+    except ArchiverError as exc:
+        # The server ANSWERED (a served 4xx/5xx) — that is not an outage.
+        raise EpicsError(f"Archiver: {exc}", error_code=_archiver_error_code(exc)) from exc
 
 
 async def _get_archive_info(pv: str, timeout: float = 5.0) -> dict[str, object]:
@@ -169,5 +180,8 @@ async def _get_archive_info(pv: str, timeout: float = 5.0) -> dict[str, object]:
 
     try:
         return await asyncio.to_thread(_run)
-    except ArchiverError as exc:
+    except ArchiverConnectionError as exc:
         raise EpicsConnectionError(f"Archiver: {exc}") from exc
+    except ArchiverError as exc:
+        # The server ANSWERED (a served 4xx/5xx) — that is not an outage.
+        raise EpicsError(f"Archiver: {exc}", error_code=_archiver_error_code(exc)) from exc

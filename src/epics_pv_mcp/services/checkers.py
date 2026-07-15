@@ -33,7 +33,7 @@ from epics_pv_mcp.services._time_window import TimeWindowFormatError
 from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG, AlarmClient
 from epics_pv_mcp.services.alarm_exceptions import AlarmError
 from epics_pv_mcp.services.archiver_client import ArchiverClient
-from epics_pv_mcp.services.archiver_exceptions import ArchiverError
+from epics_pv_mcp.services.archiver_exceptions import ArchiverConnectionError, ArchiverError
 from epics_pv_mcp.services.channelfinder_client import DEFAULT_MAX_RESULTS, ChannelFinderClient
 from epics_pv_mcp.services.channelfinder_exceptions import ChannelFinderError
 from epics_pv_mcp.services.coverage import AlarmChecker, ArchivedChecker
@@ -211,6 +211,26 @@ _OLOG_DISABLED_NOTE = (
 )
 
 
+def _archiver_error_code(exc: ArchiverError) -> str:
+    """A discrete error code for an Archiver failure whose SERVER answered.
+
+    The served HTTP status when it is readable, else a generic token. Lives in the services layer
+    (like its sibling :func:`_olog_error_code`) so ``tools/archiver`` imports it DOWNWARD — the
+    ``services → tools`` direction is what the M9 lift exists to prevent.
+
+    Kept separate from ``_olog_error_code`` rather than generalized: that one also feeds the Olog
+    write AUDIT (which must stay metadata-only, SEC-5) and carries an EpicsError branch for the
+    write gate, so folding them together would put that audit in the blast radius of an unrelated
+    fix — for six lines of status-to-token boilerplate.
+
+    Note: a retry-exhausted 502/503/504 arrives as ``requests.RetryError``, which is NOT a
+    ConnectionError — so it lands here as an ArchiverResponseError with no readable status and maps
+    to ARCHIVER_RESPONSE_ERROR. That is correct: the host DID answer, repeatedly.
+    """
+    status = http_status(exc)
+    return f"ARCHIVER_HTTP_{status}" if status is not None else "ARCHIVER_RESPONSE_ERROR"
+
+
 async def query_archived(pv: str, timeout: float = 5.0) -> dict[str, object]:
     """Report whether *pv* is being archived (Archiver MGMT getPVStatus). Read-only, config-gated.
 
@@ -232,8 +252,12 @@ async def query_archived(pv: str, timeout: float = 5.0) -> dict[str, object]:
 
     try:
         return await asyncio.to_thread(_run)
-    except ArchiverError as exc:
+    except ArchiverConnectionError as exc:
         raise EpicsConnectionError(f"Archiver: {exc}") from exc
+    except ArchiverError as exc:
+        # The server ANSWERED (a served 4xx/5xx) — that is not an outage. Safe for diagnose, which
+        # catches Exception totally here and withholds either way (diagnose._gather_archiver).
+        raise EpicsError(f"Archiver: {exc}", error_code=_archiver_error_code(exc)) from exc
 
 
 async def query_alarm_configured(
