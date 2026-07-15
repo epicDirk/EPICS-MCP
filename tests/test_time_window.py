@@ -13,7 +13,12 @@ from datetime import UTC, datetime
 
 import pytest
 
-from epics_pv_mcp.services._time_window import TimeWindowFormatError, classify_time_value
+from epics_pv_mcp.services._time_window import (
+    TimeWindowFormatError,
+    classify_time_value,
+    format_iso_z,
+    require_absolute_time,
+)
 from epics_pv_mcp.services.alarm_time import normalize_alarm_time
 from epics_pv_mcp.services.olog_time import OLOG_WIRE_TZ, normalize_olog_time
 
@@ -110,6 +115,54 @@ class TestRejected:
             _classify("garbage")
         assert not isinstance(excinfo.value, RestClientError)
         assert isinstance(excinfo.value, ValueError)
+
+
+class TestRequireAbsoluteTime:
+    """The absolute-only variant, for a plane that cannot take a relative amount at all."""
+
+    def test_absolute_values_resolve(self) -> None:
+        assert require_absolute_time("2026-01-01T02:00:00+02:00", param="start") == datetime(
+            2026, 1, 1, 0, 0, 0, tzinfo=UTC
+        )
+
+    @pytest.mark.parametrize("value", ["7 days", "now", "90 min", "500 ms", "2 weeks"])
+    def test_valid_relative_amount_is_rejected(self, value: str) -> None:
+        """The ONLY place this differs from classify_time_value: a perfectly valid amount is
+        refused, because the plane cannot express it. The message must name the way out."""
+        with pytest.raises(TimeWindowFormatError, match="only an absolute time"):
+            require_absolute_time(value, param="start")
+
+    @pytest.mark.parametrize("value", ["500 millis", "5 m", "garbage", "1 year", ""])
+    def test_classifier_refusals_are_inherited_verbatim(self, value: str) -> None:
+        """Pins that the grammar is NOT re-implemented here: the same input must raise the same
+        message as the shared classifier, so a trap fixed once is fixed for every plane."""
+        with pytest.raises(TimeWindowFormatError) as strict:
+            require_absolute_time(value, param="start")
+        with pytest.raises(TimeWindowFormatError) as shared:
+            classify_time_value(value, param="start")
+        assert str(strict.value) == str(shared.value)
+
+
+class TestFormatIsoZ:
+    """The emitter shared by every plane whose server reads zone-explicit ISO."""
+
+    def test_uses_z_not_offset(self) -> None:
+        # isoformat() would give '+00:00', which is valid ISO but not what we pin.
+        wire = format_iso_z(datetime(2026, 7, 8, 12, 45, 58, tzinfo=UTC))
+        assert wire == "2026-07-08T12:45:58.000Z"
+
+    def test_keeps_the_fraction_when_zero(self) -> None:
+        """isoformat() drops it — the wire form would then vary with the input."""
+        assert format_iso_z(datetime(2026, 1, 1, tzinfo=UTC)).endswith(".000Z")
+
+    def test_year_is_zero_padded(self) -> None:
+        assert format_iso_z(datetime(99, 1, 2, 3, 4, 5, tzinfo=UTC)) == "0099-01-02T03:04:05.000Z"
+
+    def test_sub_millisecond_is_truncated_not_rounded(self) -> None:
+        # 999_999 us rounds to 1000 ms — which is not a millisecond field. Truncation is the only
+        # safe direction, and it keeps the boundary inside the caller's window.
+        wire = format_iso_z(datetime(2026, 1, 1, 0, 0, 0, 999_999, tzinfo=UTC))
+        assert wire == "2026-01-01T00:00:00.999Z"
 
 
 class TestOlogWireFormat:

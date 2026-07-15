@@ -27,27 +27,7 @@ prefer wherever the server can read it.
 
 from __future__ import annotations
 
-from datetime import datetime
-
-from epics_pv_mcp.services._time_window import classify_time_value
-
-
-def _format_wire(moment: datetime) -> str:
-    """Render *moment* (UTC) as ``yyyy-MM-ddTHH:mm:ss.SSSZ`` — what ``ISO_INSTANT`` parses.
-
-    Millisecond precision is kept deliberately: truncating to the second would move a caller's
-    window boundary by up to a second without saying so, which is the same class of quiet
-    inaccuracy this module exists to remove.
-
-    Built explicitly rather than via ``isoformat()``: that emits ``+00:00`` rather than ``Z`` and
-    drops the fraction when it is zero (so the wire form would vary with the input), and ``%Y``
-    under ``strftime`` is not portably zero-padded below year 1000.
-    """
-    return (
-        f"{moment.year:04d}-{moment.month:02d}-{moment.day:02d}T"
-        f"{moment.hour:02d}:{moment.minute:02d}:{moment.second:02d}."
-        f"{moment.microsecond // 1000:03d}Z"
-    )
+from epics_pv_mcp.services._time_window import classify_time_value, format_iso_z
 
 
 def normalize_alarm_time(value: str, *, param: str) -> str:
@@ -61,4 +41,4 @@ def normalize_alarm_time(value: str, *, param: str) -> str:
     moment = classify_time_value(value, param=param)
     if moment is None:
         return value.strip()
-    return _format_wire(moment)
+    return format_iso_z(moment)

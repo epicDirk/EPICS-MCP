@@ -24,10 +24,14 @@ The traps below are not pedantry — each was observed live returning a wrong an
 * months/years — subtracted from a point in time, which cannot carry them. The two planes differ
   in how loudly they fail; both are refused here so the caller gets one message naming the fix.
 
-WHAT DIFFERS PER PLANE (and therefore is NOT here): the wire FORMAT. Olog cannot read ISO at all
-(its vendored parser has ISO support stripped out) and needs a space-separated wall clock plus an
-explicit ``tz``; the Alarm Logger uses the real parser and reads ISO with a zone directly. Each
-plane's module owns its own emitter — see ``olog_time`` / ``alarm_time``.
+WHAT DIFFERS PER PLANE: the wire FORMAT, and each plane's module owns the CHOICE of it (plus any
+extra param that choice implies, like Olog's ``tz``) — see ``olog_time`` / ``alarm_time`` /
+``archiver_time``. Olog cannot read ISO at all (its vendored parser has ISO support stripped out)
+and needs a space-separated wall clock; the Alarm Logger and the Archiver both read zone-explicit
+ISO, because both parse a real ``ISO_INSTANT`` — an agreement on a standard, not a coincidence, so
+:func:`format_iso_z` lives HERE and is shared by those two. Olog's wall-clock emitter stays in
+``olog_time``: one user, one home. This module therefore carries the classifier PLUS the format
+primitives more than one plane needs — never a plane's choice.
 """
 
 from __future__ import annotations
@@ -106,6 +110,46 @@ def classify_time_value(value: str, *, param: str) -> datetime | None:
         f"at all; bare 'm' is not a unit (use 'min'); 'millis' means minutes (use 'ms'); compound "
         f"amounts like '1 day 20 s' are unreliable; a raw epoch number is not accepted. The server "
         f"would silently take any of these as 'now' and answer with an empty result, not an error."
+    )
+
+
+def require_absolute_time(value: str, *, param: str) -> datetime:
+    """Like :func:`classify_time_value`, but for a plane that CANNOT take a relative amount.
+
+    A deliberate sibling rather than a ``allow_relative=False`` flag on the classifier: that
+    function returns ``datetime | None``, and a runtime bool cannot narrow a static return type —
+    every caller would need an ``assert moment is not None`` (a lie: it is a contract) or the
+    classifier would need ``@overload`` machinery to avoid it. And semantically ``None`` means
+    "a valid relative amount, pass it through"; a plane with no pass-through is best expressed by a
+    function that CANNOT return it.
+
+    Every trap message still comes from the one classifier — this only removes an option.
+    """
+    moment = classify_time_value(value, param=param)
+    if moment is None:
+        raise TimeWindowFormatError(
+            f"{param}={value!r}: this service reads only an absolute time — a relative amount is "
+            f"not supported here (unlike the alarm/logbook searches). Give an absolute time WITH a "
+            f"zone, e.g. '2026-07-15T10:00:00Z'."
+        )
+    return moment
+
+
+def format_iso_z(moment: datetime) -> str:
+    """Render *moment* (UTC) as ``yyyy-MM-ddTHH:mm:ss.SSSZ`` — what ``ISO_INSTANT`` parses.
+
+    Shared by every plane whose server reads zone-explicit ISO. Millisecond precision is kept
+    deliberately: truncating to the second would move a caller's window boundary by up to a second
+    without saying so, which is the same class of quiet inaccuracy this module exists to remove.
+
+    Built explicitly rather than via ``isoformat()``: that emits ``+00:00`` rather than ``Z`` and
+    drops the fraction when it is zero (so the wire form would vary with the input), and ``%Y``
+    under ``strftime`` is not portably zero-padded below year 1000.
+    """
+    return (
+        f"{moment.year:04d}-{moment.month:02d}-{moment.day:02d}T"
+        f"{moment.hour:02d}:{moment.minute:02d}:{moment.second:02d}."
+        f"{moment.microsecond // 1000:03d}Z"
     )
 
 
