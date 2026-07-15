@@ -27,10 +27,11 @@ setting those variables for *your* services — no code change. This guide walks
    Fix anything `epics-doctor` flags, then you are done — no need to ask us.
 
    ⚠️ Read the `?` (`unverified`) lines before calling it done: they mean "reachable, but it could
-   not prove what it is" — honest, not healthy, and deliberately exit `0`. The **Naming Service** and
-   the **archiver retrieval** webapp are structurally unverifiable (no info endpoint) and always show
-   `?`. Scripting this? Read `verification_complete` / `unverified_planes` from `--json`; the exit
-   code alone says "nothing failed", not "everything confirmed".
+   not prove what it is" — honest, not healthy, and deliberately exit `0`. Every plane has its own
+   identity beacon (see the operator guide); a `?` means that beacon did not answer usably, which is
+   worth understanding rather than waving through. Scripting this? Read `verification_complete` /
+   `unverified_planes` from `--json`; the exit code alone says "nothing failed", not "everything
+   confirmed".
 
 ## 2. The variables, by plane
 

@@ -158,13 +158,24 @@ ChannelFinder). Each plane is therefore also asked to **name itself**:
 | `?` | `unverified` | reachable, but it could not prove what it is (auth wall, no info endpoint, unreadable body). **Honest, not healthy** — exit stays `0` |
 | `✗` | `wrong_service` | it named itself as a *different* known service — that URL points at the wrong one. Exit `1` |
 
-`unverified` is not a failure on purpose: that a healthy service answers its info endpoint
-anonymously is measured at one site, and making that a hard failure everywhere would be an
-overclaim. Two planes are *structurally* unverifiable and will always show `?` — the **Naming
-Service** (no info endpoint: `/rest` is the Swagger UI, `/rest/info` is 404) and the **archiver
-retrieval** webapp (serves no `getApplianceInfo`). Scripting against this? Exit `0` means "nothing
-failed", **not** "everything confirmed" — read `verification_complete` / `unverified_planes` from
-`--json`, never the exit code alone.
+`unverified` is not a failure on purpose: that a healthy service answers its beacon anonymously is
+measured at one site, and making that a hard failure everywhere would be an overclaim.
+
+Each plane has its own beacon, because they do not share one:
+
+| Plane | Beacon | Identified by |
+|---|---|---|
+| ChannelFinder / Olog / Alarm | `GET <base-url>` | exact `name` ("ChannelFinder Service", …) |
+| Archiver (MGMT) | `GET /mgmt/bpl/getApplianceInfo` | the `identity` field |
+| Archiver (retrieval) | `GET /retrieval/bpl/getVersion` | the product name in `version` |
+| Naming | `GET /rest/swagger.json` | `info.title` |
+
+⚠️ Mind the base PATH on the archiver: retrieval serves `/retrieval/bpl`, **not** `/mgmt/bpl`.
+Probing the latter on the retrieval port 404s and tells you nothing — that mistake is exactly how an
+earlier pass concluded retrieval had no beacon at all.
+
+Scripting against this? Exit `0` means "nothing failed", **not** "everything confirmed" — read
+`verification_complete` / `unverified_planes` from `--json`, never the exit code alone.
 
 ### Retrieval-cluster-aware appliances
 An Archiver Appliance may run as an **N-member failover cluster**. Such a cluster is retrieval-aware: a

@@ -16,11 +16,12 @@ offline suite was green throughout (it passed "a"/"b" as the window).
 from __future__ import annotations
 
 import os
+from datetime import datetime
 
 import pytest
 
 from epics_pv_mcp.services._time_window import TimeWindowFormatError
-from epics_pv_mcp.services.archiver_client import ArchiverClient, HistoryResult
+from epics_pv_mcp.services.archiver_client import ArchiverClient, HistoryResult, Sample
 
 pytestmark = [
     pytest.mark.live,
@@ -75,6 +76,14 @@ def _history(client: ArchiverClient, pv: str, start: str, end: str) -> HistoryRe
     return client.get_pv_history(pv, start, end, max_points=_MAX_POINTS)
 
 
+def _inside_window(samples: list[Sample], start: str, end: str) -> int:
+    """How many samples fall STRICTLY inside ``[start, end]`` — the appliance also returns the last
+    value from BEFORE *start*, and that carried sample is present whatever window you ask for."""
+    lo = datetime.fromisoformat(start.replace("Z", "+00:00")).timestamp()
+    hi = datetime.fromisoformat(end.replace("Z", "+00:00")).timestamp()
+    return sum(1 for s in samples if lo <= s["secs"] <= hi)
+
+
 def _count(client: ArchiverClient, pv: str, start: str, end: str) -> int:
     return len(_history(client, pv, start, end)["samples"])
 
@@ -125,6 +134,18 @@ def test_sibling_notations_agree_with_iso_z(client: ArchiverClient, pv: str, sta
             "beyond it would be invisible"
         )
     assert reference["samples"], _NO_REFERENCE
+    # "Has samples" is NOT "has samples in the window": the appliance carries the last value from
+    # BEFORE the window start into the result. A slow PV therefore answers exactly one (carried)
+    # sample for EVERY start, and the comparison degenerates to 1 == 1 — green for any window at
+    # all. Measured across 24 archived PVs: n minus inside == 1 in every case, and 5 of them had
+    # n=1/inside=0. Demand a reference that genuinely spans the window.
+    inside = _inside_window(reference["samples"], *_window())
+    assert inside >= 2, (
+        f"the reference holds {len(reference['samples'])} sample(s) but only {inside} inside the "
+        "window — the appliance carries the last value from before the start, so this PV cannot "
+        "discriminate between windows. Pick a PV with several samples in the window "
+        "(EPICS_MCP_LIVE_ARCHIVER_PV)."
+    )
     assert len(sibling["samples"]) == len(reference["samples"])
 
 

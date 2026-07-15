@@ -25,7 +25,10 @@ from epics_pv_mcp.services.doctor import (
     _classify_failure,
     _identify,
     _identify_archiver,
+    _identify_naming,
+    _identify_retrieval_plane,
     _privacy_report,
+    _safe,
     run_doctor,
 )
 from epics_pv_mcp.services.olog_client import OlogClient
@@ -127,10 +130,27 @@ def _identity_never_touches_the_network(monkeypatch: pytest.MonkeyPatch) -> None
             plane=plane, configured=True, reachable=True, ca_ok=True, status="ok", identified=True
         )
 
+    # EVERY identity probe must be stubbed. Each one issues its own GET, so a single unstubbed
+    # entry point silently reintroduces network into the offline suite.
+    #
+    # rest_get_json is stubbed too, and that one is not belt-and-braces: the retrieval plane calls
+    # it DIRECTLY as its transport probe, outside the mocked client classes. Measured before this
+    # line existed: test_archiver_api_error_is_reachable_not_unreachable spent 12.1s of the suite's
+    # 17s resolving a fake hostname — passing, silently, over the network. A hermetic test that is
+    # merely slow is how "no network" rots.
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.rest_get_json", lambda *_a, **_k: {})
     monkeypatch.setattr("epics_pv_mcp.services.doctor._identify", _identified)
     monkeypatch.setattr(
         "epics_pv_mcp.services.doctor._identify_archiver",
         lambda *_a, **_k: _identified("archiver"),
+    )
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.doctor._identify_naming",
+        lambda *_a, **_k: _identified("naming"),
+    )
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.doctor._identify_retrieval_plane",
+        lambda *_a, **_k: _identified("archiver_retrieval"),
     )
 
 
@@ -280,6 +300,43 @@ def test_archiver_identity_requires_the_identity_field(monkeypatch: pytest.Monke
     assert "appliance0" in (check.detail or "")
 
 
+def test_naming_identifies_via_its_swagger_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Naming Service DOES have an identity beacon — an earlier pass claimed it had none.
+
+    That claim came from three probed paths plus an all-quantifier ("structurally unverifiable"),
+    while the refuting evidence sat in the workspace the whole time. /rest/swagger.json is an
+    anonymous static 200 and it discriminates (measured: Olog answers 401 there, CF 404).
+    """
+    _payload(monkeypatch, {"info": {"title": "Naming service API documentation"}})
+    check = _identify_naming("http://naming.example", 5.0)
+    assert (check.status, check.identified) == ("ok", True)
+
+
+def test_naming_unfamiliar_title_is_unverified_not_wrong_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The title is documentation prose and may be reworded, so an unfamiliar one means "cannot
+    confirm" — NOT "a different known service answers here". Only the latter justifies exit 1."""
+    _payload(monkeypatch, {"info": {"title": "Some other API"}})
+    assert _identify_naming("http://naming.example", 5.0).status == "unverified"
+
+
+def test_retrieval_identifies_via_getversion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Retrieval serves /retrieval/bpl — probing /mgmt/bpl there 404s and proves nothing, which is
+    exactly how an earlier pass concluded (wrongly) that retrieval had no identity endpoint."""
+    probe = _identify_retrieval_plane
+    _payload(monkeypatch, {"version": "Archiver Appliance Version 2.2.1"})
+    check = probe("http://arch.example:17668", None, 5.0)
+    assert (check.status, check.identified) == ("ok", True)
+
+    # The release number must NOT be pinned — an upgrade is not a misconfiguration.
+    _payload(monkeypatch, {"version": "Archiver Appliance Version 9.9.9"})
+    assert probe("http://arch.example:17668", None, 5.0).status == "ok"
+
+    _payload(monkeypatch, {"version": "Some Other Product 1.0"})
+    assert probe("http://arch.example:17668", None, 5.0).status == "unverified"
+
+
 def test_unknown_status_fails_closed() -> None:
     """The allowlist is the point: a new or mistyped status must FAIL, not slip through as exit 0.
 
@@ -290,6 +347,63 @@ def test_unknown_status_fails_closed() -> None:
     assert {"ok", "disabled", "info", "unverified"} == _NON_FAILING_STATUSES
 
 
+@pytest.mark.parametrize(
+    ("plane", "url_field", "client_name"),
+    [
+        ("channelfinder", "channelfinder_url", "ChannelFinderClient"),
+        ("olog", "olog_url", "OlogClient"),
+        ("alarm", "alarm_url", "AlarmClient"),
+        ("archiver", "archiver_url", "ArchiverClient"),
+        ("naming", "naming_url", "NamingServiceClient"),
+    ],
+)
+async def test_every_rest_plane_is_actually_identity_probed(
+    monkeypatch: pytest.MonkeyPatch, plane: str, url_field: str, client_name: str
+) -> None:
+    """The WIRING guard — the identity logic being correct is worthless if nobody calls it.
+
+    Measured with a mutant: deleting the identity argument from the plane gatherers (i.e. exactly
+    the pre-S4 state) left the whole gate chain green — 47/48 tests, ruff, mypy — while the doctor
+    went back to reporting "✓ channelfinder ok" for a dead container, now under the even bolder
+    "every configured plane answered AS ITSELF". Only this assertion notices.
+    """
+    _set_config(monkeypatch, **{url_field: "http://service.example/x"})
+    monkeypatch.setattr(f"epics_pv_mcp.services.doctor.{client_name}", _OkClient)
+    report = await run_doctor()
+    checked = _plane(report, plane)
+    assert checked.identified is True, (
+        f"{plane}: reachable but never identity-probed — a transport probe alone is what let a "
+        "dead container report ok"
+    )
+
+
+async def test_retrieval_falls_back_to_the_archiver_url_like_the_client_does(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A single-JVM appliance leaves EPICS_MCP_ARCHIVER_RETRIEVAL_URL empty and serves retrieval on
+    the archiver port — ArchiverClient resolves `retrieval_url or base_url` (archiver_client.py) and
+    get_pv_history queries it. Reporting that plane as "disabled" would be the same false all-clear
+    this check exists to remove, only wearing a more reassuring word.
+    """
+    _set_config(monkeypatch, archiver_url="http://arch.example:17665")  # retrieval URL empty
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.ArchiverClient", _OkClient)
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.rest_get_json", lambda *a, **k: {})
+    report = await run_doctor()
+    retrieval = _plane(report, "archiver_retrieval")
+    assert retrieval.status != "disabled", "retrieval is live via fallback, not reported as off"
+    assert retrieval.configured is True
+
+
+def test_credentials_in_a_url_are_never_echoed() -> None:
+    """doctor output is what gets pasted into a ticket; requests' error text embeds the full URL."""
+    leaky = "Failed to connect to http://admin:hunter2@olog.example/Olog: timed out"
+    assert "hunter2" not in _safe(leaky)
+    assert "***@olog.example" in _safe(leaky)
+    # A URL without credentials must survive untouched.
+    plain = "Failed to connect to http://olog.example/Olog: timed out"
+    assert _safe(plain) == plain
+
+
 async def test_unverified_plane_does_not_fail_but_is_reported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -298,15 +412,26 @@ async def test_unverified_plane_does_not_fail_but_is_reported(
     That a healthy service answers its info endpoint anonymously is measured at ONE site (n=1), so
     turning "cannot prove it" into a hard failure would be the very overclaim we keep finding.
     """
-    _set_config(monkeypatch, naming_url="http://naming.example")
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.NamingServiceClient", _OkClient)
+    _set_config(monkeypatch, channelfinder_url="http://cf.example/ChannelFinder")
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.ChannelFinderClient", _OkClient)
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.doctor._identify",
+        lambda plane, *_a, **_k: PlaneCheck(
+            plane=plane,
+            configured=True,
+            reachable=True,
+            ca_ok=True,
+            status="unverified",
+            identified=False,
+            detail="transport reachable, identity unverified",
+        ),
+    )
     report = await run_doctor()
-    naming = _plane(report, "naming")
-    assert (naming.status, naming.identified, naming.reachable) == ("unverified", False, True)
-    assert "no info endpoint" in (naming.detail or "")
+    cf = _plane(report, "channelfinder")
+    assert (cf.status, cf.identified, cf.reachable) == ("unverified", False, True)
     assert report.ok is True  # honest, not a failure
     assert report.verification_complete is False  # ...but NOT confirmed
-    assert report.unverified_planes == ["naming"]
+    assert report.unverified_planes == ["channelfinder"]
 
 
 async def test_ca_error_plane_fails(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -133,8 +133,8 @@ def test_narrow_window_discriminates(client: OlogClient) -> None:
     assert narrow is not None, _NO_REFERENCE
     assert narrow < wide, (
         f"a window starting at the newest entry returned {narrow} of {wide} — either the window is "
-        "ignored, or every entry shares one timestamp (a fixture with no time spread cannot "
-        "discriminate)"
+        "ignored, or the newest timestamp is shared by every entry the window would have excluded "
+        "(a fixture with no time spread cannot discriminate)"
     )
 
 

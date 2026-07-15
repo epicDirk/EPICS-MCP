@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -182,7 +183,7 @@ def _classify_failure(exc: Exception) -> tuple[bool | None, bool | None, PlaneSt
             "reachable, but the service kept returning a retryable 5xx (502/503/504) until the "
             "retry budget was exhausted — the service is up but erroring. Check its health.",
         )
-    return (False, None, "unreachable", f"could not reach the service: {exc}")
+    return (False, None, "unreachable", f"could not reach the service: {_safe(str(exc))}")
 
 
 #: The ``name`` each Phoebus-family service reports at its base URL, measured (they answer
@@ -195,6 +196,57 @@ _SERVICE_NAMES: dict[str, str] = {
     "alarm": "Alarm logging Service",
 }
 
+#: The Naming Service has no ``{"name": ...}`` beacon, but ``/rest/swagger.json`` is an anonymous
+#: static 200 whose ``info.title`` names it (measured; Olog answers 401 there, ChannelFinder 404).
+_NAMING_SWAGGER_TITLE = "Naming service API documentation"
+
+#: The product name inside the archiver's ``getVersion`` string. A containment test, deliberately:
+#: the release number that follows it is the variable part — an upgrade is not a misconfiguration.
+_ARCHIVER_PRODUCT = "Archiver Appliance"
+
+
+#: ``scheme://user:password@`` anywhere inside free text. Applied to what doctor PRINTS, not to
+#: what it sends — this is an output guard, not a transport change.
+_URL_CREDENTIALS = re.compile(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@")
+
+
+def _safe(text: str) -> str:
+    """Redact ``user:password@`` out of anything doctor is about to print.
+
+    Not cosmetic: requests' error text embeds the full request URL, and ``epics-doctor`` output is
+    precisely what an operator pastes into a ticket when something is already going wrong.
+    Credentials do not belong in a config URL (the documented path is ``EPICS_MCP_*_AUTH``, a
+    header) — but a URL that carries them anyway must not be echoed back verbatim. This is a local
+    output guard; the shared ``services/redact.py`` barrier is a different contract and untouched.
+    """
+    return _URL_CREDENTIALS.sub(r"\g<scheme>***@", text)
+
+
+def _fetch_beacon(url: str, auth_header: str | None, timeout: float) -> object | Exception:
+    """GET *url* and return the parsed body, or the Exception that stopped us. Never raises.
+
+    The one place every identity probe issues its request, so the redirect posture and the
+    error-to-``unverified`` translation cannot drift between planes.
+
+    ``allow_redirects=False`` because the RESPONDING host is the whole point: a redirect would let
+    another host answer for the one we configured, which is exactly the confusion being ruled out.
+    Note a caller only ever sees a 2xx body — ``rest_get_json`` raises on a non-2xx BEFORE parsing,
+    so an auth wall or a 404 can never reach a payload check.
+    """
+    session = build_retrying_session(auth_header=auth_header)
+    try:
+        return rest_get_json(
+            session,
+            url,
+            None,
+            timeout,
+            conn_exc=RestConnectionError,
+            resp_exc=RestResponseError,
+            allow_redirects=False,
+        )
+    except Exception as exc:  # noqa: BLE001 — TOTAL: any failure is an answer, never a raise
+        return exc
+
 
 def _identify(plane: str, base_url: str, auth_header: str | None, timeout: float) -> PlaneCheck:
     """Ask a Phoebus-family service to name itself; map the answer to a verdict. TOTAL.
@@ -203,26 +255,13 @@ def _identify(plane: str, base_url: str, auth_header: str | None, timeout: float
     known service — a misconfiguration that is unambiguous at any site, so it fails), or
     ``unverified`` (anything else: an auth wall, HTML, a body without a usable ``name``, a redirect,
     a 5xx). ``unverified`` is honest, not a failure — see :data:`_NON_FAILING_STATUSES`.
-
-    ``allow_redirects=False`` because the RESPONDING host is the whole point: a redirect would let
-    another host answer for the one we configured, which is exactly the confusion being ruled out.
-    Note this only ever sees a 2xx body — ``rest_get_json`` raises on a non-2xx BEFORE parsing, so
-    an auth wall or a 404 can never reach the name check and lands in ``unverified`` below.
     """
     expected = _SERVICE_NAMES[plane]
-    session = build_retrying_session(auth_header=auth_header)
-    try:
-        payload = rest_get_json(
-            session,
-            base_url,
-            None,
-            timeout,
-            conn_exc=RestConnectionError,
-            resp_exc=RestResponseError,
-            allow_redirects=False,
+    payload = _fetch_beacon(base_url, auth_header, timeout)
+    if isinstance(payload, Exception):
+        return _unverified(
+            plane, f"transport reachable, but the identity probe failed: {_safe(str(payload))}"
         )
-    except Exception as exc:  # noqa: BLE001 — TOTAL: any failure → unverified, never raises
-        return _unverified(plane, f"transport reachable, but the identity probe failed: {exc}")
 
     name = payload.get("name") if isinstance(payload, dict) else None
     if not isinstance(name, str) or not name.strip():
@@ -342,7 +381,9 @@ def _identify_archiver(base_url: str, auth_header: str | None, timeout: float) -
             allow_redirects=False,
         )
     except Exception as exc:  # noqa: BLE001 — TOTAL: any failure → unverified, never raises
-        return _unverified("archiver", f"transport reachable, but the identity probe failed: {exc}")
+        return _unverified(
+            "archiver", f"transport reachable, but the identity probe failed: {_safe(str(exc))}"
+        )
 
     identity = payload.get("identity") if isinstance(payload, dict) else None
     if not isinstance(identity, str) or not identity.strip():
@@ -377,28 +418,73 @@ async def _check_archiver(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
     return await _run_probe("archiver", _run, _id)
 
 
+def _identify_retrieval_plane(base_url: str, auth_header: str | None, timeout: float) -> PlaneCheck:
+    """The retrieval webapp names itself in ``/retrieval/bpl/getVersion``.
+
+    Note the base PATH: retrieval serves ``/retrieval/bpl``, not ``/mgmt/bpl`` — probing the latter
+    on the retrieval port 404s and says nothing. The version string carries the product name, so
+    the check is a containment test on the NAME part; the release number is the variable part and
+    must not be pinned (an appliance upgrade is not a misconfiguration).
+    """
+    payload = _fetch_beacon(
+        f"{base_url.rstrip('/')}/retrieval/bpl/getVersion", auth_header, timeout
+    )
+    if isinstance(payload, Exception):
+        return _unverified(
+            "archiver_retrieval",
+            f"transport reachable, but the identity probe failed: {_safe(str(payload))}",
+        )
+
+    version = payload.get("version") if isinstance(payload, dict) else None
+    if isinstance(version, str) and _ARCHIVER_PRODUCT in version:
+        return PlaneCheck(
+            plane="archiver_retrieval",
+            configured=True,
+            reachable=True,
+            ca_ok=True,
+            status="ok",
+            identified=True,
+            detail=f"retrieval webapp: {version}",
+        )
+    return _unverified(
+        "archiver_retrieval",
+        f"transport reachable, but getVersion reports {version!r} rather than an "
+        f"{_ARCHIVER_PRODUCT} — this may not be the retrieval webapp",
+    )
+
+
 async def _check_retrieval_plane(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
     """The archiver RETRIEVAL webapp — its own line, because nothing else probes it.
 
-    A split deployment serves MGMT and RETRIEVAL on different ports, and ``get_pv_history`` talks to
-    RETRIEVAL. The archiver plane only ever probed MGMT, so a dead retrieval endpoint still read as
-    ``archiver ok`` while every history call 404'd. Measured: retrieval serves no
-    ``getApplianceInfo`` (404) — there is no cheap identity beacon here — so this reports reachable
-    with the identity honestly unverified rather than inventing a check on suspicion.
+    ``get_pv_history`` talks to RETRIEVAL, while the archiver plane only ever probed MGMT: a dead
+    retrieval endpoint read as ``archiver ok`` while every history call 404'd.
+
+    The URL mirrors the CLIENT's own resolution (``retrieval_url or base_url``): a single-JVM
+    appliance serves every webapp on one port and leaves ``EPICS_MCP_ARCHIVER_RETRIEVAL_URL``
+    empty, so treating an empty var as "plane off" would report ``disabled`` for a retrieval
+    endpoint that is very much live and being queried — the same false all-clear this check exists
+    to remove, wearing the word "disabled".
     """
-    if not cfg.archiver_retrieval_url:
-        return _disabled("archiver_retrieval", "EPICS_MCP_ARCHIVER_RETRIEVAL_URL")
+    url = cfg.archiver_retrieval_url or cfg.archiver_url
+    if not url:
+        return _disabled("archiver_retrieval", "EPICS_MCP_ARCHIVER_URL")
 
     def _run() -> None:
+        # Probe RETRIEVAL's own endpoint, and through rest_get_json so the failure arrives with its
+        # cause chained: that is what lets _classify_failure tell a CA problem from a wrong webapp
+        # from a dead host. A raw session.head here would collapse all three into "unreachable".
         session = build_retrying_session(auth_header=cfg.archiver_auth or None)
-        session.head(cfg.archiver_retrieval_url, timeout=timeout)
+        rest_get_json(
+            session,
+            f"{url.rstrip('/')}/retrieval/bpl/getVersion",
+            None,
+            timeout,
+            conn_exc=RestConnectionError,
+            resp_exc=RestResponseError,
+        )
 
     def _id() -> PlaneCheck:
-        return _unverified(
-            "archiver_retrieval",
-            "transport reachable; identity unverified — the retrieval webapp serves no "
-            "getApplianceInfo (404), so it has no identity endpoint to check",
-        )
+        return _identify_retrieval_plane(url, cfg.archiver_auth or None, timeout)
 
     return await _run_probe("archiver_retrieval", _run, _id)
 
@@ -418,14 +504,42 @@ async def _check_alarm(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
     return await _run_probe("alarm", _run, _id)
 
 
-async def _check_naming(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
-    """The Naming Service — reachable-only, by measurement rather than by omission.
+def _identify_naming(base_url: str, timeout: float) -> PlaneCheck:
+    """The Naming Service names itself in its Swagger contract.
 
-    It exposes NO info endpoint: ``/rest`` serves the Swagger UI (HTML, 200 — a proxy or an error
-    page would look the same), ``/rest/info`` and ``/info`` are 404. Its only self-describing
-    answers are real device queries, and a data query on every ``epics-doctor`` run is not a health
-    check. So this plane says "identity unverified" and means it. No invented check on suspicion.
+    It has no ``{"name": ...}`` beacon like the Phoebus trio, but ``/rest/swagger.json`` is a
+    static, anonymous 200 whose ``info.title`` identifies the service — and it DISCRIMINATES
+    (measured: Olog answers 401 there, ChannelFinder 404).
+
+    The title is documentation prose and may be reworded by a future release, so a mismatch is
+    ``unverified``, never ``wrong_service``: we can recognise this service, but we cannot conclude
+    from an unfamiliar title that some *other* known service is answering.
     """
+    payload = _fetch_beacon(f"{base_url.rstrip('/')}/rest/swagger.json", None, timeout)
+    if isinstance(payload, Exception):
+        return _unverified(
+            "naming", f"transport reachable, but the identity probe failed: {_safe(str(payload))}"
+        )
+
+    info = payload.get("info") if isinstance(payload, dict) else None
+    title = info.get("title") if isinstance(info, dict) else None
+    if title == _NAMING_SWAGGER_TITLE:
+        return PlaneCheck(
+            plane="naming",
+            configured=True,
+            reachable=True,
+            ca_ok=True,
+            status="ok",
+            identified=True,
+        )
+    return _unverified(
+        "naming",
+        f"transport reachable, but /rest/swagger.json reports info.title={title!r} rather than "
+        f"{_NAMING_SWAGGER_TITLE!r} — this may not be the Naming Service (or its title changed)",
+    )
+
+
+async def _check_naming(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
     if not cfg.naming_url:
         return _disabled("naming", "EPICS_MCP_NAMING_URL")
 
@@ -433,11 +547,7 @@ async def _check_naming(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
         NamingServiceClient(base_url=cfg.naming_url, timeout=timeout).check_connectivity()
 
     def _id() -> PlaneCheck:
-        return _unverified(
-            "naming",
-            "transport reachable; identity unverified — this service offers no info endpoint "
-            "(/rest is the Swagger UI, /rest/info is 404), so there is nothing cheap to verify",
-        )
+        return _identify_naming(cfg.naming_url, timeout)
 
     return await _run_probe("naming", _run, _id)
 
