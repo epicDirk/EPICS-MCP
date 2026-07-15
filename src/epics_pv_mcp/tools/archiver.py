@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 
 from epics_pv_mcp.config import get_config
-from epics_pv_mcp.errors import EpicsConnectionError
+from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
 from epics_pv_mcp.services.archiver_client import (
     DEFAULT_MAX_POINTS,
     DEFAULT_MAX_PV_NAMES,
@@ -96,10 +96,35 @@ async def _list_archived_pvs(
 
     Default-disabled — with ``EPICS_MCP_ARCHIVER_URL`` unset returns ``enabled: false`` + an empty
     list and makes NO network call. Uses getAllPVs (whole appliance) or getPVsForThisAppliance (this
-    member, with ``this_appliance=True``) — NOT getMatchingPVs (404 on split/proxied). An optional
-    name-glob ``pattern`` (e.g. ``DEV-TEST01:*``) maps to the ``pv`` param; ``capped`` is honest.
-    PV names carry no person data, so no redaction is needed.
+    member, with ``this_appliance=True``) — NOT getMatchingPVs (404 on split/proxied).
+
+    ``pattern`` (an optional name glob, e.g. ``DEV-TEST01:*``) maps to getAllPVs' ``pv`` param and
+    works ONLY there. getPVsForThisAppliance has NO name filter at all, so ``pattern`` with
+    ``this_appliance=True`` is REFUSED rather than ignored — see the guard below. ``capped`` is
+    honest. PV names carry no person data, so no redaction is needed.
     """
+    # Refuse BEFORE the config gate: a bad argument is bad regardless of deployment, so a caller
+    # testing against no archiver still learns the call is wrong (and it makes no network call
+    # either way). Mirrors query_olog_create's "gate FIRST, before any client construction or I/O".
+    if pattern and this_appliance:
+        # Measured against a live appliance: getPVsForThisAppliance ignores pv, regex, pattern AND
+        # name — every reply is byte-identical to the unfiltered one. Forwarding the glob would look
+        # like filtering and silently return a full, plausible list of the WRONG PVs (with
+        # capped=true, which reads as a legitimate truncation). A loud refusal beats that.
+        # `pattern and` (truthy, not `is not None`) mirrors the client's own `if pattern:` so an
+        # empty string stays "no pattern" on both paths.
+        raise EpicsError(
+            "list_archived_pvs: pattern is not supported together with this_appliance=True. The "
+            "MGMT getPVsForThisAppliance endpoint has no name filter — it IGNORES a pv param "
+            "(measured: the reply is byte-identical with and without it), so it cannot answer a "
+            "name-filtered question for one cluster member. Drop this_appliance to filter by name "
+            "across the appliance (getAllPVs does honour pv), or drop pattern to enumerate this "
+            "member. Client-side filtering is deliberately not offered: limit is applied "
+            "server-side, so filtering a capped page would return an arbitrary subset behind a "
+            "meaningless capped flag.",
+            error_code="INVALID_ARGUMENT",
+        )
+
     cfg = get_config()
     if not cfg.archiver_url:
         return {"enabled": False, "pvs": [], "total": 0, "note": _DISABLED_NOTE}

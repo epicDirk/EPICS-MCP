@@ -6,7 +6,7 @@ import pytest
 import requests
 
 from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import EpicsConnectionError
+from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
 from epics_pv_mcp.services._http import http_status, is_ssl_error
 from epics_pv_mcp.services.archiver_client import ArchiverClient, HistoryResult, Sample
 from epics_pv_mcp.services.archiver_exceptions import (
@@ -848,12 +848,58 @@ async def test_list_archived_pvs_forwards_pattern_and_limit(
     assert captured == {"pattern": "DEV-TEST01:*", "limit": 7}
 
 
+class _NoClient:
+    """A client double that fails the test if it is constructed at all."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        raise AssertionError("a client was built for a call that must be refused up front")
+
+
 @pytest.mark.asyncio
-async def test_list_archived_pvs_this_appliance_ignores_pattern(
+async def test_list_archived_pvs_refuses_pattern_with_this_appliance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Documented behavior: this_appliance=True routes to getPVsForThisAppliance (no `pv` param), so
-    pattern is deliberately NOT forwarded — only limit is."""
+    """pattern + this_appliance=True must be REFUSED, not silently answered unfiltered.
+
+    This test replaces one named ..._this_appliance_ignores_pattern, which asserted
+    `captured == {"limit": 9}  # pattern silently dropped` — it pinned the bug as intended
+    behaviour while four caller-facing surfaces promised the filter worked.
+
+    Measured against a live appliance: getPVsForThisAppliance ignores pv/regex/pattern/name alike —
+    every reply is byte-identical to the unfiltered one. So the old behaviour handed the caller a
+    full, plausible list of the WRONG PVs behind a capped=true that reads as a fair truncation.
+    """
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
+    )
+    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _NoClient)
+    with pytest.raises(EpicsError) as excinfo:
+        await _list_archived_pvs(pattern="DEV-TEST01:*", this_appliance=True, limit=9)
+    assert excinfo.value.error_code == "INVALID_ARGUMENT"
+    assert not isinstance(excinfo.value, EpicsConnectionError)
+
+
+@pytest.mark.asyncio
+async def test_list_archived_pvs_refusal_fires_even_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bad argument is bad regardless of deployment — so the refusal precedes the config gate.
+
+    Pins the ordering: a caller testing without an archiver still learns the call is wrong instead
+    of getting a friendly enabled:false that hides it until production.
+    """
+    monkeypatch.setattr("epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig())
+    with pytest.raises(EpicsError) as excinfo:
+        await _list_archived_pvs(pattern="DEV-TEST01:*", this_appliance=True)
+    assert excinfo.value.error_code == "INVALID_ARGUMENT"
+
+
+@pytest.mark.asyncio
+async def test_list_archived_pvs_empty_pattern_with_this_appliance_is_fine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """pattern="" means 'no pattern' on both paths (the client's own `if pattern:` convention), so
+    it must NOT trip the refusal."""
     monkeypatch.setattr(
         "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
     )
@@ -863,19 +909,14 @@ async def test_list_archived_pvs_this_appliance_ignores_pattern(
         def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
-        def get_all_pvs(
-            self, pattern: str | None = None, limit: int = 5000
-        ) -> tuple[list[str], bool]:
-            raise AssertionError("this_appliance=True must not call get_all_pvs")
-
         def get_pvs_for_this_appliance(self, limit: int = 5000) -> tuple[list[str], bool]:
             captured["limit"] = limit
             return (["M"], False)
 
     monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
-    result = await _list_archived_pvs(pattern="DEV-TEST01:*", this_appliance=True, limit=9)
+    result = await _list_archived_pvs(pattern="", this_appliance=True, limit=9)
     assert result["pvs"] == ["M"]
-    assert captured == {"limit": 9}  # pattern silently dropped (endpoint has no pv param)
+    assert captured == {"limit": 9}
 
 
 @pytest.mark.asyncio

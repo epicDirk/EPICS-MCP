@@ -122,10 +122,19 @@ is an HTTP 400).
 ### List archived PVs — `list_archived_pvs` (or the MGMT API directly)
 `list_archived_pvs` enumerates the archived PV names — the sibling `is_archived`/`get_pv_history`/
 `get_archive_info` tools each require a PV name. Under the hood it calls the MGMT `getAllPVs` (whole
-appliance) or, with `this_appliance=true`, `getPVsForThisAppliance` (this member); an optional
-name-glob `pattern` maps to the endpoint's `pv` param, and `capped` is honest (over-fetch by one).
-It deliberately does **not** use `getMatchingPVs` — a standard endpoint too, but one that **may 404
-on proxied/split deployments**. Cluster shape: `getApplianceInfo` / `getAppliancesInCluster`.
+appliance) or, with `this_appliance=true`, `getPVsForThisAppliance` (this member); `capped` is honest
+(over-fetch by one). It deliberately does **not** use `getMatchingPVs` — a standard endpoint too, but
+one that **may 404 on proxied/split deployments**. Cluster shape: `getApplianceInfo` /
+`getAppliancesInCluster`.
+
+**The name filter works on ONE of those two endpoints.** `getAllPVs` honours a `pv` glob.
+`getPVsForThisAppliance` has **no name filter at all** — measured, it ignores `pv`, `regex`, `pattern`
+and `name` alike and answers byte-identically to the unfiltered call. It does not fail; it hands back
+a full, plausible list of the **wrong** PVs, and an honest `capped` makes that read like a fair
+truncation. Going at the MGMT API directly, filter only via `getAllPVs`. `list_archived_pvs` refuses
+the combination (`INVALID_ARGUMENT`) rather than answer it wrongly; client-side filtering is not a
+substitute, because `limit` is applied server-side — filtering a capped page yields an arbitrary
+subset behind a meaningless `capped`.
 
 ### Verify a deployment's config — `epics-doctor`
 The `epics-doctor` CLI (core install) is a read-only self-check: it probes every CONFIGURED plane

@@ -418,11 +418,17 @@ async def get_archive_info(
 async def list_archived_pvs(
     pattern: Annotated[
         str | None,
-        Field(description="Optional PV-name glob (e.g. 'DEV-TEST01:*'); omit to list all"),
+        Field(
+            description="Optional PV-name glob (e.g. 'DEV-TEST01:*'); omit to list all. "
+            "Cannot be combined with this_appliance=true — that endpoint has no name filter"
+        ),
     ] = None,
     this_appliance: Annotated[
         bool,
-        Field(description="List only THIS cluster member (getPVsForThisAppliance) instead of all"),
+        Field(
+            description="List only THIS cluster member (getPVsForThisAppliance) instead of all. "
+            "This endpoint cannot filter by name — leave pattern unset"
+        ),
     ] = False,
     limit: Annotated[
         int,
@@ -440,9 +446,16 @@ async def list_archived_pvs(
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.
     Uses getAllPVs (whole appliance) or, with this_appliance=true, getPVsForThisAppliance (this
-    cluster member) — NOT getMatchingPVs, which 404s on split/proxied deployments. pattern is an
-    optional name glob forwarded as the endpoint's pv param. capped is true when the appliance held
-    more than limit names (honest over-fetch). PV names carry no person data — no redaction needed.
+    cluster member) — NOT getMatchingPVs, which 404s on split/proxied deployments.
+
+    pattern is an optional name glob and works ONLY with this_appliance=false (it maps to getAllPVs'
+    pv param). getPVsForThisAppliance has NO name filter at all, so pattern together with
+    this_appliance=true is REFUSED (INVALID_ARGUMENT) rather than ignored — the endpoint would
+    otherwise return a full, plausible list of the WRONG PVs. To filter by name, drop
+    this_appliance.
+
+    capped is true when the appliance held more than limit names (honest over-fetch). PV names carry
+    no person data — no redaction needed.
     """
     return await _list_archived_pvs(pattern, this_appliance, limit, timeout)
 
