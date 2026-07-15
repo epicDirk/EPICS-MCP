@@ -22,8 +22,15 @@ setting those variables for *your* services — no code change. This guide walks
    epics-doctor --probe-pv SIM:PS-01:Cur-RB   # also pass/fail the live PVA plane
    ```
 
-   Exit `0` = all configured planes healthy; `1` = a configured plane failed; `2` = usage error.
+   Exit `0` = no configured plane failed; `1` = a configured plane failed (including
+   `wrong_service` — that URL is served by a *different* service); `2` = usage error.
    Fix anything `epics-doctor` flags, then you are done — no need to ask us.
+
+   ⚠️ Read the `?` (`unverified`) lines before calling it done: they mean "reachable, but it could
+   not prove what it is" — honest, not healthy, and deliberately exit `0`. The **Naming Service** and
+   the **archiver retrieval** webapp are structurally unverifiable (no info endpoint) and always show
+   `?`. Scripting this? Read `verification_complete` / `unverified_planes` from `--json`; the exit
+   code alone says "nothing failed", not "everything confirmed".
 
 ## 2. The variables, by plane
 

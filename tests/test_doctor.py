@@ -19,9 +19,12 @@ from epics_pv_mcp import cli_doctor
 from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.services.doctor import (
+    _NON_FAILING_STATUSES,
     DoctorReport,
     PlaneCheck,
     _classify_failure,
+    _identify,
+    _identify_archiver,
     _privacy_report,
     run_doctor,
 )
@@ -108,6 +111,29 @@ def test_classify_transport_failure_is_unreachable() -> None:
 # --- run_doctor: disabled / reachable / failing planes ---
 
 
+@pytest.fixture(autouse=True)
+def _identity_never_touches_the_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the identity probes for every run_doctor test — AUTOUSE, deliberately.
+
+    The identity probe issues its own GET (it does not go through the mocked client classes), so
+    without this a single reachable plane in an offline test would resolve a hostname for real. The
+    wiring tests below care about the transport classification, not the identity logic, so they get
+    a benign "identified" stub; the identity logic itself is unit-tested against a patched
+    ``rest_get_json`` further down, where the full result matrix lives.
+    """
+
+    def _identified(plane: str, *_args: object, **_kwargs: object) -> PlaneCheck:
+        return PlaneCheck(
+            plane=plane, configured=True, reachable=True, ca_ok=True, status="ok", identified=True
+        )
+
+    monkeypatch.setattr("epics_pv_mcp.services.doctor._identify", _identified)
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.doctor._identify_archiver",
+        lambda *_a, **_k: _identified("archiver"),
+    )
+
+
 async def test_all_disabled_is_ok_and_makes_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """Empty config → every REST plane disabled, live=info, ok=True, and NO client is ever built."""
     _set_config(monkeypatch)  # all URLs empty
@@ -126,12 +152,16 @@ async def test_all_disabled_is_ok_and_makes_no_network(monkeypatch: pytest.Monke
         "live",
         "channelfinder",
         "archiver",
+        "archiver_retrieval",
         "alarm",
         "naming",
         "olog",
     }
     for plane in report.planes:
         assert plane.status == ("info" if plane.plane == "live" else "disabled")
+    # Nothing was left unproven because nothing was probed at all.
+    assert report.verification_complete is True
+    assert report.unverified_planes == []
 
 
 async def test_reachable_plane_is_ok(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -141,6 +171,142 @@ async def test_reachable_plane_is_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     cf = _plane(report, "channelfinder")
     assert (cf.status, cf.reachable, cf.ca_ok) == ("ok", True, True)
     assert report.ok is True
+
+
+# --- the identity probe: the full result matrix, offline (S4) ---
+#
+# WHY THIS EXISTS: "ok" used to mean only "check_connectivity did not raise". check_connectivity is
+# a HEAD and counts ANY HTTP response as reachable — so a ChannelFinder URL pointing at a DEAD
+# container reported "✓ channelfinder ok", because a different service on that port answered 401
+# (its blanket auth answers 401 for every path, so the status said nothing about CF at all).
+# These drive the REAL _identify against a patched rest_get_json: no network, full matrix.
+
+
+def _payload(monkeypatch: pytest.MonkeyPatch, value: object) -> None:
+    """Make the identity probe's GET return *value* (no network)."""
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.rest_get_json", lambda *a, **k: value)
+
+
+def _raises(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
+    """Make the identity probe's GET fail with *exc* (no network)."""
+
+    def _boom(*_a: object, **_k: object) -> object:
+        raise exc
+
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.rest_get_json", _boom)
+
+
+def test_identity_exact_name_is_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    _payload(monkeypatch, {"name": "Olog Service", "version": "6.0.4"})
+    check = _identify("olog", "http://olog.example/Olog", None, 5.0)
+    assert (check.status, check.identified) == ("ok", True)
+
+
+def test_identity_of_a_different_known_service_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE case that motivated all of this — but sharpened: here the wrong service ANSWERS.
+
+    A ChannelFinder URL served by Olog is a misconfiguration that is unambiguous at any site, so
+    unlike `unverified` it is a hard failure.
+    """
+    _payload(monkeypatch, {"name": "Olog Service"})
+    check = _identify("channelfinder", "http://olog.example/Olog", None, 5.0)
+    assert (check.status, check.identified) == ("wrong_service", False)
+    assert "points at the olog service" in (check.detail or "")
+    assert check.status not in _NON_FAILING_STATUSES  # it must drive exit 1
+
+
+def test_identity_substring_is_not_enough(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A substring match would let this pass as Olog. The comparison is exact for that reason."""
+    _payload(monkeypatch, {"name": "Not Olog Service"})
+    check = _identify("olog", "http://olog.example/Olog", None, 5.0)
+    assert check.status == "unverified"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param({"name": ""}, id="empty-name"),
+        pytest.param({"name": 42}, id="non-string-name"),
+        pytest.param({"version": "1.0"}, id="no-name-field"),
+        pytest.param(["not", "a", "dict"], id="json-list"),
+        pytest.param("<html>login</html>", id="html-body"),
+        pytest.param(None, id="null-body"),
+    ],
+)
+def test_identity_unusable_body_is_unverified(
+    monkeypatch: pytest.MonkeyPatch, payload: object
+) -> None:
+    """No usable name → unverified. NEVER ok, and never a failure either — it is a "don't know"."""
+    _payload(monkeypatch, payload)
+    check = _identify("alarm", "http://alarm.example", None, 5.0)
+    assert (check.status, check.identified) == ("unverified", False)
+    assert check.reachable is True  # the transport DID work; only identity is unproven
+    assert check.status in _NON_FAILING_STATUSES
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        pytest.param(requests.exceptions.HTTPError("401"), id="auth-wall"),
+        pytest.param(requests.exceptions.HTTPError("404"), id="not-found"),
+        pytest.param(requests.exceptions.HTTPError("500"), id="server-error"),
+        pytest.param(requests.exceptions.SSLError("bad cert"), id="tls-after-head"),
+        pytest.param(requests.exceptions.ConnectionError("gone"), id="transport-after-head"),
+        pytest.param(RuntimeError("refused to follow a redirect"), id="redirect-refused"),
+    ],
+)
+def test_identity_failed_probe_is_unverified(
+    monkeypatch: pytest.MonkeyPatch, exc: Exception
+) -> None:
+    """Anything the probe cannot read → unverified, never ok.
+
+    This is also where the 401 of the dead-container case lands: rest_get_json raises on a non-2xx
+    BEFORE parsing, so an auth wall can never reach the name check.
+    """
+    _raises(monkeypatch, exc)
+    check = _identify("channelfinder", "http://cf.example/ChannelFinder", None, 5.0)
+    assert (check.status, check.identified) == ("unverified", False)
+
+
+def test_archiver_identity_requires_the_identity_field(monkeypatch: pytest.MonkeyPatch) -> None:
+    """check_connectivity accepts ANY parseable 2xx JSON — an empty {} passes it. The appliance's
+    own 'identity' field is what makes it an Archiver rather than "something served JSON here"."""
+    _payload(monkeypatch, {})
+    assert _identify_archiver("http://arch.example:17665", None, 5.0).status == "unverified"
+
+    _payload(monkeypatch, {"identity": "appliance0", "engineURL": "http://arch.example:17666"})
+    check = _identify_archiver("http://arch.example:17665", None, 5.0)
+    assert (check.status, check.identified) == ("ok", True)
+    assert "appliance0" in (check.detail or "")
+
+
+def test_unknown_status_fails_closed() -> None:
+    """The allowlist is the point: a new or mistyped status must FAIL, not slip through as exit 0.
+
+    With the previous failure DENYLIST, a typo like "wrong-service" was simply absent from it and
+    therefore counted as healthy — fail-open, in the one tool whose job is to catch bad config.
+    """
+    assert "wrong-service" not in _NON_FAILING_STATUSES  # the typo'd twin of a real status
+    assert {"ok", "disabled", "info", "unverified"} == _NON_FAILING_STATUSES
+
+
+async def test_unverified_plane_does_not_fail_but_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The honest middle: reachable, identity unproven → exit 0, but NOT "healthy".
+
+    That a healthy service answers its info endpoint anonymously is measured at ONE site (n=1), so
+    turning "cannot prove it" into a hard failure would be the very overclaim we keep finding.
+    """
+    _set_config(monkeypatch, naming_url="http://naming.example")
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.NamingServiceClient", _OkClient)
+    report = await run_doctor()
+    naming = _plane(report, "naming")
+    assert (naming.status, naming.identified, naming.reachable) == ("unverified", False, True)
+    assert "no info endpoint" in (naming.detail or "")
+    assert report.ok is True  # honest, not a failure
+    assert report.verification_complete is False  # ...but NOT confirmed
+    assert report.unverified_planes == ["naming"]
 
 
 async def test_ca_error_plane_fails(monkeypatch: pytest.MonkeyPatch) -> None:

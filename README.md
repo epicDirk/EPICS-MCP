@@ -212,9 +212,18 @@ epics-coverage   --displays <project-root> --scope DEV: # coverage matrix (needs
 
 `epics-diagnose`/`epics-crossplane`/`epics-coverage` exit `0` even on a negative finding (a
 disconnect / a broken link is a result, not a crash). **`epics-doctor` is the deliberate exception**
-— it is a scriptable pass/fail, so it exits `0` when every configured plane is healthy, `1` when a
-configured plane fails (unreachable / CA error / API error / probe-disconnect), and `2` on a usage
-error. Run it first in a new facility to confirm your `.env` (see `docs/deployment.md`).
+— it is a scriptable pass/fail, so it exits `0` when no configured plane failed, `1` when a
+configured plane fails (unreachable / CA error / API error / wrong_service / probe-disconnect), and
+`2` on a usage error. Run it first in a new facility to confirm your `.env` (see
+`docs/deployment.md`).
+
+Each plane is also asked to **name itself**, because reachable is not identified: the transport probe
+counts any HTTP response as reachable, so a URL aimed at the wrong host can look alive (measured: a
+ChannelFinder URL pointing at a dead container read `✓ ok` because an unrelated service on that port
+answered 401). A plane that cannot prove what it is reports `unverified` (`?`) — honest, **not**
+healthy, and deliberately not a failure. ⚠️ Exit `0` therefore means "nothing failed", **not**
+"everything confirmed": a script must read `verification_complete` / `unverified_planes` from
+`--json` rather than the exit code alone.
 
 ## Resources & Prompts
 

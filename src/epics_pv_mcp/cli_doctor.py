@@ -1,16 +1,24 @@
 """CLI for the read-only config self-check (``epics-doctor``).
 
 Probes every CONFIGURED plane once and prints whether it is reachable, whether the CA bundle works,
-whether the service answers, and what the ChannelFinder privacy redaction is set to — the
-``flutter doctor`` of this server. Read-only — it probes, never writes — and it touches exactly the
-planes that are CONFIGURED (a disabled plane makes no network call).
+whether the service **identifies itself as the one that URL is supposed to point at**, and what the
+ChannelFinder privacy redaction is set to — the ``flutter doctor`` of this server. Read-only — it
+probes, never writes — and it touches exactly the planes that are CONFIGURED (a disabled plane makes
+no network call).
 
 Exit code (a DELIBERATE convention, unlike the other CLIs where a finding is exit 0 — doctor is
 a scriptable pass/fail):
 
-* ``0`` — every configured plane is healthy (or honestly disabled / info-only);
-* ``1`` — a configured plane failed (unreachable / ca_error / api_error / probe-disconnect);
+* ``0`` — no configured plane failed (healthy, honestly disabled/info-only, or reachable with its
+  identity ``unverified``);
+* ``1`` — a configured plane failed (unreachable / ca_error / api_error / wrong_service /
+  probe-disconnect);
 * ``2`` — a usage error (bad arguments, or an internal EpicsError).
+
+⚠️ Exit ``0`` means "nothing failed", NOT "everything was confirmed": a plane can be reachable with
+its identity unverified and still exit 0 (that is honest, not healthy — see ``doctor.py``). A
+machine reader must therefore look at ``verification_complete`` / ``unverified_planes`` in
+``--json``, not only at the exit code.
 
 Usage::
 
@@ -28,11 +36,15 @@ import sys
 from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.services.doctor import DoctorReport, run_doctor
 
-#: One glyph per status for the human-readable render (deterministic).
+#: One glyph per status for the human-readable render (deterministic). ``unverified`` gets its own
+#: mark rather than borrowing ✓ or ✗: it is neither "confirmed" nor "broken", and the whole point of
+#: the state is that those two were being conflated.
 _STATUS_MARK = {
     "ok": "✓",
     "disabled": "·",
     "info": "i",
+    "unverified": "?",
+    "wrong_service": "✗",
     "ca_error": "✗",
     "api_error": "✗",
     "unreachable": "✗",
@@ -61,11 +73,19 @@ def _render(report: DoctorReport) -> str:
     )
     lines.append(f"  Olog free-text:     {olog_freetext}")
     lines.append("")
-    verdict = (
-        "OK — all configured planes healthy"
-        if report.ok
-        else "PROBLEM — a configured plane failed (see above)"
-    )
+    if not report.ok:
+        verdict = "PROBLEM — a configured plane failed (see above)"
+    elif report.verification_complete:
+        verdict = "OK — every configured plane answered AS ITSELF"
+    else:
+        # "all configured planes healthy" was the lie: it was printed for a ChannelFinder URL
+        # pointing at a week-dead container, because a neighbouring service answered 401. Nothing
+        # failed here either — but saying "healthy" would claim a confirmation we do not have.
+        unverified = ", ".join(report.unverified_planes)
+        verdict = (
+            f"OK — no plane failed, but {len(report.unverified_planes)} could not prove its "
+            f"identity: {unverified}. Reachable ≠ confirmed; see the '?' lines above."
+        )
     lines.append(f"Overall: {verdict}")
     return "\n".join(lines)
 

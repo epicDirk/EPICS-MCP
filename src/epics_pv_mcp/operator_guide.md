@@ -139,11 +139,32 @@ subset behind a meaningless `capped`.
 ### Verify a deployment's config — `epics-doctor`
 The `epics-doctor` CLI (core install) is a read-only self-check: it probes every CONFIGURED plane
 once and reports, per plane, whether it is reachable, whether the CA bundle works, whether the
-service answers, and what the ChannelFinder redaction is set to. A disabled plane (empty `*_URL`) is
-reported honestly, never a failure. Exit `0` = all configured planes healthy, `1` = a configured
-plane failed (`unreachable` / `ca_error` / `api_error` / probe-disconnect), `2` = a usage error. Run
-it first in a new facility to confirm the `.env`; add `--probe-pv NAME` to also pass/fail the live
-PVA plane against a real PV. Full deployment/config guide: `docs/deployment.md`.
+service **identifies itself as the one that URL should point at**, and what the ChannelFinder
+redaction is set to. A disabled plane (empty `*_URL`) is reported honestly, never a failure. Exit
+`0` = no configured plane failed, `1` = a configured plane failed (`unreachable` / `ca_error` /
+`api_error` / `wrong_service` / probe-disconnect), `2` = a usage error. Run it first in a new
+facility to confirm the `.env`; add `--probe-pv NAME` to also pass/fail the live PVA plane against a
+real PV. Full deployment/config guide: `docs/deployment.md`.
+
+**Reachable is not identified — read the `?` lines.** The transport probe is a HEAD and counts *any*
+HTTP response as reachable, so a URL pointing at the wrong host can look alive: measured, a
+ChannelFinder URL aimed at a dead container reported `✓ ok` because an unrelated service on that
+port answered `401` (blanket auth answers 401 for every path, so the status said nothing about
+ChannelFinder). Each plane is therefore also asked to **name itself**:
+
+| Mark | Status | Meaning |
+|---|---|---|
+| `✓` | `ok` | the service named itself correctly — confirmed |
+| `?` | `unverified` | reachable, but it could not prove what it is (auth wall, no info endpoint, unreadable body). **Honest, not healthy** — exit stays `0` |
+| `✗` | `wrong_service` | it named itself as a *different* known service — that URL points at the wrong one. Exit `1` |
+
+`unverified` is not a failure on purpose: that a healthy service answers its info endpoint
+anonymously is measured at one site, and making that a hard failure everywhere would be an
+overclaim. Two planes are *structurally* unverifiable and will always show `?` — the **Naming
+Service** (no info endpoint: `/rest` is the Swagger UI, `/rest/info` is 404) and the **archiver
+retrieval** webapp (serves no `getApplianceInfo`). Scripting against this? Exit `0` means "nothing
+failed", **not** "everything confirmed" — read `verification_complete` / `unverified_planes` from
+`--json`, never the exit code alone.
 
 ### Retrieval-cluster-aware appliances
 An Archiver Appliance may run as an **N-member failover cluster**. Such a cluster is retrieval-aware: a
