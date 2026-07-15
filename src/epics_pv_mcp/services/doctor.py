@@ -32,7 +32,12 @@ from pydantic import BaseModel, ConfigDict
 
 from epics_pv_mcp.config import EpicsConfig, get_config
 from epics_pv_mcp.errors import EpicsError
-from epics_pv_mcp.services._http import http_status, is_retry_error, is_ssl_error
+from epics_pv_mcp.services._http import (
+    http_status,
+    is_loopback_url,
+    is_retry_error,
+    is_ssl_error,
+)
 from epics_pv_mcp.services.alarm_client import AlarmClient
 from epics_pv_mcp.services.archiver_client import ArchiverClient
 from epics_pv_mcp.services.channelfinder_client import (
@@ -76,8 +81,11 @@ class PrivacyReport(_Model):
 
     cf_safe_owner_accounts: list[str]
     cf_safe_property_names: list[str]
-    #: Olog free-text (title/description) is ALWAYS withheld — a static guarantee, for clarity.
-    olog_freetext_withheld: bool = True
+    #: Whether Olog free text (title/description) is withheld — the EFFECTIVE posture, resolved from
+    #: ``olog_url``, not a static promise: entries come back whole from a loopback sandbox (ESS-spec
+    #: pending, see olog_client). This is the tool used to CHECK the posture, so it must never claim
+    #: a guarantee it does not have; ``True`` for a disabled plane (nothing is read at all).
+    olog_freetext_withheld: bool
 
 
 class DoctorReport(_Model):
@@ -265,20 +273,28 @@ async def _probe_live_pv(pv_name: str, timeout: float) -> tuple[bool, str | None
 
 
 def _privacy_report(cfg: EpicsConfig) -> PrivacyReport:
-    """The effective ChannelFinder redaction, resolved through the SAME helpers the client uses."""
+    """The effective redaction posture, resolved through the SAME helpers the clients use.
+
+    ``olog_freetext_withheld`` mirrors ``OlogClient._redact`` exactly — BOTH conditions, or this
+    tool would report a posture the client does not have. An unconfigured plane reads nothing, so
+    True is honest there.
+    """
+    olog_full = bool(cfg.olog_url) and is_loopback_url(cfg.olog_url) and cfg.olog_assume_test_data
     return PrivacyReport(
         cf_safe_owner_accounts=sorted(resolve_safe_owner_accounts(cfg)),
         cf_safe_property_names=sorted(resolve_safe_property_names(cfg)),
-        olog_freetext_withheld=True,
+        olog_freetext_withheld=not olog_full,
     )
 
 
 async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = None) -> DoctorReport:
     """Probe every configured plane read-only and report reachability + CA + privacy posture.
 
-    Read-only and localhost-isolated by default: a disabled plane makes NO network call; no plane
-    is reached unless its URL (or the EPICS address list, for ``probe_pv``) points there. ``ok`` is
-    True iff every configured plane is healthy — a disabled/info plane never fails the check.
+    Read-only — it probes, never writes. It reaches exactly what is CONFIGURED and nothing else: a
+    disabled plane makes NO network call, and no plane is touched unless its URL (or the EPICS
+    address list, for ``probe_pv``) points there — which, on a configured deployment, may well be a
+    real facility. ``ok`` is True iff every configured plane is healthy — a disabled/info plane
+    never fails the check.
     """
     cfg = get_config()
     probe_timeout = timeout if timeout is not None else cfg.diagnose_timeout

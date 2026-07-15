@@ -53,7 +53,10 @@ mcp = FastMCP(
         "(screens + live + source IOC), ChannelFinder lookups, Archiver history + archive "
         "configuration, Alarm "
         "configuration and history, ESS Naming-Service device-name lookup, and Phoebus Olog "
-        "logbook search (author/free-text withheld). It can also WRITE to the Olog logbook "
+        "logbook search (author dropped; free text withheld unless the Olog is a DECLARED local "
+        "test sandbox — loopback URL AND EPICS_MCP_OLOG_ASSUME_TEST_DATA — where entries come "
+        "back whole; run epics-doctor to see which). "
+        "It can also WRITE to the Olog logbook "
         "(create_log_entry / reply_to_log) behind an OWN gate (EPICS_MCP_ALLOW_OLOG_WRITE + a "
         "test-server URL boundary + a logbook allowlist + a rate limit; the author is the write "
         "service account, not spoofable) — ALLOW_PV_WRITE is a separate gate and stays off. The "
@@ -64,10 +67,12 @@ mcp = FastMCP(
         "get_alarm_history, lookup_device_name, search_logbook, get_log_entry, list_logbooks, "
         "list_tags) stay disabled "
         "until their *_URL env vars are set; an empty URL means "
-        "no client and no network call. Network reach is localhost-isolated by default: the "
-        "server opens no non-local connection unless its launcher widens the EPICS address-list "
-        "environment (EPICS_PVA_ADDR_LIST / EPICS_CA_ADDR_LIST and the matching *_AUTO_ADDR_LIST); "
-        "until then it does NOT reach ESS production. File/dir tool arguments are canonicalized "
+        "no client and no network call. Network reach is decided by the LAUNCHER, not by this "
+        "server: it opens no non-local connection until the EPICS address-list environment "
+        "(EPICS_PVA_ADDR_LIST / EPICS_CA_ADDR_LIST and the matching *_AUTO_ADDR_LIST) and the "
+        "*_URL vars are pointed somewhere — which a deployment may well have done, so do NOT "
+        "assume isolation; run epics-doctor to see what this instance actually reaches. The write "
+        "gates hold regardless of reach. File/dir tool arguments are canonicalized "
         "and existence-checked; an opt-in EPICS_MCP_ALLOWED_ROOTS (os.pathsep-separated) confines "
         "them to those roots (empty by default = no boundary). See .env.example for the commented "
         "template. For the service landscape, operational recipes (archiver PV enumeration, "
@@ -554,9 +559,12 @@ async def search_logbook(
     """Search the Phoebus Olog electronic logbook (Olog REST /logs/search).
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_OLOG_URL is set.
-    DS-PRIVACY: entries are redacted before they leave — technical fields (id, dates, level, state)
-    and logbook/tag NAMES are kept, but author/owner is dropped and the title/description free text
-    is WITHHELD (a person can be named inside it); attachments are surfaced as a count only.
+    DS-PRIVACY: entries are redacted — technical fields (id, dates, level, state) and logbook/tag
+    NAMES are kept, author/owner is dropped, the title/description free text is WITHHELD (a person
+    can be named inside it), attachments are a count only. They come back WHOLE only for a DECLARED
+    local sandbox (a loopback URL AND EPICS_MCP_OLOG_ASSUME_TEST_DATA), so results are judgeable;
+    the shape is the same either way (the full mode only adds fields). ESS-spec pending — run
+    epics-doctor for the effective posture.
 
     Page the history with offset (0-based; Olog wire 'from') and order with sort ('down'=newest
     first, the default; 'up'=oldest first). total is the number of entries returned; total_matches
@@ -592,8 +600,9 @@ async def get_log_entry(
     """Fetch one Phoebus Olog entry by id (Olog REST /logs/{id}).
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_OLOG_URL is set. Same
-    DS-PRIVACY redaction as search_logbook (author dropped, title/description withheld, attachments
-    as a count). found is false when no entry has that id.
+    DS-PRIVACY posture as search_logbook (redacted: author dropped, title/description withheld,
+    attachments as a count; whole only for a DECLARED local sandbox).
+    found is false when no entry has that id.
     """
     return await _get_log_entry(log_id, timeout)
 
@@ -668,8 +677,9 @@ async def create_log_entry(
     allowlisted URL with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true) AND a logbook allowlist
     (EPICS_MCP_OLOG_WRITE_LOGBOOKS) AND a rate limit — ALLOW_PV_WRITE is untouched. The author
     (owner) is the configured write service account, set server-side; a caller cannot spoof it. The
-    returned entry is DS-PRIVACY-redacted (owner dropped, title/description withheld). With
-    EPICS_MCP_OLOG_URL unset the tool returns enabled=false and makes no network call.
+    returned entry follows the same posture as a read (redacted; whole only for a DECLARED local
+    sandbox — where a write can therefore verify what it just wrote).
+    With EPICS_MCP_OLOG_URL unset the tool returns enabled=false and makes no network call.
     """
     return await _create_log_entry(
         title=title,

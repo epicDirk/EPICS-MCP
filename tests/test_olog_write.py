@@ -70,7 +70,9 @@ def _write_config(
 
 
 def _resp(payload: object) -> Mock:
-    resp = Mock()
+    # is_redirect is set explicitly: on a bare Mock every attribute is truthy, so a 2xx double would
+    # look like a redirect to the client's redirect guard.
+    resp = Mock(is_redirect=False)
     resp.json.return_value = payload
     resp.raise_for_status.return_value = None
     return resp
@@ -80,7 +82,7 @@ def _resp_status(status: int) -> Mock:
     """A response whose raise_for_status raises an HTTPError with *status* (mirrors requests)."""
     http_error = requests.exceptions.HTTPError(str(status))
     http_error.response = Mock(status_code=status)
-    resp = Mock()
+    resp = Mock(is_redirect=False)
     resp.raise_for_status.side_effect = http_error
     return resp
 
@@ -167,6 +169,25 @@ class TestUrlBoundary:
             )
         )
         gate.check_write_allowed(["Ops"])  # must not raise
+
+    @pytest.mark.parametrize("url", ["garbage", "http://[::1]./Olog", ""])
+    def test_sec2_unparseable_url_denied_even_when_allowlisted(self, url: str) -> None:
+        """SEC-2: an unparseable URL fails closed BEFORE the allowlist — which cannot save it.
+
+        Regression guard for the shared-primitive refactor: the host extraction must stay an
+        UP-FRONT veto. Rewriting the gate as "if is_loopback_url(): True; return allow_remote and
+        url in allowlist" would let an unparseable-but-allowlisted URL through, because
+        is_loopback_url() cannot distinguish "parsed fine, not loopback" from "did not parse".
+        """
+        gate = OlogWriteGate(
+            _write_config(
+                olog_url=url,
+                olog_write_url_allowlist=url,  # exactly allowlisted…
+                olog_write_allow_remote=True,  # …and remote writes enabled
+            )
+        )
+        with pytest.raises(OlogWriteDeniedError):
+            gate.check_write_allowed(["Ops"])
 
     def test_sec1_userinfo_at_bypass_is_denied(self) -> None:
         # SEC-1: the hostname is olog.example.org (userinfo 127.0.0.1@ is NOT the host) → denied.

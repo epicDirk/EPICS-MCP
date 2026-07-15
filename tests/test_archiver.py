@@ -323,7 +323,7 @@ def test_two_url_routing_mgmt_vs_retrieval(monkeypatch: pytest.MonkeyPatch) -> N
     client = ArchiverClient("http://arch:17665", retrieval_url="http://arch:17668")
     captured: list[str] = []
 
-    def _get(url: str, params: object = None, timeout: object = None) -> Mock:
+    def _get(url: str, params: object = None, timeout: object = None, **_: object) -> Mock:
         captured.append(url)
         if "getPVStatus" in url:
             return _resp([{"pvName": "X", "status": "Being archived"}])
@@ -346,7 +346,7 @@ def test_retrieval_url_defaults_to_base(monkeypatch: pytest.MonkeyPatch) -> None
     assert client.retrieval_url == "http://arch:17665"
     captured: list[str] = []
 
-    def _get(url: str, params: object = None, timeout: object = None) -> Mock:
+    def _get(url: str, params: object = None, timeout: object = None, **_: object) -> Mock:
         captured.append(url)
         return _resp([{"meta": {"name": "X"}, "data": []}])
 
@@ -622,7 +622,7 @@ def test_check_connectivity_probes_appliance_info(monkeypatch: pytest.MonkeyPatc
     client = ArchiverClient("http://arch:17665")
     captured: list[str] = []
 
-    def fake_get(url: str, params: object = None, timeout: object = None) -> Mock:
+    def fake_get(url: str, params: object = None, timeout: object = None, **_: object) -> Mock:
         captured.append(url)
         return _resp([{"identity": "appliance0"}])
 
@@ -678,7 +678,7 @@ def test_get_all_pvs_returns_names_not_capped(monkeypatch: pytest.MonkeyPatch) -
     client = ArchiverClient("http://arch:17665")
     captured: dict[str, object] = {}
 
-    def fake_get(url: str, params: object = None, timeout: object = None) -> Mock:
+    def fake_get(url: str, params: object = None, timeout: object = None, **_: object) -> Mock:
         captured["url"] = url
         return _resp(["SYS:PV1", "SYS:PV2"])
 
@@ -694,7 +694,9 @@ def test_get_all_pvs_forwards_pattern_and_caps(monkeypatch: pytest.MonkeyPatch) 
     client = ArchiverClient("http://arch")
     captured: dict[str, object] = {}
 
-    def fake_get(url: str, params: dict[str, str] | None = None, timeout: object = None) -> Mock:
+    def fake_get(
+        url: str, params: dict[str, str] | None = None, timeout: object = None, **_: object
+    ) -> Mock:
         captured["params"] = params or {}
         return _resp([f"PV{i}" for i in range(5)])  # 5 names, limit 3 → capped
 
@@ -712,7 +714,7 @@ def test_get_pvs_for_this_appliance(monkeypatch: pytest.MonkeyPatch) -> None:
     client = ArchiverClient("http://arch:17665")
     captured: dict[str, object] = {}
 
-    def fake_get(url: str, params: object = None, timeout: object = None) -> Mock:
+    def fake_get(url: str, params: object = None, timeout: object = None, **_: object) -> Mock:
         captured["url"] = url
         return _resp(["M:PV1"])
 

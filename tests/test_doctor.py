@@ -22,8 +22,10 @@ from epics_pv_mcp.services.doctor import (
     DoctorReport,
     PlaneCheck,
     _classify_failure,
+    _privacy_report,
     run_doctor,
 )
+from epics_pv_mcp.services.olog_client import OlogClient
 
 
 def _set_config(monkeypatch: pytest.MonkeyPatch, **kwargs: object) -> EpicsConfig:
@@ -198,6 +200,38 @@ async def test_privacy_report_reflects_override(monkeypatch: pytest.MonkeyPatch)
     assert report.privacy.cf_safe_owner_accounts == ["svc_a", "svc_b"]
 
 
+@pytest.mark.parametrize(
+    ("olog_url", "declared", "withheld"),
+    [
+        # Both conditions must hold before free text is surfaced — mirror of OlogClient._redact.
+        ("http://localhost:8080/Olog", True, False),  # declared local sandbox → full
+        ("http://127.0.0.1:8080/Olog", True, False),
+        ("http://localhost:8080/Olog", False, True),  # loopback but NOT declared → withheld
+        ("https://olog.example.org/Olog", True, True),  # declared but remote → withheld
+        ("https://olog.example.org/Olog", False, True),
+        ("http://olog:8080/Olog", True, True),
+        ("http://127.0.0.1@evil.example.org/Olog", True, True),  # userinfo spoof → not loopback
+        ("", True, True),  # plane disabled: no client, no read → "withheld" is honest
+    ],
+)
+def test_privacy_report_olog_freetext_matches_the_client(
+    olog_url: str, declared: bool, withheld: bool
+) -> None:
+    """The doctor must REPORT the effective Olog posture, never assert a static guarantee.
+
+    This is the tool an operator runs to CHECK the privacy posture — a hardcoded "always withheld"
+    would make it lie in exactly the configuration where the answer differs, and its tests would
+    stay green. Tested against ``_privacy_report`` directly: it is the unit that carries the
+    decision, and ``run_doctor`` would probe the URL over the network.
+    """
+    cfg = EpicsConfig(olog_url=olog_url, olog_assume_test_data=declared)
+    assert _privacy_report(cfg).olog_freetext_withheld is withheld
+    # The report must not diverge from what the client actually does.
+    if olog_url:
+        client = OlogClient(olog_url, assume_test_data=declared)
+        assert client._redact is withheld
+
+
 # --- live plane (Plan-QA #4: no default egress) ---
 
 
@@ -319,7 +353,25 @@ def test_cli_render_glyphs_and_privacy_block(
     assert "owner allowlist:" in out
     assert "property allowlist:" in out
     assert "(empty — all owners redacted)" in out  # the empty-owner fallback line
-    assert "Olog free-text:" in out
+    assert "Olog free-text:     withheld" in out  # the VALUE, not just the label (see below)
+
+
+def test_cli_reports_full_olog_freetext_for_a_declared_sandbox(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The human render must say FULL for a declared local sandbox — the doctor cannot lie.
+
+    Asserting the VALUE, not just the label: the other CLI test only checked that the line existed,
+    which is why a hardcoded "always withheld" could have survived both doctor tests untouched.
+    """
+    _set_config(monkeypatch, olog_url="http://localhost:8080/Olog", olog_assume_test_data=True)
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.doctor.OlogClient",
+        _cause_client(requests.exceptions.ConnectionError("refused")),
+    )
+    cli_doctor.main([])
+    out = capsys.readouterr().out
+    assert "Olog free-text:     FULL (declared local test data — ESS-spec pending)" in out
 
 
 def test_cli_bad_arg_exits_two() -> None:

@@ -17,16 +17,87 @@ to a withheld verdict or an ``EpicsError``) now leaves a server-side trace it di
 from __future__ import annotations
 
 import base64
+import ipaddress
 import logging
 from typing import Any
 
 import requests
+import urllib3.exceptions
+import urllib3.util
 from requests.adapters import HTTPAdapter
 
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.services.rest_exceptions import RestConnectionError, RestResponseError
 
 logger = logging.getLogger(__name__)
+
+
+def url_host(url: str) -> str | None:
+    """The normalised host of *url*, or None if it has none / cannot be parsed (fail closed).
+
+    The hardened host extraction behind every "which server am I talking to?" decision. It answers
+    with the host the connection would ACTUALLY reach, which is why it parses with urllib3 — the
+    parser ``requests`` itself connects through — rather than ``urllib.parse``. The two disagree on
+    a backslash in the authority (``http://evil.example.org:8080\\@127.0.0.1/Olog``: urlparse splits
+    at the last ``@`` and answers ``127.0.0.1``, urllib3 connects to ``evil.example.org``), and a
+    decision that names a different server than the socket does is worse than no decision at all.
+
+    Either parser strips userinfo, so ``http://127.0.0.1@evil.example.org/Olog`` yields
+    ``evil.example.org``, NOT loopback; IPv6 brackets are stripped. Normalised: lowercase, trailing
+    FQDN dot removed — and emptiness is judged AFTER that (``http://./Olog`` has host ``.`` which
+    normalises to nothing, so it is None, not ``""``).
+
+    Returns None for every unparseable form: hostless/garbage URLs and malformed authorities (both
+    parsers raise ``LocationParseError``/``ValueError``). Callers treat None as a hard veto — see
+    :meth:`~epics_pv_mcp.olog_safety.OlogWriteGate._url_write_allowed`, where "unparseable" must
+    lose even against an explicit allowlist, which :func:`is_loopback_url` alone cannot express
+    (it collapses "parsed, not loopback" and "did not parse" into the same False).
+    """
+    try:
+        parsed = urllib3.util.parse_url(url)
+    except (urllib3.exceptions.LocationParseError, ValueError):
+        return None  # malformed URL (e.g. bad bracketed IPv6) → fail closed
+    if not parsed.scheme:
+        # urllib3 is lenient where urlparse is not: it reads a bare "garbage" as a hostname. A base
+        # URL without a scheme is not one, and nothing could connect to it — treat it as unparseable
+        # so the veto fires rather than letting such a value reach an allowlist comparison.
+        return None
+    host = parsed.host
+    if not host:  # None or "" — hostless URL ("http:///Olog")
+        return None
+    # urllib3 keeps IPv6 brackets ("[::1]"); ipaddress needs them off. Then normalise, and judge
+    # emptiness AFTER: "http://./Olog" has host "." which normalises to nothing → still a veto.
+    return host.strip("[]").rstrip(".").lower() or None
+
+
+def is_loopback_url(url: str) -> bool:
+    """True iff *url*'s host is a loopback address — i.e. a LOCAL test server, not a real facility.
+
+    The shared "am I talking to a local sandbox?" primitive, used by two callers with DIFFERENT
+    policies on top:
+
+    * the Olog write gate (:mod:`epics_pv_mcp.olog_safety`) — loopback is one of two ways to pass;
+      an explicitly allowlisted remote is the other.
+    * the Olog read redaction (:mod:`epics_pv_mcp.services.olog_client`) — loopback is the ONLY way
+      to see un-redacted entries.
+
+    Only the PRIMITIVE is shared, never the policy: the write gate's ``_url_write_allowed`` also
+    returns True for an allowlisted REMOTE host, so reusing IT as the read predicate would read a
+    production logbook in the clear. Both policies do agree on the boolean direction, though —
+    False means "restrict" (deny the write / redact the read) — so no inversion is needed here.
+
+    Fails closed via :func:`url_host` (see there). RFC1918 private is deliberately NOT loopback — a
+    production service lives on a private network, so "private = local" would defeat the point.
+    """
+    host = url_host(url)
+    if host is None:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False  # a hostname is not an IP literal → not loopback
 
 
 def basic_auth_header(user: str, password: str) -> str | None:
@@ -97,6 +168,7 @@ def rest_get_json(
     *,
     conn_exc: type[RestConnectionError],
     resp_exc: type[RestResponseError],
+    allow_redirects: bool = True,
 ) -> object:
     """GET *url* and return parsed JSON, translating failures to the caller's REST exceptions.
 
@@ -105,9 +177,19 @@ def rest_get_json(
     per-service subclasses of :class:`RestConnectionError` / :class:`RestResponseError`. The one
     debug log here is the single place a swallowed REST failure is recorded before the caller maps
     the exception to a withheld verdict or an ``EpicsError``.
+
+    ``allow_redirects=False`` makes a redirect a *resp_exc* instead of a followed hop. It matters
+    wherever the RESPONDING host, not the requested one, is what a security decision rests on: a
+    redirect moves the data's true origin without changing the configured URL. A 3xx is not an HTTP
+    error, so ``raise_for_status`` would wave it through — hence the explicit check.
     """
     try:
-        resp = session.get(url, params=params, timeout=timeout)
+        resp = session.get(url, params=params, timeout=timeout, allow_redirects=allow_redirects)
+        if not allow_redirects and resp.is_redirect:
+            raise resp_exc(
+                f"Refused to follow a redirect from {url} (HTTP {resp.status_code}): the response "
+                "would come from a different host than the one configured."
+            )
         resp.raise_for_status()
         return resp.json()
     except requests.exceptions.RequestException as exc:
@@ -127,6 +209,7 @@ def rest_put_json(
     headers: dict[str, str] | None = None,
     conn_exc: type[RestConnectionError],
     resp_exc: type[RestResponseError],
+    allow_redirects: bool = True,
 ) -> object:
     """PUT *json_body* to *url* and return JSON, translating failures like :func:`rest_get_json`.
 
@@ -134,9 +217,26 @@ def rest_put_json(
     *conn_exc*, any other request/HTTP failure raises *resp_exc*, chained via ``from`` so
     :func:`http_status` can read the served status code). *params* carries wire query args (Olog's
     ``inReplyTo``); *headers* carries per-request headers (a static client-info header). Auth, if
-    any, rides on the session (see :func:`basic_auth_header` + :func:`build_retrying_session`)."""
+    any, rides on the session (see :func:`basic_auth_header` + :func:`build_retrying_session`).
+
+    ``allow_redirects=False`` refuses a redirect rather than follow it (see
+    :func:`rest_get_json`).
+    It matters even more on a write: a followed hop would post the body — and the auth header — to a
+    host the gate never approved."""
     try:
-        resp = session.put(url, json=json_body, params=params, headers=headers, timeout=timeout)
+        resp = session.put(
+            url,
+            json=json_body,
+            params=params,
+            headers=headers,
+            timeout=timeout,
+            allow_redirects=allow_redirects,
+        )
+        if not allow_redirects and resp.is_redirect:
+            raise resp_exc(
+                f"Refused to follow a redirect from {url} (HTTP {resp.status_code}): the write "
+                "would land on a different host than the one the gate approved."
+            )
         resp.raise_for_status()
         return resp.json()
     except requests.exceptions.RequestException as exc:

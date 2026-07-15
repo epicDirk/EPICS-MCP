@@ -2,8 +2,8 @@
 
 Probes every CONFIGURED plane once and prints whether it is reachable, whether the CA bundle works,
 whether the service answers, and what the ChannelFinder privacy redaction is set to — the
-``flutter doctor`` of this server. Read-only and localhost-isolated by default (a disabled plane
-makes no network call).
+``flutter doctor`` of this server. Read-only — it probes, never writes — and it touches exactly the
+planes that are CONFIGURED (a disabled plane makes no network call).
 
 Exit code (a DELIBERATE convention, unlike the other CLIs where a finding is exit 0 — doctor is
 a scriptable pass/fail):
@@ -54,7 +54,12 @@ def _render(report: DoctorReport) -> str:
     props = ", ".join(report.privacy.cf_safe_property_names) or "(empty — all properties redacted)"
     lines.append(f"  owner allowlist:    {owners}")
     lines.append(f"  property allowlist: {props}")
-    lines.append("  Olog free-text:     always withheld")
+    olog_freetext = (
+        "withheld"
+        if report.privacy.olog_freetext_withheld
+        else "FULL (declared local test data — ESS-spec pending)"
+    )
+    lines.append(f"  Olog free-text:     {olog_freetext}")
     lines.append("")
     verdict = (
         "OK — all configured planes healthy"

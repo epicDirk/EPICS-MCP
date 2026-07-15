@@ -6,6 +6,7 @@ import pytest
 import requests
 
 from epics_pv_mcp.config import EpicsConfig
+from epics_pv_mcp.olog_safety import OlogWriteGate
 from epics_pv_mcp.services.olog_client import OlogClient
 from epics_pv_mcp.services.olog_exceptions import OlogConnectionError, OlogError
 from epics_pv_mcp.services.redact import FREETEXT_WITHHELD
@@ -37,13 +38,213 @@ _PERSON_NAMES = [f"{c}.person" for c in "abcdefgh"]
 
 
 def _resp(payload: object, *, ok: bool = True) -> Mock:
-    resp = Mock()
+    # is_redirect is set explicitly: on a bare Mock every attribute is truthy, so a normal response
+    # double would trip the client's redirect guard.
+    resp = Mock(is_redirect=False)
     resp.json.return_value = payload
     if ok:
         resp.raise_for_status.return_value = None
     else:
         resp.raise_for_status.side_effect = requests.exceptions.HTTPError("500")
     return resp
+
+
+# --- client: the redaction switch (ESS-spec pending, decisions 2026-07-15) ---
+#
+# Against a real server the projection below is unchanged. Entries leave WHOLE only when BOTH hold:
+# a loopback URL AND the operator's explicit `assume_test_data` declaration. Neither suffices alone
+# — a port-forward serves production on localhost without the URL changing (so the URL cannot prove
+# the data is synthetic), and a flag alone would not catch "pointed at the facility and forgot".
+
+
+def _sandbox(url: str = "http://localhost:8080/Olog") -> OlogClient:
+    """A client for a DECLARED local sandbox — the only configuration that sees whole entries."""
+    return OlogClient(url, assume_test_data=True)
+
+
+def test_declared_loopback_client_returns_the_whole_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A declared loopback sandbox surfaces free text, owner, source and properties."""
+    client = _sandbox()
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(_RAW_ENTRY)))
+    entry = client.get_log_entry("42")
+    assert entry is not None
+    assert entry["title"] == "Vacuum trip found by c.person"
+    assert entry["description"] == "d.person restarted the IOC; ask e.person"
+    assert entry["owner"] == "a.person"
+    assert entry["source"] == "written by b.person"
+    assert entry["properties"] == _RAW_ENTRY["properties"]
+
+
+def test_loopback_without_the_declaration_still_redacts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE tunnel guard: a loopback URL alone must NOT un-redact.
+
+    `ssh -L 8080:olog-prod:8080` makes a production logbook answer on localhost with the URL
+    unchanged — so the address can never be the sufficient condition. Only a person can declare the
+    data synthetic. Default (no declaration) = redact.
+    """
+    client = OlogClient("http://localhost:8080/Olog", assume_test_data=False)
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(_RAW_ENTRY)))
+    entry = client.get_log_entry("42")
+    assert entry is not None
+    assert entry["title"] == FREETEXT_WITHHELD
+    assert "owner" not in entry
+
+
+def test_sandbox_refuses_to_follow_a_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A declared sandbox must not follow a redirect — it could land on a real server un-redacted.
+
+    Demonstrated live (QA 2026-07-15): a loopback server answering 302 -> a non-loopback address
+    made the client return that server's entries WHOLE, because the mode was decided from the
+    configured URL while requests silently followed the hop. Olog's REST API has no legitimate
+    redirect, so the client refuses to follow one at all — a loud error beats a silent leak.
+    """
+    client = _sandbox()
+    captured: dict[str, object] = {}
+
+    def _get(url: str, **kwargs: object) -> Mock:
+        captured.update(kwargs)
+        resp = Mock()
+        resp.is_redirect = True
+        resp.status_code = 302
+        resp.headers = {"location": "http://10.0.0.5/Olog/logs/42"}
+        resp.raise_for_status.return_value = None  # a 302 is NOT an HTTP error
+        resp.json.return_value = _RAW_ENTRY
+        return resp
+
+    monkeypatch.setattr(client.session, "get", _get)
+    with pytest.raises(OlogError) as excinfo:
+        client.get_log_entry("42")
+    assert captured["allow_redirects"] is False  # never followed in the first place
+    assert "redirect" in str(excinfo.value).lower()
+
+
+def test_declaration_without_loopback_still_redacts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The other half: declaring test data does NOT un-redact a remote server.
+
+    Catches "pointed at the facility and forgot the flag was on" — loopback stays necessary.
+    """
+    client = OlogClient("https://olog.example.org/Olog", assume_test_data=True)
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(_RAW_ENTRY)))
+    entry = client.get_log_entry("42")
+    assert entry is not None
+    assert entry["title"] == FREETEXT_WITHHELD
+
+
+def test_client_reads_the_declaration_from_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no explicit argument the client takes the declaration from the config."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.olog_client.get_config",
+        lambda: EpicsConfig(olog_url="http://localhost:8080/Olog", olog_assume_test_data=True),
+    )
+    assert OlogClient("http://localhost:8080/Olog")._redact is False
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.olog_client.get_config",
+        lambda: EpicsConfig(olog_url="http://localhost:8080/Olog"),
+    )
+    assert OlogClient("http://localhost:8080/Olog")._redact is True  # default false = redact
+
+
+def test_declared_sandbox_keeps_the_derived_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The full mode only ADDS fields — it never changes the shape the caller already relies on.
+
+    Regression guard: returning the server dict verbatim would drop ``attachment_count`` (it is
+    SYNTHESISED, not an Olog field) and flip ``logbooks``/``tags`` from list[str] to list[dict].
+    ``dict[str, object]`` is wide enough that mypy would not catch either.
+    """
+    client = _sandbox("http://127.0.0.1:8080/Olog")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(_RAW_ENTRY)))
+    entry = client.get_log_entry("42")
+    assert entry is not None
+    assert entry["logbooks"] == ["Operations"]  # name-only list[str], as in redacted mode
+    assert entry["tags"] == ["vacuum"]
+    assert entry["attachment_count"] == 1
+    # Every key the redacted mode promises is still present.
+    redacted_keys = {
+        "id",
+        "createdDate",
+        "modifyDate",
+        "level",
+        "state",
+        "title",
+        "description",
+        "logbooks",
+        "tags",
+        "attachment_count",
+    }
+    assert redacted_keys <= entry.keys()
+
+
+def test_full_mode_search_still_truncates_and_filters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The full mode must not disturb ``[:size]`` truncation or the non-dict filter.
+
+    ``capped``/``total_matches`` are computed on the RAW list before projection; the truncation and
+    the ``isinstance(e, dict)`` filter live INSIDE the comprehension and decide ``total``. The junk
+    sits INSIDE the slice on purpose — placed after it, truncation would remove it before the filter
+    ever ran and this test would pin nothing. It matters because the full mode's ``dict(entry)``
+    raises on a non-dict, so the filter is what keeps a junk element from crashing the search.
+    """
+    client = _sandbox()
+    payload = [_RAW_ENTRY, "not-a-dict", _RAW_ENTRY, _RAW_ENTRY]
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    entries, capped, _ = client.search_logbook(text="vacuum", size=2)
+    assert len(entries) == 1  # slice keeps 2, the filter drops the junk one
+    assert capped is True  # capped is computed on the RAW list, before either
+    assert all(isinstance(e, dict) for e in entries)
+
+
+def test_allowlisted_remote_write_target_is_still_read_redacted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """THE core regression: a URL the WRITE gate would allow remotely must still READ redacted.
+
+    ``OlogWriteGate._url_write_allowed`` returns True for an allowlisted remote host with
+    ``allow_remote`` — reusing it as the read predicate would surface a PRODUCTION logbook in the
+    clear. Only ``is_loopback_url`` may drive the redaction. This pins that for good.
+    """
+    remote = "https://olog.example.org/Olog"
+    gate = OlogWriteGate(
+        EpicsConfig(
+            olog_url=remote,
+            allow_olog_write=True,
+            olog_write_logbooks="Operations",
+            olog_write_url_allowlist=remote,
+            olog_write_allow_remote=True,
+        )
+    )
+    gate.check_write_allowed(["Operations"])  # the gate says: writing here is permitted…
+
+    # assume_test_data=True isolates the URL as the deciding condition — without it the client would
+    # redact regardless and this would not test the write-gate/read-predicate separation at all.
+    client = OlogClient(remote, assume_test_data=True)
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(_RAW_ENTRY)))
+    entry = client.get_log_entry("42")
+    assert entry is not None
+    assert entry["title"] == FREETEXT_WITHHELD  # …and reading it is STILL redacted.
+    assert "owner" not in entry
+    for name in _PERSON_NAMES:
+        assert name not in str(entry)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1@evil.example.org/Olog",  # userinfo spoof: host is evil.example.org
+        "http://[::1]./Olog",  # malformed → unparseable
+        "garbage",
+    ],
+)
+def test_spoofed_or_unparseable_url_redacts(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail-safe: anything not provably loopback is redacted — even WITH the declaration set.
+
+    ``assume_test_data=True`` on purpose: it isolates the loopback check as the deciding condition,
+    so this stays a real test of the URL logic. Without it the client would redact anyway and the
+    case would pass even if ``is_loopback_url`` were broken.
+    """
+    client = OlogClient(url, assume_test_data=True)
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(_RAW_ENTRY)))
+    entry = client.get_log_entry("42")
+    assert entry is not None
+    assert entry["title"] == FREETEXT_WITHHELD
 
 
 # --- client: DS-PRIVACY projection (the core guarantee) ---
@@ -81,7 +282,7 @@ def test_search_logbook_capped_and_query_params(monkeypatch: pytest.MonkeyPatch)
     client = OlogClient("http://olog")
     captured: dict[str, object] = {}
 
-    def _get(url: str, params: object = None, timeout: object = None) -> Mock:
+    def _get(url: str, params: object = None, timeout: object = None, **_: object) -> Mock:
         captured["url"] = url
         captured["params"] = params
         # return size+1 entries so capped is True
@@ -128,7 +329,7 @@ def test_get_log_entry_404_is_not_found(monkeypatch: pytest.MonkeyPatch) -> None
     client = OlogClient("http://olog")
     http_error = requests.exceptions.HTTPError("404")
     http_error.response = Mock(status_code=404)
-    resp = Mock()
+    resp = Mock(is_redirect=False)  # explicit: a bare Mock's attributes are all truthy
     resp.raise_for_status.side_effect = http_error
     monkeypatch.setattr(client.session, "get", Mock(return_value=resp))
     assert client.get_log_entry("999") is None
@@ -273,7 +474,7 @@ def test_search_logbook_offset_and_sort_wire_params(monkeypatch: pytest.MonkeyPa
     client = OlogClient("http://olog")
     captured: dict[str, object] = {}
 
-    def _get(url: str, params: object = None, timeout: object = None) -> Mock:
+    def _get(url: str, params: object = None, timeout: object = None, **_: object) -> Mock:
         captured["params"] = params
         return _resp({"logs": [], "hitCount": 0})
 
@@ -290,7 +491,7 @@ def test_search_logbook_offset_zero_omits_from(monkeypatch: pytest.MonkeyPatch) 
     client = OlogClient("http://olog")
     captured: dict[str, object] = {}
 
-    def _get(url: str, params: object = None, timeout: object = None) -> Mock:
+    def _get(url: str, params: object = None, timeout: object = None, **_: object) -> Mock:
         captured["params"] = params
         return _resp({"logs": [], "hitCount": 0})
 

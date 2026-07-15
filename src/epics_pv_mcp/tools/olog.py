@@ -1,4 +1,5 @@
-"""MCP adapters for the Phoebus Olog logbook (read-only, DS-PRIVACY-redacted).
+"""MCP adapters for the Phoebus Olog logbook (reads + one gated write; output posture is
+redacted against a real server, whole against a declared local test sandbox).
 
 Thin wrappers: the config-gated, off-loop queries live in the services layer
 (:func:`epics_pv_mcp.services.checkers.query_olog_search` / ``query_olog_entry``), so the
@@ -37,7 +38,7 @@ async def _search_logbook(
     sort: str = "down",
     timeout: float = 5.0,
 ) -> dict[str, object]:
-    """Search the Phoebus Olog logbook (DS-PRIVACY-redacted entries).
+    """Search the Phoebus Olog logbook (see services.olog_client for the output posture).
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_search`.
     """
@@ -55,7 +56,7 @@ async def _search_logbook(
 
 
 async def _get_log_entry(log_id: str, timeout: float = 5.0) -> dict[str, object]:
-    """Return one Olog entry by id (DS-PRIVACY-redacted).
+    """Return one Olog entry by id (see services.olog_client for the output posture).
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_entry`.
     """
@@ -86,7 +87,8 @@ async def _create_log_entry(
     tags: str | None = None,
     timeout: float = 5.0,
 ) -> dict[str, object]:
-    """Create a Phoebus Olog log entry. MUTATING, gated, DS-PRIVACY-redacted response.
+    """Create a Phoebus Olog log entry. MUTATING, gated; the response follows the same output
+    posture as a read.
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_create`. *logbooks* and
     *tags* are comma-separated names (split here into the lists the service expects).

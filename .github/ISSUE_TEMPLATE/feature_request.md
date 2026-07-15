@@ -15,9 +15,10 @@ What tool, CLI flag, resource, or plane would help — and roughly what it shoul
 
 ## Read-only / safety note
 
-This server is read-only by default (the single write tool is triple-gated) and localhost-isolated.
-If your request involves writes or reaching a non-local endpoint, please say so explicitly and
-describe the safety posture you expect.
+This server reads by default and mutates only through a gate: `set_pv_value` is triple-gated, and
+the Olog logbook writes sit behind their own separate gate. It reaches nothing until a launcher
+configures the EPICS address lists / service URLs. If your request involves writes or reaching a
+non-local endpoint, please say so explicitly and describe the safety posture you expect.
 
 ## Alternatives considered
 

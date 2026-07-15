@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import logging
 from unittest.mock import Mock
+from urllib.parse import urlparse
 
 import pytest
 import requests
 from requests.adapters import HTTPAdapter
+from urllib3.util import parse_url
 from urllib3.util.retry import Retry
 
 from epics_pv_mcp.config import EpicsConfig
@@ -19,9 +21,11 @@ from epics_pv_mcp.services._http import (
     build_retrying_session,
     http_status,
     is_http_404,
+    is_loopback_url,
     is_retry_error,
     is_ssl_error,
     rest_get_json,
+    url_host,
 )
 from epics_pv_mcp.services.archiver_exceptions import (
     ArchiverConnectionError,
@@ -281,3 +285,97 @@ def test_is_retry_error_false_for_others() -> None:
     conn.__cause__ = requests.exceptions.ConnectionError("refused")
     assert is_retry_error(conn) is False
     assert is_retry_error(ArchiverConnectionError("x")) is False  # no __cause__
+
+
+# ----------------------------------------------------------------------------------------------
+# is_loopback_url — the shared "is this a local test server?" primitive
+#
+# Extracted from the Olog write gate so the READ redaction can reuse the SAME hardened host
+# extraction without reusing the gate's POLICY (`_url_write_allowed` also returns True for an
+# allowlisted REMOTE host — see test_reads_a_url_the_write_gate_would_allow_remotely).
+# ----------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:8080/Olog",
+        "http://LOCALHOST:8080/Olog",  # host is lowercased
+        "http://localhost./Olog",  # a fully-qualified trailing dot still resolves to localhost
+        "http://127.0.0.1:8080/Olog",
+        "http://127.0.0.2/Olog",  # the whole 127.0.0.0/8 block is loopback
+        "http://[::1]:8080/Olog",  # IPv6 loopback; brackets stripped by urlparse().hostname
+        "https://localhost/Olog",
+    ],
+)
+def test_is_loopback_url_true_for_local_test_servers(url: str) -> None:
+    assert is_loopback_url(url) is True
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://olog.example.org/Olog",  # a plain hostname is not an IP literal
+        "http://olog:8080/Olog",  # the docker-compose service name (used by the redaction tests)
+        # RFC1918 PRIVATE is NOT loopback — a production service lives on a private network.
+        "http://10.0.0.5/Olog",
+        "http://192.168.1.10/Olog",
+        "http://172.16.0.1/Olog",
+        "http://0.0.0.0/Olog",  # the wildcard bind address is not loopback either
+    ],
+)
+def test_is_loopback_url_false_for_remote_hosts(url: str) -> None:
+    assert is_loopback_url(url) is False
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1@evil.example.org/Olog",  # userinfo: the HOST is evil.example.org
+        "http://localhost@evil.example.org/Olog",
+        # Backslash in the authority: urlparse splits at the LAST '@' and calls 127.0.0.1 the host,
+        # but urllib3 — the parser requests actually CONNECTS with — resolves evil.example.org.
+        # Whoever decides must use the parser that connects, or the decision describes a different
+        # server than the one on the wire.
+        "http://evil.example.org:8080\\@127.0.0.1/Olog",
+        "http://[::1]./Olog",  # malformed bracketed IPv6 -> urlparse raises ValueError
+        "http://[::1/Olog",
+        "",  # hostless / garbage
+        "not-a-url",
+        "http:///Olog",
+        "///Olog",
+    ],
+)
+def test_is_loopback_url_fails_closed_on_hostile_or_malformed(url: str) -> None:
+    """Anything unparseable or spoofed resolves to NOT-loopback.
+
+    Same boolean direction as the write gate: False -> restrict. For a write that means "deny",
+    for a read it means "redact" — fail-closed and fail-safe agree, so no inversion is needed.
+    """
+    assert is_loopback_url(url) is False
+
+
+@pytest.mark.parametrize("url", ["http://./Olog", "http://.../Olog", "", "garbage", "http:///x"])
+def test_url_host_returns_none_for_everything_unparseable(url: str) -> None:
+    """url_host must return None — never "" — for anything without a usable host.
+
+    Callers use ``url_host(url) is None`` as a hard veto (the write gate denies such a URL even when
+    it is exactly allowlisted). An empty string slips past that identity check: "http://./Olog" has
+    hostname "." which survives a falsiness test and only becomes "" after the trailing-dot strip.
+    Normalise first, THEN decide emptiness.
+    """
+    assert url_host(url) is None
+
+
+def test_url_host_agrees_with_the_parser_that_connects() -> None:
+    """url_host must name the host requests would actually reach — not a different one.
+
+    urllib3 is what requests connects with. Where the two parsers disagree (a backslash in the
+    authority), a decision built on urlparse describes a server other than the one on the wire —
+    so the primitive uses urllib3's answer, and refuses when they cannot agree.
+    """
+    hostile = "http://evil.example.org:8080\\@127.0.0.1/Olog"
+    assert urlparse(hostile).hostname == "127.0.0.1"  # what urlparse claims…
+    assert parse_url(hostile).host == "evil.example.org"  # …and where the connection would go
+    assert url_host(hostile) == "evil.example.org"  # we follow the connection, not the claim
+    assert is_loopback_url(hostile) is False

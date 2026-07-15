@@ -10,11 +10,15 @@ Two layers, in order:
 2. **Opt-in ``allowed_roots`` boundary** (off by default). When the env var
    ``EPICS_MCP_ALLOWED_ROOTS`` is set, the resolved path must live under one of
    those roots, else ``EpicsError(PATH_OUTSIDE_WORKSPACE)``. **Default empty = NO
-   boundary** — this is future-posture optionality, NOT a "secured" deployment:
-   the server is read-only and localhost-isolated with a single trusted caller,
-   so the boundary is dormant unless deliberately enabled. The separator is
-   OS-dependent (``os.pathsep`` — ``;`` on Windows, ``:`` on Linux), so an
-   ``EPICS_MCP_ALLOWED_ROOTS`` value is not 1:1 portable between the two.
+   boundary** — this is future-posture optionality, NOT a "secured" deployment.
+   It stays dormant because the caller is trusted, and for no other reason: do
+   NOT justify it with "the server is read-only and localhost-isolated". Neither
+   half is unconditional any more — the server has a gated write surface (the
+   Olog logbook), and its network reach depends entirely on the launcher, which
+   can widen the EPICS address lists onto a real facility network. A deployment
+   that opens either should consider enabling this boundary deliberately. The
+   separator is OS-dependent (``os.pathsep`` — ``;`` on Windows, ``:`` on Linux),
+   so an ``EPICS_MCP_ALLOWED_ROOTS`` value is not 1:1 portable between the two.
 """
 
 from __future__ import annotations

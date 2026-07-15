@@ -36,7 +36,8 @@ For the canonical plane→source→tools table and the safety/network posture, s
   (MGMT root, `/mgmt/bpl`) + optionally `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` (retrieval root, `/retrieval/data`).
 - **Phoebus Alarm Logger** — is a PV alarm-configured, and its alarm history. `EPICS_MCP_ALARM_URL`.
 - **Naming Service** — is a device name registered + ACTIVE. `EPICS_MCP_NAMING_URL`.
-- **Phoebus Olog** — logbook search, author/free-text redacted. `EPICS_MCP_OLOG_URL`.
+- **Phoebus Olog** — logbook search; author dropped, free text withheld unless a DECLARED local
+  sandbox (see "Olog output posture"). `EPICS_MCP_OLOG_URL`.
 
 ## Tool palette
 
@@ -57,6 +58,40 @@ are simply absent — that is an unmet optional extra, not a bug.
 
 Composing the display tools: `find_device` (which screens show device X + live value + serving IOC),
 `coverage_audit` (which delivered PV has no screen/archive/alarm — the blind spots).
+
+### Olog output posture (what a read gives you back) — ESS-SPEC PENDING
+
+Entries come back redacted — author dropped, `title`/`description` free text withheld, attachments
+as a count, `logbooks`/`tags` as name-only lists — UNLESS **both** of these hold:
+
+1. `EPICS_MCP_OLOG_URL` is **loopback** (`localhost` / `127.0.0.0/8` / `::1`), and
+2. `EPICS_MCP_OLOG_ASSUME_TEST_DATA=true` **declares** the data synthetic.
+
+Then the **whole** entry is returned, free text and owner included.
+
+The shape does not change between the two: the full mode only ADDS fields, so `attachment_count` and
+the name-only `logbooks`/`tags` are there either way.
+
+**Why.** Withholding the free text costs a logbook its entire point — a search returns ids whose
+content you cannot judge, and a write cannot verify what it just wrote (you would need a separate
+client to check). The withholding rule was written against an *assumed* privacy policy; none was
+ever specified for this server. So it is **deferred for local test data until a real specification
+exists**, then re-applied — the allowlist and the projection stay intact meanwhile, guarding every
+real server. Only the default moved.
+
+**Why two conditions.** A loopback ADDRESS does not prove the DATA is synthetic: `ssh -L
+8080:olog-prod:8080` or a port-forward serves a production logbook on localhost with the URL
+unchanged (demonstrated live, QA 2026-07-15) — no URL inspection can see through a tunnel, so only
+a person can assert what the data is. Conversely the declaration alone would not catch "pointed it
+at the facility and forgot", which is what the loopback condition still catches. For the same
+reason the client REFUSES redirects rather than follow them: a hop moves the data's true origin
+without changing the URL the decision came from. And note the write gate's own URL check must NOT
+be reused as the read predicate: it also passes an *allowlisted remote*, which would surface a
+production logbook in the clear.
+
+**Diagnosis:** `epics-doctor` prints the effective posture (`Olog free-text: withheld` vs `FULL
+(declared local test data — ESS-spec pending)`). This is a *runtime output* policy and has nothing to do
+with keeping person data out of committed files — that is a separate, unaffected guard.
 
 ### Olog write posture (`create_log_entry` / `reply_to_log`)
 

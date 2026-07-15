@@ -62,9 +62,26 @@ This is a controls tool, so the trust questions come first:
   (`EPICS_MCP_OLOG_WRITE_LOGBOOKS`; empty = deny-all) **and** a rate limit. The author is the write
   service account (`EPICS_MCP_OLOG_WRITE_USER`), set server-side and not spoofable; the audit line
   is metadata-only (never the title/description free text). **`ALLOW_PV_WRITE` is untouched by it.**
-- **Localhost-isolated by default.** The server opens no non-local connection unless its
-  launcher widens the EPICS address list (`EPICS_PVA_ADDR_LIST` / `EPICS_CA_ADDR_LIST` and
-  the matching `*_AUTO_ADDR_LIST`). Until then it does **not** reach production IOCs.
+- **Olog output posture — redacted unless declared test data** *(ESS-spec pending)*. Every entry
+  leaves through a strict allowlist — author dropped, `title`/`description` free text withheld,
+  attachments as a count — **unless BOTH** `EPICS_MCP_OLOG_URL` is loopback **and**
+  `EPICS_MCP_OLOG_ASSUME_TEST_DATA=true`. Then entries come back **whole**, because withholding
+  the free text costs a logbook its point (a search returns ids whose content you cannot judge,
+  and a write cannot verify what it wrote). **Two conditions, because neither proves the case
+  alone:** a loopback *address* does not prove the *data* is synthetic — a port-forward serves
+  production on localhost with the URL unchanged — and a flag alone would not catch "pointed it at
+  the facility and forgot". For the same reason the Olog client refuses redirects instead of
+  following them. **Why "pending":** the withholding rule was written against an *assumed* privacy
+  policy, never a specified one; it is deferred for declared test data until a real specification
+  exists, then re-applied — the allowlist and projection stay intact meanwhile. `epics-doctor`
+  reports the effective posture. Note this is a *runtime output* policy, unrelated to keeping
+  person data out of committed files (see `CLAUDE.md`).
+- **Network reach is the launcher's decision, not this server's.** Out of the box it opens no
+  non-local connection: the EPICS address lists (`EPICS_PVA_ADDR_LIST` / `EPICS_CA_ADDR_LIST` and
+  the matching `*_AUTO_ADDR_LIST`) and the `*_URL` vars are empty, so nothing is reached. A
+  deployment may well point them at a real facility — so do **not** assume isolation from this
+  document; run `epics-doctor` to see what your instance actually reaches. The write gates above
+  hold either way.
 - **Optional service planes are off until configured.** ChannelFinder, Archiver, Alarm and
   Naming stay disabled until their `*_URL` env vars are set; an empty/unset URL means *no
   client and no network call*. The ESS Naming plane has **no built-in host** — no egress
@@ -162,7 +179,7 @@ To reach a real control system, set the address list in the launcher's environme
 | `is_alarm_configured` | Phoebus Alarm Logger — is a PV in the alarm tree? | `EPICS_MCP_ALARM_URL` |
 | `get_alarm_history` | Phoebus Alarm Logger — alarm state history of a PV over a window (required start/end; newest-first; user/host stripped) | `EPICS_MCP_ALARM_URL` |
 | `lookup_device_name` | ESS Naming Service — is a device name registered + ACTIVE? (404 = definitive not-registered; a service error is withheld, never a false negative) | `EPICS_MCP_NAMING_URL` |
-| `search_logbook` | Phoebus Olog — search log entries (DS-PRIVACY: author dropped, title/description free text withheld, attachments as a count); paginate with `offset`/`sort`, `total_matches` = true total across all pages | `EPICS_MCP_OLOG_URL` |
+| `search_logbook` | Phoebus Olog — search log entries (DS-PRIVACY: author dropped, title/description free text withheld, attachments as a count — **unless a declared local test sandbox**, where entries come back whole; see "Olog output posture" below); paginate with `offset`/`sort`, `total_matches` = true total across all pages | `EPICS_MCP_OLOG_URL` |
 | `get_log_entry` | Phoebus Olog — one entry by id (same redaction; 404 = definitive found:false, other errors propagate) | `EPICS_MCP_OLOG_URL` |
 | `list_logbooks` | Phoebus Olog — list the valid logbook names (name-only; owners dropped) | `EPICS_MCP_OLOG_URL` |
 | `list_tags` | Phoebus Olog — list the valid tag names | `EPICS_MCP_OLOG_URL` |

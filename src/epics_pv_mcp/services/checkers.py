@@ -414,11 +414,13 @@ async def query_olog_search(
     sort: str = "down",
     timeout: float = 5.0,
 ) -> dict[str, object]:
-    """Search the Phoebus Olog logbook, returning DS-PRIVACY-redacted entries. Read-only, gated.
+    """Search the Phoebus Olog logbook. Read-only, gated.
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns a structured ``enabled: false``
     result and makes NO network call (no ESS egress). Every returned entry passes the Olog client's
-    output allowlist (author/free-text withheld) — raw entries never reach this layer. *offset*
+    output projection: redacted against a real server (author dropped, free text withheld), but
+    WHOLE against a declared loopback test sandbox — do NOT assume this layer only ever sees
+    redacted data (ESS-spec pending; see services.olog_client._project). *offset*
     (Olog wire ``from``) pages past the first *size* results; *sort* orders by create time (``down``
     newest-first default, ``up`` oldest-first). ``total`` is the number of entries returned;
     ``total_matches`` is the true total across all pages (Olog ``hitCount``, ``None`` if the Olog
@@ -456,7 +458,7 @@ async def query_olog_search(
 
 
 async def query_olog_entry(log_id: str, timeout: float = 5.0) -> dict[str, object]:
-    """Return one Olog entry by id (DS-PRIVACY-redacted). Read-only, config-gated.
+    """Return one Olog entry by id (URL+declaration-bound posture). Read-only, config-gated.
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes no
     network call. ``found`` is False when the entry does not exist. Backs ``get_log_entry``.

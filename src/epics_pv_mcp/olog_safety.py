@@ -22,16 +22,15 @@ PV write path is never touched — three things diverge deliberately:
 
 from __future__ import annotations
 
-import ipaddress
 import logging
 import sys
 import threading
 import time
-import urllib.parse
 from collections import deque
 
 from epics_pv_mcp.config import EpicsConfig, get_config
 from epics_pv_mcp.errors import OlogWriteDeniedError, RateLimitError, SafetyConfigError
+from epics_pv_mcp.services._http import is_loopback_url, url_host
 
 logger = logging.getLogger(__name__)
 
@@ -205,39 +204,29 @@ class OlogWriteGate:
     def _url_write_allowed(self) -> bool:
         """True iff ``olog_url`` is a permitted write target (loopback, or allowlisted + remote).
 
-        The host is taken ONLY from ``urlparse(url).hostname`` — never ``.netloc`` or a substring —
-        which strips userinfo and IPv6 brackets and lowercases, so ``http://127.0.0.1@evil/Olog``
-        yields host ``evil`` (refused). A hostless/garbage URL yields ``hostname=None``/``''`` →
-        refused; a MALFORMED bracketed-IPv6 authority (e.g. ``http://[::1]./Olog``) makes
-        ``urlparse`` raise ``ValueError`` in Python 3.12+ → also refused. Every unparseable form
-        fails closed (SEC-2), so a bad URL is a clean, audited DENY rather than an uncaught crash.
+        Three steps, in this order — the ORDER is load-bearing:
+
+        1. **Unparseable → deny, before anything else** (SEC-2). ``url_host`` returns None for a
+           hostless/garbage URL and for a MALFORMED bracketed-IPv6 authority (``http://[::1]./Olog``
+           makes ``urlparse`` raise ``ValueError`` on Python 3.12+). This veto runs FIRST, so an
+           unparseable URL is denied even if it is exactly allowlisted — a bad URL is a clean,
+           audited DENY, never an uncaught crash and never a lucky pass.
+        2. **Loopback → allow** (the local Docker sandbox).
+        3. **Anything else** (INCLUDING RFC1918 private — the production Olog lives on a private
+           network, so "private = allowed" would defeat the prod NO-GO): permit only an EXACTLY
+           allowlisted base URL with remote writes explicitly enabled.
+
+        The hardened host extraction lives in :func:`~epics_pv_mcp.services._http.url_host` and is
+        shared with the Olog READ redaction — the PRIMITIVE is shared, this POLICY is not. Note the
+        read side must NOT reuse this method: it returns True for an allowlisted REMOTE host too
+        (step 3), which as a read predicate would surface a production logbook un-redacted.
         """
-        try:
-            host = urllib.parse.urlparse(self._config.olog_url).hostname
-        except ValueError:
-            return False  # malformed URL (e.g. bad bracketed IPv6) → fail-closed deny
-        if not host:  # None or "" — unparseable/hostless URL: fail closed
+        url = self._config.olog_url
+        if url_host(url) is None:  # SEC-2: unparseable → fail closed, allowlist cannot override
             return False
-        host = host.rstrip(".").lower()
-        if self._is_loopback(host):
+        if is_loopback_url(url):
             return True
-        # Non-loopback (INCLUDING RFC1918 private — the production Olog lives on a private network,
-        # so "private = allowed" would defeat the prod NO-GO): permit only an EXACTLY allowlisted
-        # base URL with remote writes explicitly enabled.
-        return self._config.olog_write_allow_remote and self._config.olog_url in self._allowed_urls
-
-    @staticmethod
-    def _is_loopback(host: str) -> bool:
-        """True for ``localhost`` or a loopback IP literal (127.0.0.0/8, ::1).
-
-        A hostname is not an IP literal → ``ipaddress.ip_address`` raises ``ValueError`` → not
-        loopback (SEC-2: the ``try/except`` is required, ``ip_address`` is not total)."""
-        if host == "localhost":
-            return True
-        try:
-            return ipaddress.ip_address(host).is_loopback
-        except ValueError:
-            return False
+        return self._config.olog_write_allow_remote and url in self._allowed_urls
 
     def _audit_deny(self, error_code: str, caller: str) -> None:
         """Log a REJECTED write (empty logbooks / gate off / URL / allowlist / rate limit).

@@ -32,8 +32,10 @@ class EpicsConfig(BaseSettings):
 
     # --- Path boundary (opt-in; see paths.resolve_user_path) ---
     # os.pathsep-separated roots that file/dir tool arguments must resolve under.
-    # Empty (default) = NO boundary (future-posture optionality, not "secured" —
-    # the server is read-only + localhost-isolated with a single trusted caller).
+    # Empty (default) = NO boundary: future-posture optionality, not "secured".
+    # It stays dormant because the CALLER is trusted — not because the server is
+    # "read-only and localhost-isolated"; neither half is unconditional (there is
+    # a gated write surface, and reach is the launcher's decision). See paths.py.
     allowed_roots: str = ""
 
     # --- p4p ---
@@ -96,10 +98,23 @@ class EpicsConfig(BaseSettings):
     # naming unless this is set.
     naming_url: str = ""
     # Phoebus Olog (electronic logbook) REST root incl. context path, e.g. "http://host:8080/Olog".
-    # Empty (default) = disabled: the Olog plane makes NO network call and no ESS egress. Read-only;
-    # every returned field passes the DS-PRIVACY allowlist (author/free-text withheld) first.
+    # Empty (default) = disabled: the Olog plane makes NO network call and no ESS egress. Read-only.
+    # Output posture: DS-PRIVACY-redacted (author dropped, free text withheld) unless BOTH this url
+    # is loopback AND olog_assume_test_data is set — see below. `epics-doctor` prints the effective
+    # posture.
     olog_url: str = ""
     olog_auth: str = ""  # optional Authorization header value for secured deployments
+    # The operator's EXPLICIT declaration: "the Olog at olog_url holds synthetic test data, so its
+    # entries may leave whole". Default false = redact, always.
+    #
+    # Why a flag AND the loopback url, when the url alone looks like it should do: a loopback
+    # ADDRESS does not prove the DATA is synthetic. `ssh -L 8080:olog-prod:8080` or a
+    # port-forward make a production logbook answer on localhost:8080 — the url never changes,
+    # so binding to it alone would silently un-redact production (demonstrated live, QA
+    # 2026-07-15). No url inspection can see through a tunnel. Only a person can assert what
+    # the data IS, and this flag is where they do it: loopback stays a NECESSARY condition (it
+    # still catches "pointed at the facility and forgot"), and the flag adds the sufficient one.
+    olog_assume_test_data: bool = False
 
     # --- Olog WRITE gate (separate from ALLOW_PV_WRITE; that stays false + untouched) ---
     # Olog write is a deliberately-authorized, SEPARATE logbook surface behind its OWN gate. Unlike
