@@ -29,6 +29,7 @@ from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
 from epics_pv_mcp.olog_safety import get_olog_safety
 from epics_pv_mcp.services._http import basic_auth_header, http_status
+from epics_pv_mcp.services._time_window import TimeWindowFormatError
 from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG, AlarmClient
 from epics_pv_mcp.services.alarm_exceptions import AlarmError
 from epics_pv_mcp.services.archiver_client import ArchiverClient
@@ -41,7 +42,6 @@ from epics_pv_mcp.services.naming_client import NamingServiceClient
 from epics_pv_mcp.services.naming_exceptions import NamingServiceError
 from epics_pv_mcp.services.olog_client import DEFAULT_MAX_LOGS, OlogClient
 from epics_pv_mcp.services.olog_exceptions import OlogConnectionError, OlogError, OlogResponseError
-from epics_pv_mcp.services.olog_time import OlogTimeFormatError
 
 
 class CFRegistryChecker:
@@ -301,6 +301,10 @@ async def query_alarm_history(
 
     try:
         return await asyncio.to_thread(_run)
+    except TimeWindowFormatError as exc:
+        # Nothing was sent: the window itself is unusable. Reporting it as "cannot reach the
+        # Alarm Logger" would send the caller after an outage that is not happening.
+        raise EpicsError(f"Alarm Logger: {exc}", error_code="INVALID_TIME_WINDOW") from exc
     except AlarmError as exc:
         raise EpicsConnectionError(f"Alarm Logger: {exc}") from exc
 
@@ -457,7 +461,7 @@ async def query_olog_search(
     # ANSWERED and said no — three different next actions reported as one.
     try:
         return await asyncio.to_thread(_run)
-    except OlogTimeFormatError as exc:
+    except TimeWindowFormatError as exc:
         # Nothing was sent: the time window itself is unusable.
         raise EpicsError(f"Olog: {exc}", error_code="INVALID_TIME_WINDOW") from exc
     except OlogConnectionError as exc:

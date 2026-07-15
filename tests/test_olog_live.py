@@ -21,8 +21,8 @@ import os
 
 import pytest
 
+from epics_pv_mcp.services._time_window import TimeWindowFormatError
 from epics_pv_mcp.services.olog_client import OlogClient
-from epics_pv_mcp.services.olog_time import OlogTimeFormatError
 
 pytestmark = [
     pytest.mark.live,
@@ -90,5 +90,5 @@ def test_narrow_window_discriminates(client: OlogClient) -> None:
 def test_year_amount_rejected_before_any_request(client: OlogClient) -> None:
     """Olog cannot subtract years from a point in time. Left to the server this is a 400 that an
     anonymous read only ever sees as 401 ('unauthorized') — so it is refused here instead."""
-    with pytest.raises(OlogTimeFormatError, match="days or weeks"):
+    with pytest.raises(TimeWindowFormatError, match="days or weeks"):
         client.search_logbook(start="1 year")

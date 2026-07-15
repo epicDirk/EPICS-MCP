@@ -6,6 +6,7 @@ import pytest
 import requests
 
 from epics_pv_mcp.config import EpicsConfig
+from epics_pv_mcp.services._time_window import TimeWindowFormatError
 from epics_pv_mcp.services.alarm_client import AlarmClient
 from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError
 from epics_pv_mcp.services.redact import FREETEXT_WITHHELD
@@ -293,8 +294,14 @@ def test_get_alarm_history_exactly_max_events_not_capped(monkeypatch: pytest.Mon
 
 
 def test_get_alarm_history_query_params(monkeypatch: pytest.MonkeyPatch) -> None:
-    """pv/start/end pass through; the endpoint is /search/alarm; size = max_events+1 so capped is an
-    honest fetched>max_events."""
+    """pv passes through, start/end are NORMALIZED to zone-explicit ISO; the endpoint is
+    /search/alarm; size = max_events+1 so capped is an honest fetched>max_events.
+
+    This test previously asserted that start/end 'pass through' unchanged — pinning the very
+    behaviour that was broken. The Alarm Logger reads a bare wall clock in ITS OWN zone and reads
+    a zone-less ISO not at all (silently as 'now' -> 200 + empty). Sending the zone removes both
+    ambiguities; see services/alarm_time. Do not restore the pass-through.
+    """
     client = AlarmClient("http://alarm:8081")
     getter = Mock(return_value=_resp([]))
     monkeypatch.setattr(client.session, "get", getter)
@@ -303,10 +310,59 @@ def test_get_alarm_history_query_params(monkeypatch: pytest.MonkeyPatch) -> None
     assert args[0] == "http://alarm:8081/search/alarm"  # the state/history endpoint, not /config
     assert kwargs["params"] == {
         "pv": "DEV:X",
-        "start": "2026-06-01",
-        "end": "2026-06-02",
+        "start": "2026-06-01T00:00:00.000Z",
+        "end": "2026-06-02T00:00:00.000Z",
         "size": "51",
     }
+
+
+def test_get_alarm_history_naive_iso_gains_the_zone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE alarm regression, at the wire level.
+
+    Measured live against a real Alarm Logger: 'start=2026-07-08T12:45:58Z' returned events while
+    the identical 'start=2026-07-08T12:45:58' returned 0 — the zone-less form matches none of the
+    server's parsers and degrades to 'now'. A 7-day window is far too wide for a mere zone shift to
+    empty, so this is the collapse, not an offset. It is also the most likely wrong value there is:
+    datetime.now().isoformat() emits exactly this.
+    """
+    client = AlarmClient("http://alarm:8081")
+    getter = Mock(return_value=_resp([]))
+    monkeypatch.setattr(client.session, "get", getter)
+    client.get_alarm_history("DEV:X", "2026-07-08T12:45:58", "2026-07-15T12:45:58")
+    params = getter.call_args.kwargs["params"]
+    assert params["start"] == "2026-07-08T12:45:58.000Z"
+    assert params["end"] == "2026-07-15T12:45:58.000Z"
+
+
+def test_get_alarm_history_relative_amount_passes_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A relative amount is the server's to resolve — its clock owns its data."""
+    client = AlarmClient("http://alarm:8081")
+    getter = Mock(return_value=_resp([]))
+    monkeypatch.setattr(client.session, "get", getter)
+    client.get_alarm_history("DEV:X", "8 hours", "now")
+    params = getter.call_args.kwargs["params"]
+    assert params["start"] == "8 hours"
+    assert params["end"] == "now"
+
+
+def test_get_alarm_history_bad_time_makes_no_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A value the server would misread is refused BEFORE any I/O.
+
+    '500 millis' is the sharpest case: measured live it RETURNS DATA — for a 500-MINUTE window,
+    because the unit dispatch tests startsWith("mi") before equals("ms"). Wrong data beats no data
+    only in the sense that it is harder to notice.
+    """
+    client = AlarmClient("http://alarm:8081")
+
+    def _fail(*_a: object, **_k: object) -> Mock:
+        raise AssertionError("a request was made with an unusable time value")
+
+    monkeypatch.setattr(client.session, "get", _fail)
+    for bad in ("500 millis", "5 m", "garbage", "1 year"):
+        with pytest.raises(TimeWindowFormatError):
+            client.get_alarm_history("DEV:X", bad, "now")
 
 
 def test_get_alarm_history_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -8,13 +8,13 @@ import requests
 from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
 from epics_pv_mcp.olog_safety import OlogWriteGate
+from epics_pv_mcp.services._time_window import TimeWindowFormatError
 from epics_pv_mcp.services.olog_client import OlogClient
 from epics_pv_mcp.services.olog_exceptions import (
     OlogConnectionError,
     OlogError,
     OlogResponseError,
 )
-from epics_pv_mcp.services.olog_time import OlogTimeFormatError
 from epics_pv_mcp.services.redact import FREETEXT_WITHHELD
 from epics_pv_mcp.tools.olog import (
     _get_log_entry,
@@ -459,14 +459,14 @@ def _search_client_raising(exc: BaseException) -> type:
 @pytest.mark.asyncio
 async def test_search_bad_time_is_not_a_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """An unusable time window is a bad ARGUMENT — nothing was ever sent, so 'cannot reach Olog'
-    would be a lie. Pins that OlogTimeFormatError is not swept up by the OlogError branch."""
+    would be a lie. Pins that TimeWindowFormatError is not swept up by the OlogError branch."""
     monkeypatch.setattr(
         "epics_pv_mcp.services.checkers.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
     monkeypatch.setattr(
         "epics_pv_mcp.services.checkers.OlogClient",
-        _search_client_raising(OlogTimeFormatError("start='1 year': use days or weeks")),
+        _search_client_raising(TimeWindowFormatError("start='1 year': use days or weeks")),
     )
     with pytest.raises(EpicsError) as excinfo:
         await _search_logbook(start="1 year")
@@ -691,7 +691,7 @@ def test_search_logbook_bad_time_makes_no_request(monkeypatch: pytest.MonkeyPatc
         raise AssertionError("a request was made with an unusable time value")
 
     monkeypatch.setattr(client.session, "get", _fail)
-    with pytest.raises(OlogTimeFormatError):
+    with pytest.raises(TimeWindowFormatError):
         client.search_logbook(start="1 year")
 
 
@@ -709,7 +709,7 @@ def test_search_logbook_start_after_end_rejected_client_side(
         raise AssertionError("a request was made with an inverted window")
 
     monkeypatch.setattr(client.session, "get", _fail)
-    with pytest.raises(OlogTimeFormatError, match="after"):
+    with pytest.raises(TimeWindowFormatError, match="after"):
         client.search_logbook(start="2027-01-01T00:00:00Z", end="2026-01-01T00:00:00Z")
 
 

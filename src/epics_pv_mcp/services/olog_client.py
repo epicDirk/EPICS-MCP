@@ -67,12 +67,9 @@ from epics_pv_mcp.services._http import (
     rest_get_json,
     rest_put_json,
 )
+from epics_pv_mcp.services._time_window import TimeWindowFormatError
 from epics_pv_mcp.services.olog_exceptions import OlogConnectionError, OlogResponseError
-from epics_pv_mcp.services.olog_time import (
-    OLOG_WIRE_TZ,
-    OlogTimeFormatError,
-    normalize_olog_time,
-)
+from epics_pv_mcp.services.olog_time import OLOG_WIRE_TZ, normalize_olog_time
 from epics_pv_mcp.services.redact import redact_record
 
 # Default cap on returned log entries (a wide/empty search is otherwise unbounded).
@@ -278,7 +275,7 @@ class OlogClient:
             # ("unauthorized") — a misleading answer to what is simply a swapped window. A
             # mixed/relative window stays the server's call: resolving the amount ourselves would
             # substitute our clock for the one that owns the data.
-            raise OlogTimeFormatError(
+            raise TimeWindowFormatError(
                 f"start ({start!r}) is after end ({end!r}) — the window is empty. "
                 f"Swap them, or drop end to search up to now."
             )

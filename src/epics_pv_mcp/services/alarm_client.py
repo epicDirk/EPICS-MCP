@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from epics_pv_mcp.services._http import build_retrying_session, rest_get_json
 from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
+from epics_pv_mcp.services.alarm_time import normalize_alarm_time
 from epics_pv_mcp.services.redact import project_allowlist, redact_record
 
 # Default alarm config-tree (topic) name; the leading path segment that selects the ES index.
@@ -192,8 +193,11 @@ class AlarmClient:
         a wildcard substring on the alarm ``config`` path, applies the ``message_time`` range
         ``[start, end]`` and returns the newest ``size`` records first (``message_time`` DESC).
         *start* and *end* are REQUIRED (a defaultless query must never pull the whole history); each
-        accepts an absolute time (ISO-8601) or a relative amount (e.g. ``"8 hours"``) — the server's
-        ``TimeParser`` handles both. NOTE: without an index/root restriction ``/search/alarm``
+        accepts an absolute time (ISO-8601) or a relative amount (e.g. ``"8 hours"``). Both are
+        normalized by :func:`~epics_pv_mcp.services.alarm_time.normalize_alarm_time` FIRST — the
+        server's ``TimeParser`` reads ISO only WITH a zone and silently takes anything unreadable
+        as *now*, answering 200 with an empty list rather than an error (measured live; see that
+        module). NOTE: without an index/root restriction ``/search/alarm``
         returns alarm STATE-change AND alarm CONFIG-change documents; the ``config`` field prefix
         (``state:`` vs ``config:``) distinguishes them and is kept in the projected event.
 
@@ -212,7 +216,12 @@ class AlarmClient:
         happen at the DEFAULT ``es_max_size``; only a backend configured with a lower
         ``es_max_size`` is exposed.
         """
-        params = {"pv": pv, "start": start, "end": end, "size": str(max_events + 1)}
+        params = {
+            "pv": pv,
+            "start": normalize_alarm_time(start, param="start"),
+            "end": normalize_alarm_time(end, param="end"),
+            "size": str(max_events + 1),
+        }
         data = self._get(f"{self.base_url}/search/alarm", params)
         records = data if isinstance(data, list) else []
         capped = len(records) > max_events

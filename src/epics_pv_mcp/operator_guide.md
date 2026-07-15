@@ -168,6 +168,24 @@ Set `EPICS_MCP_NAMING_URL` to the service root **without** `/rest` and without a
 client appends `/rest/parts/…` and `/rest/deviceNames/…` itself; a trailing slash is normalized, but
 appending `/rest` yourself yields `/rest/rest/…` → 404.
 
+### Alarm history time window: ISO without a zone is read as "now" (and will not tell you)
+The Alarm Logger uses the REAL Phoebus parser (no vendored copy), so it reads ISO **with** a zone —
+`2026-07-08T12:45:58Z` and `+02:00` both work, and a bare date works too. But a zone-LESS
+`2026-07-08T12:45:58` matches no parser and falls into the same silent zero-offset path as Olog's:
+the window becomes `[now, now]` and the answer is **HTTP 200 with an empty list**. Measured live:
+the same 7-day window returned 20+ events with the `Z` and 0 without it. A window that wide cannot
+be emptied by a mere zone shift — it is the collapse.
+
+This matters more than it looks: `datetime.now().isoformat()` emits exactly the zone-less form, so
+it is the most likely wrong value a caller will ever produce. `500 millis` is worse still — it
+RETURNS data, for a 500-**minute** window. And the server's own range check is an empty `if` branch
+carrying a `// TODO check that the start is before the end`: an inverted window is logged
+server-side and queried anyway.
+
+`get_alarm_history` normalizes for you (absolute → `yyyy-MM-ddTHH:mm:ss.SSSZ`; amounts pass
+through; anything unclassifiable is refused before the request). Going at the REST API directly,
+always send the zone.
+
 ### Olog search time window: the server cannot read ISO-8601 (and will not tell you)
 Olog parses `start`/`end` with a **vendored, stripped** copy of Phoebus' `TimestampFormats` that has
 no ISO support — upstream's own copy has it; the fork deleted it. Only a **space-separated** wall

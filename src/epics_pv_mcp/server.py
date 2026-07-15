@@ -493,12 +493,16 @@ async def get_alarm_history(
         str,
         Field(
             description="Window start (REQUIRED) — absolute (ISO-8601, e.g. 2026-06-01T00:00:00Z) "
-            "or a relative amount (e.g. '8 hours', '2 days')"
+            "or a single relative amount (e.g. '8 hours', '2 days'). No months/years — use days "
+            "or weeks."
         ),
     ],
     end: Annotated[
         str,
-        Field(description="Window end (REQUIRED) — absolute (ISO-8601) or a relative amount"),
+        Field(
+            description="Window end (REQUIRED) — absolute (ISO-8601) or a single relative amount "
+            "(e.g. 'now')"
+        ),
     ],
     max_events: Annotated[
         int,
@@ -520,6 +524,12 @@ async def get_alarm_history(
     (severity/message/value/time/current_severity/current_message/enabled/mode/pv/config); the raw
     doc's user/host (who acknowledged/enabled/disabled) and command are stripped (privacy). capped
     is true when more than max_events matched.
+
+    Time window: an absolute value is normalized to zone-explicit UTC before sending (a naive one
+    is read as UTC); a single relative amount ('8 hours', 'now') passes through. A value the server
+    would misread is rejected before any request rather than sent: the Alarm Logger does not reject
+    an unreadable time, it silently takes it as 'now' and answers 200 with an empty list that is
+    indistinguishable from 'nothing alarmed'.
     """
     return await _get_alarm_history(pv, start, end, max_events, timeout)
 
