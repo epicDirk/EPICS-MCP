@@ -58,11 +58,46 @@ files. Do not rely on the local commit hook alone: its site patterns come from a
 are **absent on a fresh CI / public-fork checkout**, so the committed test is the CI-effective check —
 a best-effort denylist, not a proof, so the hand-transcription rule above is what actually keeps it out.
 
+## Server-decided parameters: no promise before a differential live probe (hard)
+
+A parameter whose semantics live on the **server** must not carry a **documented promise** until a
+**differential live probe** has confirmed it: the same target expressed several ways, plus a
+**positive control** (something that must match) **and a negative control** (something that must
+not). Until then it is **unverified**, and it says so **where the promise is made — the tool
+description** — not only in a client docstring.
+
+Scope: parameters the server interprets (a time window, a name filter, a glob, a sort order, a
+config-tree name). **Not** parameters we enforce ourselves at the boundary (`timeout`, `size`,
+`offset` — Pydantic rejects those before a request exists).
+
+Why both controls, and why live:
+
+- A mock cannot reach this class at all. It only ever knows what the client **sent**, never what
+  the server **honoured** — and it is equally blind to a **loud** rejection (13 tests passed a
+  literal `"a"` as a time; the real Archiver answers 500).
+- One control is not enough. "It returns something" would also pass if the filter were dropped
+  entirely (→ negative control); "every filter returns 0" looks the same as a filter that blocks
+  everything (→ positive control).
+- Reading the source is not a substitute. On exactly this question it was wrong five times in one
+  week (two judges on Olog, an assessment on Alarm, a suspicion on Archiver, O1's premise).
+
+Prefer making the promise **structurally true** over documenting a caveat: a `Literal`/enum at the
+tool boundary is Tier 1 and cannot rot. Document the caveat only for what the boundary cannot
+enforce. And a refusal is only correct while its premise holds — pin the server behaviour that
+justifies it in a live test, so it goes **red** when the server improves
+(`tests/test_olog_live.py::test_unreadable_sort_silently_reverses_on_the_server`).
+
+Honest limit: this one is **prose**, and prose is the category that rots (see above). No CI guard
+can prove a probe *ran* — CI runs with the live env unset, so live tests skip. The guard is the
+review, plus the live tests themselves once someone points the env at a service.
+
 ## Definition of Done (doc-sync)
 
 A new tool / resource / config is not done until: `README.md` is updated (resource URIs are
-drift-checked), the server `instructions` / tool descriptions carry the point-of-need semantics, the
-operator guide is updated, and `.env.example` documents any new var. See `CONTRIBUTING.md`.
+drift-checked), the server `instructions` / tool descriptions carry the point-of-need semantics —
+including, for a server-decided parameter, its **probed** semantics or an explicit "unverified"
+(see above) — the operator guide is updated, and `.env.example` documents any new var. See
+`CONTRIBUTING.md`.
 
 ## Build-once
 
