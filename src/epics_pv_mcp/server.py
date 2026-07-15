@@ -1,7 +1,7 @@
 """EPICS PV MCP Server — main entry point."""
 
 import logging
-from typing import Annotated
+from typing import Annotated, Literal
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -265,7 +265,13 @@ async def discover_pvs(
 async def find_channels(
     name_pattern: Annotated[
         str,
-        Field(description="Channel/PV name glob (ChannelFinder syntax: * and ?)"),
+        Field(
+            description=(
+                "Channel/PV name glob (ChannelFinder syntax: * and ?). ANCHORED and "
+                "CASE-INSENSITIVE: a bare substring matches nothing — wrap it in * to search "
+                "inside a name."
+            )
+        ),
     ],
     max_results: Annotated[
         int,
@@ -276,6 +282,12 @@ async def find_channels(
     """Query ChannelFinder: which IOC/host serves a PV, plus its tags/properties.
 
     Read-only. Disabled by default (set EPICS_MCP_CHANNELFINDER_URL to enable).
+
+    The glob is matched by the SERVER, and both of its properties bite silently (measured live
+    2026-07-15). It is ANCHORED: 'Ctrl-EVR-01' matches 0 channels while '*Ctrl-EVR-01*' matches
+    them all, so a bare substring reads as 'no such channel' rather than as a syntax mistake.
+    And it is CASE-INSENSITIVE: '*temp*', '*Temp*' and '*TEMP*' return the identical set, so a
+    hit may differ in case from what was asked (e.g. '*Temp*' matching '...MorTemPrd').
     """
     return await _find_channels(name_pattern, max_results, timeout)
 
@@ -472,15 +484,28 @@ async def list_archived_pvs(
 async def is_alarm_configured(
     pv: Annotated[str, Field(description="EPICS PV name")],
     config_name: Annotated[
-        str, Field(description="Alarm config-tree name (top-level topic, e.g. Accelerator)")
+        str,
+        Field(
+            description=(
+                "Alarm config-tree name (top-level topic, e.g. Accelerator). CASE-SENSITIVE: a "
+                "wrong or mis-cased name yields configured=null (withheld), never false."
+            )
+        ),
     ] = "Accelerator",
-    timeout: Annotated[float, Field(description="Timeout in seconds")] = 5.0,
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
 ) -> dict[str, object]:
     """Report whether a PV has an alarm configuration (Phoebus Alarm Logger /search/alarm/config).
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ALARM_URL is set.
     A hit proves the PV is configured in the alarm tree; a miss is a real negative only when the
     Alarm Logger was running at config-import time (else the config change never reached its index).
+
+    configured is true / false / null, and null means WITHHELD — the tree itself returned nothing,
+    so 'this PV is not configured' cannot be told apart from 'that is not the tree name'; a note
+    then says so. config_name is CASE-SENSITIVE even though the server lower-cases it to pick the
+    index (measured live 2026-07-15: 'accelerator' selects the right index and matches nothing,
+    reporting exactly like a genuinely unconfigured PV). The returned config field echoes your
+    input — it is NOT the server confirming the tree exists.
     """
     return await _is_alarm_configured(pv, config_name, timeout)
 
@@ -583,7 +608,14 @@ async def search_logbook(
         int, Field(description="0-based pagination offset — read past the first page", ge=0)
     ] = 0,
     sort: Annotated[
-        str, Field(description="Create-time order: 'down' newest-first (default) or 'up'")
+        Literal["down", "up"],
+        Field(
+            description=(
+                "Create-time order: 'down' newest-first (default) or 'up' oldest-first. "
+                "Rejected here if it is neither: Olog reads any unrecognized value as 'up', "
+                "silently returning the REVERSE of the documented default."
+            )
+        ),
     ] = "down",
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
 ) -> dict[str, object]:
@@ -605,9 +637,12 @@ async def search_logbook(
     from 'nothing matched'.
 
     Page the history with offset (0-based; Olog wire 'from') and order with sort ('down'=newest
-    first, the default; 'up'=oldest first). total is the number of entries returned; total_matches
-    is the true total across all pages (Olog hitCount); capped is true when more than size matched
-    on this page.
+    first, the default; 'up'=oldest first). sort only accepts those two values and is rejected
+    otherwise, because Olog does not reject an unrecognized order: it silently applies 'up' —
+    the REVERSE of the documented default — and answers 200 with a well-formed page (measured
+    live 2026-07-15: 'newest' and 'garbage' both returned oldest-first). total is the number of
+    entries returned; total_matches is the true total across all pages (Olog hitCount); capped is
+    true when more than size matched on this page.
     """
     return await _search_logbook(
         text=text,

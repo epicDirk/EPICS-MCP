@@ -249,9 +249,11 @@ messages embed the full request URL — an internal host would leak into this fi
   never a false negative.
 - **Archived? how? history?** `is_archived` / `get_archive_info` / `get_pv_history`. History `status` is
   `ok` / `empty` / `withheld` — a bare `[]` means only a truly empty history, not "could not read".
-- **Alarm configured / history?** `is_alarm_configured` (a miss is `configured:false`, a true negative
-  only if the Alarm Logger was running at config-import time — otherwise treat it as unreliable; the tool
-  cannot flag this) / `get_alarm_history` (`start` + `end` required).
+- **Alarm configured / history?** `is_alarm_configured` (`configured` is `true`/`false`/`null`;
+  `null` = withheld, see the config-tree recipe below) / `get_alarm_history` (`start` + `end`
+  required; `pv` is matched as a wildcard SUBSTRING of the config path — `Value` matches both
+  `...:Temp1Value` and `...:12VValue`). A `false` is a true negative only if the Alarm Logger was
+  running at config-import time — otherwise treat it as unreliable; the tool cannot flag this.
 - **An Olog search answers 401.** On an anonymous read that is almost never a credentials problem:
   Olog's error dispatch requires authentication, so it returns **401 in place of its own 400** —
   every server-side rejection looks like "unauthorized". Check the query (the time window first);
@@ -266,6 +268,16 @@ messages embed the full request URL — an internal host would leak into this fi
   `INVALID_ARGUMENT` is an argument combination that cannot be answered at all. Only
   `EPICS_CONNECTION_FAILED` means unreachable.
 - **Which IOC/host serves a PV?** `find_channels`.
+- **`is_alarm_configured` answers `configured:null`.** The alarm tree itself returned nothing, so
+  "this PV is not configured" cannot be told apart from "that is not the tree name" — the answer is
+  withheld, and a `note` says so. The tree name is **case-sensitive** in the query even though the
+  server lower-cases it to pick the index, so `accelerator` selects the right index and matches
+  nothing. Re-run with the tree spelled as the logger stores it (`Accelerator`). The `config` field
+  in the response echoes your input — it is not the server confirming the tree.
+- **A ChannelFinder glob finds nothing / finds odd casing.** The glob is **anchored**: a bare
+  substring (`Ctrl-EVR-01`) matches 0 — wrap it in stars (`*Ctrl-EVR-01*`). And it is
+  **case-insensitive**: `*Temp*` legitimately matches `...MorTemPrd`, so a hit may differ in case
+  from what you asked.
 - **A REST 404 = `found:false`** only where documented (`getPVTypeInfo`, Olog `get_log_entry`); any other
   error propagates — could-not-read is never silently "not there".
 
