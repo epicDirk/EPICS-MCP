@@ -47,8 +47,12 @@ This is a RUNTIME output policy and is unrelated to keeping person names out of 
 that is enforced separately (the facility-agnostic guards and hand-transcription rule, CLAUDE.md).
 
 ⚠️ Search-param names (``desc``/``logbooks``/``tags``/``start``/``end``/``size``) and the entry
-field names follow the documented Phoebus Olog model but are best-effort until the ESS live-smoke —
-the redaction is defence-in-depth regardless of which extra fields a given Olog version returns.
+field names follow the documented Phoebus Olog model. ``start``/``end``/``tz`` are no longer
+best-effort — they were smoke-tested live (2026-07-15) and the window turned out to be actively
+BROKEN as sent: Olog cannot parse ISO-8601 and says so only by returning an empty result. See
+:mod:`epics_pv_mcp.services.olog_time` for the mechanism and :meth:`OlogClient._add_window` for the
+fix. The remaining names are still best-effort — the redaction is defence-in-depth regardless of
+which extra fields a given Olog version returns.
 """
 
 from __future__ import annotations
@@ -64,6 +68,11 @@ from epics_pv_mcp.services._http import (
     rest_put_json,
 )
 from epics_pv_mcp.services.olog_exceptions import OlogConnectionError, OlogResponseError
+from epics_pv_mcp.services.olog_time import (
+    OLOG_WIRE_TZ,
+    OlogTimeFormatError,
+    normalize_olog_time,
+)
 from epics_pv_mcp.services.redact import redact_record
 
 # Default cap on returned log entries (a wide/empty search is otherwise unbounded).
@@ -241,6 +250,39 @@ class OlogClient:
                 f"Failed to connect to Olog at {self.base_url}: {exc}"
             ) from exc
 
+    @staticmethod
+    def _add_window(params: dict[str, str], start: str | None, end: str | None) -> None:
+        """Put the normalized time window into *params* — or raise before anything is sent.
+
+        Olog cannot read ISO-8601 and does not say so: an unparseable value degrades to *now*,
+        collapsing the window to nothing and returning a well-formed EMPTY result (measured live;
+        see :mod:`epics_pv_mcp.services.olog_time`). So every value is normalized to a form Olog
+        actually parses, or refused here.
+
+        ``tz`` is sent iff an absolute value is present: it exists only to interpret wall-clock
+        strings, and Olog resolves relative amounts by instant arithmetic where the zone is a
+        no-op. Omitting it would let Olog read our strings in ITS default zone — an invisible
+        offset against any Olog not running UTC.
+        """
+        start_is_absolute = end_is_absolute = False
+        if start:
+            params["start"], start_is_absolute = normalize_olog_time(start, param="start")
+        if end:
+            params["end"], end_is_absolute = normalize_olog_time(end, param="end")
+        if start_is_absolute or end_is_absolute:
+            params["tz"] = OLOG_WIRE_TZ
+        if start_is_absolute and end_is_absolute and params["start"] > params["end"]:
+            # Both absolute -> comparable right here, without a clock. The normalized form is
+            # fixed-width and always UTC, so a string compare IS a chronological one. Left to
+            # Olog this is a 400, which an anonymous read only ever sees as a 401
+            # ("unauthorized") — a misleading answer to what is simply a swapped window. A
+            # mixed/relative window stays the server's call: resolving the amount ourselves would
+            # substitute our clock for the one that owns the data.
+            raise OlogTimeFormatError(
+                f"start ({start!r}) is after end ({end!r}) — the window is empty. "
+                f"Swap them, or drop end to search up to now."
+            )
+
     def search_logbook(
         self,
         text: str | None = None,
@@ -272,13 +314,33 @@ class OlogClient:
             params["logbooks"] = logbooks
         if tags:
             params["tags"] = tags
-        if start:
-            params["start"] = start
-        if end:
-            params["end"] = end
+        self._add_window(params, start, end)
         if offset > 0:
             params["from"] = str(offset)
-        data = self._get(f"{self.base_url}/logs/search", params)
+        try:
+            data = self._get(f"{self.base_url}/logs/search", params)
+        except OlogResponseError as exc:
+            # Chain from the ORIGINAL transport cause so http_status still reads the served code
+            # downstream (mirrors create_log_entry). 5xx / anything else propagates as-is.
+            cause = exc.__cause__ if exc.__cause__ is not None else exc
+            if http_status(exc) == 401:
+                # Measured: Olog answers 401 to an ANONYMOUS caller for every server-side 400 —
+                # its error dispatch requires auth and so masks its own rejection. This read path
+                # IS anonymous, making 401 the reachable branch; blaming credentials would send
+                # the reader after the wrong problem entirely.
+                raise OlogResponseError(
+                    "Olog rejected the search (HTTP 401). On this anonymous read path that "
+                    "almost always means the QUERY was rejected, not that credentials are "
+                    "wrong: Olog's error dispatch requires authentication and returns 401 in "
+                    "place of its own 400. Check the time window (start/end) first."
+                ) from cause
+            if is_http_400(exc):
+                raise OlogResponseError(
+                    "Olog rejected the search (HTTP 400): most likely the time window — start "
+                    "must not be after end, and with no end Olog compares against now, so a "
+                    "start in the future is rejected."
+                ) from cause
+            raise
         entries = _entries_of(data)
         capped = len(entries) > size
         total_matches = _hit_count(data)

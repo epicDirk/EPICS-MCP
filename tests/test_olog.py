@@ -6,9 +6,15 @@ import pytest
 import requests
 
 from epics_pv_mcp.config import EpicsConfig
+from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
 from epics_pv_mcp.olog_safety import OlogWriteGate
 from epics_pv_mcp.services.olog_client import OlogClient
-from epics_pv_mcp.services.olog_exceptions import OlogConnectionError, OlogError
+from epics_pv_mcp.services.olog_exceptions import (
+    OlogConnectionError,
+    OlogError,
+    OlogResponseError,
+)
+from epics_pv_mcp.services.olog_time import OlogTimeFormatError
 from epics_pv_mcp.services.redact import FREETEXT_WITHHELD
 from epics_pv_mcp.tools.olog import (
     _get_log_entry,
@@ -46,6 +52,15 @@ def _resp(payload: object, *, ok: bool = True) -> Mock:
         resp.raise_for_status.return_value = None
     else:
         resp.raise_for_status.side_effect = requests.exceptions.HTTPError("500")
+    return resp
+
+
+def _err_resp(status: int) -> Mock:
+    """A response double that fails with *status*, carrying it where http_status() reads it."""
+    http_error = requests.exceptions.HTTPError(str(status))
+    http_error.response = Mock(status_code=status)
+    resp = Mock(is_redirect=False)  # explicit: a bare Mock's attributes are all truthy
+    resp.raise_for_status.side_effect = http_error
     return resp
 
 
@@ -424,6 +439,79 @@ async def test_search_logbook_tool_enabled_is_redacted(monkeypatch: pytest.Monke
     assert entries[0]["title"] == FREETEXT_WITHHELD
 
 
+# --- search_logbook: the ERROR CLASS at the tool boundary ---
+#
+# Three outcomes, three classes. Reporting a bad argument or a served rejection as
+# EPICS_CONNECTION_FAILED ("cannot reach Olog") sends the reader after the wrong problem.
+
+
+def _search_client_raising(exc: BaseException) -> type:
+    class _Fake:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def search_logbook(self, **kwargs: object) -> tuple[list[dict[str, object]], bool, int]:
+            raise exc
+
+    return _Fake
+
+
+@pytest.mark.asyncio
+async def test_search_bad_time_is_not_a_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unusable time window is a bad ARGUMENT — nothing was ever sent, so 'cannot reach Olog'
+    would be a lie. Pins that OlogTimeFormatError is not swept up by the OlogError branch."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.OlogClient",
+        _search_client_raising(OlogTimeFormatError("start='1 year': use days or weeks")),
+    )
+    with pytest.raises(EpicsError) as excinfo:
+        await _search_logbook(start="1 year")
+    assert excinfo.value.error_code == "INVALID_TIME_WINDOW"
+    assert not isinstance(excinfo.value, EpicsConnectionError)
+
+
+@pytest.mark.asyncio
+async def test_search_served_error_is_not_a_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The server ANSWERED and said no — that is not an outage."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+    http_error = requests.exceptions.HTTPError("401")
+    http_error.response = Mock(status_code=401)
+    served = OlogResponseError("Olog rejected the search (HTTP 401)")
+    served.__cause__ = http_error
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _search_client_raising(served))
+    with pytest.raises(EpicsError) as excinfo:
+        await _search_logbook(text="x")
+    assert excinfo.value.error_code == "OLOG_HTTP_401"
+    assert not isinstance(excinfo.value, EpicsConnectionError)
+
+
+@pytest.mark.asyncio
+async def test_search_connection_failure_still_maps_to_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-test: the split must not over-reach — a real outage stays a connection error."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.OlogClient",
+        _search_client_raising(OlogConnectionError("no route to host")),
+    )
+    with pytest.raises(EpicsConnectionError) as excinfo:
+        await _search_logbook(text="x")
+    assert excinfo.value.error_code == "EPICS_CONNECTION_FAILED"
+
+
 @pytest.mark.asyncio
 async def test_get_log_entry_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
@@ -501,6 +589,158 @@ def test_search_logbook_offset_zero_omits_from(monkeypatch: pytest.MonkeyPatch) 
     assert isinstance(params, dict)
     assert "from" not in params
     assert params["sort"] == "down"
+
+
+# --- search_logbook: the time window on the wire (live-established contract) ---
+#
+# Olog cannot parse ISO-8601 (its vendored TimestampFormats is a stripped copy with no ISO support)
+# and does NOT say so: an unparseable value degrades to a zero offset from *now*, collapsing the
+# window to [now, now+us] -> HTTP 200 with an empty result that reads as "nothing matched".
+# Measured live, 2026-07-15. These tests pin the normalization that prevents it; they are wire-level
+# because that silent drop happens on the SERVER, where no mock can see it.
+
+
+def test_search_logbook_iso_window_sent_as_wall_clock_with_tz(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The headline regression: an ISO window must reach Olog as its space-separated wall clock.
+
+    Sent verbatim (the pre-fix behaviour), this exact window returned 0 of 9 entries live.
+    """
+    client = OlogClient("http://olog")
+    captured: dict[str, object] = {}
+
+    def _get(url: str, params: object = None, timeout: object = None, **_: object) -> Mock:
+        captured["params"] = params
+        return _resp({"logs": [], "hitCount": 0})
+
+    monkeypatch.setattr(client.session, "get", _get)
+    client.search_logbook(start="2026-01-01T00:00:00Z", end="2027-01-01T00:00:00Z")
+    params = captured["params"]
+    assert isinstance(params, dict)
+    assert params["start"] == "2026-01-01 00:00:00.000"
+    assert params["end"] == "2027-01-01 00:00:00.000"
+    assert "T" not in str(params["start"])
+    # Without an explicit tz Olog reads the wall clock in the SERVER's zone — silently offset
+    # against any Olog not running UTC, which no UTC-sandbox test would ever reveal.
+    assert params["tz"] == "UTC"
+
+
+def test_search_logbook_relative_window_not_rewritten_and_sends_no_tz(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Relative amounts are the server's to resolve: passed verbatim, and tz would be a no-op."""
+    client = OlogClient("http://olog")
+    captured: dict[str, object] = {}
+
+    def _get(url: str, params: object = None, timeout: object = None, **_: object) -> Mock:
+        captured["params"] = params
+        return _resp({"logs": [], "hitCount": 0})
+
+    monkeypatch.setattr(client.session, "get", _get)
+    client.search_logbook(start="7 days")
+    params = captured["params"]
+    assert isinstance(params, dict)
+    assert params["start"] == "7 days"
+    assert "tz" not in params
+
+
+def test_search_logbook_mixed_window_still_sends_tz(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One absolute value is enough to need a zone for it."""
+    client = OlogClient("http://olog")
+    captured: dict[str, object] = {}
+
+    def _get(url: str, params: object = None, timeout: object = None, **_: object) -> Mock:
+        captured["params"] = params
+        return _resp({"logs": [], "hitCount": 0})
+
+    monkeypatch.setattr(client.session, "get", _get)
+    client.search_logbook(start="7 days", end="2027-01-01T00:00:00Z")
+    params = captured["params"]
+    assert isinstance(params, dict)
+    assert params["start"] == "7 days"
+    assert params["end"] == "2027-01-01 00:00:00.000"
+    assert params["tz"] == "UTC"
+
+
+def test_search_logbook_without_window_sends_no_time_params(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guards against always-sending tz: no window means no time params at all."""
+    client = OlogClient("http://olog")
+    captured: dict[str, object] = {}
+
+    def _get(url: str, params: object = None, timeout: object = None, **_: object) -> Mock:
+        captured["params"] = params
+        return _resp({"logs": [], "hitCount": 0})
+
+    monkeypatch.setattr(client.session, "get", _get)
+    client.search_logbook(text="x")
+    params = captured["params"]
+    assert isinstance(params, dict)
+    assert "start" not in params
+    assert "end" not in params
+    assert "tz" not in params
+
+
+def test_search_logbook_bad_time_makes_no_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A value Olog cannot read is refused BEFORE any I/O — never sent and silently misread."""
+    client = OlogClient("http://olog")
+
+    def _fail(*_a: object, **_k: object) -> Mock:
+        raise AssertionError("a request was made with an unusable time value")
+
+    monkeypatch.setattr(client.session, "get", _fail)
+    with pytest.raises(OlogTimeFormatError):
+        client.search_logbook(start="1 year")
+
+
+def test_search_logbook_start_after_end_rejected_client_side(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both values absolute -> we can compare them ourselves, deterministically.
+
+    Left to the server this is a 400, which our ANONYMOUS read path only ever sees as a 401
+    ('unauthorized') — actively misleading for what is a swapped window.
+    """
+    client = OlogClient("http://olog")
+
+    def _fail(*_a: object, **_k: object) -> Mock:
+        raise AssertionError("a request was made with an inverted window")
+
+    monkeypatch.setattr(client.session, "get", _fail)
+    with pytest.raises(OlogTimeFormatError, match="after"):
+        client.search_logbook(start="2027-01-01T00:00:00Z", end="2026-01-01T00:00:00Z")
+
+
+def test_search_logbook_401_message_explains_anonymous_error_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Measured: Olog turns EVERY server-side 400 into a 401 for an anonymous caller (its error
+    dispatch requires auth). Our read path IS anonymous, so 401 — not 400 — is the reachable
+    branch, and blaming credentials would send the user hunting the wrong problem."""
+    client = OlogClient("http://olog")
+
+    def _get(url: str, params: object = None, timeout: object = None, **_: object) -> Mock:
+        return _err_resp(401)
+
+    monkeypatch.setattr(client.session, "get", _get)
+    with pytest.raises(OlogResponseError, match="rejected"):
+        client.search_logbook(text="x")
+
+
+def test_search_logbook_400_message_names_the_time_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A deployment with read credentials sees Olog's real 400 — it must name the likely cause."""
+    client = OlogClient("http://olog")
+
+    def _get(url: str, params: object = None, timeout: object = None, **_: object) -> Mock:
+        return _err_resp(400)
+
+    monkeypatch.setattr(client.session, "get", _get)
+    with pytest.raises(OlogResponseError, match="time window"):
+        client.search_logbook(text="x")
 
 
 # --- list_logbooks / list_tags: client name-only projection (owner dropped) ---

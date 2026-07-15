@@ -168,6 +168,29 @@ Set `EPICS_MCP_NAMING_URL` to the service root **without** `/rest` and without a
 client appends `/rest/parts/…` and `/rest/deviceNames/…` itself; a trailing slash is normalized, but
 appending `/rest` yourself yields `/rest/rest/…` → 404.
 
+### Olog search time window: the server cannot read ISO-8601 (and will not tell you)
+Olog parses `start`/`end` with a **vendored, stripped** copy of Phoebus' `TimestampFormats` that has
+no ISO support — upstream's own copy has it; the fork deleted it. Only a **space-separated** wall
+clock (`yyyy-MM-dd HH:mm:ss.SSS` and shorter) or a **single relative amount** (`7 days`, `90 min`,
+`now`) parses.
+
+The trap is the failure mode: an unreadable value is **not** an error. Olog falls back to its
+relative-amount parser, which scans for a unit token, finds none in an ISO string, and returns a
+**zero** offset — which it subtracts from *now*. The window collapses to `[now, now+µs]` and matches
+nothing, so the answer is **HTTP 200 with an empty list**: indistinguishable from "nothing matched".
+Same window, same data, different format → 0 results vs. all of them.
+
+`search_logbook` normalizes for you (absolute → UTC wall clock plus `tz=UTC`; amounts pass through;
+anything unclassifiable is refused **before** the request). Going at the REST API directly, do it
+yourself. Also note: **months/years are unusable** (the amount is subtracted from a point in time,
+which cannot carry them → rejected), and `millis` means **minutes** to Olog's unit dispatch (use
+`ms`). Always send `tz` with a wall clock — without it Olog reads the string in the **server's**
+default zone, so a window is silently offset against any deployment not on UTC.
+
+**Generalisable:** a fully-mocked test suite cannot detect a server-side silent drop — a mock only
+sees what the client *sent*, never what the server *honoured*. Only a differential live probe
+(same window, several formats, plus a negative control) can.
+
 ## Error signatures → which tool answers
 
 Illustrate signatures by the exception **class and shape**, never a copied runtime string (error
@@ -185,6 +208,13 @@ messages embed the full request URL — an internal host would leak into this fi
 - **Alarm configured / history?** `is_alarm_configured` (a miss is `configured:false`, a true negative
   only if the Alarm Logger was running at config-import time — otherwise treat it as unreliable; the tool
   cannot flag this) / `get_alarm_history` (`start` + `end` required).
+- **An Olog search answers 401.** On an anonymous read that is almost never a credentials problem:
+  Olog's error dispatch requires authentication, so it returns **401 in place of its own 400** —
+  every server-side rejection looks like "unauthorized". Check the query (the time window first);
+  a deployment configured with read credentials sees the real 400 and its message.
+- **An Olog search answers 200 with an empty list.** Not necessarily "nothing matched" — an
+  unreadable `start`/`end` degrades to *now* server-side and matches nothing (see the recipe
+  above). Re-run with a relative amount (`7 days`) to tell a real empty from a dead window.
 - **Which IOC/host serves a PV?** `find_channels`.
 - **A REST 404 = `found:false`** only where documented (`getPVTypeInfo`, Olog `get_log_entry`); any other
   error propagates — could-not-read is never silently "not there".

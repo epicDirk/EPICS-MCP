@@ -542,10 +542,18 @@ async def search_logbook(
     ] = None,
     tags: Annotated[str | None, Field(description="Comma-separated tag names to filter by")] = None,
     start: Annotated[
-        str | None, Field(description="Window start — ISO-8601 or a relative amount ('7 days')")
+        str | None,
+        Field(
+            description="Window start — an absolute time (ISO-8601, e.g. '2026-07-15T10:00:00Z') "
+            "or a single amount ('7 days', '90 min'). No months/years — use days or weeks."
+        ),
     ] = None,
     end: Annotated[
-        str | None, Field(description="Window end — ISO-8601 or a relative amount")
+        str | None,
+        Field(
+            description="Window end — an absolute time (ISO-8601) or a single amount. "
+            "Omit to search up to now."
+        ),
     ] = None,
     size: Annotated[int, Field(description="Cap on returned entries", ge=1, le=200)] = 50,
     offset: Annotated[
@@ -565,6 +573,13 @@ async def search_logbook(
     local sandbox (a loopback URL AND EPICS_MCP_OLOG_ASSUME_TEST_DATA), so results are judgeable;
     the shape is the same either way (the full mode only adds fields). ESS-spec pending — run
     epics-doctor for the effective posture.
+
+    Time window: start/end take an absolute time (ISO-8601 — normalized to UTC before sending;
+    a naive value is read as UTC) or a single relative amount ('7 days', '90 min', 'now'). Months
+    and years are NOT supported by Olog — use days or weeks. A value Olog could not read is
+    rejected before any request rather than sent: Olog does not reject an unreadable time, it
+    silently reads it as 'now' and answers 200 with an empty result that is indistinguishable
+    from 'nothing matched'.
 
     Page the history with offset (0-based; Olog wire 'from') and order with sort ('down'=newest
     first, the default; 'up'=oldest first). total is the number of entries returned; total_matches

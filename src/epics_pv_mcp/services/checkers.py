@@ -41,6 +41,7 @@ from epics_pv_mcp.services.naming_client import NamingServiceClient
 from epics_pv_mcp.services.naming_exceptions import NamingServiceError
 from epics_pv_mcp.services.olog_client import DEFAULT_MAX_LOGS, OlogClient
 from epics_pv_mcp.services.olog_exceptions import OlogConnectionError, OlogError, OlogResponseError
+from epics_pv_mcp.services.olog_time import OlogTimeFormatError
 
 
 class CFRegistryChecker:
@@ -451,10 +452,20 @@ async def query_olog_search(
             "capped": capped,
         }
 
+    # Three outcomes, three classes. Collapsing them all into EpicsConnectionError (as this did)
+    # tells the caller the service is unreachable when in truth the ARGUMENT was bad or the server
+    # ANSWERED and said no — three different next actions reported as one.
     try:
         return await asyncio.to_thread(_run)
-    except OlogError as exc:
+    except OlogTimeFormatError as exc:
+        # Nothing was sent: the time window itself is unusable.
+        raise EpicsError(f"Olog: {exc}", error_code="INVALID_TIME_WINDOW") from exc
+    except OlogConnectionError as exc:
+        # Genuinely could not reach Olog.
         raise EpicsConnectionError(f"Olog: {exc}") from exc
+    except OlogError as exc:
+        # The server answered (a served 4xx/5xx, or a payload we could not read).
+        raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
 
 
 async def query_olog_entry(log_id: str, timeout: float = 5.0) -> dict[str, object]:
@@ -523,12 +534,13 @@ async def query_olog_tags(timeout: float = 5.0) -> dict[str, object]:
         raise EpicsConnectionError(f"Olog: {exc}") from exc
 
 
-def _olog_write_error_code(exc: BaseException) -> str:
-    """A discrete, freetext-free error code for an Olog write FAILED audit (never a message string).
+def _olog_error_code(exc: BaseException) -> str:
+    """A discrete, freetext-free error code for an Olog failure (never a message string).
 
     An :class:`EpicsError` carries its own code; an Olog connection/response error maps to a
     discrete token (the served HTTP status for a response error, when known); anything else is
-    INTERNAL. Never the exception message — the FAILED audit must stay metadata-only (SEC-5)."""
+    INTERNAL. Never the exception message — a write FAILED audit must stay metadata-only (SEC-5),
+    which is also why this stays freetext-free now that the read path classifies errors with it."""
     if isinstance(exc, EpicsError):
         return exc.error_code
     if isinstance(exc, OlogConnectionError):
@@ -584,7 +596,7 @@ async def query_olog_create(
                 logbooks=logbooks,
                 level=level,
                 title_len=len(title),
-                error_code=_olog_write_error_code(exc),
+                error_code=_olog_error_code(exc),
                 in_reply_to=in_reply_to,
                 caller=caller,
             )
