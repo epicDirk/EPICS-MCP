@@ -8,18 +8,28 @@ import requests
 from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
 from epics_pv_mcp.services._http import http_status, is_ssl_error
+from epics_pv_mcp.services._time_window import TimeWindowFormatError
+from epics_pv_mcp.services.alarm_time import normalize_alarm_time
 from epics_pv_mcp.services.archiver_client import ArchiverClient, HistoryResult, Sample
 from epics_pv_mcp.services.archiver_exceptions import (
     ArchiverConnectionError,
     ArchiverError,
     ArchiverResponseError,
 )
+from epics_pv_mcp.services.archiver_time import normalize_archiver_time
 from epics_pv_mcp.tools.archiver import (
     _get_archive_info,
     _get_pv_history,
     _is_archived,
     _list_archived_pvs,
 )
+
+# A valid window for the tests that are about something else (payload shapes, caps, errors).
+# These were "a"/"b" until the client gained a time contract — placeholders that no layer ever
+# looked at, and that a real Archiver answers with an HTTP 500. They stayed green only because
+# nothing validated them, which is the same blind spot the normalization closes.
+_T0 = "2026-06-01T00:00:00Z"
+_T1 = "2026-06-02T00:00:00Z"
 
 
 def _resp(payload: object, *, ok: bool = True) -> Mock:
@@ -92,7 +102,7 @@ def test_get_pv_history_status_empty_keeps_meta(monkeypatch: pytest.MonkeyPatch)
     raw = [{"meta": {"name": "X", "EGU": "V", "PREC": "2"}, "data": []}]
     client = ArchiverClient("http://arch")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(raw)))
-    result = client.get_pv_history("X", "a", "b")
+    result = client.get_pv_history("X", _T0, _T1)
     assert result["status"] == "empty"
     assert result["withheld_reason"] is None
     assert result["samples"] == []
@@ -118,7 +128,7 @@ def test_get_pv_history_withheld_unexpected_payload(
     when the truth is 'could not read'."""
     client = ArchiverClient("http://arch")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
-    result = client.get_pv_history("X", "a", "b")
+    result = client.get_pv_history("X", _T0, _T1)
     assert result["status"] == "withheld"
     assert result["withheld_reason"] == "unexpected_payload"
     assert result["samples"] == []
@@ -132,7 +142,7 @@ def test_get_pv_history_meta_none_and_nondict_coerced(monkeypatch: pytest.Monkey
     for payload in payloads:
         client = ArchiverClient("http://arch")
         monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
-        result = client.get_pv_history("X", "a", "b")
+        result = client.get_pv_history("X", _T0, _T1)
         assert result["meta"] == {}
         assert result["status"] == "empty"
         assert result["withheld_reason"] is None
@@ -146,7 +156,7 @@ def test_get_pv_history_withheld_unexpected_sample_shape(
     raw = [{"meta": {"name": "X"}, "data": ["junk", 42, None]}]
     client = ArchiverClient("http://arch")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(raw)))
-    result = client.get_pv_history("X", "a", "b")
+    result = client.get_pv_history("X", _T0, _T1)
     assert result["status"] == "withheld"
     assert result["withheld_reason"] == "unexpected_sample_shape"
     assert result["samples"] == []
@@ -167,7 +177,7 @@ def test_get_pv_history_nonpositive_max_points_not_withheld(
     ]
     client = ArchiverClient("http://arch")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(raw)))
-    result = client.get_pv_history("X", "a", "b", max_points=max_points)
+    result = client.get_pv_history("X", _T0, _T1, max_points=max_points)
     assert result["status"] == "ok"
     assert result["withheld_reason"] is None
     assert len(result["samples"]) == 1
@@ -190,7 +200,7 @@ def test_get_pv_history_mixed_valid_and_junk_ok(monkeypatch: pytest.MonkeyPatch)
     ]
     client = ArchiverClient("http://arch")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(raw)))
-    result = client.get_pv_history("X", "a", "b")
+    result = client.get_pv_history("X", _T0, _T1)
     assert result["status"] == "ok"
     assert [s["val"] for s in result["samples"]] == [1.0, 2.0]
 
@@ -201,7 +211,7 @@ def test_get_pv_history_connection_error(monkeypatch: pytest.MonkeyPatch) -> Non
         client.session, "get", Mock(side_effect=requests.exceptions.ConnectionError())
     )
     with pytest.raises(ArchiverConnectionError):
-        client.get_pv_history("X", "a", "b")
+        client.get_pv_history("X", _T0, _T1)
 
 
 # --- client: get_pv_type_info (DS-4B — archive configuration via getPVTypeInfo) ---
@@ -334,7 +344,7 @@ def test_two_url_routing_mgmt_vs_retrieval(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(client.session, "get", _get)
     client.is_archived("X")
     client.get_pv_type_info("X")
-    client.get_pv_history("X", "a", "b")
+    client.get_pv_history("X", _T0, _T1)
     assert captured[0] == "http://arch:17665/mgmt/bpl/getPVStatus"
     assert captured[1] == "http://arch:17665/mgmt/bpl/getPVTypeInfo"
     assert captured[2] == "http://arch:17668/retrieval/data/getData.json"
@@ -351,7 +361,7 @@ def test_retrieval_url_defaults_to_base(monkeypatch: pytest.MonkeyPatch) -> None
         return _resp([{"meta": {"name": "X"}, "data": []}])
 
     monkeypatch.setattr(client.session, "get", _get)
-    client.get_pv_history("X", "a", "b")
+    client.get_pv_history("X", _T0, _T1)
     assert captured[0] == "http://arch:17665/retrieval/data/getData.json"
 
 
@@ -430,7 +440,7 @@ async def test_get_pv_history_tool_disabled_no_network(monkeypatch: pytest.Monke
         raise AssertionError("client must not be constructed when disabled")
 
     monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _boom)
-    result = await _get_pv_history("X", "a", "b")
+    result = await _get_pv_history("X", _T0, _T1)
     assert result["enabled"] is False
     assert result["total"] == 0
 
@@ -511,7 +521,7 @@ async def test_get_pv_history_tool_passes_retrieval_url(monkeypatch: pytest.Monk
             )
 
     monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
-    result = await _get_pv_history("X", "a", "b")
+    result = await _get_pv_history("X", _T0, _T1)
     assert result["enabled"] is True
     assert captured["base_url"] == "http://arch:17665"
     assert captured["retrieval_url"] == "http://arch:17668"
@@ -544,7 +554,7 @@ async def test_get_pv_history_tool_surfaces_meta_and_status(
             )
 
     monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
-    result = await _get_pv_history("X", "a", "b")
+    result = await _get_pv_history("X", _T0, _T1)
     assert result["enabled"] is True
     assert result["total"] == 1
     assert result["meta"] == {"EGU": "V", "PREC": "2"}
@@ -577,7 +587,7 @@ async def test_get_pv_history_tool_surfaces_withheld(monkeypatch: pytest.MonkeyP
             )
 
     monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
-    result = await _get_pv_history("X", "a", "b")
+    result = await _get_pv_history("X", _T0, _T1)
     assert result["status"] == "withheld"
     assert result["withheld_reason"] == "unexpected_payload"
     assert result["note"] == "Archiver returned an unexpected payload."
@@ -846,6 +856,74 @@ async def test_list_archived_pvs_forwards_pattern_and_limit(
     monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
     await _list_archived_pvs(pattern="DEV-TEST01:*", limit=7)
     assert captured == {"pattern": "DEV-TEST01:*", "limit": 7}
+
+
+# --- get_pv_history: the time window on the wire (live-established contract) ---
+#
+# The Archiver reads zone-explicit ISO and NOTHING else — measured live: a naive ISO, a
+# space-separated wall clock, a bare date and '7 days' are each an HTTP 500. It never answers one
+# of them wrongly (unlike Olog/Alarm), but it is the narrowest of the three planes, so the
+# notations a caller learned elsewhere are normalized here rather than turned into a server error.
+
+
+def _history_params(
+    client: ArchiverClient, monkeypatch: pytest.MonkeyPatch, **kwargs: str
+) -> dict[str, object]:
+    """Capture the query params get_pv_history puts on the wire."""
+    captured: dict[str, object] = {}
+
+    def _get(url: str, params: object = None, timeout: object = None, **_: object) -> Mock:
+        captured["params"] = params
+        return _resp([{"meta": {}, "data": []}])
+
+    monkeypatch.setattr(client.session, "get", _get)
+    client.get_pv_history("SIM:PS-01:Cur-RB", kwargs["start"], kwargs["end"])
+    params = captured["params"]
+    assert isinstance(params, dict)
+    return params
+
+
+@pytest.mark.parametrize(
+    "start",
+    [
+        "2026-07-08T00:00:00Z",  # already correct — must stay stable (idempotence)
+        "2026-07-08T00:00:00",  # naive ISO: HTTP 500 today
+        "2026-07-08 00:00:00",  # the wall clock Olog requires: HTTP 500 today
+        "2026-07-08",  # bare date: HTTP 500 today
+        "2026-07-08T02:00:00+02:00",  # same instant, offset applied
+    ],
+)
+def test_get_pv_history_absolute_notations_all_reach_the_wire_as_iso_z(
+    start: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every absolute notation denotes the same instant and must leave as the one form the
+    Archiver reads. Four of these five are an HTTP 500 without the normalization."""
+    client = ArchiverClient("http://archiver:17665")
+    params = _history_params(client, monkeypatch, start=start, end="2026-07-09T00:00:00Z")
+    assert params["from"] == "2026-07-08T00:00:00.000Z"
+    assert params["to"] == "2026-07-09T00:00:00.000Z"
+
+
+def test_get_pv_history_relative_amount_makes_no_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """'7 days' works on the alarm/logbook planes and is an HTTP 500 here — so it is refused by
+    name BEFORE any I/O. Asserting the message alone would still pass if we sent it."""
+    client = ArchiverClient("http://archiver:17665")
+
+    def _fail(*_a: object, **_k: object) -> Mock:
+        raise AssertionError("a request was made with a value this plane cannot read")
+
+    monkeypatch.setattr(client.session, "get", _fail)
+    with pytest.raises(TimeWindowFormatError, match="only an absolute time"):
+        client.get_pv_history("SIM:PS-01:Cur-RB", "7 days", "now")
+
+
+def test_get_pv_history_shares_the_wire_format_with_the_alarm_plane() -> None:
+    """Both planes parse a real ISO_INSTANT, so they must agree byte-for-byte — goes red if
+    someone forks the emitter for one of them."""
+    value = "2026-07-08T12:45:58.123456Z"
+    assert normalize_archiver_time(value, param="start") == normalize_alarm_time(
+        value, param="start"
+    )
 
 
 class _NoClient:

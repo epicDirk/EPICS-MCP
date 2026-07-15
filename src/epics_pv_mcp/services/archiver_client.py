@@ -7,8 +7,13 @@ Three read-only jobs, verified against the Archiver Appliance docs
   GET {root}/mgmt/bpl/getPVTypeInfo?pv={pv}                            — HOW is it archived?
   GET {root}/retrieval/data/getData.json?pv={pv}&from={iso}&to={iso}  — historical samples
 
-Times are **ISO-8601** (e.g. ``2026-06-01T00:00:00.000Z``) per the docs — NOT epoch
-milliseconds. ``archiver_url`` is the appliance root (e.g. ``http://archiver:17665``); the
+Times are **ISO-8601 with a zone** (e.g. ``2026-06-01T00:00:00.000Z``) — NOT epoch milliseconds,
+and NOT any of the other notations the sibling planes take. MEASURED (2026-07-15, live): a naive
+ISO, a space-separated wall clock, a bare date and a relative amount (``7 days``) each answer
+**HTTP 500** — loudly, unlike Olog/Alarm, which read an unreadable time as *now* and answer 200
+with an empty list. :func:`~epics_pv_mcp.services.archiver_time.normalize_archiver_time` converts
+every absolute notation to the one form this server reads and refuses a relative amount by name.
+``archiver_url`` is the appliance root (e.g. ``http://archiver:17665``); the
 ``/mgmt`` and ``/retrieval`` paths are appended. Queries need no authentication by default;
 an optional ``Authorization`` header is forwarded for secured deployments.
 
@@ -28,6 +33,7 @@ from epics_pv_mcp.services.archiver_exceptions import (
     ArchiverConnectionError,
     ArchiverResponseError,
 )
+from epics_pv_mcp.services.archiver_time import normalize_archiver_time
 
 # The status string the Archiver MGMT API reports for an actively-archived PV.
 ARCHIVING_STATUS = "Being archived"
@@ -279,6 +285,10 @@ class ArchiverClient:
     ) -> HistoryResult:
         """Fetch samples for *pv* in [*start*, *end*] (ISO-8601), capped at *max_points*.
 
+        *start*/*end* are normalized to zone-explicit ISO first — this server reads NOTHING else
+        (measured: a naive ISO, a wall clock, a bare date and ``7 days`` are each an HTTP 500), so
+        a relative amount is refused here by name instead of becoming an opaque server error.
+
         Returns a :class:`HistoryResult` (DS-4B). ``capped`` is True if the cap truncated the
         result; ``meta`` is the getData.json ``meta`` block — PV metadata (``EGU`` units, ``PREC``
         precision) that was previously discarded; ``meta`` is ``{}`` when there is none. ``status``
@@ -294,7 +304,13 @@ class ArchiverClient:
         max_points = max(max_points, 1)
         data = self._get(
             f"{self.retrieval_url}/retrieval/data/getData.json",
-            {"pv": pv, "from": start, "to": end},
+            {
+                "pv": pv,
+                # param= names the TOOL argument (start/end), not the wire key (from/to): this is
+                # the one plane where they differ, and an error must name what the caller typed.
+                "from": normalize_archiver_time(start, param="start"),
+                "to": normalize_archiver_time(end, param="end"),
+            },
         )
         # getData.json returns [{"meta": {...}, "data": [ {secs,nanos,val,severity,status}, ... ]}]
         if not isinstance(data, list) or not data or not isinstance(data[0], dict):
