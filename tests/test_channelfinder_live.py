@@ -54,7 +54,13 @@ def glob() -> str:
     return os.environ["EPICS_MCP_LIVE_CF_GLOB"]
 
 
-def _names(client: ChannelFinderClient, pattern: str, max_results: int = 300) -> list[str]:
+#: The result cap for the probes. ``find_channels`` returns a plain list with NO ``capped`` flag
+#: (unlike the alarm/archiver clients), so truncation is only visible as ``len(...)`` reaching this
+#: value — which is why every set comparison below has to check the length against it itself.
+_MAX_RESULTS = 300
+
+
+def _names(client: ChannelFinderClient, pattern: str, max_results: int = _MAX_RESULTS) -> list[str]:
     found = client.find_channels(pattern, max_results=max_results)
     return sorted(c["name"] if isinstance(c, dict) else str(c) for c in found)
 
@@ -63,7 +69,9 @@ def test_glob_matches_something(client: ChannelFinderClient, glob: str) -> None:
     """The positive control — without hits, every probe below is vacuously green."""
     names = _names(client, glob)
     assert names, f"{glob!r} matched nothing: set EPICS_MCP_LIVE_CF_GLOB to a glob that hits"
-    assert len(names) < 300, "glob hits the cap — pick a narrower one, or counts compare the cap"
+    assert len(names) < _MAX_RESULTS, (
+        "glob hits the cap — pick a narrower one, or counts compare the cap"
+    )
 
 
 def test_impossible_glob_matches_nothing(client: ChannelFinderClient) -> None:
@@ -72,8 +80,20 @@ def test_impossible_glob_matches_nothing(client: ChannelFinderClient) -> None:
 
 
 def test_glob_is_case_insensitive(client: ChannelFinderClient, glob: str) -> None:
-    """Differential: the same glob in three cases must return the IDENTICAL set."""
-    assert _names(client, glob.lower()) == _names(client, glob.upper()) == _names(client, glob)
+    """Differential: the same glob in three cases must return the IDENTICAL set.
+
+    Both guards are inline on purpose. The positive control lives in a NEIGHBOURING test, and
+    pytest runs that one independently — so a glob that matches nothing left this comparing
+    ``[] == [] == []``: green, and proving nothing about case at all. The cap check has to be here
+    too: three results truncated at the same cap are equal for a reason that has nothing to do
+    with case (200-vs-200 is the cap, not evidence).
+    """
+    as_typed = _names(client, glob)
+    assert as_typed, f"{glob!r} matched nothing — a case comparison of empty sets proves nothing"
+    assert len(as_typed) < _MAX_RESULTS, (
+        f"{glob!r} hits the cap ({_MAX_RESULTS}) — the three sets would compare the cap, not case"
+    )
+    assert _names(client, glob.lower()) == _names(client, glob.upper()) == as_typed
 
 
 def test_glob_is_anchored(client: ChannelFinderClient, glob: str) -> None:

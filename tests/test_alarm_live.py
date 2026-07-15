@@ -65,8 +65,45 @@ def alarm_tree() -> str:
     return os.environ.get("EPICS_MCP_LIVE_ALARM_TREE", "Accelerator")
 
 
+#: The per-probe event cap. Deliberately NOT raised to hide truncation: a higher cap only moves the
+#: threshold (a busier facility binds at 100 too). The guard is ``capped is False`` in the test that
+#: compares — raising alone would relocate the blindness, not remove it.
+_MAX_EVENTS = 5
+
+#: The message for a failed positive control. It must NOT claim "your data is stale": an empty
+#: reference also comes from auth, a wrong URL, a client regression or a changed payload. Naming a
+#: single cause would be the same overclaim this file exists to catch.
+_NO_REFERENCE = (
+    "positive control not met; the comparison is not evaluable. Check fixture, config, backend "
+    "and client — an empty reference cannot tell a honoured window from a dropped one."
+)
+
+
+def _events(
+    client: AlarmClient, pv: str, start: str, end: str = "now"
+) -> tuple[list[dict[str, object]], bool]:
+    """Return ``(events, capped)`` — the cap flag is returned, never swallowed.
+
+    ``get_alarm_history`` answers newest-first and truncates at *max_events*. A caller that keeps
+    only ``len(...)`` compares ``min(n, cap)`` on both sides: two windows that differ ONLY in their
+    older tail then present the identical newest page and read as equal. The flag is the signal
+    that says the answer is the cap rather than the window.
+    """
+    events, capped = client.get_alarm_history(pv, start=start, end=end, max_events=_MAX_EVENTS)
+    return events, capped
+
+
 def _count(client: AlarmClient, pv: str, start: str, end: str = "now") -> int:
-    return len(client.get_alarm_history(pv, start=start, end=end, max_events=5)[0])
+    return len(_events(client, pv, start, end)[0])
+
+
+def _identities(events: list[dict[str, object]]) -> list[tuple[str, str]]:
+    """Identify events by ``(message_time, pv)`` — the field the server actually filters on.
+
+    Comparing identities rather than counts means a window that returns the right NUMBER of the
+    wrong events cannot pass.
+    """
+    return sorted((str(e.get("message_time")), str(e.get("pv"))) for e in events)
 
 
 def test_relative_window_finds_events(client: AlarmClient, pv: str) -> None:
@@ -75,8 +112,23 @@ def test_relative_window_finds_events(client: AlarmClient, pv: str) -> None:
 
 
 def test_naive_iso_window_is_honoured(client: AlarmClient, pv: str) -> None:
-    """THE regression: a zone-less ISO returned 0 for a window holding 20+. One character."""
-    assert _count(client, pv, "2026-07-08T12:45:58") == _count(client, pv, "2026-07-08T12:45:58Z")
+    """THE regression: a zone-less ISO returned 0 for a window that held 20+ WHEN IT WAS MEASURED.
+
+    That 20-vs-0 is the historical measurement, not what this test sees — it compares the two
+    forms against whatever the fixture holds now. Both guards below are load-bearing and were
+    missing: without the reference guard an aged-out window makes this ``0 == 0`` — green, and
+    silently no longer a test (measured: it was exactly that for the twelve days a sandbox window
+    held no events). Without the cap guard both sides read as the cap.
+    """
+    with_zone, zone_capped = _events(client, pv, "2026-07-08T12:45:58Z")
+    naive, naive_capped = _events(client, pv, "2026-07-08T12:45:58")
+
+    assert with_zone, _NO_REFERENCE
+    assert not (zone_capped or naive_capped), (
+        f"the cap truncated the comparison (max_events={_MAX_EVENTS}): a difference beyond the "
+        "newest page would be invisible. Narrow EPICS_MCP_LIVE_ALARM_PV to a single PV."
+    )
+    assert _identities(naive) == _identities(with_zone)
 
 
 def test_past_window_returns_nothing(client: AlarmClient, pv: str) -> None:

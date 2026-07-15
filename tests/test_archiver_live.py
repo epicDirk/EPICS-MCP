@@ -20,7 +20,7 @@ import os
 import pytest
 
 from epics_pv_mcp.services._time_window import TimeWindowFormatError
-from epics_pv_mcp.services.archiver_client import ArchiverClient
+from epics_pv_mcp.services.archiver_client import ArchiverClient, HistoryResult
 
 pytestmark = [
     pytest.mark.live,
@@ -58,8 +58,25 @@ def pv() -> str:
     return os.environ["EPICS_MCP_LIVE_ARCHIVER_PV"]
 
 
+#: The per-probe sample cap. Deliberately NOT raised to paper over truncation: a higher cap only
+#: moves the threshold. The guard is ``capped is False`` in the test that compares.
+_MAX_POINTS = 50
+
+#: The message for a failed positive control. It must NOT claim "your data is stale": an empty
+#: reference also comes from auth, a wrong URL, a client regression, a changed payload — or a
+#: ``withheld`` status, which means the history is UNKNOWN, not proven empty.
+_NO_REFERENCE = (
+    "positive control not met; the comparison is not evaluable. Check fixture, config, backend "
+    "and client — an empty reference cannot tell a honoured window from a dropped one."
+)
+
+
+def _history(client: ArchiverClient, pv: str, start: str, end: str) -> HistoryResult:
+    return client.get_pv_history(pv, start, end, max_points=_MAX_POINTS)
+
+
 def _count(client: ArchiverClient, pv: str, start: str, end: str) -> int:
-    return len(client.get_pv_history(pv, start, end, max_points=50)["samples"])
+    return len(_history(client, pv, start, end)["samples"])
 
 
 def _window() -> tuple[str, str]:
@@ -87,8 +104,28 @@ def test_sibling_notations_agree_with_iso_z(client: ArchiverClient, pv: str, sta
 
     Each of these is an HTTP 500 without the normalization — surfaced, until today, as
     'the Archiver is unreachable'.
+
+    The three guards are load-bearing and were missing. Without the reference guard an aged-out
+    window makes this ``0 == 0`` — green, and no longer a test. Without the cap guard both sides
+    read as the cap rather than the window. And ``status`` must be ``ok``: the client separates
+    ``withheld`` ("the response could not be interpreted") from ``empty`` ("genuinely no samples")
+    precisely so a caller cannot read the first as the second — reading only ``["samples"]``
+    throws that distinction away and would let an uninterpretable response pass as agreement.
     """
-    assert _count(client, pv, start, "2027-01-01T00:00:00Z") == _count(client, pv, *_window())
+    reference = _history(client, pv, *_window())
+    sibling = _history(client, pv, start, "2027-01-01T00:00:00Z")
+
+    for label, result in (("reference", reference), (f"{start!r}", sibling)):
+        assert result["status"] == "ok", (
+            f"{label}: status={result['status']!r} — the history is unknown, not proven empty; "
+            "this comparison is not evaluable"
+        )
+        assert not result["capped"], (
+            f"{label}: the cap truncated the comparison (max_points={_MAX_POINTS}) — a difference "
+            "beyond it would be invisible"
+        )
+    assert reference["samples"], _NO_REFERENCE
+    assert len(sibling["samples"]) == len(reference["samples"])
 
 
 def test_past_window_returns_nothing(client: ArchiverClient, pv: str) -> None:
