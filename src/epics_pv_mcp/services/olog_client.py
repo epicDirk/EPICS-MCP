@@ -46,13 +46,25 @@ move the data's true origin without changing the URL the decision was made from.
 This is a RUNTIME output policy and is unrelated to keeping person names out of COMMITTED files —
 that is enforced separately (the facility-agnostic guards and hand-transcription rule, CLAUDE.md).
 
-⚠️ Search-param names (``desc``/``logbooks``/``tags``/``start``/``end``/``size``) and the entry
-field names follow the documented Phoebus Olog model. ``start``/``end``/``tz`` are no longer
-best-effort — they were smoke-tested live (2026-07-15) and the window turned out to be actively
-BROKEN as sent: Olog cannot parse ISO-8601 and says so only by returning an empty result. See
-:mod:`epics_pv_mcp.services.olog_time` for the mechanism and :meth:`OlogClient._add_window` for the
-fix. The remaining names are still best-effort — the redaction is defence-in-depth regardless of
-which extra fields a given Olog version returns.
+⚠️ Search-param names and the entry field names follow the documented Phoebus Olog model. What has
+actually been PROBED live against a running Olog (2026-07-15), and what has not:
+
+* ``start``/``end``/``tz`` — probed, and the window turned out to be actively BROKEN as sent: Olog
+  cannot parse ISO-8601 and says so only by returning an empty result. See
+  :mod:`epics_pv_mcp.services.olog_time` for the mechanism and :meth:`OlogClient._add_window` for
+  the fix.
+* ``desc``/``logbooks``/``tags``/``level``/``title`` — probed WITH positive controls (``desc``
+  matched only bodies, not titles; each filter returned a known subset, so "everything is 0" could
+  be ruled out). They filter as named.
+* ``sort`` — probed, and unreadable values do NOT fail: anything but ``down``/``desc`` silently
+  becomes ASC, the REVERSE of this client's default. The tool layer therefore constrains it to a
+  ``Literal["down", "up"]`` (:mod:`epics_pv_mcp.server`); see
+  ``tests/test_olog_live.py::test_unreadable_sort_silently_reverses_on_the_server``.
+* ``size``/``offset`` — ``offset`` probed (page 0 vs page N differ as expected); ``size`` is bounded
+  at the tool layer and only ever narrows a result.
+* The ENTRY FIELD names (the shape of what comes BACK) are still best-effort — they are not a
+  promise this client makes about a request, and the redaction is defence-in-depth regardless of
+  which extra fields a given Olog version returns.
 """
 
 from __future__ import annotations

@@ -92,3 +92,33 @@ def test_year_amount_rejected_before_any_request(client: OlogClient) -> None:
     anonymous read only ever sees as 401 ('unauthorized') — so it is refused here instead."""
     with pytest.raises(TimeWindowFormatError, match="days or weeks"):
         client.search_logbook(start="1 year")
+
+
+def _order(client: OlogClient, sort: str) -> list[object]:
+    return [e.get("id") for e in client.search_logbook(size=5, sort=sort)[0]]
+
+
+def test_sort_orders_the_page(client: OlogClient) -> None:
+    """The positive control: without it, the probe below could not tell 'sort was applied' from
+    'sort does nothing at all'."""
+    down, up = _order(client, "down"), _order(client, "up")
+    assert down, "no entries — the sort probes below would prove nothing"
+    assert down != up
+
+
+def test_unreadable_sort_silently_reverses_on_the_server(client: OlogClient) -> None:
+    """The reason the tool constrains sort to a Literal, measured rather than assumed.
+
+    Olog does not reject an order it cannot read: anything that is not 'down'/'desc' becomes
+    ASC — the REVERSE of our documented default — behind a 200 and a well-formed page. 'newest'
+    is the sharpest case: the word an operator would reach for to mean newest-first returns
+    oldest-first.
+
+    This measures the SERVER, not us: the tool layer rejects these values before they are sent
+    (Literal['down','up']), so this asks the client directly. Should a future Olog reject them
+    itself, this test goes red and says the constraint may be relaxed — a refusal is only correct
+    while its premise holds.
+    """
+    up = _order(client, "up")
+    for unreadable in ("garbage", "newest", "asc", ""):
+        assert _order(client, unreadable) == up, f"{unreadable!r} no longer collapses to ASC"
