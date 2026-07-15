@@ -124,12 +124,40 @@ def test_is_alarm_configured_drops_config_msg_person_data(monkeypatch: pytest.Mo
         assert leaked not in detail
 
 
-def test_is_alarm_configured_false_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_is_alarm_configured_false_when_tree_answers(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A real negative: the PV query is empty, but the tree itself HAS configuration → the PV is
+    # genuinely not configured. This is the only shape that may still be reported as False.
     client = AlarmClient("http://alarm")
-    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([])))
+    monkeypatch.setattr(
+        client.session,
+        "get",
+        Mock(side_effect=[_resp([]), _resp([{"config": "config:/Accelerator/C/Other"}])]),
+    )
     configured, detail = client.is_alarm_configured("X")
     assert configured is False
     assert detail == {}
+
+
+def test_is_alarm_configured_withheld_when_tree_silent(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The bug this replaces: an empty answer used to be reported as False. Measured live, a
+    # mis-cased or unknown config_name is answered EXACTLY like a genuinely unconfigured PV
+    # (200 + []), so False was a guess dressed as a fact. Both queries empty → withheld (None).
+    client = AlarmClient("http://alarm")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([])))
+    configured, detail = client.is_alarm_configured("X")
+    assert configured is None
+    assert detail == {}
+
+
+def test_is_alarm_configured_hit_does_not_probe_the_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The extra request is on the MISS path only — a hit already proves the tree was read as
+    # intended, so the common case still costs exactly one round trip.
+    client = AlarmClient("http://alarm")
+    getter = Mock(return_value=_resp([{"config": "config:/Accelerator/C/X"}]))
+    monkeypatch.setattr(client.session, "get", getter)
+    configured, _ = client.is_alarm_configured("X")
+    assert configured is True
+    assert getter.call_count == 1
 
 
 def test_is_alarm_configured_false_on_leaf_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -147,13 +175,18 @@ def test_is_alarm_configured_false_on_leaf_mismatch(monkeypatch: pytest.MonkeyPa
 
 def test_is_alarm_configured_query_format(monkeypatch: pytest.MonkeyPatch) -> None:
     # Load-bearing: the config param MUST carry a leading slash + config name (the server does
-    # config.split("/")[1] to pick the ES index) and span component nesting with "*".
+    # config.split("/")[1] to pick the ES index) and span component nesting with "*". The tree
+    # probe on the miss path asks the same shape WITHOUT the PV — it must select the same index,
+    # or it would answer for a different tree than the one being judged.
     client = AlarmClient("http://alarm")
     getter = Mock(return_value=_resp([]))
     monkeypatch.setattr(client.session, "get", getter)
     client.is_alarm_configured("DEV-TEST01:Ctrl-EVR-01:Temp1Value", config_name="Accelerator")
-    _, kwargs = getter.call_args
-    assert kwargs["params"] == {"config": "/Accelerator/*DEV-TEST01:Ctrl-EVR-01:Temp1Value"}
+    sent = [call.kwargs["params"] for call in getter.call_args_list]
+    assert sent == [
+        {"config": "/Accelerator/*DEV-TEST01:Ctrl-EVR-01:Temp1Value"},
+        {"config": "/Accelerator/*"},
+    ]
 
 
 def test_is_alarm_configured_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:

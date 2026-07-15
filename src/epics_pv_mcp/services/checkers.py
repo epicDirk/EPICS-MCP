@@ -117,9 +117,15 @@ class AlarmConfigChecker:
             configured, _detail = self._client.is_alarm_configured(
                 pv, config_name=self._config_name
             )
-            return configured
         except AlarmError as exc:
             raise RuntimeError(f"Alarm query failed: {exc}") from exc
+        if configured is None:
+            # Tree produced nothing → the cell is unknown, not `no` (withheld != no).
+            raise RuntimeError(
+                f"Alarm tree {self._config_name!r} returned no configuration at all — "
+                "unknown or misspelled tree name, or an empty tree"
+            )
+        return configured
 
 
 def build_cf_checker(query_channelfinder: bool) -> ChannelFinderChecker | None:
@@ -209,6 +215,15 @@ _OLOG_DISABLED_NOTE = (
     "Phoebus Olog is disabled. Set EPICS_MCP_OLOG_URL to the Olog REST root "
     "(e.g. http://host:8080/Olog) to enable logbook search."
 )
+# Withheld (configured=None), NOT a negative: the tree yielded no configuration at all, so
+# "this PV is not configured" cannot be told apart from "that is not the tree name". The name is
+# case-sensitive in the query even though it is lower-cased to pick the index — see
+# AlarmClient.is_alarm_configured.
+_ALARM_TREE_UNKNOWN_NOTE = (
+    "Alarm config tree {config!r} returned no configuration at all — unknown or misspelled tree "
+    "name (it is CASE-SENSITIVE here), or an empty tree. Answer withheld rather than reported as "
+    "'not configured'."
+)
 
 
 def _archiver_error_code(exc: ArchiverError) -> str:
@@ -277,13 +292,16 @@ async def query_alarm_configured(
     def _run() -> dict[str, object]:
         client = AlarmClient(cfg.alarm_url, timeout=timeout, auth_header=cfg.alarm_auth or None)
         configured, detail = client.is_alarm_configured(pv, config_name=config_name)
-        return {
+        result: dict[str, object] = {
             "enabled": True,
             "pv": pv,
             "config": config_name,
             "configured": configured,
             "detail": detail,
         }
+        if configured is None:
+            result["note"] = _ALARM_TREE_UNKNOWN_NOTE.format(config=config_name)
+        return result
 
     try:
         return await asyncio.to_thread(_run)

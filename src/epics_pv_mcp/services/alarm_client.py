@@ -155,8 +155,12 @@ class AlarmClient:
 
     def is_alarm_configured(
         self, pv: str, config_name: str = DEFAULT_ALARM_CONFIG
-    ) -> tuple[bool, dict[str, object]]:
+    ) -> tuple[bool | None, dict[str, object]]:
         """Return ``(configured, detail)`` — True iff alarm tree *config_name* contains *pv*.
+
+        ``configured`` is **None when the answer is withheld**: the tree itself produced nothing, so
+        "not configured" cannot be told apart from "wrong tree name" (see below). Never ``False`` in
+        that case — the ``withheld != no`` rule.
 
         Queries ``/search/alarm/config`` with ``config=/{config_name}/*{pv}`` (leading slash +
         config name select the ES index; the ``*`` spans component nesting). The config-change index
@@ -166,6 +170,17 @@ class AlarmClient:
         matching record (``size=1``, ``message_time`` DESC), so a sibling PV whose name strictly
         contains *pv* and changed more recently could mask a real hit — a known backend limitation,
         harmless for the distinct sandbox device set.
+
+        WHY THE TREE PROBE (measured live 2026-07-15, not inferred): *config_name* is honoured by
+        the server in two different ways, and a mismatch between them is silent. It is lower-cased
+        to pick the ES index, but goes into the ``wildcard`` query CASE-PRESERVED against a
+        ``keyword`` field (``AlarmLogSearchUtil.java:305-313``) — so ``"accelerator"`` selects the
+        RIGHT index and matches NO document. An unknown tree is equally quiet: the index pattern
+        ends in ``*``, so Elasticsearch answers 200 + ``[]`` instead of ``index_not_found``.
+        Measured: ``/Accelerator/*Temp1Value`` → 1 record, while ``/accelerator/*Temp1Value``,
+        ``/Nonexistent/*Temp1Value`` and a genuinely unconfigured PV ALL → ``[]``. Re-asking for
+        the bare tree (``/{config_name}/*``) separates them — it returns a record iff the tree name
+        was read as intended — so only the last of those four stays a real ``False``.
 
         The returned ``detail`` is the config record reduced by :func:`_project_alarm_config` — the
         raw ES record's ``user``/``host`` (who changed the config) are dropped and the authored
@@ -182,7 +197,20 @@ class AlarmClient:
             leaf = str(record.get("config", "")).rsplit("/", 1)[-1]
             if leaf == pv:
                 return True, _project_alarm_config(record)
+        # A miss is only a real negative if the tree answered at all — one extra request, and only
+        # on the miss path (a hit above already proved the tree).
+        if not self._alarm_tree_answers(config_name):
+            return None, {}
         return False, {}
+
+    def _alarm_tree_answers(self, config_name: str) -> bool:
+        """Return True iff alarm tree *config_name* yields any config record at all.
+
+        Distinguishes a real "PV not configured" from an unknown/misspelled/mis-cased tree name,
+        which the server reports identically (200 + empty). See :meth:`is_alarm_configured`.
+        """
+        data = self._get(f"{self.base_url}/search/alarm/config", {"config": f"/{config_name}/*"})
+        return bool(data) if isinstance(data, list) else False
 
     def get_alarm_history(
         self, pv: str, start: str, end: str, max_events: int = 100

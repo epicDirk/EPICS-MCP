@@ -50,6 +50,21 @@ def pv() -> str:
     return os.environ["EPICS_MCP_LIVE_ALARM_PV"]
 
 
+@pytest.fixture
+def configured_pv() -> str:
+    """A PV that IS in the alarm tree — the positive control for the config probes."""
+    value = os.environ.get("EPICS_MCP_LIVE_ALARM_CONFIGURED_PV")
+    if not value:
+        pytest.skip("set EPICS_MCP_LIVE_ALARM_CONFIGURED_PV to a PV present in the alarm tree")
+    return value
+
+
+@pytest.fixture
+def alarm_tree() -> str:
+    """The config-tree name as spelled on that logger (case matters — that is the point)."""
+    return os.environ.get("EPICS_MCP_LIVE_ALARM_TREE", "Accelerator")
+
+
 def _count(client: AlarmClient, pv: str, start: str, end: str = "now") -> int:
     return len(client.get_alarm_history(pv, start=start, end=end, max_events=5)[0])
 
@@ -75,3 +90,40 @@ def test_misread_amounts_rejected_before_any_request(client: AlarmClient, pv: st
     for bad in ("500 millis", "5 m", "garbage", "1 year"):
         with pytest.raises(TimeWindowFormatError):
             client.get_alarm_history(pv, start=bad, end="now")
+
+
+def test_unmatched_pv_returns_nothing(client: AlarmClient) -> None:
+    """The pv filter's negative control: without it, 'the filter works' and 'the filter is
+    ignored and you got the whole history' look the same."""
+    assert _count(client, "ZZZ-no-such-pv", "7 days") == 0
+
+
+def test_alarm_tree_name_is_case_sensitive(
+    client: AlarmClient, configured_pv: str, alarm_tree: str
+) -> None:
+    """THE regression: the server lower-cases config_name to pick the ES index but matches the
+    wildcard CASE-PRESERVED against a keyword field, so a mis-cased tree selects the right index
+    and matches nothing — reporting exactly like an unconfigured PV. Must be withheld, not False.
+    """
+    configured, _ = client.is_alarm_configured(configured_pv, config_name=alarm_tree)
+    assert configured is True, f"positive control failed: {configured_pv!r} not in {alarm_tree!r}"
+
+    miscased, _ = client.is_alarm_configured(configured_pv, config_name=alarm_tree.lower())
+    assert miscased is None  # withheld — NOT False, which is what it used to report
+
+
+def test_unknown_alarm_tree_is_withheld(client: AlarmClient, configured_pv: str) -> None:
+    """An unknown tree is quiet too: the index pattern ends in '*', so Elasticsearch answers
+    200 + [] instead of index_not_found."""
+    configured, _ = client.is_alarm_configured(configured_pv, config_name="ZZZNoSuchTree")
+    assert configured is None
+
+
+def test_unconfigured_pv_in_a_real_tree_is_still_false(
+    client: AlarmClient, alarm_tree: str
+) -> None:
+    """The other half — the tree probe must not turn every miss into 'withheld'. A live tree
+    plus an absent PV is a REAL negative and has to stay False, or the fix would buy honesty by
+    never answering."""
+    configured, _ = client.is_alarm_configured("ZZZ-no-such-pv", config_name=alarm_tree)
+    assert configured is False
