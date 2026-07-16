@@ -91,6 +91,36 @@ Honest limit: this one is **prose**, and prose is the category that rots (see ab
 can prove a probe *ran* — CI runs with the live env unset, so live tests skip. The guard is the
 review, plus the live tests themselves once someone points the env at a service.
 
+## Evidence discipline (hard)
+
+How claims are made here. Measured on this repository's own history: one working day produced
+seven instances of the same error class — a plausible claim standing in for a measurement — and
+every one was caught by an adversarial counter-probe, never by the author re-reading their own
+work.
+
+1. **Reading code is not a measurement.** A claim about behaviour is made only after executing a
+   probe that could have falsified it. (The server-decided-parameter rule above is the special
+   case of this for documented promises.)
+2. **A non-finding carries the same burden of proof as a finding.** "There is no X" is a claim
+   about the system, not about the search that failed to find it — say what was probed, and how.
+3. **Universal claims ("none", "never", "structurally impossible") need more than a handful of
+   samples.** Three probed paths do not support an all-quantifier.
+4. **A rationale written into a docstring binds beyond its function.** Deviating a few functions
+   later from a justification the same file states — e.g. an exact-match rule with its reason,
+   followed by a substring check — is a defect, not a style choice.
+5. **A fix is a change like any other.** It gets the same adversarial counter-probe as the code
+   it repairs; both defects the re-audit found in this repo's own hardening commit had been
+   introduced BY the fix — and the adversarial review of the follow-up fix found two more in it.
+   Every new guard must be proven able to go red (on the pre-fix code or via a mutant, by test
+   node id) — a guard that cannot go red is the defect it was meant to remove.
+6. **Whoever commissions a review is liable for the premises handed to it.** A reviewer builds on
+   what the prompt asserts and cannot re-check it — measure premises before writing them into a
+   prompt. And a verdict returned without findings (file:line, repro) is demanded back before
+   acting on it.
+
+Honest limit: these are prose rules — the category that rots (see above). No CI guard can prove
+they were followed; the guard is the adversarial counter-probe itself.
+
 ## Definition of Done (doc-sync)
 
 A new tool / resource / config is not done until: `README.md` is updated (resource URIs are
@@ -107,8 +137,11 @@ newer `opi_navigation` does (then move the pin and the lockfile together).
 
 ## What is NOT persistence
 
-Commit bodies (read, rarely found later), plan snapshots, and personal assistant memory. Durable
-knowledge belongs in code+tests, the operator guide, or this file.
+Commit bodies (read, rarely found later), plan snapshots, personal assistant memory, and session
+handover notes or analysis write-ups: **documented is not discoverable** — a file no future
+session systematically reads is a transcript, not a home (measured: a seven-row defect table that
+lived only in a handover nearly died with it). Durable knowledge belongs in code+tests, the
+operator guide, or this file.
 
 ## Gates
 
