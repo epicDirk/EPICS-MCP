@@ -1,10 +1,11 @@
 """CLI for the read-only config self-check (``epics-doctor``).
 
-Probes every CONFIGURED plane once and prints whether it is reachable, whether the CA bundle works,
-whether the service **identifies itself as the one that URL is supposed to point at**, and what the
-ChannelFinder privacy redaction is set to — the ``flutter doctor`` of this server. Read-only — it
-probes, never writes — and it touches exactly the planes that are CONFIGURED (a disabled plane makes
-no network call).
+Probes every CONFIGURED plane (a transport probe, refined on success by an identity probe — up to
+two requests for a healthy plane; retries on a 5xx add more) and prints whether it is reachable,
+whether the CA bundle works, whether the service **identifies itself as the one that URL is
+supposed to point at**, and what the ChannelFinder privacy redaction is set to — the ``flutter
+doctor`` of this server. Read-only — it probes, never writes — and it touches exactly the planes
+that are CONFIGURED (a disabled plane makes no network call).
 
 Exit code (a DELIBERATE convention, unlike the other CLIs where a finding is exit 0 — doctor is
 a scriptable pass/fail):
@@ -12,13 +13,14 @@ a scriptable pass/fail):
 * ``0`` — no configured plane failed (healthy, honestly disabled/info-only, or reachable with its
   identity ``unverified``);
 * ``1`` — a configured plane failed (unreachable / ca_error / api_error / wrong_service /
-  probe-disconnect);
+  config_error / probe-disconnect);
 * ``2`` — a usage error (bad arguments, or an internal EpicsError).
 
 ⚠️ Exit ``0`` means "nothing failed", NOT "everything was confirmed": a plane can be reachable with
 its identity unverified and still exit 0 (that is honest, not healthy — see ``doctor.py``). A
 machine reader must therefore look at ``verification_complete`` / ``unverified_planes`` in
-``--json``, not only at the exit code.
+``--json``, not only at the exit code — and for POSITIVE confirmation assert ``identified_planes``
+is non-empty (``verification_complete`` is vacuously true on an empty config).
 
 Usage::
 
@@ -45,6 +47,7 @@ _STATUS_MARK = {
     "info": "i",
     "unverified": "?",
     "wrong_service": "✗",
+    "config_error": "✗",
     "ca_error": "✗",
     "api_error": "✗",
     "unreachable": "✗",
@@ -76,7 +79,19 @@ def _render(report: DoctorReport) -> str:
     if not report.ok:
         verdict = "PROBLEM — a configured plane failed (see above)"
     elif report.verification_complete:
-        verdict = "OK — every configured plane answered AS ITSELF"
+        # verification_complete is "no plane was left unverified" — vacuously true when nothing
+        # was probed at all. The strong sentence is earned by actual identifications: with zero,
+        # "answered AS ITSELF" would read as a confirmation of probes that never ran (measured:
+        # it was printed for a completely empty config). Same source as the JSON's
+        # identified_planes, so the human verdict and the machine signal cannot drift.
+        verified = len(report.identified_planes)
+        if verified:
+            verdict = f"OK — every identity-probed plane answered AS ITSELF ({verified} verified)"
+        else:
+            verdict = (
+                "OK — nothing failed, but nothing was identity-verified either "
+                "(no REST plane is configured)"
+            )
     else:
         # "all configured planes healthy" was the lie: it was printed for a ChannelFinder URL
         # pointing at a week-dead container, because a neighbouring service answered 401. Nothing

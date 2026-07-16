@@ -10,6 +10,7 @@ and the CLI exit-code convention (0 healthy / 1 a plane failed / 2 usage).
 from __future__ import annotations
 
 import json
+from typing import get_args
 from unittest.mock import Mock
 
 import pytest
@@ -22,6 +23,7 @@ from epics_pv_mcp.services.doctor import (
     _NON_FAILING_STATUSES,
     DoctorReport,
     PlaneCheck,
+    PlaneStatus,
     _classify_failure,
     _identify,
     _identify_archiver,
@@ -179,9 +181,12 @@ async def test_all_disabled_is_ok_and_makes_no_network(monkeypatch: pytest.Monke
     }
     for plane in report.planes:
         assert plane.status == ("info" if plane.plane == "live" else "disabled")
-    # Nothing was left unproven because nothing was probed at all.
+    # Nothing was left unproven because nothing was probed at all — verification_complete is
+    # VACUOUSLY true here, and identified_planes carries the machine-readable difference between
+    # "all confirmed" and "nothing ran": it must be empty.
     assert report.verification_complete is True
     assert report.unverified_planes == []
+    assert report.identified_planes == []
 
 
 async def test_reachable_plane_is_ok(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -337,6 +342,36 @@ def test_retrieval_identifies_via_getversion(monkeypatch: pytest.MonkeyPatch) ->
     assert probe("http://arch.example:17668", None, 5.0).status == "unverified"
 
 
+@pytest.mark.parametrize(
+    "version",
+    [
+        pytest.param("Not Archiver Appliance Version 1.0", id="prefixed-name"),
+        pytest.param("Archiver ApplianceX Version 1", id="suffixed-name"),
+        pytest.param("Archiver Appliances Anonymous 1.0", id="longer-word"),
+    ],
+)
+def test_retrieval_identity_is_anchored_at_a_word_boundary(
+    monkeypatch: pytest.MonkeyPatch, version: str
+) -> None:
+    """S18(a): a version string whose NAME merely contains the product name must NOT identify.
+
+    ``_identify`` matches the service name EXACTLY and its docstring says why — a substring would
+    let a service calling itself "Not Olog Service" pass. Three functions later the retrieval probe
+    shipped a containment check anyway (`_ARCHIVER_PRODUCT in version`), fail-open: the reasoning
+    was written down and then ignored within the same file. The match is anchored at the START
+    *and at a word boundary* — a bare ``startswith`` closed only the left side ("Archiver
+    ApplianceX" still passed; the adversarial review of the first fix caught it). Only the release
+    number after the full product name is variable (measured live on two real deployments:
+    "Archiver Appliance Version 2.2.1").
+
+    Red-proof: on the pre-fix code (84018ec) the first case reported ``ok`` (containment); the
+    suffixed cases reported ``ok`` on the bare-startswith intermediate too.
+    """
+    _payload(monkeypatch, {"version": version})
+    check = _identify_retrieval_plane("http://arch.example:17668", None, 5.0)
+    assert (check.status, check.identified) == ("unverified", False)
+
+
 def test_unknown_status_fails_closed() -> None:
     """The allowlist is the point: a new or mistyped status must FAIL, not slip through as exit 0.
 
@@ -392,6 +427,57 @@ async def test_retrieval_falls_back_to_the_archiver_url_like_the_client_does(
     retrieval = _plane(report, "archiver_retrieval")
     assert retrieval.status != "disabled", "retrieval is live via fallback, not reported as off"
     assert retrieval.configured is True
+
+
+async def test_retrieval_url_without_archiver_url_is_a_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S18(b): EPICS_MCP_ARCHIVER_RETRIEVAL_URL set while EPICS_MCP_ARCHIVER_URL is empty.
+
+    Every archiver tool gates on EPICS_MCP_ARCHIVER_URL (tools/archiver.py, checkers.py), so that
+    retrieval URL is never used by anything — yet the fallback fix reported the STRONGEST all-clear
+    the tool knows for it (measured against a live retrieval endpoint: ``ok=True,
+    verification_complete=True`` while every archiver tool was disabled). A fix against false-green
+    that produced false-green. The pair is dead config and must FAIL, loudly, without probing:
+    an ``ok`` next to a config error would only muddy what the operator has to change.
+
+    Red-proof: on the pre-fix code this test FAILS — the plane is probed instead of refused
+    (live it reported ``ok``; under this test's boom-mock the probe errors, either way the
+    status is not ``config_error``).
+    """
+    _set_config(monkeypatch, archiver_retrieval_url="http://arch.example:17668")
+    boom = Mock(side_effect=AssertionError("dead config must not be probed"))
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.rest_get_json", boom)
+    report = await run_doctor()
+    retrieval = _plane(report, "archiver_retrieval")
+    assert retrieval.status == "config_error"
+    assert retrieval.configured is True
+    assert "EPICS_MCP_ARCHIVER_URL" in (retrieval.detail or "")
+    assert retrieval.status not in _NON_FAILING_STATUSES  # it must drive exit 1
+    assert report.ok is False
+    # The archiver plane itself stays honestly disabled — the ERROR is the inconsistent pair.
+    assert _plane(report, "archiver").status == "disabled"
+
+
+async def test_retrieval_plane_is_actually_identity_probed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wiring guard for the SIXTH plane — the matrix above covers five and left retrieval out.
+
+    Not a matrix row, because retrieval has no client class (its transport probe calls
+    rest_get_json directly) and a lone retrieval URL is a ``config_error`` since S18(b) — so the
+    wired path to guard is the fallback one (archiver URL set). Mutant-proof: removing the
+    identity argument from the ``_run_probe`` call in ``_check_retrieval_plane`` leaves every
+    other test green; only this assertion notices (``identified`` stays None).
+    """
+    _set_config(monkeypatch, archiver_url="http://arch.example:17665")
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.ArchiverClient", _OkClient)
+    report = await run_doctor()
+    retrieval = _plane(report, "archiver_retrieval")
+    assert retrieval.identified is True, (
+        "archiver_retrieval: reachable but never identity-probed — the same gap the matrix "
+        "guards against for the other five planes"
+    )
 
 
 def test_credentials_in_a_url_are_never_echoed() -> None:
@@ -645,6 +731,78 @@ def test_cli_render_glyphs_and_privacy_block(
     assert "property allowlist:" in out
     assert "(empty — all owners redacted)" in out  # the empty-owner fallback line
     assert "Olog free-text:     withheld" in out  # the VALUE, not just the label (see below)
+
+
+def test_cli_config_error_renders_failing_and_exits_one(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """S18(b), CLI side: the dead retrieval-without-archiver pair must exit 1 with a ✗ line.
+
+    Red-proof: on the pre-fix code this configuration exited 0 under the tool's strongest
+    all-clear sentence.
+    """
+    _set_config(monkeypatch, archiver_retrieval_url="http://arch.example:17668")
+    code = cli_doctor.main([])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "✗ archiver_retrieval" in out
+    assert "config_error" in out
+    assert "EPICS_MCP_ARCHIVER_URL" in out  # the actionable part of the detail line
+
+
+def test_cli_verdict_with_nothing_configured_claims_no_identity(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """S18(c): with not a single REST plane configured, the verdict used to read "every configured
+    plane answered AS ITSELF" — vacuously true over the empty set, and it READS as a confirmation
+    of probes that never ran. Nothing failed, so exit stays 0; but the sentence must say that
+    nothing was verified either.
+
+    Red-proof: on the pre-fix code this test FAILS (the strong sentence is printed).
+    """
+    _set_config(monkeypatch)  # all URLs empty → every REST plane disabled, live=info
+    code = cli_doctor.main([])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "AS ITSELF" not in out
+    assert "nothing was identity-verified" in out
+
+
+def test_cli_verdict_counts_the_identity_verified_planes(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The strong sentence is earned by actual identifications and says how many there were."""
+    _set_config(monkeypatch, channelfinder_url="http://cf.example/ChannelFinder")
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.ChannelFinderClient", _OkClient)
+    code = cli_doctor.main([])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "AS ITSELF (1 verified)" in out
+
+
+async def test_identified_planes_is_the_positive_signal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S18(c), machine side: ``verification_complete`` alone cannot tell "all confirmed" from
+    "nothing ran" — it is vacuously True on an empty config, and three docs tell scripts to read
+    it. ``identified_planes`` is the positive counterpart to ``unverified_planes``: a script that
+    wants POSITIVE confirmation asserts it is non-empty (found by the adversarial review of the
+    first S18 fix, which had closed the vacuous truth only on the human-rendered verdict line).
+    """
+    _set_config(monkeypatch, channelfinder_url="http://cf.example/ChannelFinder")
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.ChannelFinderClient", _OkClient)
+    report = await run_doctor()
+    assert report.identified_planes == ["channelfinder"]
+    assert report.verification_complete is True
+
+
+def test_every_plane_status_has_a_render_mark() -> None:
+    """Every PlaneStatus value must carry its own glyph in the CLI render.
+
+    ``_render`` falls back to "?" for an unknown status — which is the ``unverified`` mark, so a
+    status missing from ``_STATUS_MARK`` would silently wear the honest-doubt glyph. This guard
+    makes adding a status without a mark a red test instead (it caught exactly that while
+    ``config_error`` was being added).
+    """
+    assert set(get_args(PlaneStatus)) == set(cli_doctor._STATUS_MARK)
 
 
 def test_cli_reports_full_olog_freetext_for_a_declared_sandbox(

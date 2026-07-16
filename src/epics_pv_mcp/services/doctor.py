@@ -1,10 +1,11 @@
 """Read-only config self-check ("doctor") — is this deployment wired up correctly? (E2)
 
-``run_doctor`` probes every CONFIGURED plane once, read-only, and reports whether it is reachable,
-whether the CA bundle works, whether the service **identifies itself as the service we configured**,
-and what the ChannelFinder privacy redaction is set to. It is the ``flutter doctor`` of this server:
-a new user in a fresh facility runs ``epics-doctor`` and gets an immediate "is my config right?"
-without asking us.
+``run_doctor`` probes every CONFIGURED plane read-only — a transport probe, refined on success by
+an identity probe, so a healthy plane answers up to TWO requests — and reports whether it is
+reachable, whether the CA bundle works, whether the service **identifies itself as the service we
+configured**, and what the ChannelFinder privacy redaction is set to. It is the ``flutter doctor``
+of this server: a new user in a fresh facility runs ``epics-doctor`` and gets an immediate "is my
+config right?" without asking us.
 
 Design (mirrors :mod:`epics_pv_mcp.services.diagnose`):
 
@@ -71,6 +72,7 @@ PlaneStatus = Literal[
     "info",
     "unverified",
     "wrong_service",
+    "config_error",
     "ca_error",
     "api_error",
     "unreachable",
@@ -140,10 +142,16 @@ class DoctorReport(_Model):
     #: True iff no configured plane was left ``unverified``. ``ok`` alone is not enough for a
     #: machine reader: an unverified plane is honest, not healthy, and a CI job that only looks at
     #: ``ok`` (or the exit code) would read "nothing failed" as "everything is confirmed" — exactly
-    #: the conflation this whole check exists to remove.
+    #: the conflation this whole check exists to remove. ⚠️ Vacuously True when nothing ran an
+    #: identity probe at all (e.g. an empty config) — a reader wanting POSITIVE confirmation
+    #: asserts ``identified_planes`` is non-empty, not this flag alone.
     verification_complete: bool
     #: The planes that are reachable but could not prove their identity (empty when none).
     unverified_planes: list[str]
+    #: The planes that PROVED their identity — the positive counterpart to ``unverified_planes``.
+    #: Empty on an empty config, which is how a machine reader tells "everything was confirmed"
+    #: from "nothing ran at all" (``verification_complete`` is vacuously True in both).
+    identified_planes: list[str]
 
 
 def _classify_failure(exc: Exception) -> tuple[bool | None, bool | None, PlaneStatus, str]:
@@ -200,9 +208,19 @@ _SERVICE_NAMES: dict[str, str] = {
 #: static 200 whose ``info.title`` names it (measured; Olog answers 401 there, ChannelFinder 404).
 _NAMING_SWAGGER_TITLE = "Naming service API documentation"
 
-#: The product name inside the archiver's ``getVersion`` string. A containment test, deliberately:
-#: the release number that follows it is the variable part — an upgrade is not a misconfiguration.
+#: The product name the archiver's ``getVersion`` string STARTS with, up to a word boundary.
+#: Anchored on BOTH sides of the name, for the same reason ``_SERVICE_NAMES`` above matches
+#: exactly: a containment test let a service calling itself "Not Archiver Appliance" pass
+#: (measured), and a bare ``startswith`` still let "Archiver ApplianceX" pass (caught by the
+#: adversarial review of that fix). Only the release number AFTER the full product name is the
+#: variable part (an upgrade is not a misconfiguration); measured live on two real deployments:
+#: "Archiver Appliance Version 2.2.1".
 _ARCHIVER_PRODUCT = "Archiver Appliance"
+
+
+def _is_archiver_version_string(version: str) -> bool:
+    """True iff *version* is the archiver product name, optionally followed by a release part."""
+    return version == _ARCHIVER_PRODUCT or version.startswith(_ARCHIVER_PRODUCT + " ")
 
 
 #: ``scheme://user:password@`` anywhere inside free text. Applied to what doctor PRINTS, not to
@@ -422,9 +440,10 @@ def _identify_retrieval_plane(base_url: str, auth_header: str | None, timeout: f
     """The retrieval webapp names itself in ``/retrieval/bpl/getVersion``.
 
     Note the base PATH: retrieval serves ``/retrieval/bpl``, not ``/mgmt/bpl`` — probing the latter
-    on the retrieval port 404s and says nothing. The version string carries the product name, so
-    the check is a containment test on the NAME part; the release number is the variable part and
-    must not be pinned (an appliance upgrade is not a misconfiguration).
+    on the retrieval port 404s and says nothing. The version string STARTS with the product name,
+    so the check is anchored there up to a word boundary (see ``_is_archiver_version_string``);
+    only the release number after the full name is variable and must not be pinned (an appliance
+    upgrade is not a misconfiguration).
     """
     payload = _fetch_beacon(
         f"{base_url.rstrip('/')}/retrieval/bpl/getVersion", auth_header, timeout
@@ -436,7 +455,7 @@ def _identify_retrieval_plane(base_url: str, auth_header: str | None, timeout: f
         )
 
     version = payload.get("version") if isinstance(payload, dict) else None
-    if isinstance(version, str) and _ARCHIVER_PRODUCT in version:
+    if isinstance(version, str) and _is_archiver_version_string(version):
         return PlaneCheck(
             plane="archiver_retrieval",
             configured=True,
@@ -464,7 +483,27 @@ async def _check_retrieval_plane(cfg: EpicsConfig, timeout: float) -> PlaneCheck
     empty, so treating an empty var as "plane off" would report ``disabled`` for a retrieval
     endpoint that is very much live and being queried — the same false all-clear this check exists
     to remove, wearing the word "disabled".
+
+    The INVERSE pair — retrieval URL set, archiver URL empty — is dead config, not a plane to
+    probe: every archiver tool gates on ``EPICS_MCP_ARCHIVER_URL`` (tools/archiver.py,
+    checkers.py), so nothing ever queries that retrieval URL. The first fallback fix probed it
+    anyway and reported the STRONGEST all-clear the tool knows (``ok=True,
+    verification_complete=True``) for a configuration none of the tools can use — a fix against
+    false-green that produced false-green. It is a loud ``config_error`` now, without a network
+    call: the config itself is the finding, and an ``ok`` line next to it would only muddy what
+    the operator has to change.
     """
+    if cfg.archiver_retrieval_url and not cfg.archiver_url:
+        return PlaneCheck(
+            plane="archiver_retrieval",
+            configured=True,
+            status="config_error",
+            detail=(
+                "EPICS_MCP_ARCHIVER_RETRIEVAL_URL is set but EPICS_MCP_ARCHIVER_URL is empty — "
+                "every archiver tool gates on EPICS_MCP_ARCHIVER_URL, so this retrieval URL is "
+                "never used. Set EPICS_MCP_ARCHIVER_URL (the MGMT webapp URL)."
+            ),
+        )
     url = cfg.archiver_retrieval_url or cfg.archiver_url
     if not url:
         return _disabled("archiver_retrieval", "EPICS_MCP_ARCHIVER_URL")
@@ -664,4 +703,5 @@ async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = Non
         ok=ok,
         verification_complete=not unverified,
         unverified_planes=unverified,
+        identified_planes=[plane.plane for plane in planes if plane.identified],
     )

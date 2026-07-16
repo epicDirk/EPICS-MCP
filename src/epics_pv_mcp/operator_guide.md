@@ -138,11 +138,13 @@ subset behind a meaningless `capped`.
 
 ### Verify a deployment's config — `epics-doctor`
 The `epics-doctor` CLI (core install) is a read-only self-check: it probes every CONFIGURED plane
-once and reports, per plane, whether it is reachable, whether the CA bundle works, whether the
+(a transport probe, refined on success by an identity probe — up to two requests for a healthy
+plane; retries on a 5xx add more) and
+reports, per plane, whether it is reachable, whether the CA bundle works, whether the
 service **identifies itself as the one that URL should point at**, and what the ChannelFinder
 redaction is set to. A disabled plane (empty `*_URL`) is reported honestly, never a failure. Exit
 `0` = no configured plane failed, `1` = a configured plane failed (`unreachable` / `ca_error` /
-`api_error` / `wrong_service` / probe-disconnect), `2` = a usage error. Run it first in a new
+`api_error` / `wrong_service` / `config_error` / probe-disconnect), `2` = a usage error. Run it first in a new
 facility to confirm the `.env`; add `--probe-pv NAME` to also pass/fail the live PVA plane against a
 real PV. Full deployment/config guide: `docs/deployment.md`.
 
@@ -157,6 +159,7 @@ ChannelFinder). Each plane is therefore also asked to **name itself**:
 | `✓` | `ok` | the service named itself correctly — confirmed |
 | `?` | `unverified` | reachable, but it could not prove what it is (auth wall, no info endpoint, unreadable body). **Honest, not healthy** — exit stays `0` |
 | `✗` | `wrong_service` | it named itself as a *different* known service — that URL points at the wrong one. Exit `1` |
+| `✗` | `config_error` | the configuration is self-contradictory, no probe is even attempted (e.g. `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` set while `EPICS_MCP_ARCHIVER_URL` is empty — every archiver tool gates on the latter, so that retrieval URL is never used). Exit `1` |
 
 `unverified` is not a failure on purpose: that a healthy service answers its beacon anonymously is
 measured at one site, and making that a hard failure everywhere would be an overclaim.
@@ -175,7 +178,9 @@ Probing the latter on the retrieval port 404s and tells you nothing — that mis
 earlier pass concluded retrieval had no beacon at all.
 
 Scripting against this? Exit `0` means "nothing failed", **not** "everything confirmed" — read
-`verification_complete` / `unverified_planes` from `--json`, never the exit code alone.
+`verification_complete` / `unverified_planes` from `--json`, never the exit code alone. And for
+**positive** confirmation assert `identified_planes` is non-empty: `verification_complete` is
+vacuously true on an empty config, so it alone cannot tell "all confirmed" from "nothing ran".
 
 ### Retrieval-cluster-aware appliances
 An Archiver Appliance may run as an **N-member failover cluster**. Such a cluster is retrieval-aware: a

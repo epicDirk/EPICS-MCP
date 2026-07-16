@@ -23,7 +23,8 @@ setting those variables for *your* services — no code change. This guide walks
    ```
 
    Exit `0` = no configured plane failed; `1` = a configured plane failed (including
-   `wrong_service` — that URL is served by a *different* service); `2` = usage error.
+   `wrong_service` — that URL is served by a *different* service — and `config_error` — the
+   variables contradict each other, e.g. a retrieval URL with no archiver URL); `2` = usage error.
    Fix anything `epics-doctor` flags, then you are done — no need to ask us.
 
    ⚠️ Read the `?` (`unverified`) lines before calling it done: they mean "reachable, but it could
@@ -31,7 +32,8 @@ setting those variables for *your* services — no code change. This guide walks
    identity beacon (see the operator guide); a `?` means that beacon did not answer usably, which is
    worth understanding rather than waving through. Scripting this? Read `verification_complete` /
    `unverified_planes` from `--json`; the exit code alone says "nothing failed", not "everything
-   confirmed".
+   confirmed" — and for positive confirmation assert `identified_planes` is non-empty
+   (`verification_complete` is vacuously true on an empty config).
 
 ## 2. The variables, by plane
 
