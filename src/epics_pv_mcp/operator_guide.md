@@ -136,6 +136,16 @@ the combination (`INVALID_ARGUMENT`) rather than answer it wrongly; client-side 
 substitute, because `limit` is applied server-side — filtering a capped page yields an arbitrary
 subset behind a meaningless `capped`.
 
+**Finding PVs by archiving RATE (e.g. a moderately-sampled test fixture):** enumeration cannot see
+rates, but the MGMT report endpoints can — `GET /mgmt/bpl/getEventRateReport` answers a rate-sorted
+list of `{pvName, eventRate}` objects (measured live on two appliances, 2026-07-16). Sampling
+`getAllPVs` blindly is the wrong tool for that job: archives are often bimodal (fast PVs plus
+carried-only ones), so a blind stride finds no middle. Also know your SITE'S cluster layout before
+enumerating: a facility may run **several archiver clusters split by purpose** (e.g. scalars vs.
+large waveforms vs. per-network instances, each with its own MGMT root) — `getApplianceInfo`'s
+`identity` tells you which appliance a URL actually is, and enumerating the wrong cluster silently
+yields a complete-looking list of the wrong population.
+
 ### Verify a deployment's config — `epics-doctor`
 The `epics-doctor` CLI (core install) is a read-only self-check: it probes every CONFIGURED plane
 (a transport probe, refined on success by an identity probe — up to two requests for a healthy
