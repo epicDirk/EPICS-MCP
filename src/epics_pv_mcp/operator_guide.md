@@ -281,11 +281,13 @@ messages embed the full request URL — an internal host would leak into this fi
   `PV_TIMEOUT` (never `PV_NOT_FOUND`) — the cause cannot be read off the transport error code. Use
   `diagnose_connection`: the live probe is the sole authority for connected/disconnected; ChannelFinder
   and Naming only *explain* it (they never flip the verdict; `withheld ≠ no`).
-- **"not found" vs "not registered".** `lookup_device_name`: a real HTTP 404 on the device endpoint is a
-  **definitive** `registered:false`; a service/transport/TLS failure is **withheld** (`registered:null`),
-  never a false negative.
+- **"not found" vs "not registered".** `lookup_device_name`: the service's measured "no such name" —
+  HTTP **204** (what an ESS-style Naming Service actually answers) — and a real HTTP 404 are the
+  **definitive** `registered:false`; a service/transport/TLS failure or an unreadable record is
+  **withheld** (`registered:null`), never a false negative.
 - **Archived? how? history?** `is_archived` / `get_archive_info` / `get_pv_history`. History `status` is
-  `ok` / `empty` / `withheld` — a bare `[]` means only a truly empty history, not "could not read".
+  `ok` / `empty` / `withheld` — a bare `[]` means only a truly empty history, not "could not read";
+  a single unreadable sample withholds the whole result rather than being silently skipped.
 - **Alarm configured / history?** `is_alarm_configured` (`configured` is `true`/`false`/`null`;
   `null` = withheld, see the config-tree recipe below) / `get_alarm_history` (`start` + `end`
   required; `pv` is matched as a wildcard SUBSTRING of the config path — `Value` matches both
@@ -316,7 +318,14 @@ messages embed the full request URL — an internal host would leak into this fi
   **case-insensitive**: `*Temp*` legitimately matches `...MorTemPrd`, so a hit may differ in case
   from what you asked.
 - **A REST 404 = `found:false`** only where documented (`getPVTypeInfo`, Olog `get_log_entry`); any other
-  error propagates — could-not-read is never silently "not there".
+  error propagates — could-not-read is never silently "not there". An **unreadable 2xx** is part of
+  that rule: every REST client validates the payload against its measured schema and raises (or
+  withholds where a status channel exists) instead of minting a definitive answer. Two wire
+  realities worth knowing: a real Olog answers **401** (not 404) for an unknown id on the anonymous
+  read path — that surfaces as an error, never as `found:false`; and an ESS-style Naming Service
+  answers **204** for a nonexistent name — mapped to the definitive `registered:false`. With the
+  Olog plane *disabled*, `get_log_entry` answers `found:null` (not checked), mirroring the
+  `archived`/`configured`/`registered` siblings.
 
 ## Acceptance — the questions this guide must answer
 

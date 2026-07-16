@@ -223,7 +223,9 @@ async def find_device(
     localhost-isolated by default (does NOT reach ESS production until the launcher widens the EPICS
     address list); the live read is capped to max_batch_size channels (honest note; screens stay
     complete). Source IOC comes from ChannelFinder, disabled by default (empty
-    EPICS_MCP_CHANNELFINDER_URL → no source IOC, honest note). ca-only PVs are not read under the
+    EPICS_MCP_CHANNELFINDER_URL → no source IOC, honest note); a CAPPED ChannelFinder fetch adds a
+    note that the source-IOC join may be incomplete — a channel without source_ioc may simply have
+    fallen past the cap, not be unregistered (F16). ca-only PVs are not read under the
     single pva provider. displays_dir is the project/dataset ROOT. Returns
     {"report": <DeviceLookupReport JSON>, "markdown": <rendered report>}.
     """

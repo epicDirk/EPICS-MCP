@@ -46,6 +46,15 @@ framed in these terms:
 The Live plane is the **only** authority for connected/disconnected; every other plane is
 explanatory and is *withheld* (never a false negative) when its service is not configured.
 
+**Strict response schemas (S11).** Every REST client validates a 2xx payload against the
+measured schema of its endpoint. An unreadable payload **raises a loud error** — except in
+`get_pv_history`, whose existing `status` channel reports it as `withheld` — and is **never**
+minted into a definitive answer. (`is_alarm_configured`'s `null` stays the *readable-but-
+tree-ambiguous* verdict; an unreadable payload there raises like everywhere else.) Definitive
+negatives come only from each service's measured signal: Archiver `getPVTypeInfo` HTTP 404,
+Olog `get_log_entry` HTTP 404, Naming HTTP 204/404. Junk list items are never silently
+dropped, missing fields never zero-filled, non-strings never stringified into names.
+
 ## Safety & network posture
 
 This is a controls tool, so the trust questions come first:
@@ -173,14 +182,14 @@ To reach a real control system, set the address list in the launcher's environme
 |------|---------|-----------|
 | `find_channels` | ChannelFinder — which IOC/host serves a PV + tags/properties | `EPICS_MCP_CHANNELFINDER_URL` |
 | `is_archived` | Archiver Appliance — is a PV being archived? (+ connection_state / last_event / is_monitored from the same getPVStatus call) | `EPICS_MCP_ARCHIVER_URL` |
-| `get_pv_history` | Archiver Appliance — archived samples over an ISO-8601 window (+ the getData.json `meta` block: EGU units, PREC precision; `status` = ok/empty/withheld so an empty result is never mistaken for "could not read") | `EPICS_MCP_ARCHIVER_URL` |
-| `get_archive_info` | Archiver Appliance — how a PV is archived (sampling method/period, STS/MTS/LTS retention, DBRType, archived fields, source host); `found:false` on a 404 (never-archived), errors propagate | `EPICS_MCP_ARCHIVER_URL` |
+| `get_pv_history` | Archiver Appliance — archived samples over an ISO-8601 window (+ the getData.json `meta` block: EGU units, PREC precision; `status` = ok/empty/withheld so an empty result is never mistaken for "could not read"; one unreadable sample withholds the whole result) | `EPICS_MCP_ARCHIVER_URL` |
+| `get_archive_info` | Archiver Appliance — how a PV is archived (sampling method/period, STS/MTS/LTS retention, DBRType, archived fields, source host); `found:false` ONLY on the 404 (never-archived) — an unreadable 2xx errors, never a false `found` | `EPICS_MCP_ARCHIVER_URL` |
 | `list_archived_pvs` | Archiver Appliance — enumerate archived PV names (getAllPVs / `this_appliance`=getPVsForThisAppliance, not getMatchingPVs); optional name-glob `pattern` (getAllPVs only — `getPVsForThisAppliance` has no name filter, so the combination is refused rather than answered unfiltered), honest `capped` | `EPICS_MCP_ARCHIVER_URL` |
 | `is_alarm_configured` | Phoebus Alarm Logger — is a PV in the alarm tree? | `EPICS_MCP_ALARM_URL` |
 | `get_alarm_history` | Phoebus Alarm Logger — alarm state history of a PV over a window (required start/end; newest-first; user/host stripped) | `EPICS_MCP_ALARM_URL` |
-| `lookup_device_name` | ESS Naming Service — is a device name registered + ACTIVE? (404 = definitive not-registered; a service error is withheld, never a false negative) | `EPICS_MCP_NAMING_URL` |
+| `lookup_device_name` | ESS Naming Service — is a device name registered + ACTIVE? (HTTP 204 — the real service's measured "no such name" — and 404 = definitive not-registered; a service error or unreadable record is withheld, never a false negative) | `EPICS_MCP_NAMING_URL` |
 | `search_logbook` | Phoebus Olog — search log entries (DS-PRIVACY: author dropped, title/description free text withheld, attachments as a count — **unless a declared local test sandbox**, where entries come back whole; see "Olog output posture" below); paginate with `offset`/`sort`, `total_matches` = true total across all pages | `EPICS_MCP_OLOG_URL` |
-| `get_log_entry` | Phoebus Olog — one entry by id (same redaction; 404 = definitive found:false, other errors propagate) | `EPICS_MCP_OLOG_URL` |
+| `get_log_entry` | Phoebus Olog — one entry by id (same redaction; 404 = definitive found:false, everything else — incl. an unreadable 2xx — errors; disabled → found:null) | `EPICS_MCP_OLOG_URL` |
 | `list_logbooks` | Phoebus Olog — list the valid logbook names (name-only; owners dropped) | `EPICS_MCP_OLOG_URL` |
 | `list_tags` | Phoebus Olog — list the valid tag names | `EPICS_MCP_OLOG_URL` |
 | `create_log_entry` | Phoebus Olog — **post** a log entry (MUTATING; own gate + test-server URL boundary + logbook allowlist + rate limit; author = the service account, not spoofable; response redacted) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` |

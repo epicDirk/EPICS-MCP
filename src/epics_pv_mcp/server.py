@@ -288,6 +288,9 @@ async def find_channels(
     them all, so a bare substring reads as 'no such channel' rather than as a syntax mistake.
     And it is CASE-INSENSITIVE: '*temp*', '*Temp*' and '*TEMP*' return the identical set, so a
     hit may differ in case from what was asked (e.g. '*Temp*' matching '...MorTemPrd').
+
+    A malformed registry record (a non-dict element, or one without a usable name) raises a loud
+    error — records are never silently dropped into a smaller, fabricated answer.
     """
     return await _find_channels(name_pattern, max_results, timeout)
 
@@ -314,12 +317,13 @@ async def lookup_device_name(
     """Look up an ESS device name in the Naming Service: is it registered and ACTIVE?
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_NAMING_URL is set (no
-    ESS egress otherwise). A reachable service answering "not registered" (HTTP 404) yields
-    registered=false — a DEFINITIVE answer; OBSOLETE/DELETED also yield registered=false with the
-    status preserved. A service/URL failure (unreachable, 5xx, bad JSON, timeout) is WITHHELD
-    (registered=null + withheld=true), never collapsed into a false "not registered". Surfaces only
-    registered/status/message. Unlike diagnose_connection this needs no live PV probe — it answers
-    the pure registry question directly.
+    ESS egress otherwise). A reachable service answering "not registered" — HTTP 204, the signal
+    the real service actually sends (measured 2026-07-16), or HTTP 404 — yields registered=false,
+    a DEFINITIVE answer; OBSOLETE/DELETED also yield registered=false with the status preserved.
+    A service/URL failure (unreachable, 5xx, bad JSON, timeout) and a 2xx record without a
+    readable status are WITHHELD (registered=null + withheld=true), never collapsed into a false
+    "not registered". Surfaces only registered/status/message. Unlike diagnose_connection this
+    needs no live PV probe — it answers the pure registry question directly.
     """
     return await _lookup_device_name(name, timeout)
 
@@ -342,7 +346,10 @@ async def is_archived(
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.
     Beyond archived/status the result surfaces the MGMT record's connection_state (source IOC
     connected now?), last_event (time of the last archived sample), is_monitored, sampling_period
-    and appliance when present — same single getPVStatus call, no extra cost.
+    and appliance when present — same single getPVStatus call, no extra cost. An unreadable
+    getPVStatus payload raises a loud error — never a fabricated archived=false: the appliance
+    answers even an UNKNOWN pv with a real record (status "Not being archived", measured), so
+    that record is the only definitive negative.
 
     is_archived answers only for a NAMED PV. To ENUMERATE the archived PVs use list_archived_pvs
     (getAllPVs / getPVsForThisAppliance, NOT getMatchingPVs — it 404s on split/proxied deployments).
@@ -385,7 +392,9 @@ async def get_pv_history(
     alongside the samples. capped is true when the window held more than max_points samples. status
     disambiguates an empty result: "ok" (samples returned), "empty" (a valid but sample-less window)
     or "withheld" (an unreadable response, with a withheld_reason) — so an empty samples list is
-    never mistaken for "no data" when the truth is "could not read".
+    never mistaken for "no data" when the truth is "could not read". A single unreadable sample
+    in the data array withholds the WHOLE result (it is never silently skipped or zero-filled
+    into a plausible sample).
     """
     return await _get_pv_history(pv, start, end, max_points, timeout)
 
@@ -409,7 +418,10 @@ async def get_archive_info(
     Complements is_archived (live connection state) and get_pv_history (the samples): surfaces the
     archive CONFIGURATION — sampling method/period, retention (the STS/MTS/LTS data_stores),
     computed event/storage rates, dbr_type, archived fields, source host_name and creation_time.
-    found is false when the appliance has no type-info record for the PV (unknown / never archived).
+    found is false when the appliance has no type-info record for the PV (unknown / never
+    archived) — it signals that with HTTP 404 and ONLY that; an unreadable 2xx raises a loud
+    error instead of a false found (neither a fabricated "not archived" nor, for an unrelated
+    body, a fabricated found=true).
 
     get_archive_info answers only for a NAMED PV; list_archived_pvs enumerates them
     (getAllPVs / getPVsForThisAppliance, NOT getMatchingPVs — 404s on split/proxied). See
@@ -502,10 +514,11 @@ async def is_alarm_configured(
 
     configured is true / false / null, and null means WITHHELD — the tree itself returned nothing,
     so 'this PV is not configured' cannot be told apart from 'that is not the tree name'; a note
-    then says so. config_name is CASE-SENSITIVE even though the server lower-cases it to pick the
-    index (measured live 2026-07-15: 'accelerator' selects the right index and matches nothing,
-    reporting exactly like a genuinely unconfigured PV). The returned config field echoes your
-    input — it is NOT the server confirming the tree exists.
+    then says so. An unreadable payload or record raises a loud error instead of falling through
+    to the tree probe as a false negative. config_name is CASE-SENSITIVE even though the server
+    lower-cases it to pick the index (measured live 2026-07-15: 'accelerator' selects the right
+    index and matches nothing, reporting exactly like a genuinely unconfigured PV). The returned
+    config field echoes your input — it is NOT the server confirming the tree exists.
     """
     return await _is_alarm_configured(pv, config_name, timeout)
 
@@ -561,7 +574,8 @@ async def get_alarm_history(
     state:/config: distinguishes them). Events are newest first and carry only technical fields
     (severity/message/value/time/current_severity/current_message/enabled/mode/pv/config); the raw
     doc's user/host (who acknowledged/enabled/disabled) and command are stripped (privacy). capped
-    is true when more than max_events matched.
+    is true when more than max_events matched. An unreadable payload or record raises a loud
+    error — never an empty result that reads as 'nothing alarmed'.
 
     Time window: an absolute value is normalized to zone-explicit UTC before sending (a naive one
     is read as UTC); a single relative amount ('8 hours', 'now') passes through. A value the server
@@ -642,7 +656,8 @@ async def search_logbook(
     the REVERSE of the documented default — and answers 200 with a well-formed page (measured
     live 2026-07-15: 'newest' and 'garbage' both returned oldest-first). total is the number of
     entries returned; total_matches is the true total across all pages (Olog hitCount); capped is
-    true when more than size matched on this page.
+    true when more than size matched on this page. An unreadable payload or entry raises a loud
+    error — never an empty result that reads as 'nothing matched'.
     """
     return await _search_logbook(
         text=text,
@@ -672,10 +687,15 @@ async def get_log_entry(
 ) -> dict[str, object]:
     """Fetch one Phoebus Olog entry by id (Olog REST /logs/{id}).
 
-    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_OLOG_URL is set. Same
-    DS-PRIVACY posture as search_logbook (redacted: author dropped, title/description withheld,
-    attachments as a count; whole only for a DECLARED local sandbox).
-    found is false when no entry has that id.
+    Read-only. Disabled by default — returns enabled=false with found=null (the plane was NOT
+    checked) unless EPICS_MCP_OLOG_URL is set. Same DS-PRIVACY posture as search_logbook
+    (redacted: author dropped, title/description withheld, attachments as a count; whole only for
+    a DECLARED local sandbox).
+
+    found is false ONLY on the service's definitive HTTP 404; an unreadable 2xx raises a loud
+    error (it is neither a "not found" nor projected as a fabricated entry). NOTE: a real Olog
+    answers 401 for an unknown id on this anonymous read path (measured 2026-07-16 — its error
+    dispatch requires auth), which surfaces as an error, not as found=false.
     """
     return await _get_log_entry(log_id, timeout)
 
@@ -696,6 +716,7 @@ async def list_logbooks(
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_OLOG_URL is set. Returns
     the logbook NAMES only (owners dropped) — the valid values for search_logbook(logbooks=…).
+    An unreadable listing raises a loud error — never an empty 'there are none'.
     """
     return await _list_logbooks(timeout)
 
@@ -716,6 +737,7 @@ async def list_tags(
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_OLOG_URL is set. Returns
     the tag NAMES only — the valid values for search_logbook(tags=…). Tags carry no owner.
+    An unreadable listing raises a loud error — never an empty 'there are none'.
     """
     return await _list_tags(timeout)
 
@@ -751,7 +773,8 @@ async def create_log_entry(
     (EPICS_MCP_OLOG_WRITE_LOGBOOKS) AND a rate limit — ALLOW_PV_WRITE is untouched. The author
     (owner) is the configured write service account, set server-side; a caller cannot spoof it. The
     returned entry follows the same posture as a read (redacted; whole only for a DECLARED local
-    sandbox — where a write can therefore verify what it just wrote).
+    sandbox — where a write can therefore verify what it just wrote). A write response that is not
+    the created entry raises a loud error — it is never projected as a fabricated confirmation.
     With EPICS_MCP_OLOG_URL unset the tool returns enabled=false and makes no network call.
     """
     return await _create_log_entry(
