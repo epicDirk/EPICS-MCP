@@ -222,10 +222,12 @@ epics-coverage   --displays <project-root> --scope DEV: # coverage matrix (needs
 `epics-diagnose`/`epics-crossplane`/`epics-coverage` exit `0` even on a negative finding (a
 disconnect / a broken link is a result, not a crash). **`epics-doctor` is the deliberate exception**
 — it is a scriptable pass/fail, so it exits `0` when no configured plane failed, `1` when a
-configured plane fails (unreachable / CA error / API error / wrong_service / probe-disconnect /
+configured plane fails (unreachable / CA error / API error / probe-disconnect /
 config_error — e.g. a retrieval URL with no archiver URL, which no tool would ever use), and
-`2` on a usage error. Run it first in a new facility to confirm your `.env` (see
-`docs/deployment.md`).
+`2` on a usage error. A service answering with a *different* known service's name is reported
+`unverified` with the found name in the detail — not a failure, because a path-based reverse
+proxy can serve the real API behind a base URL that names another service (measured). Run it
+first in a new facility to confirm your `.env` (see `docs/deployment.md`).
 
 Each plane is also asked to **name itself**, because reachable is not identified: the transport probe
 counts any HTTP response as reachable, so a URL aimed at the wrong host can look alive (measured: a

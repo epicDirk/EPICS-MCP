@@ -12,8 +12,8 @@ a scriptable pass/fail):
 
 * ``0`` — no configured plane failed (healthy, honestly disabled/info-only, or reachable with its
   identity ``unverified``);
-* ``1`` — a configured plane failed (unreachable / ca_error / api_error / wrong_service /
-  config_error / probe-disconnect);
+* ``1`` — a configured plane failed (unreachable / ca_error / api_error / config_error /
+  probe-disconnect);
 * ``2`` — a usage error (bad arguments, or an internal EpicsError).
 
 ⚠️ Exit ``0`` means "nothing failed", NOT "everything was confirmed": a plane can be reachable with
@@ -46,7 +46,6 @@ _STATUS_MARK = {
     "disabled": "·",
     "info": "i",
     "unverified": "?",
-    "wrong_service": "✗",
     "config_error": "✗",
     "ca_error": "✗",
     "api_error": "✗",

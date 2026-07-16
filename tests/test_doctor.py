@@ -227,17 +227,27 @@ def test_identity_exact_name_is_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     assert (check.status, check.identified) == ("ok", True)
 
 
-def test_identity_of_a_different_known_service_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    """THE case that motivated all of this — but sharpened: here the wrong service ANSWERS.
+def test_identity_of_a_different_known_service_is_unverified_with_the_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S14: a foreign service name is "cannot confirm", never a hard failure.
 
-    A ChannelFinder URL served by Olog is a misconfiguration that is unambiguous at any site, so
-    unlike `unverified` it is a hard failure.
+    The earlier ``wrong_service``+exit-1 verdict rested on "a misconfiguration that is
+    unambiguous at any site" — refuted by measurement (2026-07-16): a path-based reverse
+    proxy served the REAL ChannelFinder API while the base GET answered as ``Olog Service``,
+    so the doctor failed a WORKING configuration. The found name must still surface in the
+    detail (it is the actionable clue when the config IS wrong).
     """
     _payload(monkeypatch, {"name": "Olog Service"})
     check = _identify("channelfinder", "http://olog.example/Olog", None, 5.0)
-    assert (check.status, check.identified) == ("wrong_service", False)
-    assert "points at the olog service" in (check.detail or "")
-    assert check.status not in _NON_FAILING_STATUSES  # it must drive exit 1
+    assert (check.status, check.identified) == ("unverified", False)
+    assert "Olog Service" in (check.detail or "")
+    assert "ChannelFinder Service" in (check.detail or "")
+    assert "the name of the olog service" in (check.detail or "")  # the plane mapping survives
+    assert check.status in _NON_FAILING_STATUSES  # honest doubt, exit 0
+    # And the vocabulary itself is gone — a re-added dead Literal value (paired with its glyph)
+    # would survive every functional test, since nothing emits it anymore.
+    assert "wrong_service" not in get_args(PlaneStatus)
 
 
 def test_identity_substring_is_not_enough(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -317,11 +327,12 @@ def test_naming_identifies_via_its_swagger_contract(monkeypatch: pytest.MonkeyPa
     assert (check.status, check.identified) == ("ok", True)
 
 
-def test_naming_unfamiliar_title_is_unverified_not_wrong_service(
+def test_naming_unfamiliar_title_is_unverified(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The title is documentation prose and may be reworded, so an unfamiliar one means "cannot
-    confirm" — NOT "a different known service answers here". Only the latter justifies exit 1."""
+    confirm" — honest doubt, exit 0 (since S14 that is the ONLY verdict any unconfirmed
+    identity can earn; the harder wrong_service verdict was refuted by measurement)."""
     _payload(monkeypatch, {"info": {"title": "Some other API"}})
     assert _identify_naming("http://naming.example", 5.0).status == "unverified"
 
@@ -378,7 +389,7 @@ def test_unknown_status_fails_closed() -> None:
     With the previous failure DENYLIST, a typo like "wrong-service" was simply absent from it and
     therefore counted as healthy — fail-open, in the one tool whose job is to catch bad config.
     """
-    assert "wrong-service" not in _NON_FAILING_STATUSES  # the typo'd twin of a real status
+    assert "wrong-service" not in _NON_FAILING_STATUSES  # the typo'd twin of a former status
     assert {"ok", "disabled", "info", "unverified"} == _NON_FAILING_STATUSES
 
 

@@ -29,6 +29,13 @@ carry breaking changes).
 
 ### Changed
 
+- `epics-doctor`: a service answering with a *different* known service's name is now reported
+  `unverified` (exit 0) with the found name in the detail, instead of the removed
+  `wrong_service` failure (exit 1). Measured motivation: a path-based reverse proxy served the
+  real ChannelFinder API while the base GET answered as Olog — the old hard failure flagged a
+  working configuration, and its "unambiguous at any site" rationale did not survive that
+  measurement. Migration: a script that relied on exit `1` for a cross-wired URL must now read
+  `unverified_planes` from `--json` (and assert `identified_planes` for positive confirmation).
 - `EPICS_MCP_DEFAULT_TIMEOUT` is now honoured on the whole read/write path. Tool
   timeouts default to the configured server timeout instead of a hardcoded `5.0`.
 - The 15 tool wrappers now share a single `translate_epics_errors` decorator instead of

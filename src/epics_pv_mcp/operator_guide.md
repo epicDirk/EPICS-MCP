@@ -172,7 +172,7 @@ reports, per plane, whether it is reachable, whether the CA bundle works, whethe
 service **identifies itself as the one that URL should point at**, and what the ChannelFinder
 redaction is set to. A disabled plane (empty `*_URL`) is reported honestly, never a failure. Exit
 `0` = no configured plane failed, `1` = a configured plane failed (`unreachable` / `ca_error` /
-`api_error` / `wrong_service` / `config_error` / probe-disconnect), `2` = a usage error. Run it first in a new
+`api_error` / `config_error` / probe-disconnect), `2` = a usage error. Run it first in a new
 facility to confirm the `.env`; add `--probe-pv NAME` to also pass/fail the live PVA plane against a
 real PV. Full deployment/config guide: `docs/deployment.md`.
 
@@ -185,12 +185,16 @@ ChannelFinder). Each plane is therefore also asked to **name itself**:
 | Mark | Status | Meaning |
 |---|---|---|
 | `✓` | `ok` | the service named itself correctly — confirmed |
-| `?` | `unverified` | reachable, but it could not prove what it is (auth wall, no info endpoint, unreadable body). **Honest, not healthy** — exit stays `0` |
-| `✗` | `wrong_service` | it named itself as a *different* known service — that URL points at the wrong one. Exit `1` |
+| `?` | `unverified` | reachable, but it could not prove what it is (auth wall, no info endpoint, unreadable body — or a beacon naming a *different* service, with that name in the detail). **Honest, not healthy** — exit stays `0` |
 | `✗` | `config_error` | the configuration is self-contradictory, no probe is even attempted (e.g. `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` set while `EPICS_MCP_ARCHIVER_URL` is empty — every archiver tool gates on the latter, so that retrieval URL is never used). Exit `1` |
 
 `unverified` is not a failure on purpose: that a healthy service answers its beacon anonymously is
-measured at one site, and making that a hard failure everywhere would be an overclaim.
+measured at one site, and making that a hard failure everywhere would be an overclaim. The same
+holds when the beacon names a *different* known service (an earlier release failed that case as
+`wrong_service`, exit `1`): measured, a path-based reverse proxy served the real ChannelFinder API
+while the base GET answered as Olog — the foreign name cannot prove a misconfiguration, so the
+doctor reports it honestly and keeps the found name in the detail as the first clue for when the
+config IS wrong.
 
 Each plane has its own beacon, because they do not share one:
 

@@ -71,7 +71,6 @@ PlaneStatus = Literal[
     "disabled",
     "info",
     "unverified",
-    "wrong_service",
     "config_error",
     "ca_error",
     "api_error",
@@ -89,6 +88,10 @@ PlaneStatus = Literal[
 #: ANONYMOUSLY is measured at exactly one site (n=1), and turning that into a hard failure for every
 #: site would be the same overclaim this server keeps finding in other people's code. It is reported
 #: honestly instead — and ``DoctorReport.verification_complete`` tells a machine reader it happened.
+#: The same holds when the beacon carries a DIFFERENT known service's name (S14, measured
+#: 2026-07-16): a path-based reverse proxy served the real ChannelFinder API while the base GET
+#: answered as Olog — a foreign name cannot prove a misconfiguration, so it too is ``unverified``
+#: (with the found name in the detail), never a failure.
 _NON_FAILING_STATUSES: frozenset[str] = frozenset({"ok", "disabled", "info", "unverified"})
 
 
@@ -269,10 +272,13 @@ def _fetch_beacon(url: str, auth_header: str | None, timeout: float) -> object |
 def _identify(plane: str, base_url: str, auth_header: str | None, timeout: float) -> PlaneCheck:
     """Ask a Phoebus-family service to name itself; map the answer to a verdict. TOTAL.
 
-    Returns ``ok`` (it named itself correctly), ``wrong_service`` (it named itself as a DIFFERENT
-    known service — a misconfiguration that is unambiguous at any site, so it fails), or
-    ``unverified`` (anything else: an auth wall, HTML, a body without a usable ``name``, a redirect,
-    a 5xx). ``unverified`` is honest, not a failure — see :data:`_NON_FAILING_STATUSES`.
+    Returns ``ok`` (it named itself correctly) or ``unverified`` (anything else: an auth wall,
+    HTML, a body without a usable ``name``, a redirect, a 5xx — or a body naming a DIFFERENT
+    service, with that name in the detail). A foreign name is deliberately NOT a failure (S14):
+    the earlier ``wrong_service``+exit-1 verdict rested on "unambiguous at any site", refuted by
+    measurement (2026-07-16) — a path-based reverse proxy served the REAL ChannelFinder API while
+    the base GET answered as Olog, so the hard failure flagged a WORKING configuration.
+    ``unverified`` is honest, not a failure — see :data:`_NON_FAILING_STATUSES`.
     """
     expected = _SERVICE_NAMES[plane]
     payload = _fetch_beacon(base_url, auth_header, timeout)
@@ -290,23 +296,18 @@ def _identify(plane: str, base_url: str, auth_header: str | None, timeout: float
         return PlaneCheck(
             plane=plane, configured=True, reachable=True, ca_ok=True, status="ok", identified=True
         )
-    for other, other_name in _SERVICE_NAMES.items():
-        if name == other_name:
-            return PlaneCheck(
-                plane=plane,
-                configured=True,
-                reachable=True,
-                ca_ok=True,
-                status="wrong_service",
-                identified=False,
-                detail=(
-                    f"this URL is served by {other_name!r}, not {expected!r} — the "
-                    f"{plane} URL points at the {other} service."
-                ),
-            )
+    # A KNOWN foreign name keeps its plane mapping in the detail — that is the actionable clue
+    # when the config really is cross-wired (status stays unverified either way, S14).
+    hint = next(
+        (f" (the name of the {other} service)" for other, o in _SERVICE_NAMES.items() if name == o),
+        "",
+    )
     return _unverified(
         plane,
-        f"transport reachable, but it identifies as {name!r}, not {expected!r} — unknown service",
+        f"transport reachable, but this URL answers as {name!r}{hint}, not {expected!r} — cannot "
+        f"confirm it is the {plane} service. Not a failure: a path-based reverse proxy can "
+        "serve the real API behind a base URL that names another service (measured); if the "
+        "config IS wrong, the name here is the clue.",
     )
 
 
@@ -551,8 +552,10 @@ def _identify_naming(base_url: str, timeout: float) -> PlaneCheck:
     (measured: Olog answers 401 there, ChannelFinder 404).
 
     The title is documentation prose and may be reworded by a future release, so a mismatch is
-    ``unverified``, never ``wrong_service``: we can recognise this service, but we cannot conclude
-    from an unfamiliar title that some *other* known service is answering.
+    ``unverified``: we can recognise this service, but an unfamiliar title proves nothing about
+    what is answering (since S14 the same honesty applies to every identity probe — even a
+    beacon naming a different known service only ever yields ``unverified`` with the name in
+    the detail).
     """
     payload = _fetch_beacon(f"{base_url.rstrip('/')}/rest/swagger.json", None, timeout)
     if isinstance(payload, Exception):

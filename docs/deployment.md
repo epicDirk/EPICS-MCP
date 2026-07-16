@@ -23,9 +23,12 @@ setting those variables for *your* services — no code change. This guide walks
    ```
 
    Exit `0` = no configured plane failed; `1` = a configured plane failed (including
-   `wrong_service` — that URL is served by a *different* service — and `config_error` — the
-   variables contradict each other, e.g. a retrieval URL with no archiver URL); `2` = usage error.
-   Fix anything `epics-doctor` flags, then you are done — no need to ask us.
+   `config_error` — the variables contradict each other, e.g. a retrieval URL with no archiver
+   URL); `2` = usage error. A URL answering with a *different* known service's name is reported
+   `unverified` with that name in the detail — not a failure (a path-based reverse proxy can
+   serve the real API behind a base URL that names another service, measured), but the name is
+   your first clue if the config IS wrong. Fix anything `epics-doctor` flags, then you are
+   done — no need to ask us.
 
    ⚠️ Read the `?` (`unverified`) lines before calling it done: they mean "reachable, but it could
    not prove what it is" — honest, not healthy, and deliberately exit `0`. Every plane has its own
