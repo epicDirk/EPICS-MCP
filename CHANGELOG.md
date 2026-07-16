@@ -9,6 +9,13 @@ carry breaking changes).
 
 ### Added
 
+- `python -m epics_pv_mcp.find_moderate_pv`: read-only fixture finder — walks the MGMT
+  event-rate report (omitting `limit` returns the whole report — near-complete, measured
+  against `getAllPVs`; `limit` behaves as if applied per cluster member and merged, measured),
+  filters a rate band, and counter-verifies each examined candidate (bounded by
+  `--max-verify`) against the target window with a real history fetch (the report's rate is
+  the appliance's own recent-window figure, never the caller's window). Deliberately a
+  module, not a console script (build-once: no packaging change).
 - `epics-pv://guide` resource + `OPERATING.md`: an operational cookbook (service planes,
   archiver-enumeration/retrieval-cluster/CA-bundle recipes, error signatures) shipped inside
   the package, so the server carries its own operational knowledge. Backed by one source file
