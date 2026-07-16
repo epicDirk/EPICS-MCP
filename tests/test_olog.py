@@ -189,21 +189,20 @@ def test_declared_sandbox_keeps_the_derived_shape(monkeypatch: pytest.MonkeyPatc
     assert redacted_keys <= entry.keys()
 
 
-def test_full_mode_search_still_truncates_and_filters(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The full mode must not disturb ``[:size]`` truncation or the non-dict filter.
+def test_full_mode_search_still_truncates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The full mode must not disturb ``[:size]`` truncation.
 
-    ``capped``/``total_matches`` are computed on the RAW list before projection; the truncation and
-    the ``isinstance(e, dict)`` filter live INSIDE the comprehension and decide ``total``. The junk
-    sits INSIDE the slice on purpose — placed after it, truncation would remove it before the filter
-    ever ran and this test would pin nothing. It matters because the full mode's ``dict(entry)``
-    raises on a non-dict, so the filter is what keeps a junk element from crashing the search.
+    ``capped``/``total_matches`` are computed on the RAW list before projection. (This test used
+    to also pin a silent non-dict FILTER inside the comprehension — S11 removed that filter: a
+    junk element in the page now raises instead of silently shrinking the result, see
+    ``test_search_entry_without_identity_raises``.)
     """
     client = _sandbox()
-    payload = [_RAW_ENTRY, "not-a-dict", _RAW_ENTRY, _RAW_ENTRY]
+    payload = [dict(_RAW_ENTRY, id=i) for i in range(3)]
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
     entries, capped, _ = client.search_logbook(text="vacuum", size=2)
-    assert len(entries) == 1  # slice keeps 2, the filter drops the junk one
-    assert capped is True  # capped is computed on the RAW list, before either
+    assert len(entries) == 2  # slice keeps size
+    assert capped is True  # capped is computed on the RAW list, before projection
     assert all(isinstance(e, dict) for e in entries)
 
 
@@ -359,11 +358,25 @@ def test_get_log_entry_non_404_propagates(monkeypatch: pytest.MonkeyPatch) -> No
         client.get_log_entry("999")
 
 
-def test_get_log_entry_empty_body_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A 200 with an empty/non-dict body also collapses to None (defensive, never a crash)."""
+@pytest.mark.parametrize(
+    "payload",
+    [{}, ["x"], "nope", 123, {"unexpected": "shape"}, {"id": None}],
+    ids=["empty-dict", "list", "string", "number", "dict-without-id", "null-id"],
+)
+def test_get_log_entry_unreadable_2xx_raises(
+    payload: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S11: a 200 whose body is not a log entry must RAISE — never a definitive answer.
+
+    Replaces the former ``…empty_body_is_none`` pin, which cemented the defect: ``{}`` collapsed
+    to ``None`` (indistinguishable from the definitive 404 "not found"), and an unrelated
+    non-empty dict was PROJECTED as a fabricated entry (auditor probe ``{"unexpected": "shape"}``
+    → a plausible log entry that never existed). The measured entry record always carries ``id``.
+    """
     client = OlogClient("http://olog")
-    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp({})))
-    assert client.get_log_entry("999") is None
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    with pytest.raises(OlogResponseError):
+        client.get_log_entry("999")
 
 
 def test_search_logbook_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -405,7 +418,12 @@ async def test_get_log_entry_tool_disabled_no_network(monkeypatch: pytest.Monkey
     monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _boom)
     result = await _get_log_entry("1")
     assert result["enabled"] is False
-    assert result["found"] is False
+    # S11 (Zusatzfläche 3): a DISABLED plane was the lone `found: False` among four
+    # None-on-disabled siblings (archived/configured/registered/get_archive_info's found) —
+    # a definitive "this entry does not exist" from a plane that was never asked. None = not
+    # checked; False stays reserved for the definitive 404.
+    assert result["found"] is None
+    assert "note" in result
 
 
 @pytest.mark.asyncio
@@ -766,6 +784,100 @@ def test_list_tags_names_only(monkeypatch: pytest.MonkeyPatch) -> None:
     raw = [{"name": "vacuum", "state": "Active"}, {"name": "rf", "state": "Active"}]
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(raw)))
     assert client.list_tags() == ["vacuum", "rf"]
+
+
+# --- client: strict response schema (S11) — unreadable 2xx is NEVER a definitive answer ---
+#
+# Auditor probes (QA 2026-07-16 §8.2/B1): syntactically valid 2xx JSON of the wrong shape used to
+# collapse into plausible definitive answers — search -> ([], False, None) ("no hits"), list
+# endpoints -> [] ("there are none"). The measured payload shapes (local Olog 6.0.4, live): search
+# is {hitCount:int, logs:[entry…]} (bare list = older-version variant, stays valid), every entry
+# carries `id`, every /logbooks//tags item carries `name`.
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{}, "nope", 123, {"unexpected": "shape"}, {"logs": "not-a-list"}],
+    ids=["empty-dict", "string", "number", "unrelated-dict", "logs-not-a-list"],
+)
+def test_search_unreadable_2xx_payload_raises(
+    payload: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S11: an unreadable 2xx search payload must RAISE — it used to read as ``([], False, None)``,
+    indistinguishable from a genuinely empty search (auditor probe OLOG_SEARCH_BAD_2XX)."""
+    client = OlogClient("http://olog")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    with pytest.raises(OlogResponseError):
+        client.search_logbook(text="x")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [[123], [{"title": "no id"}], {"logs": ["junk"], "hitCount": 1}],
+    ids=["non-dict-entry", "entry-without-id", "junk-inside-wrapper"],
+)
+def test_search_entry_without_identity_raises(
+    payload: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S11: every entry of the page must be a dict carrying the measured anchor ``id`` — junk
+    entries were silently DROPPED before (a fabricated, smaller result)."""
+    client = OlogClient("http://olog")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    with pytest.raises(OlogResponseError):
+        client.search_logbook(text="x")
+
+
+def test_search_unreadable_hitcount_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S11: a PRESENT-but-unreadable ``hitCount`` raises; only an ABSENT count is the honest
+    ``total_matches=None`` (the no-count server variant)."""
+    client = OlogClient("http://olog")
+    monkeypatch.setattr(
+        client.session, "get", Mock(return_value=_resp({"logs": [], "hitCount": "many"}))
+    )
+    with pytest.raises(OlogResponseError):
+        client.search_logbook(text="x")
+
+
+def test_search_empty_results_stay_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Positive control: both MEASURED empty shapes stay a real empty result, not an error —
+    strictness must not flag a genuinely empty search (the S14 false-red lesson)."""
+    client = OlogClient("http://olog")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([])))
+    assert client.search_logbook(text="x") == ([], False, None)
+    monkeypatch.setattr(
+        client.session, "get", Mock(return_value=_resp({"logs": [], "hitCount": 0}))
+    )
+    assert client.search_logbook(text="x") == ([], False, 0)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{}, "nope", [{"owner": "x"}], ["Operations"], [{"name": 7}]],
+    ids=["dict", "string", "item-without-name", "string-item", "non-str-name"],
+)
+def test_list_logbooks_unreadable_2xx_raises(
+    payload: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S11: the top-level /logbooks listing IS the answer — an unreadable payload or item must
+    RAISE. It used to collapse to ``[]`` ("there are no logbooks") or silently drop items (a
+    fabricated "this logbook does not exist" for anyone validating a name against the list)."""
+    client = OlogClient("http://olog")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    with pytest.raises(OlogResponseError):
+        client.list_logbooks()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{}, "nope", [{"state": "Active"}], ["vacuum"]],
+    ids=["dict", "string", "item-without-name", "string-item"],
+)
+def test_list_tags_unreadable_2xx_raises(payload: object, monkeypatch: pytest.MonkeyPatch) -> None:
+    """S11: same strictness for /tags (auditor probe OLOG_LIST_TAGS_BAD_2XX -> [])."""
+    client = OlogClient("http://olog")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    with pytest.raises(OlogResponseError):
+        client.list_tags()
 
 
 # --- list_logbooks / list_tags: config gate + enabled path ---

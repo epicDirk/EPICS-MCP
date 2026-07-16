@@ -95,6 +95,31 @@ class HistoryResult(TypedDict):
     withheld_reason: str | None
 
 
+def _readable_sample(point: object) -> Sample | None:
+    """Parse one getData.json sample point, or ``None`` when it is unreadable (S11).
+
+    Measured (ESS appliance 2.2.1, 50 live samples): every sample carries
+    ``secs``/``nanos``/``val``/``severity``/``status``. The REQUIRED anchors are ``secs`` and
+    ``val``; the int fields must be int-coercible when present (an absent
+    ``nanos``/``severity``/``status`` defaults to 0 — deliberately not required, so a sparse
+    server variant stays readable). The old code accepted ANY dict and minted missing fields as
+    0/None — two different broken dicts both became the same plausible sample (auditor probe) —
+    and a non-int-coercible field crashed with an uncaught ValueError.
+    """
+    if not isinstance(point, dict) or "secs" not in point or "val" not in point:
+        return None
+    try:
+        return Sample(
+            secs=int(point["secs"]),
+            nanos=int(point.get("nanos", 0)),
+            val=point["val"],
+            severity=int(point.get("severity", 0)),
+            status=int(point.get("status", 0)),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
 class ArchiverClient:
     """Read-only client for the EPICS Archiver Appliance REST API. GET-only."""
 
@@ -143,15 +168,33 @@ class ArchiverClient:
         return True
 
     def get_pv_status(self, pv: str) -> dict[str, object]:
-        """Return the MGMT status record for *pv* (``getPVStatus`` returns a 1-element list)."""
+        """Return the MGMT status record for *pv* (``getPVStatus`` returns a 1-element list).
+
+        S11: the payload must be a non-empty list whose first element is a dict carrying a
+        string ``status``. Measured (ESS appliance 2.2.1): even an UNKNOWN pv gets a REAL record
+        (``{"pvName": …, "status": "Not being archived"}``) — so ``[]``/junk is out of contract
+        and RAISES. The old code minted a synthetic ``{"status": "Unknown"}`` record, which the
+        callers turned into the definitive ``(False, "Unknown")`` / ``archived: false`` (auditor
+        probe ARCHIVER_IS_ARCHIVED_BAD_2XX).
+        """
         data = self._get(f"{self.base_url}/mgmt/bpl/getPVStatus", {"pv": pv})
-        if not isinstance(data, list) or not data or not isinstance(data[0], dict):
-            return {"pvName": pv, "status": "Unknown"}
+        if (
+            not isinstance(data, list)
+            or not data
+            or not isinstance(data[0], dict)
+            or not isinstance(data[0].get("status"), str)
+            or not data[0]["status"]  # an EMPTY status is no measured value either
+        ):
+            raise ArchiverResponseError(
+                "getPVStatus returned an unreadable payload (expected a 1-element list whose "
+                f"record carries a non-empty string 'status', got {type(data).__name__}); "
+                "the archive status is not readable — this is NOT a 'not archived'."
+            )
         return data[0]
 
     def is_archived(self, pv: str) -> tuple[bool, str]:
         """Return ``(is_archived, status_string)`` for *pv* (active iff 'Being archived')."""
-        status = str(self.get_pv_status(pv).get("status", "Unknown"))
+        status = str(self.get_pv_status(pv)["status"])  # validated by get_pv_status (S11)
         return status == ARCHIVING_STATUS, status
 
     def get_archive_status(self, pv: str) -> dict[str, object]:
@@ -166,7 +209,7 @@ class ArchiverClient:
         The Archiver MGMT record carries no person data, so no allowlist redaction is needed here.
         """
         record = self.get_pv_status(pv)
-        status = str(record.get("status", "Unknown"))
+        status = str(record["status"])  # validated by get_pv_status (S11)
         result: dict[str, object] = {"archived": status == ARCHIVING_STATUS, "status": status}
         for source_key, out_key in (
             ("connectionState", "connection_state"),
@@ -193,10 +236,12 @@ class ArchiverClient:
         Returns ``{"found": True, ...}`` when the appliance has a type-info record for *pv*, or
         ``{"found": False}`` when it has none (unknown / never-archived PV). The appliance signals
         the latter with **HTTP 404** on this endpoint — unlike ``getPVStatus``, which 200s "Not
-        being archived" — so a 404 is mapped to ``found: False`` here; every OTHER failure (5xx,
-        bad JSON, an unreachable appliance) PROPAGATES, so a could-not-read is never silently
-        reported as "not archived". The MGMT record carries no person data, so no allowlist
-        redaction beyond the field projection is needed.
+        being archived" — and ONLY with that 404 (S11): a 2xx whose body is not a readable
+        type-info record RAISES like every other failure (5xx, bad JSON, an unreachable
+        appliance), so a could-not-read is never silently reported as "not archived" — and an
+        unrelated non-empty dict is never projected as a fabricated ``found: True``. The MGMT
+        record carries no person data, so no allowlist redaction beyond the field projection is
+        needed.
         """
         try:
             data = self._get(f"{self.base_url}/mgmt/bpl/getPVTypeInfo", {"pv": pv})
@@ -208,9 +253,7 @@ class ArchiverClient:
             if is_http_404(exc):
                 return {"found": False}
             raise
-        record = self._unwrap_type_info(data)
-        if record is None:
-            return {"found": False}
+        record = self._require_type_info_record(data)
         result: dict[str, object] = {"found": True}
         for source_key, out_key in _TYPE_INFO_FIELDS:
             if source_key in record:
@@ -218,17 +261,26 @@ class ArchiverClient:
         return result
 
     @staticmethod
-    def _unwrap_type_info(data: object) -> dict[str, object] | None:
-        """Normalize the getPVTypeInfo payload to a record dict, or ``None`` when there is none.
+    def _require_type_info_record(data: object) -> dict[str, object]:
+        """Normalize the getPVTypeInfo payload to its record dict, or RAISE (S11).
 
-        Appliance versions return either a bare object or a 1-element list (like getPVStatus). An
-        empty object / empty list / non-mapping payload means "no type info for this PV".
+        Appliance versions return either a bare object or a 1-element list (like getPVStatus);
+        the measured record (ESS 2.2.1) always carries ``pvName`` — the schema anchor. The old
+        ``_unwrap_type_info`` mapped ``{}``/``[]``/junk to ``found: False`` (conflating
+        "could not read" with the appliance's definitive 404) and accepted ANY non-empty dict as
+        the record — the auditor probe ``{"unexpected": "shape"}`` came back as a fabricated
+        ``found: True``. The unknown-PV signal on this endpoint is HTTP 404 and only that.
         """
-        if isinstance(data, dict):
-            return data or None  # an empty {} means "unknown PV" -> not found
-        if isinstance(data, list) and data and isinstance(data[0], dict):
-            return data[0] or None
-        return None
+        record: object = data
+        if isinstance(record, list) and len(record) == 1:
+            record = record[0]
+        if isinstance(record, dict) and isinstance(record.get("pvName"), str) and record["pvName"]:
+            return record
+        raise ArchiverResponseError(
+            "getPVTypeInfo returned an unreadable payload (expected a type-info record carrying "
+            f"a non-empty 'pvName', got {type(data).__name__}); "
+            "this is NOT the 404 'no record' signal."
+        )
 
     def get_all_pvs(
         self, pattern: str | None = None, limit: int = DEFAULT_MAX_PV_NAMES
@@ -273,7 +325,16 @@ class ArchiverClient:
         limit = max(limit, 1)
         if not isinstance(data, list):
             raise ArchiverResponseError(f"{endpoint} returned a non-list payload")
-        names = [str(item) for item in data]
+        # S11: a non-string item must raise — str() used to mint junk (dicts, numbers) into
+        # plausible PV "names". Measured (ESS 2.2.1): a bare array of strings, nothing else.
+        names: list[str] = []
+        for item in data:
+            if not isinstance(item, str):
+                raise ArchiverResponseError(
+                    f"{endpoint} returned a non-string item (got {type(item).__name__}) — "
+                    "refusing to mint it into a PV name."
+                )
+            names.append(item)
         return (names[:limit], len(names) > limit)
 
     def get_pv_history(
@@ -331,20 +392,6 @@ class ArchiverClient:
                 "The Archiver response carried no readable 'data' array; the sample history is "
                 "WITHHELD, not reported as empty.",
             )
-        capped = len(raw_samples) > max_points
-        samples: list[Sample] = []
-        for point in raw_samples[:max_points]:
-            if not isinstance(point, dict):
-                continue
-            samples.append(
-                Sample(
-                    secs=int(point.get("secs", 0)),
-                    nanos=int(point.get("nanos", 0)),
-                    val=point.get("val"),
-                    severity=int(point.get("severity", 0)),
-                    status=int(point.get("status", 0)),
-                )
-            )
         if not raw_samples:
             return HistoryResult(
                 samples=[],
@@ -358,16 +405,23 @@ class ArchiverClient:
                 ),
                 withheld_reason=None,
             )
-        if not samples:
-            # A non-empty data array (its first ``max_points >= 1`` elements were inspected) held no
-            # readable {secs,...} dicts — the shape is off. ``capped`` reflects the real truncation.
-            return self._withheld_history(
-                meta,
-                "unexpected_sample_shape",
-                "The Archiver 'data' array held no readable samples; the history is WITHHELD, "
-                "not reported as empty.",
-                capped=capped,
-            )
+        capped = len(raw_samples) > max_points
+        samples: list[Sample] = []
+        for point in raw_samples[:max_points]:
+            sample = _readable_sample(point)
+            if sample is None:
+                # S11: ONE unreadable element withholds the WHOLE result — silently skipping junk
+                # fabricated a smaller history that read as the complete answer, and any dict at
+                # all used to be accepted with missing fields minted as 0/None. ``capped``
+                # reflects the real truncation of the raw array.
+                return self._withheld_history(
+                    meta,
+                    "unexpected_sample_shape",
+                    "The Archiver 'data' array held an unreadable sample; the history is "
+                    "WITHHELD, not reported as empty or partial.",
+                    capped=capped,
+                )
+            samples.append(sample)
         return HistoryResult(
             samples=samples, capped=capped, meta=meta, status="ok", note="", withheld_reason=None
         )

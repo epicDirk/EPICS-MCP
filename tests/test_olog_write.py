@@ -22,6 +22,7 @@ import epics_pv_mcp.olog_safety as olog_safety_module
 from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.errors import (
     EpicsConnectionError,
+    EpicsError,
     OlogWriteDeniedError,
     RateLimitError,
     SafetyConfigError,
@@ -466,6 +467,19 @@ class TestCreateClient:
         with pytest.raises(OlogResponseError):
             client.create_log_entry(title="t", logbooks=["Ops"])
 
+    def test_response_without_entry_identity_is_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """S11: a 2xx write response that is not a log entry must RAISE — any non-empty dict used
+        to be PROJECTED as the created entry (a fabricated write confirmation). The measured
+        entry record always carries ``id``."""
+        client = OlogClient("http://olog:8080/Olog")
+        monkeypatch.setattr(
+            client.session, "put", Mock(return_value=_resp({"unexpected": "shape"}))
+        )
+        with pytest.raises(OlogResponseError):
+            client.create_log_entry(title="t", logbooks=["Ops"])
+
 
 # ======================================================================================
 # Service/tool orchestration: disabled, enabled, audit end-to-end
@@ -578,13 +592,17 @@ class TestToolOrchestration:
         monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _FailingClient)
         with (
             caplog.at_level(logging.INFO, logger=_AUDIT_LOGGER),
-            pytest.raises(EpicsConnectionError),
+            # S11 §8: the server ANSWERED (a served 400) — since the split this surfaces as
+            # EpicsError, no longer relabelled EpicsConnectionError ("cannot reach Olog", which
+            # sent the operator retrying against an outage that was not happening).
+            pytest.raises(EpicsError) as excinfo,
         ):
             await query_olog_create(
                 title="trip by z.person",
                 logbooks=["Ops"],
                 description="z.person did it",
             )
+        assert not isinstance(excinfo.value, EpicsConnectionError)
         assert "event=FAILED" in caplog.text
         assert "logbooks=Ops" in caplog.text
         assert "error_code=" in caplog.text

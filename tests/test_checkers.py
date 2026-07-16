@@ -12,15 +12,19 @@ from unittest.mock import Mock
 import pytest
 
 from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import EpicsConnectionError
+from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
 from epics_pv_mcp.services import checkers
-from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError
+from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
 from epics_pv_mcp.services.archiver_exceptions import ArchiverConnectionError
-from epics_pv_mcp.services.channelfinder_exceptions import ChannelFinderConnectionError
+from epics_pv_mcp.services.channelfinder_exceptions import (
+    ChannelFinderConnectionError,
+    ChannelFinderResponseError,
+)
 from epics_pv_mcp.services.naming_exceptions import (
     NamingServiceConnectionError,
     NamingServiceResponseError,
 )
+from epics_pv_mcp.services.olog_exceptions import OlogResponseError
 
 # --- checker adapters: error → RuntimeError (the pure core withholds, never false-flags) ---
 
@@ -147,6 +151,100 @@ async def test_query_channels_translates_error_to_epics_connection(
     monkeypatch.setattr(checkers, "ChannelFinderClient", _FailClient)
     with pytest.raises(EpicsConnectionError, match="ChannelFinder"):
         await checkers.query_channels("X*")
+
+
+# --- query_* error branches (S11 §8): a RESPONSE error must NOT be relabelled "unreachable" ---
+#
+# The clients now RAISE their plane's ResponseError on an unreadable 2xx (S11). These query
+# functions used to collapse EVERY plane error into EpicsConnectionError — "cannot reach the
+# service" about a server that ANSWERED. That is the neighbouring falsehood of the class S11
+# closes; query_olog_search and query_archived already live the honest three-way split.
+
+
+async def test_query_alarm_configured_response_error_is_not_a_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(alarm_url="http://alarm"))
+
+    class _FailClient:
+        def __init__(self, *args: object, **kwargs: object) -> None: ...
+
+        def is_alarm_configured(
+            self, pv: str, config_name: str = "Accelerator"
+        ) -> tuple[bool, dict[str, object]]:
+            raise AlarmResponseError("unreadable payload")
+
+    monkeypatch.setattr(checkers, "AlarmClient", _FailClient)
+    with pytest.raises(EpicsError, match="Alarm Logger") as excinfo:
+        await checkers.query_alarm_configured("X")
+    assert not isinstance(excinfo.value, EpicsConnectionError)  # the server ANSWERED
+
+
+async def test_query_alarm_history_response_error_is_not_a_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(alarm_url="http://alarm"))
+
+    class _FailClient:
+        def __init__(self, *args: object, **kwargs: object) -> None: ...
+
+        def get_alarm_history(
+            self, pv: str, start: str, end: str, max_events: int = 100
+        ) -> tuple[list[dict[str, object]], bool]:
+            raise AlarmResponseError("unreadable payload")
+
+    monkeypatch.setattr(checkers, "AlarmClient", _FailClient)
+    with pytest.raises(EpicsError, match="Alarm Logger") as excinfo:
+        await checkers.query_alarm_history("X", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z")
+    assert not isinstance(excinfo.value, EpicsConnectionError)
+
+
+async def test_query_channels_response_error_is_not_a_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(channelfinder_url="http://cf"))
+
+    class _FailClient:
+        def __init__(self, *args: object, **kwargs: object) -> None: ...
+
+        def find_channels(self, name_pattern: str, max_results: int = 500) -> list[object]:
+            raise ChannelFinderResponseError("unreadable payload")
+
+    monkeypatch.setattr(checkers, "ChannelFinderClient", _FailClient)
+    with pytest.raises(EpicsError, match="ChannelFinder") as excinfo:
+        await checkers.query_channels("X*")
+    assert not isinstance(excinfo.value, EpicsConnectionError)
+
+
+@pytest.mark.parametrize("method", ["get_log_entry", "list_logbooks", "list_tags"])
+async def test_query_olog_response_error_is_not_a_connection_error(
+    method: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each of the three remaining olog query functions has its own except block — each must
+    stop relabelling a ResponseError as 'Olog unreachable' (search already splits)."""
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(olog_url="http://olog"))
+
+    class _FailClient:
+        def __init__(self, *args: object, **kwargs: object) -> None: ...
+
+        def get_log_entry(self, log_id: str) -> dict[str, object] | None:
+            raise OlogResponseError("unreadable payload")
+
+        def list_logbooks(self) -> list[str]:
+            raise OlogResponseError("unreadable payload")
+
+        def list_tags(self) -> list[str]:
+            raise OlogResponseError("unreadable payload")
+
+    monkeypatch.setattr(checkers, "OlogClient", _FailClient)
+    calls = {
+        "get_log_entry": lambda: checkers.query_olog_entry("1"),
+        "list_logbooks": lambda: checkers.query_olog_logbooks(),
+        "list_tags": lambda: checkers.query_olog_tags(),
+    }
+    with pytest.raises(EpicsError, match="Olog") as excinfo:
+        await calls[method]()
+    assert not isinstance(excinfo.value, EpicsConnectionError)
 
 
 # --- build_naming_client: timeout forwarding (DS-2 tool wiring; was dropped before) ---

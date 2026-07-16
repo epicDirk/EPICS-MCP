@@ -153,7 +153,17 @@ class ChannelFinderClient:
             raise ChannelFinderResponseError(
                 f"ChannelFinder returned a non-list payload for '{name_pattern}'"
             )
-        return [self._project(channel) for channel in data if isinstance(channel, dict)]
+        # S11: a non-dict element must raise — it used to be silently dropped, shrinking the
+        # registry answer without a trace (two different malformed payloads both "succeeded").
+        channels: list[ChannelInfo] = []
+        for channel in data:
+            if not isinstance(channel, dict):
+                raise ChannelFinderResponseError(
+                    f"ChannelFinder returned a non-dict channel record "
+                    f"(got {type(channel).__name__}) for '{name_pattern}'"
+                )
+            channels.append(self._project(channel))
+        return channels
 
     def _project(self, channel: dict[str, object]) -> ChannelInfo:
         """Project a raw channel JSON into a :class:`ChannelInfo`.
@@ -188,8 +198,17 @@ class ChannelFinderClient:
             )
         raw_owner = str(channel.get("owner", ""))
         owner = raw_owner if raw_owner in self._safe_owner_accounts else ""
+        # S11: the identity field is required. A record without a usable name used to become
+        # ChannelInfo(name="") — an identity-less phantom that entered downstream sets
+        # (crossplane/coverage registered_under) as "". Measured (ESS CF): name is always there.
+        raw_name = channel.get("name")
+        if not isinstance(raw_name, str) or not raw_name:
+            raise ChannelFinderResponseError(
+                "ChannelFinder returned a channel record without a usable 'name' "
+                f"(got {type(raw_name).__name__}); the record has no identity."
+            )
         return ChannelInfo(
-            name=str(channel.get("name", "")),
+            name=raw_name,
             owner=owner,
             ioc_name=props.get("iocName"),
             host_name=props.get("hostName"),

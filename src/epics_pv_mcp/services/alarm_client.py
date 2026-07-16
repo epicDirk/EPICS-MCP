@@ -112,6 +112,32 @@ def _project_alarm_event(record: dict[str, object]) -> dict[str, object]:
     return project_allowlist(record, _ALARM_HISTORY_ALLOWLIST)
 
 
+def _require_alarm_records(data: object, endpoint: str) -> list[dict[str, object]]:
+    """The measured ``/search/alarm*`` payload: a list of docs, each a dict with a string
+    ``config`` (S11).
+
+    ``config`` is the identity field this client reads (config docs carry no ``pv``), and it is
+    the one field BOTH measured doc types (``state:`` and ``config:``) always carry — the schema
+    anchor. Anything else used to collapse into a definitive answer: a non-list payload read as
+    ``[]``, a junk record was silently dropped (auditor probe ALARM_HISTORY_BAD_2XX →
+    ``([], False)``; plan-review finding A1 → a definitive ``False`` from ``[123]``).
+    """
+    if not isinstance(data, list):
+        raise AlarmResponseError(
+            f"Alarm Logger {endpoint} returned an unreadable payload "
+            f"(expected a list, got {type(data).__name__}); the answer is not readable."
+        )
+    records: list[dict[str, object]] = []
+    for record in data:
+        if not isinstance(record, dict) or not isinstance(record.get("config"), str):
+            raise AlarmResponseError(
+                f"Alarm Logger {endpoint} returned an unreadable record "
+                f"(expected a dict carrying a string 'config', got {type(record).__name__})."
+            )
+        records.append(record)
+    return records
+
+
 class AlarmClient:
     """Read-only client for the Phoebus Alarm Logger REST API. GET-only."""
 
@@ -189,12 +215,14 @@ class AlarmClient:
         """
         config_query = f"/{config_name}/*{pv}"
         data = self._get(f"{self.base_url}/search/alarm/config", {"config": config_query})
-        records = data if isinstance(data, list) else []
+        # S11: unreadable must never become a definitive answer. A non-list payload used to read
+        # as [] (a miss), and junk records inside a list were silently dropped — either way an
+        # answering tree then turned "could not read" into a definitive False.
+        records = _require_alarm_records(data, "/search/alarm/config")
         for record in records:
-            if not isinstance(record, dict):
-                continue
-            # Config docs have NO `pv` field → identity = leaf segment of the `config` path.
-            leaf = str(record.get("config", "")).rsplit("/", 1)[-1]
+            # Config docs have NO `pv` field → identity = leaf segment of the `config` path
+            # (the validated string anchor from _require_alarm_records).
+            leaf = str(record["config"]).rsplit("/", 1)[-1]
             if leaf == pv:
                 return True, _project_alarm_config(record)
         # A miss is only a real negative if the tree answered at all — one extra request, and only
@@ -204,13 +232,20 @@ class AlarmClient:
         return False, {}
 
     def _alarm_tree_answers(self, config_name: str) -> bool:
-        """Return True iff alarm tree *config_name* yields any config record at all.
+        """Return True iff alarm tree *config_name* yields a READABLE config record.
 
         Distinguishes a real "PV not configured" from an unknown/misspelled/mis-cased tree name,
         which the server reports identically (200 + empty). See :meth:`is_alarm_configured`.
+        S11: only a readable record (a dict with a string ``config``) counts as proof — junk is
+        no evidence the tree name was read as intended, so a junk-only answer stays "not
+        answered" and the miss above stays withheld (None), never a definitive False.
         """
         data = self._get(f"{self.base_url}/search/alarm/config", {"config": f"/{config_name}/*"})
-        return bool(data) if isinstance(data, list) else False
+        if not isinstance(data, list):
+            return False
+        return any(
+            isinstance(record, dict) and isinstance(record.get("config"), str) for record in data
+        )
 
     def get_alarm_history(
         self, pv: str, start: str, end: str, max_events: int = 100
@@ -251,11 +286,9 @@ class AlarmClient:
             "size": str(max_events + 1),
         }
         data = self._get(f"{self.base_url}/search/alarm", params)
-        records = data if isinstance(data, list) else []
+        # S11: unreadable used to read as ([], False) — "no alarms in the window" — and junk
+        # records were silently dropped (a fabricated, smaller history). Both raise now.
+        records = _require_alarm_records(data, "/search/alarm")
         capped = len(records) > max_events
-        events = [
-            _project_alarm_event(record)
-            for record in records[:max_events]
-            if isinstance(record, dict)
-        ]
+        events = [_project_alarm_event(record) for record in records[:max_events]]
         return events, capped

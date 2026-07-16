@@ -104,10 +104,59 @@ _LOG_FREETEXT = frozenset({"title", "description"})
 
 
 def _names(items: object) -> list[str]:
-    """The ``name`` of each dict in *items* (logbook/tag structs); per-item owners dropped."""
+    """The ``name`` of each dict in *items* (logbook/tag structs); per-item owners dropped.
+
+    LENIENT by design and ONLY for fields INSIDE an already-anchored entry (``_derive_shape``):
+    the entry's identity is guarded by :func:`_require_entry`, and its ``logbooks``/``tags`` are a
+    derived metadata projection where one malformed element must not sink the whole entry. The
+    TOP-LEVEL ``/logbooks`` / ``/tags`` listings go through :func:`_named_list` instead — there
+    the list IS the answer, and unreadable must never read as "there are none" (S11).
+    """
     if not isinstance(items, list):
         return []
     return [str(item["name"]) for item in items if isinstance(item, dict) and "name" in item]
+
+
+def _named_list(data: object, endpoint: str) -> list[str]:
+    """STRICT name extraction for the top-level ``/logbooks`` / ``/tags`` listings (S11).
+
+    The measured payload (live) is a list of ``{name, …}`` structs with ``name`` always a string.
+    Anything else used to collapse to ``[]`` — a fabricated "there are no logbooks/tags",
+    indistinguishable from a genuinely empty server, and a silently dropped item told anyone
+    validating a filter name "this one does not exist". Unreadable now raises.
+    """
+    if not isinstance(data, list):
+        raise OlogResponseError(
+            f"Olog {endpoint} returned an unreadable payload "
+            f"(expected a list, got {type(data).__name__}); the listing is not readable."
+        )
+    names: list[str] = []
+    for item in data:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            raise OlogResponseError(
+                f"Olog {endpoint} returned an unreadable item "
+                f"(expected a dict with a string 'name', got {type(item).__name__})."
+            )
+        names.append(item["name"])
+    return names
+
+
+def _require_entry(data: object, context: str) -> dict[str, object]:
+    """The measured log-entry record: a dict carrying the identity field ``id`` (S11).
+
+    Guards every place a payload is about to be PROJECTED as a log entry. The old behaviour
+    projected ANY non-empty dict — an unrelated 2xx body became a fabricated, plausible entry
+    (auditor probe: ``{"unexpected": "shape"}`` → a projected log entry that never existed) —
+    and an empty/non-dict body collapsed to ``None``, indistinguishable from the definitive
+    404 "not found".
+    """
+    if isinstance(data, dict) and data.get("id") is not None:
+        return data
+    raise OlogResponseError(
+        f"Olog {context} returned a payload that is not a log entry "
+        f"(expected a dict carrying a non-null 'id', got {type(data).__name__}); "
+        "the answer is not readable — this is NOT a 'not found'."
+    )
 
 
 def _derive_shape(entry: dict[str, object], out: dict[str, object]) -> dict[str, object]:
@@ -163,28 +212,49 @@ def _expand_log_entry(entry: dict[str, object]) -> dict[str, object]:
 
 
 def _entries_of(data: object) -> list[object]:
-    """The list of raw entries from an Olog search response (a bare list or a ``{logs: [...]}``)."""
+    """The list of raw entries from an Olog search response (S11: strict).
+
+    Two MEASURED shapes are readable: the ``{logs: [...], hitCount}`` wrapper (live Olog 6.x) and
+    a bare list (an older version that returns just the page). Anything else used to collapse to
+    ``[]`` — a fabricated empty search, indistinguishable from zero hits (auditor probe
+    OLOG_SEARCH_BAD_2XX → ``([], False, None)``). Unreadable now raises.
+    """
     if isinstance(data, list):
         return data
     if isinstance(data, dict):
         logs = data.get("logs")
         if isinstance(logs, list):
             return logs
-    return []
+        raise OlogResponseError(
+            "Olog search returned a mapping without a readable 'logs' list; "
+            "the result is not readable — this is NOT an empty search."
+        )
+    raise OlogResponseError(
+        f"Olog search returned an unreadable payload "
+        f"(expected a list or a {{logs, hitCount}} mapping, got {type(data).__name__})."
+    )
 
 
 def _hit_count(data: object) -> int | None:
     """The Olog ``hitCount`` (total matches for the query) from a ``{logs, hitCount}`` wrapper.
 
-    Returns ``None`` for a bare-list response (an Olog version that returns just the page of logs
-    with no total); the caller then falls back to the length of the returned page. ``hitCount`` is
-    the total across ALL pages and need not equal the returned page size — Olog documents this on
-    ``SearchResult`` (it differs whenever ``from``/``size`` paginate).
+    Returns ``None`` when the response carries no count at all (the bare-list variant of an older
+    Olog, or a wrapper without the field) — the honest "this server version provides no total".
+    A PRESENT-but-unreadable count raises (S11): it must never silently become ``None``, which
+    reads as "no count provided". ``hitCount`` is the total across ALL pages and need not equal
+    the returned page size — Olog documents this on ``SearchResult`` (it differs whenever
+    ``from``/``size`` paginate).
     """
     if isinstance(data, dict):
         count = data.get("hitCount")
+        if count is None:
+            return None
         if isinstance(count, int) and not isinstance(count, bool):
             return count
+        raise OlogResponseError(
+            f"Olog search returned an unreadable hitCount "
+            f"(expected an integer, got {type(count).__name__})."
+        )
     return None
 
 
@@ -353,16 +423,23 @@ class OlogClient:
         entries = _entries_of(data)
         capped = len(entries) > size
         total_matches = _hit_count(data)
-        projected = [self._project(e) for e in entries[:size] if isinstance(e, dict)]
+        # S11: every entry of the page must be a readable log entry — junk used to be silently
+        # dropped (a fabricated, smaller result). Validate ALL entries, then project the page.
+        records = [_require_entry(e, "search") for e in entries]
+        projected = [self._project(record) for record in records[:size]]
         return projected, capped, total_matches
 
     def get_log_entry(self, log_id: str) -> dict[str, object] | None:
         """Return one log entry by id (DS-PRIVACY-redacted), or ``None`` when it does not exist.
 
         A missing/deleted id makes the Olog answer HTTP 404, which is the definitive "not found"
-        (mapped to ``None``); every OTHER failure (5xx, bad payload, an unreachable service)
-        PROPAGATES, so a could-not-read never masquerades as not-found. Mirrors the archiver
-        ``getPVTypeInfo`` handling.
+        (mapped to ``None``); every OTHER failure (5xx, an unreachable service, or a 2xx whose
+        body is not a readable log entry) PROPAGATES, so a could-not-read never masquerades as
+        not-found. Mirrors the archiver ``getPVTypeInfo`` handling. (S11 closed the 2xx gap:
+        ``{}`` used to collapse to ``None``, and any unrelated non-empty dict was projected as a
+        fabricated entry.) NOTE: a real Olog answers **401** for an unknown id on this anonymous
+        read path (measured 2026-07-16 — its error dispatch requires auth), so the 404 branch is
+        the documented contract, not the only signal seen in the wild; a 401 propagates loudly.
         """
         try:
             data = self._get(f"{self.base_url}/logs/{log_id}", {})
@@ -370,9 +447,7 @@ class OlogClient:
             if is_http_404(exc):
                 return None
             raise
-        if isinstance(data, dict) and data:
-            return self._project(data)
-        return None
+        return self._project(_require_entry(data, "GET /logs/{id}"))
 
     def list_logbooks(self) -> list[str]:
         """Return the names of all Olog logbooks (``GET /logbooks``), name-only.
@@ -382,7 +457,7 @@ class OlogClient:
         ``search_logbook(logbooks=…)``.
         """
         data = self._get(f"{self.base_url}/logbooks", {})
-        return _names(data)
+        return _named_list(data, "GET /logbooks")
 
     def list_tags(self) -> list[str]:
         """Return the names of all Olog tags (``GET /tags``), name-only.
@@ -391,7 +466,7 @@ class OlogClient:
         are the valid filter values for ``search_logbook(tags=…)``.
         """
         data = self._get(f"{self.base_url}/tags", {})
-        return _names(data)
+        return _named_list(data, "GET /tags")
 
     def create_log_entry(
         self,
@@ -464,6 +539,6 @@ class OlogClient:
                     "credentials (EPICS_MCP_OLOG_WRITE_USER / _PASSWORD)."
                 ) from cause
             raise
-        if isinstance(data, dict) and data:
-            return self._project(data)
-        raise OlogResponseError("Olog create returned an unexpected empty response.")
+        # S11: the write response must be the created log entry — any other non-empty dict used
+        # to be projected as a fabricated write confirmation.
+        return self._project(_require_entry(data, "PUT /logs (create)"))

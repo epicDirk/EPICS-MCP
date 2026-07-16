@@ -175,6 +175,40 @@ def test_build_device_report_channelfinder_unreachable_note() -> None:
     assert not any("disabled" in note.lower() for note in report.notes)
 
 
+def test_build_device_report_cf_capped_note() -> None:
+    """F16 (S11 Zusatzfläche 4): a CAPPED ChannelFinder fetch must surface a note — the honest
+    ``capped`` computed by query_channels was silently discarded here, so a >max_results device
+    quietly joined against a TRUNCATED registry and some channels showed ``source_ioc=None``
+    with no explanation (silent degradation, indistinguishable from 'CF has no entry')."""
+    live = {"results": [{"pv_name": "DEV:X", "value": 0}], "errors": []}
+    iocs = {
+        "enabled": True,
+        "channels": [{"name": "DEV:X", "ioc_name": "ioc-1", "host_name": "h1"}],
+        "total": 1,
+        "capped": True,
+    }
+    report = build_device_report(
+        PvLookupResult(
+            query="DEV",
+            match="prefix",
+            total_pvs_matched=1,
+            displays=(
+                DisplayMatch(
+                    display_path="a.bob", matched_pvs=("DEV:X",), roles=("read",), count=1
+                ),
+            ),
+        ),
+        live,
+        iocs,
+        total_matched=1,
+        live_read=1,
+        live_capped=False,
+        channelfinder_enabled=True,
+    )
+    assert any("capped" in note.lower() for note in report.notes)
+    assert any("source" in note.lower() for note in report.notes)
+
+
 def test_build_device_report_live_capped_note() -> None:
     """When fewer channels were read live than matched, an honest 'N of M' note appears."""
     live = {"results": [{"pv_name": "DEV:X", "value": 0}], "errors": []}

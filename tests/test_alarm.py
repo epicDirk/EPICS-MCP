@@ -8,7 +8,7 @@ import requests
 from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.services._time_window import TimeWindowFormatError
 from epics_pv_mcp.services.alarm_client import AlarmClient
-from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError
+from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
 from epics_pv_mcp.services.redact import FREETEXT_WITHHELD
 from epics_pv_mcp.tools.alarm import _get_alarm_history, _is_alarm_configured
 
@@ -160,6 +160,115 @@ def test_is_alarm_configured_hit_does_not_probe_the_tree(monkeypatch: pytest.Mon
     assert getter.call_count == 1
 
 
+# --- client: strict response schema (S11) — unreadable 2xx is NEVER a definitive answer ---
+#
+# Measured payload shapes (local Alarm Logger 5.0.052, live 2026-07-16): /search/alarm returns a
+# list whose docs ALL carry a string `config` (state: docs additionally pv/severity/…, config:
+# docs config_msg/…); /search/alarm/config likewise. `config` is the identity field the client
+# reads — it is the schema anchor.
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{}, "nope", 123, {"unexpected": "shape"}],
+    ids=["dict", "string", "number", "unrelated-dict"],
+)
+def test_is_alarm_configured_unreadable_payload_raises(
+    payload: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S11: a non-list 2xx main payload must RAISE — it used to be read as ``[]`` (a miss) and
+    fall through to the tree probe, where an answering tree turned it into a DEFINITIVE
+    ``False``. Unreadable must never reach the tree probe."""
+    client = AlarmClient("http://alarm")
+    monkeypatch.setattr(
+        client.session,
+        "get",
+        Mock(side_effect=[_resp(payload), _resp([{"config": "config:/Accelerator/C/Other"}])]),
+    )
+    with pytest.raises(AlarmResponseError):
+        client.is_alarm_configured("X")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [[123], [{"unexpected": "shape"}], [{"config": 7}]],
+    ids=["non-dict-record", "record-without-config", "non-str-config"],
+)
+def test_is_alarm_configured_unreadable_record_raises(
+    payload: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S11 (plan-review finding A1): unreadable records INSIDE a list were silently dropped →
+    miss → answering tree → DEFINITIVE ``False`` from junk. Every record must be a dict carrying
+    a string ``config``; junk raises, it never silently shrinks the answer."""
+    client = AlarmClient("http://alarm")
+    monkeypatch.setattr(
+        client.session,
+        "get",
+        Mock(side_effect=[_resp(payload), _resp([{"config": "config:/Accelerator/C/Other"}])]),
+    )
+    with pytest.raises(AlarmResponseError):
+        client.is_alarm_configured("X")
+
+
+def test_is_alarm_configured_junk_tree_probe_withholds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S11: a MISS whose tree probe returns junk must stay withheld (None), never a definitive
+    ``False`` — junk is no proof the tree name was read as intended."""
+    client = AlarmClient("http://alarm")
+    monkeypatch.setattr(
+        client.session,
+        "get",
+        Mock(side_effect=[_resp([]), _resp([123])]),
+    )
+    configured, detail = client.is_alarm_configured("X")
+    assert configured is None
+    assert detail == {}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{}, "nope", 123, {"unexpected": "shape"}],
+    ids=["dict", "string", "number", "unrelated-dict"],
+)
+def test_get_alarm_history_unreadable_payload_raises(
+    payload: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S11: an unreadable 2xx history payload must RAISE — it used to read as ``([], False)``,
+    indistinguishable from "no alarms in the window" (auditor probe ALARM_HISTORY_BAD_2XX)."""
+    client = AlarmClient("http://alarm")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    with pytest.raises(AlarmResponseError):
+        client.get_alarm_history("X", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [[123], [{"unexpected": "shape"}], [{"config": 7}]],
+    ids=["non-dict-record", "record-without-config", "non-str-config"],
+)
+def test_get_alarm_history_unreadable_record_raises(
+    payload: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S11: junk records in the history list were silently dropped (a fabricated, smaller
+    history). Every record must be a dict carrying a string ``config`` (measured: BOTH doc
+    types — state: and config: — always carry it)."""
+    client = AlarmClient("http://alarm")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    with pytest.raises(AlarmResponseError):
+        client.get_alarm_history("X", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z")
+
+
+def test_get_alarm_history_empty_list_is_a_real_empty_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Positive control: a measured ``[]`` stays a genuinely empty window, not an error (the
+    S14 false-red lesson)."""
+    client = AlarmClient("http://alarm")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([])))
+    events, capped = client.get_alarm_history("X", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z")
+    assert events == []
+    assert capped is False
+
+
 def test_is_alarm_configured_false_on_leaf_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
     # Substring over-match guard: a returned record whose config-leaf is a DIFFERENT PV (e.g. the
     # trailing-`*` query matched a sibling "XY") must NOT count as configured for "X".
@@ -278,6 +387,7 @@ def test_get_alarm_history_strips_person_fields(monkeypatch: pytest.MonkeyPatch)
     client = AlarmClient("http://alarm:8081")
     raw = [
         {
+            "config": "state:/Accelerator/DEV-TEST01/X",  # measured: every doc carries `config`
             "pv": "DEV-TEST01:X",
             "severity": "MINOR",
             "message": "LOW_ALARM",
@@ -306,7 +416,8 @@ def test_get_alarm_history_capped(monkeypatch: pytest.MonkeyPatch) -> None:
     """capped=True when the server returns MORE than max_events — the client fetches max_events+1
     (honest off-by-one) and keeps the newest max_events."""
     client = AlarmClient("http://alarm:8081")
-    raw = [{"pv": "X", "severity": "MAJOR"} for _ in range(4)]  # max_events=3 → request 4, got 4
+    # max_events=3 → request 4, got 4; `config` = the measured always-present anchor (S11)
+    raw = [{"config": "state:/Accelerator/C/X", "pv": "X", "severity": "MAJOR"} for _ in range(4)]
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(raw)))
     events, capped = client.get_alarm_history("X", "2026-06-01", "2026-06-02", max_events=3)
     assert capped is True
@@ -319,7 +430,8 @@ def test_get_alarm_history_exactly_max_events_not_capped(monkeypatch: pytest.Mon
     regression would false-flag exactly max_events real events as truncated (which the
     size=max_events+1 idiom exists to avoid), and every OTHER capped test survives that mutation."""
     client = AlarmClient("http://alarm:8081")
-    raw = [{"pv": "X", "severity": "MAJOR"} for _ in range(3)]  # exactly max_events=3 (requested 4)
+    # exactly max_events=3 (requested 4); `config` = the measured always-present anchor (S11)
+    raw = [{"config": "state:/Accelerator/C/X", "pv": "X", "severity": "MAJOR"} for _ in range(3)]
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(raw)))
     events, capped = client.get_alarm_history("X", "2026-06-01", "2026-06-02", max_events=3)
     assert capped is False

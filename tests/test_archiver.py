@@ -68,6 +68,67 @@ def test_is_archived_false(monkeypatch: pytest.MonkeyPatch) -> None:
     assert status == "Paused"
 
 
+def test_is_archived_unknown_pv_record_is_the_definitive_negative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Positive control for the measured definitive signal: the appliance answers an UNKNOWN pv
+    on getPVStatus with a REAL record (measured live, ESS 2.2.1:
+    ``[{"pvName": …, "status": "Not being archived"}]``) — never with ``[]`` or an empty body.
+    That record is the definitive negative and stays one; only unreadable payloads raise (S11).
+    """
+    client = ArchiverClient("http://arch")
+    monkeypatch.setattr(
+        client.session,
+        "get",
+        Mock(return_value=_resp([{"pvName": "ZZZ:X", "status": "Not being archived"}])),
+    )
+    archived, status = client.is_archived("ZZZ:X")
+    assert archived is False
+    assert status == "Not being archived"
+
+
+# --- client: strict response schema (S11) — unreadable 2xx is NEVER a definitive answer ---
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{}, [], "nope", 123, [123], [{"unexpected": "shape"}], [{"status": 7}], [{"status": ""}]],
+    ids=[
+        "dict",
+        "empty-list",
+        "string",
+        "number",
+        "non-dict-element",
+        "record-without-status",
+        "non-str-status",
+        "empty-status",
+    ],
+)
+def test_is_archived_unreadable_2xx_raises(
+    monkeypatch: pytest.MonkeyPatch, payload: object
+) -> None:
+    """S11: an unreadable getPVStatus payload must RAISE — it used to become a synthetic
+    ``{"status": "Unknown"}`` record and thus the definitive ``(False, "Unknown")`` (auditor
+    probe ARCHIVER_IS_ARCHIVED_BAD_2XX). Measured: even an unknown PV gets a real record, so
+    ``[]`` is out of contract too."""
+    client = ArchiverClient("http://arch")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    with pytest.raises(ArchiverResponseError):
+        client.is_archived("X")
+
+
+@pytest.mark.parametrize("payload", [{}, [{"unexpected": "shape"}]], ids=["dict", "no-status"])
+def test_get_archive_status_unreadable_2xx_raises(
+    monkeypatch: pytest.MonkeyPatch, payload: object
+) -> None:
+    """S11: same guard through the enriched sibling (``archived: false, status: "Unknown"`` was
+    the fabricated tool answer — auditor probe ARCHIVER_STATUS_BAD_2XX)."""
+    client = ArchiverClient("http://arch")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    with pytest.raises(ArchiverResponseError):
+        client.get_archive_status("X")
+
+
 # --- client: get_pv_history (DS-4B extended return contract) ---
 
 
@@ -185,9 +246,11 @@ def test_get_pv_history_nonpositive_max_points_not_withheld(
     assert result["samples"][0]["val"] == 1.5
 
 
-def test_get_pv_history_mixed_valid_and_junk_ok(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A data array mixing readable sample dicts with junk yields status='ok' with only the
-    readable samples (junk silently skipped) — NOT withheld, because at least one dict was read."""
+def test_get_pv_history_mixed_valid_and_junk_withholds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S11 (flips the former 'mixed junk is ok' pin): ONE unreadable element in the data array
+    withholds the WHOLE result. Silently skipping junk fabricated a smaller history that read as
+    the complete answer — the auditor fed two DIFFERENT broken arrays and both came back
+    ``status=ok``. Withheld ≠ no: the caller learns the window could not be read."""
     raw = [
         {
             "meta": {"name": "X"},
@@ -202,8 +265,36 @@ def test_get_pv_history_mixed_valid_and_junk_ok(monkeypatch: pytest.MonkeyPatch)
     client = ArchiverClient("http://arch")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(raw)))
     result = client.get_pv_history("X", _T0, _T1)
-    assert result["status"] == "ok"
-    assert [s["val"] for s in result["samples"]] == [1.0, 2.0]
+    assert result["status"] == "withheld"
+    assert result["withheld_reason"] == "unexpected_sample_shape"
+    assert result["samples"] == []
+
+
+@pytest.mark.parametrize(
+    "sample",
+    [
+        {"nanos": 0, "val": 1.0},  # missing secs
+        {"secs": 1, "nanos": 0},  # missing val
+        {"secs": "x", "val": 1.0},  # secs not int-coercible (used to CRASH: uncaught ValueError)
+        {"secs": 1, "val": 1.0, "severity": "bad"},  # present field not int-coercible
+        {"unexpected": "shape"},  # the auditor probe: ANY dict was accepted as a Sample
+    ],
+    ids=["no-secs", "no-val", "junk-secs", "junk-severity", "unrelated-dict"],
+)
+def test_get_pv_history_unreadable_sample_withholds(
+    monkeypatch: pytest.MonkeyPatch, sample: object
+) -> None:
+    """S11: a sample must carry the measured anchors ``secs`` AND ``val``, and every present
+    int field must be coercible — anything else withholds the WHOLE result. The old code
+    accepted ANY dict and filled missing fields with 0/None: two different broken dicts both
+    became ``status=ok, sample={secs:0, nanos:0, val:null, …}`` (a fabricated sample)."""
+    raw = [{"meta": {"name": "X"}, "data": [sample]}]
+    client = ArchiverClient("http://arch")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(raw)))
+    result = client.get_pv_history("X", _T0, _T1)
+    assert result["status"] == "withheld"
+    assert result["withheld_reason"] == "unexpected_sample_shape"
+    assert result["samples"] == []
 
 
 def test_get_pv_history_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -266,10 +357,16 @@ def test_get_pv_type_info_projects_fields(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_get_pv_type_info_omits_absent_fields(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A sparse record surfaces found=True but omits the fields it lacks (no null noise)."""
+    """A sparse record surfaces found=True but omits the fields it lacks (no null noise).
+
+    The fixture carries ``pvName`` — the measured always-present anchor (S11); the assertion is
+    unchanged because ``pvName`` is deliberately NOT allowlisted into the output.
+    """
     client = ArchiverClient("http://arch")
     monkeypatch.setattr(
-        client.session, "get", Mock(return_value=_resp({"DBRType": "DBR_SCALAR_INT"}))
+        client.session,
+        "get",
+        Mock(return_value=_resp({"pvName": "X", "DBRType": "DBR_SCALAR_INT"})),
     )
     result = client.get_pv_type_info("X")
     assert result == {"found": True, "dbr_type": "DBR_SCALAR_INT"}
@@ -279,20 +376,53 @@ def test_get_pv_type_info_unwraps_list(monkeypatch: pytest.MonkeyPatch) -> None:
     """Some appliance versions wrap the record in a 1-element list (like getPVStatus)."""
     client = ArchiverClient("http://arch")
     monkeypatch.setattr(
-        client.session, "get", Mock(return_value=_resp([{"samplingMethod": "SCAN"}]))
+        client.session,
+        "get",
+        Mock(return_value=_resp([{"pvName": "X", "samplingMethod": "SCAN"}])),
     )
     result = client.get_pv_type_info("X")
     assert result == {"found": True, "sampling_method": "SCAN"}
 
 
-@pytest.mark.parametrize("payload", [{}, [{}], [], "nope", None, [123]])
-def test_get_pv_type_info_not_found(monkeypatch: pytest.MonkeyPatch, payload: object) -> None:
-    """An empty / non-record payload (unknown PV, appliance returns no type info) -> found=False,
-    never a raw passthrough or a crash. [{}] pins the list-wrap ``data[0] or None`` branch."""
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        [{}],
+        [],
+        "nope",
+        None,
+        [123],
+        {"unexpected": "shape"},
+        [{"unexpected": "shape"}],
+        {"pvName": ""},
+    ],
+    ids=[
+        "empty-dict",
+        "empty-dict-in-list",
+        "empty-list",
+        "string",
+        "null",
+        "non-dict-in-list",
+        "dict-without-pvName",
+        "listed-dict-without-pvName",
+        "empty-pvName",
+    ],
+)
+def test_get_pv_type_info_unreadable_2xx_raises(
+    monkeypatch: pytest.MonkeyPatch, payload: object
+) -> None:
+    """S11 (replaces the former ``…not_found`` pin, which cemented the defect): a 2xx whose body
+    is not a type-info record must RAISE. The old code mapped ``{}``/junk to ``found:False``
+    (conflated with the appliance's definitive 404) and — worse — projected ANY non-empty dict
+    as ``found:True`` (auditor probe ``{"unexpected":"shape"}`` → a fabricated archive record).
+    Measured (ESS appliance 2.2.1): the record always carries ``pvName``; the unknown-PV signal
+    on this endpoint is HTTP 404 and ONLY that (see ``test_get_pv_type_info_404_is_not_found``).
+    """
     client = ArchiverClient("http://arch")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
-    result = client.get_pv_type_info("X")
-    assert result == {"found": False}
+    with pytest.raises(ArchiverResponseError):
+        client.get_pv_type_info("X")
 
 
 def test_get_pv_type_info_404_is_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -339,7 +469,7 @@ def test_two_url_routing_mgmt_vs_retrieval(monkeypatch: pytest.MonkeyPatch) -> N
         if "getPVStatus" in url:
             return _resp([{"pvName": "X", "status": "Being archived"}])
         if "getPVTypeInfo" in url:
-            return _resp({"DBRType": "DBR_SCALAR_DOUBLE"})
+            return _resp({"pvName": "X", "DBRType": "DBR_SCALAR_DOUBLE"})  # S11 anchor
         return _resp([{"meta": {"name": "X"}, "data": []}])
 
     monkeypatch.setattr(client.session, "get", _get)
@@ -763,6 +893,19 @@ def test_coerce_pv_names_nonpositive_limit_clamped() -> None:
         names, capped = ArchiverClient._coerce_pv_names(["A", "B", "C"], bad, "getAllPVs")
         assert names == ["A"]  # clamped to limit 1, NOT names[:-1]==["A","B"] nor names[:0]==[]
         assert capped is True  # honestly capped (3 > 1)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [["PV:A", 123], [{"name": "PV:A"}], ["PV:A", None]],
+    ids=["number-item", "dict-item", "null-item"],
+)
+def test_coerce_pv_names_non_string_item_raises(payload: object) -> None:
+    """S11: a list item that is not a string must RAISE — ``str()`` used to mint junk into
+    plausible PV "names" (``{'name': 'PV:A'}`` became the literal name ``"{'name': 'PV:A'}"``).
+    Measured (ESS 2.2.1): getAllPVs returns a bare array of strings, nothing else."""
+    with pytest.raises(ArchiverResponseError):
+        ArchiverClient._coerce_pv_names(payload, 10, "getAllPVs")
 
 
 # --- tool: list_archived_pvs ---

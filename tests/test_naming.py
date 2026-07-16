@@ -92,6 +92,81 @@ def test_validate_name_transport_error_propagates(monkeypatch: pytest.MonkeyPatc
         client.validate_name("DEV-TEST01:Ctrl-EVR-01")
 
 
+# --- client: strict response schema (S11) — unreadable 2xx is NEVER a definitive answer ---
+#
+# Measured (ESS Naming, live 2026-07-16): GET /rest/deviceNames/{name} with Accept:
+# application/json answers a dict that ALWAYS carries a string `status` (plus name/uuid/…);
+# WITHOUT the Accept header the service answers XML (content-type application/xml) — so the
+# client must ask for JSON explicitly. A nonexistent name answers HTTP 204 (No Content), NOT
+# the 404 the old contract assumed (S16a).
+
+
+def test_session_asks_for_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Premise pin (S11, measured live 2026-07-16): the real ESS Naming service serves **XML**
+    to a plain ``Accept: */*`` GET — only ``Accept: application/json`` yields the JSON record
+    this client parses. The shared ``build_retrying_session`` sets that header today; this pins
+    it, because swapping the session builder would silently collapse EVERY live lookup into
+    withheld (``resp.json()`` fails on XML). Mutant-red: without the header the requests default
+    is ``*/*``."""
+    client = NamingServiceClient(base_url="http://naming.example/")
+    assert client.session.headers.get("Accept") == "application/json"
+
+
+def test_validate_name_payload_without_status_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S11: a 2xx dict WITHOUT the measured anchor ``status`` must RAISE (→ callers withhold) —
+    it used to become the definitive ``registered=False`` with status ''."""
+    client = _client_with(monkeypatch, _resp({"unexpected": "shape"}))
+    with pytest.raises(NamingServiceResponseError):
+        client.validate_name("DEV-TEST01:Ctrl-EVR-01")
+
+
+@pytest.mark.parametrize("status", [123, ""], ids=["non-str", "empty-str"])
+def test_validate_name_unreadable_status_raises(
+    status: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S11 (plan-review finding A2 + diff-review): a non-string ``status`` used to be
+    str()-minted ('123'), and an EMPTY string read as an unknown status — both became the
+    definitive ``registered=False``. Neither is a measured server value; junk raises instead."""
+    client = _client_with(monkeypatch, _resp({"status": status}))
+    with pytest.raises(NamingServiceResponseError):
+        client.validate_name("DEV-TEST01:Ctrl-EVR-01")
+
+
+@pytest.mark.parametrize("payload", [["x"], "nope", 123], ids=["list", "string", "number"])
+def test_validate_name_non_dict_payload_raises(
+    payload: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S11: a non-dict 2xx payload used to escape as an uncaught AttributeError (crashing
+    crossplane_check); it must be the plane's own ResponseError so every caller withholds."""
+    client = _client_with(monkeypatch, _resp(payload))
+    with pytest.raises(NamingServiceResponseError):
+        client.validate_name("DEV-TEST01:Ctrl-EVR-01")
+
+
+def test_validate_name_204_is_definitively_not_registered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S16(a), measured live (ESS Naming 2026-07-16): a nonexistent name answers HTTP 204
+    (No Content) — NOT 404. Before this, the empty body failed ``resp.json()`` and the lookup
+    withheld (honest but needlessly vague); the measured 204 is the service's definitive
+    "not registered" and maps to it. The 404 branch stays (a second definitive signal)."""
+    resp = _resp(None, status=204)
+    resp.json.side_effect = requests.exceptions.JSONDecodeError("Expecting value", "", 0)
+    client = _client_with(monkeypatch, resp)
+    result = client.validate_name("ZZZ-FAKE99:Ctrl-X-99")
+    assert result["registered"] is False
+    assert "not registered" in result["message"]
+
+
+def test_get_parts_non_list_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S11: a non-list 2xx parts payload was returned as-is (annotation-only typing) and crashed
+    later — the shape guard makes it the plane's own ResponseError. (The lenient
+    ``_approved_part`` semantics on top are S13's business, untouched here.)"""
+    client = _client_with(monkeypatch, _resp({"unexpected": "shape"}))
+    with pytest.raises(NamingServiceResponseError):
+        client._get_parts("SYSX")
+
+
 def test_validate_system_approved(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _client_with(
         monkeypatch,

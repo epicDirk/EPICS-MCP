@@ -209,6 +209,14 @@ def build_device_report(
         cf_note = ioc_channels.get("note")
         if isinstance(cf_note, str) and cf_note:
             notes.append(cf_note)
+        # F16 (S11): query_channels computes an honest `capped` — discarding it here meant a
+        # >max_results device silently joined against a TRUNCATED registry, and a channel whose
+        # entry fell past the cap showed source_ioc=None indistinguishably from "no CF entry".
+        if ioc_channels.get("capped"):
+            notes.append(
+                "ChannelFinder result capped — the source-IOC join may be incomplete: a channel "
+                "without source_ioc may simply have fallen past the cap, not be unregistered."
+            )
 
     return DeviceLookupReport(
         query=lookup.query,

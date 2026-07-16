@@ -31,11 +31,14 @@ from epics_pv_mcp.olog_safety import get_olog_safety
 from epics_pv_mcp.services._http import basic_auth_header, http_status
 from epics_pv_mcp.services._time_window import TimeWindowFormatError
 from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG, AlarmClient
-from epics_pv_mcp.services.alarm_exceptions import AlarmError
+from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmError
 from epics_pv_mcp.services.archiver_client import ArchiverClient
 from epics_pv_mcp.services.archiver_exceptions import ArchiverConnectionError, ArchiverError
 from epics_pv_mcp.services.channelfinder_client import DEFAULT_MAX_RESULTS, ChannelFinderClient
-from epics_pv_mcp.services.channelfinder_exceptions import ChannelFinderError
+from epics_pv_mcp.services.channelfinder_exceptions import (
+    ChannelFinderConnectionError,
+    ChannelFinderError,
+)
 from epics_pv_mcp.services.coverage import AlarmChecker, ArchivedChecker
 from epics_pv_mcp.services.crossplane import CFRegistryCapped, ChannelFinderChecker
 from epics_pv_mcp.services.naming_client import NamingServiceClient
@@ -226,6 +229,24 @@ _ALARM_TREE_UNKNOWN_NOTE = (
 )
 
 
+def _alarm_error_code(exc: AlarmError) -> str:
+    """A discrete error code for an Alarm-Logger failure whose SERVER answered.
+
+    The served HTTP status when it is readable, else a generic token — the sibling of
+    :func:`_archiver_error_code` (see there for why these stay per-plane instead of one
+    generalized helper).
+    """
+    status = http_status(exc)
+    return f"ALARM_HTTP_{status}" if status is not None else "ALARM_RESPONSE_ERROR"
+
+
+def _channelfinder_error_code(exc: ChannelFinderError) -> str:
+    """A discrete error code for a ChannelFinder failure whose SERVER answered (sibling of
+    :func:`_archiver_error_code`)."""
+    status = http_status(exc)
+    return f"CHANNELFINDER_HTTP_{status}" if status is not None else "CHANNELFINDER_RESPONSE_ERROR"
+
+
 def _archiver_error_code(exc: ArchiverError) -> str:
     """A discrete error code for an Archiver failure whose SERVER answered.
 
@@ -305,8 +326,12 @@ async def query_alarm_configured(
 
     try:
         return await asyncio.to_thread(_run)
-    except AlarmError as exc:
+    except AlarmConnectionError as exc:
         raise EpicsConnectionError(f"Alarm Logger: {exc}") from exc
+    except AlarmError as exc:
+        # S11 §8: the server ANSWERED (a served 4xx/5xx or an unreadable 2xx) — relabelling that
+        # "cannot reach the Alarm Logger" sends the caller after an outage that is not happening.
+        raise EpicsError(f"Alarm Logger: {exc}", error_code=_alarm_error_code(exc)) from exc
 
 
 async def query_alarm_history(
@@ -347,8 +372,11 @@ async def query_alarm_history(
         # Nothing was sent: the window itself is unusable. Reporting it as "cannot reach the
         # Alarm Logger" would send the caller after an outage that is not happening.
         raise EpicsError(f"Alarm Logger: {exc}", error_code="INVALID_TIME_WINDOW") from exc
-    except AlarmError as exc:
+    except AlarmConnectionError as exc:
         raise EpicsConnectionError(f"Alarm Logger: {exc}") from exc
+    except AlarmError as exc:
+        # S11 §8: the server ANSWERED — an unreadable payload is not an outage.
+        raise EpicsError(f"Alarm Logger: {exc}", error_code=_alarm_error_code(exc)) from exc
 
 
 async def query_channels(
@@ -387,8 +415,13 @@ async def query_channels(
 
     try:
         return await asyncio.to_thread(_run)
-    except ChannelFinderError as exc:
+    except ChannelFinderConnectionError as exc:
         raise EpicsConnectionError(f"ChannelFinder: {exc}") from exc
+    except ChannelFinderError as exc:
+        # S11 §8: the server ANSWERED — an unreadable payload is not an outage.
+        raise EpicsError(
+            f"ChannelFinder: {exc}", error_code=_channelfinder_error_code(exc)
+        ) from exc
 
 
 async def query_naming_lookup(name: str, timeout: float = 5.0) -> dict[str, object]:
@@ -517,12 +550,16 @@ async def query_olog_search(
 async def query_olog_entry(log_id: str, timeout: float = 5.0) -> dict[str, object]:
     """Return one Olog entry by id (URL+declaration-bound posture). Read-only, config-gated.
 
-    Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes no
-    network call. ``found`` is False when the entry does not exist. Backs ``get_log_entry``.
+    Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` with
+    ``found: None`` — the plane was NOT checked, mirroring the ``archived: None`` /
+    ``configured: None`` / ``registered: None`` / get_archive_info ``found: None`` siblings
+    (S11 Zusatzfläche 3: this was the lone ``found: False`` among them — a definitive "does not
+    exist" from a plane that was never asked). ``found`` is False ONLY for the definitive 404.
+    Backs ``get_log_entry``.
     """
     cfg = get_config()
     if not cfg.olog_url:
-        return {"enabled": False, "id": log_id, "found": False, "note": _OLOG_DISABLED_NOTE}
+        return {"enabled": False, "id": log_id, "found": None, "note": _OLOG_DISABLED_NOTE}
 
     def _run() -> dict[str, object]:
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
@@ -533,8 +570,12 @@ async def query_olog_entry(log_id: str, timeout: float = 5.0) -> dict[str, objec
 
     try:
         return await asyncio.to_thread(_run)
-    except OlogError as exc:
+    except OlogConnectionError as exc:
         raise EpicsConnectionError(f"Olog: {exc}") from exc
+    except OlogError as exc:
+        # S11 §8: the server ANSWERED — an unreadable payload is not an outage (search already
+        # lives this three-way split; see query_olog_search).
+        raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
 
 
 async def query_olog_logbooks(timeout: float = 5.0) -> dict[str, object]:
@@ -555,8 +596,12 @@ async def query_olog_logbooks(timeout: float = 5.0) -> dict[str, object]:
 
     try:
         return await asyncio.to_thread(_run)
-    except OlogError as exc:
+    except OlogConnectionError as exc:
         raise EpicsConnectionError(f"Olog: {exc}") from exc
+    except OlogError as exc:
+        # S11 §8: the server ANSWERED — an unreadable payload is not an outage (search already
+        # lives this three-way split; see query_olog_search).
+        raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
 
 
 async def query_olog_tags(timeout: float = 5.0) -> dict[str, object]:
@@ -576,8 +621,12 @@ async def query_olog_tags(timeout: float = 5.0) -> dict[str, object]:
 
     try:
         return await asyncio.to_thread(_run)
-    except OlogError as exc:
+    except OlogConnectionError as exc:
         raise EpicsConnectionError(f"Olog: {exc}") from exc
+    except OlogError as exc:
+        # S11 §8: the server ANSWERED — an unreadable payload is not an outage (search already
+        # lives this three-way split; see query_olog_search).
+        raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
 
 
 def _olog_error_code(exc: BaseException) -> str:
@@ -660,5 +709,9 @@ async def query_olog_create(
 
     try:
         return await asyncio.to_thread(_run)
-    except OlogError as exc:
+    except OlogConnectionError as exc:
         raise EpicsConnectionError(f"Olog: {exc}") from exc
+    except OlogError as exc:
+        # S11 §8: the server ANSWERED — an unreadable payload is not an outage (search already
+        # lives this three-way split; see query_olog_search).
+        raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc

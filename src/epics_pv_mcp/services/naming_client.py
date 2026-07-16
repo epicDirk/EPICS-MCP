@@ -104,7 +104,13 @@ class NamingServiceClient:
     # ------------------------------------------------------------------
 
     def _get_parts(self, mnemonic: str) -> list[dict[str, object]]:
-        """``GET /rest/parts/mnemonic/{mnemonic}`` (cached)."""
+        """``GET /rest/parts/mnemonic/{mnemonic}`` (cached).
+
+        S11 shape guard: the payload must be a list of dicts — the old annotation-only typing
+        returned anything as-is and crashed callers later (an uncaught AttributeError instead of
+        the plane's own error). The lenient ``_approved_part`` semantics on top are S13's
+        business, untouched here.
+        """
         if mnemonic in self._parts_cache:
             return self._parts_cache[mnemonic]
         try:
@@ -112,20 +118,29 @@ class NamingServiceClient:
                 self.parts_url + url_quote(mnemonic, safe="-:"), timeout=self.timeout
             )
             resp.raise_for_status()
-            data: list[dict[str, object]] = resp.json()
+            data: object = resp.json()
         except requests.exceptions.RequestException as exc:
             raise NamingServiceResponseError(
                 f"Failed to query parts for '{mnemonic}': {exc}"
             ) from exc
-        self._parts_cache[mnemonic] = data
-        return data
+        if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+            raise NamingServiceResponseError(
+                f"Naming Service parts query for '{mnemonic}' returned an unreadable payload "
+                f"(expected a list of records, got {type(data).__name__})."
+            )
+        parts: list[dict[str, object]] = data
+        self._parts_cache[mnemonic] = parts
+        return parts
 
     def _get_device_name(self, name: str) -> dict[str, object]:
         """``GET /rest/deviceNames/{name}`` (cached).
 
-        A 404 raises :class:`NamingServiceNotFound` (the DEFINITIVE "not registered"); every other
-        HTTP/transport/JSON failure raises the generic :class:`NamingServiceResponseError` so the
-        caller can tell "name not registered" apart from a service/URL error (DS-2).
+        TWO measured definitive "not registered" signals raise :class:`NamingServiceNotFound`:
+        a 404, and — what the real ESS service actually answers for a nonexistent name (measured
+        live 2026-07-16, S16a) — an HTTP **204** No Content. Every other HTTP/transport/JSON
+        failure, and a 2xx whose body is not a record dict (S11), raises the generic
+        :class:`NamingServiceResponseError` so the caller can tell "name not registered" apart
+        from a service/URL error (DS-2).
         """
         if name in self._names_cache:
             return self._names_cache[name]
@@ -134,7 +149,14 @@ class NamingServiceClient:
                 self.names_url + url_quote(name, safe="-:"), timeout=self.timeout
             )
             resp.raise_for_status()
-            data: dict[str, object] = resp.json()
+            if resp.status_code == 204:
+                # Measured (S16a): the service's actual "no such name" is 204 + empty body —
+                # NOT 404. Split it out BEFORE resp.json(), which would fail on the empty body
+                # and needlessly withhold a definitive answer.
+                raise NamingServiceNotFound(
+                    f'The name "{name}" is not registered in the Naming Service'
+                )
+            data: object = resp.json()
         except requests.exceptions.HTTPError as exc:
             # A 404 on the deviceNames endpoint is the service's "not registered" answer. Any other
             # status (5xx, 401/403, or a 404 caused by a WRONG base path) is a service/URL failure
@@ -151,6 +173,13 @@ class NamingServiceClient:
             raise NamingServiceResponseError(
                 f"Failed to query device name '{name}': {exc}"
             ) from exc
+        if not isinstance(data, dict):
+            # S11: a non-dict 2xx used to escape as an uncaught AttributeError in validate_name
+            # (crashing crossplane_check) — it must be the plane's own error so callers withhold.
+            raise NamingServiceResponseError(
+                f"Naming Service device-name query for '{name}' returned an unreadable payload "
+                f"(expected a record dict, got {type(data).__name__})."
+            )
         self._names_cache[name] = data
         return data
 
@@ -194,12 +223,14 @@ class NamingServiceClient:
 
         *ess_name* is the device-name part of a PV (e.g. ``DEV-TEST01:Ctrl-EVR-01``),
         without the trailing property. Returns ``registered=True`` only for ``ACTIVE``;
-        ``OBSOLETE``/``DELETED``/unknown → ``registered=False`` with the status preserved. A
-        genuine 404 → ``registered=False`` (definitively not registered). A NON-404 service/URL
-        failure (5xx, bad JSON, wrong endpoint, timeout) is NOT swallowed — it PROPAGATES as a
-        :class:`NamingServiceResponseError` so the caller withholds instead of reporting a false
-        "not registered" (DS-2 / audit S5). Callers that consult naming best-effort (crossplane)
-        catch it; ``diagnose`` already withholds on any naming exception.
+        ``OBSOLETE``/``DELETED``/unknown → ``registered=False`` with the status preserved. The
+        service's measured "no such name" — HTTP **204** (S16a) — and a genuine 404 both map to
+        ``registered=False`` (definitively not registered). Every OTHER service/URL failure
+        (5xx, bad JSON, wrong endpoint, timeout) and a 2xx record without a readable ``status``
+        (S11) is NOT swallowed — it PROPAGATES as a :class:`NamingServiceResponseError` so the
+        caller withholds instead of reporting a false "not registered" (DS-2 / audit S5).
+        Callers that consult naming best-effort (crossplane) catch it; ``diagnose`` already
+        withholds on any naming exception.
         """
         try:
             data = self._get_device_name(ess_name)
@@ -209,7 +240,17 @@ class NamingServiceClient:
                 status="",
                 message=f'The name "{ess_name}" is not registered in the Naming Service',
             )
-        status = str(data.get("status", ""))
+        raw_status = data.get("status")
+        if not isinstance(raw_status, str) or not raw_status:
+            # S11: the measured record always carries a NON-EMPTY string `status` (the anchor).
+            # A missing, junk or empty status used to become the definitive registered=False
+            # ('' / str()-minted '123' read as an unknown status) — a fabricated negative.
+            # Raise → callers withhold.
+            raise NamingServiceResponseError(
+                f"Naming Service record for '{ess_name}' carries no readable 'status' "
+                f"(got {type(raw_status).__name__}); the answer is not readable."
+            )
+        status = raw_status
         messages = {
             "ACTIVE": f'The name "{ess_name}" is registered (ACTIVE)',
             "OBSOLETE": f'The name "{ess_name}" is OBSOLETE',

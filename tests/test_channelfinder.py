@@ -213,6 +213,42 @@ def test_non_list_payload_raises(monkeypatch: pytest.MonkeyPatch) -> None:
         client.find_channels("X")
 
 
+# --- client: strict response schema (S11) — unreadable 2xx is NEVER a definitive answer ---
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [[123], ["SYS:PS-01"], [{"name": "SYS:PS-01"}, None]],
+    ids=["number-item", "string-item", "null-after-valid"],
+)
+def test_find_channels_non_dict_item_raises(
+    payload: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S11: a non-dict element in the channel list must RAISE — it used to be silently dropped
+    (a fabricated smaller registry; two different malformed payloads both looked 'successful')."""
+    client = ChannelFinderClient("http://cf")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    with pytest.raises(ChannelFinderResponseError):
+        client.find_channels("X")
+
+
+@pytest.mark.parametrize(
+    "record",
+    [{"owner": "recceiver"}, {"name": ""}, {"name": 7}],
+    ids=["no-name", "empty-name", "non-str-name"],
+)
+def test_find_channels_record_without_name_raises(
+    record: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S11: a channel record without a usable ``name`` must RAISE — it used to become
+    ``ChannelInfo(name="")``, an identity-less phantom channel that entered downstream sets
+    (crossplane/coverage) as the empty string. Measured (ESS CF): ``name`` is always present."""
+    client = ChannelFinderClient("http://cf")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([record])))
+    with pytest.raises(ChannelFinderResponseError):
+        client.find_channels("X")
+
+
 def test_check_connectivity_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
     """Any HTTP response to a HEAD on the root = reachable (transport + CA proven)."""
     client = ChannelFinderClient("http://cf")
