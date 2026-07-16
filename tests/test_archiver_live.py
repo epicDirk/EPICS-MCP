@@ -183,3 +183,50 @@ def test_this_appliance_endpoint_still_has_no_name_filter(client: ArchiverClient
     # blanket 'no filtering here') the right call.
     by_name = client._get(f"{mgmt}/getAllPVs", {"limit": "5", "pv": glob})
     assert by_name != unfiltered
+
+
+# --- S11 schema anchors: the strict client schema, pinned against the REAL payloads ---
+
+
+def test_live_status_and_typeinfo_satisfy_the_strict_schema(
+    client: ArchiverClient, pv: str
+) -> None:
+    """S11 anchor: getPVStatus answers a 1-element list whose record carries a string ``status``,
+    and getPVTypeInfo answers a record carrying ``pvName`` (measured 2026-07-16, appliance 2.2.x).
+    The client now RAISES on anything else — this run passing pins the premise against the real
+    wire. Goes red if an appliance version stops matching (then re-measure, never loosen)."""
+    archived, status = client.is_archived(pv)
+    assert isinstance(status, str) and status
+    assert archived is True, (
+        "positive control not met: the fixture PV is not 'Being archived' — pick an actively "
+        "archived EPICS_MCP_LIVE_ARCHIVER_PV so the anchors pin a real record."
+    )
+    info = client.get_pv_type_info(pv)
+    assert info["found"] is True
+
+
+def test_unknown_pv_signals_stay_definitive(client: ArchiverClient) -> None:
+    """S11 negative controls, measured 2026-07-16: an UNKNOWN pv gets a REAL getPVStatus record
+    (``status: "Not being archived"`` — never ``[]``/empty), and getPVTypeInfo answers HTTP 404
+    → ``found: False``. These are the ONLY definitive negatives; everything unreadable raises.
+    The name is synthetic — no facility value is committed."""
+    archived, status = client.is_archived("ZZZ-FAKE99:No-Such-PV")
+    assert archived is False
+    assert status == "Not being archived"
+    assert client.get_pv_type_info("ZZZ-FAKE99:No-Such-PV") == {"found": False}
+
+
+def test_live_enumeration_and_samples_satisfy_the_strict_schema(
+    client: ArchiverClient, pv: str
+) -> None:
+    """S11 anchor: getAllPVs is a bare array of strings, and every getData.json sample carries
+    the ``secs``/``val`` anchors with int-coercible fields (measured 2026-07-16) — the client now
+    raises/withholds on anything else, so ok/empty here IS the schema proof."""
+    names, _capped = client.get_all_pvs(limit=3)
+    assert names and all(isinstance(name, str) for name in names)
+    result = _history(client, pv, "2020-01-01T00:00:00Z", "2030-01-01T00:00:00Z")
+    assert result["status"] in ("ok", "empty")
+    assert result["status"] == "ok", (
+        "positive control not met: no samples for the fixture PV in a 2020-2030 window — "
+        "the sample-schema anchor cannot pin anything. Check EPICS_MCP_LIVE_ARCHIVER_PV."
+    )

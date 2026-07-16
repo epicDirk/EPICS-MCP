@@ -24,6 +24,7 @@ import pytest
 
 from epics_pv_mcp.services._time_window import TimeWindowFormatError
 from epics_pv_mcp.services.olog_client import OlogClient
+from epics_pv_mcp.services.olog_exceptions import OlogError
 
 pytestmark = [
     pytest.mark.live,
@@ -181,3 +182,33 @@ def test_unreadable_sort_silently_reverses_on_the_server(client: OlogClient) -> 
     assert down != up, "sort has no effect at all — an unreadable value cannot be shown to collapse"
     for unreadable in ("garbage", "newest", "asc", ""):
         assert _order(client, unreadable) == up, f"{unreadable!r} no longer collapses to ASC"
+
+
+# --- S11 schema anchors: the strict client schema, pinned against the REAL payload ---
+
+
+def test_live_payloads_satisfy_the_strict_schema(client: OlogClient) -> None:
+    """S11 anchor: the strict response schema (search wrapper, entries carry ``id``, listings
+    carry ``name``) was DERIVED from this live payload (measured 2026-07-16, Olog 6.x). This pins
+    the premise so it goes red if a server stops matching — the schema is then re-MEASURED, never
+    loosened blindly. A mock cannot carry this burden: it only ever knows what we assumed."""
+    entries, _capped, total = client.search_logbook(start=_WIDE_ISO[0], end=_WIDE_ISO[1], size=5)
+    assert entries, _NO_REFERENCE
+    assert all("id" in entry for entry in entries)  # the measured anchor field
+    assert total is None or isinstance(total, int)  # wrapper hitCount readable (or absent)
+    fetched = client.get_log_entry(str(entries[0]["id"]))
+    assert fetched is not None and "id" in fetched
+    logbooks = client.list_logbooks()
+    assert logbooks and all(isinstance(name, str) and name for name in logbooks)
+    tags = client.list_tags()
+    assert all(isinstance(name, str) and name for name in tags)
+
+
+def test_unknown_id_error_is_loud_not_a_not_found(client: OlogClient) -> None:
+    """S16(b) premise pin, measured 2026-07-16: a real Olog answers **401** (not the documented
+    404) for an unknown id on this anonymous read path — its error dispatch requires auth. The
+    loud error is the correct surface (``found:false`` stays reserved for a genuine 404, which
+    this server never emits here). Goes red if a future Olog starts answering 404 — then the
+    documented contract finally matches the wire and this pin gets updated."""
+    with pytest.raises(OlogError):
+        client.get_log_entry("99999999")

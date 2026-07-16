@@ -179,3 +179,20 @@ def test_unconfigured_pv_in_a_real_tree_is_still_false(
     never answering."""
     configured, _ = client.is_alarm_configured("ZZZ-no-such-pv", config_name=alarm_tree)
     assert configured is False
+
+
+# --- S11 schema anchor: the strict client schema, pinned against the REAL payload ---
+
+
+def test_live_history_satisfies_the_strict_schema(client: AlarmClient, pv: str) -> None:
+    """S11 anchor: the record schema (every doc a dict carrying a string ``config`` — measured
+    2026-07-16 on BOTH doc types, state: and config:) was derived from this live payload. The
+    client now RAISES on anything else, so this run passing IS the proof the real payload matches;
+    the explicit per-event assert pins the projected surface too. Goes red if a logger version
+    stops matching — then the schema is re-measured, never loosened blindly."""
+    events, _capped = client.get_alarm_history(pv, "2020-01-01T00:00:00Z", "2030-01-01T00:00:00Z")
+    assert events, (
+        "positive control not met: no alarm docs for the fixture PV in a 2020-2030 window — "
+        "the schema anchor cannot pin anything. Check EPICS_MCP_LIVE_ALARM_PV."
+    )
+    assert all(isinstance(event.get("config"), str) and event["config"] for event in events)

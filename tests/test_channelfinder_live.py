@@ -110,3 +110,18 @@ def test_glob_is_anchored(client: ChannelFinderClient, glob: str) -> None:
     inner = exact[len(exact) // 3 : len(exact) // 3 + 8]
     assert _names(client, inner) == [], f"{inner!r} matched unanchored — the glob is not anchored"
     assert _names(client, f"*{inner}*"), f"'*{inner}*' matched nothing — inner is not a substring"
+
+
+# --- S11 schema anchor: the strict client schema, pinned against the REAL payload ---
+
+
+def test_live_channels_satisfy_the_strict_schema(client: ChannelFinderClient, glob: str) -> None:
+    """S11 anchor: every channel record carries a non-empty string ``name`` (measured
+    2026-07-16) — the client now RAISES on a nameless/non-dict record instead of minting
+    ``ChannelInfo(name="")``, so this run passing pins the premise against the real registry."""
+    channels = client.find_channels(glob, max_results=20)
+    assert channels, (
+        "positive control not met: the fixture glob matched nothing — the schema anchor cannot "
+        "pin anything. Check EPICS_MCP_LIVE_CF_GLOB."
+    )
+    assert all(isinstance(channel["name"], str) and channel["name"] for channel in channels)
