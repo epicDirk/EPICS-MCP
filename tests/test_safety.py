@@ -45,9 +45,19 @@ class TestPatternAllowlist:
         # Should not raise
         sl.check_write_allowed("TEST:pv")
 
-    def test_empty_pattern_allows_all(self, safety: SafetyLayer) -> None:
-        # Default empty pattern means no pattern check
-        safety.check_write_allowed("ANYTHING:goes")
+    def test_empty_pattern_with_writes_on_raises(self) -> None:
+        # S22: writes ENABLED with an EMPTY allowlist pattern is a misconfiguration — every PV
+        # would be writable. It must fail closed at construction (SafetyConfigError), not
+        # warn-and-allow. This replaces the former test_empty_pattern_allows_all, which cemented
+        # the allow-all footgun.
+        cfg = EpicsConfig(allow_pv_write=True, pv_write_pattern="", write_rate_limit=10)
+        with pytest.raises(SafetyConfigError):
+            SafetyLayer(cfg)
+
+    def test_explicit_allow_all_pattern_is_permitted(self) -> None:
+        # Positive control: the guard forbids the SILENT empty default, not a DELIBERATE choice.
+        # An operator may allow every PV with an explicit '.*' — that must construct fine.
+        SafetyLayer(EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10))
 
 
 class TestSafetyConfigGuard:
@@ -65,7 +75,7 @@ class TestRateLimit:
     """Sliding-window rate limit enforcement."""
 
     def test_rate_limit_exceeded(self) -> None:
-        cfg = EpicsConfig(allow_pv_write=True, write_rate_limit=5)
+        cfg = EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=5)
         sl = SafetyLayer(cfg)
 
         # First 5 calls should succeed
@@ -77,7 +87,7 @@ class TestRateLimit:
             sl.check_write_allowed("TEST:pv_overflow")
 
     def test_rate_limit_error_has_details(self) -> None:
-        cfg = EpicsConfig(allow_pv_write=True, write_rate_limit=2)
+        cfg = EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=2)
         sl = SafetyLayer(cfg)
         sl.check_write_allowed("A:pv")
         sl.check_write_allowed("B:pv")
@@ -155,7 +165,9 @@ class TestAuditDeny:
         assert "error_code=PV_WRITE_DENIED" in caplog.text
 
     def test_rate_limit_emits_deny(self, caplog: pytest.LogCaptureFixture) -> None:
-        sl = SafetyLayer(EpicsConfig(allow_pv_write=True, write_rate_limit=1))
+        sl = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=1)
+        )
         sl.check_write_allowed("TEST:a")  # consumes the single token
         with (
             caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"),

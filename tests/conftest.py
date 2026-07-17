@@ -30,8 +30,9 @@ def config() -> EpicsConfig:
 
 @pytest.fixture
 def write_config() -> EpicsConfig:
-    """Config with writes enabled."""
-    return EpicsConfig(allow_pv_write=True, write_rate_limit=5)
+    """Config with writes enabled. An explicit allow-all pattern ('.*') stands in for the former
+    implicit empty default — writes-on now REQUIRES a non-empty pattern (S22)."""
+    return EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=5)
 
 
 @pytest.fixture

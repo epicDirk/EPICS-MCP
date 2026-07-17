@@ -60,9 +60,10 @@ dropped, missing fields never zero-filled, non-strings never stringified into na
 This is a controls tool, so the trust questions come first:
 
 - **Read-only by default.** The mutating tools are gated off. `set_pv_value` is **triple-gated**:
-  `EPICS_MCP_ALLOW_PV_WRITE=true` **and** an optional regex allowlist
-  (`EPICS_MCP_PV_WRITE_PATTERN`) **and** a per-minute rate limit — every write *attempt*
-  is audit-logged (`ALLOW`/`DENY`/`FAILED`).
+  `EPICS_MCP_ALLOW_PV_WRITE=true` **and** a regex allowlist (`EPICS_MCP_PV_WRITE_PATTERN` —
+  **required** when writes are on: an empty pattern makes the server **refuse to start** rather
+  than silently allow every PV; use `.*` to deliberately allow all) **and** a per-minute rate
+  limit — every write *attempt* is audit-logged (`ALLOW`/`DENY`/`FAILED`).
 - **Olog logbook write is a *separate* gate.** `create_log_entry` / `reply_to_log` need
   `EPICS_MCP_ALLOW_OLOG_WRITE=true` **and** a **test-server URL boundary** (only a loopback Olog,
   or an exact URL in `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` with
@@ -351,7 +352,7 @@ Add to your `.mcp.json` or `claude_desktop_config.json`. **Read-only, localhost:
 }
 ```
 
-**Writes enabled for test PVs only** (triple-gated):
+**Writes enabled for test PVs only** (triple-gated — the pattern is required, an empty one refuses to start):
 
 ```json
 {

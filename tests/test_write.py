@@ -37,7 +37,7 @@ class TestSetPvValueSuccess:
         mock_pv_put: AsyncMock,
     ) -> None:
         # Configure safety to allow writes
-        cfg = EpicsConfig(allow_pv_write=True, write_rate_limit=10)
+        cfg = EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
         sl = SafetyLayer(cfg)
         mock_get_safety.return_value = sl
 
@@ -87,7 +87,7 @@ class TestSetPvValueRateLimited:
         mock_pv_put: AsyncMock,
     ) -> None:
         # Configure safety with rate_limit=2
-        cfg = EpicsConfig(allow_pv_write=True, write_rate_limit=2)
+        cfg = EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=2)
         sl = SafetyLayer(cfg)
         mock_get_safety.return_value = sl
 
@@ -120,7 +120,7 @@ class TestSetPvValueFailed:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         mock_get_safety.return_value = SafetyLayer(
-            EpicsConfig(allow_pv_write=True, write_rate_limit=10)
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
         )
         mock_pv_get.return_value = {"pv_name": "TEST:PV", "value": 1.0}
         mock_pv_put.side_effect = PVTimeoutError("put timed out")
@@ -150,7 +150,7 @@ class TestSetPvValueFailed:
         # A non-EpicsError (a bug below the tool layer) must still be audited,
         # tagged INTERNAL, and re-raised unchanged.
         mock_get_safety.return_value = SafetyLayer(
-            EpicsConfig(allow_pv_write=True, write_rate_limit=10)
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
         )
         mock_pv_get.return_value = {"pv_name": "TEST:PV", "value": 1.0}
         mock_pv_put.side_effect = ValueError("unexpected boom")
@@ -177,7 +177,7 @@ class TestSetPvValueFailed:
         # consumed its rate-limit token (append happens in check_write_allowed,
         # before pv_put), so the next attempt is rejected before reaching pv_put.
         mock_get_safety.return_value = SafetyLayer(
-            EpicsConfig(allow_pv_write=True, write_rate_limit=1)
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=1)
         )
         mock_pv_get.return_value = {"pv_name": "TEST:PV", "value": 1.0}
         mock_pv_put.side_effect = PVTimeoutError("put timed out")

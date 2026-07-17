@@ -107,7 +107,8 @@ up before a write proceeds, each fail-closed and audited as `DENY` before the ra
   — a production write is a deliberate, auditable double action. The host is read only from the URL's
   parsed hostname, so a `user@host` trick cannot smuggle a loopback prefix past a production host.
 - **Logbook allowlist.** Every target logbook must be in `EPICS_MCP_OLOG_WRITE_LOGBOOKS`; an EMPTY
-  allowlist with the gate on is **deny-all** (the inverse of the PV pattern).
+  allowlist with the gate on is **deny-all** (fail-closed). (The PV write pattern is fail-closed too,
+  but differently: an empty pattern with writes on is refused at startup, not treated as allow-all.)
 - **Rate limit + audit.** `EPICS_MCP_OLOG_WRITE_RATE_LIMIT` (low; a logbook is human-paced). The audit
   line is metadata-only — logbook names, level, title LENGTH, entry id, service-account owner — and
   **never** the `title`/`description` free text.

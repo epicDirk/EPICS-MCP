@@ -101,3 +101,30 @@ async def test_get_alarm_history_disabled_by_default(monkeypatch: pytest.MonkeyP
     result = await get_alarm_history("DEV-TEST01:X", "2026-06-01", "2026-06-02")
     assert result["enabled"] is False
     assert result["events"] == []
+
+
+def test_main_validates_write_config_before_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S22: main() validates the write-safety config at BOOT (eager get_safety()) before mcp.run().
+    A misconfig (writes enabled + empty allowlist pattern) must fail loudly at start, not silently
+    run with every PV writable. Rot-Beweis against the former ``def main(): mcp.run()``."""
+    import epics_pv_mcp.config as config_module
+    import epics_pv_mcp.safety as safety_module
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.errors import SafetyConfigError
+    from epics_pv_mcp.server import main, mcp
+
+    run_called: list[bool] = []
+    monkeypatch.setattr(mcp, "run", lambda *args, **kwargs: run_called.append(True))
+
+    saved_config = config_module._config
+    saved_safety = safety_module._safety
+    try:
+        config_module._config = EpicsConfig(allow_pv_write=True, pv_write_pattern="")
+        safety_module._safety = None
+        with pytest.raises(SafetyConfigError):
+            main()
+        # The boot validation must fire BEFORE mcp.run() — the server never starts serving.
+        assert not run_called
+    finally:
+        config_module._config = saved_config
+        safety_module._safety = saved_safety

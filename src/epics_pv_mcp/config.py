@@ -22,9 +22,11 @@ class EpicsConfig(BaseSettings):
 
     # --- Safety ---
     allow_pv_write: bool = False
-    # Regex-Allowlist für Schreib-PVs. Leer = KEIN zusätzlicher Filter: bei
-    # aktivem allow_pv_write sind dann alle PVs schreibbar (das env-Gate ist die
-    # primäre Kontrolle, das Pattern eine optionale Verschärfung).
+    # Regex-Allowlist für Schreib-PVs. Bei aktivem allow_pv_write ist ein nicht-leeres Pattern
+    # PFLICHT: ein leeres Pattern mit writes-on wird beim Start als SafetyConfigError abgelehnt
+    # (fail-closed, siehe SafetyLayer.__init__) — nicht mehr ein stiller allow-all. Wer wirklich
+    # jeden PV schreibbar will, sagt das explizit (z. B. '.*'). Default leer ist sicher, weil
+    # allow_pv_write per Default False ist.
     pv_write_pattern: str = ""
     # max writes per minute; ge=1 — "block all" is the allow_pv_write gate, not 0.
     write_rate_limit: int = Field(default=10, ge=1)
@@ -126,7 +128,8 @@ class EpicsConfig(BaseSettings):
     olog_write_user: str = ""  # Basic-auth service account (never a personal login — becomes owner)
     olog_write_password: str = ""  # Basic-auth password for the write service account
     # Comma-separated logbook names a write may target (NOT a regex — names are discrete). EMPTY +
-    # gate on = deny-all (fail-closed, the INVERSE of the PV pattern where empty = allow-all).
+    # gate on = deny-all (fail-closed). (The PV write pattern is also fail-closed but differently:
+    # an empty pattern with writes on is refused at startup, see pv_write_pattern above.)
     olog_write_logbooks: str = ""
     # Max Olog writes per 60 s window; ge=1 — the on/off control is allow_olog_write, not 0. Low by
     # default (a logbook is human-paced).

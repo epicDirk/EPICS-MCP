@@ -11,6 +11,7 @@ from epics_pv_mcp import __version__
 from epics_pv_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_pv_mcp.prompts import diagnose_pv as _diagnose_pv
 from epics_pv_mcp.resources import get_epics_config, get_guide, get_health
+from epics_pv_mcp.safety import get_safety
 from epics_pv_mcp.services.diagnose import (
     DEFAULT_CHECK_ALARM,
     DEFAULT_CHECK_ARCHIVER,
@@ -939,6 +940,10 @@ def compare_machine_state(pv_prefix: str, reference_file: str = "") -> str:
 
 def main() -> None:
     """Entry point for the MCP server."""
+    # Validate the write-safety config at boot (fail-fast): builds the safety singleton, which
+    # refuses to start on a misconfigured write gate (e.g. writes enabled + empty allowlist pattern)
+    # instead of surfacing it only on the first write. Harmless when writes are off (the default).
+    get_safety()
     mcp.run()
 
 

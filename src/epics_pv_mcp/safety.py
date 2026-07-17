@@ -29,7 +29,9 @@ class SafetyLayer:
     """Guards all PV write operations with three checks:
 
     1. Environment gate  — ``allow_pv_write`` must be True.
-    2. Pattern allowlist  — PV name must match ``pv_write_pattern`` regex.
+    2. Pattern allowlist  — PV name must match ``pv_write_pattern`` regex. REQUIRED when writes are
+       enabled: an empty pattern with ``allow_pv_write`` on raises ``SafetyConfigError`` at
+       construction (fail-closed), never a silent allow-all.
     3. Rate limit         — at most ``write_rate_limit`` writes per 60 s window.
     """
 
@@ -48,13 +50,17 @@ class SafetyLayer:
                 f"Invalid EPICS_MCP_PV_WRITE_PATTERN regex {config.pv_write_pattern!r}: {exc}",
                 details={"pattern": config.pv_write_pattern},
             ) from exc
-        # Defense-in-depth: writes ENABLED without a PV-name allowlist leaves only the on/off env
-        # gate — every PV becomes writable. That is deliberate (the env gate is the primary control)
-        # but a sharp footgun, so warn loudly when an operator forgot EPICS_MCP_PV_WRITE_PATTERN.
+        # Fail-closed: writes ENABLED without a PV-name allowlist would leave only the on/off env
+        # gate — every PV becomes writable. Refuse at construction rather than warn-and-allow: an
+        # empty pattern with writes on is a misconfiguration (a forgotten pattern env var), not a
+        # valid "allow all". An operator who genuinely wants every PV writable must say so
+        # explicitly (e.g. '.*') — this turns the silent footgun into a loud SafetyConfigError.
         if config.allow_pv_write and self._pattern is None:
-            logging.getLogger(__name__).warning(
-                "PV writes are ENABLED but no EPICS_MCP_PV_WRITE_PATTERN is set — EVERY PV name is "
-                "writable. Set a pattern (e.g. '^MPS:.*$') to restrict writes to specific PVs."
+            raise SafetyConfigError(
+                "PV writes are ENABLED (EPICS_MCP_ALLOW_PV_WRITE=true) but "
+                "EPICS_MCP_PV_WRITE_PATTERN is empty — refusing to start with every PV writable. "
+                "Set a pattern (e.g. '^MPS:.*$', or '.*' to deliberately allow all).",
+                details={"allow_pv_write": True, "pv_write_pattern": ""},
             )
         # Sliding-window timestamps of recent writes. G2 constrains
         # write_rate_limit to ge=1, so a *validated* config never produces a
