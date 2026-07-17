@@ -102,9 +102,11 @@ up before a write proceeds, each fail-closed and audited as `DENY` before the ra
 - **Env gate.** `EPICS_MCP_ALLOW_OLOG_WRITE=true` (default false = every write denied).
 - **Test-server URL boundary.** Unlike PV write (implicitly safe via the address-list localhost
   isolation), Olog speaks HTTP to an arbitrary URL. A write is refused unless the `OLOG_URL` host is
-  **loopback** (the local Olog), or the exact base URL is in `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST`
-  **and** `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true`. A private (non-loopback) host is refused by default
-  — a production write is a deliberate, auditable double action. The host is read only from the URL's
+  **loopback** (the local Olog), or the exact **https** base URL is in
+  `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` **and** `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true`. A private
+  (non-loopback) host — and any plain-http remote (Basic creds are cleartext) — is refused by default;
+  a production write is a deliberate, auditable double action, and the write session is env-independent
+  (a remote's CA comes from `EPICS_MCP_CA_BUNDLE`, not the env). The host is read only from the URL's
   parsed hostname, so a `user@host` trick cannot smuggle a loopback prefix past a production host.
 - **Logbook allowlist.** Every target logbook must be in `EPICS_MCP_OLOG_WRITE_LOGBOOKS`; an EMPTY
   allowlist with the gate on is **deny-all** (fail-closed). (The PV write pattern is fail-closed too,

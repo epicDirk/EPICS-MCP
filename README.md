@@ -66,9 +66,9 @@ This is a controls tool, so the trust questions come first:
   limit — every write *attempt* is audit-logged (`ALLOW`/`DENY`/`FAILED`).
 - **Olog logbook write is a *separate* gate.** `create_log_entry` / `reply_to_log` need
   `EPICS_MCP_ALLOW_OLOG_WRITE=true` **and** a **test-server URL boundary** (only a loopback Olog,
-  or an exact URL in `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` with
-  `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true` — a non-loopback/private host is refused by default, so
-  a production write is a deliberate double action) **and** a logbook allowlist
+  or an exact **https** URL in `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` with
+  `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true` — a non-loopback/private host, and any plain-http remote,
+  is refused by default, so a production write is a deliberate double action) **and** a logbook allowlist
   (`EPICS_MCP_OLOG_WRITE_LOGBOOKS`; empty = deny-all) **and** a rate limit. The author is the write
   service account (`EPICS_MCP_OLOG_WRITE_USER`), set server-side and not spoofable; the audit line
   is metadata-only (never the title/description free text). **`ALLOW_PV_WRITE` is untouched by it.**
@@ -310,7 +310,7 @@ All settings are read from environment variables with the `EPICS_MCP_` prefix.
 | `EPICS_MCP_OLOG_WRITE_LOGBOOKS` | _(empty)_ | Comma-separated logbook names a write may target; **empty + gate on = deny-all** |
 | `EPICS_MCP_OLOG_WRITE_RATE_LIMIT` | `5` | Max Olog writes per 60 s window |
 | `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` | _(empty)_ | Comma-separated exact base URLs allowed as non-loopback write targets (only with `_ALLOW_REMOTE`) |
-| `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE` | `false` | Permit writes to a non-loopback (allowlisted) Olog. Default false: only loopback is writable. Prefer `https://` for a remote (Basic creds are cleartext otherwise) |
+| `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE` | `false` | Permit writes to a non-loopback (allowlisted) Olog. Default false: only loopback is writable. A remote **must** be `https://` — a plain-http remote is refused (Basic creds are cleartext). The write session is env-independent (no proxy/`REQUESTS_CA_BUNDLE` env): give a remote's CA via `EPICS_MCP_CA_BUNDLE` |
 
 **EPICS network** (standard EPICS env; controls what the server can reach)
 

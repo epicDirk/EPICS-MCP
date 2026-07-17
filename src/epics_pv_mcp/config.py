@@ -122,8 +122,9 @@ class EpicsConfig(BaseSettings):
     # Olog write is a deliberately-authorized, SEPARATE logbook surface behind its OWN gate. Unlike
     # PV write (implicitly test-safe via the EPICS address-list localhost isolation), Olog speaks
     # HTTP to an arbitrary URL — so the gate adds a TEST-SERVER URL BOUNDARY: a write is refused
-    # unless olog_url resolves to a loopback host (the local Docker sandbox) OR is explicitly
-    # allowlisted AND allow_remote is set. This prevents an accidental write to a production Olog.
+    # unless olog_url resolves to a loopback host (the local Docker sandbox) OR is an allowlisted
+    # https URL with allow_remote set (a plain-http remote is refused — creds are cleartext). This
+    # prevents an accidental write to a production Olog.
     allow_olog_write: bool = False  # primary on/off gate (default false = every Olog write denied)
     olog_write_user: str = ""  # Basic-auth service account (never a personal login — becomes owner)
     olog_write_password: str = ""  # Basic-auth password for the write service account
@@ -134,11 +135,13 @@ class EpicsConfig(BaseSettings):
     # Max Olog writes per 60 s window; ge=1 — the on/off control is allow_olog_write, not 0. Low by
     # default (a logbook is human-paced).
     olog_write_rate_limit: int = Field(default=5, ge=1)
-    # Comma-separated EXACT base URLs (== olog_url) allowed as non-loopback write targets. Only
-    # takes effect with olog_write_allow_remote — a production write is a deliberate double action.
+    # Comma-separated EXACT base URLs (== olog_url) allowed as non-loopback write targets; each must
+    # be https (a plain-http remote is refused). Only takes effect with olog_write_allow_remote — a
+    # production write is a deliberate double action.
     olog_write_url_allowlist: str = ""
-    # Permit writes to a non-loopback (allowlisted) URL. Default false: only loopback is writable,
-    # so a private-network production Olog is refused unless this is deliberately enabled.
+    # Permit writes to a non-loopback (allowlisted) https URL. Default false: only loopback is
+    # writable. The write session is env-independent (no proxy / REQUESTS_CA_BUNDLE env), so a
+    # remote's CA must come from ca_bundle (EPICS_MCP_CA_BUNDLE).
     olog_write_allow_remote: bool = False
 
 

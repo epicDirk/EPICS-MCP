@@ -771,7 +771,7 @@ async def create_log_entry(
 
     MUTATING. Disabled by default and behind its OWN gate (separate from set_pv_value): it needs
     EPICS_MCP_ALLOW_OLOG_WRITE=true AND a test-server URL boundary (only a loopback Olog, or an
-    allowlisted URL with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true) AND a logbook allowlist
+    allowlisted https URL with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true) AND a logbook allowlist
     (EPICS_MCP_OLOG_WRITE_LOGBOOKS) AND a rate limit — ALLOW_PV_WRITE is untouched. The author
     (owner) is the configured write service account, set server-side; a caller cannot spoof it. The
     returned entry follows the same posture as a read (redacted; whole only for a DECLARED local
