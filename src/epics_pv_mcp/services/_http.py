@@ -204,7 +204,11 @@ def build_write_session(
 
     ``verify`` resolves the same VALUE as the read factory (``ca_bundle`` > ``tls_verify`` > True);
     only the env fallbacks are dropped. Pass it explicitly (the Olog client passes its read
-    session's already-resolved ``verify``) so the two sessions agree on the CA to trust.
+    session's already-resolved ``verify``) so the two sessions agree on that configured VALUE. But
+    they do NOT necessarily trust the same EFFECTIVE CA: because this session drops env fallbacks
+    (``trust_env=False``), a ``REQUESTS_CA_BUNDLE`` env CA is honoured only by the read session,
+    and a remote-https write's CA must come from ``EPICS_MCP_CA_BUNDLE`` config (the N03 tradeoff,
+    per :meth:`~epics_pv_mcp.services.olog_client.OlogClient._write_session`).
     """
     session = requests.Session()
     session.headers.update({"accept": accept})
