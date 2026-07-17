@@ -1,10 +1,16 @@
 """Shared fixtures for EPICS PV MCP tests."""
 
+import collections
 import importlib.util
+import threading
+import time
+from collections.abc import Callable
+from typing import Protocol
 
 import pytest
 
 from epics_pv_mcp.config import EpicsConfig
+from epics_pv_mcp.errors import RateLimitError
 from epics_pv_mcp.safety import SafetyLayer
 
 # The display-aware tools and their opi_navigation-coupled tests need the optional
@@ -57,3 +63,64 @@ def safety(write_config: EpicsConfig) -> SafetyLayer:
 def safety_locked(config: EpicsConfig) -> SafetyLayer:
     """SafetyLayer with writes disabled (default)."""
     return SafetyLayer(config)
+
+
+# --- S28: deterministic rate-limiter atomicity harness (OlogWriteGate + SafetyLayer) ----------
+
+
+class _RateLimitOwner(Protocol):
+    """Anything with a sliding-window timestamp deque — both write gates satisfy this."""
+
+    _timestamps: collections.deque[float]
+
+
+class _RendezvousDeque(collections.deque[float]):
+    """A deque whose FIRST ``append`` opens the len-check -> append window that exposes a
+    non-atomic rate limiter: it signals ``checked`` (so a second thread may start) and then sleeps a
+    BOUNDED time before recording. Bounded sleep (not a Barrier) never deadlocks the locked code —
+    the lock holder just sleeps briefly and releases. See S28."""
+
+    def __init__(self, maxlen: int | None) -> None:
+        super().__init__(maxlen=maxlen)
+        self.checked = threading.Event()
+
+    def append(self, item: float, /) -> None:
+        if not self.checked.is_set():
+            self.checked.set()  # thread 1 passed its len-check; hold the window open for thread 2
+            time.sleep(0.15)
+        super().append(item)
+
+
+@pytest.fixture
+def concurrent_admit_count() -> Callable[[_RateLimitOwner, Callable[[], None]], int]:
+    """Return a driver that runs ``call`` from TWO threads through ``owner``'s rate check->append
+    seam and returns the number of admitted (non-``RateLimitError``) calls. Deterministic: thread 2
+    starts only after thread 1 has passed its len-check (``checked``), and the bounded sleep keeps
+    the window open without a Barrier — so a properly locked limiter admits exactly 1 (no deadlock)
+    while a non-atomic one admits 2. Swap in a limit=1 config for the sharpest signal."""
+
+    def _run(owner: _RateLimitOwner, call: Callable[[], None]) -> int:
+        hooked = _RendezvousDeque(maxlen=owner._timestamps.maxlen)
+        owner._timestamps = hooked
+        admits = 0
+        admit_lock = threading.Lock()
+
+        def worker(second: bool) -> None:
+            nonlocal admits
+            if second:
+                hooked.checked.wait(timeout=5.0)
+            try:
+                call()
+            except RateLimitError:
+                return
+            with admit_lock:
+                admits += 1
+
+        threads = [threading.Thread(target=worker, args=(s,)) for s in (False, True)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        return admits
+
+    return _run

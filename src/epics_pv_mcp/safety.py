@@ -76,6 +76,12 @@ class SafetyLayer:
             ) from exc
         self._audit_handler: logging.Handler | None = None
         self._audit_logger = self._setup_audit_logger()
+        # S28: the rate-limit token acquisition (purge -> len-check -> append) must be ATOMIC —
+        # symmetric with OlogWriteGate. The PV write path runs the gate inline on the event loop
+        # today (tools/write.py, before the first await), so it is not racy YET; the lock is
+        # defensive symmetry that also holds if PV write ever moves to a thread (O5). Per-instance
+        # lock; the module-level _safety_lock guards the singleton getter, a separate concern.
+        self._rate_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Public API
@@ -105,10 +111,17 @@ class SafetyLayer:
                 details={"pv_name": pv_name, "pattern": self._config.pv_write_pattern},
             )
 
-        # 3. Rate limit (sliding window)
-        now = time.monotonic()
-        self._purge_old(now)
-        if len(self._timestamps) >= self._config.write_rate_limit:
+        # 3. Rate limit (sliding window). S28: purge + len-check + append are ONE atomic step under
+        # _rate_lock (symmetric with OlogWriteGate), so concurrent writes can never both pass the
+        # check and exceed the limit. `now` is sampled inside the lock; the audit + raise for a rate
+        # denial run OUTSIDE the lock (I/O; the deny path never appends a token — invariant holds).
+        with self._rate_lock:
+            now = time.monotonic()
+            self._purge_old(now)
+            over_limit = len(self._timestamps) >= self._config.write_rate_limit
+            if not over_limit:
+                self._timestamps.append(now)  # record this write (success path only)
+        if over_limit:
             self._audit_deny(pv_name, "RATE_LIMIT_EXCEEDED")
             raise RateLimitError(
                 f"Write rate limit exceeded ({self._config.write_rate_limit} "
@@ -119,9 +132,6 @@ class SafetyLayer:
                     "window_seconds": self._WINDOW_SECONDS,
                 },
             )
-
-        # Record this write timestamp
-        self._timestamps.append(now)
 
     def audit_write(
         self, pv_name: str, old_value: object, new_value: object, caller: str = "set_pv_value"

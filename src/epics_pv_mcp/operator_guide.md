@@ -111,9 +111,11 @@ up before a write proceeds, each fail-closed and audited as `DENY` before the ra
 - **Logbook allowlist.** Every target logbook must be in `EPICS_MCP_OLOG_WRITE_LOGBOOKS`; an EMPTY
   allowlist with the gate on is **deny-all** (fail-closed). (The PV write pattern is fail-closed too,
   but differently: an empty pattern with writes on is refused at startup, not treated as allow-all.)
-- **Rate limit + audit.** `EPICS_MCP_OLOG_WRITE_RATE_LIMIT` (low; a logbook is human-paced). The audit
-  line is metadata-only — logbook names, level, title LENGTH, entry id, service-account owner — and
-  **never** the `title`/`description` free text.
+- **Rate limit + audit.** `EPICS_MCP_OLOG_WRITE_RATE_LIMIT` (low; a logbook is human-paced). The limit
+  is enforced ATOMICALLY (the purge/check/record step holds a per-gate lock), so concurrent writes —
+  the Olog gate runs under `asyncio.to_thread`, i.e. real worker threads — can never both slip past it
+  and exceed the window. The audit line is metadata-only — logbook names, level, title LENGTH, entry
+  id, service-account owner — and **never** the `title`/`description` free text.
 
 The author (`owner`) is the write service account (`EPICS_MCP_OLOG_WRITE_USER`, a dedicated account —
 never a personal login), set server-side from the auth Principal; a caller cannot spoof it. Use a

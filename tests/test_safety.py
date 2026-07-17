@@ -1,6 +1,7 @@
 """Tests for the SafetyLayer (write gate, pattern allowlist, rate limiting, audit)."""
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -97,6 +98,18 @@ class TestRateLimit:
 
         assert exc_info.value.error_code == "RATE_LIMIT_EXCEEDED"
         assert exc_info.value.details["limit"] == 2
+
+    def test_rate_limit_token_acquisition_is_atomic(
+        self, concurrent_admit_count: Callable[..., int]
+    ) -> None:
+        """S28: the rate token acquisition (purge->len-check->append) is atomic under _rate_lock,
+        symmetric with OlogWriteGate. Two concurrent writes at limit=1 admit exactly one. The PV
+        path is inline-on-the-event-loop today (not racy yet), so this guards the invariant against
+        a future move to threads (O5); it goes RED (admits==2) if the lock is removed (mutant)."""
+        cfg = EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=1)
+        sl = SafetyLayer(cfg)
+        admits = concurrent_admit_count(sl, lambda: sl.check_write_allowed("TEST:pv"))
+        assert admits == 1
 
 
 class TestAuditWrite:

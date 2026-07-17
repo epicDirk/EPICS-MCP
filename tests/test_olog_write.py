@@ -10,7 +10,7 @@ important test of the phase. All host/URL/person tokens are SYNTHETIC (facility-
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -293,6 +293,17 @@ class TestRateLimit:
         gate.check_write_allowed(["Ops"])
         with pytest.raises(RateLimitError):
             gate.check_write_allowed(["Ops"])
+
+    def test_rate_limit_token_acquisition_is_atomic(
+        self, concurrent_admit_count: Callable[..., int]
+    ) -> None:
+        """S28: two concurrent create_log_entry run in DIFFERENT worker threads (this gate is called
+        under asyncio.to_thread), so the purge->len-check->append MUST be atomic. With limit=1 the
+        rendezvous forces the check->append interleaving; exactly ONE write is admitted. This test
+        goes RED (admits==2) against the pre-S28 unlocked code — proven by the mutant on HEAD~1."""
+        gate = OlogWriteGate(_write_config(olog_write_rate_limit=1))
+        admits = concurrent_admit_count(gate, lambda: gate.check_write_allowed(["Ops"]))
+        assert admits == 1
 
 
 # ======================================================================================

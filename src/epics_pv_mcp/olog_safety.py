@@ -78,6 +78,12 @@ class OlogWriteGate:
             ) from exc
         self._audit_handler: logging.Handler | None = None
         self._audit_logger = self._setup_audit_logger()
+        # S28: the rate-limit token acquisition (purge -> len-check -> append) must be ATOMIC. This
+        # gate runs under asyncio.to_thread (checkers.query_olog_create), so two concurrent writes
+        # execute in DIFFERENT worker threads; without a lock both could pass the len-check before
+        # either appends and exceed the limit (measured: limit 1 -> 2 admitted). Per-instance lock;
+        # the module-level _olog_safety_lock guards the singleton getter, a separate concern.
+        self._rate_lock = threading.Lock()
         # Defense-in-depth: writes ENABLED with an EMPTY allowlist is deny-all (fail-closed), so
         # warn loudly — an operator who set ALLOW_OLOG_WRITE but forgot the allowlist gets no write.
         if config.allow_olog_write and not self._allowed_logbooks:
@@ -141,10 +147,18 @@ class OlogWriteGate:
                 details={"logbooks": logbooks},
             )
 
-        # 4. Rate limit (sliding window) — LAST, so a denial above never consumes a token
-        now = time.monotonic()
-        self._purge_old(now)
-        if len(self._timestamps) >= self._config.olog_write_rate_limit:
+        # 4. Rate limit (sliding window) — LAST, so a denial above never consumes a token.
+        # S28: purge + len-check + append are ONE atomic step under _rate_lock, so two concurrent
+        # writes (this gate runs under asyncio.to_thread = real threads) can never both pass the
+        # check and exceed the limit. `now` is sampled inside the lock too. The audit + raise for a
+        # rate denial run OUTSIDE the lock (I/O; never appends a token — the invariant holds).
+        with self._rate_lock:
+            now = time.monotonic()
+            self._purge_old(now)
+            over_limit = len(self._timestamps) >= self._config.olog_write_rate_limit
+            if not over_limit:
+                self._timestamps.append(now)  # record this write (success path only)
+        if over_limit:
             self._audit_deny("RATE_LIMIT_EXCEEDED", caller)
             raise RateLimitError(
                 f"Olog write rate limit exceeded ({self._config.olog_write_rate_limit} writes per "
@@ -154,9 +168,6 @@ class OlogWriteGate:
                     "window_seconds": self._WINDOW_SECONDS,
                 },
             )
-
-        # Record this write timestamp (success path only)
-        self._timestamps.append(now)
 
     def audit_write(
         self,
