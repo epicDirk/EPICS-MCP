@@ -4,9 +4,10 @@ on: [push, pull_request]
 
 jobs:
   # Tests auf ubuntu-latest: p4p-Linux-Wheels sind battle-tested (war auch der OS der
-  # bisherigen EPICS-CI). Die `live`-Tests (IOC-Sandbox) self-skippen ohne EPICS_SANDBOX +
-  # laufendes IOC → in CI läuft die Offline-Suite, die live-Tests werden geskippt. Coverage
-  # report-only (kein --cov-fail-under-Gate, wie phoebus-display-mcp).
+  # bisherigen EPICS-CI). Die `live`-Tests (IOC-Sandbox) self-skippen, weil ihre
+  # `EPICS_MCP_*`-URL-/`EPICS_MCP_LIVE_*`-Vars in CI ungesetzt sind → in CI läuft die
+  # Offline-Suite, die live-Tests werden geskippt. Coverage report-only (kein
+  # --cov-fail-under-Gate, wie phoebus-display-mcp).
   test:
     runs-on: ubuntu-latest
     steps:

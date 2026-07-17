@@ -139,10 +139,13 @@ warn_unused_ignores = false
 testpaths = ["tests"]
 pythonpath = ["tests"]
 asyncio_mode = "auto"
-# `live` = tests that need a running local EPICS test stack; opt-in via
-# `EPICS_SANDBOX=1 uv run pytest -m live`. Deliberately NO `addopts = -m "not live"` (would change
-# default pytest for everyone and is brittle); live tests skip themselves via skipif(EPICS_SANDBOX)
-# so the default run/CI stays green without the stack.
+# `live` = tests that need a running local EPICS test stack. Opt-in: set the target plane's
+# `EPICS_MCP_*` vars, then `uv run pytest -m live`. Each live module self-skips via
+# `pytest.mark.skipif` on its own `EPICS_MCP_*` URL var (and, where present, an extra
+# `EPICS_MCP_LIVE_*` fixture var - each tests/test_*_live.py docstring lists that plane's vars),
+# so the default run and CI stay green with those vars unset. Deliberately NO
+# `addopts = -m "not live"` (would change default pytest for everyone and is brittle); the
+# per-module skipif already keeps the default/CI green without the stack.
 markers = [
-    "live: needs a running local EPICS test stack; opt-in via -m live + EPICS_SANDBOX=1",
+    "live: needs a running local EPICS stack; opt-in via -m live + the plane's EPICS_MCP_* vars",
 ]

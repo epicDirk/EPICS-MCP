@@ -124,3 +124,22 @@ def test_knowledge_files_are_facility_agnostic() -> None:
             if match:
                 problems.append(f"{path.relative_to(_ROOT)} [{label}: {match.group(0)!r}]")
     assert not problems, f"facility identifier(s) leaked into committed files: {problems}"
+
+
+def test_no_epics_sandbox_fiction() -> None:
+    """S2: the ``live`` opt-in was documented as a non-existent ``EPICS_SANDBOX`` env var
+    (``skipif(EPICS_SANDBOX)`` / ``EPICS_SANDBOX=1``) — a claim about our own repo that probes
+    nothing: ``EPICS_SANDBOX=1 uv run pytest -m live`` runs ZERO live tests and exits 0, because
+    each live module actually self-skips on its own ``EPICS_MCP_*`` URL/fixture vars. Pin the
+    fiction as removed: no tracked file may mention it. Reuses ``_tracked_text_files()``, which
+    excludes THIS file (see the exclusion in that helper) so the needle never self-matches.
+    """
+    offenders = [
+        str(path.relative_to(_ROOT))
+        for path in _tracked_text_files()
+        if "EPICS_SANDBOX" in path.read_text(encoding="utf-8")
+    ]
+    assert not offenders, (
+        "EPICS_SANDBOX is a non-existent gate (no Python reads it); the real live opt-in is the "
+        f"per-plane EPICS_MCP_* URL/fixture vars. It must not appear in tracked files: {offenders}"
+    )
