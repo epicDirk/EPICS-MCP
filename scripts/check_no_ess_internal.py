@@ -33,8 +33,10 @@ _SELF = Path(__file__).name
 
 
 def load_patterns() -> list[tuple[str, re.Pattern[str]]]:
-    """Compile the built-in secret patterns plus any site regexes from the git-ignored local file."""
-    patterns: list[tuple[str, re.Pattern[str]]] = [(label, re.compile(rx)) for label, rx in _BUILTIN]
+    """Compile built-in secret patterns plus any site regexes from the git-ignored local file."""
+    patterns: list[tuple[str, re.Pattern[str]]] = [
+        (label, re.compile(rx)) for label, rx in _BUILTIN
+    ]
     if _LOCAL_FILE.exists():
         for lineno, raw in enumerate(_LOCAL_FILE.read_text(encoding="utf-8").splitlines(), start=1):
             line = raw.strip()
