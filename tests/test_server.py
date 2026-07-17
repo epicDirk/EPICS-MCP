@@ -1,5 +1,7 @@
 """Tests for server-level tool wrappers (EpicsError → ToolError conversion)."""
 
+import logging
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -126,5 +128,41 @@ def test_main_validates_write_config_before_run(monkeypatch: pytest.MonkeyPatch)
         # The boot validation must fire BEFORE mcp.run() — the server never starts serving.
         assert not run_called
     finally:
+        config_module._config = saved_config
+        safety_module._safety = saved_safety
+
+
+def test_main_boots_read_only_despite_unusable_audit_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """S22 QA (F-A): the eager boot validation must fire ONLY when writes are enabled. A read-only
+    deployment (writes off = the default) with a set-but-unwritable EPICS_MCP_AUDIT_LOG_FILE must
+    still boot — the audit sink is a write-only concern. Regression guard for the eager get_safety()
+    over-reach that promoted the audit-path guard to boot time for read-only deployments."""
+    import epics_pv_mcp.config as config_module
+    import epics_pv_mcp.safety as safety_module
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import main, mcp
+
+    run_called: list[bool] = []
+    monkeypatch.setattr(mcp, "run", lambda *args, **kwargs: run_called.append(True))
+
+    # Clear the process-global audit logger so the FileHandler is actually attempted (mirrors
+    # test_safety.py::test_invalid_audit_path_raises_safety_config_error).
+    audit = logging.getLogger("epics_pv_mcp.audit")
+    saved_handlers = audit.handlers[:]
+    audit.handlers.clear()
+    saved_config = config_module._config
+    saved_safety = safety_module._safety
+    try:
+        config_module._config = EpicsConfig(
+            allow_pv_write=False, audit_log_file=str(tmp_path / "nope" / "audit.log")
+        )
+        safety_module._safety = None
+        main()  # must NOT raise — a read-only deploy boots despite the unusable (unused) audit path
+        assert run_called == [True]
+    finally:
+        audit.handlers.clear()
+        audit.handlers.extend(saved_handlers)
         config_module._config = saved_config
         safety_module._safety = saved_safety

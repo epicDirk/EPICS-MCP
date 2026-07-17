@@ -277,7 +277,7 @@ All settings are read from environment variables with the `EPICS_MCP_` prefix.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `EPICS_MCP_ALLOW_PV_WRITE` | `false` | Master switch for PV writes |
-| `EPICS_MCP_PV_WRITE_PATTERN` | _(empty)_ | Regex allowlist of writable PV names (e.g. `^TEST:.*`) |
+| `EPICS_MCP_PV_WRITE_PATTERN` | _(empty)_ | Regex allowlist of writable PV names (e.g. `^TEST:.*`); **required** once writes are enabled — empty + writes on refuses to start |
 | `EPICS_MCP_WRITE_RATE_LIMIT` | `10` | Max writes per minute (≥ 1) |
 | `EPICS_MCP_AUDIT_LOG_FILE` | _(empty)_ | Audit log path (empty = stderr) |
 
