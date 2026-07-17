@@ -1,6 +1,9 @@
 """Live probes for the Alarm Logger time window — the class of bug a mock CANNOT catch.
 
-Opt-in: ``pytest -m live`` with ``EPICS_MCP_ALARM_URL`` and ``EPICS_MCP_LIVE_ALARM_PV`` set.
+Opt-in: ``pytest -m live`` with ``EPICS_MCP_ALARM_URL`` and ``EPICS_MCP_LIVE_ALARM_PV`` set. The
+config-tree probes also need ``EPICS_MCP_LIVE_ALARM_CONFIGURED_PV`` (a PV in the alarm tree — the
+positive control; without it those two tests skip) and, if the tree is not "Accelerator",
+``EPICS_MCP_LIVE_ALARM_TREE``.
 
 WHY THESE EXIST
 ---------------
