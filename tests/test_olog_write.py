@@ -169,7 +169,21 @@ class TestUrlBoundary:
                 olog_write_allow_remote=True,
             )
         )
-        gate.check_write_allowed(["Ops"])  # must not raise
+        gate.check_write_allowed(["Ops"])  # must not raise (https remote = the positive control)
+
+    def test_remote_http_write_refused_even_when_allowlisted(self) -> None:
+        """S23/N03: an allowlisted REMOTE target must be https. A plain-http Basic-auth write to a
+        real server exposes the service-account credentials on the wire (and to any inherited
+        proxy). Loopback stays http-OK (the local sandbox); only the remote lane is tightened."""
+        gate = OlogWriteGate(
+            _write_config(
+                olog_url="http://olog.example.org/Olog",
+                olog_write_url_allowlist="http://olog.example.org/Olog",
+                olog_write_allow_remote=True,
+            )
+        )
+        with pytest.raises(OlogWriteDeniedError):
+            gate.check_write_allowed(["Ops"])
 
     @pytest.mark.parametrize("url", ["garbage", "http://[::1]./Olog", ""])
     def test_sec2_unparseable_url_denied_even_when_allowlisted(self, url: str) -> None:
@@ -396,7 +410,7 @@ class TestCreateClient:
                 }
             )
 
-        monkeypatch.setattr(client.session, "put", _put)
+        monkeypatch.setattr(client._write_session, "put", _put)
         entry = client.create_log_entry(
             title="Vacuum trip",
             logbooks=["Ops"],
@@ -416,7 +430,9 @@ class TestCreateClient:
         headers = captured["headers"]
         assert isinstance(headers, dict)
         assert headers["X-Olog-Client-Info"] == "epics-pv-mcp"
-        # auth rode on the session
+        # auth rode on the dedicated WRITE session (where the PUT goes); the read session keeps it
+        # too, byte-identical — a silent drop on either would 401 a secured server.
+        assert client._write_session.headers.get("authorization") == "Basic dXNlcjpwYXNz"
         assert client.session.headers.get("authorization") == "Basic dXNlcjpwYXNz"
         # redaction: owner dropped, free text withheld, logbook name-only, NO person name leaks
         assert "owner" not in entry
@@ -434,7 +450,7 @@ class TestCreateClient:
             captured["json"] = kwargs.get("json")
             return _resp({"id": 6, "title": "t", "logbooks": [{"name": "Ops"}]})
 
-        monkeypatch.setattr(client.session, "put", _put)
+        monkeypatch.setattr(client._write_session, "put", _put)
         client.create_log_entry(title="re", logbooks=["Ops"], in_reply_to="42")
         assert captured["params"] == {"inReplyTo": "42"}
         # description is ALWAYS sent as a present string (empty here) — Olog save path NPEs on null.
@@ -444,26 +460,26 @@ class TestCreateClient:
 
     def test_http_400_maps_to_clear_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = OlogClient("http://olog:8080/Olog")
-        monkeypatch.setattr(client.session, "put", Mock(return_value=_resp_status(400)))
+        monkeypatch.setattr(client._write_session, "put", Mock(return_value=_resp_status(400)))
         with pytest.raises(OlogResponseError, match="400"):
             client.create_log_entry(title="t", logbooks=["Nope"])
 
     def test_http_401_maps_to_auth_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = OlogClient("http://olog:8080/Olog")
-        monkeypatch.setattr(client.session, "put", Mock(return_value=_resp_status(401)))
+        monkeypatch.setattr(client._write_session, "put", Mock(return_value=_resp_status(401)))
         with pytest.raises(OlogResponseError, match="401"):
             client.create_log_entry(title="t", logbooks=["Ops"])
 
     def test_http_500_propagates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = OlogClient("http://olog:8080/Olog")
-        monkeypatch.setattr(client.session, "put", Mock(return_value=_resp_status(500)))
+        monkeypatch.setattr(client._write_session, "put", Mock(return_value=_resp_status(500)))
         with pytest.raises(OlogResponseError) as exc_info:
             client.create_log_entry(title="t", logbooks=["Ops"])
         assert "400" not in str(exc_info.value)  # NOT re-labelled as a 400
 
     def test_empty_response_is_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = OlogClient("http://olog:8080/Olog")
-        monkeypatch.setattr(client.session, "put", Mock(return_value=_resp({})))
+        monkeypatch.setattr(client._write_session, "put", Mock(return_value=_resp({})))
         with pytest.raises(OlogResponseError):
             client.create_log_entry(title="t", logbooks=["Ops"])
 
@@ -475,7 +491,7 @@ class TestCreateClient:
         entry record always carries ``id``."""
         client = OlogClient("http://olog:8080/Olog")
         monkeypatch.setattr(
-            client.session, "put", Mock(return_value=_resp({"unexpected": "shape"}))
+            client._write_session, "put", Mock(return_value=_resp({"unexpected": "shape"}))
         )
         with pytest.raises(OlogResponseError):
             client.create_log_entry(title="t", logbooks=["Ops"])

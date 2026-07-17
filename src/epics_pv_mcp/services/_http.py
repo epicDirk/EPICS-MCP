@@ -100,6 +100,22 @@ def is_loopback_url(url: str) -> bool:
         return False  # a hostname is not an IP literal → not loopback
 
 
+def is_https_url(url: str) -> bool:
+    """True iff *url*'s scheme is ``https`` — parsed with urllib3 (the parser requests connects
+    with), fail-closed on anything unparseable.
+
+    The Olog write gate uses this to refuse a plain-``http`` write to an allowlisted REMOTE host: a
+    Basic-auth PUT over http exposes the service-account credentials on the wire (and to any proxy).
+    Loopback stays http-OK (a local sandbox), so this gates only the remote lane — see
+    :meth:`~epics_pv_mcp.olog_safety.OlogWriteGate._url_write_allowed`.
+    """
+    try:
+        parsed = urllib3.util.parse_url(url)
+    except (urllib3.exceptions.LocationParseError, ValueError):
+        return False
+    return (parsed.scheme or "").lower() == "https"
+
+
 def basic_auth_header(user: str, password: str) -> str | None:
     """Return an HTTP ``Basic <base64(user:pass)>`` header value, or ``None`` if either is empty.
 
@@ -157,6 +173,53 @@ def build_retrying_session(
         session.mount("https://", adapter)
     except ImportError:
         pass  # urllib3 retry unavailable — proceed without
+    return session
+
+
+def build_write_session(
+    *,
+    accept: str = "application/json",
+    auth_header: str | None = None,
+    verify: bool | str | None = None,
+) -> requests.Session:
+    """Return a :class:`requests.Session` for the ONE write path (Olog ``PUT /logs``): no retries,
+    and deliberately ENV-INDEPENDENT. The sibling of :func:`build_retrying_session` for a
+    credential-carrying mutation, where the read session's two conveniences turn into hazards (S23).
+
+    Two deliberate divergences from the read factory:
+
+    * **No retry policy** (``max_retries=0`` — no adapter carrying a ``Retry``). Olog ``PUT /logs``
+      is NOT idempotent: every PUT mints a new entry. Under the read session's 3-retry policy a
+      request the server PROCESSED but whose response was lost would be replayed into a DUPLICATE
+      entry (urllib3's default ``allowed_methods`` retries PUT). A lost PUT thus surfaces as an
+      error — an ``unknown`` outcome the caller must resolve by SEARCHING, never a blind retry —
+      not a silent second entry.
+    * **``trust_env=False`` always** (the read factory keeps it on at the plain default to preserve
+      the zero-code ``REQUESTS_CA_BUNDLE`` path). The write session inherits NO ambient environment:
+      no proxy / ``NO_PROXY`` / netrc, and no ``REQUESTS_CA_BUNDLE`` env. This closes N03 — an
+      inherited proxy can never carry the Basic ``Authorization`` header outward — and keeps the
+      write deterministic. The cost falls only on a REMOTE https Olog (loopback needs neither): its
+      internal CA must come from the ``EPICS_MCP_CA_BUNDLE`` config (the DS-1 chokepoint), not the
+      env, and it is not reachable through an env proxy.
+
+    ``verify`` resolves the same VALUE as the read factory (``ca_bundle`` > ``tls_verify`` > True);
+    only the env fallbacks are dropped. Pass it explicitly (the Olog client passes its read
+    session's already-resolved ``verify``) so the two sessions agree on the CA to trust.
+    """
+    session = requests.Session()
+    session.headers.update({"accept": accept})
+    if auth_header:
+        session.headers.update({"authorization": auth_header})
+    if verify is None:
+        cfg = get_config()
+        verify = cfg.ca_bundle or cfg.tls_verify
+    session.verify = verify
+    # Env-independent by design: no proxy / netrc / REQUESTS_CA_BUNDLE for a credentialed write.
+    session.trust_env = False
+    # max_retries=0 → requests builds Retry(total=0); a lost non-idempotent PUT is never replayed.
+    no_retry = HTTPAdapter(max_retries=0)
+    session.mount("http://", no_retry)
+    session.mount("https://", no_retry)
     return session
 
 

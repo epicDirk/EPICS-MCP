@@ -69,9 +69,14 @@ actually been PROBED live against a running Olog (2026-07-15), and what has not:
 
 from __future__ import annotations
 
+import functools
+
+import requests
+
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.services._http import (
     build_retrying_session,
+    build_write_session,
     http_status,
     is_http_400,
     is_http_404,
@@ -273,6 +278,11 @@ class OlogClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = build_retrying_session(auth_header=auth_header)
+        # Keep the auth header on the instance so the lazily-built WRITE session
+        # (:attr:`_write_session`) can carry it too — a constructor-local is out of the
+        # cached_property's reach. The read `session` above stays byte-identical (auth on it is
+        # harmless: reads / check_connectivity use it, never the PUT — that uses the write one).
+        self._auth_header = auth_header
         # ESS-SPEC PENDING (see _expand_log_entry): redact everything EXCEPT a server that is BOTH
         # loopback AND declared to hold test data. Two conditions, because neither suffices alone:
         # a loopback address does not prove the data is synthetic (a port-forward serves production
@@ -284,6 +294,19 @@ class OlogClient:
         if assume_test_data is None:
             assume_test_data = get_config().olog_assume_test_data
         self._redact = not (is_loopback_url(self.base_url) and assume_test_data)
+
+    @functools.cached_property
+    def _write_session(self) -> requests.Session:
+        """The dedicated session for the ONE write (:meth:`create_log_entry`): no retries and
+        env-independent (see :func:`~epics_pv_mcp.services._http.build_write_session`). Built
+        lazily, so a read-only client never constructs it. ``verify`` mirrors the read session's
+        resolved value; build_write_session then drops the env fallbacks. With an explicit
+        ``EPICS_MCP_CA_BUNDLE`` read and write trust the SAME CA; on the plain default only the read
+        session honours a ``REQUESTS_CA_BUNDLE`` env (the deliberate N03 tradeoff — a remote-https
+        write needs its CA via config). A duplicate build (the cached_property is not
+        thread-safe) yields an equivalent, side-effect-free session, so no lock is needed.
+        """
+        return build_write_session(auth_header=self._auth_header, verify=self.session.verify)
 
     def _project(self, entry: dict[str, object]) -> dict[str, object]:
         """Project one entry on its way out: redacted for a real server, whole for a local sandbox.
@@ -511,7 +534,10 @@ class OlogClient:
             params["inReplyTo"] = str(in_reply_to)
         try:
             data = rest_put_json(
-                self.session,
+                # The dedicated write session (no retries, env-independent) — NOT self.session:
+                # a lost non-idempotent PUT must not be replayed into a duplicate entry (S23/F06),
+                # and the Basic auth header must not leak through an inherited proxy (S23/N03).
+                self._write_session,
                 f"{self.base_url}/logs",
                 body,
                 self.timeout,

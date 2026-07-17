@@ -9,8 +9,9 @@ PV write path is never touched — three things diverge deliberately:
 * **Test-server URL boundary** (the one new building block vs. PV). PV write is implicitly test-safe
   through the EPICS address-list localhost isolation; Olog speaks HTTP to an arbitrary URL, where
   that isolation does NOT apply. So a write is refused unless ``olog_url`` resolves to a loopback
-  host (the local Docker sandbox) OR is explicitly allowlisted AND remote writes are enabled — a
-  production write is a deliberate, auditable double action. The host is taken ONLY from
+  host (the local Docker sandbox) OR is an allowlisted https URL with remote writes enabled (a
+  plain-http remote is refused — Basic creds are cleartext) — a production write is a deliberate,
+  auditable double action. The host is taken ONLY from
   ``urlparse(url).hostname`` (never ``.netloc`` / a substring): ``http://127.0.0.1@olog-prod/Olog``
   has hostname ``olog-prod`` and is refused.
 * **Deny-all empty allowlist.** Gate on + empty logbook allowlist = deny every write (the INVERSE
@@ -30,7 +31,7 @@ from collections import deque
 
 from epics_pv_mcp.config import EpicsConfig, get_config
 from epics_pv_mcp.errors import OlogWriteDeniedError, RateLimitError, SafetyConfigError
-from epics_pv_mcp.services._http import is_loopback_url, url_host
+from epics_pv_mcp.services._http import is_https_url, is_loopback_url, url_host
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ class OlogWriteGate:
 
     0. Non-empty logbooks  — an empty set slips through the ``⊆`` allowlist check, so guard first.
     1. Environment gate    — ``allow_olog_write`` must be True.
-    2. Test-server URL boundary — ``olog_url`` host must be loopback, else allowlisted + remote.
+    2. Test-server URL boundary — loopback ``olog_url``, else an allowlisted remote https URL.
     3. Logbook allowlist   — every target logbook ∈ ``olog_write_logbooks`` (empty = deny-all).
     4. Rate limit          — at most ``olog_write_rate_limit`` writes per 60 s window.
 
@@ -125,9 +126,9 @@ class OlogWriteGate:
             self._audit_deny("OLOG_WRITE_DENIED", caller)
             raise OlogWriteDeniedError(
                 f"Olog write refused: target {self._config.olog_url!r} is not a permitted write "
-                "target. Only a loopback host, or a URL that is in "
+                "target. Only a loopback host, or an https URL that is in "
                 "EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true, "
-                "may be written to.",
+                "may be written to (a plain-http remote is refused — Basic creds are cleartext).",
                 details={"olog_url": self._config.olog_url},
             )
 
@@ -214,7 +215,9 @@ class OlogWriteGate:
         2. **Loopback → allow** (the local Docker sandbox).
         3. **Anything else** (INCLUDING RFC1918 private — the production Olog lives on a private
            network, so "private = allowed" would defeat the prod NO-GO): permit only an EXACTLY
-           allowlisted base URL with remote writes explicitly enabled.
+           allowlisted base URL with remote writes explicitly enabled AND an ``https`` scheme (a
+           plain-http Basic-auth write to a real server would expose the credentials — see
+           :func:`~epics_pv_mcp.services._http.is_https_url`).
 
         The hardened host extraction lives in :func:`~epics_pv_mcp.services._http.url_host` and is
         shared with the Olog READ redaction — the PRIMITIVE is shared, this POLICY is not. Note the
@@ -226,7 +229,12 @@ class OlogWriteGate:
             return False
         if is_loopback_url(url):
             return True
-        return self._config.olog_write_allow_remote and url in self._allowed_urls
+        # A REMOTE (non-loopback) target must ALSO be https: a plain-http Basic-auth write to a real
+        # server would expose the service-account credentials on the wire (and to any inherited
+        # proxy). Loopback stayed http-OK above (the sandbox); only the remote lane is tightened.
+        return (
+            self._config.olog_write_allow_remote and url in self._allowed_urls and is_https_url(url)
+        )
 
     def _audit_deny(self, error_code: str, caller: str) -> None:
         """Log a REJECTED write (empty logbooks / gate off / URL / allowlist / rate limit).

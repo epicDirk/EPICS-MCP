@@ -19,8 +19,10 @@ from urllib3.util.retry import Retry
 from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.services._http import (
     build_retrying_session,
+    build_write_session,
     http_status,
     is_http_404,
+    is_https_url,
     is_loopback_url,
     is_retry_error,
     is_ssl_error,
@@ -136,6 +138,39 @@ def test_verify_default_config_verifies_and_keeps_trust_env(
     session = build_retrying_session()
     assert session.verify is True
     assert session.trust_env is True
+
+
+# --- build_write_session (S23: the dedicated Olog write session) ---
+
+
+def test_write_session_has_no_retry_adapter() -> None:
+    """S23/F06: the Olog write session must NOT blindly retry. Olog ``PUT /logs`` is NOT idempotent
+    (each PUT mints a new entry), so a request the server PROCESSED but whose response was lost
+    would, under the read session's 3-retry policy, be replayed into a DUPLICATE log entry.
+    ``max_retries.total == 0`` on both schemes — a lost PUT surfaces as an error, never a retry."""
+    session = build_write_session()
+    for scheme in ("http://x", "https://x"):
+        adapter = session.get_adapter(scheme)
+        assert isinstance(adapter, HTTPAdapter)
+        retries = adapter.max_retries
+        total = retries.total if isinstance(retries, Retry) else retries
+        assert total == 0
+
+
+def test_write_session_pins_trust_env_off_even_on_plain_default() -> None:
+    """S23/N03: the write session is deliberately ENV-INDEPENDENT (no proxy / netrc /
+    REQUESTS_CA_BUNDLE env) so an inherited proxy can never carry the Basic ``Authorization`` header
+    outward. Unlike the READ factory (which keeps trust_env on at the plain default to preserve the
+    zero-code REQUESTS_CA_BUNDLE path), trust_env is off even when ``verify is True``."""
+    assert build_write_session(verify=True).trust_env is False
+
+
+def test_write_session_carries_optional_auth_header() -> None:
+    """The write session must actually carry the auth header — the write NEEDS it. A silent drop
+    would 401 the server, and against an auth-less loopback sandbox it would pass unnoticed."""
+    session = build_write_session(auth_header="Basic dXNlcjpwYXNz")
+    assert session.headers["authorization"] == "Basic dXNlcjpwYXNz"
+    assert session.headers["accept"] == "application/json"
 
 
 def test_channelfinder_client_session_inherits_ca_from_config(
@@ -379,3 +414,20 @@ def test_url_host_agrees_with_the_parser_that_connects() -> None:
     assert parse_url(hostile).host == "evil.example.org"  # …and where the connection would go
     assert url_host(hostile) == "evil.example.org"  # we follow the connection, not the claim
     assert is_loopback_url(hostile) is False
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://olog.example.org/Olog", True),
+        ("HTTPS://olog.example.org/Olog", True),  # scheme is lowercased
+        ("http://olog.example.org/Olog", False),
+        ("http://localhost:8080/Olog", False),  # loopback http is still not https
+        ("ftp://x/y", False),
+        ("garbage", False),  # fail-closed on unparseable
+        ("", False),
+    ],
+)
+def test_is_https_url(url: str, expected: bool) -> None:
+    """The write gate's remote-lane scheme check: https only, fail-closed on unparseable input."""
+    assert is_https_url(url) is expected
