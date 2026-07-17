@@ -30,8 +30,10 @@ def config() -> EpicsConfig:
 
 @pytest.fixture
 def write_config() -> EpicsConfig:
-    """Config with writes enabled. An explicit allow-all pattern ('.*') stands in for the former
-    implicit empty default — writes-on now REQUIRES a non-empty pattern (S22)."""
+    """Config with writes enabled. An explicit permissive pattern ('.*' — allow-all for any valid
+    PV name) stands in for the former implicit empty default; writes-on now REQUIRES a non-empty
+    pattern (S22). Note: '.*' is marginally stricter than the old empty default (fullmatch does not
+    cross newlines), but PV names never contain newlines, so the tests are unaffected."""
     return EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=5)
 
 

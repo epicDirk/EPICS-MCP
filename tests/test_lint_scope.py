@@ -7,9 +7,12 @@ claim that did not cover everything, measured: ``ruff check .`` was red on
 gap cannot reopen unnoticed.
 """
 
+import tomllib
 from pathlib import Path
 
-_CONFIG = Path(__file__).resolve().parents[1] / ".pre-commit-config.yaml"
+_ROOT = Path(__file__).resolve().parents[1]
+_CONFIG = _ROOT / ".pre-commit-config.yaml"
+_PYPROJECT = _ROOT / "pyproject.toml"
 
 
 def test_ruff_hooks_include_scripts_in_scope() -> None:
@@ -20,3 +23,12 @@ def test_ruff_hooks_include_scripts_in_scope() -> None:
     assert ruff_lines, "no ruff hook entries found in .pre-commit-config.yaml"
     for line in ruff_lines:
         assert "scripts" in line, f"ruff hook does not lint scripts/: {line.strip()!r}"
+
+
+def test_mypy_scope_includes_scripts() -> None:
+    """mypy must type-check ``scripts/`` too (H4). Ruff was extended to ``scripts`` but the mypy
+    ``files`` list lagged, leaving tracked scripts/ product code type-unchecked — the same gap that
+    motivated linting scripts/ in the first place."""
+    data = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
+    files = data["tool"]["mypy"]["files"]
+    assert "scripts" in files, f"[tool.mypy] files does not include scripts/: {files}"
