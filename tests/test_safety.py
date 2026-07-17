@@ -220,6 +220,22 @@ class TestSafetyConfig:
             audit.handlers.clear()
             audit.handlers.extend(saved)
 
+    def test_audit_path_validated_on_repeated_construction(self, tmp_path: Path) -> None:
+        # QA 2026-07-17: the audit-path guard must not be skipped just because an EARLIER
+        # SafetyLayer already attached a handler to the process-global audit logger. A later
+        # SafetyLayer with a broken audit path must STILL fail closed (regression guard for the
+        # `if not audit.handlers` block that used to gate the path validation too).
+        audit = logging.getLogger("epics_pv_mcp.audit")
+        saved = audit.handlers[:]
+        audit.handlers.clear()
+        try:
+            SafetyLayer(EpicsConfig())  # first construction registers a stderr handler
+            with pytest.raises(SafetyConfigError):
+                SafetyLayer(EpicsConfig(audit_log_file=str(tmp_path / "nope" / "audit.log")))
+        finally:
+            audit.handlers.clear()
+            audit.handlers.extend(saved)
+
     def test_get_safety_singleton_under_threads(self) -> None:
         import threading
 

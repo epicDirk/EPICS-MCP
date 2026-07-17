@@ -190,28 +190,40 @@ class SafetyLayer:
             self._timestamps.popleft()
 
     def _setup_audit_logger(self) -> logging.Logger:
-        """Create a dedicated logger for audit records."""
+        """Create a dedicated logger for audit records.
+
+        The audit sink is VALIDATED on every construction — not only the first — so a broken
+        audit path fails closed even when an earlier SafetyLayer already attached a handler to
+        the process-global ``epics_pv_mcp.audit`` logger (QA 2026-07-17: gating the whole block
+        on ``if not audit.handlers`` used to skip the path check on repeat construction). At most
+        ONE handler is attached; a duplicate built only to validate the path is discarded.
+        """
         audit = logging.getLogger("epics_pv_mcp.audit")
         audit.setLevel(logging.INFO)
-        # Avoid duplicate handlers on repeated init
+        handler: logging.Handler
+        if self._config.audit_log_file:
+            # Fail-closed: ein kaputter/nicht schreibbarer Audit-Pfad darf nicht erst beim ersten
+            # Write als roher FileNotFoundError crashen — symmetrisch zur Regex-Validierung im
+            # __init__ klar als SafetyConfigError scheitern. Läuft bei JEDER Konstruktion.
+            try:
+                handler = logging.FileHandler(self._config.audit_log_file)
+            except OSError as exc:
+                raise SafetyConfigError(
+                    f"Invalid EPICS_MCP_AUDIT_LOG_FILE {self._config.audit_log_file!r}: {exc}",
+                    details={"audit_log_file": self._config.audit_log_file},
+                ) from exc
+        else:
+            handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%dT%H:%M:%S")
+        )
+        # Attach at most one handler (dedup on repeated init). The handler above was built
+        # unconditionally, so its path validation already ran; if the logger is already
+        # configured, close the extra one (frees the duplicate file descriptor — a
+        # StreamHandler over sys.stderr does not own the stream, so close() won't close stderr).
         if not audit.handlers:
-            handler: logging.Handler
-            if self._config.audit_log_file:
-                # Fail-closed: ein kaputter/nicht schreibbarer Audit-Pfad darf nicht erst
-                # beim ersten Write als roher FileNotFoundError crashen — symmetrisch zur
-                # Regex-Validierung im __init__ klar als SafetyConfigError scheitern.
-                try:
-                    handler = logging.FileHandler(self._config.audit_log_file)
-                except OSError as exc:
-                    raise SafetyConfigError(
-                        f"Invalid EPICS_MCP_AUDIT_LOG_FILE {self._config.audit_log_file!r}: {exc}",
-                        details={"audit_log_file": self._config.audit_log_file},
-                    ) from exc
-            else:
-                handler = logging.StreamHandler(sys.stderr)
-            handler.setFormatter(
-                logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%dT%H:%M:%S")
-            )
             audit.addHandler(handler)
             self._audit_handler = handler
+        else:
+            handler.close()
         return audit
