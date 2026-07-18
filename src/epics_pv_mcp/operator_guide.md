@@ -219,6 +219,11 @@ Each plane has its own beacon, because they do not share one:
 Probing the latter on the retrieval port 404s and tells you nothing — that mistake is exactly how an
 earlier pass concluded retrieval had no beacon at all.
 
+The Naming `/rest/swagger.json` beacon is single-sourced (title + path in `services/naming_identity`)
+and now backs **two** surfaces: epics-doctor's naming plane AND `lookup_device_name`'s S13
+definitive-negative gate (a 204/404 is trusted only after this beacon confirms the responder — see
+"not found vs not registered" below).
+
 Scripting against this? Exit `0` means "nothing failed", **not** "everything confirmed" — read
 `verification_complete` / `unverified_planes` / `inconclusive_identity_planes` from `--json`, never
 the exit code alone. A FAILED identity probe lands in `inconclusive_identity_planes` (exit `3`), NOT
@@ -255,7 +260,7 @@ pass `timeout` ≥ 8 for the first probe.
 
 ### Naming URL: no trailing `/rest`
 Set `EPICS_MCP_NAMING_URL` to the service root **without** `/rest` and without a trailing slash. The
-client appends `/rest/parts/…` and `/rest/deviceNames/…` itself; a trailing slash is normalized, but
+client appends `/rest/deviceNames/…` itself; a trailing slash is normalized, but
 appending `/rest` yourself yields `/rest/rest/…` → 404.
 
 ### Archiver history time window: ISO-with-zone only — and a 500 does not mean unreachable
@@ -327,8 +332,12 @@ messages embed the full request URL — an internal host would leak into this fi
   and Naming only *explain* it (they never flip the verdict; `withheld ≠ no`).
 - **"not found" vs "not registered".** `lookup_device_name`: the service's measured "no such name" —
   HTTP **204** (what an ESS-style Naming Service actually answers) — and a real HTTP 404 are the
-  **definitive** `registered:false`; a service/transport/TLS failure or an unreadable record is
-  **withheld** (`registered:null`), never a false negative.
+  **definitive** `registered:false`, but **only once the responder proves it is the Naming Service via
+  its `/rest/swagger.json` beacon (S13)**; a service/transport/TLS failure, an unreadable record, OR an
+  unverified/foreign identity is **withheld** (`registered:null`), never a false negative. (A
+  registered/ACTIVE answer skips the identity probe — the measured hazard is a foreign 404, not a
+  foreign ACTIVE record.) The extra swagger round-trip fires only on the not-registered path and is
+  cached per client instance; when it withholds, a server-side `logger.debug` records the probe verdict.
 - **Archived? how? history?** `is_archived` / `get_archive_info` / `get_pv_history`. History `status` is
   `ok` / `empty` / `withheld` — a bare `[]` means only a truly empty history, not "could not read";
   a single unreadable sample withholds the whole result rather than being silently skipped.
@@ -367,8 +376,12 @@ messages embed the full request URL — an internal host would leak into this fi
   withholds where a status channel exists) instead of minting a definitive answer. Two wire
   realities worth knowing: a real Olog answers **401** (not 404) for an unknown id on the anonymous
   read path — that surfaces as an error, never as `found:false`; and an ESS-style Naming Service
-  answers **204** for a nonexistent name — mapped to the definitive `registered:false`. With the
-  Olog plane *disabled*, `get_log_entry` answers `found:null` (not checked), mirroring the
+  answers **204** for a nonexistent name — mapped to the definitive `registered:false` **only after
+  its `/rest/swagger.json` identity beacon confirms the responder (S13); an unverified/foreign 404 is
+  withheld, not minted into a false `name_typo`**. The Archiver/Olog `404 = found:false` stay
+  **ungated** — the same latent "is this the right service?" question, deferred as lower-severity (a
+  foreign archiver/olog 404 is corroboration, not a device-identity verdict). With the Olog plane
+  *disabled*, `get_log_entry` answers `found:null` (not checked), mirroring the
   `archived`/`configured`/`registered` siblings.
 
 ## Acceptance — the questions this guide must answer

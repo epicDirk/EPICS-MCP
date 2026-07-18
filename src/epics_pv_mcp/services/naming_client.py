@@ -3,16 +3,16 @@
 Vendored and slimmed from pvValidator's ``pvValidatorUtils/naming_client.py`` (Alfio
 Rizzo, ESS) so this repo stays standalone — pvValidator itself is Linux/SWIG-only and
 cannot be imported on Windows, but its Naming-Service client is pure Python (``requests``
-+ stdlib). The "Did you mean?"/confusable helpers (which pull in pvValidator's ``rules``)
-are intentionally dropped; only the read-only validation calls the cross-plane check needs
-are kept. Endpoints (all GET):
++ stdlib). The "Did you mean?"/confusable helpers (which pull in pvValidator's ``rules``) and the
+parts/mnemonic validators (dead code with a fail-open trap, removed in S13) are intentionally
+dropped; only the one read-only call the cross-plane check needs is kept. Endpoint (GET):
 
-  GET /rest/parts/mnemonic/{mnemonic}  — validate System / Subsystem / Discipline / Device
   GET /rest/deviceNames/{name}         — check if an ESS device name is registered + status
 """
 
 from __future__ import annotations
 
+import logging
 from typing import TypedDict
 from urllib.parse import quote as url_quote
 
@@ -24,6 +24,13 @@ from epics_pv_mcp.services.naming_exceptions import (
     NamingServiceNotFound,
     NamingServiceResponseError,
 )
+from epics_pv_mcp.services.naming_identity import (
+    NAMING_SWAGGER_PATH,
+    IdentityVerdict,
+    probe_naming_identity,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class NameStatus(TypedDict):
@@ -57,16 +64,13 @@ class NamingServiceClient:
         # Shared session builder (accept header + 3-retry/502-503-504 policy); naming needs no auth.
         self.session = build_retrying_session()
 
-        self._parts_cache: dict[str, list[dict[str, object]]] = {}
         self._names_cache: dict[str, dict[str, object]] = {}
-        self._bool_cache: dict[str, bool] = {}
+        #: The service-identity verdict (S13), probed at most once per instance on the first
+        #: definitive-negative lookup and reused thereafter — see ``_require_verified_identity``.
+        self._identity: IdentityVerdict | None = None
 
-    # ``base_url`` is the service root WITHOUT a trailing ``/rest``: these properties append it
-    # themselves, so configuring the URL with a trailing ``/rest`` yields ``/rest/rest/…`` → 404.
-    @property
-    def parts_url(self) -> str:
-        return f"{self.base_url}/rest/parts/mnemonic/"
-
+    # ``base_url`` is the service root WITHOUT a trailing ``/rest``: this property appends it
+    # itself, so configuring the URL with a trailing ``/rest`` yields ``/rest/rest/…`` → 404.
     @property
     def names_url(self) -> str:
         return f"{self.base_url}/rest/deviceNames/"
@@ -103,35 +107,6 @@ class NamingServiceClient:
     # Low-level GETs
     # ------------------------------------------------------------------
 
-    def _get_parts(self, mnemonic: str) -> list[dict[str, object]]:
-        """``GET /rest/parts/mnemonic/{mnemonic}`` (cached).
-
-        S11 shape guard: the payload must be a list of dicts — the old annotation-only typing
-        returned anything as-is and crashed callers later (an uncaught AttributeError instead of
-        the plane's own error). The lenient ``_approved_part`` semantics on top are S13's
-        business, untouched here.
-        """
-        if mnemonic in self._parts_cache:
-            return self._parts_cache[mnemonic]
-        try:
-            resp = self.session.get(
-                self.parts_url + url_quote(mnemonic, safe="-:"), timeout=self.timeout
-            )
-            resp.raise_for_status()
-            data: object = resp.json()
-        except requests.exceptions.RequestException as exc:
-            raise NamingServiceResponseError(
-                f"Failed to query parts for '{mnemonic}': {exc}"
-            ) from exc
-        if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
-            raise NamingServiceResponseError(
-                f"Naming Service parts query for '{mnemonic}' returned an unreadable payload "
-                f"(expected a list of records, got {type(data).__name__})."
-            )
-        parts: list[dict[str, object]] = data
-        self._parts_cache[mnemonic] = parts
-        return parts
-
     def _get_device_name(self, name: str) -> dict[str, object]:
         """``GET /rest/deviceNames/{name}`` (cached).
 
@@ -141,6 +116,14 @@ class NamingServiceClient:
         failure, and a 2xx whose body is not a record dict (S11), raises the generic
         :class:`NamingServiceResponseError` so the caller can tell "name not registered" apart
         from a service/URL error (DS-2).
+
+        **S13 identity gate:** a 204/404 is trusted as definitive ONLY after
+        :meth:`_require_verified_identity` confirms the responder is the Naming Service (its swagger
+        beacon). A foreign/misconfigured URL answering 404 because it lacks ``/rest/deviceNames/``
+        is WITHHELD (raises :class:`NamingServiceResponseError`, NOT
+        :class:`NamingServiceNotFound`), closing the wrong-base-path/foreign-host RESIDUAL the old
+        contract documented as open. The sole remaining gap is a foreign host that serves the ESS
+        Naming swagger verbatim (implausible).
         """
         if name in self._names_cache:
             return self._names_cache[name]
@@ -153,6 +136,7 @@ class NamingServiceClient:
                 # Measured (S16a): the service's actual "no such name" is 204 + empty body —
                 # NOT 404. Split it out BEFORE resp.json(), which would fail on the empty body
                 # and needlessly withhold a definitive answer.
+                self._require_verified_identity()  # S13: withhold unless the responder is Naming
                 raise NamingServiceNotFound(
                     f'The name "{name}" is not registered in the Naming Service'
                 )
@@ -163,6 +147,7 @@ class NamingServiceClient:
             # that must NOT collapse into a false "not registered" — split it out here.
             response = exc.response
             if response is not None and response.status_code == 404:
+                self._require_verified_identity()  # S13: withhold unless the responder is Naming
                 raise NamingServiceNotFound(
                     f'The name "{name}" is not registered in the Naming Service'
                 ) from exc
@@ -183,40 +168,38 @@ class NamingServiceClient:
         self._names_cache[name] = data
         return data
 
+    def _require_verified_identity(self) -> None:
+        """Withhold a would-be definitive "not registered" unless the responder proved it is the
+        Naming Service (S13).
+
+        A 204/404 on ``/rest/deviceNames/`` is trusted as a definitive ``registered=False`` ONLY
+        when the SAME host also identifies itself as the Naming Service via its swagger beacon
+        (:func:`~epics_pv_mcp.services.naming_identity.probe_naming_identity`). A foreign or
+        misconfigured URL that answers 404 because it lacks that path would otherwise fabricate a
+        false ``registered=False`` → a false ``name_typo`` in ``diagnose`` (the measured S13 gap).
+        If identity is not ``verified``, raise the PARENT :class:`NamingServiceResponseError` — NOT
+        its subclass :class:`NamingServiceNotFound`, which :meth:`validate_name` maps to
+        ``registered=False`` — so every caller WITHHOLDS. Probed at most once per client instance
+        and cached on ``self._identity`` (both ``unverified`` and ``probe_failed`` withhold; the
+        distinction only enriches the debug trace)."""
+        if self._identity is None:
+            self._identity = probe_naming_identity(self.base_url, timeout=self.timeout)
+        if self._identity != "verified":
+            logger.debug(
+                "Naming not-registered WITHHELD: identity probe to %s%s = %s (not verified)",
+                self.base_url,
+                NAMING_SWAGGER_PATH,
+                self._identity,
+            )
+            raise NamingServiceResponseError(
+                f"Naming Service identity at {self.base_url} could not be confirmed via its "
+                f"swagger beacon (probe: {self._identity}); a 'not registered' answer is withheld "
+                "rather than trusted as definitive (S13)."
+            )
+
     # ------------------------------------------------------------------
     # High-level validation (read-only)
     # ------------------------------------------------------------------
-
-    def _approved_part(self, mnemonic: str, *, part_type: str, levels: tuple[str, ...]) -> bool:
-        """True if *mnemonic* has an Approved part of *part_type* at one of *levels*."""
-        try:
-            parts = self._get_parts(mnemonic)
-        except NamingServiceResponseError:
-            return False
-        return any(
-            item.get("status") == "Approved"
-            and item.get("type") == part_type
-            and item.get("level") in levels
-            for item in parts
-        )
-
-    def validate_system(self, system: str) -> bool:
-        """True if *system* is an Approved System-Structure mnemonic (level 1 or 2)."""
-        key = f"sys:{system}"
-        if key not in self._bool_cache:
-            self._bool_cache[key] = self._approved_part(
-                system, part_type="System Structure", levels=("1", "2")
-            )
-        return self._bool_cache[key]
-
-    def validate_discipline(self, discipline: str) -> bool:
-        """True if *discipline* is an Approved Device-Structure mnemonic (level 1)."""
-        key = f"dis:{discipline}"
-        if key not in self._bool_cache:
-            self._bool_cache[key] = self._approved_part(
-                discipline, part_type="Device Structure", levels=("1",)
-            )
-        return self._bool_cache[key]
 
     def validate_name(self, ess_name: str) -> NameStatus:
         """Check whether an ESS device name is registered and ACTIVE.
@@ -224,8 +207,10 @@ class NamingServiceClient:
         *ess_name* is the device-name part of a PV (e.g. ``DEV-TEST01:Ctrl-EVR-01``),
         without the trailing property. Returns ``registered=True`` only for ``ACTIVE``;
         ``OBSOLETE``/``DELETED``/unknown → ``registered=False`` with the status preserved. The
-        service's measured "no such name" — HTTP **204** (S16a) — and a genuine 404 both map to
-        ``registered=False`` (definitively not registered). Every OTHER service/URL failure
+        service's measured "no such name" — HTTP **204** (S16a) — and a genuine 404 map to
+        ``registered=False`` (definitively not registered) ONLY when the responder proves it is the
+        Naming Service (S13 gate → ``_require_verified_identity``); an
+        unverified/foreign responder's 204/404 is WITHHELD instead. Every OTHER service/URL failure
         (5xx, bad JSON, wrong endpoint, timeout) and a 2xx record without a readable ``status``
         (S11) is NOT swallowed — it PROPAGATES as a :class:`NamingServiceResponseError` so the
         caller withholds instead of reporting a false "not registered" (DS-2 / audit S5).

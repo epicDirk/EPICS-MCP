@@ -60,6 +60,7 @@ from epics_pv_mcp.services.channelfinder_client import (
 )
 from epics_pv_mcp.services.epics_client import pv_get
 from epics_pv_mcp.services.naming_client import NamingServiceClient
+from epics_pv_mcp.services.naming_identity import NAMING_SWAGGER_PATH, NAMING_SWAGGER_TITLE
 from epics_pv_mcp.services.olog_client import OlogClient
 from epics_pv_mcp.services.rest_exceptions import RestConnectionError, RestResponseError
 
@@ -241,9 +242,9 @@ _SERVICE_NAMES: dict[str, str] = {
     "alarm": "Alarm logging Service",
 }
 
-#: The Naming Service has no ``{"name": ...}`` beacon, but ``/rest/swagger.json`` is an anonymous
-#: static 200 whose ``info.title`` names it (measured; Olog answers 401 there, ChannelFinder 404).
-_NAMING_SWAGGER_TITLE = "Naming service API documentation"
+#: The Naming Service's swagger beacon (title + path) is single-sourced in
+#: :mod:`epics_pv_mcp.services.naming_identity` (imported above) — the ONE home shared with
+#: ``naming_client``'s S13 definitive-negative gate, so the two identity surfaces cannot drift.
 
 #: The product name the archiver's ``getVersion`` string STARTS with, up to a word boundary.
 #: Anchored on BOTH sides of the name, for the same reason ``_SERVICE_NAMES`` above matches
@@ -647,13 +648,13 @@ def _identify_naming(base_url: str, timeout: float) -> PlaneCheck:
     beacon naming a different known service only ever yields ``unverified`` with the name in
     the detail).
     """
-    payload = _fetch_beacon(f"{base_url.rstrip('/')}/rest/swagger.json", None, timeout)
+    payload = _fetch_beacon(f"{base_url.rstrip('/')}{NAMING_SWAGGER_PATH}", None, timeout)
     if isinstance(payload, Exception):
         return _identity_fetch_failure("naming", payload)
 
     info = payload.get("info") if isinstance(payload, dict) else None
     title = info.get("title") if isinstance(info, dict) else None
-    if title == _NAMING_SWAGGER_TITLE:
+    if title == NAMING_SWAGGER_TITLE:
         return PlaneCheck(
             plane="naming",
             configured=True,
@@ -665,7 +666,7 @@ def _identify_naming(base_url: str, timeout: float) -> PlaneCheck:
     return _unverified(
         "naming",
         f"transport reachable, but /rest/swagger.json reports info.title={title!r} rather than "
-        f"{_NAMING_SWAGGER_TITLE!r} — this may not be the Naming Service (or its title changed)",
+        f"{NAMING_SWAGGER_TITLE!r} — this may not be the Naming Service (or its title changed)",
     )
 
 

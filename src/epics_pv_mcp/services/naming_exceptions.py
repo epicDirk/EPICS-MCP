@@ -36,9 +36,10 @@ class NamingServiceNotFound(NamingServiceResponseError):
     probe). ``validate_name`` maps a 404 to ``registered=False`` but lets the generic error
     PROPAGATE so the caller withholds instead of reporting a false ``name_typo`` (DS-2 / audit S5).
 
-    RESIDUAL (honest): a 404 caused by a WRONG base path (e.g. the ``…/rest`` double-``/rest``
-    mistake) is INDISTINGUISHABLE from a genuine "name not registered" 404, so it still yields
-    ``registered=False``. That misconfiguration is prevented by correct URL config (the overlay
-    script sets ``EPICS_MCP_NAMING_URL`` without a trailing ``/rest``; the URL-resolution test
-    guards ``…/rest/deviceNames/``), NOT by this split.
+    S13: a 404/204 is trusted as a definitive "not registered" ONLY after the responder proves it is
+    the Naming Service via its swagger beacon (``naming_client._require_verified_identity``). A 404
+    caused by a WRONG base path or a FOREIGN host — which the old contract could not tell from a
+    genuine "name not registered" 404, the former RESIDUAL — is now WITHHELD as a generic
+    :class:`NamingServiceResponseError` instead. The one remaining gap is a foreign host serving
+    the ESS Naming swagger verbatim (implausible).
     """

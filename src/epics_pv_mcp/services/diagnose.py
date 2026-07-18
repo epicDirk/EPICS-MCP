@@ -424,8 +424,9 @@ async def _gather_naming(pv_name: str, requested: bool, timeout: float) -> Namin
         # yields ``registered=False`` → name_typo, which is correct. Since DS-2, a reachable HEAD
         # but a NON-404 deviceNames failure (5xx / bad JSON) PROPAGATES out of ``validate_name`` and
         # is caught by the ``except`` below → withheld, not a false ``registered=False``/name_typo.
-        # RESIDUAL: a 404 from a WRONG base path is indistinguishable from a genuine not-registered
-        # 404 and still yields ``registered=False`` — prevented by correct URL config, not here.
+        # S13: a 404/204 from a WRONG base path or FOREIGN host (was the RESIDUAL) is now WITHHELD
+        # too — ``validate_name`` trusts a definitive "not registered" only after its swagger-beacon
+        # identity gate confirms the responder is the Naming Service.
         client.check_connectivity()
         status = client.validate_name(device_name)
         return NamingEvidence(

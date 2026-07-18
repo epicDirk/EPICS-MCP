@@ -12,6 +12,11 @@ answered with HTTP **204** (not the 404 the old contract assumed — S16a); and 
 XML unless the client asks for JSON (which the shared session builder does). These tests pin
 those premises against the real wire, so a service change turns them red — the schema is then
 re-measured, never loosened blindly.
+
+S13 adds an identity premise: a 204/404 is trusted as a definitive "not registered" only when the
+service names itself via ``/rest/swagger.json`` (info.title). ``test_swagger_beacon_identifies_the
+_service`` pins that server fact so a title reword or a dropped swagger endpoint turns red — then
+re-measure ``NAMING_SWAGGER_TITLE`` in ``naming_identity``, never loosen the gate.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ import os
 import pytest
 
 from epics_pv_mcp.services.naming_client import NamingServiceClient
+from epics_pv_mcp.services.naming_identity import probe_naming_identity
 
 pytestmark = [
     pytest.mark.live,
@@ -64,7 +70,18 @@ def test_nonexistent_name_is_definitively_not_registered(client: NamingServiceCl
     """S16(a) premise pin, measured 2026-07-16: the real service answers HTTP **204** (No
     Content) for a nonexistent name — not 404. The client maps that measured signal (and a
     genuine 404) to the definitive ``registered: False``; anything else withholds. Goes red if
-    the service changes its no-such-name signal — then re-measure before touching the mapping."""
+    the service changes its no-such-name signal — then re-measure before touching the mapping.
+    Since S13 this also implicitly requires the swagger-identity gate to VERIFY (a real service
+    does), so a broken swagger would withhold here too — pinned explicitly in the next test."""
     result = client.validate_name("ZZZ-FAKE99:Ctrl-X-99")
     assert result["registered"] is False
     assert "not registered" in result["message"]
+
+
+def test_swagger_beacon_identifies_the_service(client: NamingServiceClient) -> None:
+    """S13 premise pin: the definitive-negative identity gate trusts a 204/404 only when
+    ``/rest/swagger.json`` names the service (info.title == NAMING_SWAGGER_TITLE). This pins that
+    server fact against the real wire, so it goes RED if ESS rewords the swagger title or drops the
+    endpoint — then re-measure the constant in ``naming_identity``, never loosen the gate blindly.
+    (The 204→not-registered mapping is pinned by the test above, which now depends on this.)"""
+    assert probe_naming_identity(client.base_url, timeout=client.timeout) == "verified"

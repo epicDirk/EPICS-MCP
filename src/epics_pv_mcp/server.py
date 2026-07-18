@@ -384,12 +384,15 @@ async def lookup_device_name(
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_NAMING_URL is set (no
     ESS egress otherwise). A reachable service answering "not registered" — HTTP 204, the signal
-    the real service actually sends (measured 2026-07-16), or HTTP 404 — yields registered=false,
-    a DEFINITIVE answer; OBSOLETE/DELETED also yield registered=false with the status preserved.
-    A service/URL failure (unreachable, 5xx, bad JSON, timeout) and a 2xx record without a
-    readable status are WITHHELD (registered=null + withheld=true), never collapsed into a false
-    "not registered". Surfaces only registered/status/message. Unlike diagnose_connection this
-    needs no live PV probe — it answers the pure registry question directly.
+    the real service actually sends (measured 2026-07-16), or HTTP 404 — yields registered=false, a
+    DEFINITIVE answer, but ONLY once the responder proves it is the Naming Service via its
+    /rest/swagger.json identity beacon (S13): a foreign/misconfigured URL whose 404 cannot be
+    identity-confirmed is WITHHELD, not minted into a false name_typo. OBSOLETE/DELETED also yield
+    registered=false with the status preserved. A service/URL failure (unreachable, 5xx, bad JSON,
+    timeout), a 2xx record without a readable status, AND an unverified identity are all WITHHELD
+    (registered=null + withheld=true). A registered/ACTIVE answer is returned WITHOUT an identity
+    probe (the measured hazard is a foreign 404, not a foreign ACTIVE record — out of scope, S13).
+    Surfaces only registered/status/message. Unlike diagnose_connection this needs no live PV probe.
     """
     return await _lookup_device_name(name, timeout)
 
@@ -942,7 +945,9 @@ async def diagnose_connection(
     unregistered, indeterminate; 'indeterminate' is first-class and honest. On a PVA name-server a
     typo and a dead IOC both time out (PV_NOT_FOUND only under UDP broadcast), so cause is keyed on
     ChannelFinder/Naming, never the transport error code. No collision/uniqueness claim is made
-    (multi-responder detection is out of scope). Naming is off by default (no ESS egress).
+    (multi-responder detection is out of scope). Naming is off by default (no ESS egress); a Naming
+    URL that cannot prove its identity (its /rest/swagger.json beacon) withholds rather than
+    fabricating name_typo (S13), so a foreign/misconfigured URL yields indeterminate, not a typo.
     """
     return await _diagnose_connection(
         pv_name,

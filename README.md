@@ -51,9 +51,13 @@ measured schema of its endpoint. An unreadable payload **raises a loud error** �
 `get_pv_history`, whose existing `status` channel reports it as `withheld` — and is **never**
 minted into a definitive answer. (`is_alarm_configured`'s `null` stays the *readable-but-
 tree-ambiguous* verdict; an unreadable payload there raises like everywhere else.) Definitive
-negatives come only from each service's measured signal: Archiver `getPVTypeInfo` HTTP 404,
-Olog `get_log_entry` HTTP 404, Naming HTTP 204/404. Junk list items are never silently
-dropped, missing fields never zero-filled, non-strings never stringified into names.
+negatives come only from each service's measured signal: Archiver `getPVTypeInfo` HTTP 404 and
+Olog `get_log_entry` HTTP 404. **Naming HTTP 204/404 is definitive only once the responder proves
+it is the Naming Service** via its `/rest/swagger.json` beacon (S13) — otherwise the "not
+registered" answer is withheld, so a foreign/misconfigured URL's 404 no longer mints a false
+`name_typo`. (Archiver and Olog 404 stay ungated — the same latent question, deferred as
+lower-severity.) Junk list items are never silently dropped, missing fields never zero-filled,
+non-strings never stringified into names.
 
 ## Safety & network posture
 
@@ -188,7 +192,7 @@ To reach a real control system, set the address list in the launcher's environme
 | `list_archived_pvs` | Archiver Appliance — enumerate archived PV names (getAllPVs / `this_appliance`=getPVsForThisAppliance, not getMatchingPVs); optional name-glob `pattern` (getAllPVs only — `getPVsForThisAppliance` has no name filter, so the combination is refused rather than answered unfiltered), honest `capped` | `EPICS_MCP_ARCHIVER_URL` |
 | `is_alarm_configured` | Phoebus Alarm Logger — is a PV in the alarm tree? | `EPICS_MCP_ALARM_URL` |
 | `get_alarm_history` | Phoebus Alarm Logger — alarm state history of a PV over a window (required start/end; newest-first; user/host stripped) | `EPICS_MCP_ALARM_URL` |
-| `lookup_device_name` | ESS Naming Service — is a device name registered + ACTIVE? (HTTP 204 — the real service's measured "no such name" — and 404 = definitive not-registered; a service error or unreadable record is withheld, never a false negative) | `EPICS_MCP_NAMING_URL` |
+| `lookup_device_name` | ESS Naming Service — is a device name registered + ACTIVE? (HTTP 204 — the real service's measured "no such name" — and 404 = definitive not-registered **only after the `/rest/swagger.json` identity probe confirms the responder, S13**; a service error, unreadable record or unverified identity is withheld, never a false negative) | `EPICS_MCP_NAMING_URL` |
 | `search_logbook` | Phoebus Olog — search log entries (DS-PRIVACY: author dropped, title/description free text withheld, attachments as a count — **unless a declared local test sandbox**, where entries come back whole; see "Olog output posture" below); paginate with `offset`/`sort`, `total_matches` = true total across all pages | `EPICS_MCP_OLOG_URL` |
 | `get_log_entry` | Phoebus Olog — one entry by id (same redaction; 404 = definitive found:false, everything else — incl. an unreadable 2xx — errors; disabled → found:null) | `EPICS_MCP_OLOG_URL` |
 | `list_logbooks` | Phoebus Olog — list the valid logbook names (name-only; owners dropped) | `EPICS_MCP_OLOG_URL` |
