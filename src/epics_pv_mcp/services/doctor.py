@@ -166,10 +166,13 @@ class DoctorReport(_Model):
     #: does not map to the exit code. Read ``inconclusive_identity_planes`` (exit 3 driver) and
     #: ``verification_complete`` before treating this as "everything is confirmed".
     ok: bool
-    #: True iff every configured plane's identity was established — i.e. NO plane was left
-    #: ``unverified`` AND none had its identity probe fail (``inconclusive_identity_planes`` empty).
-    #: ``ok`` alone is not enough for a machine reader: an unverified/inconclusive plane is honest,
-    #: not healthy, and a CI job that only looks at ``ok`` would read "nothing hard-failed" as
+    #: True iff no configured plane was left ``unverified`` AND none had its identity probe fail
+    #: (``inconclusive_identity_planes`` empty). ⚠️ This is NOT "every configured plane's identity
+    #: was established": a HARD-failed plane (``unreachable`` / ``api_error`` / ``ca_error``) is
+    #: never identity-probed, so it lands in ``ok`` (which goes False), NOT here — this flag can be
+    #: True while a plane hard-failed (read ``ok`` / ``identified_planes`` for that). ``ok`` alone
+    #: is not enough for a machine reader either: an unverified/inconclusive plane is honest, not
+    #: healthy, and a CI job that only looks at ``ok`` would read "nothing hard-failed" as
     #: "everything is confirmed" — exactly the conflation this whole check exists to remove.
     #: ⚠️ Vacuously True when nothing ran an identity probe at all (e.g. an empty config) — a reader
     #: wanting POSITIVE confirmation asserts ``identified_planes`` is non-empty, not this flag.

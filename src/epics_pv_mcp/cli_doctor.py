@@ -128,7 +128,7 @@ def _render(report: DoctorReport) -> str:
             "confirmed healthy — see the '!' lines above."
         )
     elif report.verification_complete:
-        # verification_complete is "every plane's identity was established" — vacuously true when
+        # verification_complete is "no plane unverified or inconclusive" — vacuously true when
         # nothing was probed at all. The strong sentence is earned by actual identifications: with
         # zero, "answered AS ITSELF" would read as confirmation of probes that never ran (measured:
         # it printed for a completely empty config). Same source as the JSON's identified_planes, so
