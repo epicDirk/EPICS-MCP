@@ -140,7 +140,9 @@ async def get_pvs(
     """Batch-read multiple EPICS PVs in a single call.
 
     Each result carries the same best-effort metadata as get_pv_info
-    (alarm/timestamp/display/control/value_alarm/enum)."""
+    (alarm/timestamp/display/control/value_alarm/enum). A per-PV read failure lands in the errors
+    list; a structural provider fault — the native batch returning a different number of values than
+    requested — surfaces loudly as [UPSTREAM_CONTRACT_ERROR] rather than silently dropping PVs."""
     return await _get_pvs(names, timeout)
 
 

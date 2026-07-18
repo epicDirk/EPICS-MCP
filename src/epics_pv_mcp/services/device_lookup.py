@@ -74,8 +74,9 @@ class DeviceLookupReport(_Model):
     channels: tuple[ChannelStatus, ...] = ()
     total_matched_channels: int = 0
     # ``live_read`` = channels the live read ATTEMPTED (the capped coverage count);
-    # ``len(channels)`` = the subset that returned a status row (a silent native-batch drop can make
-    # the latter smaller). Header and capped note both report ``live_read`` so they never disagree.
+    # ``len(channels)`` = the subset that returned a status row. A degraded live read (an empty
+    # envelope from find_device's fallback on a provider-contract breach) can make the latter
+    # smaller. Header and capped note both report ``live_read`` so they never disagree.
     live_read: int = 0
     live_capped: bool = False
     channelfinder_enabled: bool = False
@@ -194,11 +195,16 @@ def build_device_report(
     if live_capped:
         # S7-5: report the number of channels the live read ATTEMPTED (live_read, known in
         # find_device as len(read)), not len(channels) — the latter counts p4p RESPONSES and
-        # undercounts if the native batch silently drops a name.
+        # undercounts when fewer come back than were attempted (e.g. a degraded live read).
         notes.append(
             f"Live status shown for {live_read} of {total_matched} matched channels "
             "(read capped) — refine the query for full live coverage. The screen list is complete."
         )
+    # A degraded live read (best-effort at the find_device edge) carries a "note" on the live
+    # envelope. Surface it so an empty channel list is explained (mirrors the ChannelFinder note).
+    live_note = live_results.get("note")
+    if isinstance(live_note, str) and live_note:
+        notes.append(live_note)
     if not channelfinder_enabled:
         notes.append(
             "ChannelFinder disabled — source IOC not resolved (set EPICS_MCP_CHANNELFINDER_URL)."
@@ -258,7 +264,7 @@ def render_markdown(report: DeviceLookupReport) -> str:
         lines.append(f"  - `{screen.display_path}` — {screen.count} channel(s) [{roles}]")
     # Use live_read (channels ATTEMPTED), not len(channels) (channels that returned) — so this
     # header agrees with the capped note, which S7-5 anchored to live_read. They diverge only on a
-    # silent native-batch drop; the per-channel rows below still list exactly what returned.
+    # degraded live read (an empty envelope); the per-channel rows below still list what returned.
     lines.append(
         f"- **Live channels:** {report.live_read} of {report.total_matched_channels} matched"
     )

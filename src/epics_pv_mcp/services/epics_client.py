@@ -86,7 +86,13 @@ async def pv_get(name: str, timeout: float | None = None) -> dict[str, object]:
 
 
 async def pv_get_batch(names: list[str], timeout: float | None = None) -> dict[str, object]:
-    """Batch-get PVs. Returns ``{"results": [...], "errors": [...]}``."""
+    """Batch-get PVs. Returns the partial-failure envelope ``{"results": [...], "errors": [...]}``.
+
+    Raises ``EpicsError(error_code="UPSTREAM_CONTRACT_ERROR")`` if the native batch returns a
+    different number of values than requested names — a broken provider must fail loudly rather than
+    silently drop the surplus PVs (S27/F11 "no silent loss"). Also raises ``BATCH_TOO_LARGE`` if
+    ``len(names)`` exceeds ``max_batch_size``.
+    """
     cfg = get_config()
     timeout = timeout if timeout is not None else cfg.default_timeout
 
@@ -103,12 +109,6 @@ async def pv_get_batch(names: list[str], timeout: float | None = None) -> dict[s
     # Try native batch get first
     try:
         values = await asyncio.to_thread(ctxt.get, names, timeout=timeout)
-        for name, value in zip(names, values, strict=False):
-            try:
-                results.append(_format_value(name, value))
-            except Exception as exc:  # noqa: BLE001
-                # ein kaputter Einzelwert darf den Batch nicht abbrechen
-                errors.append({"pv_name": name, "error": str(exc)})
     except Exception as exc:  # noqa: BLE001
         # Batch fehlgeschlagen -> Einzelabfrage-Fallback. Die Wurzel des Batch-Fehlers nicht still
         # verschlucken (für die Diagnose loggen); die Einzelabfragen liefern danach je PV einen
@@ -121,6 +121,9 @@ async def pv_get_batch(names: list[str], timeout: float | None = None) -> dict[s
             *(pv_get(name, timeout=timeout) for name in names),
             return_exceptions=True,
         )
+        # asyncio.gather(return_exceptions=True) garantiert len(individual)==len(names) UND Ordnung
+        # -> hier KEIN Längen-Guard (ein strict=True wäre ein Wächter, der nie rot werden kann;
+        # Evidence-Regel 5). Der Provider-Vertrag wird im else-Zweig geprüft, wo er feuern kann.
         for name, outcome in zip(names, individual, strict=False):
             if not isinstance(outcome, BaseException):
                 results.append(outcome)
@@ -136,6 +139,23 @@ async def pv_get_batch(names: list[str], timeout: float | None = None) -> dict[s
                 # A non-Exception BaseException (e.g. CancelledError) is never swallowed. It did not
                 # arise from the native-batch failure, so do not chain it to that context.
                 raise outcome from None
+    else:
+        # Nativer Batch OK. Provider-Längen-Vertrag HIER durchsetzen (außerhalb des except), damit
+        # ein Verstoß LAUT als UPSTREAM_CONTRACT_ERROR scheitert statt in den Fallback geschluckt
+        # zu werden — ein Raise im try würde vom except Exception gefangen (S27/F11: kein stiller
+        # Verlust). p4p prä-sized sein Ergebnis auf len(names) -> feuert nur bei kaputtem Provider.
+        if len(values) != len(names):
+            raise EpicsError(
+                f"EPICS provider returned {len(values)} values for {len(names)} requested PVs",
+                error_code="UPSTREAM_CONTRACT_ERROR",
+                details={"requested": len(names), "received": len(values)},
+            )
+        for name, value in zip(names, values, strict=False):
+            try:
+                results.append(_format_value(name, value))
+            except Exception as exc:  # noqa: BLE001
+                # ein kaputter Einzelwert darf den Batch nicht abbrechen
+                errors.append({"pv_name": name, "error": str(exc)})
 
     return {"results": results, "errors": errors}
 

@@ -237,8 +237,10 @@ def test_build_device_report_live_capped_note() -> None:
 
 def test_build_device_report_capped_note_counts_attempts_not_responses() -> None:
     """S7-5 regression lock: the capped note counts live_read (channels ATTEMPTED), not
-    len(channels) (p4p RESPONSES). The two diverge when the native batch silently drops a name
-    (pv_get_batch zips names/values with strict=False) — here 2 attempted, only 1 came back."""
+    len(channels) (p4p RESPONSES). These diverge whenever fewer responses return than were
+    attempted — after S27 that arises from a degraded live read (find_device's empty-envelope
+    fallback on a provider-contract breach), not from a native strict=False truncation (which now
+    raises). Here a hand-built 1-of-2 pins the counting invariant."""
     live = {"results": [{"pv_name": "DEV:X", "value": 0}], "errors": []}  # only 1 response returned
     report = build_device_report(
         PvLookupResult(
@@ -261,6 +263,38 @@ def test_build_device_report_capped_note_counts_attempts_not_responses() -> None
     # the honest attempt count (live_read=2), NOT the response count (len(channels)=1)
     assert any("2 of 500 matched channels" in note for note in report.notes)
     assert not any("1 of 500 matched channels" in note for note in report.notes)
+
+
+def test_build_device_report_surfaces_degraded_live_note() -> None:
+    """S27: when find_device degrades the live read to an empty envelope on a provider-contract
+    breach it carries a 'note'; build_device_report must surface it in report.notes so the empty
+    channel list is explained, not silently blank (mirrors the ChannelFinder note path). Goes RED
+    without the live-note extraction (the note would be dropped)."""
+    live = {
+        "results": [],
+        "errors": [],
+        "note": "Live read unavailable — malformed provider batch.",
+    }
+    report = build_device_report(
+        PvLookupResult(
+            query="DEV",
+            match="prefix",
+            total_pvs_matched=2,
+            displays=(
+                DisplayMatch(
+                    display_path="a.bob", matched_pvs=("DEV:X",), roles=("read",), count=1
+                ),
+            ),
+        ),
+        live,
+        {"enabled": False, "channels": []},
+        total_matched=2,
+        live_read=2,
+        live_capped=False,
+        channelfinder_enabled=False,
+    )
+    assert report.channels == ()  # empty live envelope → no per-channel rows
+    assert any("Live read unavailable" in note for note in report.notes)
 
 
 def test_render_header_and_capped_note_agree_on_the_attempt_count() -> None:

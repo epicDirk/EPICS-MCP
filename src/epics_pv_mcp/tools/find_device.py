@@ -15,6 +15,7 @@ over that cap raises ``BATCH_TOO_LARGE``) — the screen list stays complete, on
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -36,6 +37,8 @@ from epics_pv_mcp.services.device_lookup import (
     render_markdown,
 )
 from epics_pv_mcp.services.epics_client import pv_get_batch
+
+logger = logging.getLogger(__name__)
 
 
 def _run_lookup(
@@ -92,14 +95,28 @@ async def _find_device(
     cfg = get_config()
     read = channels[: cfg.max_batch_size]
     live_capped = len(channels) > len(read)
-    live: Mapping[str, object] = (
-        await pv_get_batch(list(read), timeout) if read else {"results": [], "errors": []}
-    )
+    live: Mapping[str, object]
+    try:
+        live = await pv_get_batch(list(read), timeout) if read else {"results": [], "errors": []}
+    except EpicsError as exc:
+        # S27: the provider broke its batch length contract (UPSTREAM_CONTRACT_ERROR). The offline
+        # screens are already computed and must survive — degrade the LIVE part rather than sink the
+        # whole tool (mirrors the ChannelFinder best-effort handling below; both carry a report
+        # note). Not silent: logged AND surfaced as a report note (build_device_report reads live's
+        # "note"). BATCH_TOO_LARGE cannot fire here (read is capped above) — catches the breach.
+        logger.warning("Live read degraded for query %r (provider contract): %s", cleaned, exc)
+        live = {
+            "results": [],
+            "errors": [],
+            "note": "Live values unavailable — the EPICS provider returned a malformed batch. "
+            "The screen list is complete; live values could not be read.",
+        }
 
     # ChannelFinder source-IOC join with a match-aware glob: a substring match need not start with
     # the query, so broaden to ``*stem*``; prefix/exact stay anchored at ``stem*``. The exact-name
     # join in build_device_report filters the (over-broad) fetch. Best-effort — a CF outage must not
-    # sink the screens+live result (mirrors pv_get_batch, which degrades rather than raising).
+    # sink the screens+live result (mirrors the live-read handling above: a provider-contract breach
+    # degrades the live part, screens stay complete).
     stem = channel_name(cleaned).rstrip(":")
     glob = f"*{stem}*" if match == "substring" else f"{stem}*"
     try:

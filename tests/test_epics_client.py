@@ -5,8 +5,10 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 import epics_pv_mcp.services.epics_client as epics_client
-from epics_pv_mcp.errors import EpicsConnectionError, PVNotFoundError, PVTimeoutError
+from epics_pv_mcp.errors import EpicsConnectionError, EpicsError, PVNotFoundError, PVTimeoutError
 from epics_pv_mcp.services.epics_client import _classify_p4p_error, _format_value
 from epics_pv_mcp.tools.info import _get_pv_info
 
@@ -826,3 +828,22 @@ async def test_pv_get_batch_native_bad_value_isolated(monkeypatch: Any) -> None:
     assert [r["pv_name"] for r in results] == ["A:1", "C:3"]
     assert [e["pv_name"] for e in errors] == ["B:2"]
     assert "malformed value" in str(errors[0]["error"])
+
+
+class _ShortBatchContext:
+    """A p4p Context stand-in whose batch get returns FEWER values than requested names — a broken
+    provider violating the length contract. Returns one wrapped value for any number of names."""
+
+    def get(self, names: list[str], timeout: object = None) -> list[object]:
+        return [_wrap(SimpleNamespace(value=0.0, alarm=None))]
+
+
+async def test_pv_get_batch_native_length_mismatch_raises(monkeypatch: Any) -> None:
+    """S27/F11: a provider that returns fewer values than requested names must fail LOUDLY with
+    UPSTREAM_CONTRACT_ERROR, not silently drop the surplus PVs. Goes RED (no raise) against the
+    pre-S27 code (native path, short list, zip strict=False -> 1 result / 0 errors / no raise)."""
+    monkeypatch.setattr(epics_client, "get_context", _ShortBatchContext)
+    with pytest.raises(EpicsError) as ei:
+        await epics_client.pv_get_batch(["A:1", "B:2", "C:3"])
+    assert ei.value.error_code == "UPSTREAM_CONTRACT_ERROR"
+    assert ei.value.details == {"requested": 3, "received": 1}

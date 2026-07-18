@@ -228,3 +228,31 @@ async def test_find_device_tool_match_modes(
     assert isinstance(report, dict)
     assert report["match"] == match
     assert [s["display_path"] for s in report["screens"]] == ["panel.bob"]
+
+
+@pytest.mark.asyncio
+@patch("epics_pv_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
+async def test_find_device_live_read_contract_error_degrades(
+    mock_batch: AsyncMock, tmp_path: Path
+) -> None:
+    """S27: a provider length-contract breach (UPSTREAM_CONTRACT_ERROR) from the live batch read
+    must degrade the LIVE part but keep the already-computed offline screens — must NOT sink the
+    whole tool. Goes RED against the pre-S27 find_device (live read sits outside try/except → the
+    error propagates and _find_device raises)."""
+    mock_batch.side_effect = EpicsError(
+        "EPICS provider returned 1 values for 2 requested PVs",
+        error_code="UPSTREAM_CONTRACT_ERROR",
+        details={"requested": 2, "received": 1},
+    )
+    result = await _find_device("DEV-TEST01:Ctrl-EVR-01", str(_displays(tmp_path)))
+
+    report = result["report"]
+    assert isinstance(report, dict)
+    # Offline screens survive the live-read failure — the point of degrading, not sinking.
+    assert [s["display_path"] for s in report["screens"]] == ["panel.bob"]
+    # Live degraded to an empty envelope: no per-channel status, but the tool did NOT raise.
+    assert report["channels"] == []
+    # The degrade is surfaced as a report note (not a silent blank), mirroring CF's honest degrade.
+    assert any("Live values unavailable" in note for note in report["notes"])
+    # The live read WAS attempted (the wrap caught a real call, not a no-op because read was empty).
+    mock_batch.assert_awaited_once()
