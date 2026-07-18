@@ -1,6 +1,8 @@
 """EPICS PV MCP Server — main entry point."""
 
+import importlib.util
 import logging
+from collections.abc import Callable
 from typing import Annotated, Literal
 
 from mcp.server.fastmcp import FastMCP
@@ -46,13 +48,33 @@ from epics_pv_mcp.tools.write import _set_pv_value
 
 logger = logging.getLogger(__name__)
 
-# Keep in sync with the epics-pv posture in SKILL.md
-mcp = FastMCP(
-    "epics-pv-mcp",
-    instructions=(
+
+def _display_tools_available() -> bool:
+    """True iff the optional ``[displays]`` extra is installed (its sole package is opi_navigation).
+
+    ``find_spec`` has no import side effects, so this is safe to call before the server is built and
+    again at registration time. It is the exact signal ``tests/conftest.py`` uses to gate the
+    display-tool tests — one capability truth, reused.
+    """
+    return importlib.util.find_spec("opi_navigation") is not None
+
+
+def build_instructions(display_tools_available: bool) -> str:
+    """Render the server ``instructions`` from the actual capability set (S26/N06).
+
+    The display-gated capabilities (validate_pvs / crossplane_check / find_device) are advertised
+    only when the ``[displays]`` extra is installed, so a core-only install does not over-claim
+    them. A pure function of the flag → both branches are directly testable without a reimport.
+    """
+    display_clause = (
+        "validate the PVs of a .bob display, cross-plane provenance, device lookup "
+        "(screens + live + source IOC), "
+        if display_tools_available
+        else ""
+    )
+    return (
         "Read-only EPICS PV access by default: read live values and metadata, monitor, "
-        "discover, validate the PVs of a .bob display, cross-plane provenance, device lookup "
-        "(screens + live + source IOC), ChannelFinder lookups, Archiver history + archive "
+        "discover, " + display_clause + "ChannelFinder lookups, Archiver history + archive "
         "configuration, Alarm "
         "configuration and history, ESS Naming-Service device-name lookup, and Phoebus Olog "
         "logbook search (author dropped; free text withheld unless the Olog is a DECLARED local "
@@ -80,7 +102,47 @@ mcp = FastMCP(
         "template. For the service landscape, operational recipes (archiver PV enumeration, "
         "retrieval-cluster-aware appliances, the combined CA-bundle recipe) and typical error "
         "signatures, read the epics-pv://guide resource."
-    ),
+    )
+
+
+def _load_display_registrar() -> Callable[[FastMCP], None] | None:
+    """Load the display-tool registrar iff the optional ``[displays]`` extra is installed AND
+    imports cleanly. Returns the registrar (run once the server is built) or ``None`` — the ONE
+    capability truth every surface derives from (tool registration, the ``instructions`` string,
+    and the ``compare_machine_state`` prompt), so they can never diverge (S26/N06).
+
+    Degrade-loud posture:
+    - A MISSING extra (``find_spec`` None) is the supported core-only state — return None silently
+      so the core PV server installs and starts standalone.
+    - An INSTALLED extra that fails to import (broken transitive dep, corrupt module, …) is a
+      BROKEN deployment, not a missing one: log ERROR with the correct attribution and return None,
+      so the core PV server stays up AND no surface over-claims display tools that did not register.
+      The catch is broad on purpose — an OPTIONAL extra must never crash the core server — while the
+      ERROR + exc_info keep the failure loud (the former broad ``except ImportError`` logged INFO
+      "not installed", mis-attributing an internal import failure as a missing package).
+    """
+    if not _display_tools_available():
+        return None
+    try:
+        from epics_pv_mcp.display_tools import register_display_tools
+    except Exception:  # an optional extra must never crash core — logged loud just below
+        logger.error(
+            "opi_navigation is installed but the display tools failed to load "
+            "(broken [displays] extra); core PV tools remain available.",
+            exc_info=True,
+        )
+        return None
+    return register_display_tools
+
+
+# One capability truth: the registrar exists only if the extra is installed AND imports cleanly.
+_display_registrar = _load_display_registrar()
+_DISPLAY_TOOLS_AVAILABLE = _display_registrar is not None
+
+# Keep in sync with the epics-pv posture in SKILL.md
+mcp = FastMCP(
+    "epics-pv-mcp",
+    instructions=build_instructions(_DISPLAY_TOOLS_AVAILABLE),
 )
 # S1-2: FastMCP exposes no public API to set the server version, so we reach the low-level MCP
 # server defensively — a FastMCP upgrade that renames/removes ``_mcp_server`` then degrades to
@@ -892,17 +954,12 @@ async def diagnose_connection(
     )
 
 
-# Display-aware tools (validate_pvs / crossplane_check / coverage_audit / find_device) need the
-# opi_navigation PV-inventory — the optional `[displays]` extra. Register them only when it is
-# installed, so the core PV server installs and starts standalone without it.
-try:
-    from epics_pv_mcp.display_tools import register_display_tools
-
-    register_display_tools(mcp)
-except ImportError:
-    logger.info(
-        "Display tools disabled: opi_navigation not installed (pip install epics-pv-mcp[displays])"
-    )
+# Register the display-aware tools (validate_pvs / crossplane_check / coverage_audit / find_device),
+# loaded above as the single capability truth. Runs now that mcp + the core tools exist. When the
+# registrar is None (extra absent, or installed-but-broken and already logged at ERROR), the core
+# server runs standalone and no surface over-claims the display tools.
+if _display_registrar is not None:
+    _display_registrar(mcp)
 
 
 # === Resources ===
@@ -938,7 +995,12 @@ def diagnose_pv(pv_name: str) -> str:
 @mcp.prompt()
 def compare_machine_state(pv_prefix: str, reference_file: str = "") -> str:
     """Compare current machine state to expected values."""
-    return _compare_machine_state(pv_prefix, reference_file)
+    # Thread the actual capability so the rendered prompt never instructs the LLM to call the
+    # display-gated validate_pvs tool on a core-only install (S26/N05). The LLM-facing signature
+    # stays (pv_prefix, reference_file) — display_tools_available is NOT an exposed prompt argument.
+    return _compare_machine_state(
+        pv_prefix, reference_file, display_tools_available=_DISPLAY_TOOLS_AVAILABLE
+    )
 
 
 def main() -> None:

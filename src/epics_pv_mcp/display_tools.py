@@ -6,10 +6,11 @@ per-instance PV inventory of ``.bob`` operator screens. That inventory comes fro
 ``opi_navigation`` package (the build-once Wedge-0 PV engine), which is an **optional**
 dependency: ``pip install epics-pv-mcp[displays]``.
 
-Keeping them in their own module lets :mod:`epics_pv_mcp.server` register them lazily
-inside a ``try/except ImportError`` — so the core PV server (read/write/monitor/discover/
-diagnose + the REST planes) installs and starts standalone, for any EPICS user who does
-not have the display layer.
+Keeping them in their own module lets :mod:`epics_pv_mcp.server` load them lazily via one
+capability probe (``_load_display_registrar``): it skips them silently when the extra is absent
+(``find_spec`` gate) — so the core PV server (read/write/monitor/discover/diagnose + the REST
+planes) installs and starts standalone, for any EPICS user who does not have the display layer —
+and it degrades loud (an ERROR log, core tools kept) if an *installed* extra fails to import.
 
 A dedicated CS-Studio / Phoebus MCP that complements these tools is in the works.
 """
@@ -235,8 +236,9 @@ async def find_device(
 def register_display_tools(mcp: FastMCP) -> None:
     """Register the four display-aware tools on *mcp*.
 
-    Called from :mod:`epics_pv_mcp.server` inside a ``try/except ImportError`` so the
-    core server installs and starts without the optional ``[displays]`` extra.
+    Called from :mod:`epics_pv_mcp.server` only after ``_load_display_registrar`` has confirmed the
+    optional ``[displays]`` extra is installed and imports cleanly (the single capability truth), so
+    the core server installs and starts standalone without it.
     """
     mcp.tool(annotations=_READONLY)(validate_pvs)
     mcp.tool(annotations=_READONLY)(crossplane_check)

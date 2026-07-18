@@ -1,13 +1,46 @@
 """Tests for server-level tool wrappers (EpicsError → ToolError conversion)."""
 
+import importlib.util
 import logging
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastmcp.exceptions import ToolError
+from mcp.server.fastmcp import FastMCP
 
 from epics_pv_mcp.errors import PVNotFoundError, PVTimeoutError
+
+_Fn = Callable[..., object]
+
+
+class _ToolSpy:
+    """A minimal stand-in for a FastMCP instance that records which functions get registered via
+    ``.tool(...)``. Version-independent (no coupling to FastMCP's internal tool registry) — used to
+    assert the display-tool registration seam behaviour (S26/N06)."""
+
+    def __init__(self) -> None:
+        self.registered: list[str] = []
+
+    def tool(self, **kwargs: object) -> Callable[[_Fn], _Fn]:
+        """Mirror FastMCP's ``tool(...)`` decorator factory, recording each registered name."""
+
+        def _decorator(fn: _Fn) -> _Fn:
+            self.registered.append(getattr(fn, "__name__", repr(fn)))
+            return fn
+
+        return _decorator
+
+
+def _named(name: str) -> _Fn:
+    """A no-op callable carrying *name* as its ``__name__`` (so _ToolSpy records that name)."""
+
+    def _f() -> None: ...
+
+    _f.__name__ = name
+    return _f
 
 
 @pytest.mark.asyncio
@@ -166,3 +199,200 @@ def test_main_boots_read_only_despite_unusable_audit_path(
         audit.handlers.extend(saved_handlers)
         config_module._config = saved_config
         safety_module._safety = saved_safety
+
+
+# --- S26 / N05+N06: core-only + installed-but-broken consistency ------------------------------
+
+
+def test_load_display_registrar_degrades_loud_on_broken_extra(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Guard A (S26/N06, degrade-loud): an INSTALLED-but-broken [displays] extra must log at ERROR
+    with the correct attribution and return None (→ registrar unavailable, so NO surface over-claims
+    the display tools), WITHOUT crashing — the core PV tools stay available. Rot-Beweis vs. the old
+    broad ``except ImportError`` that logged INFO "not installed". Install-independent: forces the
+    availability signal True and injects a broken import via sys.modules, so opi_navigation need not
+    be importable (this test also runs in a core-only install)."""
+    import sys
+
+    import epics_pv_mcp.server as server
+
+    monkeypatch.setattr(server, "_display_tools_available", lambda: True)
+    # A None entry makes ``from epics_pv_mcp.display_tools import ...`` raise ImportError.
+    monkeypatch.setitem(sys.modules, "epics_pv_mcp.display_tools", None)
+
+    with caplog.at_level(logging.ERROR, logger="epics_pv_mcp.server"):
+        registrar = server._load_display_registrar()  # must NOT raise
+
+    assert registrar is None  # broken extra → no registrar → no over-claim on any surface
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert errors, "a broken installed extra must be logged at ERROR"
+    assert "display tools failed to load" in errors[0].getMessage()
+
+
+def test_load_display_registrar_skips_when_extra_absent(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Guard A positive control 1: a MISSING extra (find_spec None) is the supported core-only
+    degrade — return None SILENTLY (no ERROR), symmetric to Guard A's loud degrade on a broken
+    extra."""
+    import epics_pv_mcp.server as server
+
+    monkeypatch.setattr(server, "_display_tools_available", lambda: False)
+
+    with caplog.at_level(logging.ERROR, logger="epics_pv_mcp.server"):
+        assert server._load_display_registrar() is None
+    assert not [r for r in caplog.records if r.levelno == logging.ERROR], (
+        "an absent extra must degrade silently, without an ERROR log"
+    )
+
+
+def test_load_display_registrar_returns_registrar_when_importable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guard A positive control 2 (non-vacuous happy path, install-independent): with the extra
+    present and importable, the loader returns the registrar (→ _DISPLAY_TOOLS_AVAILABLE True) and
+    that registrar registers exactly the four display tools. A fake display_tools module is injected
+    so this pins the plumbing even in a core-only CI where opi_navigation is absent — excluding the
+    mutant that returns None on the importable branch."""
+    import sys
+    import types
+
+    import epics_pv_mcp.server as server
+
+    def _fake_register(m: object) -> None:
+        for name in ("validate_pvs", "crossplane_check", "coverage_audit", "find_device"):
+            m.tool()(_named(name))  # type: ignore[attr-defined]
+
+    fake = types.ModuleType("epics_pv_mcp.display_tools")
+    fake.register_display_tools = _fake_register  # type: ignore[attr-defined]
+    monkeypatch.setattr(server, "_display_tools_available", lambda: True)
+    monkeypatch.setitem(sys.modules, "epics_pv_mcp.display_tools", fake)
+
+    registrar = server._load_display_registrar()
+    assert registrar is not None
+    spy = _ToolSpy()
+    registrar(cast(FastMCP[Any], spy))
+    assert set(spy.registered) == {
+        "validate_pvs",
+        "crossplane_check",
+        "coverage_audit",
+        "find_device",
+    }
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("opi_navigation") is None,
+    reason="[displays] extra (opi_navigation) not installed",
+)
+def test_load_display_registrar_returns_real_registrar_when_installed() -> None:
+    """Guard A positive control 2b: with opi_navigation actually installed, the loader returns the
+    REAL register_display_tools (identity), and driving that PRODUCTION registrar registers exactly
+    the four display tools — real coverage (not the injected fake of 2a), so a dropped/renamed
+    production tool fails here. Runs in the local commit gate; skipped in a core-only CI."""
+    import epics_pv_mcp.server as server
+    from epics_pv_mcp.display_tools import register_display_tools
+
+    registrar = server._load_display_registrar()
+    assert registrar is register_display_tools
+    spy = _ToolSpy()
+    registrar(cast(FastMCP[Any], spy))
+    assert set(spy.registered) == {
+        "validate_pvs",
+        "crossplane_check",
+        "coverage_audit",
+        "find_device",
+    }
+
+
+def test_compare_machine_state_wrapper_threads_capability(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Guard B2 (S26/N05, the fail-open closer): the REGISTERED server prompt wrapper must thread
+    the real capability. With display tools unavailable, rendering must not instruct validate_pvs —
+    proves server.py actually passes _DISPLAY_TOOLS_AVAILABLE (a forgotten pass-through would leave
+    the pure-function Guard B1 green while the live prompt stayed broken)."""
+    import epics_pv_mcp.server as server
+
+    monkeypatch.setattr(server, "_DISPLAY_TOOLS_AVAILABLE", False)
+    result = server.compare_machine_state("MPS:", reference_file="status.bob")
+    assert "validate_pvs" not in result
+
+
+def test_compare_machine_state_prompt_hides_capability_arg() -> None:
+    """Guard B2 (schema): the capability flag must NOT be an LLM-settable prompt argument — the
+    wrapper's exposed signature stays (pv_prefix, reference_file), else the LLM could force
+    display_tools_available=True and re-instruct the missing tool."""
+    import inspect
+
+    import epics_pv_mcp.server as server
+
+    params = inspect.signature(server.compare_machine_state).parameters
+    assert "display_tools_available" not in params
+
+
+def test_build_instructions_omits_display_claims_core_only() -> None:
+    """Guard C (S26, Fläche 3): the instructions advertise the display-gated capabilities only when
+    the extra is available — a core-only install must not over-claim them. Both branches by direct
+    call of the pure builder."""
+    from epics_pv_mcp.server import build_instructions
+
+    full = build_instructions(True)
+    core = build_instructions(False)
+    assert "validate the PVs of a .bob display" in full
+    assert "validate the PVs of a .bob display" not in core
+    assert "device lookup (screens + live + source IOC)" not in core
+    # the core capabilities remain in both
+    assert "ChannelFinder lookups" in core
+    assert "set_pv_value" in core
+
+
+def test_mcp_instructions_wired_to_capability_flag() -> None:
+    """Guard D (S26/N06, the instructions-wiring closer — symmetric to Guard B2 for the prompt): the
+    LIVE server object's instructions must be built FROM the real capability flag, i.e.
+    mcp.instructions == build_instructions(_DISPLAY_TOOLS_AVAILABLE). Pins that the initialize-
+    handshake advertisement follows the flag; a hardcoded build_instructions(True) would diverge
+    from this in a core-only install (flag False) — the asymmetric gap the pure-function Guard C
+    alone cannot close."""
+    from epics_pv_mcp.server import _DISPLAY_TOOLS_AVAILABLE, build_instructions, mcp
+
+    assert mcp.instructions == build_instructions(_DISPLAY_TOOLS_AVAILABLE)
+
+
+def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guard E (S26/N06, the fix's central regression guard): reproduce the INSTALLED-but-broken
+    state at import time (find_spec truthy, the display_tools import fails) via importlib.reload,
+    then assert the LIVE surfaces stay consistent — ``_DISPLAY_TOOLS_AVAILABLE`` False, instructions
+    omit the display clause, the prompt omits validate_pvs.
+
+    The ONLY test that fails if the single-truth derivation ``_DISPLAY_TOOLS_AVAILABLE =
+    _display_registrar is not None`` regresses to the Round-1 find_spec formulation
+    ``= _display_tools_available()``: the two diverge only in this state, which neither CI lane
+    otherwise exercises. Install-independent (forces find_spec truthy + a broken import); restores
+    the clean module afterwards so the rest of the suite is unaffected."""
+    import importlib
+    import sys
+
+    import epics_pv_mcp.server as server
+
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name, *a, **k: (
+            object() if name == "opi_navigation" else real_find_spec(name, *a, **k)
+        ),
+    )
+    # A None entry makes ``from epics_pv_mcp.display_tools import ...`` raise ImportError at reload.
+    monkeypatch.setitem(sys.modules, "epics_pv_mcp.display_tools", None)
+    try:
+        importlib.reload(server)
+
+        assert server._DISPLAY_TOOLS_AVAILABLE is False
+        assert "validate the PVs of a .bob display" not in (server.mcp.instructions or "")
+        prompt = server.compare_machine_state("MPS:", reference_file="status.bob")
+        assert "validate_pvs" not in prompt
+        assert "status.bob" in prompt  # the file is still referenced, via the core client-read path
+    finally:
+        monkeypatch.undo()  # restore find_spec + sys.modules BEFORE the clean reload
+        importlib.reload(server)  # restore the real module for the rest of the suite
