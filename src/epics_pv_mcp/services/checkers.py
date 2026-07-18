@@ -24,6 +24,9 @@ home for its adapter, factory and query).
 from __future__ import annotations
 
 import asyncio
+import base64
+import uuid
+from collections.abc import Callable
 
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
@@ -43,6 +46,11 @@ from epics_pv_mcp.services.coverage import AlarmChecker, ArchivedChecker
 from epics_pv_mcp.services.crossplane import CFRegistryCapped, ChannelFinderChecker
 from epics_pv_mcp.services.naming_client import NamingServiceClient
 from epics_pv_mcp.services.naming_exceptions import NamingServiceError
+from epics_pv_mcp.services.olog_attachments import (
+    plan_attachments,
+    read_uploads,
+    write_download,
+)
 from epics_pv_mcp.services.olog_client import DEFAULT_MAX_LOGS, OlogClient
 from epics_pv_mcp.services.olog_exceptions import OlogConnectionError, OlogError, OlogResponseError
 
@@ -218,6 +226,33 @@ _OLOG_DISABLED_NOTE = (
     "Phoebus Olog is disabled. Set EPICS_MCP_OLOG_URL to the Olog REST root "
     "(e.g. http://host:8080/Olog) to enable logbook search."
 )
+# The download/list posture message: raw attachment bytes (and filenames, for a list) are author
+# free text and bypass the dict-based redaction, so they leave ONLY from a declared local sandbox
+# with the explicit opt-in — the same whole-mode threshold as an entry read, plus a second flag.
+_ATTACH_WITHHELD_NOTE = (
+    "Attachment bytes are withheld. Raw bytes leave only from a declared local test sandbox "
+    "(loopback EPICS_MCP_OLOG_URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA) AND with "
+    "EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD=true (bytes bypass the entry redaction, so they need "
+    "their own opt-in; the by-id endpoint has no server-side per-log authorization). Run "
+    "epics-doctor to see the effective posture."
+)
+_ATTACH_LIST_WITHHELD_NOTE = (
+    "Attachment filenames are withheld (author free text). Only the count is shown unless the Olog "
+    "is a declared local test sandbox (loopback + EPICS_MCP_OLOG_ASSUME_TEST_DATA)."
+)
+# A base64 download is returned IN the tool result (response tokens), so it is capped far below the
+# path-based ceiling (olog_attach_max_bytes) — a large blob must go to a workspace file, not the
+# model context. The effective base64 cap is min(this, olog_attach_max_bytes).
+_BASE64_DOWNLOAD_MAX_BYTES = 5 * 1024 * 1024
+
+
+def _default_olog_id_factory() -> str:
+    """A fresh attachment UUID. Injected into :func:`query_olog_create` so the upload logic is
+    deterministic in tests (the project's no-``uuid``-in-logic rule); production uses this
+    default."""
+    return str(uuid.uuid4())
+
+
 # Withheld (configured=None), NOT a negative: the tree yielded no configuration at all, so
 # "this PV is not configured" cannot be told apart from "that is not the tree name". The name is
 # case-sensitive in the query even though it is lower-cased to pick the index — see
@@ -653,17 +688,30 @@ async def query_olog_create(
     level: str | None = None,
     tags: list[str] | None = None,
     in_reply_to: str | None = None,
+    attachments: list[str] | None = None,
+    embed_image_base64: str | None = None,
     timeout: float = 5.0,
+    *,
+    id_factory: Callable[[], str] = _default_olog_id_factory,
 ) -> dict[str, object]:
     """Create (or, with *in_reply_to*, reply to) an Olog log entry. MUTATING, gated, redacted.
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes NO
     network call. When enabled, the :class:`~epics_pv_mcp.olog_safety.OlogWriteGate` (env gate +
-    test-server URL boundary + logbook allowlist + rate limit) runs BEFORE any I/O — a denial raises
-    (audited DENY) before a client is even constructed. The full server response is run through the
-    read redaction before return (owner dropped, title/description withheld). A completed write is
-    audited ALLOW; a write that passes the gate but fails at the HTTP layer is audited FAILED (no
-    entry id/owner) and re-raised. Backs ``create_log_entry`` / ``reply_to_log``."""
+    test-server URL boundary + logbook allowlist + attachment size cap + rate limit) runs BEFORE any
+    I/O — a denial raises (audited DENY) before a client is even constructed. The full server
+    response
+    is run through the read redaction before return (owner dropped, title/description withheld). A
+    completed write is audited ALLOW; a write that passes the gate but fails at the HTTP layer is
+    audited FAILED (no entry id/owner) and re-raised. Backs ``create_log_entry`` / ``reply_to_log``.
+
+    *attachments* (OA1) are workspace file paths uploaded with the entry (create-with-attachments,
+    ``PUT /logs/multipart``); *embed_image_base64* is a small inline image whose
+    ``![](attachment/<uuid>)`` markup is appended to the description. Attachment SIZES are summed
+    (``stat``, not read) and fed to the gate's size cap BEFORE any bytes are read; the UUIDs are
+    minted by *id_factory* (injected for deterministic tests). ``attachments_uploaded`` echoes the
+    ``{id[, filename]}`` of each upload (filename only in whole-mode — it is author free text).
+    """
     cfg = get_config()
     if not cfg.olog_url:
         return {"enabled": False, "created": False, "note": _OLOG_DISABLED_NOTE}
@@ -672,19 +720,35 @@ async def query_olog_create(
 
     def _run() -> dict[str, object]:
         gate = get_olog_safety()
-        # Gate FIRST, before any client construction or I/O. A denial (OlogWriteDeniedError /
-        # RateLimitError) is audited DENY inside the gate and propagates unchanged.
-        gate.check_write_allowed(logbooks, caller=caller)
+        # Cheap gate checks FIRST — env / URL boundary / logbook allowlist — BEFORE any filesystem
+        # I/O, so a denied write never even stats the attachment paths (no file-existence oracle for
+        # a caller the gate rejects). A denial is audited DENY and propagates unchanged.
+        gate.check_write_preconditions(logbooks, caller=caller)
+        # Now resolve + SIZE attachments (stat, NO read yet) so the size cap can refuse an
+        # over-limit
+        # upload before any bytes are materialised (anti-DoS). A bad path / bad base64 raises
+        # EpicsError(INVALID_INPUT) here — before the full gate, and still before any file READ.
+        plan = plan_attachments(attachments, embed_image_base64, id_factory)
+        # Full gate: re-runs the (idempotent) cheap checks, then the attachment size cap and the
+        # rate
+        # token — the token is taken only here, on the success path, once. File READ + network
+        # follow.
+        gate.check_write_allowed(logbooks, caller=caller, attachment_bytes=plan.total_bytes)
+        uploads = read_uploads(plan.specs) if plan.specs else None
+        effective_description = (
+            (description or "") + plan.inline_markup if plan.inline_markup else description
+        )
         auth = basic_auth_header(cfg.olog_write_user, cfg.olog_write_password)
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=auth)
         try:
             entry = client.create_log_entry(
                 title=title,
                 logbooks=logbooks,
-                description=description,
+                description=effective_description,
                 level=level,
                 tags=tags,
                 in_reply_to=in_reply_to,
+                attachments=uploads,
             )
         except Exception as exc:  # broad on purpose: audit ANY failed write attempt, then re-raise
             gate.audit_write_failed(
@@ -704,8 +768,21 @@ async def query_olog_create(
             owner=cfg.olog_write_user,
             in_reply_to=in_reply_to,
             caller=caller,
+            attachment_count=len(plan.specs),
+            attachment_bytes=plan.total_bytes,
         )
-        return {"enabled": True, "created": True, "entry": entry}
+        result: dict[str, object] = {"enabled": True, "created": True, "entry": entry}
+        if uploads is not None:
+            # Filenames are author free text → whole-mode only; ids are UUIDs (safe) → always.
+            result["attachments_uploaded"] = [
+                (
+                    {"id": u["id"], "filename": u["filename"]}
+                    if client.whole_mode
+                    else {"id": u["id"]}
+                )
+                for u in uploads
+            ]
+        return result
 
     try:
         return await asyncio.to_thread(_run)
@@ -714,4 +791,152 @@ async def query_olog_create(
     except OlogError as exc:
         # S11 §8: the server ANSWERED — an unreadable payload is not an outage (search already
         # lives this three-way split; see query_olog_search).
+        raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
+
+
+async def query_olog_download(
+    log_id: str | None = None,
+    filename: str | None = None,
+    attachment_id: str | None = None,
+    output_path: str | None = None,
+    as_base64: bool = False,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    """Download one Olog attachment's raw bytes. Read-only, config-gated, and POSTURE-gated (OA1).
+
+    Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` +
+    ``downloaded: false`` and makes NO network call. Bytes leave ONLY from a declared local sandbox
+    (whole-mode) AND with the explicit ``EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD`` opt-in —
+    otherwise
+    the result is ``withheld: true`` and NO byte fetch happens (the posture is checked BEFORE the
+    request; the client's :meth:`~.OlogClient._require_attachment_bytes_allowed` is a further
+    backstop). Identify the attachment by ``(log_id + filename)`` — the primary route — or by
+    ``attachment_id`` (the by-id route an inline image uses). Bytes cross the MCP boundary either
+    written to ``output_path`` (a NEW workspace file, ``EPICS_MCP_ALLOWED_ROOTS``-checked) or, with
+    ``as_base64=true``, base64-encoded in the result (small files only — the payload is response
+    tokens). Backs ``download_log_attachment``.
+    """
+    if not filename and not attachment_id:
+        raise EpicsError(
+            "download needs either filename (with log_id) or attachment_id",
+            error_code="INVALID_INPUT",
+        )
+    if filename and not log_id:
+        raise EpicsError("download by filename needs log_id", error_code="INVALID_INPUT")
+    if not as_base64 and not output_path:
+        raise EpicsError(
+            "download needs output_path (a workspace file to write) or as_base64=true",
+            error_code="INVALID_INPUT",
+        )
+    cfg = get_config()
+    if not cfg.olog_url:
+        return {"enabled": False, "downloaded": False, "note": _OLOG_DISABLED_NOTE}
+
+    def _run() -> dict[str, object]:
+        client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
+        # Posture FIRST: if raw bytes may not leave, withhold structurally — no byte fetch at all.
+        if not client.attachment_bytes_allowed:
+            return {
+                "enabled": True,
+                "downloaded": False,
+                "withheld": True,
+                "note": _ATTACH_WITHHELD_NOTE,
+            }
+        # A base64 result rides back in the tool output (response tokens), so it is capped far below
+        # the path-based ceiling; a path download uses the client's default (olog_attach_max_bytes).
+        max_bytes = (
+            min(cfg.olog_attach_max_bytes, _BASE64_DOWNLOAD_MAX_BYTES) if as_base64 else None
+        )
+        if attachment_id is not None:
+            content, server_filename, content_type = client.get_attachment_by_id(
+                attachment_id, max_bytes=max_bytes
+            )
+        elif log_id is not None and filename is not None:
+            content, server_filename, content_type = client.get_attachment(
+                log_id, filename, max_bytes=max_bytes
+            )
+        else:  # unreachable — the outer guards ensure one identity is fully specified
+            raise EpicsError("download identity is incomplete", error_code="INVALID_INPUT")
+        result: dict[str, object] = {
+            "enabled": True,
+            "downloaded": True,
+            "size_bytes": len(content),
+            "content_type": content_type,
+            "filename": server_filename,
+        }
+        if as_base64:
+            result["content_base64"] = base64.b64encode(content).decode("ascii")
+        elif output_path is not None:
+            result["output_path"] = write_download(output_path, content)
+        else:  # unreachable — guarded above
+            raise EpicsError("download needs output_path or as_base64", error_code="INVALID_INPUT")
+        return result
+
+    try:
+        return await asyncio.to_thread(_run)
+    except OlogConnectionError as exc:
+        raise EpicsConnectionError(f"Olog: {exc}") from exc
+    except OlogError as exc:
+        raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
+
+
+async def query_olog_list_attachments(log_id: str, timeout: float = 5.0) -> dict[str, object]:
+    """List one Olog entry's attachments (id + fileMetadataDescription; filename whole-mode only).
+
+    Read-only, config-gated. Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset returns
+    ``enabled: false`` + ``found: None``. ``found: false`` for a definitive 404. Reuses
+    :meth:`~.OlogClient.get_log_entry`'s projection: in whole-mode the raw ``attachments`` array
+    (id / filename / fileMetadataDescription) is surfaced; in redacted mode only the count is known
+    and filenames are withheld (author free text). Backs ``list_log_attachments``.
+    """
+    cfg = get_config()
+    if not cfg.olog_url:
+        return {
+            "enabled": False,
+            "id": log_id,
+            "found": None,
+            "attachments": [],
+            "note": _OLOG_DISABLED_NOTE,
+        }
+
+    def _run() -> dict[str, object]:
+        client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
+        entry = client.get_log_entry(log_id)
+        if entry is None:
+            return {"enabled": True, "id": log_id, "found": False, "attachments": []}
+        raw = entry.get("attachments")
+        if isinstance(raw, list):
+            # whole-mode: the raw list is present (id/filename/fileMetadataDescription/checksum).
+            attachments: list[dict[str, object]] = [
+                {
+                    "id": item.get("id"),
+                    "filename": item.get("filename"),
+                    "fileMetadataDescription": item.get("fileMetadataDescription"),
+                }
+                for item in raw
+                if isinstance(item, dict)
+            ]
+            return {
+                "enabled": True,
+                "id": log_id,
+                "found": True,
+                "attachments": attachments,
+                "attachment_count": len(attachments),
+            }
+        # Redacted mode: no raw list — only the synthesised count; filenames withheld.
+        return {
+            "enabled": True,
+            "id": log_id,
+            "found": True,
+            "attachments": [],
+            "withheld": True,
+            "attachment_count": entry.get("attachment_count"),
+            "note": _ATTACH_LIST_WITHHELD_NOTE,
+        }
+
+    try:
+        return await asyncio.to_thread(_run)
+    except OlogConnectionError as exc:
+        raise EpicsConnectionError(f"Olog: {exc}") from exc
+    except OlogError as exc:
         raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc

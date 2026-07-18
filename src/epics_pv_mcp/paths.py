@@ -89,3 +89,45 @@ def resolve_user_path(raw: str, *, kind: Literal["dir", "file"], label: str) -> 
             error_code="PATH_OUTSIDE_WORKSPACE",
         )
     return resolved
+
+
+def resolve_new_file_path(raw: str, *, label: str) -> Path:
+    """Canonicalize a NOT-yet-existing output-file path, enforcing the boundary via its PARENT.
+
+    :func:`resolve_user_path` with ``kind="file"`` stat-checks ``is_file`` and therefore REJECTS a
+    path that does not exist yet — which is exactly a download TARGET the caller is about to create.
+    This resolves the PARENT directory (which must exist) through :func:`resolve_user_path`, so the
+    opt-in ``EPICS_MCP_ALLOWED_ROOTS`` boundary is enforced identically, then rejoins the basename.
+    The basename is taken via ``Path(raw).name`` (a single component — never a separator) and
+    rejected
+    if it is ``""`` / ``"."`` / ``".."``, so the result cannot traverse out of the validated parent.
+    An EXISTING SYMLINK at the target is rejected too (``is_symlink`` = ``lstat``, does not
+    follow), so
+    a symlink cannot redirect the write OUT of the validated parent — this is the cross-platform
+    guard
+    the caller's ``O_EXCL`` open cannot give alone (on Windows ``O_EXCL`` follows a DANGLING
+    symlink and
+    creates its target). Mirrors the parent-dir fallback pattern in
+    :mod:`epics_pv_mcp.tools.validate`.
+
+    Raises:
+        EpicsError(INVALID_INPUT): empty/blank *raw*, a basename that is not a plain filename, a
+            non-existent parent directory, or an existing symlink at the target.
+        EpicsError(PATH_OUTSIDE_WORKSPACE): the parent resolves outside every allowed root.
+    """
+    if not raw.strip():
+        raise EpicsError(f"{label} must not be empty", error_code="INVALID_INPUT")
+    candidate = Path(raw)
+    name = candidate.name
+    if name in ("", ".", ".."):
+        raise EpicsError(
+            f"{label} must end in a plain filename (got {raw!r})", error_code="INVALID_INPUT"
+        )
+    parent = resolve_user_path(str(candidate.parent), kind="dir", label=label)
+    target = parent / name
+    if target.is_symlink():
+        raise EpicsError(
+            f"{label} is an existing symlink; refusing to write through it (got {raw!r})",
+            error_code="INVALID_INPUT",
+        )
+    return target

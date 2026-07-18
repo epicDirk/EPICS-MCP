@@ -23,3 +23,19 @@ class OlogConnectionError(OlogError, RestConnectionError):
 
 class OlogResponseError(OlogError, RestResponseError):
     """Unexpected response (HTTP error / bad payload) from the Olog service."""
+
+
+class OlogAttachmentDownloadDenied(OlogError):
+    """Raw attachment bytes were requested but the read posture forbids them (OA1).
+
+    The DEFENSE-IN-DEPTH backstop for the attachment-download privacy gate: bytes leave only when
+    the
+    client is in whole-mode (loopback + ``olog_assume_test_data``) AND
+    ``olog_allow_attachment_download``
+    is set (see :attr:`~epics_pv_mcp.services.olog_client.OlogClient.attachment_bytes_allowed`). The
+    normal path checks that posture in the service layer and returns a structured ``withheld``
+    result
+    without a network call; this raise fires only if a byte-fetch is reached, so no un-redacted
+    bytes can slip out through a code path that forgot the check. NOT a server error — it never
+    wraps
+    an HTTP response."""

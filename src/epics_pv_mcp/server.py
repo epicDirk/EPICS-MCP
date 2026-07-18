@@ -37,7 +37,9 @@ from epics_pv_mcp.tools.monitor import _monitor_pv
 from epics_pv_mcp.tools.naming import _lookup_device_name
 from epics_pv_mcp.tools.olog import (
     _create_log_entry,
+    _download_log_attachment,
     _get_log_entry,
+    _list_log_attachments,
     _list_logbooks,
     _list_tags,
     _reply_to_log,
@@ -81,15 +83,19 @@ def build_instructions(display_tools_available: bool) -> str:
         "test sandbox — loopback URL AND EPICS_MCP_OLOG_ASSUME_TEST_DATA — where entries come "
         "back whole; run epics-doctor to see which). "
         "It can also WRITE to the Olog logbook "
-        "(create_log_entry / reply_to_log) behind an OWN gate (EPICS_MCP_ALLOW_OLOG_WRITE + a "
-        "test-server URL boundary + a logbook allowlist + a rate limit; the author is the write "
-        "service account, not spoofable) — ALLOW_PV_WRITE is a separate gate and stays off. The "
+        "(create_log_entry / reply_to_log, which can carry attachments of any file type) behind an "
+        "OWN gate (EPICS_MCP_ALLOW_OLOG_WRITE + a "
+        "test-server URL boundary + a logbook allowlist + an upload-size cap + a rate limit; the "
+        "author is the write "
+        "service account, not spoofable) — ALLOW_PV_WRITE is a separate gate and stays off. "
+        "Attachment BYTES (download_log_attachment) come back only from a declared local sandbox "
+        "AND with EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD (they bypass the entry redaction). The "
         "PV-mutating tool, set_pv_value, is gated OFF by "
         "default and additionally requires EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, "
         "a rate limit and an audit log. The REST-backed tools (find_channels, is_archived, "
         "get_pv_history, get_archive_info, list_archived_pvs, is_alarm_configured, "
         "get_alarm_history, lookup_device_name, search_logbook, get_log_entry, list_logbooks, "
-        "list_tags) stay disabled "
+        "list_tags, list_log_attachments, download_log_attachment) stay disabled "
         "until their *_URL env vars are set; an empty URL means "
         "no client and no network call. Network reach is decided by the LAUNCHER, not by this "
         "server: it opens no non-local connection until the EPICS address-list environment "
@@ -833,6 +839,20 @@ async def create_log_entry(
     tags: Annotated[
         str | None, Field(description="Comma-separated tag name(s) — must already exist")
     ] = None,
+    attachments: Annotated[
+        str | None,
+        Field(
+            description="Comma-separated workspace file path(s) to upload with the entry — "
+            "any file type, arbitrary size (create-with-attachments, PUT /logs/multipart)"
+        ),
+    ] = None,
+    embed_image_base64: Annotated[
+        str | None,
+        Field(
+            description="A single small base64-encoded image, uploaded and embedded inline in the "
+            "body via ![](attachment/<id>) — e.g. an opi-live take_screenshot PNG"
+        ),
+    ] = None,
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
 ) -> dict[str, object]:
     """Post a new entry to the Phoebus Olog electronic logbook (Olog REST PUT /logs).
@@ -846,6 +866,10 @@ async def create_log_entry(
     sandbox — where a write can therefore verify what it just wrote). A write response that is not
     the created entry raises a loud error — it is never projected as a fabricated confirmation.
     With EPICS_MCP_OLOG_URL unset the tool returns enabled=false and makes no network call.
+
+    With attachments (workspace file paths, any type/size) the entry is sent as multipart; their
+    total size is capped (EPICS_MCP_OLOG_ATTACH_MAX_BYTES) and only HEIC is refused server-side. The
+    response echoes attachments_uploaded (the {id[, filename]} of each — filename whole-mode only).
     """
     return await _create_log_entry(
         title=title,
@@ -853,6 +877,8 @@ async def create_log_entry(
         description=description,
         level=level,
         tags=tags,
+        attachments=attachments,
+        embed_image_base64=embed_image_base64,
         timeout=timeout,
     )
 
@@ -879,12 +905,26 @@ async def reply_to_log(
     tags: Annotated[
         str | None, Field(description="Comma-separated tag name(s) — must already exist")
     ] = None,
+    attachments: Annotated[
+        str | None,
+        Field(
+            description="Comma-separated workspace file path(s) to upload with the reply "
+            "(any type/size)"
+        ),
+    ] = None,
+    embed_image_base64: Annotated[
+        str | None,
+        Field(description="A single small base64-encoded image to embed inline in the reply body"),
+    ] = None,
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
 ) -> dict[str, object]:
     """Reply to an existing Phoebus Olog entry (Olog REST PUT /logs?inReplyTo=log_id).
 
     MUTATING. Same gate, service account, and DS-PRIVACY redaction as create_log_entry — it threads
-    the new entry to log_id via the Olog Log Entry Group. A log_id that identifies no existing entry
+    the new entry to log_id via the Olog Log Entry Group. A reply is its own entry, so it carries
+    its
+    OWN attachments (workspace file paths, any type/size). A log_id that identifies no existing
+    entry
     returns a clear HTTP 400 error. Disabled by default (needs EPICS_MCP_OLOG_URL +
     EPICS_MCP_ALLOW_OLOG_WRITE).
     """
@@ -895,8 +935,100 @@ async def reply_to_log(
         description=description,
         level=level,
         tags=tags,
+        attachments=attachments,
+        embed_image_base64=embed_image_base64,
         timeout=timeout,
     )
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        # NOT read-only: with output_path it writes a file to the workspace (it refuses to
+        # overwrite,
+        # so not destructive; and a re-download to the same path then fails, so not idempotent).
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def download_log_attachment(
+    log_id: Annotated[
+        str | None,
+        Field(description="Id of the Olog entry the attachment belongs to (with filename)"),
+    ] = None,
+    filename: Annotated[
+        str | None,
+        Field(description="Attachment filename to download (needs log_id) — the primary route"),
+    ] = None,
+    attachment_id: Annotated[
+        str | None,
+        Field(
+            description="Attachment GridFS id (the by-id route inline images use) — an alternative "
+            "to log_id + filename"
+        ),
+    ] = None,
+    output_path: Annotated[
+        str | None,
+        Field(
+            description="Workspace file path to write the bytes to (a NEW file) — the default "
+            "handover for any size"
+        ),
+    ] = None,
+    as_base64: Annotated[
+        bool,
+        Field(
+            description="Return the bytes base64-encoded in the result instead (small files only)"
+        ),
+    ] = False,
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """Download one Phoebus Olog attachment's raw bytes (GET /logs/attachments/{id}/{name} or
+    /attachment/{id}).
+
+    Identify it by (log_id + filename) or by attachment_id. POSTURE-GATED: raw bytes leave ONLY
+    from a
+    declared local test sandbox (loopback EPICS_MCP_OLOG_URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA) AND
+    with EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD=true — otherwise the result is withheld=true and
+    NO
+    byte fetch happens (bytes bypass the entry redaction, and the by-id endpoint has no server-side
+    per-log auth, so byte egress is a deliberate opt-in). Bytes cross the boundary written to
+    output_path (a NEW workspace file, EPICS_MCP_ALLOWED_ROOTS-checked) or base64 in the result
+    (as_base64, small files). With EPICS_MCP_OLOG_URL unset returns enabled=false.
+    """
+    return await _download_log_attachment(
+        log_id=log_id,
+        filename=filename,
+        attachment_id=attachment_id,
+        output_path=output_path,
+        as_base64=as_base64,
+        timeout=timeout,
+    )
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def list_log_attachments(
+    log_id: Annotated[str, Field(description="Id of the Olog entry whose attachments to list")],
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """List one Phoebus Olog entry's attachments.
+
+    Returns each attachment's id + fileMetadataDescription always, and its filename ONLY from a
+    declared local sandbox (whole-mode — a filename is author free text). found=false for a
+    definitive
+    404. With EPICS_MCP_OLOG_URL unset returns enabled=false. Use the ids/filenames with
+    download_log_attachment.
+    """
+    return await _list_log_attachments(log_id, timeout)
 
 
 @mcp.tool(

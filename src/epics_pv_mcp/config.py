@@ -144,6 +144,33 @@ class EpicsConfig(BaseSettings):
     # remote's CA must come from ca_bundle (EPICS_MCP_CA_BUNDLE).
     olog_write_allow_remote: bool = False
 
+    # --- Olog ATTACHMENT surface (OA1) ---
+    # A downloaded attachment's raw BYTES and its FILENAME are author-written free text (a person
+    # can
+    # be named in either) and BYPASS the dict-based redact_record barrier — so they need their own
+    # gate at the byte boundary. Raw bytes leave ONLY when the read posture is already whole-mode
+    # (loopback url AND olog_assume_test_data, i.e. OlogClient._redact is False) AND this flag is
+    # explicitly set. A SECOND, deliberate opt-in on top of the whole-mode signal (defense-in-depth,
+    # like the write gate): the by-id endpoint /Olog/attachment/{id} has no server-side per-log
+    # authorization, so un-redacted byte egress stays an intentional, auditable choice. Default
+    # false
+    # = never emit raw attachment bytes. Filenames follow the whole-mode boundary alone (they are a
+    # lesser exposure and already visible in a whole-mode entry read); this flag gates only the
+    # bytes.
+    olog_allow_attachment_download: bool = False
+    # Client-side anti-DoS cap on attachment bytes, both directions. On UPLOAD it caps the TOTAL
+    # size,
+    # checked in the Olog write gate BEFORE the files are read (a stat-sum, so an over-limit file is
+    # never materialised). On DOWNLOAD it caps the body (a Content-Length over it is refused before
+    # any
+    # read; the stream is accumulated only up to the cap), so a huge attachment never OOMs the
+    # process
+    # — a base64 download is capped further still (response tokens). ge=1; default 50 MiB. The Olog
+    # SERVER enforces its own upload limit (HTTP 413, profile-dependent — 50/100 MB under the docker
+    # profile); this is the MCP's own fail-fast, not a mirror of the server value (reading GET /Olog
+    # serverConfig is deferred, OA10).
+    olog_attach_max_bytes: int = Field(default=52_428_800, ge=1)
+
 
 _config: EpicsConfig | None = None
 _config_lock = threading.Lock()

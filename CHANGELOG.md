@@ -9,6 +9,18 @@ carry breaking changes).
 
 ### Added
 
+- **Olog attachments (OA1).** `create_log_entry` / `reply_to_log` now take `attachments` (workspace
+  file paths, any type/size — sent as multipart `PUT /logs/multipart`, mirroring CS-Studio) and
+  `embed_image_base64` (a small inline image embedded via `![](attachment/<id>)`). Two new read
+  tools: `list_log_attachments` (id + metadata; filename **whole-mode only**) and
+  `download_log_attachment` (raw bytes by log+filename or GridFS id, to a workspace `output_path` or
+  `as_base64`). Bytes bypass the entry redaction, so a download is **withheld** unless whole-mode
+  **and** the new `EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD` opt-in; uploads ride the existing Olog
+  write gate, extended with a size cap (`EPICS_MCP_OLOG_ATTACH_MAX_BYTES`) that also bounds the
+  download body (anti-OOM; a base64 download is capped further). A download `output_path` is a NEW
+  file — it refuses to overwrite and refuses a symlink target (no data loss, no boundary escape).
+  Verified against a live loopback Olog with a byte-identical round-trip. The no-attachment create
+  path is unchanged.
 - `python -m epics_pv_mcp.find_moderate_pv`: read-only fixture finder — walks the MGMT
   event-rate report (omitting `limit` returns the whole report — near-complete, measured
   against `getAllPVs`; `limit` behaves as if applied per cluster member and merged, measured),

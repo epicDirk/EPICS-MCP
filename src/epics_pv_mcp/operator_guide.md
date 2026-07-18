@@ -50,7 +50,8 @@ are simply absent — that is an unmet optional extra, not a bug.
 `get_pv_value` · `get_pvs` · `set_pv_value` · `get_pv_info` · `monitor_pv` · `discover_pvs` ·
 `find_channels` · `lookup_device_name` · `is_archived` · `get_pv_history` · `get_archive_info` ·
 `list_archived_pvs` · `is_alarm_configured` · `get_alarm_history` · `diagnose_connection` ·
-`search_logbook` · `get_log_entry` · `list_logbooks` · `list_tags` · `create_log_entry` · `reply_to_log`
+`search_logbook` · `get_log_entry` · `list_logbooks` · `list_tags` · `create_log_entry` · `reply_to_log` ·
+`list_log_attachments` · `download_log_attachment`
 
 **Optional `[displays]` — cross-plane with the operator-screen PV inventory:**
 `validate_pvs` · `crossplane_check` · `coverage_audit` · `find_device`
@@ -139,6 +140,35 @@ The author (`owner`) is the write service account (`EPICS_MCP_OLOG_WRITE_USER`, 
 never a personal login), set server-side from the auth Principal; a caller cannot spoof it. Use a
 loopback Olog for testing; the target logbooks must already exist server-side (a non-existent logbook
 is an HTTP 400).
+
+### Olog attachment posture (upload + download)
+
+Attachments are the one Olog surface where raw bytes cross the boundary, so the posture has two tiers.
+
+**Upload** (`create_log_entry` / `reply_to_log` with `attachments` = workspace file paths, or
+`embed_image_base64`): the entry is sent as `multipart/form-data` to `PUT /logs/multipart` (mirroring
+CS-Studio's own client) instead of the plain JSON `PUT /logs` — the no-attachment path is unchanged. It
+rides the SAME write gate as a plain post (env + URL boundary + logbook allowlist + rate limit), plus a
+**total-size cap** (`EPICS_MCP_OLOG_ATTACH_MAX_BYTES`, checked from file `stat` BEFORE any bytes are
+read, so an over-limit file is never loaded). Any file type is accepted (only HEIC is refused
+server-side, by content-sniff); an over-limit request is the server's HTTP 413. The audit line carries
+attachment COUNT + total BYTES, never a filename (a filename is author free text). Each attachment gets
+a client-minted UUID and an id-prefixed unique filename (`<uuid>_<name>`), so a by-name download can
+never hit the server's duplicate-filename 404.
+
+**Download** (`download_log_attachment` — by `log_id`+`filename`, or by GridFS `attachment_id`) and the
+filenames in `list_log_attachments`: raw bytes and filenames are author free text and BYPASS the entry
+redaction, so they leave only in **whole-mode** (loopback URL + `ASSUME_TEST_DATA`) — and the raw BYTES
+additionally require the explicit **`EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD`** opt-in (default false =
+withheld). Two reasons for the second gate: bytes sidestep the dict-based redaction entirely, and the
+by-id endpoint has NO server-side per-log authorization (any valid GridFS id grants content) — so
+un-redacted byte egress is a deliberate, auditable choice, not implied by the URL. Bytes cross the MCP
+boundary as a workspace file `output_path` (a NEW file, `EPICS_MCP_ALLOWED_ROOTS`-checked — it refuses
+to overwrite an existing file or follow a symlink, so a download never loses data or escapes the
+boundary) or, for a small inline image, base64 in the result. The download body is size-capped by
+`EPICS_MCP_OLOG_ATTACH_MAX_BYTES` (a base64 result is capped smaller still — it rides back as response
+tokens), so a huge attachment cannot OOM the process. `epics-doctor`'s Olog posture line already tells
+you whether whole-mode is in effect.
 
 ## Operational recipes (the non-obvious parts)
 

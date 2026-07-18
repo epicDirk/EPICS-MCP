@@ -200,8 +200,10 @@ To reach a real control system, set the address list in the launcher's environme
 | `get_log_entry` | Phoebus Olog — one entry by id (same redaction; 404 = definitive found:false, everything else — incl. an unreadable 2xx — errors; disabled → found:null) | `EPICS_MCP_OLOG_URL` |
 | `list_logbooks` | Phoebus Olog — list the valid logbook names (name-only; owners dropped) | `EPICS_MCP_OLOG_URL` |
 | `list_tags` | Phoebus Olog — list the valid tag names | `EPICS_MCP_OLOG_URL` |
-| `create_log_entry` | Phoebus Olog — **post** a log entry (MUTATING; own gate + test-server URL boundary + logbook allowlist + rate limit; author = the service account, not spoofable; response redacted) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` |
-| `reply_to_log` | Phoebus Olog — **reply** to an entry (threads via the Log Entry Group; same gate/redaction as create_log_entry; bad id → 400) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` |
+| `create_log_entry` | Phoebus Olog — **post** a log entry (MUTATING; own gate + test-server URL boundary + logbook allowlist + upload-size cap + rate limit; author = the service account, not spoofable; response redacted). Optional `attachments` (workspace file paths, any type/size — multipart) + `embed_image_base64` (small inline image) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` |
+| `reply_to_log` | Phoebus Olog — **reply** to an entry (threads via the Log Entry Group; same gate/redaction/attachments as create_log_entry; bad id → 400) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` |
+| `list_log_attachments` | Phoebus Olog — list one entry's attachments (id + fileMetadataDescription; filename **whole-mode only** — author free text; 404 → found:false) | `EPICS_MCP_OLOG_URL` |
+| `download_log_attachment` | Phoebus Olog — download one attachment's raw **bytes** by (log_id + filename) or GridFS id, to a workspace `output_path` or `as_base64`. **Withheld** unless whole-mode **AND** `EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD` (bytes bypass the entry redaction) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD` |
 
 **Display-aware** (require the optional `[displays]` extra)
 
@@ -323,6 +325,8 @@ All settings are read from environment variables with the `EPICS_MCP_` prefix.
 | `EPICS_MCP_OLOG_WRITE_RATE_LIMIT` | `5` | Max Olog writes per 60 s window |
 | `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` | _(empty)_ | Comma-separated exact base URLs allowed as non-loopback write targets (only with `_ALLOW_REMOTE`) |
 | `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE` | `false` | Permit writes to a non-loopback (allowlisted) Olog. Default false: only loopback is writable. A remote **must** be `https://` — a plain-http remote is refused (Basic creds are cleartext). The write session is env-independent (no proxy/`REQUESTS_CA_BUNDLE` env): give a remote's CA via `EPICS_MCP_CA_BUNDLE` |
+| `EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD` | `false` | Opt-in for `download_log_attachment` to hand back raw **bytes** (+ list filenames): only in whole-mode (loopback + `ASSUME_TEST_DATA`) **and** with this set. Bytes bypass the entry redaction; the by-id endpoint has no server-side per-log auth — so byte egress is a deliberate choice |
+| `EPICS_MCP_OLOG_ATTACH_MAX_BYTES` | `52428800` | Client-side cap on total upload bytes (checked before files are read; the server enforces its own 413) |
 
 **EPICS network** (standard EPICS env; controls what the server can reach)
 

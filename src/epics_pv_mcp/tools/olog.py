@@ -12,12 +12,25 @@ from __future__ import annotations
 
 from epics_pv_mcp.services.checkers import (
     query_olog_create,
+    query_olog_download,
     query_olog_entry,
+    query_olog_list_attachments,
     query_olog_logbooks,
     query_olog_search,
     query_olog_tags,
 )
 from epics_pv_mcp.services.olog_client import DEFAULT_MAX_LOGS
+
+
+def _split_paths(value: str | None) -> list[str]:
+    """Split a comma-separated attachment-paths argument into stripped, non-empty paths.
+
+    Comma is the tool-layer convention (as for logbooks/tags); a workspace file path rarely contains
+    one. The service layer canonicalises + existence-checks each path (a comma inside a real path
+    would surface there as a clear ``INVALID_INPUT``)."""
+    if not value:
+        return []
+    return [token.strip() for token in value.split(",") if token.strip()]
 
 
 def _split_names(value: str | None) -> list[str]:
@@ -85,13 +98,18 @@ async def _create_log_entry(
     description: str | None = None,
     level: str | None = None,
     tags: str | None = None,
+    attachments: str | None = None,
+    embed_image_base64: str | None = None,
     timeout: float = 5.0,
 ) -> dict[str, object]:
-    """Create a Phoebus Olog log entry. MUTATING, gated; the response follows the same output
-    posture as a read.
+    """Create a Phoebus Olog log entry, optionally with attachments. MUTATING, gated; the response
+    follows the same output posture as a read.
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_create`. *logbooks* and
-    *tags* are comma-separated names (split here into the lists the service expects).
+    *tags* are comma-separated names; *attachments* are comma-separated workspace file paths
+    uploaded
+    with the entry (create-with-attachments, arbitrary type/size); *embed_image_base64* is a single
+    small inline image, embedded in the body via ``![](attachment/<uuid>)``.
     """
     return await query_olog_create(
         title=title,
@@ -99,6 +117,8 @@ async def _create_log_entry(
         description=description,
         level=level,
         tags=_split_names(tags) or None,
+        attachments=_split_paths(attachments) or None,
+        embed_image_base64=embed_image_base64,
         timeout=timeout,
     )
 
@@ -110,13 +130,16 @@ async def _reply_to_log(
     description: str | None = None,
     level: str | None = None,
     tags: str | None = None,
+    attachments: str | None = None,
+    embed_image_base64: str | None = None,
     timeout: float = 5.0,
 ) -> dict[str, object]:
     """Reply to an existing Olog entry (threads via the Log Entry Group). MUTATING, gated, redacted.
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_create` with
-    ``in_reply_to=log_id`` — the same client/server code path as a create. A *log_id* that does not
-    identify an existing entry → HTTP 400 (a clear error).
+    ``in_reply_to=log_id`` — the same client/server code path as a create (a reply is its own entry,
+    so it carries its OWN attachments). A *log_id* that does not identify an existing entry → HTTP
+    400.
     """
     return await query_olog_create(
         title=title,
@@ -124,6 +147,38 @@ async def _reply_to_log(
         description=description,
         level=level,
         tags=_split_names(tags) or None,
+        attachments=_split_paths(attachments) or None,
+        embed_image_base64=embed_image_base64,
         in_reply_to=log_id,
         timeout=timeout,
     )
+
+
+async def _download_log_attachment(
+    log_id: str | None = None,
+    filename: str | None = None,
+    attachment_id: str | None = None,
+    output_path: str | None = None,
+    as_base64: bool = False,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    """Download one Olog attachment's raw bytes (posture-gated).
+
+    Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_download`.
+    """
+    return await query_olog_download(
+        log_id=log_id,
+        filename=filename,
+        attachment_id=attachment_id,
+        output_path=output_path,
+        as_base64=as_base64,
+        timeout=timeout,
+    )
+
+
+async def _list_log_attachments(log_id: str, timeout: float = 5.0) -> dict[str, object]:
+    """List one Olog entry's attachments (filenames whole-mode only).
+
+    Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_list_attachments`.
+    """
+    return await query_olog_list_attachments(log_id, timeout=timeout)

@@ -70,24 +70,52 @@ actually been PROBED live against a running Olog (2026-07-15), and what has not:
 from __future__ import annotations
 
 import functools
+import json
+from typing import TypedDict
+from urllib.parse import quote
 
 import requests
 
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.services._http import (
+    MultipartFiles,
     build_retrying_session,
     build_write_session,
     http_status,
     is_http_400,
     is_http_404,
     is_loopback_url,
+    rest_get_bytes,
     rest_get_json,
     rest_put_json,
+    rest_put_multipart,
 )
 from epics_pv_mcp.services._time_window import TimeWindowFormatError
-from epics_pv_mcp.services.olog_exceptions import OlogConnectionError, OlogResponseError
+from epics_pv_mcp.services.olog_exceptions import (
+    OlogAttachmentDownloadDenied,
+    OlogConnectionError,
+    OlogResponseError,
+)
 from epics_pv_mcp.services.olog_time import OLOG_WIRE_TZ, normalize_olog_time
 from epics_pv_mcp.services.redact import redact_record
+
+
+class AttachmentUpload(TypedDict):
+    """One attachment ready for a multipart upload — the service-layer hands these to the client.
+
+    ``id`` is the client-generated UUID (the checker mints it — deterministic, injectable).
+    ``filename`` is the per-submission-unique ``<id>_<basename>`` (id-prefixed so a by-name
+    download can never hit the server's duplicate-filename 404). ``content`` is the raw bytes;
+    ``content_type`` the guessed MIME (``None`` → the wire falls back to octet-stream, mirroring
+    CS-Studio's ``Files.probeContentType`` fallback). The client turns ``content_type`` into the
+    Olog ``fileMetadataDescription`` metadata string (``"image"``/``"file"``) — NOT a MIME.
+    """
+
+    id: str
+    filename: str
+    content: bytes
+    content_type: str | None
+
 
 # Default cap on returned log entries (a wide/empty search is otherwise unbounded).
 DEFAULT_MAX_LOGS = 50
@@ -274,6 +302,7 @@ class OlogClient:
         timeout: float = 5.0,
         auth_header: str | None = None,
         assume_test_data: bool | None = None,
+        allow_attachment_download: bool | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -294,6 +323,12 @@ class OlogClient:
         if assume_test_data is None:
             assume_test_data = get_config().olog_assume_test_data
         self._redact = not (is_loopback_url(self.base_url) and assume_test_data)
+        # OA1: a SEPARATE, explicit opt-in for handing back raw attachment BYTES/filenames on top of
+        # whole-mode (defense-in-depth — the by-id endpoint has no server-side per-log auth). Read
+        # from config when not passed (tests pass it explicitly). See ``attachment_bytes_allowed``.
+        if allow_attachment_download is None:
+            allow_attachment_download = get_config().olog_allow_attachment_download
+        self._allow_attachment_download = allow_attachment_download
 
     @functools.cached_property
     def _write_session(self) -> requests.Session:
@@ -499,8 +534,14 @@ class OlogClient:
         level: str | None = None,
         tags: list[str] | None = None,
         in_reply_to: str | None = None,
+        attachments: list[AttachmentUpload] | None = None,
     ) -> dict[str, object]:
         """Create a log entry (``PUT /logs``) and return it DS-PRIVACY-redacted.
+
+        With *attachments* the entry is sent as ``multipart/form-data`` to ``PUT /logs/multipart``
+        instead (create-with-attachments, OA1 — the CS-Studio ``OlogHttpClient.save`` path); WITHOUT
+        them the plain ``PUT /logs`` JSON path is byte-identical to before. Either way the response
+        leaves through the same :meth:`_project`.
 
         *title* and *logbooks* are mandatory server-side (empty → HTTP 400); the named logbooks and
         tags MUST already exist (else 400). *in_reply_to* (wire query ``inReplyTo``) threads the new
@@ -533,31 +574,44 @@ class OlogClient:
         if in_reply_to is not None:
             params["inReplyTo"] = str(in_reply_to)
         try:
-            data = rest_put_json(
-                # The dedicated write session (no retries, env-independent) — NOT self.session:
-                # a lost non-idempotent PUT must not be replayed into a duplicate entry (S23/F06),
-                # and the Basic auth header must not leak through an inherited proxy (S23/N03).
-                self._write_session,
-                f"{self.base_url}/logs",
-                body,
-                self.timeout,
-                params=params or None,
-                headers={"X-Olog-Client-Info": _CLIENT_INFO},
-                conn_exc=OlogConnectionError,
-                resp_exc=OlogResponseError,
-                # Never follow a redirect on a write: the gate approved THIS host, and a hop would
-                # carry the body and the Basic auth header somewhere it never inspected.
-                allow_redirects=False,
-            )
+            if attachments:
+                data = self._put_multipart(body, attachments, params)
+            else:
+                data = rest_put_json(
+                    # The dedicated write session (no retries, env-independent) — NOT self.session:
+                    # a lost non-idempotent PUT must not be replayed into a duplicate entry
+                    # (S23/F06),
+                    # and the Basic auth header must not leak through an inherited proxy (S23/N03).
+                    self._write_session,
+                    f"{self.base_url}/logs",
+                    body,
+                    self.timeout,
+                    params=params or None,
+                    headers={"X-Olog-Client-Info": _CLIENT_INFO},
+                    conn_exc=OlogConnectionError,
+                    resp_exc=OlogResponseError,
+                    # Never follow a redirect on a write: the gate approved THIS host, and a hop
+                    # would
+                    # carry the body and the Basic auth header somewhere it never inspected.
+                    allow_redirects=False,
+                )
         except OlogResponseError as exc:
-            # Re-raise a clearer message for the two actionable statuses, chaining from the ORIGINAL
+            # Re-raise a clearer message for the actionable statuses, chaining from the ORIGINAL
             # transport cause (exc.__cause__, the requests HTTPError) so http_status still reads the
-            # served code downstream (the audit error_code). 5xx / anything else propagates as-is.
+            # served code downstream (the audit error_code). 5xx / anything else propagates as-is —
+            # note the multipart create wraps a saveAttachments failure as a bare 500, NOT a
+            # 400/413.
             cause = exc.__cause__ if exc.__cause__ is not None else exc
             if is_http_400(exc):
                 raise OlogResponseError(
                     "Olog rejected the entry (HTTP 400): a logbook or tag does not exist, the "
-                    "title is empty, or in_reply_to does not identify an existing entry."
+                    "title is empty, in_reply_to does not identify an existing entry, or an "
+                    "attachment is malformed / HEIC (the one file type Olog refuses)."
+                ) from cause
+            if http_status(exc) == 413:
+                raise OlogResponseError(
+                    "Olog rejected the entry (HTTP 413): an attachment or the request exceeds "
+                    "the server's size limit (maxFileSize / maxRequestSize)."
                 ) from cause
             if http_status(exc) == 401:
                 raise OlogResponseError(
@@ -567,4 +621,148 @@ class OlogClient:
             raise
         # S11: the write response must be the created log entry — any other non-empty dict used
         # to be projected as a fabricated write confirmation.
-        return self._project(_require_entry(data, "PUT /logs (create)"))
+        which = "PUT /logs/multipart (create)" if attachments else "PUT /logs (create)"
+        return self._project(_require_entry(data, which))
+
+    def _put_multipart(
+        self,
+        body: dict[str, object],
+        attachments: list[AttachmentUpload],
+        params: dict[str, str],
+    ) -> object:
+        """Send a create-with-attachments as multipart/form-data to ``PUT /logs/multipart`` (OA1).
+
+        Mirrors CS-Studio's own client (``OlogHttpClient.save`` → ``HttpRequestMultipartBody``): the
+        log JSON gains an ``attachments`` array (one ``{id, filename, fileMetadataDescription}`` per
+        file, paired to a ``files`` part by ``filename``) and is sent as a ``logEntry`` text part
+        plus
+        one ``files`` part per attachment. ``markup=commonmark`` is added so inline-image markup
+        renders (the JSON create path deliberately keeps its byte-identical no-markup behaviour).
+        Uses
+        ``_write_session`` for the same non-idempotent-PUT reasons as the JSON path; ``requests``
+        sets
+        the ``Content-Type`` boundary itself, so no manual one is passed.
+        """
+        log_json = dict(body)
+        log_json["attachments"] = [
+            {
+                "id": item["id"],
+                "filename": item["filename"],
+                # "fileMetadataDescription" is Olog's metadata STRING ("image"/"file"), NOT a MIME —
+                # CS-Studio sets exactly these two values (AttachmentsEditorController:313-317).
+                "fileMetadataDescription": (
+                    "image" if (item["content_type"] or "").startswith("image") else "file"
+                ),
+            }
+            for item in attachments
+        ]
+        files: MultipartFiles = [("logEntry", (None, json.dumps(log_json), "application/json"))]
+        files += [
+            (
+                "files",
+                (
+                    item["filename"],
+                    item["content"],
+                    item["content_type"] or "application/octet-stream",
+                ),
+            )
+            for item in attachments
+        ]
+        multipart_params = {**params, "markup": "commonmark"}
+        return rest_put_multipart(
+            self._write_session,
+            f"{self.base_url}/logs/multipart",
+            files,
+            self.timeout,
+            params=multipart_params,
+            headers={"X-Olog-Client-Info": _CLIENT_INFO},
+            conn_exc=OlogConnectionError,
+            resp_exc=OlogResponseError,
+            allow_redirects=False,
+        )
+
+    @property
+    def whole_mode(self) -> bool:
+        """True when entries leave WHOLE (loopback + declared test data) — the filename-visibility
+        gate. An attachment FILENAME is author free text (a person can be named in it), so it is
+        surfaced only in whole-mode; raw attachment BYTES need the additional explicit opt-in
+        (:attr:`attachment_bytes_allowed`). The inverse of the internal ``_redact`` flag, exposed so
+        the service layer gates filenames off the SAME decision rather than re-deriving it."""
+        return not self._redact
+
+    @property
+    def attachment_bytes_allowed(self) -> bool:
+        """True iff raw attachment bytes/filenames may leave: whole-mode AND the explicit opt-in.
+
+        The ONE place the download posture is decided. ``_redact is False`` is the whole-mode signal
+        (loopback URL AND declared test data); ``_allow_attachment_download`` is the second,
+        deliberate
+        opt-in on top (the by-id endpoint ``/attachment/{id}`` has no server-side per-log auth, so
+        byte
+        egress stays an intentional choice — decision a). The service layer checks this BEFORE any
+        byte
+        fetch and withholds structurally; the download methods re-check it as a defense-in-depth
+        backstop (:meth:`_require_attachment_bytes_allowed`).
+        """
+        return (not self._redact) and self._allow_attachment_download
+
+    def _require_attachment_bytes_allowed(self) -> None:
+        """Backstop: raise :class:`OlogAttachmentDownloadDenied` unless bytes may leave."""
+        if not self.attachment_bytes_allowed:
+            raise OlogAttachmentDownloadDenied(
+                "Raw Olog attachment bytes are withheld: this needs a declared local test sandbox "
+                "(loopback URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA) AND "
+                "EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD=true."
+            )
+
+    def _attachment_max_bytes(self, max_bytes: int | None) -> int:
+        """The effective download size cap: *max_bytes* if given, else the configured upload cap.
+
+        The download reuses ``olog_attach_max_bytes`` so a fetch is bounded symmetrically with an
+        upload (anti-OOM); a caller can pass a SMALLER cap (the base64 lane does, to bound the
+        response tokens)."""
+        return max_bytes if max_bytes is not None else get_config().olog_attach_max_bytes
+
+    def get_attachment(
+        self, log_id: str, filename: str, *, max_bytes: int | None = None
+    ) -> tuple[bytes, str | None, str | None]:
+        """Download one attachment by log id + filename → ``(bytes, filename, content_type)``.
+
+        ``GET /logs/attachments/{logId}/{name}`` — *name* is a single path segment, percent-encoded
+        with ``quote(safe="")`` (a space becomes ``%20``, matching CS-Studio's ``URLEncoder`` +
+        ``+``→``%20`` fix; a ``+`` is not valid in an Olog path element). No auth (reads are open —
+        CS-Studio sends none). Guarded first by :meth:`_require_attachment_bytes_allowed`; the body
+        is
+        size-capped (*max_bytes*, default the configured upload cap) so a huge object never OOMs.
+        """
+        self._require_attachment_bytes_allowed()
+        url = f"{self.base_url}/logs/attachments/{log_id}/{quote(filename, safe='')}"
+        return rest_get_bytes(
+            self.session,
+            url,
+            self.timeout,
+            max_bytes=self._attachment_max_bytes(max_bytes),
+            conn_exc=OlogConnectionError,
+            resp_exc=OlogResponseError,
+            allow_redirects=False,
+        )
+
+    def get_attachment_by_id(
+        self, attachment_id: str, *, max_bytes: int | None = None
+    ) -> tuple[bytes, str | None, str | None]:
+        """Download one attachment by its GridFS id → ``(bytes, server_filename, content_type)``.
+
+        ``GET /attachment/{id}`` — the route an inline image (``![](attachment/<id>)``) resolves to.
+        Same posture backstop, redirect refusal and size cap as :meth:`get_attachment`.
+        """
+        self._require_attachment_bytes_allowed()
+        url = f"{self.base_url}/attachment/{quote(attachment_id, safe='')}"
+        return rest_get_bytes(
+            self.session,
+            url,
+            self.timeout,
+            max_bytes=self._attachment_max_bytes(max_bytes),
+            conn_exc=OlogConnectionError,
+            resp_exc=OlogResponseError,
+            allow_redirects=False,
+        )

@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import ipaddress
 import logging
+from email.message import Message
 from typing import Any
 
 import requests
@@ -308,6 +309,171 @@ def rest_put_json(
         return resp.json()
     except requests.exceptions.RequestException as exc:
         logger.debug("REST PUT failed for %s: %s", url, exc)
+        if isinstance(exc, requests.exceptions.ConnectionError):
+            raise conn_exc(f"Failed to connect to {url}: {exc}") from exc
+        raise resp_exc(f"Request failed ({url}): {exc}") from exc
+
+
+#: A ``requests`` multipart ``files=`` payload as a LIST of ``(part_name, (filename, content,
+#: content_type))`` tuples — deliberately a list, never a dict: the Olog multipart carries several
+#: parts all named ``files``, and a dict would silently keep only the last (requests collapses
+#: duplicate keys). ``filename`` is ``None`` for a text part (the ``logEntry`` JSON) and the unique
+#: filename for a file part; ``content`` is a JSON ``str`` or the raw file ``bytes``.
+MultipartFiles = list[tuple[str, tuple[str | None, str | bytes, str]]]
+
+
+def rest_put_multipart(
+    session: requests.Session,
+    url: str,
+    files: MultipartFiles,
+    timeout: float,
+    *,
+    params: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
+    conn_exc: type[RestConnectionError],
+    resp_exc: type[RestResponseError],
+    allow_redirects: bool = False,
+) -> object:
+    """PUT a ``multipart/form-data`` body to *url* and return JSON — the multipart mirror of
+    :func:`rest_put_json` (same error contract, chained via ``from`` so :func:`http_status` reads
+    the
+    served code).
+
+    *files* is a LIST of ``(name, (filename, content, content_type))`` tuples (see
+    :data:`MultipartFiles`). ``requests`` builds the multipart body from it AND sets the
+    ``Content-Type: multipart/form-data; boundary=…`` header itself — so this function passes **no**
+    manual ``Content-Type`` header (one would clobber the boundary and the server could not parse
+    the
+    body). This mirrors CS-Studio's own client, which builds the same body by hand
+    (``HttpRequestMultipartBody``): a ``logEntry`` JSON part plus one ``files`` part per attachment.
+
+    *headers* carries per-request headers (a static client-info header); it MUST NOT include
+    ``Content-Type`` — ``requests`` sets that (with the boundary) from *files*, and an explicit one
+    would replace it and break the body. Auth rides on the session.
+
+    ``allow_redirects=False`` refuses a redirect rather than follow it (see :func:`rest_put_json`):
+    on a write a followed hop would post the body — and the Basic auth header — to a host the gate
+    never approved. Defaults to False here because every Olog attachment write is gated to a
+    specific
+    host."""
+    try:
+        resp = session.put(
+            url,
+            files=files,
+            params=params,
+            headers=headers,
+            timeout=timeout,
+            allow_redirects=allow_redirects,
+        )
+        if not allow_redirects and resp.is_redirect:
+            raise resp_exc(
+                f"Refused to follow a redirect from {url} (HTTP {resp.status_code}): the upload "
+                "would land on a redirect target, not the URL the gate approved."
+            )
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.RequestException as exc:
+        logger.debug("REST PUT (multipart) failed for %s: %s", url, exc)
+        if isinstance(exc, requests.exceptions.ConnectionError):
+            raise conn_exc(f"Failed to connect to {url}: {exc}") from exc
+        raise resp_exc(f"Request failed ({url}): {exc}") from exc
+
+
+def _filename_from_content_disposition(header: str | None) -> str | None:
+    """The download filename parsed from a ``Content-Disposition`` header value, or ``None``.
+
+    Uses the stdlib :class:`email.message.Message` parser (handles quoting and the RFC 2231
+    ``filename*=`` form), so no ad-hoc regex. Olog serves attachments with
+    ``Content-Disposition: attachment; filename=…``; the value is author free text, so callers gate
+    it under the same posture as the bytes (a person can be named in a filename).
+    """
+    if not header:
+        return None
+    message = Message()
+    message["content-disposition"] = header
+    filename = message.get_filename()
+    return filename if isinstance(filename, str) and filename else None
+
+
+def _read_body_capped(
+    resp: requests.Response, max_bytes: int | None, url: str, resp_exc: type[RestResponseError]
+) -> bytes:
+    """Read the response body, refusing anything over *max_bytes* (``None`` = no cap).
+
+    A declared ``Content-Length`` over the cap is refused BEFORE the body is read; then the streamed
+    body is accumulated only up to the cap, so a MISSING or LYING length cannot slip a huge object
+    past it. This keeps a multi-GB attachment from being materialised into the MCP process
+    memory."""
+    if max_bytes is None:
+        return resp.content
+    declared = resp.headers.get("Content-Length")
+    if declared is not None and declared.isdigit() and int(declared) > max_bytes:
+        raise resp_exc(
+            f"Response body from {url} exceeds the size cap "
+            f"({max_bytes} bytes; Content-Length {declared})."
+        )
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in resp.iter_content(chunk_size=65536):
+        total += len(chunk)
+        if total > max_bytes:
+            raise resp_exc(f"Response body from {url} exceeds the size cap ({max_bytes} bytes).")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def rest_get_bytes(
+    session: requests.Session,
+    url: str,
+    timeout: float,
+    *,
+    params: dict[str, str] | None = None,
+    max_bytes: int | None = None,
+    conn_exc: type[RestConnectionError],
+    resp_exc: type[RestResponseError],
+    allow_redirects: bool = False,
+) -> tuple[bytes, str | None, str | None]:
+    """GET raw BYTES from *url* → ``(content, filename, content_type)``, translating failures like
+    :func:`rest_get_json`.
+
+    The byte mirror of :func:`rest_get_json` for an attachment download (Olog's response body is a
+    file, not JSON). Streams (``stream=True``) and **explicitly closes the response** via the
+    context
+    manager — there is no other streaming caller in this module, so a leaked connection would be a
+    silent regression. *max_bytes* caps the body (:func:`_read_body_capped` — a Content-Length over
+    it
+    is refused before any read, and the stream is accumulated only up to the cap); ``None`` = no
+    cap,
+    but the attachment caller always passes one, so a huge object is never materialised into memory.
+    ``filename`` comes from ``Content-Disposition`` (Olog sends ``attachment; filename=…``) and
+    ``content_type`` from the response header (Olog derives it from the file extension server-side
+    and
+    may omit it → ``None``); both are surfaced but a caller applies the download privacy gate first.
+
+    ``allow_redirects=False`` refuses a redirect (see :func:`rest_get_json`): the download posture
+    is
+    decided from the CONFIGURED host, so a followed hop would let a loopback URL serve bytes from a
+    real server. Defaults to False here because the whole attachment surface is host-gated."""
+    try:
+        with session.get(
+            url,
+            params=params,
+            timeout=timeout,
+            stream=True,
+            allow_redirects=allow_redirects,
+        ) as resp:
+            if not allow_redirects and resp.is_redirect:
+                raise resp_exc(
+                    f"Refused to follow a redirect from {url} (HTTP {resp.status_code}): the bytes "
+                    "would come from a redirect target, not the configured URL."
+                )
+            resp.raise_for_status()
+            content = _read_body_capped(resp, max_bytes, url, resp_exc)
+            filename = _filename_from_content_disposition(resp.headers.get("Content-Disposition"))
+            content_type = resp.headers.get("Content-Type")
+            return content, filename, content_type
+    except requests.exceptions.RequestException as exc:
+        logger.debug("REST GET (bytes) failed for %s: %s", url, exc)
         if isinstance(exc, requests.exceptions.ConnectionError):
             raise conn_exc(f"Failed to connect to {url}: {exc}") from exc
         raise resp_exc(f"Request failed ({url}): {exc}") from exc

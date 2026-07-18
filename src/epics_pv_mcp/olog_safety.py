@@ -55,6 +55,9 @@ class OlogWriteGate:
     1. Environment gate    — ``allow_olog_write`` must be True.
     2. Test-server URL boundary — loopback ``olog_url``, else an allowlisted remote https URL.
     3. Logbook allowlist   — every target logbook ∈ ``olog_write_logbooks`` (empty = deny-all).
+    3b. Attachment size cap — ``attachment_bytes`` ≤ ``olog_attach_max_bytes`` (OA1 anti-DoS; a
+        no-op at the default ``attachment_bytes=0``). BEFORE the rate limit so it never burns a
+        token.
     4. Rate limit          — at most ``olog_write_rate_limit`` writes per 60 s window.
 
     Every rejection is audited as DENY *before* the raise, i.e. before the rate token is appended,
@@ -101,13 +104,15 @@ class OlogWriteGate:
     # Public API
     # ------------------------------------------------------------------
 
-    def check_write_allowed(self, logbooks: list[str], caller: str = "create_log_entry") -> None:
-        """Raise if an Olog write to *logbooks* must not proceed.
-
-        Raises:
-            OlogWriteDeniedError: empty logbooks, gate off, URL not permitted, or logbook not in the
-                allowlist.
-            RateLimitError: write rate limit exceeded.
+    def check_write_preconditions(
+        self, logbooks: list[str], caller: str = "create_log_entry"
+    ) -> None:
+        """The CHEAP, deterministic write checks — non-empty logbooks, env gate, URL boundary,
+        logbook allowlist — with NO rate token and NO filesystem work. Split out so an upload caller
+        can run them BEFORE it stats attachment sizes: a denied write then touches no filesystem
+        (restoring the "deny before any I/O" posture — a denied caller must not get a file-existence
+        stat oracle). The size cap + rate limit stay in :meth:`check_write_allowed`, which calls
+        this first. Each failing check audits DENY before the raise; none appends a rate token.
         """
         # 0. Non-empty logbooks — SEC-3: set() <= frozenset() is True, so an empty list would slip
         #    through the allowlist check, burn a rate token, and 400 at the server. Guard here.
@@ -147,6 +152,45 @@ class OlogWriteGate:
                 details={"logbooks": logbooks},
             )
 
+    def check_write_allowed(
+        self,
+        logbooks: list[str],
+        caller: str = "create_log_entry",
+        attachment_bytes: int = 0,
+    ) -> None:
+        """Raise if an Olog write to *logbooks* must not proceed.
+
+        *attachment_bytes* is the total size of any attachment upload (OA1); the caller sums it by
+        ``stat`` before reading files, so an over-limit request is refused before any bytes are
+        materialised. Default 0 → the size cap is a no-op for a plain (no-attachment) write.
+
+        Raises:
+            OlogWriteDeniedError: empty logbooks, gate off, URL not permitted, logbook not in the
+                allowlist, or the attachment upload exceeds ``olog_attach_max_bytes``.
+            RateLimitError: write rate limit exceeded.
+        """
+        # Checks 0-3 (the cheap, deterministic denials) run FIRST and touch no filesystem — so an
+        # upload caller can run them BEFORE it stats attachment sizes (see
+        # check_write_preconditions).
+        self.check_write_preconditions(logbooks, caller)
+
+        # 3b. Attachment size cap (OA1 anti-DoS) — BEFORE the rate limit, so an over-limit upload
+        #     never consumes a rate token, and matched by the caller reading file SIZES (stat)
+        # before
+        #     bytes, so a huge file is refused without being loaded. attachment_bytes defaults to 0
+        #     (a no-attachment write), making this a no-op for every pre-OA1 caller.
+        if attachment_bytes > self._config.olog_attach_max_bytes:
+            self._audit_deny("OLOG_ATTACH_TOO_LARGE", caller)
+            raise OlogWriteDeniedError(
+                f"Olog write refused: attachment upload of {attachment_bytes} bytes exceeds the "
+                f"limit of {self._config.olog_attach_max_bytes} bytes "
+                "(EPICS_MCP_OLOG_ATTACH_MAX_BYTES).",
+                details={
+                    "attachment_bytes": attachment_bytes,
+                    "olog_attach_max_bytes": self._config.olog_attach_max_bytes,
+                },
+            )
+
         # 4. Rate limit (sliding window) — LAST, so a denial above never consumes a token.
         # S28: purge + len-check + append are ONE atomic step under _rate_lock, so two concurrent
         # writes (this gate runs under asyncio.to_thread = real threads) can never both pass the
@@ -178,16 +222,25 @@ class OlogWriteGate:
         owner: str,
         in_reply_to: str | None = None,
         caller: str = "create_log_entry",
+        attachment_count: int = 0,
+        attachment_bytes: int = 0,
     ) -> None:
         """Log a completed (ALLOW) Olog write. Metadata only — NEVER title/description free text.
 
         ``owner`` is the write service-account name from config (the Principal the SERVER records
-        as owner, not the redacted response, which drops owner).
+        as owner, not the redacted response, which drops owner). ``attachment_count``/
+        ``attachment_bytes`` (OA1) are COUNTS/SIZES only — never a filename, which is author free
+        text
+        (a person can be named in it); they are appended only for an upload, so a plain write's
+        audit
+        line stays byte-identical.
         """
         self._emit(
             f"OLOG_WRITE event=ALLOW logbooks={self._join(logbooks)} level={self._lvl(level)} "
             f"title_len={title_len} entry_id={entry_id} owner={owner}"
-            f"{self._reply_suffix(in_reply_to)} caller={caller}"
+            f"{self._reply_suffix(in_reply_to)}"
+            f"{self._attach_suffix(attachment_count, attachment_bytes)} "
+            f"caller={caller}"
         )
 
     def audit_write_failed(
@@ -266,6 +319,14 @@ class OlogWriteGate:
     @staticmethod
     def _reply_suffix(in_reply_to: str | None) -> str:
         return f" in_reply_to={in_reply_to}" if in_reply_to is not None else ""
+
+    @staticmethod
+    def _attach_suffix(attachment_count: int, attachment_bytes: int) -> str:
+        """Metadata-only audit fragment for an upload; empty for a no-attachment write (so its audit
+        line is byte-identical to before). NEVER a filename — counts and total bytes only."""
+        if attachment_count <= 0:
+            return ""
+        return f" attachments={attachment_count} attach_bytes={attachment_bytes}"
 
     def _emit(self, message: str) -> None:
         """Single audit sink. The message is pre-formatted from discrete metadata only (no free
