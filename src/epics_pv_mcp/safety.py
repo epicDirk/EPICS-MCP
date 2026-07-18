@@ -133,15 +133,42 @@ class SafetyLayer:
                 },
             )
 
-    def audit_write(
-        self, pv_name: str, old_value: object, new_value: object, caller: str = "set_pv_value"
+    def audit_write_attempt(
+        self, pv_name: str, new_value: object, operation_id: str, caller: str = "set_pv_value"
     ) -> None:
-        """Log a completed (ALLOW) write for audit purposes."""
+        """Log a write ATTEMPT (``event=ATTEMPT``) emitted BEFORE the I/O.
+
+        Durable evidence that a write was dispatched — so a put that lands at the IOC after a
+        mid-flight cancellation (see :meth:`audit_write_unknown`) is never wholly un-recorded. The
+        ``operation_id`` correlates this line with the terminal ALLOW/FAILED/UNKNOWN_PENDING record.
+        """
         self._emit(
-            "PV_WRITE event=ALLOW pv=%s old=%r new=%r caller=%s",
+            "PV_WRITE event=ATTEMPT pv=%s new=%r op=%s caller=%s",
+            pv_name,
+            new_value,
+            operation_id,
+            caller,
+        )
+
+    def audit_write(
+        self,
+        pv_name: str,
+        old_value: object,
+        new_value: object,
+        operation_id: str = "-",
+        caller: str = "set_pv_value",
+    ) -> None:
+        """Log a completed (ALLOW) write for audit purposes.
+
+        ``operation_id`` ties this terminal record to the ``event=ATTEMPT`` line emitted before the
+        I/O (:meth:`audit_write_attempt`); ``"-"`` means uncorrelated (a direct, non-tool call).
+        """
+        self._emit(
+            "PV_WRITE event=ALLOW pv=%s old=%r new=%r op=%s caller=%s",
             pv_name,
             old_value,
             new_value,
+            operation_id,
             caller,
         )
 
@@ -151,20 +178,46 @@ class SafetyLayer:
         old_value: object,
         new_value: object,
         error_code: str,
+        operation_id: str = "-",
         caller: str = "set_pv_value",
     ) -> None:
         """Log a write that passed the safety gate but FAILED during ``pv_put``.
 
         The README promises *every* write is logged; this closes the gap where a
         failed put (or any non-:class:`EpicsError` raised below the tool layer)
-        left no forensic trace.
+        left no forensic trace. ``operation_id`` ties it to the ``event=ATTEMPT`` line.
         """
         self._emit(
-            "PV_WRITE event=FAILED pv=%s old=%r new=%r error_code=%s caller=%s",
+            "PV_WRITE event=FAILED pv=%s old=%r new=%r error_code=%s op=%s caller=%s",
             pv_name,
             old_value,
             new_value,
             error_code,
+            operation_id,
+            caller,
+        )
+
+    def audit_write_unknown(
+        self,
+        pv_name: str,
+        old_value: object,
+        new_value: object,
+        operation_id: str,
+        caller: str = "set_pv_value",
+    ) -> None:
+        """Log a write whose outcome is UNKNOWN (``event=UNKNOWN_PENDING``).
+
+        The write coroutine was cancelled mid-``pv_put``; the ``asyncio.to_thread`` worker running
+        the p4p put is NOT stopped by that cancellation, so the value may still reach the IOC. This
+        is never a FAILED write (which would imply nothing was written) and must never be blindly
+        retried (which could double-write) — the operator verifies by read-back.
+        """
+        self._emit(
+            "PV_WRITE event=UNKNOWN_PENDING pv=%s old=%r new=%r op=%s caller=%s",
+            pv_name,
+            old_value,
+            new_value,
+            operation_id,
             caller,
         )
 

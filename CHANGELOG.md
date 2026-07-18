@@ -57,6 +57,12 @@ carry breaking changes).
 
 ### Fixed
 
+- `set_pv_value` audit blind spot on cancellation (N01): a write cancelled mid-`pv_put` (asyncio
+  `CancelledError`) used to leave **no** `PV_WRITE` record even though the `asyncio.to_thread` p4p
+  put keeps running and may still land at the IOC. It now emits `event=ATTEMPT` (with a correlating
+  `op=<id>`) **before** the I/O and `event=UNKNOWN_PENDING` on cancel, then re-raises the cancel
+  unchanged — never mislabelled `FAILED`, never blindly retried. So "every write attempt is
+  audit-logged" now holds even for an interrupted write. `ALLOW`/`FAILED` carry the `op` too.
 - `NamingServiceClient` normalises `base_url` (trailing-slash strip) like the other REST
   clients, so a URL configured without a trailing slash no longer 404s.
 - README ↔ code drift: resource URIs, the full configuration table (incl. the optional

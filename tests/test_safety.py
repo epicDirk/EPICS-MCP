@@ -146,6 +146,42 @@ class TestAuditWrite:
         assert "error_code=PV_TIMEOUT" in caplog.text
         assert "TEST:pv" in caplog.text
 
+    def test_audit_write_attempt_record(
+        self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """S24: the ATTEMPT record (before the I/O) carries the new value + correlating op."""
+        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+            safety.audit_write_attempt("TEST:pv", 20.0, "w7")
+
+        assert "event=ATTEMPT" in caplog.text
+        assert "new=20.0" in caplog.text
+        assert "op=w7" in caplog.text
+        assert "caller=set_pv_value" in caplog.text
+
+    def test_audit_write_unknown_record(
+        self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """S24: a cancelled-mid-put write is recorded UNKNOWN_PENDING, not FAILED (put may land)."""
+        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+            safety.audit_write_unknown("TEST:pv", 10.0, 20.0, "w7")
+
+        assert "event=UNKNOWN_PENDING" in caplog.text
+        assert "old=10.0" in caplog.text
+        assert "new=20.0" in caplog.text
+        assert "op=w7" in caplog.text
+
+    def test_audit_write_carries_operation_id_when_given(
+        self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """S24: ALLOW/FAILED accept an op that correlates them with their ATTEMPT line; the default
+        ``"-"`` (a direct, non-tool call) keeps the pre-S24 positional call sites green."""
+        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+            safety.audit_write("TEST:pv", 10.0, 20.0, operation_id="w3")
+            safety.audit_write("TEST:pv", 10.0, 20.0)  # default op
+
+        assert "op=w3" in caplog.text
+        assert "op=-" in caplog.text
+
 
 class TestAuditDeny:
     """Rejected writes must leave a DENY audit record — and consume no rate token."""

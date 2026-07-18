@@ -67,7 +67,10 @@ This is a controls tool, so the trust questions come first:
   `EPICS_MCP_ALLOW_PV_WRITE=true` **and** a regex allowlist (`EPICS_MCP_PV_WRITE_PATTERN` —
   **required** when writes are on: an empty pattern makes the server **refuse to start** rather
   than silently allow every PV; use `.*` to deliberately allow all) **and** a per-minute rate
-  limit — every write *attempt* is audit-logged (`ALLOW`/`DENY`/`FAILED`).
+  limit — every write is audit-logged: a rejected one is `DENY`d at the gate (nothing sent); an
+  accepted one logs `ATTEMPT` before the I/O, then a terminal `ALLOW`/`FAILED` — or `UNKNOWN_PENDING`
+  if it was cancelled mid-put (the value may still land at the IOC, so verify by read-back and never
+  blindly retry).
 - **Olog logbook write is a *separate* gate.** `create_log_entry` / `reply_to_log` need
   `EPICS_MCP_ALLOW_OLOG_WRITE=true` **and** a **test-server URL boundary** (only a loopback Olog,
   or an exact **https** URL in `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` with

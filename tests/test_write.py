@@ -1,6 +1,8 @@
 """Tests for write tool functions (_set_pv_value) with safety checks."""
 
+import asyncio
 import logging
+import re
 from collections.abc import Iterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -187,3 +189,113 @@ class TestSetPvValueFailed:
         with pytest.raises(RateLimitError):
             await _set_pv_value("TEST:PV", "2.0")
         mock_pv_put.assert_awaited_once()  # second attempt never reached pv_put
+
+
+def _audit_events(caplog: pytest.LogCaptureFixture) -> list[tuple[str, str | None]]:
+    """The ``(event, op)`` of every ``PV_WRITE`` line in emission order (records preserve order)."""
+    out: list[tuple[str, str | None]] = []
+    for record in caplog.records:
+        msg = record.getMessage()
+        if "PV_WRITE" not in msg:
+            continue
+        event = msg.split("event=", 1)[1].split(" ", 1)[0]
+        match = re.search(r"\bop=(\S+)", msg)
+        out.append((event, match.group(1) if match else None))
+    return out
+
+
+class TestSetPvValueAuditTrail:
+    """S24/N01: every write emits an ATTEMPT record BEFORE the I/O, correlated by ``op`` with its
+    terminal ALLOW/FAILED/UNKNOWN_PENDING record; a write cancelled mid-``pv_put`` is recorded as
+    UNKNOWN_PENDING (never lost, never mislabelled FAILED); the cancellation always propagates."""
+
+    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.get_safety")
+    async def test_success_emits_attempt_then_allow_same_op(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        mock_pv_get.return_value = {"pv_name": "TEST:PV", "value": 1.0}
+        mock_pv_put.return_value = None
+
+        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+            await _set_pv_value("TEST:PV", "2.0")
+
+        events = _audit_events(caplog)
+        # ATTEMPT is emitted BEFORE the terminal record, and they share one op.
+        assert [e for e, _ in events] == ["ATTEMPT", "ALLOW"]
+        assert events[0][1] is not None and events[0][1] == events[1][1]
+
+    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.get_safety")
+    async def test_failed_put_emits_attempt_then_failed_same_op(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        mock_pv_get.return_value = {"pv_name": "TEST:PV", "value": 1.0}
+        mock_pv_put.side_effect = PVTimeoutError("put timed out")
+
+        with (
+            caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"),
+            pytest.raises(PVTimeoutError),
+        ):
+            await _set_pv_value("TEST:PV", "2.0")
+
+        events = _audit_events(caplog)
+        assert [e for e, _ in events] == ["ATTEMPT", "FAILED"]
+        assert events[0][1] is not None and events[0][1] == events[1][1]
+
+    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.get_safety")
+    async def test_cancel_mid_put_emits_unknown_pending_and_reraises(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # The put "hangs" (a rendezvous Event marks that we are inside pv_put), then the task is
+        # cancelled — mirroring a client disconnect / wait_for timeout while the to_thread put is
+        # in flight. No real PV is touched.
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        mock_pv_get.return_value = {"pv_name": "TEST:PV", "value": 1.0}
+
+        put_started = asyncio.Event()
+
+        async def _hang(*_args: object, **_kwargs: object) -> None:
+            put_started.set()
+            await asyncio.Event().wait()  # blocks forever → only leaves via cancellation
+
+        mock_pv_put.side_effect = _hang
+
+        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+            task = asyncio.create_task(_set_pv_value("TEST:PV", "2.0"))
+            await asyncio.wait_for(put_started.wait(), timeout=2.0)  # ensure we are inside pv_put
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        events = _audit_events(caplog)
+        # ATTEMPT (before the put) then UNKNOWN_PENDING (on cancel), correlated by op.
+        assert [e for e, _ in events] == ["ATTEMPT", "UNKNOWN_PENDING"]
+        assert events[0][1] is not None and events[0][1] == events[1][1]
+        # A cancelled write is NEVER labelled ALLOW or FAILED.
+        assert "event=ALLOW" not in caplog.text
+        assert "event=FAILED" not in caplog.text

@@ -93,6 +93,24 @@ production logbook in the clear.
 (declared local test data — ESS-spec pending)`). This is a *runtime output* policy and has nothing to do
 with keeping person data out of committed files — that is a separate, unaffected guard.
 
+### PV write posture (`set_pv_value`) — the audit trail
+
+A `set_pv_value` write leaves a `PV_WRITE` audit line at each stage, correlated by an `op=<id>` token:
+
+- `event=DENY` — the gate refused it (writes off / not in the allowlist / rate limit); nothing was sent.
+- `event=ATTEMPT` — emitted **before** the I/O; a durable record that this write was dispatched.
+- `event=ALLOW` — the put returned successfully.
+- `event=FAILED error_code=…` — the put raised (timeout, connection, or a bug tagged `INTERNAL`).
+- `event=UNKNOWN_PENDING` — **the important one.** The write coroutine was cancelled mid-put (client
+  disconnect, `wait_for` timeout, task cancel). The blocking p4p put runs in a worker thread that a
+  cancellation does **not** stop, so the value **may still reach the IOC** after the caller sees the
+  cancel. **Operator action:** treat the value as *possibly written* — read the PV back to establish
+  the real state; do **not** blindly retry (a retry can double-apply to hardware). This is why a cancel
+  is never logged as `FAILED` (which would wrongly imply nothing was written).
+
+Every terminal line shares the `op=<id>` of its `ATTEMPT`, so an interrupted write is never a silent
+gap in the trail. (A direct, non-tool call to the audit helpers logs `op=-`.)
+
 ### Olog write posture (`create_log_entry` / `reply_to_log`)
 
 Posting to the logbook is the server's first mutating operation against a REST service, so it has its
