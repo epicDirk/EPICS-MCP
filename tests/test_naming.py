@@ -383,3 +383,34 @@ def test_doctor_and_client_share_one_swagger_title() -> None:
     # Read via __dict__: the constant is imported into doctor's namespace (not re-exported), and
     # the point is that doctor resolves the SAME object as naming_identity (drift = a new object).
     assert doctor.__dict__["NAMING_SWAGGER_TITLE"] is naming_identity.NAMING_SWAGGER_TITLE
+
+
+def test_identity_verdict_is_per_instance_not_shared(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S13 cache SCOPE (QA F6): the identity verdict caches on the INSTANCE (``self._identity``),
+    never shared across clients — so a SECOND client (possibly pointed at a different host) issues
+    its OWN swagger probe and never inherits the first's ``verified``. The existing
+    ``test_identity_probed_once_per_instance`` only pins ONE instance (call_count == 1), so a mutant
+    that hoists the cache to a class-/module-level attribute would pass it; this pins TWO instances.
+    Mutant-red: sharing the verdict across instances makes the seam called ONCE, not once per
+    instance (assert 2 → 1)."""
+    seam = _stub_identity(monkeypatch, verified=True)
+    for _ in range(2):
+        client = _client_for_negative(monkeypatch, 404)
+        assert client.validate_name("X:x")["registered"] is False
+    assert seam.call_count == 2
+
+
+def test_definitive_negative_is_not_cached_refetches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S13 / DS-2 (QA F6): a definitive negative RAISES before the ``_names_cache`` write, so the
+    SAME name is re-queried on every lookup — a name may get registered later, and a cached negative
+    would go stale (worse: replay as an S11 no-status withhold). No existing test pins this: the
+    cache test loops over DISTINCT names. Mutant-red: writing ``_names_cache`` before the raise
+    makes the second same-name lookup a cache hit, so the deviceNames GET is issued once, not N
+    times (assert 3 → 1)."""
+    _stub_identity(monkeypatch, verified=True)
+    client = NamingServiceClient(base_url="http://naming.example/")
+    get = Mock(return_value=_resp({}, status=404))
+    monkeypatch.setattr(client.session, "get", get)
+    for _ in range(3):
+        assert client.validate_name("SAME:name")["registered"] is False
+    assert get.call_count == 3

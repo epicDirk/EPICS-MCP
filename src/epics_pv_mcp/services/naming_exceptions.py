@@ -40,6 +40,9 @@ class NamingServiceNotFound(NamingServiceResponseError):
     the Naming Service via its swagger beacon (``naming_client._require_verified_identity``). A 404
     caused by a WRONG base path or a FOREIGN host — which the old contract could not tell from a
     genuine "name not registered" 404, the former RESIDUAL — is now WITHHELD as a generic
-    :class:`NamingServiceResponseError` instead. The one remaining gap is a foreign host serving
-    the ESS Naming swagger verbatim (implausible).
+    :class:`NamingServiceResponseError` instead. Two residuals remain (both judged acceptable): a
+    foreign host that serves the ESS Naming swagger verbatim AND 204/404s on deviceNames
+    (implausible), and — OUTSIDE this 204/404 gate — the ungated positive/record path in
+    ``validate_name`` (a foreign 200 with a well-formed ``status`` is trusted without an identity
+    probe; the measured hazard was a foreign 404, S13 Nit 1).
     """

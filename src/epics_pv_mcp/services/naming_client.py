@@ -122,8 +122,12 @@ class NamingServiceClient:
         beacon). A foreign/misconfigured URL answering 404 because it lacks ``/rest/deviceNames/``
         is WITHHELD (raises :class:`NamingServiceResponseError`, NOT
         :class:`NamingServiceNotFound`), closing the wrong-base-path/foreign-host RESIDUAL the old
-        contract documented as open. The sole remaining gap is a foreign host that serves the ESS
-        Naming swagger verbatim (implausible).
+        contract documented as open. Two residuals remain, both judged acceptable: (1) a foreign
+        host that BOTH serves the ESS Naming swagger verbatim AND answers 204/404 on deviceNames
+        (implausible); and (2) — OUTSIDE this 204/404 gate — the ungated positive/record path
+        (:meth:`validate_name`): a foreign 200 carrying a well-formed ``status`` field is trusted
+        without an identity probe. The measured hazard was a foreign 404; gating the positive path
+        would withhold real records whenever the swagger endpoint is momentarily flaky (S13 Nit 1).
         """
         if name in self._names_cache:
             return self._names_cache[name]

@@ -387,7 +387,8 @@ async def lookup_device_name(
     the real service actually sends (measured 2026-07-16), or HTTP 404 — yields registered=false, a
     DEFINITIVE answer, but ONLY once the responder proves it is the Naming Service via its
     /rest/swagger.json identity beacon (S13): a foreign/misconfigured URL whose 404 cannot be
-    identity-confirmed is WITHHELD, not minted into a false name_typo. OBSOLETE/DELETED also yield
+    identity-confirmed is WITHHELD, not minted into a false registered=false (which would surface
+    downstream as a spurious name_typo in diagnose_connection). OBSOLETE/DELETED also yield
     registered=false with the status preserved. A service/URL failure (unreachable, 5xx, bad JSON,
     timeout), a 2xx record without a readable status, AND an unverified identity are all WITHHELD
     (registered=null + withheld=true). A registered/ACTIVE answer is returned WITHOUT an identity
