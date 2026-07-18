@@ -99,12 +99,15 @@ _PERSON_RE = re.compile(r"\bDirk\b|\bNordt\b", re.IGNORECASE)
 # enumerate: a facility has thousands, all structurally like the synthetic ones. So instead of
 # listing real names, we flag anything ESS-PV-SHAPED and pass only DECLARED synthetic placeholders.
 # The negative lookbehind anchors the match at a run boundary, so it never fires mid-token inside a
-# sanctioned 'SIM:PS-01:Cur-RB' placeholder (it would otherwise re-anchor on 'PS-01'). The head must
-# carry a digit index before the first ':' (the ESS Sec-Sub## shape), which also excludes ISO-8601
-# timestamps and bare ALLCAPS enums ('MODE1:AUTO', 'NTScalar:Value').
+# sanctioned 'SIM:PS-01:Cur-RB' placeholder (it would otherwise re-anchor on 'PS-01'). Three
+# structural gates keep it off non-PV text: (1) a digit must appear SOMEWHERE in the device path — a
+# real ESS numeric index sits either in the Section-Subsection head ('PS-01:...') OR in a later
+# device segment ('ISrc-CS:ISS-Magtr-01:...'); this alone excludes 'NTScalar:Value'. (2) The
+# [A-Z]-led head never anchors on a digit-led ISO-8601 timestamp. (3) The head needs >=1 hyphenated
+# segment (the ESS Sec-Sub## shape), which is what excludes bare ALLCAPS enums like 'MODE1:AUTO'.
 _PV_RE = re.compile(
     r"(?<![A-Za-z0-9:./-])"  # anchor at a run boundary (not mid SIM:.. / path / date)
-    r"(?=[A-Za-z0-9-]*[0-9][A-Za-z0-9-]*:)"  # head has a digit index before the first ':'
+    r"(?=[A-Za-z0-9:-]*[0-9])"  # a digit appears anywhere in the device path (head OR a segment)
     r"[A-Z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+"  # head: >=1 hyphenated segment (ESS Sec-Sub##)
     r":[A-Za-z][A-Za-z0-9-]*"  # device segment after ':'
     r"(?::[A-Za-z][A-Za-z0-9-]*)*"  # optional further ':'-segments (signal)
@@ -244,7 +247,10 @@ def test_pv_detector_flags_realistic_names_and_passes_synthetic() -> None:
     non-PV constructs. The positive fixtures use INVENTED section heads (QAB / VLXQ / WXY — no real
     ESS segment), so this assertion never itself commits a real facility name, and this file is
     excluded from the scan (see ``_tracked_text_files``). Each positive is paired with its premise:
-    the old denylist did NOT catch it — that is what makes this guard provably able to go red."""
+    the old denylist did NOT catch it — that is what makes this guard provably able to go red. Two
+    index positions are covered so the detector is not narrowed to one: the digit in the head
+    ('QAB-ZZ07:...') AND the digit in a later device segment with an alpha-only head
+    ('QAB-ZZ:Diag-BPM-09:...') — the real ESS naming family the pre-first-colon head gate missed."""
 
     def flags(name: str) -> bool:  # exact production path (scheme-strip + ISO + synthetic filter)
         return bool(_pv_leak_tokens(name))
@@ -253,6 +259,7 @@ def test_pv_detector_flags_realistic_names_and_passes_synthetic() -> None:
         "VLXQ-42:PWRC-UNIT-003:Curr-RB",
         "QAB-ZZ07:Ctrl-XVR-03",
         "WXY-QQ42:Diag-BPM-09",
+        "QAB-ZZ:Diag-BPM-09:Val",  # alpha-only head, digit in the DEVICE segment (Sec-Sub:Dev-NN)
         "pva://VLXQ-42:Ctrl-XVR-03",  # scheme-prefixed paste form (Phoebus/pvget output)
         "pvas://QAB-ZZ07:Ctrl-XVR-03",  # TLS-secured PVAccess paste form
         "SIMD-07:Ctrl-XVR-03",  # head merely STARTS with 'SIM' — not a whole-segment marker
