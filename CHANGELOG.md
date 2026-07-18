@@ -29,6 +29,18 @@ carry breaking changes).
 
 ### Changed
 
+- `epics-doctor`: a FAILED identity probe (a served non-2xx like a 401/404, a transport error, or a
+  refused redirect on the identity endpoint) is now reported as the new status
+  `identity_probe_failed` (glyph `!`) and exits **`3`** (INCONCLUSIVE), instead of collapsing into
+  `unverified`/exit `0`. A 2xx that merely could not be named (an anonymous or unreadable body, or a
+  foreign service name) stays `unverified`/exit `0`. New `--json` field `inconclusive_identity_planes`
+  carries the failed-probe planes (distinct from `unverified_planes`); `verification_complete` is now
+  also False when a probe failed. Motivation: a probe that FAILED used to be indistinguishable from a
+  reachable-but-anonymous one — the false all-clear this tool exists to catch (the S4 dead-container
+  case). Migration: a script that gated on exit `0` now sees exit `3` for a reachable-but-unidentifiable
+  plane and must read `inconclusive_identity_planes` alongside `unverified_planes` from `--json`. Also
+  fixes the redirect-refusal message wording (`rest_get_json` / `rest_put_json`): it no longer claims
+  "different host" for a same-origin redirect.
 - `epics-doctor`: a service answering with a *different* known service's name is now reported
   `unverified` (exit 0) with the found name in the detail, instead of the removed
   `wrong_service` failure (exit 1). Measured motivation: a path-based reverse proxy served the

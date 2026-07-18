@@ -27,6 +27,7 @@ from epics_pv_mcp.services._http import (
     is_retry_error,
     is_ssl_error,
     rest_get_json,
+    rest_put_json,
     url_host,
 )
 from epics_pv_mcp.services.archiver_exceptions import (
@@ -267,6 +268,57 @@ def test_rest_get_json_http_error_raises_resp_exc(monkeypatch: pytest.MonkeyPatc
             1.0,
             conn_exc=ArchiverConnectionError,
             resp_exc=ArchiverResponseError,
+        )
+
+
+def test_rest_get_json_refuses_redirect_with_neutral_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F20 (S21, under S12): a refused redirect (allow_redirects=False) must NOT claim "different
+    host" — that is objectively false for a same-origin redirect (http→https, trailing slash). The
+    message names a redirect TARGET, not a host.
+
+    Red-proof: match="redirect target" reds the pre-fix "different host" wording.
+    """
+    session = build_retrying_session()
+    redirect = Mock()
+    redirect.is_redirect = True
+    redirect.status_code = 302
+    monkeypatch.setattr(session, "get", Mock(return_value=redirect))
+    with pytest.raises(ArchiverResponseError, match="redirect target"):
+        rest_get_json(
+            session,
+            "http://x",
+            None,
+            1.0,
+            conn_exc=ArchiverConnectionError,
+            resp_exc=ArchiverResponseError,
+            allow_redirects=False,
+        )
+
+
+def test_rest_put_json_refuses_redirect_with_neutral_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F20 on the WRITE path: the same "different host" wording is equally wrong for a same-origin
+    redirect. Behaviour (refuse the redirect) is unchanged — only the message text.
+
+    Red-proof: match="redirect target" reds the pre-fix "different host" wording.
+    """
+    session = build_retrying_session()
+    redirect = Mock()
+    redirect.is_redirect = True
+    redirect.status_code = 307
+    monkeypatch.setattr(session, "put", Mock(return_value=redirect))
+    with pytest.raises(ArchiverResponseError, match="redirect target"):
+        rest_put_json(
+            session,
+            "http://x",
+            {"a": 1},
+            1.0,
+            conn_exc=ArchiverConnectionError,
+            resp_exc=ArchiverResponseError,
+            allow_redirects=False,
         )
 
 

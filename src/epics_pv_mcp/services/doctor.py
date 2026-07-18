@@ -63,14 +63,15 @@ from epics_pv_mcp.services.naming_client import NamingServiceClient
 from epics_pv_mcp.services.olog_client import OlogClient
 from epics_pv_mcp.services.rest_exceptions import RestConnectionError, RestResponseError
 
-#: Every status a plane can carry. A ``Literal`` rather than a bare ``str`` on purpose: the verdict
-#: below is computed from a NON-FAILING allowlist, so a typo in a status string must be a type
-#: error at the boundary, not a silent pass.
+#: Every status a plane can carry. A ``Literal`` rather than a bare ``str`` on purpose: the exit
+#: verdict below is computed from status ALLOWLISTS (the three frozensets), so a typo in a status
+#: string is a type error at the boundary, not a silent pass.
 PlaneStatus = Literal[
     "ok",
     "disabled",
     "info",
     "unverified",
+    "identity_probe_failed",
     "config_error",
     "ca_error",
     "api_error",
@@ -78,21 +79,42 @@ PlaneStatus = Literal[
     "disconnected",
 ]
 
-#: Statuses that do NOT count as a doctor failure. An ALLOWLIST, not a failure denylist: with a
-#: denylist an unforeseen or mistyped status silently lands on "not failing" and yields exit 0 —
-#: fail-OPEN, in the one tool whose job is to notice a misconfiguration. Anything not listed here
-#: fails (fail-closed), so the cost of forgetting to classify a new status is a false alarm rather
-#: than a false all-clear.
+#: Statuses that are honestly clean → exit 0. An ALLOWLIST, not a failure denylist: with a denylist
+#: an unforeseen or mistyped status silently lands on "not failing" and yields exit 0 — fail-OPEN,
+#: in the one tool whose job is to notice a misconfiguration. ``ok`` counts a plane clean iff its
+#: status is in an allowlist (this set OR ``_INCONCLUSIVE_STATUSES``); anything in neither fails
+#: (fail-closed), so the cost of forgetting to classify a new status is a false alarm rather than a
+#: false all-clear.
 #:
-#: ``unverified`` is deliberately non-failing: that a healthy service answers its info endpoint
-#: ANONYMOUSLY is measured at exactly one site (n=1), and turning that into a hard failure for every
-#: site would be the same overclaim this server keeps finding in other people's code. It is reported
-#: honestly instead — and ``DoctorReport.verification_complete`` tells a machine reader it happened.
-#: The same holds when the beacon carries a DIFFERENT known service's name (S14, measured
-#: 2026-07-16): a path-based reverse proxy served the real ChannelFinder API while the base GET
-#: answered as Olog — a foreign name cannot prove a misconfiguration, so it too is ``unverified``
-#: (with the found name in the detail), never a failure.
+#: ``unverified`` is deliberately here: that a healthy service answers its info endpoint ANONYMOUSLY
+#: is measured at exactly one site (n=1), and turning that into a hard failure for every site would
+#: be the same overclaim this server keeps finding in other people's code. The same holds for a 2xx
+#: whose body is not the JSON we can name it by (e.g. a 200 HTML login page), and when the beacon
+#: carries a DIFFERENT known service's name (S14, measured 2026-07-16): a path-based reverse proxy
+#: served the real ChannelFinder API while the base GET answered as Olog — a foreign name cannot
+#: prove a misconfiguration. All three ANSWERED 2xx; none is a failure. A probe that actually FAILED
+#: (a served non-2xx, a transport error, a refused redirect) is NOT here — it is
+#: ``identity_probe_failed``, which the exit code notices. It is all reported honestly, and
+#: ``DoctorReport.verification_complete`` tells a machine reader identity was not established.
 _NON_FAILING_STATUSES: frozenset[str] = frozenset({"ok", "disabled", "info", "unverified"})
+
+#: Reachable, but the identity probe itself FAILED — a served non-2xx (401/404/5xx), a transport
+#: error, or a refused redirect on the identity endpoint — as opposed to ``unverified``, where the
+#: endpoint ANSWERED 2xx and we merely could not name it. Not a hard failure: a 401 on an INFO
+#: endpoint does not prove the plane's TOOL endpoints are broken, so it never claims "plane failed"
+#: (exit 1). But it is not a silent all-clear either — it drives its own inconclusive exit (3) and
+#: never renders "OK". This is the S4 origin story (a URL at a dead container whose neighbour
+#: answered 401), which used to collapse to a silent exit 0 via ``unverified``.
+_INCONCLUSIVE_STATUSES: frozenset[str] = frozenset({"identity_probe_failed"})
+
+#: Statuses that ARE a hard failure → exit 1. Listed explicitly (rather than "everything else")
+#: only so ``test_status_partition_is_total_and_disjoint`` can prove the three sets tile
+#: ``PlaneStatus`` exactly. The fail-closed guarantee still comes from ``ok`` being an allowlist of
+#: the OTHER two sets (an unclassified status is in neither, so it is not clean and not inconclusive
+#: → it fails), never from this denylist.
+_FAILING_STATUSES: frozenset[str] = frozenset(
+    {"config_error", "ca_error", "api_error", "unreachable", "disconnected"}
+)
 
 
 class _Model(BaseModel):
@@ -138,19 +160,28 @@ class DoctorReport(_Model):
 
     planes: list[PlaneCheck]
     privacy: PrivacyReport
-    #: True iff no configured plane FAILED. Note what this does NOT say: a plane can be reachable
-    #: with its identity unverified and still leave ``ok`` True — read ``verification_complete``
-    #: before treating this as "everything is confirmed".
+    #: True iff no configured plane HARD-FAILED (nothing in ``_FAILING_STATUSES``). Note what this
+    #: does NOT say: a plane can be reachable with its identity ``unverified`` (still exit 0) OR its
+    #: identity probe ``identity_probe_failed`` (exit 3) and still leave ``ok`` True — ``ok`` alone
+    #: does not map to the exit code. Read ``inconclusive_identity_planes`` (exit 3 driver) and
+    #: ``verification_complete`` before treating this as "everything is confirmed".
     ok: bool
-    #: True iff no configured plane was left ``unverified``. ``ok`` alone is not enough for a
-    #: machine reader: an unverified plane is honest, not healthy, and a CI job that only looks at
-    #: ``ok`` (or the exit code) would read "nothing failed" as "everything is confirmed" — exactly
-    #: the conflation this whole check exists to remove. ⚠️ Vacuously True when nothing ran an
-    #: identity probe at all (e.g. an empty config) — a reader wanting POSITIVE confirmation
-    #: asserts ``identified_planes`` is non-empty, not this flag alone.
+    #: True iff every configured plane's identity was established — i.e. NO plane was left
+    #: ``unverified`` AND none had its identity probe fail (``inconclusive_identity_planes`` empty).
+    #: ``ok`` alone is not enough for a machine reader: an unverified/inconclusive plane is honest,
+    #: not healthy, and a CI job that only looks at ``ok`` would read "nothing hard-failed" as
+    #: "everything is confirmed" — exactly the conflation this whole check exists to remove.
+    #: ⚠️ Vacuously True when nothing ran an identity probe at all (e.g. an empty config) — a reader
+    #: wanting POSITIVE confirmation asserts ``identified_planes`` is non-empty, not this flag.
     verification_complete: bool
-    #: The planes that are reachable but could not prove their identity (empty when none).
+    #: The planes that ANSWERED 2xx but could not prove their identity — anonymous, an unreadable
+    #: body, or a foreign name (empty when none). Honest, not a failure → exit 0.
     unverified_planes: list[str]
+    #: The planes whose identity probe FAILED (a served non-2xx / transport error / refused
+    #: redirect) — reachable but suspect, distinct from ``unverified`` (empty when none). Drives the
+    #: inconclusive exit 3. A machine reader reads this ALONGSIDE ``unverified_planes``: a failed
+    #: probe lands HERE, not in ``unverified_planes``.
+    inconclusive_identity_planes: list[str]
     #: The planes that PROVED their identity — the positive counterpart to ``unverified_planes``.
     #: Empty on an empty config, which is how a machine reader tells "everything was confirmed"
     #: from "nothing ran at all" (``verification_complete`` is vacuously True in both).
@@ -272,20 +303,21 @@ def _fetch_beacon(url: str, auth_header: str | None, timeout: float) -> object |
 def _identify(plane: str, base_url: str, auth_header: str | None, timeout: float) -> PlaneCheck:
     """Ask a Phoebus-family service to name itself; map the answer to a verdict. TOTAL.
 
-    Returns ``ok`` (it named itself correctly) or ``unverified`` (anything else: an auth wall,
-    HTML, a body without a usable ``name``, a redirect, a 5xx — or a body naming a DIFFERENT
-    service, with that name in the detail). A foreign name is deliberately NOT a failure (S14):
-    the earlier ``wrong_service``+exit-1 verdict rested on "unambiguous at any site", refuted by
-    measurement (2026-07-16) — a path-based reverse proxy served the REAL ChannelFinder API while
-    the base GET answered as Olog, so the hard failure flagged a WORKING configuration.
-    ``unverified`` is honest, not a failure — see :data:`_NON_FAILING_STATUSES`.
+    Three outcomes: ``ok`` (it named itself correctly); ``unverified`` — it ANSWERED 2xx but we
+    could not name it: an unreadable/HTML body, a body without a usable ``name``, or a body naming a
+    DIFFERENT known service (with that name in the detail); or ``identity_probe_failed`` — the probe
+    itself FAILED (a served non-2xx like a 401 auth wall or a 404, a transport error, a refused
+    redirect), routed via :func:`_identity_fetch_failure`. A foreign name is deliberately NOT a
+    failure (S14): the earlier ``wrong_service``+exit-1 verdict rested on "unambiguous at any site",
+    refuted by measurement (2026-07-16) — a path-based reverse proxy served the REAL ChannelFinder
+    API while the base GET answered as Olog, so the hard failure flagged a WORKING configuration.
+    ``unverified`` is honest (exit 0); ``identity_probe_failed`` is inconclusive (exit 3, never a
+    silent all-clear) — see :data:`_NON_FAILING_STATUSES` / :data:`_INCONCLUSIVE_STATUSES`.
     """
     expected = _SERVICE_NAMES[plane]
     payload = _fetch_beacon(base_url, auth_header, timeout)
     if isinstance(payload, Exception):
-        return _unverified(
-            plane, f"transport reachable, but the identity probe failed: {_safe(str(payload))}"
-        )
+        return _identity_fetch_failure(plane, payload)
 
     name = payload.get("name") if isinstance(payload, dict) else None
     if not isinstance(name, str) or not name.strip():
@@ -312,7 +344,9 @@ def _identify(plane: str, base_url: str, auth_header: str | None, timeout: float
 
 
 def _unverified(plane: str, detail: str) -> PlaneCheck:
-    """Reachable, identity not established. Honest — NOT ``ok``, and NOT a failure."""
+    """Reachable, endpoint ANSWERED 2xx, identity not established. Honest — NOT ``ok``, and NOT a
+    failure (exit 0). The sibling of :func:`_identity_probe_failed`, which is for a probe that never
+    got a usable answer."""
     return PlaneCheck(
         plane=plane,
         configured=True,
@@ -321,6 +355,56 @@ def _unverified(plane: str, detail: str) -> PlaneCheck:
         status="unverified",
         identified=False,
         detail=detail,
+    )
+
+
+def _identity_probe_failed(plane: str, detail: str) -> PlaneCheck:
+    """Reachable, but the identity probe itself FAILED (a served non-2xx / transport error / refused
+    redirect). Distinct from :func:`_unverified`: there the endpoint ANSWERED 2xx and we merely
+    could not name it; here the identity request never got a usable answer. Not a hard failure
+    (:data:`_INCONCLUSIVE_STATUSES`) — reported as inconclusive (exit 3), never a silent
+    all-clear."""
+    return PlaneCheck(
+        plane=plane,
+        configured=True,
+        reachable=True,
+        ca_ok=True,
+        status="identity_probe_failed",
+        identified=False,
+        detail=detail,
+    )
+
+
+def _beacon_reached_but_unreadable(exc: BaseException) -> bool:
+    """True iff a failed identity fetch actually REACHED a 2xx response whose body was unreadable.
+
+    :func:`~epics_pv_mcp.services._http.rest_get_json` calls ``raise_for_status()`` BEFORE
+    ``resp.json()``, so the only way a 2xx is reached and the call still raises is a body that is
+    not JSON — a ``JSONDecodeError`` (a ``ValueError`` subclass). On ``requests>=2.27`` that is a
+    ``requests`` ``JSONDecodeError``, wrapped by ``rest_get_json`` and read here as the
+    ``__cause__``; on the older ``requests>=2.25`` floor it is the STDLIB ``json.JSONDecodeError`` —
+    a ``ValueError`` but NOT a ``RequestException``, so ``rest_get_json`` does not wrap it and it
+    arrives raw (hence we check the exception ITSELF too). A served non-2xx chains an ``HTTPError``,
+    a transport failure a ``ConnectionError``, a refused redirect chains nothing — none is a
+    ``ValueError``. So this cleanly separates "answered 2xx, just not nameably" (honest
+    ``unverified``, e.g. a 200 HTML login page) from "the probe FAILED" (``identity_probe_failed``).
+    Null-safe."""
+    return isinstance(exc, ValueError) or isinstance(getattr(exc, "__cause__", None), ValueError)
+
+
+def _identity_fetch_failure(plane: str, exc: BaseException) -> PlaneCheck:
+    """Map a FAILED identity fetch to a verdict, shared by every identity probe so the split cannot
+    drift: a REACHED-but-unreadable 2xx (a body that is not JSON) is honest :func:`_unverified`;
+    anything else — a served non-2xx, a transport error, a refused redirect — is
+    :func:`_identity_probe_failed`."""
+    if _beacon_reached_but_unreadable(exc):
+        return _unverified(
+            plane,
+            "transport reachable; the endpoint answered 2xx but its body was not readable JSON, so "
+            f"its identity could not be checked: {_safe(str(exc))}",
+        )
+    return _identity_probe_failed(
+        plane, f"transport reachable, but the identity probe FAILED: {_safe(str(exc))}"
     )
 
 
@@ -399,10 +483,8 @@ def _identify_archiver(base_url: str, auth_header: str | None, timeout: float) -
             resp_exc=RestResponseError,
             allow_redirects=False,
         )
-    except Exception as exc:  # noqa: BLE001 — TOTAL: any failure → unverified, never raises
-        return _unverified(
-            "archiver", f"transport reachable, but the identity probe failed: {_safe(str(exc))}"
-        )
+    except Exception as exc:  # noqa: BLE001 — TOTAL: any failure → classified, never raises
+        return _identity_fetch_failure("archiver", exc)
 
     identity = payload.get("identity") if isinstance(payload, dict) else None
     if not isinstance(identity, str) or not identity.strip():
@@ -450,10 +532,7 @@ def _identify_retrieval_plane(base_url: str, auth_header: str | None, timeout: f
         f"{base_url.rstrip('/')}/retrieval/bpl/getVersion", auth_header, timeout
     )
     if isinstance(payload, Exception):
-        return _unverified(
-            "archiver_retrieval",
-            f"transport reachable, but the identity probe failed: {_safe(str(payload))}",
-        )
+        return _identity_fetch_failure("archiver_retrieval", payload)
 
     version = payload.get("version") if isinstance(payload, dict) else None
     if isinstance(version, str) and _is_archiver_version_string(version):
@@ -513,6 +592,14 @@ async def _check_retrieval_plane(cfg: EpicsConfig, timeout: float) -> PlaneCheck
         # Probe RETRIEVAL's own endpoint, and through rest_get_json so the failure arrives with its
         # cause chained: that is what lets _classify_failure tell a CA problem from a wrong webapp
         # from a dead host. A raw session.head here would collapse all three into "unreachable".
+        #
+        # Deliberate redirect asymmetry (do NOT add allow_redirects=False here): this TRANSPORT
+        # probe answers "is the webapp reachable", so it FOLLOWS redirects exactly as
+        # get_pv_history's real ArchiverClient does (its _get omits allow_redirects → default True).
+        # Refusing here would report api_error/exit-1 for an endpoint the tool actually reaches.
+        # Origin integrity is the IDENTITY probe's job — _identify_retrieval_plane's _fetch_beacon
+        # uses allow_redirects=False, so a redirecting endpoint surfaces as identity_probe_failed
+        # (exit 3), not a false failure.
         session = build_retrying_session(auth_header=cfg.archiver_auth or None)
         rest_get_json(
             session,
@@ -559,9 +646,7 @@ def _identify_naming(base_url: str, timeout: float) -> PlaneCheck:
     """
     payload = _fetch_beacon(f"{base_url.rstrip('/')}/rest/swagger.json", None, timeout)
     if isinstance(payload, Exception):
-        return _unverified(
-            "naming", f"transport reachable, but the identity probe failed: {_safe(str(payload))}"
-        )
+        return _identity_fetch_failure("naming", payload)
 
     info = payload.get("info") if isinstance(payload, dict) else None
     title = info.get("title") if isinstance(info, dict) else None
@@ -680,8 +765,9 @@ async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = Non
     Read-only — it probes, never writes. It reaches exactly what is CONFIGURED and nothing else: a
     disabled plane makes NO network call, and no plane is touched unless its URL (or the EPICS
     address list, for ``probe_pv``) points there — which, on a configured deployment, may well be a
-    real facility. ``ok`` is True iff no configured plane FAILED — a disabled/info plane never fails
-    the check, and neither does an ``unverified`` one, so read ``verification_complete`` alongside
+    real facility. ``ok`` is True iff no configured plane HARD-FAILED — a disabled/info plane never
+    fails the check, and neither does an ``unverified`` (exit 0) nor an ``identity_probe_failed``
+    (exit 3) one, so read ``inconclusive_identity_planes`` and ``verification_complete`` alongside
     ``ok`` before concluding that everything was confirmed.
     """
     cfg = get_config()
@@ -696,15 +782,21 @@ async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = Non
         _check_olog(cfg, probe_timeout),
     )
     planes = [live, channelfinder, archiver, retrieval, alarm, naming, olog]
-    # Fail-CLOSED: anything not explicitly known to be non-failing counts as a failure, so a new or
-    # mistyped status cannot quietly yield exit 0 from the tool whose job is to catch bad config.
-    ok = all(plane.status in _NON_FAILING_STATUSES for plane in planes)
+    # Fail-CLOSED via an ALLOWLIST union: a plane is "not a hard failure" only if its status is
+    # honestly clean (_NON_FAILING_STATUSES, exit 0) OR inconclusive (_INCONCLUSIVE_STATUSES,
+    # exit 3). Anything else — a hard failure, or a new/mistyped status — makes ``ok`` False →
+    # exit 1, so an unclassified status cannot quietly yield exit 0 from the tool whose job is to
+    # catch bad config. ``ok`` alone does NOT map to the exit code; the exit code also reads
+    # ``inconclusive``.
+    ok = all(plane.status in _NON_FAILING_STATUSES | _INCONCLUSIVE_STATUSES for plane in planes)
     unverified = [plane.plane for plane in planes if plane.status == "unverified"]
+    inconclusive = [plane.plane for plane in planes if plane.status in _INCONCLUSIVE_STATUSES]
     return DoctorReport(
         planes=planes,
         privacy=_privacy_report(cfg),
         ok=ok,
-        verification_complete=not unverified,
+        verification_complete=not unverified and not inconclusive,
         unverified_planes=unverified,
+        inconclusive_identity_planes=inconclusive,
         identified_planes=[plane.plane for plane in planes if plane.identified],
     )

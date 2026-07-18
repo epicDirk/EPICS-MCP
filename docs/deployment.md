@@ -22,21 +22,24 @@ setting those variables for *your* services — no code change. This guide walks
    epics-doctor --probe-pv SIM:PS-01:Cur-RB   # also pass/fail the live PVA plane
    ```
 
-   Exit `0` = no configured plane failed; `1` = a configured plane failed (including
-   `config_error` — the variables contradict each other, e.g. a retrieval URL with no archiver
-   URL); `2` = usage error. A URL answering with a *different* known service's name is reported
-   `unverified` with that name in the detail — not a failure (a path-based reverse proxy can
-   serve the real API behind a base URL that names another service, measured), but the name is
-   your first clue if the config IS wrong. Fix anything `epics-doctor` flags, then you are
-   done — no need to ask us.
+   Exit `0` = nothing failed and no identity probe failed; `1` = a configured plane HARD-failed
+   (including `config_error` — the variables contradict each other, e.g. a retrieval URL with no
+   archiver URL); `2` = usage error; `3` = INCONCLUSIVE — a plane is reachable but its identity
+   probe FAILED (a served non-2xx like a 401/404, a transport error, or a refused redirect on the
+   identity endpoint): not a hard failure, but not a silent all-clear either. A URL that ANSWERS
+   with a *different* known service's name is reported `unverified` (exit `0`) with that name in the
+   detail — not a failure (a path-based reverse proxy can serve the real API behind a base URL that
+   names another service, measured), but the name is your first clue if the config IS wrong. Fix
+   anything `epics-doctor` flags, then you are done — no need to ask us.
 
-   ⚠️ Read the `?` (`unverified`) lines before calling it done: they mean "reachable, but it could
-   not prove what it is" — honest, not healthy, and deliberately exit `0`. Every plane has its own
-   identity beacon (see the operator guide); a `?` means that beacon did not answer usably, which is
-   worth understanding rather than waving through. Scripting this? Read `verification_complete` /
-   `unverified_planes` from `--json`; the exit code alone says "nothing failed", not "everything
-   confirmed" — and for positive confirmation assert `identified_planes` is non-empty
-   (`verification_complete` is vacuously true on an empty config).
+   ⚠️ Read the `?` (`unverified`, exit `0`) and `!` (`identity_probe_failed`, exit `3`) lines before
+   calling it done. `?` = "answered 2xx, but could not prove what it is" — honest, not healthy. `!` =
+   "reachable, but the identity probe FAILED (401/404/redirect/…)" — suspect, not a silent pass.
+   Every plane has its own identity beacon (see the operator guide). Scripting this? Read
+   `verification_complete` / `unverified_planes` / `inconclusive_identity_planes` from `--json` (a
+   failed probe lands in `inconclusive_identity_planes`, not `unverified_planes`); the exit code
+   alone says "nothing failed", not "everything confirmed" — and for positive confirmation assert
+   `identified_planes` is non-empty (`verification_complete` is vacuously true on an empty config).
 
 ## 2. The variables, by plane
 

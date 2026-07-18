@@ -176,21 +176,26 @@ plane; retries on a 5xx add more) and
 reports, per plane, whether it is reachable, whether the CA bundle works, whether the
 service **identifies itself as the one that URL should point at**, and what the ChannelFinder
 redaction is set to. A disabled plane (empty `*_URL`) is reported honestly, never a failure. Exit
-`0` = no configured plane failed, `1` = a configured plane failed (`unreachable` / `ca_error` /
-`api_error` / `config_error` / probe-disconnect), `2` = a usage error. Run it first in a new
-facility to confirm the `.env`; add `--probe-pv NAME` to also pass/fail the live PVA plane against a
-real PV. Full deployment/config guide: `docs/deployment.md`.
+`0` = nothing failed and no identity probe failed, `1` = a configured plane HARD-failed
+(`unreachable` / `ca_error` / `api_error` / `config_error` / probe-disconnect), `2` = a usage error,
+`3` = INCONCLUSIVE — a plane is reachable but its identity probe FAILED (a served non-2xx like a
+401/404, a transport error, or a refused redirect): not a hard failure, but not a silent all-clear
+either. Run it first in a new facility to confirm the `.env`; add `--probe-pv NAME` to also pass/fail
+the live PVA plane against a real PV. Full deployment/config guide: `docs/deployment.md`.
 
-**Reachable is not identified — read the `?` lines.** The transport probe is a HEAD and counts *any*
-HTTP response as reachable, so a URL pointing at the wrong host can look alive: measured, a
-ChannelFinder URL aimed at a dead container reported `✓ ok` because an unrelated service on that
-port answered `401` (blanket auth answers 401 for every path, so the status said nothing about
-ChannelFinder). Each plane is therefore also asked to **name itself**:
+**Reachable is not identified — read the `?` and `!` lines.** The transport probe is a HEAD and
+counts *any* HTTP response as reachable, so a URL pointing at the wrong host can look alive:
+measured, a ChannelFinder URL aimed at a dead container reported `✓ ok` because an unrelated service
+on that port answered `401` (blanket auth answers 401 for every path, so the status said nothing
+about ChannelFinder). That exact case now surfaces as `!` `identity_probe_failed` (exit `3`): the
+identity probe hits the 401 and no longer collapses to a silent exit `0`. Each plane is therefore
+also asked to **name itself**:
 
 | Mark | Status | Meaning |
 |---|---|---|
 | `✓` | `ok` | the service named itself correctly — confirmed |
-| `?` | `unverified` | reachable, but it could not prove what it is (auth wall, no info endpoint, unreadable body — or a beacon naming a *different* service, with that name in the detail). **Honest, not healthy** — exit stays `0` |
+| `?` | `unverified` | reachable and ANSWERED 2xx, but could not prove what it is (a body with no usable `name`, an unreadable/HTML body — or a beacon naming a *different* service, with that name in the detail). **Honest, not healthy** — exit stays `0` |
+| `!` | `identity_probe_failed` | reachable, but the identity probe FAILED (a served non-2xx like a `401` auth wall or `404`, a transport error, or a refused redirect on the identity endpoint). Reachable but suspect — **not** a hard failure (the plane's tool endpoints may work), **not** a silent all-clear either: exit `3` (INCONCLUSIVE) |
 | `✗` | `config_error` | the configuration is self-contradictory, no probe is even attempted (e.g. `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` set while `EPICS_MCP_ARCHIVER_URL` is empty — every archiver tool gates on the latter, so that retrieval URL is never used). Exit `1` |
 
 `unverified` is not a failure on purpose: that a healthy service answers its beacon anonymously is
@@ -215,7 +220,9 @@ Probing the latter on the retrieval port 404s and tells you nothing — that mis
 earlier pass concluded retrieval had no beacon at all.
 
 Scripting against this? Exit `0` means "nothing failed", **not** "everything confirmed" — read
-`verification_complete` / `unverified_planes` from `--json`, never the exit code alone. And for
+`verification_complete` / `unverified_planes` / `inconclusive_identity_planes` from `--json`, never
+the exit code alone. A FAILED identity probe lands in `inconclusive_identity_planes` (exit `3`), NOT
+in `unverified_planes` (exit `0`) — a script hunting identity problems must read both. And for
 **positive** confirmation assert `identified_planes` is non-empty: `verification_complete` is
 vacuously true on an empty config, so it alone cannot tell "all confirmed" from "nothing ran".
 

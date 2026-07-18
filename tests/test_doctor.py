@@ -4,7 +4,8 @@ Every test is hermetic: the config is patched to a fresh EpicsConfig and each cl
 replaced by a fake, so the 'not live' suite makes no network call. Covers the 3-bucket classifier
 (Plan-QA #1: a served non-2xx is api_error/reachable, not unreachable), the disabled/ok/failing
 planes, the single-source privacy report, the live plane's no-default-egress posture (Plan-QA #4),
-and the CLI exit-code convention (0 healthy / 1 a plane failed / 2 usage).
+and the CLI exit-code convention (0 clean / 1 a plane hard-failed / 2 usage / 3 inconclusive: an
+identity probe that FAILED, S12).
 """
 
 from __future__ import annotations
@@ -20,10 +21,13 @@ from epics_pv_mcp import cli_doctor
 from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.services.doctor import (
+    _FAILING_STATUSES,
+    _INCONCLUSIVE_STATUSES,
     _NON_FAILING_STATUSES,
     DoctorReport,
     PlaneCheck,
     PlaneStatus,
+    PrivacyReport,
     _classify_failure,
     _identify,
     _identify_archiver,
@@ -290,17 +294,61 @@ def test_identity_unusable_body_is_unverified(
         pytest.param(RuntimeError("refused to follow a redirect"), id="redirect-refused"),
     ],
 )
-def test_identity_failed_probe_is_unverified(
+def test_identity_failed_probe_is_identity_probe_failed(
     monkeypatch: pytest.MonkeyPatch, exc: Exception
 ) -> None:
-    """Anything the probe cannot read → unverified, never ok.
+    """S12: a FAILED identity probe (a served non-2xx, a transport error, or a refused redirect) is
+    ``identity_probe_failed`` — NOT the honest ``unverified`` (that is for a 2xx answered-but-not-
+    nameable). This is exactly where the 401 of the dead-container case lands: rest_get_json raises
+    on a non-2xx BEFORE parsing, so an auth wall can never reach the name check — and it must no
+    longer collapse to a silent exit 0. A TLS/transport failure DURING the identity GET is re-homed
+    here too (the transport HEAD already proved reachability+CA to the same host).
 
-    This is also where the 401 of the dead-container case lands: rest_get_json raises on a non-2xx
-    BEFORE parsing, so an auth wall can never reach the name check.
+    Red-proof: on the pre-fix code every case here was ``unverified`` (exit 0).
     """
     _raises(monkeypatch, exc)
     check = _identify("channelfinder", "http://cf.example/ChannelFinder", None, 5.0)
+    assert (check.status, check.identified) == ("identity_probe_failed", False)
+    assert check.status in _INCONCLUSIVE_STATUSES
+    assert check.status not in _NON_FAILING_STATUSES  # NOT a silent all-clear
+
+
+def test_identity_unreadable_2xx_body_stays_unverified(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S12 boundary (FLAW A): a 200 whose body is NOT JSON (e.g. an HTML login page) is honest
+    ``unverified``, NOT ``identity_probe_failed``. rest_get_json calls raise_for_status() BEFORE
+    resp.json(), so reaching resp.json() means the status WAS 2xx; a non-JSON body surfaces as a
+    ``JSONDecodeError`` (a ValueError subclass) chained via ``from exc``. The chained ValueError is
+    how ``_beacon_reached_but_unreadable`` tells "the service ANSWERED, just not nameably" (exit 0)
+    from "the probe FAILED" (exit 3).
+
+    Red-proof: a mutant dropping the ValueError carve-out from ``_identity_fetch_failure`` makes
+    this ``identity_probe_failed`` instead. Positive control for S14/anonymous: must NOT go red.
+    """
+    cause = json.JSONDecodeError("Expecting value", "<html>login</html>", 0)
+    exc = requests.exceptions.RequestException("Request failed (http://cf.example): bad JSON body")
+    exc.__cause__ = cause  # what rest_get_json chains on a 2xx-but-unparseable body
+    _raises(monkeypatch, exc)
+    check = _identify("channelfinder", "http://cf.example/ChannelFinder", None, 5.0)
     assert (check.status, check.identified) == ("unverified", False)
+    assert check.reachable is True  # the endpoint answered 2xx; only identity is unproven
+    assert check.status in _NON_FAILING_STATUSES  # honest, exit 0 — never a failed probe
+
+
+def test_identity_unreadable_2xx_raw_valueerror_stays_unverified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S12 min-version robustness (diff-review R1): on the ``requests>=2.25`` floor a bad-JSON 2xx
+    raises the STDLIB ``json.JSONDecodeError`` — a ``ValueError`` but NOT a ``RequestException``, so
+    ``rest_get_json`` does not wrap it and it arrives RAW (``__cause__`` is None). It must still be
+    ``unverified`` (the service answered 2xx), so the discriminator checks the exception ITSELF.
+
+    Red-proof: a discriminator that only inspects ``__cause__`` makes this identity_probe_failed.
+    """
+    raw = json.JSONDecodeError("Expecting value", "<html>login</html>", 0)  # __cause__ is None
+    _raises(monkeypatch, raw)
+    check = _identify("channelfinder", "http://cf.example/ChannelFinder", None, 5.0)
+    assert (check.status, check.identified) == ("unverified", False)
+    assert check.status in _NON_FAILING_STATUSES
 
 
 def test_archiver_identity_requires_the_identity_field(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -391,6 +439,21 @@ def test_unknown_status_fails_closed() -> None:
     """
     assert "wrong-service" not in _NON_FAILING_STATUSES  # the typo'd twin of a former status
     assert {"ok", "disabled", "info", "unverified"} == _NON_FAILING_STATUSES
+
+
+def test_status_partition_is_total_and_disjoint() -> None:
+    """S12: the three status sets tile ``PlaneStatus`` exactly. This is what keeps ``ok``'s
+    allowlist union fail-CLOSED: a new status added to the Literal but forgotten from all three sets
+    is (a) not clean, not inconclusive → ``ok`` counts it a failure, and (b) caught here as red.
+
+    Red-proof: a mutant that adds a Literal value without classifying it (or double-lists one)
+    breaks totality/disjointness here.
+    """
+    all_statuses = set(get_args(PlaneStatus))
+    assert _NON_FAILING_STATUSES.isdisjoint(_INCONCLUSIVE_STATUSES)
+    assert _NON_FAILING_STATUSES.isdisjoint(_FAILING_STATUSES)
+    assert _INCONCLUSIVE_STATUSES.isdisjoint(_FAILING_STATUSES)
+    assert all_statuses == _NON_FAILING_STATUSES | _INCONCLUSIVE_STATUSES | _FAILING_STATUSES
 
 
 @pytest.mark.parametrize(
@@ -529,6 +592,41 @@ async def test_unverified_plane_does_not_fail_but_is_reported(
     assert report.ok is True  # honest, not a failure
     assert report.verification_complete is False  # ...but NOT confirmed
     assert report.unverified_planes == ["channelfinder"]
+    assert report.inconclusive_identity_planes == []  # unverified is NOT a failed probe
+
+
+async def test_inconclusive_plane_keeps_ok_and_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S12: a FAILED identity probe (identity_probe_failed) is reachable-but-suspect. ``ok`` stays
+    True (it is NOT a hard failure), so the exit code cannot be derived from ``ok`` alone — it lands
+    in ``inconclusive_identity_planes`` (the field a machine reader must check ALONGSIDE
+    ``unverified_planes``), and ``verification_complete`` is False.
+
+    Red-proof (the FLAW-B trap): a naive ``ok = all(status in _NON_FAILING_STATUSES)`` (leaving the
+    old line) flips ``ok`` to False here — which would collapse exit 3 into exit 1. Pins the union.
+    """
+    _set_config(monkeypatch, channelfinder_url="http://cf.example/ChannelFinder")
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.ChannelFinderClient", _OkClient)
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.doctor._identify",
+        lambda plane, *_a, **_k: PlaneCheck(
+            plane=plane,
+            configured=True,
+            reachable=True,
+            ca_ok=True,
+            status="identity_probe_failed",
+            identified=False,
+            detail="transport reachable, but the identity probe FAILED: 401",
+        ),
+    )
+    report = await run_doctor()
+    cf = _plane(report, "channelfinder")
+    assert cf.status == "identity_probe_failed"
+    assert report.ok is True  # NOT a hard failure — pins the ok-union
+    assert report.verification_complete is False
+    assert report.inconclusive_identity_planes == ["channelfinder"]
+    assert report.unverified_planes == []
 
 
 async def test_ca_error_plane_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -759,6 +857,112 @@ def test_cli_config_error_renders_failing_and_exits_one(
     assert "✗ archiver_retrieval" in out
     assert "config_error" in out
     assert "EPICS_MCP_ARCHIVER_URL" in out  # the actionable part of the detail line
+
+
+def test_cli_inconclusive_exits_three(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """S12: a reachable plane whose identity probe FAILED exits 3 (INCONCLUSIVE), never a silent
+    exit 0 with "Overall: OK". This is the S4 dead-container-behind-a-neighbour case.
+
+    Red-proof: on the pre-fix 2-way CLI (``0 if ok else 1``) an inconclusive plane has ok=True →
+    exit 0 and the render has no INCONCLUSIVE branch → "Overall: OK". Both assertions go red. It
+    ALSO catches the FLAW-B trap: if the ok-line were left unchanged, ok=False → this exits 1.
+    """
+    _set_config(monkeypatch, channelfinder_url="http://cf.example/ChannelFinder")
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.ChannelFinderClient", _OkClient)
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.doctor._identify",
+        lambda plane, *_a, **_k: PlaneCheck(
+            plane=plane,
+            configured=True,
+            reachable=True,
+            ca_ok=True,
+            status="identity_probe_failed",
+            identified=False,
+            detail="transport reachable, but the identity probe FAILED: 401",
+        ),
+    )
+    code = cli_doctor.main([])
+    out = capsys.readouterr().out
+    assert code == 3
+    assert "INCONCLUSIVE" in out
+    assert "Overall: OK" not in out
+    assert "! channelfinder" in out  # the inconclusive glyph
+
+
+def test_failing_dominates_inconclusive(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """S12 precedence: a HARD failure dominates an inconclusive identity probe → exit 1 / PROBLEM.
+
+    Red-proof: a mutant that checks inconclusive before failing (``3 if inconclusive else 1``)
+    returns 3 here.
+    """
+    _set_config(
+        monkeypatch,
+        channelfinder_url="http://cf.example/ChannelFinder",
+        alarm_url="http://alarm:8081",
+    )
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.ChannelFinderClient", _OkClient)
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.doctor.AlarmClient",
+        _cause_client(requests.exceptions.ConnectionError("refused")),  # alarm HARD-fails
+    )
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.doctor._identify",
+        lambda plane, *_a, **_k: PlaneCheck(
+            plane=plane,
+            configured=True,
+            reachable=True,
+            ca_ok=True,
+            status="identity_probe_failed",
+            identified=False,
+            detail="probe failed",
+        ),
+    )
+    code = cli_doctor.main([])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "PROBLEM" in out
+    assert "INCONCLUSIVE" not in out  # the hard failure wins the headline
+
+
+def test_render_and_exit_agree() -> None:
+    """S12: the verdict WORD (_render) and the exit CODE (main) both come from one _exit_category,
+    so they cannot drift. A reorder of the _render elif-chain that said "OK" while main exits 3
+    would break here.
+    """
+    privacy = PrivacyReport(
+        cf_safe_owner_accounts=[], cf_safe_property_names=[], olog_freetext_withheld=True
+    )
+
+    def _mk(
+        *, ok: bool, inconclusive: list[str], complete: bool, identified: list[str]
+    ) -> DoctorReport:
+        return DoctorReport(
+            planes=[],
+            privacy=privacy,
+            ok=ok,
+            verification_complete=complete,
+            unverified_planes=[],
+            inconclusive_identity_planes=inconclusive,
+            identified_planes=identified,
+        )
+
+    cases = {
+        "failed": (_mk(ok=False, inconclusive=[], complete=False, identified=[]), "PROBLEM", 1),
+        "inconclusive": (
+            _mk(ok=True, inconclusive=["cf"], complete=False, identified=[]),
+            "INCONCLUSIVE",
+            3,
+        ),
+        "clean": (_mk(ok=True, inconclusive=[], complete=True, identified=["cf"]), "OK", 0),
+    }
+    for category, (report, word, code) in cases.items():
+        assert cli_doctor._exit_category(report) == category
+        assert word in cli_doctor._render(report)
+        assert cli_doctor._EXIT_CODE[cli_doctor._exit_category(report)] == code
 
 
 def test_cli_verdict_with_nothing_configured_claims_no_identity(

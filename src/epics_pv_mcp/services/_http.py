@@ -255,7 +255,7 @@ def rest_get_json(
         if not allow_redirects and resp.is_redirect:
             raise resp_exc(
                 f"Refused to follow a redirect from {url} (HTTP {resp.status_code}): the response "
-                "would come from a different host than the one configured."
+                "would come from a redirect target, not the configured URL."
             )
         resp.raise_for_status()
         return resp.json()
@@ -302,7 +302,7 @@ def rest_put_json(
         if not allow_redirects and resp.is_redirect:
             raise resp_exc(
                 f"Refused to follow a redirect from {url} (HTTP {resp.status_code}): the write "
-                "would land on a different host than the one the gate approved."
+                "would land on a redirect target, not the URL the gate approved."
             )
         resp.raise_for_status()
         return resp.json()
