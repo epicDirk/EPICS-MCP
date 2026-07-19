@@ -41,6 +41,7 @@ from epics_pv_mcp.tools.olog import (
     _download_log_attachment,
     _get_log_entry,
     _list_log_attachments,
+    _list_log_levels,
     _list_logbooks,
     _list_tags,
     _reply_to_log,
@@ -103,7 +104,7 @@ def build_instructions(display_tools_available: bool) -> str:
         "a rate limit and an audit log. The REST-backed tools (find_channels, is_archived, "
         "get_pv_history, get_archive_info, list_archived_pvs, is_alarm_configured, "
         "get_alarm_history, lookup_device_name, search_logbook, get_log_entry, list_logbooks, "
-        "list_tags, list_log_attachments, download_log_attachment) stay disabled "
+        "list_tags, list_log_levels, list_log_attachments, download_log_attachment) stay disabled "
         "until their *_URL env vars are set; an empty URL means "
         "no client and no network call. Network reach is decided by the LAUNCHER, not by this "
         "server: it opens no non-local connection until the EPICS address-list environment "
@@ -715,6 +716,28 @@ async def search_logbook(
             )
         ),
     ] = "down",
+    level: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Triage level(s) to filter by, e.g. 'Problem' — comma/semicolon/pipe-separated "
+                "for OR. Case-insensitive; '*' wildcards are honoured. Site-configurable: call "
+                "list_log_levels for the valid values. An UNKNOWN level is not rejected by Olog — "
+                "it returns 0 hits."
+            )
+        ),
+    ] = None,
+    title: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Word(s) to match in the entry TITLE (not the body — that is `text`). "
+                "Case-insensitive, whole words only: a word fragment matches nothing unless "
+                "wildcarded ('att*'); several words are AND-ed. Quote a phrase to match in "
+                "order."
+            )
+        ),
+    ] = None,
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
 ) -> dict[str, object]:
     """Search the Phoebus Olog electronic logbook (Olog REST /logs/search).
@@ -742,6 +765,28 @@ async def search_logbook(
     entries returned; total_matches is the true total across all pages (Olog hitCount); capped is
     true when more than size matched on this page. An unreadable payload or entry raises a loud
     error — never an empty result that reads as 'nothing matched'.
+
+    Filter by triage level and by title with level/title. Both ARE honoured by the server and both
+    are case-insensitive — probed differentially 2026-07-19 against a running Olog with a positive
+    AND a negative control, plus a control showing that an ignored parameter returns the unfiltered
+    count (Olog silently drops parameters it does not know, so "it returned results" proves
+    nothing). level ORs over comma/semicolon/pipe; title matches whole WORDS, not substrings — a
+    fragment finds nothing unless wildcarded with '*', several words are AND-ed, and it is a
+    SEPARATE axis from text, which searches the body only and never the title.
+
+    Caveat that the boundary cannot enforce: Olog does not reject a level it does not know — it
+    answers 0 hits, so 'this level does not exist' and 'no entries have this level' look identical.
+    A result where NOTHING matched therefore carries a note when the value does not name a
+    configured level; call list_log_levels for the valid values. The note states a fact about the
+    VALUE and does not claim to be the cause — another filter in the same search can produce the
+    same 0, an OR-ed list still runs on its recognised parts, and a wildcard level is honoured by
+    the server and so cannot be checked against the name list at all.
+
+    A blank level/title is rejected before any request, because blank is never 'no filter' here and
+    the two possible outcomes disagree: an empty-string level matches nothing (0 hits), while a
+    separators-only value — or any blank title — makes Olog DROP the filter and return the
+    UNFILTERED set as though it were filtered. Note that title splits on whitespace and on a literal
+    '+' as well, so '+' is a blank title but an ordinary level.
     """
     return await _search_logbook(
         text=text,
@@ -752,6 +797,8 @@ async def search_logbook(
         size=size,
         offset=offset,
         sort=sort,
+        level=level,
+        title=title,
         timeout=timeout,
     )
 
@@ -824,6 +871,36 @@ async def list_tags(
     An unreadable listing raises a loud error — never an empty 'there are none'.
     """
     return await _list_tags(timeout)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def list_log_levels(
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """List the valid Phoebus Olog log levels (Olog REST /levels).
+
+    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_OLOG_URL is set. Levels
+    are the logbook's TRIAGE axis (Info / Problem / Request / … ) and are SITE-CONFIGURABLE, not a
+    fixed enum — so this is the only way to learn the valid values for search_logbook(level=…) and
+    create_log_entry(level=…). A Level carries no owner, so this is PII-free like list_tags.
+
+    Call this BEFORE filtering a search by level: Olog does not reject a level it does not know, it
+    answers 0 hits — so a typo reads exactly like 'there are no such entries'.
+
+    default_level is the level a create uses when none is given. It is null, with a note saying why,
+    whenever the server does not state it unambiguously (no level flagged, more than one flagged, or
+    the flag unreadable) — never guessed. An unreadable listing raises a loud error, never an empty
+    'there are none'.
+    """
+    return await _list_log_levels(timeout)
 
 
 @mcp.tool(

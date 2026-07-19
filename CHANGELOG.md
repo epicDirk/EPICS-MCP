@@ -9,6 +9,46 @@ carry breaking changes).
 
 ### Added
 
+- **Olog log levels + the `level`/`title` search facets (OA2 / part of OA5).** New read tool
+  `list_log_levels` (`GET /levels`, ungated like `list_tags`) returning the level names plus
+  `default_level` — the level a create uses when none is given, reported only when the server states
+  it unambiguously and `null` with an explaining note otherwise (no level flagged, several flagged,
+  or the flag unreadable; the server's own seed data ships two defaults). `search_logbook` gained
+  `level` and `title` filters.
+
+  Both filters were confirmed by a **differential live probe** with a positive control, a negative
+  control, and an ignored-parameter control — Olog silently drops parameters it does not know
+  (`default: // Unsupported search parameters are ignored`), so "the filter returned results" proves
+  nothing on its own. Two measured hazards are handled rather than documented away: an **unknown
+  level returns 0 hits instead of an error**, so an empty level-filtered result now carries a note
+  saying the value is not a configured level (checked only on an empty result, and a failed
+  cross-check says so rather than overturning the search); and a **blank filter is refused before any
+  request**, because the server's two answers to it are both misleading and disagree with each other
+  (a blank `level` matches nothing, a blank `title` is dropped and returns everything).
+  `title` matches whole words, not substrings — deliberately unlike `find_channels`.
+
+  Hardened by an adversarial review of the diff (19 findings confirmed, 8 refuted), all
+  re-measured against the running server before acting:
+
+  - **`level` is trimmed the way Java trims**, i.e. only code points ≤ U+0020. Python's wider
+    `strip()` removed NBSP-class spaces that the server KEEPS, so `level="\xa0Info"` was normalised
+    into the configured `Info`, the cross-check saw a known level, and the empty result went out
+    unannotated (measured: the server returns 0 for it and 19 for `"Info"`).
+  - **The blank guard uses each field's OWN separator class.** `title` also splits on whitespace
+    and on a **literal `+`** (the Java class is `[\|,;\s+]`, where the trailing `+` is a class
+    member, not a quantifier), so `title="+"` produced no search term, Olog dropped the filter, and
+    the UNFILTERED set came back looking filtered. `"+"` remains an ordinary `level`.
+  - **The empty-result note no longer overclaims.** It is a statement about the VALUE, never about
+    the cause: it is skipped for an empty PAGE past the end of a paginated set (which contradicts
+    `total_matches` in the same payload), it does not judge a wildcard level (the server honours
+    `Inf*`), it says an OR-ed filter still ran on its recognised parts, and it admits that another
+    filter in the same search may account for the 0.
+  - Documentation corrected where it was wrong: a separators-only `level` does **not** match
+    nothing, it is dropped and returns the unfiltered set — a different mechanism from `""`.
+  - The free-text withholding now states its honest limit: a search still answers with a hit COUNT,
+    so `title=<word>` reveals whether a word occurs in some withheld title. Pre-existing via
+    `text`/`desc`, not introduced here, but previously unacknowledged.
+
 - **Olog attachments (OA1).** `create_log_entry` / `reply_to_log` now take `attachments` (workspace
   file paths, any type/size — sent as multipart `PUT /logs/multipart`, mirroring CS-Studio) and
   `embed_image_base64` (a small inline image embedded via `![](attachment/<id>)`). Two new read

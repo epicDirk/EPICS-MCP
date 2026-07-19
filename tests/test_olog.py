@@ -1,5 +1,6 @@
 """Offline tests for the Phoebus Olog client + tools (no network), DS-PRIVACY focus."""
 
+from typing import Any, ClassVar
 from unittest.mock import Mock
 
 import pytest
@@ -9,15 +10,17 @@ from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
 from epics_pv_mcp.olog_safety import OlogWriteGate
 from epics_pv_mcp.services._time_window import TimeWindowFormatError
-from epics_pv_mcp.services.olog_client import OlogClient
+from epics_pv_mcp.services.olog_client import OlogClient, split_level_values
 from epics_pv_mcp.services.olog_exceptions import (
     OlogConnectionError,
     OlogError,
+    OlogFilterValueError,
     OlogResponseError,
 )
 from epics_pv_mcp.services.redact import FREETEXT_WITHHELD
 from epics_pv_mcp.tools.olog import (
     _get_log_entry,
+    _list_log_levels,
     _list_logbooks,
     _list_tags,
     _search_logbook,
@@ -952,3 +955,468 @@ async def test_list_tags_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     result = await _list_tags()
     assert result["enabled"] is True
     assert result["tags"] == ["vacuum", "rf"]
+
+
+# --- list_log_levels (OA2): strict listing + an UNAMBIGUOUS default, never a guessed one ---
+#
+# Levels are the logbook's triage axis and are site-configurable, so the server is the only source
+# of the valid values. The names reuse the S11-strict `_named_list`; the default is reported only
+# when the server states it unambiguously, because a guessed default would misdescribe what a
+# create without an explicit level actually writes.
+
+
+def test_list_log_levels_names_and_unambiguous_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The measured payload shape: a list of {name, defaultLevel} with exactly one flagged."""
+    client = OlogClient("http://olog")
+    payload = [
+        {"name": "Urgent", "defaultLevel": False},
+        {"name": "Info", "defaultLevel": True},
+        {"name": "Problem", "defaultLevel": False},
+    ]
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    names, default, note = client.list_log_levels()
+    assert names == ["Urgent", "Info", "Problem"]
+    assert default == "Info"
+    assert note is None
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        ([{"name": "A", "defaultLevel": True}, {"name": "B", "defaultLevel": True}], "2 levels"),
+        ([{"name": "A", "defaultLevel": False}], "no level"),
+        ([{"name": "A"}], "did not report"),
+        ([{"name": "A", "defaultLevel": "yes"}], "did not report"),
+    ],
+    ids=["two-defaults", "no-default", "flag-missing", "flag-not-a-bool"],
+)
+def test_list_log_levels_withholds_an_ambiguous_default(
+    payload: list[dict[str, object]], reason: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Withheld is not guessed. Two defaults is NOT hypothetical: the server's own seed file ships
+    two, even though its createLevel endpoint enforces one, so "take the first" would invent an
+    answer. A missing or non-bool flag must not take the whole listing down either: the NAMES are
+    the tool's primary answer and stay readable."""
+    client = OlogClient("http://olog")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    names, default, note = client.list_log_levels()
+    assert names == [item["name"] for item in payload]
+    assert default is None
+    assert note is not None and reason in note
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{}, "nope", [{"defaultLevel": True}], ["Info"], [{"name": 7, "defaultLevel": True}]],
+    ids=["dict", "string", "item-without-name", "string-item", "non-str-name"],
+)
+def test_list_log_levels_unreadable_2xx_raises(
+    payload: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S11 strictness inherited from `_named_list`: an unreadable listing must RAISE. Collapsing to
+    [] would tell a caller validating a level value that NONE of them exist."""
+    client = OlogClient("http://olog")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    with pytest.raises(OlogResponseError):
+        client.list_log_levels()
+
+
+@pytest.mark.asyncio
+async def test_list_log_levels_tool_disabled_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config", lambda: EpicsConfig(olog_url="")
+    )
+
+    def _boom(*args: object, **kwargs: object) -> OlogClient:
+        raise AssertionError("client must not be constructed when disabled")
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _boom)
+    result = await _list_log_levels()
+    assert result["enabled"] is False
+    assert result["levels"] == []
+    assert result["default_level"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_log_levels_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+
+    class _Fake:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
+            return ["Info", "Problem"], "Info", None
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _Fake)
+    result = await _list_log_levels()
+    assert result["enabled"] is True
+    assert result["levels"] == ["Info", "Problem"]
+    assert result["default_level"] == "Info"
+    assert "note" not in result  # nothing to explain -> no noise
+
+
+@pytest.mark.asyncio
+async def test_list_log_levels_propagates_the_withholding_note(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The note is the whole point of withholding an ambiguous default — a service that computed it
+    and then dropped it would surface a bare null the caller cannot interpret."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+
+    class _Ambiguous:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
+            return ["A", "B"], None, "marks 2 levels as default"
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _Ambiguous)
+    result = await _list_log_levels()
+    assert result["default_level"] is None
+    assert result["note"] == "marks 2 levels as default"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("raised", "expected"),
+    [
+        (OlogConnectionError("down"), EpicsConnectionError),
+        (OlogResponseError("garbage"), EpicsError),
+    ],
+    ids=["unreachable", "answered-but-unreadable"],
+)
+async def test_list_log_levels_splits_outage_from_bad_answer(
+    raised: Exception, expected: type[Exception], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two different facts, two different next actions: "the service is down" vs "the service
+    ANSWERED and we could not read it". Collapsing them sends the reader after the wrong problem
+    (S11 section 8 — the same split search already lives)."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+
+    class _Broken:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
+            raise raised
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _Broken)
+    with pytest.raises(expected):
+        await _list_log_levels()
+
+
+# --- search: the level/title facets (OA2/OA5) ---
+#
+# What a mock CAN prove: that we SEND what we claim to send, and that the blank guard fires before
+# any request. What it CANNOT prove is whether the server HONOURS the filter — Olog silently drops
+# parameters it does not know, so that half lives in tests/test_olog_live.py as a differential
+# probe carrying both controls.
+
+
+def test_search_sends_level_and_title_on_the_wire(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The wire names are `level` and `title`. A typo in either is silently IGNORED by Olog rather
+    than rejected, so the names themselves are worth pinning."""
+    client = OlogClient("http://olog")
+    get = Mock(return_value=_resp({"logs": [], "hitCount": 0}))
+    monkeypatch.setattr(client.session, "get", get)
+    client.search_logbook(level="Problem", title="vacuum")
+    params = get.call_args.kwargs["params"]
+    assert params["level"] == "Problem"
+    assert params["title"] == "vacuum"
+
+
+def test_search_omits_level_and_title_when_not_filtering(monkeypatch: pytest.MonkeyPatch) -> None:
+    """None means "not filtering" and must not reach the wire at all."""
+    client = OlogClient("http://olog")
+    get = Mock(return_value=_resp({"logs": [], "hitCount": 0}))
+    monkeypatch.setattr(client.session, "get", get)
+    client.search_logbook()
+    params = get.call_args.kwargs["params"]
+    assert "level" not in params
+    assert "title" not in params
+
+
+def test_level_split_matches_java_trim_not_python_strip() -> None:
+    """Python's ``strip()`` is Unicode-aware; Java's ``trim()`` is not. Stripping more than the
+    server does would normalise an UNMATCHABLE level into a configured name — the cross-check would
+    then see a known level, stay silent, and let a fabricated emptiness through.
+
+    Measured 2026-07-19: level='\\xa0Info' returns 0 hits where level='Info' returns 19, i.e. the
+    server really does keep the NBSP."""
+    assert split_level_values(" Info ") == ["Info"]  # ASCII padding: trimmed by both
+    assert split_level_values("\t\nInfo\r") == ["Info"]  # all <= U+0020
+    assert split_level_values("\xa0Info") == ["\xa0Info"]  # NBSP: kept, as the server keeps it
+    assert split_level_values("Info,Problem") == ["Info", "Problem"]
+    assert split_level_values("  ") == []  # still blank
+    assert split_level_values("|;,") == []
+
+
+def test_title_blank_guard_uses_the_titles_own_separator_class() -> None:
+    """`title` and `level` do NOT share a separator class, and assuming they do is a silent bug.
+
+    The server's title class is the Java literal ``[\\|,;\\s+]`` — inside a character class that
+    trailing ``+`` is a LITERAL member, not a quantifier. So a ``+``-only title yields no search
+    terms and Olog returns the UNFILTERED set (measured: title='+' -> every entry), while the same
+    value is a perfectly ordinary level (measured: level='+' -> 0 hits, genuinely filtered)."""
+    client = OlogClient("http://olog")
+    with pytest.raises(OlogFilterValueError):
+        client.search_logbook(title="+")
+    with pytest.raises(OlogFilterValueError):
+        client.search_logbook(title="  +  ")
+    # ... and it must stay a usable value on the OTHER field, which does not split on '+'
+    assert split_level_values("+") == ["+"]
+
+
+@pytest.mark.parametrize("blank", ["", " ", ",", ",,", " ; ", "|"], ids=repr)
+@pytest.mark.parametrize("field", ["level", "title"])
+def test_search_refuses_a_blank_filter_before_any_request(
+    field: str, blank: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A blank filter is refused BEFORE the request, because Olog's two answers to it are both
+    misleading and they DISAGREE with each other: a blank level matches nothing (0 hits, reading as
+    "no such entries") while a blank title is dropped (an UNFILTERED result presented as a filtered
+    one). Measured 2026-07-19."""
+    client = OlogClient("http://olog")
+
+    def _boom(*args: object, **kwargs: object) -> Mock:
+        raise AssertionError("no request may be issued for a blank filter")
+
+    monkeypatch.setattr(client.session, "get", _boom)
+    filters: dict[str, Any] = {field: blank}
+    with pytest.raises(OlogFilterValueError):
+        client.search_logbook(**filters)
+
+
+@pytest.mark.asyncio
+async def test_blank_filter_surfaces_as_invalid_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The service maps it to INVALID_INPUT, not to a transport/response code: nothing was sent."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+    with pytest.raises(EpicsError) as excinfo:
+        await _search_logbook(level="  ")
+    assert excinfo.value.error_code == "INVALID_INPUT"
+
+
+# --- search: the empty-level-filter annotation (OA2) ---
+#
+# Olog answers an unrecognised level with 200 + 0 hits, so "this level does not exist" and "no
+# entries have this level" are the SAME response. Without the annotation a caller reports the
+# second when the first is true.
+
+
+class _FakeSearch:
+    """An OlogClient double: a fixed search result plus a levels listing (or a failure).
+
+    ``search_logbook`` mirrors the REAL signature keyword for keyword rather than swallowing
+    ``**kwargs``, and records what it was called with. A permissive double is not neutral here: it
+    absorbs exactly the defect class these tests exist to catch — a service layer that forwards a
+    misspelled keyword, or forwards nothing at all, would still be green against ``**kwargs``.
+    """
+
+    entries: ClassVar[list[dict[str, object]]] = []
+    levels: ClassVar[tuple[list[str], str | None, str | None]] = (
+        ["Info", "Problem"],
+        "Info",
+        None,
+    )
+    levels_error: ClassVar[Exception | None] = None
+    total_matches: ClassVar[int | None] = None
+    seen: ClassVar[dict[str, object]] = {}
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        pass
+
+    def search_logbook(
+        self,
+        text: str | None = None,
+        logbooks: str | None = None,
+        tags: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        size: int = 50,
+        offset: int = 0,
+        sort: str = "down",
+        level: str | None = None,
+        title: str | None = None,
+    ) -> tuple[list[dict[str, object]], bool, int | None]:
+        type(self).seen = {
+            "text": text,
+            "logbooks": logbooks,
+            "tags": tags,
+            "start": start,
+            "end": end,
+            "size": size,
+            "offset": offset,
+            "sort": sort,
+            "level": level,
+            "title": title,
+        }
+        total = self.total_matches if self.total_matches is not None else len(self.entries)
+        return self.entries, False, total
+
+    def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
+        if self.levels_error is not None:
+            raise self.levels_error
+        return self.levels
+
+
+@pytest.mark.asyncio
+async def test_service_forwards_level_and_title_to_the_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The checkers -> client pass-through, which nothing else exercises: a facet the service
+    silently fails to forward would leave the search UNFILTERED while looking filtered."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _FakeSearch)
+    await _search_logbook(level="Problem", title="vacuum", size=7)
+    assert _FakeSearch.seen["level"] == "Problem"
+    assert _FakeSearch.seen["title"] == "vacuum"
+    assert _FakeSearch.seen["size"] == 7
+
+
+@pytest.mark.asyncio
+async def test_empty_page_past_the_end_is_not_annotated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An empty PAGE is not an empty RESULT. Paging past the end returns no entries while
+    total_matches says something DID match — annotating that would contradict the very payload it
+    is attached to, and would blame a level that is doing its job."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+
+    class _PastTheEnd(_FakeSearch):
+        entries: ClassVar[list[dict[str, object]]] = []
+        total_matches: ClassVar[int | None] = 12
+
+        def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
+            raise AssertionError("/levels must not be fetched for an empty PAGE")
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _PastTheEnd)
+    result = await _search_logbook(level="Warning", offset=999)
+    assert result["total"] == 0
+    assert result["total_matches"] == 12
+    assert "note" not in result
+
+
+@pytest.mark.asyncio
+async def test_note_does_not_judge_a_wildcard_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Olog HONOURS a wildcard level (measured: 'Inf*' returns the Info entries), so a wildcard
+    part cannot be checked against the name list — declaring it 'not a configured level' would deny
+    the real cause. It is named as unchecked instead."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _FakeSearch)
+    result = await _search_logbook(level="Zzz*")
+    assert "note" not in result  # nothing checkable was unknown -> no verdict at all
+
+
+@pytest.mark.asyncio
+async def test_note_on_a_mixed_or_list_does_not_generalise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An OR-ed filter is not all-or-nothing. With one valid and one invalid value the search DID
+    run on the valid one, so the note must name the unknown part AND say the search still ran."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _FakeSearch)
+    result = await _search_logbook(level="Info,Warnign")
+    note = result["note"]
+    assert isinstance(note, str)
+    assert "'Warnign'" in note
+    assert "did still run on 'Info'" in note
+    # and it must NOT claim the whole filter was bogus
+    assert "may account for the empty result as well" not in note
+
+
+@pytest.mark.asyncio
+async def test_empty_result_names_an_unknown_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _FakeSearch)
+    result = await _search_logbook(level="Warning")
+    note = result["note"]
+    assert isinstance(note, str)
+    assert "Warning" in note
+    assert "does not name a configured level" in note
+    # It states a fact about the VALUE and must NOT claim to know why the result is empty — other
+    # filters in the same search can produce the identical 0.
+    assert "may account for the empty result as well" in note
+
+
+@pytest.mark.asyncio
+async def test_empty_result_for_a_known_level_is_not_annotated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A configured level that simply has no entries is an honest 0. Annotating it would be noise,
+    and noise trains the reader to skip the note that matters. Also pins the case-insensitive
+    comparison — the server matches case-insensitively, so the cross-check must too."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _FakeSearch)
+    result = await _search_logbook(level="problem")
+    assert "note" not in result
+
+
+@pytest.mark.asyncio
+async def test_nonempty_result_is_never_annotated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The extra /levels lookup runs ONLY on an empty result — a result that found something needs
+    no excuse, and must not pay for a second round trip."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+
+    class _Found(_FakeSearch):
+        entries: ClassVar[list[dict[str, object]]] = [{"id": 1}]
+
+        def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
+            raise AssertionError("/levels must not be fetched when the search found something")
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _Found)
+    result = await _search_logbook(level="Warning")
+    assert "note" not in result
+
+
+@pytest.mark.asyncio
+async def test_unreadable_levels_lookup_says_so_and_keeps_the_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed cross-check must neither overturn a search that succeeded (withheld is not no) nor
+    be swallowed into what would read as a clean bill of health."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+
+    class _LevelsDown(_FakeSearch):
+        levels_error: ClassVar[Exception | None] = OlogResponseError("levels unreadable")
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _LevelsDown)
+    result = await _search_logbook(level="Warning")
+    assert result["enabled"] is True  # the search itself still succeeded
+    note = result["note"]
+    assert isinstance(note, str)
+    assert "Could not verify" in note

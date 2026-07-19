@@ -18,13 +18,16 @@ constants, not derived from the clock, so a run is reproducible.
 from __future__ import annotations
 
 import os
+from collections import Counter
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
 from epics_pv_mcp.services._time_window import TimeWindowFormatError
 from epics_pv_mcp.services.olog_client import OlogClient
-from epics_pv_mcp.services.olog_exceptions import OlogError
+from epics_pv_mcp.services.olog_exceptions import OlogError, OlogFilterValueError
+from epics_pv_mcp.services.redact import FREETEXT_WITHHELD
 
 pytestmark = [
     pytest.mark.live,
@@ -54,6 +57,17 @@ _NO_REFERENCE = (
 def client() -> OlogClient:
     url = os.environ["EPICS_MCP_OLOG_URL"]
     return OlogClient(url, timeout=10.0)
+
+
+@pytest.fixture
+def whole_client() -> OlogClient:
+    """A client that may see free text — for probes that must READ a title to derive a probe word.
+
+    Declaring test data is not enough on its own: the client un-redacts only when the URL is ALSO
+    loopback, so pointing this suite at a real server keeps the free text withheld and the probes
+    that need it skip rather than leak."""
+    url = os.environ["EPICS_MCP_OLOG_URL"]
+    return OlogClient(url, timeout=10.0, assume_test_data=True)
 
 
 def _hits(client: OlogClient, start: str, end: str) -> int | None:
@@ -202,6 +216,250 @@ def test_live_payloads_satisfy_the_strict_schema(client: OlogClient) -> None:
     assert logbooks and all(isinstance(name, str) and name for name in logbooks)
     tags = client.list_tags()
     assert all(isinstance(name, str) and name for name in tags)
+
+
+# --- OA2/OA5: the level + title facets, with the control that makes a probe MEAN something ---
+#
+# Olog's parameter switch ends in `default: // Unsupported search parameters are ignored`, so a
+# filter it does not understand is DROPPED, not rejected — and the answer is a well-formed 200 with
+# the unfiltered set. "The filter returned results" therefore proves nothing on its own. Every probe
+# below carries three things: a positive control (must match), a negative control (must not), and
+# the IGNORED-PARAMETER control that shows what a dropped filter actually looks like.
+
+
+def _raw_hit_count(client: OlogClient, params: dict[str, str]) -> int | None:
+    """``hitCount`` for an arbitrary query — deliberately bypassing ``search_logbook``.
+
+    The client only ever sends parameters it knows, so it cannot express the one query this file
+    needs most: a filter under a name the server does NOT know. Reaching past the public method is
+    the point here, not a shortcut."""
+    data = client._get(f"{client.base_url}/logs/search", params)
+    return data.get("hitCount") if isinstance(data, dict) else None
+
+
+def _levels_in_fixture(client: OlogClient) -> Counter[str]:
+    """How many entries carry each level, read from the unfiltered set. ``level`` is a technical
+    field and survives redaction, so this works in either output posture."""
+    entries, _capped, _total = client.search_logbook(size=200)
+    return Counter(str(entry["level"]) for entry in entries if entry.get("level"))
+
+
+def test_level_filter_is_honoured_by_the_server(client: OlogClient) -> None:
+    """The differential probe behind the documented level promise (CLAUDE.md's hard rule).
+
+    Positive: filtering by a level present in the fixture returns exactly the entries carrying it.
+    Negative: the entries of a DIFFERENT level are absent — without this, a dropped filter would
+    look identical. Control: the same value under an unknown parameter name comes back UNFILTERED,
+    which is what "silently ignored" looks like, so the positive result cannot be explained that
+    way."""
+    counts = _levels_in_fixture(client)
+    if len(counts) < 2:
+        pytest.skip(f"fixture carries {len(counts)} distinct level(s); need 2 to discriminate")
+    (level, count), (other, other_count) = counts.most_common(2)
+
+    entries, _capped, _total = client.search_logbook(level=level, size=200)
+    assert entries, _NO_REFERENCE
+    assert {str(entry["level"]) for entry in entries} == {level}  # negative: nothing else got in
+    assert len(entries) == count  # positive: everything carrying it got out
+
+    unfiltered = _raw_hit_count(client, {"size": "200"})
+    # PRECONDITION, not an assertion about the filter: the per-level counts are read from the same
+    # single page as `unfiltered`, so they only add up while the fixture fits in one page. Stated
+    # explicitly (rather than left as a bare equality that would start failing for an unrelated
+    # reason once the sandbox outgrows `size`) — and skipped, not failed, because a fixture too
+    # large to page in one go says nothing about whether the level filter works.
+    if unfiltered is None or unfiltered != sum(counts.values()):
+        pytest.skip(
+            f"fixture no longer fits one page ({unfiltered} total vs {sum(counts.values())} "
+            "counted) — the arithmetic control needs a single-page fixture"
+        )
+    assert unfiltered == count + other_count + sum(
+        n for lvl, n in counts.items() if lvl not in (level, other)
+    )
+    ignored = _raw_hit_count(client, {"size": "200", "notaparameter": level})
+    assert ignored == unfiltered, (
+        "the ignored-parameter control did not come back unfiltered — this server may now reject "
+        "unknown parameters, which would make the control meaningless (re-measure before trusting)"
+    )
+    assert len(entries) != unfiltered, (
+        "the level filter narrowed nothing — indistinguishable from having been dropped"
+    )
+
+
+def test_level_filter_is_case_insensitive(client: OlogClient) -> None:
+    """The index analyzer lowercases, so the filter is case-insensitive. Documented in the tool
+    description, therefore pinned here rather than assumed from reading the mapping."""
+    counts = _levels_in_fixture(client)
+    if not counts:
+        pytest.skip("fixture carries no levelled entries")
+    level, count = counts.most_common(1)[0]
+    for spelling in (level.lower(), level.upper()):
+        entries, _capped, _total = client.search_logbook(level=spelling, size=200)
+        assert len(entries) == count, f"{spelling!r} did not match as {level!r}"
+
+
+def test_unknown_level_is_silently_zero_not_an_error(client: OlogClient) -> None:
+    """S8, measured: an unrecognised level is NOT rejected — the server answers 200 with 0 hits.
+
+    This is why ``list_log_levels`` exists and why an empty level-filtered result is annotated: at
+    the wire there is no difference between "this level does not exist" and "no entries have this
+    level", so a typo reads as a fact about the logbook. Goes red if a future Olog starts validating
+    the value — the annotation could then be simplified.
+
+    The non-emptiness precondition is load-bearing, not decoration: on an empty logbook ``entries ==
+    []`` holds no matter what the server does, so without it this test would be green against an
+    Olog that rejects the value loudly — the exact ``[] == []`` class already documented for
+    ``test_unreadable_sort_silently_reverses_on_the_server``."""
+    reference, _capped, _total = client.search_logbook(size=200)
+    assert reference, _NO_REFERENCE
+    entries, _capped, total = client.search_logbook(level="NotAConfiguredLevel", size=200)
+    assert entries == []
+    assert total in (0, None)
+
+
+def test_title_filter_is_honoured_and_matches_whole_words(whole_client: OlogClient) -> None:
+    """``title`` filters as named, case-insensitively, and matches whole WORDS — not substrings.
+
+    The fragment is DERIVED, not hard-coded: a strict prefix of a real title word that is itself not
+    a word anywhere in the fixture. That makes the substring claim decidable rather than likely —
+    bare, it must find nothing; wildcarded, it must find the word it was taken from. (Nothing from
+    the fixture is committed; titles are read at runtime.)
+
+    Takes the WHOLE-mode client on purpose: the probe word has to be read out of a real title, and
+    the default posture WITHHOLDS title free text. Deriving from a redacted title silently probes
+    the withheld-placeholder text instead — which matches nothing and fails the positive control
+    (measured while writing this test).
+
+    Worth stating because it is the OPPOSITE of ``find_channels``, whose bare value is an anchored
+    substring glob — copying that wording over would have been a false documented promise."""
+    entries, _capped, _total = whole_client.search_logbook(size=200)
+    assert entries, _NO_REFERENCE
+    titles = [
+        str(entry["title"])
+        for entry in entries
+        if isinstance(entry.get("title"), str) and entry["title"] != FREETEXT_WITHHELD
+    ]
+    if not titles:
+        pytest.skip("titles are withheld here (not a declared loopback sandbox) — no probe word")
+    words = {word for title in titles for word in title.lower().split() if word.isalnum()}
+
+    # Sorted by (-length, word) so a length tie breaks on the WORD, not on set-iteration order —
+    # which depends on PYTHONHASHSEED and would make the chosen probe differ between runs of the
+    # same fixture, contradicting this file's own reproducibility promise.
+    probe = next((w for w in sorted(words, key=lambda w: (-len(w), w)) if len(w) >= 4), None)
+    if probe is None:
+        pytest.skip("no title word long enough to derive a fragment from")
+    fragment = probe[:-1]
+    if fragment in words:
+        pytest.skip("the derived fragment is itself a title word; cannot decide substring-ness")
+
+    def hits(value: str) -> int:
+        return len(whole_client.search_logbook(title=value, size=200)[0])
+
+    assert hits(probe), "positive control: the word must match"
+    assert hits(probe.upper()) == hits(probe), "must be case-insensitive"
+    assert hits("zzznosuchtitleword") == 0  # negative control
+    assert hits(fragment) == 0, (
+        "a bare word FRAGMENT matched — title is not the whole-word matcher the tool description "
+        "promises (and is not the anchored substring glob of find_channels either); re-measure"
+    )
+    assert hits(f"{fragment}*") >= hits(probe), "the wildcard must find at least the word itself"
+
+
+def test_documented_combination_semantics_hold(
+    client: OlogClient, whole_client: OlogClient
+) -> None:
+    """Pins the three COMBINATION promises the tool description makes, each of which was documented
+    from one probe and nothing else — an unpinned promise is one server upgrade from being a lie.
+
+    * ``level`` ORs over ``,`` ``;`` ``|`` — all three separators, not just the comma that got
+      measured first: two levels joined must return the union of their individual counts.
+    * several ``title`` words are AND-ed — two words from the SAME title must return that title's
+      count, two words from DIFFERENT titles must return nothing.
+    * a quoted ``title`` matches the phrase IN ORDER — reversing the words must return nothing.
+    """
+    counts = _levels_in_fixture(client)
+    nonzero = [name for name, count in counts.items() if count]
+    if len(nonzero) < 2:
+        pytest.skip("need two levels with entries to prove the OR")
+    first, second = nonzero[0], nonzero[1]
+    union = counts[first] + counts[second]
+    for separator in (",", ";", "|"):
+        joined = client.search_logbook(level=f"{first}{separator}{second}", size=200)[0]
+        assert len(joined) == union, f"{separator!r} did not OR the two levels"
+
+    # The title half needs the WHOLE-mode client: the default posture withholds title free text,
+    # and a probe word derived from the withheld placeholder matches nothing (measured twice
+    # while writing this file — it presents as a skip or a failed positive control, never as a
+    # real result).
+    entries, _capped, _total = whole_client.search_logbook(size=200)
+    titles = [
+        str(entry["title"])
+        for entry in entries
+        if isinstance(entry.get("title"), str) and entry["title"] != FREETEXT_WITHHELD
+    ]
+    pair = next((t.lower().split() for t in sorted(titles) if len(t.split()) >= 2), None)
+    if pair is None:
+        pytest.skip("no multi-word title readable in this posture — cannot probe AND/phrase")
+
+    def hits(value: str) -> int:
+        return len(whole_client.search_logbook(title=value, size=200)[0])
+
+    assert hits(f"{pair[0]} {pair[1]}") == hits(f'"{pair[0]} {pair[1]}"'), (
+        "AND-ing two adjacent words and quoting them as a phrase disagree on a title that "
+        "contains them in that order — one of the two documented rules is wrong"
+    )
+    assert hits(f"{pair[0]} zzznosuchtitleword") == 0, "several title words are not AND-ed"
+    assert hits('"zzznosuch wordpairzzz"') == 0  # negative control for the phrase form
+
+
+def test_blank_filters_are_refused_before_any_request(client: OlogClient) -> None:
+    """Pins BOTH halves of the asymmetry the guard exists for — read straight off the server, so it
+    goes red if Olog ever starts treating the two fields alike.
+
+    A blank ``level`` matches nothing (0 hits, reading exactly like "no such entries"); a blank
+    ``title`` is dropped entirely (the UNFILTERED count, presented as a filtered result). Neither is
+    "no filter", and because they disagree, neither behaviour can be inferred from the other — hence
+    the client refuses both before sending."""
+    unfiltered = _raw_hit_count(client, {"size": "200"})
+    assert unfiltered, _NO_REFERENCE
+    assert _raw_hit_count(client, {"size": "200", "level": ""}) == 0
+    assert _raw_hit_count(client, {"size": "200", "title": ""}) == unfiltered
+
+    for field in ("level", "title"):
+        filters: dict[str, Any] = {field: "  ", "size": 200}
+        with pytest.raises(OlogFilterValueError):
+            client.search_logbook(**filters)
+
+
+def test_levels_listing_satisfies_the_strict_schema(client: OlogClient) -> None:
+    """OA2 anchor: ``GET /levels`` returns ``{name, defaultLevel}`` records (measured 2026-07-19).
+    Pins the premise ``_level_list`` was written against, so a server that changes shape goes red
+    instead of quietly losing the default."""
+    names, default, _note = client.list_log_levels()
+    assert names and all(isinstance(name, str) and name for name in names)
+
+    # Differential, not a constant: read the flag straight off the wire and require the extracted
+    # default to agree with it. `default is None or default in names` would be satisfied by None
+    # alone, so it stays green exactly when the shape change it exists to catch happens (a renamed
+    # or dropped `defaultLevel` yields None and the anchor never notices). Deriving the expectation
+    # from the payload keeps this true for any Olog with any seed data — including the two-defaults
+    # case the seed file ships, where withholding is the CORRECT answer.
+    raw = client._get(f"{client.base_url}/levels", {})
+    assert isinstance(raw, list)
+    flagged = [item["name"] for item in raw if item.get("defaultLevel") is True]
+    assert [str(item["name"]) for item in raw] == names
+    assert default == (flagged[0] if len(flagged) == 1 else None), (
+        f"extracted default {default!r} disagrees with the wire, which flags {flagged!r} — "
+        "the 'defaultLevel' premise this anchor pins no longer holds"
+    )
+
+    counts = _levels_in_fixture(client)
+    assert set(counts) <= set(names), (
+        f"entries carry levels the server does not list: {sorted(set(counts) - set(names))} — "
+        "a level can be deleted while entries keep the string, which is exactly why the level "
+        "filter is NOT validated against this listing before searching"
+    )
 
 
 def test_unknown_id_error_is_loud_not_a_not_found(client: OlogClient) -> None:

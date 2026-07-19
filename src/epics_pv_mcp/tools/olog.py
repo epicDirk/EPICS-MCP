@@ -15,6 +15,7 @@ from epics_pv_mcp.services.checkers import (
     query_olog_create,
     query_olog_download,
     query_olog_entry,
+    query_olog_levels,
     query_olog_list_attachments,
     query_olog_logbooks,
     query_olog_search,
@@ -51,6 +52,8 @@ async def _search_logbook(
     size: int = DEFAULT_MAX_LOGS,
     offset: int = 0,
     sort: str = "down",
+    level: str | None = None,
+    title: str | None = None,
     timeout: float = 5.0,
 ) -> dict[str, object]:
     """Search the Phoebus Olog logbook (see services.olog_client for the output posture).
@@ -66,6 +69,8 @@ async def _search_logbook(
         size=size,
         offset=offset,
         sort=sort,
+        level=level,
+        title=title,
         timeout=timeout,
     )
 
@@ -92,6 +97,14 @@ async def _list_tags(timeout: float = 5.0) -> dict[str, object]:
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_tags`.
     """
     return await query_olog_tags(timeout=timeout)
+
+
+async def _list_log_levels(timeout: float = 5.0) -> dict[str, object]:
+    """List the valid Olog log-level names (+ the default level).
+
+    Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_levels`.
+    """
+    return await query_olog_levels(timeout=timeout)
 
 
 async def _create_log_entry(

@@ -17,6 +17,22 @@ class OlogError(RestClientError):
     """Base error for the Olog client."""
 
 
+class OlogFilterValueError(ValueError):
+    """A search filter value is unusable, refused BEFORE any request is issued (OA2/OA5).
+
+    Deliberately a :class:`ValueError` and NOT an :class:`OlogError`: nothing was sent, so this is
+    a bad ARGUMENT, not a service failure — the same shape as
+    :class:`~epics_pv_mcp.services._time_window.TimeWindowFormatError`, and the service maps it to
+    ``INVALID_INPUT`` rather than to a transport/response code.
+
+    The case that makes this necessary is measured, not hypothetical: a ``level`` that is present
+    but blank is NOT "no filter" on the Olog side. ``""`` splits to ``[""]`` and becomes a wildcard
+    matching nothing, so the server answers HTTP 200 with **0 hits** (measured 2026-07-19) — which
+    reads exactly like "there are no such entries". ``title`` is asymmetric here (blank IS dropped,
+    yielding the unfiltered count), so neither behaviour can be assumed from the other. Refusing a
+    blank filter keeps a caller from reporting a fabricated emptiness as a fact."""
+
+
 class OlogConnectionError(OlogError, RestConnectionError):
     """Failed to establish a connection to the Olog service."""
 

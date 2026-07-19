@@ -50,8 +50,9 @@ are simply absent — that is an unmet optional extra, not a bug.
 `get_pv_value` · `get_pvs` · `set_pv_value` · `get_pv_info` · `monitor_pv` · `discover_pvs` ·
 `find_channels` · `lookup_device_name` · `is_archived` · `get_pv_history` · `get_archive_info` ·
 `list_archived_pvs` · `is_alarm_configured` · `get_alarm_history` · `diagnose_connection` ·
-`search_logbook` · `get_log_entry` · `list_logbooks` · `list_tags` · `create_log_entry` · `reply_to_log` ·
-`update_log_entry` · `add_log_attachment` · `list_log_attachments` · `download_log_attachment`
+`search_logbook` · `get_log_entry` · `list_logbooks` · `list_tags` · `list_log_levels` ·
+`create_log_entry` · `reply_to_log` · `update_log_entry` · `add_log_attachment` ·
+`list_log_attachments` · `download_log_attachment`
 
 **Optional `[displays]` — cross-plane with the operator-screen PV inventory:**
 `validate_pvs` · `crossplane_check` · `coverage_audit` · `find_device`
@@ -93,6 +94,70 @@ production logbook in the clear.
 **Diagnosis:** `epics-doctor` prints the effective posture (`Olog free-text: withheld` vs `FULL
 (declared local test data — ESS-spec pending)`). This is a *runtime output* policy and has nothing to do
 with keeping person data out of committed files — that is a separate, unaffected guard.
+
+### Olog search filters — what the server does with a value it does not like
+
+**The signature to recognise: Olog does not reject a bad search parameter, it ignores it.** Its
+parameter switch ends in `default: // Unsupported search parameters are ignored`, so a misspelled
+parameter NAME is dropped and the query comes back with the **unfiltered** set behind a 200. "The
+search returned results" is therefore never evidence that a filter was applied — which is why every
+filter promise here rests on a differential probe carrying a positive control, a negative control,
+and an ignored-parameter control (`tests/test_olog_live.py`).
+
+Measured behaviour of the filters, 2026-07-19:
+
+| Value | `level` | `title` |
+|---|---|---|
+| known / matching | filters as named, case-insensitive | filters as named, case-insensitive |
+| **unknown** | **200 + 0 hits, no error** | **200 + 0 hits, no error** |
+| empty string `""` | matches **nothing** (0 hits) | **dropped** → unfiltered result |
+| separators only (`","`, `"+"`) | **dropped** → unfiltered result | **dropped** → unfiltered result |
+| several values | OR over `,` `;` `\|` | AND over whitespace-separated words |
+| quoted `"a b"` | phrase (also for values with a space) | phrase, in order |
+| wildcard `*` | **honoured** (`Inf*` matches `Info`) | **honoured** |
+
+⚠️ The two "blank" rows are NOT the same mechanism, and both are refused client-side for that
+reason. `""` survives Java's `split` as a single empty term and becomes a wildcard matching nothing;
+a separators-only value leaves NO term, so the filter is dropped and the **unfiltered** set comes
+back looking filtered — the worse of the two. And the separator classes DIFFER: `title` also splits
+on whitespace **and on a literal `+`** (the Java class is `[\|,;\s+]`, where the trailing `+` is a
+class member, not a quantifier), so `"+"` is a blank title but a perfectly ordinary level.
+
+⚠️ `level` values are trimmed with Java's `trim()`, which removes only code points ≤ U+0020 — NOT
+NBSP or other Unicode spaces. `level=" Info"` therefore returns 0 hits while `level="Info"`
+returns the entries. Anything comparing a level value against the name list must trim the same way,
+or it will normalise an unmatchable value into a configured one and stay silent about it.
+
+Three consequences worth carrying:
+
+1. **An unknown level reads exactly like an empty logbook.** `level=Warnign` returns 0 hits, and
+   nothing distinguishes that from "no entries are Warnings". Call **`list_log_levels`** for the
+   valid values — levels are site-configurable, not a fixed enum. `search_logbook` annotates an
+   empty level-filtered result when the value is not a configured level, so the 0 is not reported
+   as a fact about the logbook.
+2. **Blank is not "no filter", and the two fields disagree about what it means.** Both are refused
+   client-side before the request (`INVALID_INPUT`) — neither server answer is usable.
+3. **`title` matches whole WORDS, not substrings** — the opposite of `find_channels`, whose bare
+   value is an anchored substring glob. A word fragment finds nothing unless wildcarded (`att*`).
+   `title` is also a separate axis from `text`/`desc`, which searches the **body** only and never
+   the title.
+
+Do **not** validate a level against `list_log_levels` before searching: a level can be deleted while
+existing entries keep the string, so a pre-flight check would refuse a legitimate search of history.
+The cross-check belongs where it is — on an empty result.
+
+An unbalanced double quote in `title` makes the server throw, which an anonymous read sees as **401**
+(Olog's error dispatch requires auth and so masks its own 400). On this read path a 401 almost always
+means the QUERY was rejected, not that credentials are wrong.
+
+**Honest limit of the free-text withholding (stated, not solved).** Against a redacted server the
+`title`/`description` values are withheld — but a *search* still answers with a hit COUNT, so asking
+`title=<word>` reveals whether that word occurs in some title even though no title is readable. This
+is inherent to any search interface over withheld text and is **not new** with the `title` facet:
+`text`/`desc` has offered the same oracle over the body since the first read tool. It is recorded
+here because the redaction section otherwise reads as a stronger guarantee than it is. Closing it
+would mean withholding counts too, which costs search its purpose — the withholding policy is
+ESS-spec-pending anyway (see above), so this is a known, bounded gap, not an accepted design.
 
 ### PV write posture (`set_pv_value`) — the audit trail
 

@@ -54,9 +54,15 @@ from epics_pv_mcp.services.olog_attachments import (
 from epics_pv_mcp.services.olog_client import (
     DEFAULT_MAX_LOGS,
     OlogClient,
+    split_level_values,
     unroundtrippable_attachment_filenames,
 )
-from epics_pv_mcp.services.olog_exceptions import OlogConnectionError, OlogError, OlogResponseError
+from epics_pv_mcp.services.olog_exceptions import (
+    OlogConnectionError,
+    OlogError,
+    OlogFilterValueError,
+    OlogResponseError,
+)
 
 
 class CFRegistryChecker:
@@ -522,6 +528,73 @@ async def query_naming_lookup(name: str, timeout: float = 5.0) -> dict[str, obje
         }
 
 
+def _unknown_level_note(client: OlogClient, level: str) -> str | None:
+    """Flag a level filter whose value does not name a configured level (OA2).
+
+    Olog answers an unrecognised ``level`` with 200 and 0 hits, so "this level does not exist"
+    and "no entries have this level" are the same response. Left alone, a caller reports the
+    second when the first is true. This runs ONLY on a genuinely empty result, so the extra
+    ``GET /levels`` costs nothing on the path that found something.
+
+    Deliberately makes the WEAKEST claim that is still useful — a statement about the VALUE, never
+    about the CAUSE of the emptiness. The stronger wording ("this is 'no such level', NOT 'no
+    entries have it'") was wrong in four measured ways, each of which this now avoids:
+
+    * **Wildcards are honoured.** ``level="Inf*"`` returns the ``Info`` entries (measured), so a
+      value containing ``*``/``?`` cannot be judged against the name list at all — those parts are
+      excluded from the verdict and named separately as unchecked.
+    * **An OR-ed list is not all-or-nothing.** With ``level="Info,Warnign"`` the search really did
+      run on ``Info``; concluding "no such level" over the whole filter is false.
+    * **The level is not the only possible cause.** A time window, ``logbooks``/``tags`` or a
+      ``text`` filter can produce the same 0. The note says the value is unconfigured; it does not
+      claim that is *why* nothing matched.
+    * It is only reached for a genuinely empty RESULT, never an empty PAGE past the end of a
+      paginated set — the caller decides that (see :func:`query_olog_search`).
+
+    Returns ``None`` when every checkable part IS a configured level — then the result needs no
+    annotation. If ``/levels`` itself cannot be read, that is SAID rather than swallowed or raised:
+    a failed cross-check must not overturn a search that succeeded (withheld ≠ no), and must not
+    silently look like a clean bill of health either."""
+    requested = split_level_values(level)
+    checkable = [part for part in requested if "*" not in part and "?" not in part]
+    wildcards = [part for part in requested if part not in checkable]
+    try:
+        names, _default, _note = client.list_log_levels()
+    except OlogError as exc:
+        return (
+            f"Nothing matched. Could not verify whether {level!r} names configured levels "
+            f"({exc}) — Olog returns 0 hits and no error for an unrecognised level, so this "
+            "result may mean the value does not exist rather than that no entries carry it."
+        )
+    known = {name.casefold() for name in names}
+    unknown = [part for part in checkable if part.casefold() not in known]
+    if not unknown:
+        return None
+
+    plural = len(unknown) != 1
+    parts = ", ".join(repr(part) for part in unknown)
+    note = (
+        f"Nothing matched. {parts} {'do' if plural else 'does'} not name a configured level on "
+        f"this server (known: {', '.join(names) or 'none'}), and Olog returns 0 hits rather than "
+        f"an error for an unrecognised level — so {'these values' if plural else 'that value'} "
+        "matched nothing by construction."
+    )
+    recognised = [part for part in checkable if part not in unknown]
+    if recognised:
+        note += (
+            " The filter is OR-ed, so the search did still run on "
+            f"{', '.join(map(repr, recognised))}."
+        )
+    if wildcards:
+        note += (
+            f" {', '.join(map(repr, wildcards))} contains a wildcard, which Olog honours but which "
+            "cannot be checked against the level names — it is not part of this verdict."
+        )
+    if not recognised and not wildcards:
+        note += " Other filters in this search may account for the empty result as well."
+    return note
+
+
 async def query_olog_search(
     text: str | None = None,
     logbooks: str | None = None,
@@ -531,6 +604,8 @@ async def query_olog_search(
     size: int = DEFAULT_MAX_LOGS,
     offset: int = 0,
     sort: str = "down",
+    level: str | None = None,
+    title: str | None = None,
     timeout: float = 5.0,
 ) -> dict[str, object]:
     """Search the Phoebus Olog logbook. Read-only, gated.
@@ -543,7 +618,13 @@ async def query_olog_search(
     (Olog wire ``from``) pages past the first *size* results; *sort* orders by create time (``down``
     newest-first default, ``up`` oldest-first). ``total`` is the number of entries returned;
     ``total_matches`` is the true total across all pages (Olog ``hitCount``, ``None`` if the Olog
-    version omits it); ``capped`` is True when more than *size* matched on this page. Backs
+    version omits it); ``capped`` is True when more than *size* matched on this page.
+
+    *level* and *title* (OA2/OA5) filter by triage level and title; both are server-honoured and
+    case-insensitive (differentially probed 2026-07-19, both controls). A blank value for either is
+    refused before any request. Because Olog answers an UNKNOWN level with 0 hits instead of an
+    error, an empty level-filtered result gets a ``note`` saying so (:func:`_unknown_level_note`) —
+    otherwise "this level does not exist" is indistinguishable from "no entries have it". Backs
     ``search_logbook``.
     """
     cfg = get_config()
@@ -561,14 +642,25 @@ async def query_olog_search(
             size=size,
             offset=offset,
             sort=sort,
+            level=level,
+            title=title,
         )
-        return {
+        result: dict[str, object] = {
             "enabled": True,
             "entries": entries,
             "total": len(entries),
             "total_matches": total_matches,
             "capped": capped,
         }
+        # Only a GENUINELY empty result is worth explaining. An empty PAGE past the end of a
+        # paginated set (offset beyond total_matches) also has no entries, but something DID match
+        # — annotating it would contradict total_matches in the very same payload.
+        nothing_matched = not entries and not total_matches
+        if level and nothing_matched:
+            note = _unknown_level_note(client, level)
+            if note is not None:
+                result["note"] = note
+        return result
 
     # Three outcomes, three classes. Collapsing them all into EpicsConnectionError (as this did)
     # tells the caller the service is unreachable when in truth the ARGUMENT was bad or the server
@@ -578,6 +670,10 @@ async def query_olog_search(
     except TimeWindowFormatError as exc:
         # Nothing was sent: the time window itself is unusable.
         raise EpicsError(f"Olog: {exc}", error_code="INVALID_TIME_WINDOW") from exc
+    except OlogFilterValueError as exc:
+        # Nothing was sent either: a blank level/title filter, which Olog would answer misleadingly
+        # rather than reject (0 hits for level, unfiltered for title).
+        raise EpicsError(f"Olog: {exc}", error_code="INVALID_INPUT") from exc
     except OlogConnectionError as exc:
         # Genuinely could not reach Olog.
         raise EpicsConnectionError(f"Olog: {exc}") from exc
@@ -657,6 +753,49 @@ async def query_olog_tags(timeout: float = 5.0) -> dict[str, object]:
     def _run() -> dict[str, object]:
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
         return {"enabled": True, "tags": client.list_tags()}
+
+    try:
+        return await asyncio.to_thread(_run)
+    except OlogConnectionError as exc:
+        raise EpicsConnectionError(f"Olog: {exc}") from exc
+    except OlogError as exc:
+        # S11 §8: the server ANSWERED — an unreadable payload is not an outage (search already
+        # lives this three-way split; see query_olog_search).
+        raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
+
+
+async def query_olog_levels(timeout: float = 5.0) -> dict[str, object]:
+    """List the valid Olog log levels. Read-only, config-gated (a ``Level`` has no owner).
+
+    Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes no
+    network call. Levels are the logbook's TRIAGE axis and are site-configurable, so the valid
+    values can only come from the server — they are the valid values for
+    ``search_logbook(level=…)`` and ``create_log_entry(level=…)``. ``default_level`` is the one a
+    create uses when none is given; it is ``None`` with an explaining ``note`` whenever the server
+    does not state it unambiguously
+    (missing/unreadable flag, none marked, or more than one marked — the server's own seed data has
+    two). Backs ``list_log_levels``.
+    """
+    cfg = get_config()
+    if not cfg.olog_url:
+        return {
+            "enabled": False,
+            "levels": [],
+            "default_level": None,
+            "note": _OLOG_DISABLED_NOTE,
+        }
+
+    def _run() -> dict[str, object]:
+        client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
+        names, default_level, note = client.list_log_levels()
+        result: dict[str, object] = {
+            "enabled": True,
+            "levels": names,
+            "default_level": default_level,
+        }
+        if note is not None:
+            result["note"] = note
+        return result
 
     try:
         return await asyncio.to_thread(_run)

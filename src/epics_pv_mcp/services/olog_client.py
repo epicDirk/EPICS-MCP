@@ -8,10 +8,12 @@ whether that projection redacts.
 
 Read-only jobs:
 
-  GET {root}/logs/search?desc=…&logbooks=…&tags=…&start=…&end=…&size=…&from=…&sort=…  — search
+  GET {root}/logs/search?desc=…&logbooks=…&tags=…&level=…&title=…&start=…&end=…&size=…&from=…&sort=…
+                                                                        — search
   GET {root}/logs/{id}                                                  — one log entry
   GET {root}/logbooks                                                   — list logbook names
   GET {root}/tags                                                       — list tag names
+  GET {root}/levels                                                     — list level names (OA2)
 
 ``olog_url`` is the Olog REST root incl. context path (e.g. ``http://olog:8080/Olog``); the
 ``/logs`` paths are appended. Reading needs no auth by default; an optional ``Authorization``
@@ -53,9 +55,27 @@ actually been PROBED live against a running Olog (2026-07-15), and what has not:
   cannot parse ISO-8601 and says so only by returning an empty result. See
   :mod:`epics_pv_mcp.services.olog_time` for the mechanism and :meth:`OlogClient._add_window` for
   the fix.
-* ``desc``/``logbooks``/``tags``/``level``/``title`` — probed WITH positive controls (``desc``
-  matched only bodies, not titles; each filter returned a known subset, so "everything is 0" could
-  be ruled out). They filter as named.
+* ``desc``/``logbooks``/``tags`` — probed WITH positive controls (``desc`` matched only bodies, not
+  titles; each filter returned a known subset, so "everything is 0" could be ruled out). They filter
+  as named.
+* ``level``/``title`` — probed again 2026-07-19 (OA2/OA5), now with BOTH controls and pinned by live
+  tests rather than by this docstring alone. They filter as named and are case-insensitive (the
+  index analyzer lowercases). Three findings that changed the code:
+
+  - An UNKNOWN value is not rejected: the server answers 200 with **0 hits**, which reads exactly
+    like "there are no such entries" — the ``sort`` failure mode again, one step worse. Hence
+    ``list_log_levels`` (enumerate the valid values) and the service-layer annotation on an empty
+    level-filtered result.
+  - A BLANK value is not "no filter", and the two fields DISAGREE about what it means: a blank
+    ``level`` matches nothing (0 hits) while a blank ``title`` is dropped (unfiltered result). Both
+    are refused before the request (:func:`_reject_blank_filter`).
+  - ``title`` matches whole WORDS, not substrings — a fragment finds nothing unless wildcarded, and
+    several words are AND-ed. Notably this is NOT the anchored-glob behaviour of ``find_channels``,
+    so that wording must not be copied over.
+
+  The control that makes the probe meaningful: an unknown PARAMETER NAME returns the unfiltered
+  count, because ``LogSearchUtil``'s parameter switch ends in ``default: // Unsupported search
+  parameters are ignored``. A filter that "returns results" proves nothing on its own.
 * ``sort`` — probed, and unreadable values do NOT fail: anything but ``down``/``desc`` silently
   becomes ASC, the REVERSE of this client's default. The tool layer therefore constrains it to a
   ``Literal["down", "up"]`` (:mod:`epics_pv_mcp.server`); see
@@ -71,7 +91,8 @@ from __future__ import annotations
 
 import functools
 import json
-from typing import TypedDict
+import re
+from typing import TypedDict, cast
 from urllib.parse import quote
 
 import requests
@@ -95,6 +116,7 @@ from epics_pv_mcp.services._time_window import TimeWindowFormatError
 from epics_pv_mcp.services.olog_exceptions import (
     OlogAttachmentDownloadDenied,
     OlogConnectionError,
+    OlogFilterValueError,
     OlogResponseError,
     OlogRoundTripUnsafe,
     OlogWholeModeRequired,
@@ -211,6 +233,126 @@ def _named_list(data: object, endpoint: str) -> list[str]:
             )
         names.append(item["name"])
     return names
+
+
+#: Exactly what Java's ``String.trim()`` removes: every code point <= U+0020.
+#:
+#: Python's bare ``str.strip()`` is Unicode-aware and ALSO removes NBSP / thin / ideographic space —
+#: which the server KEEPS. Stripping them here would silently normalise an unmatchable level into a
+#: configured one (measured 2026-07-19: ``level="\xa0Info"`` returns 0 hits where ``level="Info"``
+#: returns 19), so the "is this a configured level?" cross-check would see a known name, stay quiet,
+#: and let a fabricated emptiness through.
+_JAVA_TRIM_CHARS = "".join(chr(code) for code in range(0x21))
+
+#: The server's separator class for ``level`` — ``LogSearchUtil`` splits on exactly these.
+_LEVEL_SEPARATORS = re.compile(r"[|,;]")
+
+#: The server's separator class for ``title`` (and ``desc``), which is NOT simply "the level class
+#: plus whitespace": the Java literal is ``[\|,;\s+]``, and inside a character class that trailing
+#: ``+`` is a LITERAL member, not a quantifier. A ``+``-only title therefore yields no search terms
+#: at all — and Olog answers an UNFILTERED result (measured: ``title="+"`` returns every entry).
+_TITLE_SEPARATORS = re.compile(r"[|,;\s+]")
+
+
+def split_level_values(value: str) -> list[str]:
+    """The parts an Olog ``level`` filter is OR-ed over, mirroring the server's own split+trim.
+
+    ``LogSearchUtil`` splits a level value on ``[|,;]`` and treats the parts as alternatives
+    (measured: two levels comma-joined return the union of their entry counts), then applies Java's
+    ``trim()`` — hence :data:`_JAVA_TRIM_CHARS` rather than Python's wider ``strip()``.
+
+    Public because the service layer re-uses exactly this split to name which parts of a fruitless
+    level filter the server does not know — a private copy there would be free to drift from what
+    was actually sent."""
+    return [
+        stripped
+        for part in _LEVEL_SEPARATORS.split(value)
+        if (stripped := part.strip(_JAVA_TRIM_CHARS))
+    ]
+
+
+def _reject_blank_filter(name: str, value: str | None) -> None:
+    """Refuse a filter that is present but blank, BEFORE any request (OA2/OA5).
+
+    ``None`` means "not filtering" and is fine. A value that leaves NO search term once the server
+    has split it is a filter the caller meant to apply and the server will not apply — and it is
+    refused here because every way that plays out is misleading. Measured 2026-07-19:
+
+    * ``level=""`` → 0 hits (Java's ``split`` returns one empty term, which becomes a wildcard
+      matching nothing) — reads exactly like "there are no such entries";
+    * ``level=","``, ``title=""``, ``title="+"`` → the term list comes out EMPTY, the filter is
+      dropped, and the caller gets the UNFILTERED set presented as a filtered one.
+
+    The second outcome is the worse of the two, and it is why the check must use the FIELD'S OWN
+    separator class: ``title`` treats whitespace and a literal ``+`` as separators too, so a value
+    that is a perfectly good level (``"+"``) is blank as a title."""
+    if value is None:
+        return
+    separators = _TITLE_SEPARATORS if name == "title" else _LEVEL_SEPARATORS
+    if any(part.strip(_JAVA_TRIM_CHARS) for part in separators.split(value)):
+        return
+    raise OlogFilterValueError(
+        f"{name}={value!r} contains no search term once Olog has split it on its separators "
+        f"({'whitespace, + , ; |' if name == 'title' else ', ; |'}), so it is not a usable filter. "
+        "Olog does not reject it — depending on the exact value it either matches NOTHING (0 hits, "
+        "reading like 'no such entries') or drops the filter and returns the UNFILTERED set as if "
+        f"it were filtered. Pass a real value, or omit {name} to not filter."
+    )
+
+
+def _level_list(data: object, endpoint: str) -> tuple[list[str], str | None, str | None]:
+    """``(names, default_level, note)`` for ``GET /levels`` — computed in ONE pass (OA2).
+
+    Reuses the S11-strict :func:`_named_list` for the names, so an unreadable listing RAISES here
+    too and never collapses to "there are no levels". The default flag is then read from that SAME
+    already-validated list — a second, independent walk is what let a guard and a payload diverge
+    once before (OA3's P0), so names and default are never derived from separate traversals.
+
+    A ``Level`` is ``{name, defaultLevel}`` (Level.java) and carries no owner, so this is trivially
+    PII-free like ``/tags``.
+
+    The default is reported only when the server states it UNAMBIGUOUSLY; otherwise ``None`` plus a
+    note saying why — never a guess:
+
+    * exactly one item flagged → that name;
+    * no item flagged → ``None`` (legitimate: a server may mark none);
+    * MORE than one flagged → ``None``. Not hypothetical: the server's own seed file ships two
+      defaults, even though its ``createLevel`` endpoint enforces one — so picking "the first" would
+      invent an answer the server never gave;
+    * the flag missing or not a boolean on any item → ``None``. Deliberately not a raise: the NAMES
+      are still readable and are the tool's primary answer; an older/leaner Olog omitting the field
+      must not take the whole listing down.
+    """
+    names = _named_list(data, endpoint)
+    # _named_list has already PROVEN this shape (top-level list, every item a dict with a str
+    # 'name') and raised otherwise — hence a cast rather than a second round of checks: re-deriving
+    # the shape is exactly the independent-walk pattern this function exists to avoid.
+    items = cast("list[dict[str, object]]", data)
+
+    # Zipped against the names _named_list just extracted (same list, same order, strict=True pins
+    # that) so the flag is always attributed to the name it was read next to.
+    flagged: list[str] = []
+    for name, item in zip(names, items, strict=True):
+        flag = item.get("defaultLevel")
+        if not isinstance(flag, bool):
+            unreadable = (
+                f"Olog {endpoint} did not report a readable 'defaultLevel' flag for every "
+                "level, so the default is withheld rather than guessed; the names are unaffected."
+            )
+            return names, None, unreadable
+        if flag:
+            flagged.append(name)
+
+    if len(flagged) == 1:
+        return names, flagged[0], None
+    if not flagged:
+        return names, None, f"Olog {endpoint} marks no level as the default."
+    ambiguous = (
+        f"Olog {endpoint} marks {len(flagged)} levels as default "
+        f"({', '.join(sorted(flagged))}); only one can be THE default, so it is withheld "
+        "rather than guessed."
+    )
+    return names, None, ambiguous
 
 
 def _require_entry(data: object, context: str) -> dict[str, object]:
@@ -541,6 +683,8 @@ class OlogClient:
         size: int = DEFAULT_MAX_LOGS,
         offset: int = 0,
         sort: str = "down",
+        level: str | None = None,
+        title: str | None = None,
     ) -> tuple[list[dict[str, object]], bool, int | None]:
         """Search log entries → ``(entries, capped, total_matches)``; see :meth:`_project`.
 
@@ -549,12 +693,29 @@ class OlogClient:
         ``from`` is a Python keyword, hence the ``offset`` name — read past the first page).
         *sort* orders by create time: ``down`` (default) = newest first, ``up`` = oldest first.
 
+        *level* and *title* (OA2/OA5) filter by triage level and by title. Both are honoured by the
+        server and both are case-insensitive — probed differentially 2026-07-19 with a positive AND
+        a negative control, plus a control proving an IGNORED parameter looks different (see
+        ``tests/test_olog_live.py``). *level* is OR-ed over ``, ; |`` separated values; a value the
+        server does not know yields **0 hits and no error**, so an unrecognised level is
+        indistinguishable from "no entries" at this layer — ``list_log_levels`` enumerates the valid
+        ones, and the service layer annotates an empty level-filtered result. *title* matches whole
+        WORDS, not substrings (a word fragment finds nothing unless wildcarded with ``*``), and
+        several words are AND-ed; it is a separate axis from *text*, which searches the body only.
+
         ``capped`` is True when more than *size* matched on this page (one extra is requested to
         detect it honestly, the Archiver/ChannelFinder pattern). ``total_matches`` is the true total
         across all pages (Olog ``hitCount``); it is ``None`` only when the Olog version returns a
         bare list with no count — ``capped`` then still signals honestly whether more matched (no
         fabricated total).
         """
+        # Refused before anything is sent: a blank filter is never what the caller meant, and the
+        # two servers-side outcomes are BOTH misleading (a blank level matches nothing → a
+        # fabricated "no entries"; a blank title is dropped → an unfiltered result presented as a
+        # filtered one). Measured 2026-07-19; see OlogFilterValueError.
+        _reject_blank_filter("level", level)
+        _reject_blank_filter("title", title)
+
         params: dict[str, str] = {"size": str(size + 1), "sort": sort}
         if text:
             params["desc"] = text
@@ -562,6 +723,10 @@ class OlogClient:
             params["logbooks"] = logbooks
         if tags:
             params["tags"] = tags
+        if level:
+            params["level"] = level
+        if title:
+            params["title"] = title
         self._add_window(params, start, end)
         if offset > 0:
             params["from"] = str(offset)
@@ -636,6 +801,22 @@ class OlogClient:
         """
         data = self._get(f"{self.base_url}/tags", {})
         return _named_list(data, "GET /tags")
+
+    def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
+        """``(names, default_level, note)`` for the Olog levels (``GET /levels``), name-only (OA2).
+
+        Levels are the logbook's TRIAGE axis (Info / Problem / Request / … — site-configurable, not
+        a fixed enum), so the valid values can only come from the server. These names are the valid
+        values for ``search_logbook(level=…)`` and for ``create_log_entry(level=…)``.
+        *default_level* is the one a create uses when no level is given, and is ``None`` with an
+        explaining *note* whenever the server does not state it unambiguously (see
+        :func:`_level_list`).
+
+        A ``Level`` carries no owner, so — like ``/tags`` — this is trivially PII-free and needs no
+        redaction. An unreadable listing raises rather than collapsing to an empty list: "there are
+        no levels" would tell a caller validating a filter value that none of them exist."""
+        data = self._get(f"{self.base_url}/levels", {})
+        return _level_list(data, "GET /levels")
 
     def create_log_entry(
         self,
