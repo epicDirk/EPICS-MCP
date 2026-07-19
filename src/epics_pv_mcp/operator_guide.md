@@ -51,7 +51,7 @@ are simply absent — that is an unmet optional extra, not a bug.
 `find_channels` · `lookup_device_name` · `is_archived` · `get_pv_history` · `get_archive_info` ·
 `list_archived_pvs` · `is_alarm_configured` · `get_alarm_history` · `diagnose_connection` ·
 `search_logbook` · `get_log_entry` · `list_logbooks` · `list_tags` · `create_log_entry` · `reply_to_log` ·
-`list_log_attachments` · `download_log_attachment`
+`add_log_attachment` · `list_log_attachments` · `download_log_attachment`
 
 **Optional `[displays]` — cross-plane with the operator-screen PV inventory:**
 `validate_pvs` · `crossplane_check` · `coverage_audit` · `find_device`
@@ -155,6 +155,14 @@ server-side, by content-sniff); an over-limit request is the server's HTTP 413. 
 attachment COUNT + total BYTES, never a filename (a filename is author free text). Each attachment gets
 a client-minted UUID and an id-prefixed unique filename (`<uuid>_<name>`), so a by-name download can
 never hit the server's duplicate-filename 404.
+
+**Attach to an existing entry** (`add_log_attachment` → `POST /logs/multipart`) is a third write tool,
+gated identically, with the logbook allowlist keyed on the TARGET entry's OWN logbooks (read first). It
+is **whole-mode only**: Olog's update endpoint is destructive — it `retainAll`-prunes any attachment not
+resubmitted (equality by id) and overwrites title/body/logbooks/tags/level/properties — so a safe attach
+must round-trip the target entry's FULL content, readable only whole (loopback + `ASSUME_TEST_DATA`).
+Against a redacted/remote server it is refused. The write is thus purely ADDITIVE: existing attachments
+and every field survive; only the new file(s) are added.
 
 **Download** (`download_log_attachment` — by `log_id`+`filename`, or by GridFS `attachment_id`) and the
 filenames in `list_log_attachments`: raw bytes and filenames are author free text and BYPASS the entry

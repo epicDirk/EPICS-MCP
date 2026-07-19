@@ -87,6 +87,7 @@ from epics_pv_mcp.services._http import (
     is_loopback_url,
     rest_get_bytes,
     rest_get_json,
+    rest_post_multipart,
     rest_put_json,
     rest_put_multipart,
 )
@@ -95,6 +96,7 @@ from epics_pv_mcp.services.olog_exceptions import (
     OlogAttachmentDownloadDenied,
     OlogConnectionError,
     OlogResponseError,
+    OlogWholeModeRequired,
 )
 from epics_pv_mcp.services.olog_time import OLOG_WIRE_TZ, normalize_olog_time
 from epics_pv_mcp.services.redact import redact_record
@@ -115,6 +117,41 @@ class AttachmentUpload(TypedDict):
     filename: str
     content: bytes
     content_type: str | None
+
+
+def _attachment_meta_description(content_type: str | None) -> str:
+    """Olog's ``fileMetadataDescription`` metadata STRING (``"image"``/``"file"``) — NOT a MIME.
+
+    CS-Studio sets exactly these two values (AttachmentsEditorController:313-317)."""
+    return "image" if (content_type or "").startswith("image") else "file"
+
+
+def _attachment_parts(
+    uploads: list[AttachmentUpload],
+) -> tuple[list[dict[str, str]], MultipartFiles]:
+    """Split uploads into (``attachments`` metadata, ``files`` multipart parts).
+
+    Shared by create-with-attachments (:meth:`OlogClient._put_multipart`) and attach-to-existing
+    (:meth:`OlogClient.add_attachment`): each upload contributes one ``{id, filename,
+    fileMetadataDescription}`` metadata entry (paired to a ``files`` part by ``filename``) plus one
+    ``("files", (filename, content, content_type))`` part. Keeping the two in one place means the
+    metadata string and the part always agree on the filename."""
+    meta = [
+        {
+            "id": item["id"],
+            "filename": item["filename"],
+            "fileMetadataDescription": _attachment_meta_description(item["content_type"]),
+        }
+        for item in uploads
+    ]
+    parts: MultipartFiles = [
+        (
+            "files",
+            (item["filename"], item["content"], item["content_type"] or "application/octet-stream"),
+        )
+        for item in uploads
+    ]
+    return meta, parts
 
 
 # Default cap on returned log entries (a wide/empty search is otherwise unbounded).
@@ -645,30 +682,10 @@ class OlogClient:
         the ``Content-Type`` boundary itself, so no manual one is passed.
         """
         log_json = dict(body)
-        log_json["attachments"] = [
-            {
-                "id": item["id"],
-                "filename": item["filename"],
-                # "fileMetadataDescription" is Olog's metadata STRING ("image"/"file"), NOT a MIME —
-                # CS-Studio sets exactly these two values (AttachmentsEditorController:313-317).
-                "fileMetadataDescription": (
-                    "image" if (item["content_type"] or "").startswith("image") else "file"
-                ),
-            }
-            for item in attachments
-        ]
+        meta, file_parts = _attachment_parts(attachments)
+        log_json["attachments"] = meta
         files: MultipartFiles = [("logEntry", (None, json.dumps(log_json), "application/json"))]
-        files += [
-            (
-                "files",
-                (
-                    item["filename"],
-                    item["content"],
-                    item["content_type"] or "application/octet-stream",
-                ),
-            )
-            for item in attachments
-        ]
+        files += file_parts
         multipart_params = {**params, "markup": "commonmark"}
         return rest_put_multipart(
             self._write_session,
@@ -767,3 +784,93 @@ class OlogClient:
             resp_exc=OlogResponseError,
             allow_redirects=False,
         )
+
+    def get_raw_entry(self, log_id: str) -> dict[str, object] | None:
+        """The RAW server entry for a whole-mode round-trip (OA1b) — NOT projected. Whole-mode only.
+
+        ``add_attachment`` must resubmit the entry's FULL content, because the server's ``POST
+        /logs/multipart`` runs a destructive ``updateLog`` (prunes any attachment not resubmitted,
+        overwrites the fields). That content is only readable whole, so this refuses unless the
+        client is in whole-mode (loopback + declared test data) — the defense-in-depth backstop for
+        the service's up-front check. Returns ``None`` on a definitive 404 (unknown/deleted id); a
+        2xx that is not a readable log entry raises (never a fabricated round-trip source)."""
+        if not self.whole_mode:
+            raise OlogWholeModeRequired(
+                "add_log_attachment needs a declared local test sandbox (loopback "
+                "EPICS_MCP_OLOG_URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA): attaching to an existing "
+                "entry must round-trip its full content, which is withheld against a redacted "
+                "server."
+            )
+        try:
+            data = self._get(f"{self.base_url}/logs/{log_id}", {})
+        except OlogResponseError as exc:
+            if is_http_404(exc):
+                return None
+            raise
+        return _require_entry(data, "GET /logs/{id} (raw round-trip source)")
+
+    def add_attachment(
+        self,
+        log_id: str,
+        raw_entry: dict[str, object],
+        uploads: list[AttachmentUpload],
+        inline_markup: str = "",
+    ) -> dict[str, object]:
+        """Attach *uploads* to an EXISTING entry (OA1b, ``POST /logs/multipart``) and return the
+        result DS-PRIVACY-projected.
+
+        ``POST /logs/multipart`` is NOT additive: it runs the full ``updateLog``, which
+        ``retainAll``-prunes every attachment whose id is not resubmitted (Attachment equality is by
+        id) and overwrites title/description/source/level/logbooks/tags/properties with the
+        submitted values (LogResource.java:537-558). So this ROUND-TRIPS *raw_entry* verbatim —
+        existing attachment metadata re-listed so ``retainAll`` keeps them (they ``existById``
+        server-side, so no bytes are resent), and every overwrite-field carried through — and only
+        APPENDS the new attachment metadata + the new ``files`` parts. The write is thus purely
+        additive: nothing pruned, no field wiped.
+
+        *inline_markup* (from an ``embed_image_base64``) is appended to the round-tripped ``source``
+        so the new inline image renders; ``markup=commonmark`` regenerates ``description`` from
+        ``source`` server-side. *raw_entry* comes from :meth:`get_raw_entry` (whole-mode)."""
+        existing = raw_entry.get("attachments")
+        existing_meta: list[dict[str, str]] = [
+            {
+                "id": str(item["id"]),
+                "filename": str(item.get("filename")),
+                "fileMetadataDescription": str(item.get("fileMetadataDescription") or "file"),
+            }
+            for item in (existing if isinstance(existing, list) else [])
+            if isinstance(item, dict) and item.get("id") is not None
+        ]
+        new_meta, file_parts = _attachment_parts(uploads)
+        source = raw_entry.get("source")
+        if inline_markup:
+            source = (source if isinstance(source, str) else "") + inline_markup
+        log_json: dict[str, object] = {
+            # LogResource.updateLog(multipart) rejects a null/absent/negative id (:577) — a NUMBER.
+            "id": int(log_id),
+            "title": raw_entry.get("title"),
+            "description": raw_entry.get("description"),
+            "source": source,
+            "level": raw_entry.get("level"),
+            # Round-trip verbatim: updateLog STORES exactly what is sent (a reshape would drop the
+            # logbook/tag owner+state and any property). The Log Entry Group property is preserved
+            # server-side regardless — updateLog re-adds the persisted one.
+            "logbooks": raw_entry.get("logbooks"),
+            "tags": raw_entry.get("tags"),
+            "properties": raw_entry.get("properties"),
+            "attachments": existing_meta + new_meta,
+        }
+        files: MultipartFiles = [("logEntry", (None, json.dumps(log_json), "application/json"))]
+        files += file_parts
+        data = rest_post_multipart(
+            self._write_session,
+            f"{self.base_url}/logs/multipart",
+            files,
+            self.timeout,
+            params={"markup": "commonmark"},
+            headers={"X-Olog-Client-Info": _CLIENT_INFO},
+            conn_exc=OlogConnectionError,
+            resp_exc=OlogResponseError,
+            allow_redirects=False,
+        )
+        return self._project(_require_entry(data, "POST /logs/multipart (add attachment)"))

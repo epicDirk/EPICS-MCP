@@ -34,6 +34,7 @@ from epics_pv_mcp.errors import EpicsError, OlogWriteDeniedError
 from epics_pv_mcp.olog_safety import OlogWriteGate
 from epics_pv_mcp.services import _http
 from epics_pv_mcp.services.checkers import (
+    query_olog_add_attachment,
     query_olog_create,
     query_olog_download,
     query_olog_list_attachments,
@@ -44,6 +45,7 @@ from epics_pv_mcp.services.olog_exceptions import (
     OlogAttachmentDownloadDenied,
     OlogConnectionError,
     OlogResponseError,
+    OlogWholeModeRequired,
 )
 
 _AUDIT_LOGGER = "epics_pv_mcp.olog_audit"
@@ -102,7 +104,7 @@ def _ok_resp(payload: object) -> MagicMock:
 class TestMultipartTransport:
     def test_passes_files_and_never_sets_content_type(self) -> None:
         session = MagicMock()
-        session.put.return_value = _ok_resp({"id": 1})
+        session.request.return_value = _ok_resp({"id": 1})
         files: _http.MultipartFiles = [
             ("logEntry", (None, "{}", "application/json")),
             ("files", ("uid_a.png", b"PNG", "image/png")),
@@ -117,15 +119,33 @@ class TestMultipartTransport:
             resp_exc=OlogResponseError,
         )
         assert out == {"id": 1}
-        _, kwargs = session.put.call_args
+        args, kwargs = session.request.call_args
+        assert args[0] == "PUT"  # create rides the PUT verb
         assert kwargs["files"] == files  # a LIST of tuples, not a dict
         headers = kwargs.get("headers") or {}
         # requests sets Content-Type (with the boundary) from files=; we must never pass our own.
         assert not any(key.lower() == "content-type" for key in headers)
 
+    def test_post_multipart_uses_the_post_verb(self) -> None:
+        # OA1b: attach-to-existing rides POST /logs/multipart (the server's updateLog), the ONLY
+        # transport difference from create — same body, same redirect refusal.
+        session = MagicMock()
+        session.request.return_value = _ok_resp({"id": 7})
+        out = _http.rest_post_multipart(
+            session,
+            f"{_LOOPBACK}/logs/multipart",
+            [("logEntry", (None, "{}", "application/json"))],
+            5.0,
+            conn_exc=OlogConnectionError,
+            resp_exc=OlogResponseError,
+        )
+        assert out == {"id": 7}
+        args, _ = session.request.call_args
+        assert args[0] == "POST"
+
     def test_refuses_redirect(self) -> None:
         session = MagicMock()
-        session.put.return_value = MagicMock(is_redirect=True, status_code=302)
+        session.request.return_value = MagicMock(is_redirect=True, status_code=302)
         with pytest.raises(OlogResponseError, match="redirect"):
             _http.rest_put_multipart(
                 session,
@@ -776,6 +796,220 @@ class TestServiceList:
         assert result["withheld"] is True
         assert result["attachments"] == []
         assert result["attachment_count"] == 3
+
+
+# ======================================================================================
+# OA1b — add_log_attachment: client round-trip + whole-mode + service gating
+# ======================================================================================
+
+# A representative RAW whole-mode entry (as measured from the live sandbox: source + properties
+# present, logbooks a list-of-structs, attachments carry id/filename/metadata/checksum).
+_RAW_ENTRY: dict[str, object] = {
+    "id": 17,
+    "title": "existing title",
+    "description": "rendered body",
+    "source": "raw **body**",
+    "level": "Info",
+    "state": "Active",
+    "logbooks": [{"name": "Ops", "owner": None, "state": "Active"}],
+    "tags": [{"name": "shift"}],
+    "properties": [],
+    "attachments": [
+        {
+            "id": "old1",
+            "filename": "old1_a.png",
+            "fileMetadataDescription": "image",
+            "checksum": None,
+        }
+    ],
+}
+
+
+class TestClientAddAttachment:
+    def test_round_trips_existing_and_appends_new(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # RED-PROOF (guard c): the destructive POST /logs/multipart prunes any attachment not
+        # resubmitted, so the round-trip MUST re-list the existing attachment AND carry every
+        # overwrite-field. A mutant that sent only the new attachment (or dropped title/logbooks)
+        # would drop the existing id / fields here → red.
+        captured: dict[str, Any] = {}
+
+        def fake_post(
+            session: object,
+            url: str,
+            files: _http.MultipartFiles,
+            timeout: float,
+            *,
+            params: dict[str, str] | None = None,
+            headers: dict[str, str] | None = None,
+            conn_exc: type[Exception],
+            resp_exc: type[Exception],
+            allow_redirects: bool = False,
+        ) -> object:
+            captured.update(url=url, files=files, params=params)
+            return {"id": 17, "title": "withheld", "logbooks": ["Ops"]}
+
+        monkeypatch.setattr(olog_client_module, "rest_post_multipart", fake_post)
+        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        new = AttachmentUpload(
+            id="new1", filename="new1_x.bob", content=b"<display/>", content_type=None
+        )
+        client.add_attachment("17", _RAW_ENTRY, [new])
+
+        assert captured["url"].endswith("/logs/multipart")
+        assert captured["params"]["markup"] == "commonmark"
+        name0, (fn0, body0, ct0) = captured["files"][0]
+        assert name0 == "logEntry" and fn0 is None and ct0 == "application/json"
+        log_json = json.loads(body0)
+        assert log_json["id"] == 17  # numeric, LogResource:577
+        # every overwrite-field is round-tripped verbatim (else updateLog wipes it)
+        assert log_json["title"] == "existing title"
+        assert log_json["source"] == "raw **body**"
+        assert log_json["level"] == "Info"
+        assert log_json["logbooks"] == [{"name": "Ops", "owner": None, "state": "Active"}]
+        assert log_json["tags"] == [{"name": "shift"}]
+        # attachments = existing (checksum dropped) + new — the anti-retainAll list
+        assert log_json["attachments"] == [
+            {"id": "old1", "filename": "old1_a.png", "fileMetadataDescription": "image"},
+            {"id": "new1", "filename": "new1_x.bob", "fileMetadataDescription": "file"},
+        ]
+        # one files part for the NEW attachment only (existing bytes already stored server-side)
+        assert captured["files"][1] == (
+            "files",
+            ("new1_x.bob", b"<display/>", "application/octet-stream"),
+        )
+        assert len(captured["files"]) == 2
+
+    def test_embed_appends_to_source(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured: dict[str, Any] = {}
+
+        def fake_post(
+            session: object, url: str, files: _http.MultipartFiles, *a: object, **k: object
+        ) -> object:
+            captured["files"] = files
+            return {"id": 17, "logbooks": ["Ops"]}
+
+        monkeypatch.setattr(olog_client_module, "rest_post_multipart", fake_post)
+        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        new = AttachmentUpload(
+            id="img1", filename="img1.png", content=b"IMG", content_type="image/png"
+        )
+        client.add_attachment("17", _RAW_ENTRY, [new], inline_markup="\n\n![](attachment/img1)")
+        log_json = json.loads(captured["files"][0][1][1])
+        assert log_json["source"] == "raw **body**\n\n![](attachment/img1)"
+
+    def test_get_raw_entry_refuses_when_not_whole_mode(self) -> None:
+        # RED-PROOF (guard a, client backstop): a redacted client (loopback but no assume_test_data)
+        # must refuse to read the round-trip source — no redacted entry is ever round-tripped.
+        client = OlogClient(_LOOPBACK, assume_test_data=False)
+        assert client.whole_mode is False
+        with pytest.raises(OlogWholeModeRequired):
+            client.get_raw_entry("17")
+
+
+class _AddCaptureClient:
+    """A fake OlogClient for add_log_attachment service tests: flippable whole_mode, a canned raw
+    entry, and a recording add_attachment."""
+
+    whole: ClassVar[bool] = True
+    raw: ClassVar[dict[str, object] | None] = None
+    calls: ClassVar[dict[str, Any]] = {}
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        pass
+
+    @property
+    def whole_mode(self) -> bool:
+        return _AddCaptureClient.whole
+
+    def get_raw_entry(self, log_id: str) -> dict[str, object] | None:
+        return _AddCaptureClient.raw
+
+    def add_attachment(
+        self,
+        log_id: str,
+        raw_entry: dict[str, object],
+        uploads: list[AttachmentUpload],
+        inline_markup: str = "",
+    ) -> dict[str, object]:
+        _AddCaptureClient.calls = {"log_id": log_id, "uploads": uploads, "inline": inline_markup}
+        return {"id": int(log_id), "title": "withheld", "logbooks": ["Ops"]}
+
+
+class TestServiceAddAttachment:
+    @pytest.mark.asyncio
+    async def test_disabled_without_url(self) -> None:
+        _set_config(olog_url="")
+        result = await query_olog_add_attachment("17", attachments=["x"])
+        assert result["enabled"] is False
+        assert result["added"] is False
+
+    @pytest.mark.asyncio
+    async def test_needs_at_least_one_attachment(self) -> None:
+        config_module._config = _write_config()
+        with pytest.raises(EpicsError) as exc:
+            await query_olog_add_attachment("17")
+        assert exc.value.error_code == "INVALID_INPUT"
+
+    @pytest.mark.asyncio
+    async def test_numeric_id_required(self) -> None:
+        # RED-PROOF (guard b): a non-numeric id is refused BEFORE any network/filesystem (the server
+        # rejects a null/absent/negative id; we fail fast with a clear message).
+        config_module._config = _write_config()
+        with pytest.raises(EpicsError) as exc:
+            await query_olog_add_attachment("not-a-number", attachments=["/x"])
+        assert exc.value.error_code == "INVALID_INPUT"
+
+    @pytest.mark.asyncio
+    async def test_refuses_when_not_whole_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # RED-PROOF (guard a, service): a redacted server is refused up front — no read, no write.
+        config_module._config = _write_config()
+        _AddCaptureClient.whole = False
+        _AddCaptureClient.calls = {}
+        monkeypatch.setattr(checkers_module, "OlogClient", _AddCaptureClient)
+        with pytest.raises(OlogWriteDeniedError, match="sandbox"):
+            await query_olog_add_attachment("17", attachments=["/x"])
+        assert _AddCaptureClient.calls == {}  # never reached add_attachment
+
+    @pytest.mark.asyncio
+    async def test_gate_deny_when_target_logbook_not_allowlisted(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # RED-PROOF (guard d): the gate is keyed on the TARGET entry's OWN logbooks; a target in a
+        # logbook outside EPICS_MCP_OLOG_WRITE_LOGBOOKS is denied.
+        config_module._config = _write_config(olog_write_logbooks="Ops")
+        _AddCaptureClient.whole = True
+        _AddCaptureClient.raw = {"id": 17, "logbooks": [{"name": "SecretBook"}], "title": "x"}
+        _AddCaptureClient.calls = {}
+        monkeypatch.setattr(checkers_module, "OlogClient", _AddCaptureClient)
+        f = tmp_path / "a.bob"
+        f.write_bytes(b"<display/>")
+        with pytest.raises(OlogWriteDeniedError, match="allowlist"):
+            await query_olog_add_attachment("17", attachments=[str(f)], id_factory=lambda: "uid")
+        assert _AddCaptureClient.calls == {}  # denied before add_attachment
+
+    @pytest.mark.asyncio
+    async def test_happy_path_rounds_trip_and_audits(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        config_module._config = _write_config(olog_write_logbooks="Ops")
+        _AddCaptureClient.whole = True
+        _AddCaptureClient.raw = {"id": 17, "logbooks": [{"name": "Ops"}], "title": "existing"}
+        _AddCaptureClient.calls = {}
+        monkeypatch.setattr(checkers_module, "OlogClient", _AddCaptureClient)
+        f = tmp_path / "plot.png"
+        f.write_bytes(b"PNGDATA")  # 7 bytes
+        with caplog.at_level(logging.INFO, logger=_AUDIT_LOGGER):
+            result = await query_olog_add_attachment(
+                "17", attachments=[str(f)], id_factory=lambda: "uidA"
+            )
+        assert result["added"] is True
+        assert result["attachments_uploaded"] == [{"id": "uidA", "filename": "uidA_plot.png"}]
+        # the raw entry reached add_attachment (round-trip source)
+        assert _AddCaptureClient.calls["uploads"][0]["filename"] == "uidA_plot.png"
+        # audit is metadata-only (count + bytes, never a filename)
+        assert "attachments=1 attach_bytes=7" in caplog.text
+        assert "plot.png" not in caplog.text
+        assert "caller=add_log_attachment" in caplog.text
 
     @pytest.mark.asyncio
     async def test_missing_entry_is_found_false(self, monkeypatch: pytest.MonkeyPatch) -> None:

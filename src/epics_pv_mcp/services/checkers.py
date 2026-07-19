@@ -29,7 +29,7 @@ import uuid
 from collections.abc import Callable
 
 from epics_pv_mcp.config import get_config
-from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
+from epics_pv_mcp.errors import EpicsConnectionError, EpicsError, OlogWriteDeniedError
 from epics_pv_mcp.olog_safety import get_olog_safety
 from epics_pv_mcp.services._http import basic_auth_header, http_status
 from epics_pv_mcp.services._time_window import TimeWindowFormatError
@@ -791,6 +791,108 @@ async def query_olog_create(
     except OlogError as exc:
         # S11 §8: the server ANSWERED — an unreadable payload is not an outage (search already
         # lives this three-way split; see query_olog_search).
+        raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
+
+
+async def query_olog_add_attachment(
+    log_id: str,
+    attachments: list[str] | None = None,
+    embed_image_base64: str | None = None,
+    timeout: float = 5.0,
+    *,
+    id_factory: Callable[[], str] = _default_olog_id_factory,
+) -> dict[str, object]:
+    """Attach files to an EXISTING Olog entry (OA1b). MUTATING, gated, WHOLE-MODE ONLY.
+
+    Default-disabled (no ``EPICS_MCP_OLOG_URL`` → ``enabled: false``, no network). WHOLE-MODE ONLY:
+    the server's ``POST /logs/multipart`` runs a DESTRUCTIVE ``updateLog`` (it prunes any attachment
+    not resubmitted and overwrites title/body/logbooks/tags/level/properties), so a safe attach must
+    round-trip the target entry's FULL content — readable only whole (loopback +
+    ``EPICS_MCP_OLOG_ASSUME_TEST_DATA``). Against a redacted server it is refused. The write goes
+    through the SAME :class:`~epics_pv_mcp.olog_safety.OlogWriteGate` as create, with the allowlist
+    keyed on the TARGET entry's own logbooks (read first). Backs ``add_log_attachment``.
+    """
+    cfg = get_config()
+    if not cfg.olog_url:
+        return {"enabled": False, "added": False, "note": _OLOG_DISABLED_NOTE}
+    if not attachments and not embed_image_base64:
+        raise EpicsError(
+            "add_log_attachment needs at least one attachment (attachments or embed_image_base64)",
+            error_code="INVALID_INPUT",
+        )
+    if not log_id.strip().isdigit():
+        raise EpicsError(
+            "add_log_attachment needs a numeric log_id (the id of the target entry)",
+            error_code="INVALID_INPUT",
+        )
+    caller = "add_log_attachment"
+
+    def _run() -> dict[str, object]:
+        auth = basic_auth_header(cfg.olog_write_user, cfg.olog_write_password)
+        client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=auth)
+        # Whole-mode FIRST — before any read or write. It is required for the round-trip source AND
+        # implies the loopback write-URL boundary; a redacted/remote server is refused structurally.
+        if not client.whole_mode:
+            raise OlogWriteDeniedError(
+                "Olog write refused: add_log_attachment needs a declared local test sandbox "
+                "(loopback EPICS_MCP_OLOG_URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA). Attaching to an "
+                "existing entry must round-trip its full content — the server's update prunes any "
+                "attachment or field not resubmitted — which is withheld against a redacted server."
+            )
+        raw = client.get_raw_entry(log_id)
+        if raw is None:
+            raise EpicsError(
+                f"add_log_attachment: no Olog entry with id {log_id}", error_code="OLOG_HTTP_404"
+            )
+        raw_logbooks = raw.get("logbooks")
+        logbook_items = raw_logbooks if isinstance(raw_logbooks, list) else []
+        target_logbooks = [
+            str(item["name"]) for item in logbook_items if isinstance(item, dict) and "name" in item
+        ]
+        raw_level = raw.get("level")
+        level = raw_level if isinstance(raw_level, str) else None
+        title_len = len(str(raw.get("title") or ""))
+        gate = get_olog_safety()
+        # Gate ordering mirrors create: cheap checks (env / URL / allowlist on the TARGET logbooks)
+        # with NO filesystem first, then stat-size the attachments, then the size cap + rate token.
+        gate.check_write_preconditions(target_logbooks, caller=caller)
+        plan = plan_attachments(attachments, embed_image_base64, id_factory)
+        gate.check_write_allowed(target_logbooks, caller=caller, attachment_bytes=plan.total_bytes)
+        uploads = read_uploads(plan.specs)
+        try:
+            entry = client.add_attachment(log_id, raw, uploads, inline_markup=plan.inline_markup)
+        except Exception as exc:  # broad on purpose: audit ANY failed attach, then re-raise
+            gate.audit_write_failed(
+                logbooks=target_logbooks,
+                level=level,
+                title_len=title_len,
+                error_code=_olog_error_code(exc),
+                caller=caller,
+            )
+            raise
+        gate.audit_write(
+            entry_id=str(entry.get("id", log_id)),
+            logbooks=target_logbooks,
+            level=level,
+            title_len=title_len,
+            owner=cfg.olog_write_user,
+            caller=caller,
+            attachment_count=len(plan.specs),
+            attachment_bytes=plan.total_bytes,
+        )
+        # Whole-mode is guaranteed here (refused otherwise), so filenames may be echoed.
+        return {
+            "enabled": True,
+            "added": True,
+            "entry": entry,
+            "attachments_uploaded": [{"id": u["id"], "filename": u["filename"]} for u in uploads],
+        }
+
+    try:
+        return await asyncio.to_thread(_run)
+    except OlogConnectionError as exc:
+        raise EpicsConnectionError(f"Olog: {exc}") from exc
+    except OlogError as exc:
         raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
 
 

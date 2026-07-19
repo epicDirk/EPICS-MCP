@@ -322,8 +322,9 @@ def rest_put_json(
 MultipartFiles = list[tuple[str, tuple[str | None, str | bytes, str]]]
 
 
-def rest_put_multipart(
+def _request_multipart(
     session: requests.Session,
+    method: str,
     url: str,
     files: MultipartFiles,
     timeout: float,
@@ -334,30 +335,25 @@ def rest_put_multipart(
     resp_exc: type[RestResponseError],
     allow_redirects: bool = False,
 ) -> object:
-    """PUT a ``multipart/form-data`` body to *url* and return JSON — the multipart mirror of
-    :func:`rest_put_json` (same error contract, chained via ``from`` so :func:`http_status` reads
-    the
-    served code).
+    """Send a ``multipart/form-data`` body via *method* to *url* and return JSON — the shared core
+    of :func:`rest_put_multipart` (create) and :func:`rest_post_multipart` (attach-to-existing).
 
     *files* is a LIST of ``(name, (filename, content, content_type))`` tuples (see
     :data:`MultipartFiles`). ``requests`` builds the multipart body from it AND sets the
-    ``Content-Type: multipart/form-data; boundary=…`` header itself — so this function passes **no**
-    manual ``Content-Type`` header (one would clobber the boundary and the server could not parse
-    the
-    body). This mirrors CS-Studio's own client, which builds the same body by hand
+    ``Content-Type: multipart/form-data; boundary=…`` header itself — so this passes **no** manual
+    ``Content-Type`` (one would clobber the boundary and the server could not parse the body). This
+    mirrors CS-Studio's own client, which builds the same body by hand
     (``HttpRequestMultipartBody``): a ``logEntry`` JSON part plus one ``files`` part per attachment.
 
     *headers* carries per-request headers (a static client-info header); it MUST NOT include
-    ``Content-Type`` — ``requests`` sets that (with the boundary) from *files*, and an explicit one
-    would replace it and break the body. Auth rides on the session.
-
-    ``allow_redirects=False`` refuses a redirect rather than follow it (see :func:`rest_put_json`):
-    on a write a followed hop would post the body — and the Basic auth header — to a host the gate
-    never approved. Defaults to False here because every Olog attachment write is gated to a
-    specific
-    host."""
+    ``Content-Type`` — ``requests`` sets that (with the boundary) from *files*. Auth rides on the
+    session. ``allow_redirects=False`` refuses a redirect rather than follow it (see
+    :func:`rest_put_json`): on a write a followed hop would post the body — and the Basic auth
+    header — to a host the gate never approved. Defaults to False because every Olog attachment
+    write is gated to a specific host."""
     try:
-        resp = session.put(
+        resp = session.request(
+            method,
             url,
             files=files,
             params=params,
@@ -373,10 +369,68 @@ def rest_put_multipart(
         resp.raise_for_status()
         return resp.json()
     except requests.exceptions.RequestException as exc:
-        logger.debug("REST PUT (multipart) failed for %s: %s", url, exc)
+        logger.debug("REST %s (multipart) failed for %s: %s", method, url, exc)
         if isinstance(exc, requests.exceptions.ConnectionError):
             raise conn_exc(f"Failed to connect to {url}: {exc}") from exc
         raise resp_exc(f"Request failed ({url}): {exc}") from exc
+
+
+def rest_put_multipart(
+    session: requests.Session,
+    url: str,
+    files: MultipartFiles,
+    timeout: float,
+    *,
+    params: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
+    conn_exc: type[RestConnectionError],
+    resp_exc: type[RestResponseError],
+    allow_redirects: bool = False,
+) -> object:
+    """PUT a ``multipart/form-data`` body to *url* (Olog create-with-attachments, ``PUT
+    /logs/multipart``) — a thin :func:`_request_multipart` wrapper. See there for the contract."""
+    return _request_multipart(
+        session,
+        "PUT",
+        url,
+        files,
+        timeout,
+        params=params,
+        headers=headers,
+        conn_exc=conn_exc,
+        resp_exc=resp_exc,
+        allow_redirects=allow_redirects,
+    )
+
+
+def rest_post_multipart(
+    session: requests.Session,
+    url: str,
+    files: MultipartFiles,
+    timeout: float,
+    *,
+    params: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
+    conn_exc: type[RestConnectionError],
+    resp_exc: type[RestResponseError],
+    allow_redirects: bool = False,
+) -> object:
+    """POST a ``multipart/form-data`` body to *url* (Olog attach-to-existing, ``POST
+    /logs/multipart`` = the server's ``updateLog``) — the POST sibling of
+    :func:`rest_put_multipart`. Same contract; the verb differs because the server routes create
+    (PUT) and update (POST) separately."""
+    return _request_multipart(
+        session,
+        "POST",
+        url,
+        files,
+        timeout,
+        params=params,
+        headers=headers,
+        conn_exc=conn_exc,
+        resp_exc=resp_exc,
+        allow_redirects=allow_redirects,
+    )
 
 
 def _filename_from_content_disposition(header: str | None) -> str | None:

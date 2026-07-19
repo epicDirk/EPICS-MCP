@@ -108,3 +108,49 @@ def test_download_is_withheld_without_the_flag() -> None:
     no_flag = OlogClient(_URL, timeout=15.0, assume_test_data=True, allow_attachment_download=False)
     with pytest.raises(OlogAttachmentDownloadDenied):
         no_flag.get_attachment("1", "whatever.png")
+
+
+def test_add_attachment_is_additive_and_byte_identical(client: OlogClient) -> None:
+    """OA1b: create (1 attachment) → add_attachment (a 2nd) → the entry KEEPS both attachments AND
+    its title/body/logbooks, and both download byte-identically.
+
+    This is the differential no mock can carry: the server's POST /logs/multipart runs a destructive
+    updateLog (retainAll-prunes any attachment not resubmitted, overwrites the fields). Only a real
+    round-trip against a real server proves the attach is purely additive. All content is synthetic.
+    """
+    logbook = _LOGBOOKS.split(",")[0].strip()
+    first = _upload(_PNG, "oa1b-first.png", "image/png")
+    entry = client.create_log_entry(
+        title="OA1b additive attach",
+        logbooks=[logbook],
+        description="original **body** (offline test artifact)",
+        attachments=[first],
+    )
+    log_id = str(entry["id"])
+
+    # attach a SECOND file to the EXISTING entry via the round-trip
+    raw = client.get_raw_entry(log_id)
+    assert raw is not None
+    second = _upload(_BLOB, "oa1b-second.bob", None)
+    client.add_attachment(log_id, raw, [second])
+
+    # the entry now carries BOTH attachments — existing preserved (anti-retainAll), new added
+    after = client.get_raw_entry(log_id)
+    assert after is not None
+    attachments = after["attachments"]
+    assert isinstance(attachments, list) and len(attachments) == 2
+    names = {a["filename"] for a in attachments}
+    assert first["filename"] in names and second["filename"] in names
+
+    # and every field is UNCHANGED (updateLog would wipe a field not round-tripped) — anti-overwrite
+    assert after["title"] == "OA1b additive attach"
+    assert "original" in str(after["source"])
+    logbooks = after["logbooks"]
+    assert isinstance(logbooks, list)
+    assert [lb["name"] for lb in logbooks] == [logbook]
+
+    # and both attachments are byte-identical
+    b1, _n1, _t1 = client.get_attachment(log_id, first["filename"])
+    b2, _n2, _t2 = client.get_attachment(log_id, second["filename"])
+    assert b1 == _PNG
+    assert b2 == _BLOB

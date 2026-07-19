@@ -36,6 +36,7 @@ from epics_pv_mcp.tools.info import _get_pv_info
 from epics_pv_mcp.tools.monitor import _monitor_pv
 from epics_pv_mcp.tools.naming import _lookup_device_name
 from epics_pv_mcp.tools.olog import (
+    _add_log_attachment,
     _create_log_entry,
     _download_log_attachment,
     _get_log_entry,
@@ -83,7 +84,9 @@ def build_instructions(display_tools_available: bool) -> str:
         "test sandbox — loopback URL AND EPICS_MCP_OLOG_ASSUME_TEST_DATA — where entries come "
         "back whole; run epics-doctor to see which). "
         "It can also WRITE to the Olog logbook "
-        "(create_log_entry / reply_to_log, which can carry attachments of any file type) behind an "
+        "(create_log_entry / reply_to_log, which can carry attachments of any file type, and "
+        "add_log_attachment to attach files to an EXISTING entry — whole-mode only, a non-"
+        "destructive full-entry round-trip) behind an "
         "OWN gate (EPICS_MCP_ALLOW_OLOG_WRITE + a "
         "test-server URL boundary + a logbook allowlist + an upload-size cap + a rate limit; the "
         "author is the write "
@@ -935,6 +938,51 @@ async def reply_to_log(
         description=description,
         level=level,
         tags=tags,
+        attachments=attachments,
+        embed_image_base64=embed_image_base64,
+        timeout=timeout,
+    )
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def add_log_attachment(
+    log_id: Annotated[
+        str, Field(description="Numeric id of the EXISTING Olog entry to attach the file(s) to")
+    ],
+    attachments: Annotated[
+        str | None,
+        Field(
+            description="Comma-separated workspace file path(s) to attach — any type, up to "
+            "EPICS_MCP_OLOG_ATTACH_MAX_BYTES total (default 50 MiB)"
+        ),
+    ] = None,
+    embed_image_base64: Annotated[
+        str | None,
+        Field(description="A single small base64-encoded image to embed inline in the entry body"),
+    ] = None,
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """Attach one or more files to an EXISTING Phoebus Olog entry (Olog REST POST /logs/multipart).
+
+    MUTATING and WHOLE-MODE ONLY. Olog's update endpoint is destructive — it prunes any attachment
+    not resubmitted and overwrites the entry's fields — so a safe attach must round-trip the target
+    entry's full content, readable only from a DECLARED local sandbox (loopback EPICS_MCP_OLOG_URL +
+    EPICS_MCP_OLOG_ASSUME_TEST_DATA). Against a redacted/remote server it is refused. Same gate as
+    create_log_entry (env gate + test-server URL boundary + rate limit + size cap), with the logbook
+    allowlist keyed on the TARGET entry's OWN logbooks (read first). The attach is purely ADDITIVE:
+    existing attachments and every field are preserved. Needs at least one attachment (attachments
+    or embed_image_base64). With EPICS_MCP_OLOG_URL unset returns enabled=false.
+    """
+    return await _add_log_attachment(
+        log_id=log_id,
         attachments=attachments,
         embed_image_base64=embed_image_base64,
         timeout=timeout,

@@ -25,6 +25,19 @@ class OlogResponseError(OlogError, RestResponseError):
     """Unexpected response (HTTP error / bad payload) from the Olog service."""
 
 
+class OlogWholeModeRequired(OlogError):
+    """A whole-entry round-trip (add_log_attachment, OA1b) was requested but the client is not in
+    whole-mode (loopback URL + ``olog_assume_test_data``).
+
+    Attaching to an existing entry goes through ``POST /logs/multipart`` = the server's destructive
+    ``updateLog``, which PRUNES any attachment not resubmitted and OVERWRITES title/body/logbooks/
+    tags/level/properties with what is sent. A safe attach must therefore round-trip the entry's
+    FULL content — which is only readable whole (a redacted read withholds the free text and drops
+    the raw attachment list). Against a redacted server the operation is refused. The service checks
+    ``whole_mode`` up front; this backstop fires only if a raw read is reached, so a redacted entry
+    is never round-tripped. NOT a server error — it never wraps an HTTP response."""
+
+
 class OlogAttachmentDownloadDenied(OlogError):
     """Raw attachment bytes were requested but the read posture forbids them (OA1).
 

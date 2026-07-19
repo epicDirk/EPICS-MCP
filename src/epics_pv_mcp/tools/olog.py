@@ -11,6 +11,7 @@ the tool" anti-pattern is avoided for this name-capable surface). Default-disabl
 from __future__ import annotations
 
 from epics_pv_mcp.services.checkers import (
+    query_olog_add_attachment,
     query_olog_create,
     query_olog_download,
     query_olog_entry,
@@ -150,6 +151,25 @@ async def _reply_to_log(
         attachments=_split_paths(attachments) or None,
         embed_image_base64=embed_image_base64,
         in_reply_to=log_id,
+        timeout=timeout,
+    )
+
+
+async def _add_log_attachment(
+    log_id: str,
+    attachments: str | None = None,
+    embed_image_base64: str | None = None,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    """Attach files to an EXISTING Olog entry. MUTATING, gated, whole-mode only.
+
+    Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_add_attachment`.
+    *attachments* are comma-separated workspace file paths.
+    """
+    return await query_olog_add_attachment(
+        log_id=log_id,
+        attachments=_split_paths(attachments) or None,
+        embed_image_base64=embed_image_base64,
         timeout=timeout,
     )
 

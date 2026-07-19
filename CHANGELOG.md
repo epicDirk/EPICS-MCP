@@ -21,6 +21,15 @@ carry breaking changes).
   file — it refuses to overwrite and refuses a symlink target (no data loss, no boundary escape).
   Verified against a live loopback Olog with a byte-identical round-trip. The no-attachment create
   path is unchanged.
+- **Olog attach-to-existing (OA1b).** New write tool `add_log_attachment(log_id, attachments,
+  embed_image_base64?)` attaches file(s) to an EXISTING entry via `POST /logs/multipart`. That
+  endpoint is the server's DESTRUCTIVE `updateLog` (it `retainAll`-prunes any attachment not
+  resubmitted and overwrites the entry's fields), so the tool round-trips the target entry's full
+  content and only appends — the attach is purely **additive** (existing attachments and every field
+  survive). **Whole-mode only** (the round-trip source is readable only from a declared local
+  sandbox); against a redacted/remote server it is refused. Same write gate as create, with the
+  logbook allowlist keyed on the TARGET entry's own logbooks. Verified live: create → add → both
+  attachments preserved, title/body/logbooks unchanged, bytes byte-identical.
 - `python -m epics_pv_mcp.find_moderate_pv`: read-only fixture finder — walks the MGMT
   event-rate report (omitting `limit` returns the whole report — near-complete, measured
   against `getAllPVs`; `limit` behaves as if applied per cluster member and merged, measured),
