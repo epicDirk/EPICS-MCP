@@ -90,3 +90,41 @@ def test_guide_env_vars_exist() -> None:
     mentioned = set(_ENV_RE.findall(get_guide()))
     unknown = mentioned - allowed
     assert not unknown, f"guide mentions unknown EPICS_MCP_* env vars: {sorted(unknown)}"
+
+
+def _level_param_descriptions(source: str) -> dict[str, str]:
+    """``{tool_name: description}`` for every tool parameter literally named ``level``.
+
+    Reads the ``Field(description=…)`` out of the ``Annotated[...]`` annotation. Adjacent string
+    literals inside the parentheses are folded into one constant by the parser, so a multi-line
+    description arrives here as a single string.
+    """
+    found: dict[str, str] = {}
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.AsyncFunctionDef):
+            continue
+        for arg in [*node.args.args, *node.args.kwonlyargs]:
+            if arg.arg != "level" or not isinstance(arg.annotation, ast.Subscript):
+                continue
+            for elt in ast.walk(arg.annotation):
+                if not (isinstance(elt, ast.Call) and getattr(elt.func, "id", "") == "Field"):
+                    continue
+                for kw in elt.keywords:
+                    if kw.arg == "description" and isinstance(kw.value, ast.Constant):
+                        found[node.name] = str(kw.value.value)
+    return found
+
+
+def test_every_level_parameter_points_at_list_log_levels() -> None:
+    """Levels are SITE-CONFIGURABLE, so no description may imply a fixed enum — each one has to send
+    the caller to ``list_log_levels``.
+
+    This is the only guard on these strings: nothing else in the suite reads a parameter
+    description, so without it the four ``level`` surfaces drift apart silently — which is exactly
+    how ``update_log_entry`` came to say only "New entry level/type. Omit to leave unchanged" while
+    its siblings said more.
+    """
+    descriptions = _level_param_descriptions(_SERVER.read_text(encoding="utf-8"))
+    assert descriptions, "no level parameters found — the AST anchor broke"
+    missing = sorted(name for name, text in descriptions.items() if "list_log_levels" not in text)
+    assert not missing, f"level description does not mention list_log_levels: {missing}"

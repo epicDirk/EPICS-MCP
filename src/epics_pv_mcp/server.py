@@ -890,7 +890,8 @@ async def list_log_levels(
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_OLOG_URL is set. Levels
     are the logbook's TRIAGE axis (Info / Problem / Request / … ) and are SITE-CONFIGURABLE, not a
     fixed enum — so this is the only way to learn the valid values for search_logbook(level=…) and
-    create_log_entry(level=…). A Level carries no owner, so this is PII-free like list_tags.
+    for every write that takes one: create_log_entry, reply_to_log and update_log_entry. A Level
+    carries no owner, so this is PII-free like list_tags.
 
     Call this BEFORE filtering a search by level: Olog does not reject a level it does not know, it
     answers 0 hits — so a typo reads exactly like 'there are no such entries'.
@@ -919,7 +920,16 @@ async def create_log_entry(
     ],
     description: Annotated[str | None, Field(description="Log body / description text")] = None,
     level: Annotated[
-        str | None, Field(description="Entry level (e.g. 'Info'; server default when omitted)")
+        str | None,
+        Field(
+            description=(
+                "Entry triage level, e.g. 'Info' — server default when omitted. Site-configurable: "
+                "call list_log_levels for the valid values. An unknown or blank level is REFUSED "
+                "here (INVALID_INPUT) before the write: Olog itself stores it and answers 200, "
+                "after which no level filter finds the entry. Matched exactly — no OR-separators, "
+                "no wildcards, no case-folding (those are search semantics)."
+            )
+        ),
     ] = None,
     tags: Annotated[
         str | None, Field(description="Comma-separated tag name(s) — must already exist")
@@ -986,7 +996,16 @@ async def reply_to_log(
     ],
     description: Annotated[str | None, Field(description="Reply body / description text")] = None,
     level: Annotated[
-        str | None, Field(description="Entry level (e.g. 'Info'; server default when omitted)")
+        str | None,
+        Field(
+            description=(
+                "Entry triage level, e.g. 'Info' — server default when omitted. Site-configurable: "
+                "call list_log_levels for the valid values. An unknown or blank level is REFUSED "
+                "here (INVALID_INPUT) before the write: Olog itself stores it and answers 200, "
+                "after which no level filter finds the entry. Matched exactly — no OR-separators, "
+                "no wildcards, no case-folding (those are search semantics)."
+            )
+        ),
     ] = None,
     tags: Annotated[
         str | None, Field(description="Comma-separated tag name(s) — must already exist")
@@ -1095,7 +1114,16 @@ async def update_log_entry(
         ),
     ] = None,
     level: Annotated[
-        str | None, Field(description="New entry level/type. Omit to leave unchanged")
+        str | None,
+        Field(
+            description=(
+                "New entry triage level. Omit to leave unchanged. Site-configurable: call "
+                "list_log_levels for the valid values. An unknown or blank level is REFUSED here "
+                "(INVALID_INPUT) before the write: Olog validates neither, so an unknown one would "
+                "be stored as a value no filter matches and a blank one would silently CLEAR the "
+                "entry's level. Matched exactly — no OR-separators, no wildcards, no case-folding."
+            )
+        ),
     ] = None,
     logbooks: Annotated[
         str | None,

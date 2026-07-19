@@ -1170,7 +1170,8 @@ class OlogClient:
         Caveats worth knowing at the call site: the server re-sets ``owner`` to the write service
         account on EVERY update (LogResource.java:550) — the original author survives only in the
         archived version (:531) — and it does NOT validate logbook/tag existence on update (unlike
-        create), which is why the service checks edited names itself. *raw_entry* comes from
+        create) nor the ``level`` on ANY write path, which is why the service checks edited names
+        and the level itself (see ``_reject_unknown_level``). *raw_entry* comes from
         :meth:`get_raw_entry` (whole-mode only); the server's own numeric id is round-tripped
         verbatim (the multipart handler reads the id from the BODY, :577, so no path/body id
         mismatch is possible).
