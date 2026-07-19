@@ -41,3 +41,10 @@ sandbox/
 
 # Site-specific pre-commit PII/secret patterns (kept out of this public repo by design).
 scripts/.pii_patterns.local
+
+# Scratch trees of QA runs (isolated venvs, uv/pre-commit caches, coverage dumps, built sdists).
+# They are throw-away by construction and nothing references them — but some are created with
+# permissions git cannot read, so WITHOUT these rules every `git status` also emits a
+# "could not open directory ... Permission denied" warning. Ignoring them silences that too.
+qa_tmp*/
+.qa_full*/
