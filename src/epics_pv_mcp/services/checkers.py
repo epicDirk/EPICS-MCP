@@ -824,6 +824,42 @@ def _olog_error_code(exc: BaseException) -> str:
     return "INTERNAL"
 
 
+def _reject_unknown_level(client: OlogClient, level: str | None, caller: str) -> None:
+    """Refuse a ``level`` the server does not know — the write-side counterpart to the logbook/tag
+    existence checks in :func:`query_olog_update`.
+
+    Olog validates none of the three on a write: an unknown level is stored verbatim and HTTP 200
+    comes back, after which the entry matches no level filter at all (``level="Urgnet"``). A BLANK
+    level is worse than unknown — it is accepted and silently CLEARS the field — so it is refused
+    separately, before any request, and with its own message.
+
+    Exact string match, deliberately. Neither read-side helper fits here:
+    :func:`~epics_pv_mcp.services.olog_client.split_level_values` is search semantics (OR-split on
+    ``[|,;]`` + trim) and :func:`_unknown_level_note` matches casefold and tolerates wildcards. A
+    level being WRITTEN is a scalar — ``"Info,Problem"`` and ``" Info"`` are values the server would
+    store literally and no filter would ever find again.
+
+    The listing is fail-closed by construction (``list_log_levels`` raises rather than collapsing to
+    an empty list), so an unreadable ``/levels`` refuses the write instead of waving it through.
+    """
+    if level is None:
+        return
+    if not level.strip():
+        raise EpicsError(
+            f"{caller}: level must not be empty — Olog accepts a blank level and would store it, "
+            "silently clearing the entry's triage level",
+            error_code="INVALID_INPUT",
+        )
+    known = client.list_log_levels()[0]
+    if level not in known:
+        raise EpicsError(
+            f"{caller}: unknown level {level!r} — Olog does not validate the level on a write, so "
+            "the entry would be stored with a value that no level filter matches. Known levels: "
+            f"{', '.join(known)}",
+            error_code="INVALID_INPUT",
+        )
+
+
 async def query_olog_create(
     title: str,
     logbooks: list[str],
@@ -867,6 +903,16 @@ async def query_olog_create(
         # I/O, so a denied write never even stats the attachment paths (no file-existence oracle for
         # a caller the gate rejects). A denial is audited DENY and propagates unchanged.
         gate.check_write_preconditions(logbooks, caller=caller)
+        auth = basic_auth_header(cfg.olog_write_user, cfg.olog_write_password)
+        client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=auth)
+        # Level vocabulary BEFORE the rate token, mirroring the update path (see the ordering note
+        # there): a typo must not cost a token. This is the ONE network read that happens before the
+        # full gate, and only when a level was actually passed — a create that takes the server
+        # default still makes exactly one HTTP call. It stays BEHIND check_write_preconditions (a
+        # caller the gate rejects gets no vocabulary oracle) and AHEAD of plan_attachments (no path
+        # is stat'ed for a write that a bad level already doomed), so both properties the comment
+        # above promises survive; only "no I/O at all before the full gate" is now narrower.
+        _reject_unknown_level(client, level, caller)
         # Now resolve + SIZE attachments (stat, NO read yet) so the size cap can refuse an
         # over-limit
         # upload before any bytes are materialised (anti-DoS). A bad path / bad base64 raises
@@ -881,8 +927,6 @@ async def query_olog_create(
         effective_description = (
             (description or "") + plan.inline_markup if plan.inline_markup else description
         )
-        auth = basic_auth_header(cfg.olog_write_user, cfg.olog_write_password)
-        client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=auth)
         try:
             entry = client.create_log_entry(
                 title=title,
@@ -1143,8 +1187,9 @@ async def query_olog_update(
         # Gate ordering mirrors create/add: the cheap deterministic checks (env / URL / allowlist)
         # first, then the name validation reads, then the rate token last.
         gate.check_write_preconditions(gate_logbooks, caller=caller)
-        # Olog's update does NOT validate logbook/tag existence (create does) — an unknown name
-        # would be stored silently as a phantom reference, so it is checked here.
+        # Olog's update does NOT validate logbook/tag existence (create does) or the level (neither
+        # path does) — an unknown name would be stored silently as a phantom reference and an
+        # unknown level as a value no filter matches, so all three are checked here.
         if logbooks is not None:
             unknown = sorted(set(logbooks) - set(client.list_logbooks()))
             if unknown:
@@ -1161,6 +1206,7 @@ async def query_olog_update(
                     "would store them silently as phantom references.",
                     error_code="INVALID_INPUT",
                 )
+        _reject_unknown_level(client, level, caller)
         gate.check_write_allowed(gate_logbooks, caller=caller, attachment_bytes=0)
         warnings: list[str] = []
         if description is None and not isinstance(raw.get("source"), str):

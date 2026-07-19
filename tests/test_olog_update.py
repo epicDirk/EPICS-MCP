@@ -304,6 +304,7 @@ class _UpdateCaptureClient:
     raw: ClassVar[dict[str, object] | None] = None
     logbooks_available: ClassVar[list[str]] = ["Ops", "Commissioning"]
     tags_available: ClassVar[list[str]] = ["shift", "fault"]
+    levels_available: ClassVar[list[str]] = ["Info", "Problem", "Request"]
     calls: ClassVar[dict[str, Any]] = {}
 
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -321,6 +322,10 @@ class _UpdateCaptureClient:
 
     def list_tags(self) -> list[str]:
         return _UpdateCaptureClient.tags_available
+
+    def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
+        # Same 3-tuple shape as the real client — the write-side check reads [0] (the names).
+        return _UpdateCaptureClient.levels_available, "Info", None
 
     def update_log_entry(
         self,
@@ -348,6 +353,7 @@ def _install_fake(monkeypatch: pytest.MonkeyPatch, raw: dict[str, object] | None
     _UpdateCaptureClient.raw = _RAW_ENTRY if raw is None else raw
     _UpdateCaptureClient.logbooks_available = ["Ops", "Commissioning"]
     _UpdateCaptureClient.tags_available = ["shift", "fault"]
+    _UpdateCaptureClient.levels_available = ["Info", "Problem", "Request"]
     _UpdateCaptureClient.calls = {}
     monkeypatch.setattr(checkers_module, "OlogClient", _UpdateCaptureClient)
 
@@ -518,6 +524,49 @@ class TestServiceUpdate:
         with pytest.raises(EpicsError) as exc:
             await query_olog_update("17", tags=["nosuchtag"])
         assert exc.value.error_code == "INVALID_INPUT"
+        assert _UpdateCaptureClient.calls == {}
+
+    @pytest.mark.asyncio
+    async def test_unknown_level_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # RED-PROOF: Olog validates the level on NEITHER write path — "Urgnet" comes back HTTP 200
+        # and the entry then matches no level filter at all. level was the one of the three
+        # server-managed fields that went through unchecked.
+        config_module._config = _write_config(olog_write_logbooks="Ops")
+        _install_fake(monkeypatch)
+        with pytest.raises(EpicsError) as exc:
+            await query_olog_update("17", level="Urgnet")
+        assert exc.value.error_code == "INVALID_INPUT"
+        assert "Urgnet" in str(exc.value)
+        assert _UpdateCaptureClient.calls == {}
+
+    @pytest.mark.asyncio
+    async def test_blank_level_refused_with_its_own_message(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # RED-PROOF: a blank level is not "no change" — the server stores it and the entry silently
+        # loses its triage level. Distinct message from the vocabulary refusal on purpose: the two
+        # failures need different fixes from the caller.
+        config_module._config = _write_config(olog_write_logbooks="Ops")
+        _install_fake(monkeypatch)
+        with pytest.raises(EpicsError) as exc:
+            await query_olog_update("17", level="   ")
+        assert exc.value.error_code == "INVALID_INPUT"
+        assert "empty" in str(exc.value) and "clearing" in str(exc.value)
+        assert _UpdateCaptureClient.calls == {}
+
+    @pytest.mark.asyncio
+    async def test_level_match_is_exact_not_search_semantics(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A WRITTEN level is a scalar. split_level_values (OR-split + trim) and _unknown_level_note
+        # (casefold + wildcards) are READ-side helpers; either one here would wave through values
+        # the server stores literally and no filter ever finds again.
+        config_module._config = _write_config(olog_write_logbooks="Ops")
+        _install_fake(monkeypatch)
+        for bad in ("Info,Problem", " Info", "info", "Inf*"):
+            with pytest.raises(EpicsError) as exc:
+                await query_olog_update("17", level=bad)
+            assert exc.value.error_code == "INVALID_INPUT", bad
         assert _UpdateCaptureClient.calls == {}
 
     @pytest.mark.asyncio

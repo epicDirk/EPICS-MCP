@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import Mock
 
 import pytest
@@ -539,6 +540,10 @@ class _FakeClient:
     def create_log_entry(self, **kwargs: object) -> dict[str, object]:
         return {"id": 99, "title": FREETEXT_WITHHELD, "logbooks": ["Ops"]}
 
+    def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
+        # The create path checks a passed level against this before taking the rate token.
+        return ["Info", "Problem", "Request"], "Info", None
+
 
 class TestToolOrchestration:
     @pytest.mark.asyncio
@@ -655,3 +660,93 @@ class TestToolOrchestration:
         assert "trip by" not in caplog.text
         assert "entry_id=" not in caplog.text
         assert "owner=" not in caplog.text
+
+
+# ======================================================================================
+# Create: level vocabulary (OQ1) — the write-side counterpart to the update path's checks
+# ======================================================================================
+
+
+class _LevelCountingClient:
+    """Counts /levels lookups so a create that passes no level can be shown to make none."""
+
+    levels_calls: ClassVar[int] = 0
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        pass
+
+    def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
+        _LevelCountingClient.levels_calls += 1
+        return ["Info", "Problem", "Request"], "Info", None
+
+    def create_log_entry(self, **kwargs: object) -> dict[str, object]:
+        return {"id": 99, "title": FREETEXT_WITHHELD, "logbooks": ["Ops"]}
+
+
+class TestCreateLevelVocabulary:
+    @pytest.mark.asyncio
+    async def test_unknown_level_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # RED-PROOF: create had the same hole as update — `level="Urgnet"` was stored verbatim and
+        # the entry then matched no level filter. Checking only update would move the asymmetry.
+        config_module._config = _write_config()
+        monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _LevelCountingClient)
+        with pytest.raises(EpicsError) as exc:
+            await query_olog_create(title="t", logbooks=["Ops"], level="Urgnet")
+        assert exc.value.error_code == "INVALID_INPUT"
+        assert "Urgnet" in str(exc.value)
+
+    @pytest.mark.asyncio
+    async def test_blank_level_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        config_module._config = _write_config()
+        monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _LevelCountingClient)
+        with pytest.raises(EpicsError) as exc:
+            await query_olog_create(title="t", logbooks=["Ops"], level="")
+        assert exc.value.error_code == "INVALID_INPUT"
+        assert "empty" in str(exc.value)
+
+    @pytest.mark.asyncio
+    async def test_bad_level_does_not_burn_a_rate_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # THE ordering property: the vocabulary check sits BEFORE check_write_allowed, so a typo
+        # costs no token. This is the gate's own documented rule, not a local choice —
+        # OlogWriteGate's docstring states that a denial never consumes a token, and the attachment
+        # size cap (step 3b) sits ahead of the rate limit for exactly this reason. Same idiom as
+        # test_sec3_empty_logbooks_denied_without_rate_token: with rate_limit=1, a valid create must
+        # still succeed after repeated refusals.
+        config_module._config = _write_config(olog_write_rate_limit=1)
+        monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _LevelCountingClient)
+        for _ in range(3):
+            with pytest.raises(EpicsError):
+                await query_olog_create(title="t", logbooks=["Ops"], level="Urgnet")
+        result = await query_olog_create(title="t", logbooks=["Ops"], level="Problem")
+        assert result["created"] is True  # the single token was still there
+        with pytest.raises(RateLimitError):
+            await query_olog_create(title="t", logbooks=["Ops"], level="Problem")
+
+    @pytest.mark.asyncio
+    async def test_create_without_level_makes_no_levels_lookup(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The cost containment: a create that takes the server's default level must still make
+        # exactly ONE HTTP call. Without this, OQ1 would have doubled the request count of the
+        # most-used write tool for every caller, including those that never pass a level.
+        config_module._config = _write_config()
+        monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _LevelCountingClient)
+        _LevelCountingClient.levels_calls = 0
+        result = await query_olog_create(title="t", logbooks=["Ops"])
+        assert result["created"] is True
+        assert _LevelCountingClient.levels_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_denied_write_never_builds_a_client(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The client moved AHEAD of the rate token, but it must stay BEHIND the cheap precondition
+        # checks: a caller the gate rejects still gets no level-vocabulary oracle.
+        config_module._config = EpicsConfig(
+            olog_url="http://localhost:8080/Olog", allow_olog_write=False
+        )
+        monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _boom)
+        with pytest.raises(OlogWriteDeniedError):
+            await query_olog_create(title="t", logbooks=["Ops"], level="Urgnet")

@@ -142,9 +142,17 @@ Three consequences worth carrying:
    `title` is also a separate axis from `text`/`desc`, which searches the **body** only and never
    the title.
 
-Do **not** validate a level against `list_log_levels` before searching: a level can be deleted while
-existing entries keep the string, so a pre-flight check would refuse a legitimate search of history.
-The cross-check belongs where it is — on an empty result.
+Do **not** validate a level against `list_log_levels` before **searching**: a level can be deleted
+while existing entries keep the string, so a pre-flight check would refuse a legitimate search of
+history. The cross-check belongs where it is — on an empty result.
+
+**Writing is the opposite case, and the rule does not carry over.** `create_log_entry`,
+`reply_to_log` and `update_log_entry` DO validate a passed `level` against `list_log_levels`, and
+refuse an unknown one with `INVALID_INPUT`. The asymmetry is deliberate: searching for a deleted
+level is legitimate (the string still sits on old entries), but *writing* one is a typo that Olog
+answers with HTTP 200 and that no filter ever finds again. A blank level is refused separately — the
+server accepts it and silently clears the entry's triage level. The match is exact: no casefolding,
+no trimming, no `,`/`;`/`|` splitting. Those are search semantics; a level being written is a scalar.
 
 An unbalanced double quote in `title` makes the server throw, which an anonymous read sees as **401**
 (Olog's error dispatch requires auth and so masks its own 400). On this read path a 401 almost always
