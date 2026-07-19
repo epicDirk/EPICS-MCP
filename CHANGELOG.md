@@ -9,6 +9,59 @@ carry breaking changes).
 
 ### Added
 
+- **Write-side `level` validation (OQ1).** `create_log_entry`, `reply_to_log` and
+  `update_log_entry` now refuse a `level` the server does not list, and refuse a blank one
+  separately (it would silently CLEAR the entry's level). Matched EXACTLY — no OR-separators, no
+  wildcards, no case-folding; those are search semantics and a written level is a scalar. The
+  check sits BEFORE the rate token on both paths, so a typo costs no token, and it only runs when
+  a `level` was passed — a create that takes the server default still makes exactly one HTTP call.
+
+  The premise is pinned by a **differential live probe**, not read off the Java source
+  (`test_server_does_not_validate_a_written_level`): the server stores `"Urgnet"` verbatim behind
+  HTTP 200, after which no level filter finds the entry, and a blank level clears the field. If a
+  future Olog starts validating, that test goes red before the documentation becomes a lie.
+
+- **`entry_id` in the FAILED write audit (OQ6).** `audit_write_failed` accepts an optional
+  `entry_id`; the two EDIT paths pass it. The server archives and mutates before answering, so a
+  timeout can leave an APPLIED write in front of a client that sees FAILED — the record now names
+  the entry. The create call is byte-identical (a failed create still has no id). Metadata-only,
+  unchanged: no owner, no free text.
+
+### Changed
+
+- **Refusals no longer report as `INTERNAL` (OQ5).** `OlogError` carries `error_code` as a class
+  attribute and each subclass sets its own, mirroring `EpicsError`. `OlogRoundTripUnsafe` →
+  `INVALID_INPUT`, `OlogWholeModeRequired` → `OLOG_WRITE_DENIED`, `OlogAttachmentDownloadDenied` →
+  `OLOG_ATTACHMENT_DOWNLOAD_DENIED`. `INTERNAL` reads as transient and invited retries that each
+  burned a rate token and wrote a FAILED line for a write that never happened. The new branch is
+  LAST in `_olog_error_code` — the connection/response branches are themselves `OlogError`
+  subclasses and would otherwise be swallowed along with the HTTP-status resolution.
+
+- **The `level` parameter descriptions agree again (OQ3)**, all three pointing at
+  `list_log_levels`, guarded by a new AST drift test so they cannot silently diverge.
+
+### Fixed
+
+- **The attach documentation said the opposite of the truth (OQ4).** Five places claimed an
+  attach preserves "every field". `POST /logs/multipart` delegates to the server's `updateLog`,
+  which runs `setOwner(principal.getName())` unconditionally (`LogResource.java:550`) — attaching
+  a file REWRITES the entry's author, and the original survives only in the server-side archived
+  version, which this server cannot read. **Measured live with a second principal**
+  (`test_add_attachment_restamps_the_owner`): owner flips from the creating account to the write
+  service account while the content is untouched. The sibling additive test could never see this —
+  it creates and attaches as the same account — and its "every field is UNCHANGED" comment is now
+  narrowed to "every CONTENT field".
+
+- **The safety prose named 2 of 4 write tools (OQ8).** `EPICS_MCP_ALLOW_OLOG_WRITE` gates
+  `create_log_entry`, `reply_to_log`, `add_log_attachment` and `update_log_entry`; README,
+  ARCHITECTURE and the operator guide described it as "create_log_entry / reply_to_log". A site
+  admin reading that section to approve the gate would conclude that only NEW entries can be
+  created and unknowingly enable the destructive `update_log_entry`.
+
+- **The archive was cited as a safety net it cannot be (OQ7).** Three places pointed at the
+  server-side archived version to soften the owner re-stamp; no tool here can read or restore it.
+  All three now say recovery is manual.
+
 - **Olog log levels + the `level`/`title` search facets (OA2 / part of OA5).** New read tool
   `list_log_levels` (`GET /levels`, ungated like `list_tags`) returning the level names plus
   `default_level` — the level a create uses when none is given, reported only when the server states

@@ -96,8 +96,26 @@ class OlogRoundTripUnsafe(OlogError):
     Refusing is deliberate (safe-refuse): a loud error is better than a silently lost file. The
     service checks this up front via
     :func:`~epics_pv_mcp.services.olog_client.unroundtrippable_attachment_filenames`; the client
-    re-checks as a defense-in-depth backstop. NOT a server error — it never wraps an HTTP
-    response."""
+    re-checks as a defense-in-depth backstop.
+
+    MEASURED 2026-07-20 against Olog 6.0.4-SNAPSHOT — and the measurement refines WHERE the danger
+    sits without removing it. A controlled probe (identical multipart submission, second filename
+    differing only in CASE → HTTP 400 and one attachment; genuinely different → 200 and two) shows
+    the colliding state cannot be created *through multipart-with-files*. But the 400 is NOT a
+    collision check:
+
+    * ``Attachment.compareTo`` really does compare ``compareToIgnoreCase`` inside a ``TreeSet``, so
+      the colliding pair COLLAPSES on deserialisation — the silent drop above is real.
+    * What then fails is ``AttachmentsUploadUtil.areMultipartFilesOrphaned``, which matches an
+      uploaded file back to its metadata with case-SENSITIVE ``equals``. After the collapse the
+      uploaded file has no metadata left, is flagged orphaned, and the request is refused.
+
+    So the refusal is a side effect of having sent a FILE, not a guard against collisions — and
+    ``areMultipartFilesOrphaned`` returns false immediately when there are NO file parts. A plain
+    field edit (``update_log_entry`` sends the logEntry part and zero files) therefore never reaches
+    that check: the collapse happens, ``retainAll`` prunes, and nothing complains. That is exactly
+    the scenario this exception guards, and it remains unprotected on the server side. NOT a server
+    error — it never wraps an HTTP response."""
 
     # Mirrors the service-level pre-check for exactly this case, which already raises
     # EpicsError(INVALID_INPUT) — the layer that catches it must not change the verdict.

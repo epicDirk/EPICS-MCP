@@ -889,10 +889,13 @@ async def query_olog_create(
     """Create (or, with *in_reply_to*, reply to) an Olog log entry. MUTATING, gated, redacted.
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes NO
-    network call. When enabled, the :class:`~epics_pv_mcp.olog_safety.OlogWriteGate` (env gate +
-    test-server URL boundary + logbook allowlist + attachment size cap + rate limit) runs BEFORE any
-    I/O — a denial raises (audited DENY) before a client is even constructed. The full server
-    response
+    network call. When enabled, the CHEAP :class:`~epics_pv_mcp.olog_safety.OlogWriteGate` stages
+    (env gate + test-server URL boundary + logbook allowlist) run BEFORE any I/O — such a denial
+    raises (audited DENY) before a client is even constructed. The two REMAINING stages are later:
+    since the level check was added, a ``GET /levels`` (only when a ``level`` is passed) and the
+    attachment ``stat`` both happen BEFORE the attachment size cap and the rate token, so a denial
+    from *those* two does follow some I/O. That ordering is deliberate — a bad level must not cost a
+    rate token — and is spelled out at the call sites below. The full server response
     is run through the read redaction before return (owner dropped, title/description withheld). A
     completed write is audited ALLOW; a write that passes the gate but fails at the HTTP layer is
     audited FAILED (no entry id/owner) and re-raised. Backs ``create_log_entry`` / ``reply_to_log``.
