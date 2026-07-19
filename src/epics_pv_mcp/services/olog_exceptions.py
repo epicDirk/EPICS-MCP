@@ -38,6 +38,23 @@ class OlogWholeModeRequired(OlogError):
     is never round-tripped. NOT a server error — it never wraps an HTTP response."""
 
 
+class OlogRoundTripUnsafe(OlogError):
+    """An entry cannot be updated (OA3) because its attachments would not survive the round-trip.
+
+    Olog keeps attachments across an update by ``retainAll`` against the SUBMITTED list, and that
+    match is **filename-keyed** — ``Attachment.compareTo`` compares ``filename.compareToIgnoreCase``
+    and the submitted side is a ``TreeSet`` (Attachment.java:55-68, Log.java:63), so the id is never
+    consulted. Filenames colliding case-insensitively therefore collapse to one element, and an
+    attachment without a usable filename cannot be matched at all — either way the server would
+    silently DROP an attachment from an edit the caller only meant to change a field in.
+
+    Refusing is deliberate (safe-refuse): a loud error is better than a silently lost file. The
+    service checks this up front via
+    :func:`~epics_pv_mcp.services.olog_client.unroundtrippable_attachment_filenames`; the client
+    re-checks as a defense-in-depth backstop. NOT a server error — it never wraps an HTTP
+    response."""
+
+
 class OlogAttachmentDownloadDenied(OlogError):
     """Raw attachment bytes were requested but the read posture forbids them (OA1).
 

@@ -19,6 +19,7 @@ from epics_pv_mcp.services.checkers import (
     query_olog_logbooks,
     query_olog_search,
     query_olog_tags,
+    query_olog_update,
 )
 from epics_pv_mcp.services.olog_client import DEFAULT_MAX_LOGS
 
@@ -170,6 +171,33 @@ async def _add_log_attachment(
         log_id=log_id,
         attachments=_split_paths(attachments) or None,
         embed_image_base64=embed_image_base64,
+        timeout=timeout,
+    )
+
+
+async def _update_log_entry(
+    log_id: str,
+    title: str | None = None,
+    description: str | None = None,
+    level: str | None = None,
+    logbooks: str | None = None,
+    tags: str | None = None,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    """Edit an EXISTING Olog entry's fields. MUTATING, gated, whole-mode only.
+
+    Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_update`. An argument left
+    at ``None`` leaves that field UNCHANGED. *logbooks* and *tags* are comma-separated names and
+    REPLACE the entry's current list (they are not merged) — passing an empty *tags* clears the
+    tags, while an empty *logbooks* is refused (an entry must stay in at least one logbook).
+    """
+    return await query_olog_update(
+        log_id=log_id,
+        title=title,
+        description=description,
+        level=level,
+        logbooks=_split_names(logbooks) if logbooks is not None else None,
+        tags=_split_names(tags) if tags is not None else None,
         timeout=timeout,
     )
 

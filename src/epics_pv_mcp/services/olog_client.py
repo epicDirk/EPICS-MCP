@@ -96,6 +96,7 @@ from epics_pv_mcp.services.olog_exceptions import (
     OlogAttachmentDownloadDenied,
     OlogConnectionError,
     OlogResponseError,
+    OlogRoundTripUnsafe,
     OlogWholeModeRequired,
 )
 from epics_pv_mcp.services.olog_time import OLOG_WIRE_TZ, normalize_olog_time
@@ -228,6 +229,78 @@ def _require_entry(data: object, context: str) -> dict[str, object]:
         f"(expected a dict carrying a non-null 'id', got {type(data).__name__}); "
         "the answer is not readable — this is NOT a 'not found'."
     )
+
+
+def attachment_round_trip(raw_entry: dict[str, object]) -> tuple[list[dict[str, str]], list[str]]:
+    """``(metadata to resubmit, offenders that cannot survive)`` — computed in ONE pass.
+
+    Olog keeps an attachment across an update only if the submitted list still contains it —
+    ``CollectionUtils.retainAll(persisted, submitted)`` (LogResource.java:537-538). The submitted
+    side deserializes into a ``TreeSet`` (``Log.attachments``, Log.java:63), so ``contains`` is
+    decided by ``Attachment.compareTo`` — which compares ``filename.compareToIgnoreCase``
+    (Attachment.java:55-68). Retention is therefore **filename-keyed**: ``equals``/``hashCode`` do
+    use the id (:37-53) but a ``TreeSet`` never consults them.
+
+    An attachment is an OFFENDER when re-submitting it cannot preserve it:
+    * a filename colliding case-insensitively with another — they collapse to ONE element in the
+      set (in the persisted set, in ours, and in the result); the id cannot tell them apart;
+    * no usable filename — nothing can match it (and a naive ``str(None)`` would submit the literal
+      ``"None"``, matching nothing);
+    * no id, or a shape that is not a readable record — we cannot faithfully resubmit it;
+    * an ``attachments`` value that is present but not a list — we cannot enumerate what to
+      resubmit at all, and submitting nothing would prune EVERYTHING.
+
+    **Both halves come from this one function on purpose.** They were once two (a guard that
+    checked filenames and a builder that additionally skipped id-less/malformed items), and the
+    pair silently disagreed: an id-less attachment passed the guard as "safe" and was then dropped
+    from the payload — the exact silent prune the guard exists to prevent (found by adversarial
+    diff review, probe-measured). Deriving payload and verdict together makes that drift
+    impossible: anything the payload would omit is, by construction, an offender.
+
+    An EMPTY offender list means the entry round-trips losslessly; the callers refuse otherwise
+    (safe-refuse) rather than silently dropping an attachment.
+    """
+    items = raw_entry.get("attachments")
+    meta: list[dict[str, str]] = []
+    offenders: list[str] = []
+    if items is None:
+        return meta, offenders
+    if not isinstance(items, list):
+        offenders.append("<unreadable attachment list>")
+        return meta, offenders
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            offenders.append("<unreadable attachment>")
+            continue
+        filename = item.get("filename")
+        if not isinstance(filename, str) or not filename:
+            offenders.append("<no filename>")
+            continue
+        if item.get("id") is None:
+            offenders.append(filename)
+            continue
+        # lower(), not casefold(): Java's compareToIgnoreCase folds per character, so it does NOT
+        # treat "straße"/"strasse" as equal — casefold() does, and would refuse an entry that
+        # actually round-trips fine.
+        key = filename.lower()
+        if key in seen:
+            offenders.append(filename)
+            continue
+        seen.add(key)
+        meta.append(
+            {
+                "id": str(item["id"]),
+                "filename": filename,
+                "fileMetadataDescription": str(item.get("fileMetadataDescription") or "file"),
+            }
+        )
+    return meta, sorted(set(offenders))
+
+
+def unroundtrippable_attachment_filenames(raw_entry: dict[str, object]) -> list[str]:
+    """The offenders of :func:`attachment_round_trip` — the safe-refuse check on its own."""
+    return attachment_round_trip(raw_entry)[1]
 
 
 def _derive_shape(entry: dict[str, object], out: dict[str, object]) -> dict[str, object]:
@@ -820,27 +893,30 @@ class OlogClient:
         result DS-PRIVACY-projected.
 
         ``POST /logs/multipart`` is NOT additive: it runs the full ``updateLog``, which
-        ``retainAll``-prunes every attachment whose id is not resubmitted (Attachment equality is by
-        id) and overwrites title/description/source/level/logbooks/tags/properties with the
-        submitted values (LogResource.java:537-558). So this ROUND-TRIPS *raw_entry* verbatim —
-        existing attachment metadata re-listed so ``retainAll`` keeps them (they ``existById``
-        server-side, so no bytes are resent), and every overwrite-field carried through — and only
-        APPENDS the new attachment metadata + the new ``files`` parts. The write is thus purely
-        additive: nothing pruned, no field wiped.
+        ``retainAll``-prunes every attachment not resubmitted and overwrites
+        title/description/source/level/logbooks/tags/properties with the submitted values
+        (LogResource.java:537-558). So this ROUND-TRIPS *raw_entry* verbatim — existing attachment
+        metadata re-listed so ``retainAll`` keeps them (the bytes stay server-side, nothing is
+        resent), and every overwrite-field carried through — and only APPENDS the new attachment
+        metadata + the new ``files`` parts. The write is thus purely additive: nothing pruned, no
+        field wiped.
+
+        ⚠️ That retention is **filename-keyed, not id-keyed** (``Attachment.compareTo`` inside a
+        ``TreeSet``; see :func:`attachment_round_trip`) — an earlier version of this docstring said
+        "equality is by id" — wrong about the mechanism, and what let a matching bug hide.
+        An entry whose attachments cannot survive that match is REFUSED here rather than attached
+        to, because the attach would silently drop one of the existing files.
 
         *inline_markup* (from an ``embed_image_base64``) is appended to the round-tripped ``source``
         so the new inline image renders; ``markup=commonmark`` regenerates ``description`` from
         ``source`` server-side. *raw_entry* comes from :meth:`get_raw_entry` (whole-mode)."""
-        existing = raw_entry.get("attachments")
-        existing_meta: list[dict[str, str]] = [
-            {
-                "id": str(item["id"]),
-                "filename": str(item.get("filename")),
-                "fileMetadataDescription": str(item.get("fileMetadataDescription") or "file"),
-            }
-            for item in (existing if isinstance(existing, list) else [])
-            if isinstance(item, dict) and item.get("id") is not None
-        ]
+        existing_meta, unsafe = attachment_round_trip(raw_entry)
+        if unsafe:
+            raise OlogRoundTripUnsafe(
+                "Refusing to attach to this Olog entry: its existing attachments cannot survive "
+                f"the required round-trip ({', '.join(unsafe)}). Olog matches attachments by "
+                "filename (case-insensitively), so one of them would be silently dropped."
+            )
         new_meta, file_parts = _attachment_parts(uploads)
         source = raw_entry.get("source")
         if inline_markup:
@@ -874,3 +950,105 @@ class OlogClient:
             allow_redirects=False,
         )
         return self._project(_require_entry(data, "POST /logs/multipart (add attachment)"))
+
+    def update_log_entry(
+        self,
+        raw_entry: dict[str, object],
+        *,
+        title: str | None = None,
+        description: str | None = None,
+        level: str | None = None,
+        logbooks: list[str] | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, object]:
+        """Edit an EXISTING entry's fields (OA3) and return the result DS-PRIVACY-projected.
+
+        Sent as ``POST /logs/multipart`` with the ``logEntry`` part and NO file parts. That is the
+        same server core as OA1b's attach — the multipart handler delegates straight into the JSON
+        ``updateLog`` (LogResource.java:602) — so this reuses the ONE multipart write path that is
+        already live-verified instead of introducing a second, unprobed endpoint.
+
+        ``updateLog`` is a FULL REPLACE: every editable field is overwritten with what is submitted,
+        and a field left out is set to NULL (LogResource.java:550-558); every attachment missing
+        from the submitted list is pruned (``retainAll``, :537-538). So this ROUND-TRIPS the whole
+        *raw_entry* — title/source/description/level/logbooks/tags/properties plus the existing
+        attachment metadata — and overlays ONLY the fields the caller passed (``None`` = keep
+        unchanged). Nothing is lost that the caller did not deliberately change; that is the entire
+        reason a field edit needs the full entry.
+
+        A body edit is written to ``source``, NOT ``description``: under ``markup=commonmark`` the
+        server regenerates ``description`` from ``source`` (CommonmarkCleaner.java:46-49), so a new
+        ``description`` sitting next to a stale ``source`` would be silently overwritten and the
+        edit would vanish. Both are set to the new text, so the two never disagree even if the
+        markup step were skipped.
+
+        Attachment retention is **filename-keyed**, not id-keyed (see
+        :func:`unroundtrippable_attachment_filenames`); an entry whose attachments cannot survive
+        that match is refused up front by the service, and re-checked here as a backstop.
+
+        Caveats worth knowing at the call site: the server re-sets ``owner`` to the write service
+        account on EVERY update (LogResource.java:550) — the original author survives only in the
+        archived version (:531) — and it does NOT validate logbook/tag existence on update (unlike
+        create), which is why the service checks edited names itself. *raw_entry* comes from
+        :meth:`get_raw_entry` (whole-mode only); the server's own numeric id is round-tripped
+        verbatim (the multipart handler reads the id from the BODY, :577, so no path/body id
+        mismatch is possible).
+        """
+        # Payload and verdict from ONE pass, so the re-listed set and the refusal can never
+        # disagree (an omitted attachment IS an offender by construction).
+        existing_meta, unsafe = attachment_round_trip(raw_entry)
+        if unsafe:
+            raise OlogRoundTripUnsafe(
+                "Refusing to update this Olog entry: its attachments cannot survive the required "
+                f"round-trip ({', '.join(unsafe)}). Olog matches attachments by filename "
+                "(case-insensitively), so a duplicate, missing or unreadable one would be "
+                "silently dropped by the update."
+            )
+        if description is not None:
+            # The body edit IS the new source (body-of-truth under markup=commonmark); description
+            # is set alongside so the two cannot disagree.
+            new_source: object = description
+            new_description: object = description
+        else:
+            new_source = raw_entry.get("source")
+            raw_description = raw_entry.get("description")
+            # Never send a null description: Olog's save path dereferences it without a null-guard
+            # (the same reason create always sends a present string).
+            new_description = raw_description if isinstance(raw_description, str) else ""
+        log_json: dict[str, object] = {
+            # Verbatim server id — the multipart handler rejects a null/absent/negative id (:577).
+            "id": raw_entry.get("id"),
+            "title": title if title is not None else raw_entry.get("title"),
+            "description": new_description,
+            "source": new_source,
+            "level": level if level is not None else raw_entry.get("level"),
+            # Edited names are reshaped to the wire form; UNedited lists ride through verbatim so a
+            # reshape cannot drop a logbook/tag owner or state the server stored.
+            "logbooks": (
+                [{"name": name} for name in logbooks]
+                if logbooks is not None
+                else raw_entry.get("logbooks")
+            ),
+            "tags": (
+                [{"name": name} for name in tags] if tags is not None else raw_entry.get("tags")
+            ),
+            # Full replace: omitting properties would wipe every one of them. The Log Entry Group
+            # property is server-managed (stripped from the payload and re-added, :540-548).
+            "properties": raw_entry.get("properties"),
+            "attachments": existing_meta,
+        }
+        files: MultipartFiles = [("logEntry", (None, json.dumps(log_json), "application/json"))]
+        data = rest_post_multipart(
+            # The dedicated write session (no retries, env-independent) — as for every Olog write.
+            self._write_session,
+            f"{self.base_url}/logs/multipart",
+            files,
+            self.timeout,
+            params={"markup": "commonmark"},
+            headers={"X-Olog-Client-Info": _CLIENT_INFO},
+            conn_exc=OlogConnectionError,
+            resp_exc=OlogResponseError,
+            # Never follow a redirect on a write: the gate approved THIS host.
+            allow_redirects=False,
+        )
+        return self._project(_require_entry(data, "POST /logs/multipart (update)"))

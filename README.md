@@ -39,7 +39,7 @@ framed in these terms:
 | **History** | EPICS Archiver Appliance | `is_archived`, `get_pv_history`, `get_archive_info` |
 | **Alarm** | Phoebus Alarm Logger | `is_alarm_configured`, `get_alarm_history` |
 | **Naming** | ESS Naming Service | `lookup_device_name`, `diagnose_connection`, `crossplane_check` |
-| **Logbook** | Phoebus Olog | `search_logbook`, `get_log_entry`, `list_logbooks`, `list_tags`, `create_log_entry`, `reply_to_log`, `add_log_attachment` |
+| **Logbook** | Phoebus Olog | `search_logbook`, `get_log_entry`, `list_logbooks`, `list_tags`, `create_log_entry`, `reply_to_log`, `update_log_entry`, `add_log_attachment` |
 | **Display** | `.bob` operator screens (CS-Studio / Phoebus) | `validate_pvs`, `crossplane_check`, `coverage_audit`, `find_device` |
 | **IOC** | e3 `st.cmd` (+ optional `.db`) | `crossplane_check` |
 
@@ -203,6 +203,7 @@ To reach a real control system, set the address list in the launcher's environme
 | `create_log_entry` | Phoebus Olog — **post** a log entry (MUTATING; own gate + test-server URL boundary + logbook allowlist + upload-size cap + rate limit; author = the service account, not spoofable; response redacted). Optional `attachments` (workspace file paths, any type/size — multipart) + `embed_image_base64` (small inline image) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` |
 | `reply_to_log` | Phoebus Olog — **reply** to an entry (threads via the Log Entry Group; same gate/redaction/attachments as create_log_entry; bad id → 400) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` |
 | `add_log_attachment` | Phoebus Olog — attach file(s) to an **existing** entry (MUTATING; same gate as create, allowlist keyed on the TARGET entry's logbooks). **Whole-mode only** — the server's update is destructive (prunes/overwrites), so it round-trips the full entry; the attach is purely **additive** (existing attachments + fields preserved) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` (+ whole-mode) |
+| `update_log_entry` | Phoebus Olog — edit an **existing** entry's `title` / body / `level` / `logbooks` / `tags` (MUTATING). **Whole-mode only**, same destructive endpoint: an omitted argument means *unchanged*, and attachments + properties + unedited fields are round-tripped verbatim. The logbook allowlist is keyed on the **UNION** of current + resulting logbooks (a move writes to both). A body edit goes to the raw `source` (the server regenerates the rendered text); an entry with duplicate/missing attachment filenames is **refused** (Olog matches attachments by filename) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` (+ whole-mode) |
 | `list_log_attachments` | Phoebus Olog — list one entry's attachments (id + fileMetadataDescription; filename **whole-mode only** — author free text; 404 → found:false) | `EPICS_MCP_OLOG_URL` |
 | `download_log_attachment` | Phoebus Olog — download one attachment's raw **bytes** by (log_id + filename) or GridFS id, to a workspace `output_path` or `as_base64`. **Withheld** unless whole-mode **AND** `EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD` (bytes bypass the entry redaction) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD` |
 
@@ -319,7 +320,7 @@ All settings are read from environment variables with the `EPICS_MCP_` prefix.
 | `EPICS_MCP_NAMING_URL` | _(empty)_ | ESS Naming plane for `lookup_device_name` / `diagnose_connection` / `crossplane_check`. **No built-in host — no egress unless set** |
 | `EPICS_MCP_OLOG_URL` | _(empty)_ | Phoebus Olog REST root (incl. context path, e.g. `.../Olog`) for `search_logbook` / `get_log_entry`. **No built-in host — no egress unless set** |
 | `EPICS_MCP_OLOG_AUTH` | _(empty)_ | Optional `Authorization` header for a secured Olog (READ only) |
-| `EPICS_MCP_ALLOW_OLOG_WRITE` | `false` | Master gate for `create_log_entry` / `reply_to_log` / `add_log_attachment` (separate from `ALLOW_PV_WRITE`) |
+| `EPICS_MCP_ALLOW_OLOG_WRITE` | `false` | Master gate for `create_log_entry` / `reply_to_log` / `add_log_attachment` / `update_log_entry` (separate from `ALLOW_PV_WRITE`) |
 | `EPICS_MCP_OLOG_WRITE_USER` | _(empty)_ | Basic-auth service account for Olog writes (a dedicated account, never a personal login — it becomes the record `owner`) |
 | `EPICS_MCP_OLOG_WRITE_PASSWORD` | _(empty)_ | Basic-auth password for the write service account |
 | `EPICS_MCP_OLOG_WRITE_LOGBOOKS` | _(empty)_ | Comma-separated logbook names a write may target; **empty + gate on = deny-all** |

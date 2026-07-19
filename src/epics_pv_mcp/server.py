@@ -45,6 +45,7 @@ from epics_pv_mcp.tools.olog import (
     _list_tags,
     _reply_to_log,
     _search_logbook,
+    _update_log_entry,
 )
 from epics_pv_mcp.tools.read import _get_pv_value, _get_pvs
 from epics_pv_mcp.tools.write import _set_pv_value
@@ -84,9 +85,13 @@ def build_instructions(display_tools_available: bool) -> str:
         "test sandbox — loopback URL AND EPICS_MCP_OLOG_ASSUME_TEST_DATA — where entries come "
         "back whole; run epics-doctor to see which). "
         "It can also WRITE to the Olog logbook "
-        "(create_log_entry / reply_to_log, which can carry attachments of any file type, and "
-        "add_log_attachment to attach files to an EXISTING entry — whole-mode only, a non-"
-        "destructive full-entry round-trip) behind an "
+        "(create_log_entry / reply_to_log, which can carry attachments of any file type, "
+        "add_log_attachment to attach files to an EXISTING entry, and update_log_entry to edit an "
+        "existing entry's title/body/level/logbooks/tags — the last two whole-mode only, each a "
+        "full-entry round-trip that preserves attachments and every field it was not asked to "
+        "change (update_log_entry does overwrite the fields you pass, and gates on the UNION of "
+        "the entry's current and resulting logbooks)) "
+        "behind an "
         "OWN gate (EPICS_MCP_ALLOW_OLOG_WRITE + a "
         "test-server URL boundary + a logbook allowlist + an upload-size cap + a rate limit; the "
         "author is the write "
@@ -985,6 +990,77 @@ async def add_log_attachment(
         log_id=log_id,
         attachments=attachments,
         embed_image_base64=embed_image_base64,
+        timeout=timeout,
+    )
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+        # Destructive in the honest sense: it OVERWRITES fields of an existing entry (the previous
+        # version survives only in the server's archive), unlike create/attach which only add.
+        destructiveHint=True,
+        idempotentHint=False,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def update_log_entry(
+    log_id: Annotated[str, Field(description="Numeric id of the EXISTING Olog entry to edit")],
+    title: Annotated[
+        str | None, Field(description="New title. Omit to leave unchanged; must not be empty")
+    ] = None,
+    description: Annotated[
+        str | None,
+        Field(
+            description="New body text (CommonMark). Omit to leave unchanged; REPLACES the whole "
+            "body"
+        ),
+    ] = None,
+    level: Annotated[
+        str | None, Field(description="New entry level/type. Omit to leave unchanged")
+    ] = None,
+    logbooks: Annotated[
+        str | None,
+        Field(
+            description="Comma-separated logbook names that REPLACE the entry's current logbooks "
+            "(not merged). Omit to leave unchanged; at least one is required"
+        ),
+    ] = None,
+    tags: Annotated[
+        str | None,
+        Field(
+            description="Comma-separated tag names that REPLACE the entry's current tags (not "
+            "merged). Omit to leave unchanged; pass an empty string to clear"
+        ),
+    ] = None,
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """Edit an EXISTING Phoebus Olog entry's fields (Olog REST POST /logs/multipart).
+
+    MUTATING and WHOLE-MODE ONLY. Olog's update is destructive — it prunes any attachment not
+    resubmitted and NULLS any field not sent — so a safe edit must round-trip the target entry's
+    full content, readable only from a DECLARED local sandbox (loopback EPICS_MCP_OLOG_URL +
+    EPICS_MCP_OLOG_ASSUME_TEST_DATA). Against a redacted/remote server it is refused. This tool does
+    that round-trip for you: any field you omit stays EXACTLY as it was, and attachments and
+    properties are preserved. Same gate as create_log_entry, with the logbook allowlist keyed on the
+    UNION of the entry's current and resulting logbooks (moving an entry in or out is a write to
+    both).
+
+    Three server behaviours worth knowing: the entry's OWNER is re-set to the write service account
+    on every edit (the original author survives only in the server's archived version); editing a
+    legacy entry that has no raw body source makes the server re-render its visible text (reported
+    back as a warning); and an entry whose attachments have duplicate or missing filenames is
+    REFUSED, because Olog matches attachments by filename and would silently drop one. Needs at
+    least one field to change. With EPICS_MCP_OLOG_URL unset returns enabled=false.
+    """
+    return await _update_log_entry(
+        log_id=log_id,
+        title=title,
+        description=description,
+        level=level,
+        logbooks=logbooks,
+        tags=tags,
         timeout=timeout,
     )
 

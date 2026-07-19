@@ -51,7 +51,7 @@ are simply absent — that is an unmet optional extra, not a bug.
 `find_channels` · `lookup_device_name` · `is_archived` · `get_pv_history` · `get_archive_info` ·
 `list_archived_pvs` · `is_alarm_configured` · `get_alarm_history` · `diagnose_connection` ·
 `search_logbook` · `get_log_entry` · `list_logbooks` · `list_tags` · `create_log_entry` · `reply_to_log` ·
-`add_log_attachment` · `list_log_attachments` · `download_log_attachment`
+`update_log_entry` · `add_log_attachment` · `list_log_attachments` · `download_log_attachment`
 
 **Optional `[displays]` — cross-plane with the operator-screen PV inventory:**
 `validate_pvs` · `crossplane_check` · `coverage_audit` · `find_device`
@@ -159,10 +159,40 @@ never hit the server's duplicate-filename 404.
 **Attach to an existing entry** (`add_log_attachment` → `POST /logs/multipart`) is a third write tool,
 gated identically, with the logbook allowlist keyed on the TARGET entry's OWN logbooks (read first). It
 is **whole-mode only**: Olog's update endpoint is destructive — it `retainAll`-prunes any attachment not
-resubmitted (equality by id) and overwrites title/body/logbooks/tags/level/properties — so a safe attach
+resubmitted and overwrites title/body/logbooks/tags/level/properties — so a safe attach
 must round-trip the target entry's FULL content, readable only whole (loopback + `ASSUME_TEST_DATA`).
 Against a redacted/remote server it is refused. The write is thus purely ADDITIVE: existing attachments
 and every field survive; only the new file(s) are added.
+
+⚠️ **Attachment retention is FILENAME-keyed, not id-keyed** (measured in the server source, and the
+single most surprising fact about this endpoint). `retainAll` tests membership against the SUBMITTED
+collection, which deserializes into a `TreeSet` — so the match runs through `Attachment.compareTo`,
+which compares `filename` **case-insensitively**. `equals`/`hashCode` do use the id, but a `TreeSet`
+never consults them. Two consequences: re-listing an attachment by id alone (filename null) prunes it,
+and two attachments whose filenames collide case-insensitively collapse into one — silently, and not
+fixable client-side. That is why every round-trip re-lists a non-null filename per attachment, and why
+**both** round-tripping tools (`update_log_entry` and `add_log_attachment`) REFUSE an entry whose
+attachments cannot survive the match — duplicate, missing, or otherwise unreadable — instead of
+writing to it. The re-submitted list and that refusal are derived in the SAME pass, on purpose: when
+they were computed separately they disagreed, and an attachment the payload quietly omitted passed the
+guard as safe (found by adversarial review, probe-measured — the guard existed and the file was lost
+anyway).
+
+**Edit an existing entry** (`update_log_entry` → `POST /logs/multipart` with the `logEntry` part and NO
+file parts) changes `title` / body / `level` / `logbooks` / `tags`. Same destructive endpoint, same
+**whole-mode only** rule, same gate — with one difference that matters: the logbook allowlist is keyed on
+the **UNION** of the entry's current and resulting logbooks, because moving an entry INTO a logbook and
+pulling it OUT of one are both writes to that logbook; gating on either side alone leaves a hole. An
+omitted argument means "unchanged" — the tool round-trips the whole entry and overlays only what was
+passed, so attachments and properties survive. Three server behaviours it has to compensate for:
+a body edit is written to **`source`**, never `description` (under `markup=commonmark` the server
+regenerates `description` FROM `source`, so a new description beside a stale source is silently
+overwritten and the edit vanishes); the update does **not** validate logbook/tag existence the way
+create does, so unknown names are checked client-side or they become phantom references; and an
+empty title is **not** rejected server-side. Note also that the server re-sets `owner` to the write
+service account on EVERY update — the original author survives only in the archived version — and that
+editing a legacy entry with no raw `source` makes the server re-render its visible body (reported back
+as a warning).
 
 **Download** (`download_log_attachment` — by `log_id`+`filename`, or by GridFS `attachment_id`) and the
 filenames in `list_log_attachments`: raw bytes and filenames are author free text and BYPASS the entry

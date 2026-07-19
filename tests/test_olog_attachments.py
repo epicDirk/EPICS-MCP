@@ -45,6 +45,7 @@ from epics_pv_mcp.services.olog_exceptions import (
     OlogAttachmentDownloadDenied,
     OlogConnectionError,
     OlogResponseError,
+    OlogRoundTripUnsafe,
     OlogWholeModeRequired,
 )
 
@@ -896,6 +897,32 @@ class TestClientAddAttachment:
         client.add_attachment("17", _RAW_ENTRY, [new], inline_markup="\n\n![](attachment/img1)")
         log_json = json.loads(captured["files"][0][1][1])
         assert log_json["source"] == "raw **body**\n\n![](attachment/img1)"
+
+    def test_refuses_unroundtrippable_attachments(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # RED-PROOF: attaching also round-trips the EXISTING attachment list, and retention is
+        # filename-keyed — so an entry whose current attachments collide case-insensitively cannot
+        # be attached to without the server silently dropping one of them. Refuse instead.
+        captured: dict[str, Any] = {}
+
+        def fake_post(
+            session: object, url: str, files: _http.MultipartFiles, *a: object, **k: object
+        ) -> object:
+            captured["files"] = files
+            return {"id": 17, "logbooks": ["Ops"]}
+
+        monkeypatch.setattr(olog_client_module, "rest_post_multipart", fake_post)
+        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        entry = dict(_RAW_ENTRY)
+        entry["attachments"] = [
+            {"id": "1", "filename": "plot.png"},
+            {"id": "2", "filename": "PLOT.PNG"},
+        ]
+        new = AttachmentUpload(
+            id="n1", filename="n1_x.bob", content=b"<display/>", content_type=None
+        )
+        with pytest.raises(OlogRoundTripUnsafe, match="filename"):
+            client.add_attachment("17", entry, [new])
+        assert captured == {}  # nothing was written
 
     def test_get_raw_entry_refuses_when_not_whole_mode(self) -> None:
         # RED-PROOF (guard a, client backstop): a redacted client (loopback but no assume_test_data)

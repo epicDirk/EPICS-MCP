@@ -51,7 +51,11 @@ from epics_pv_mcp.services.olog_attachments import (
     read_uploads,
     write_download,
 )
-from epics_pv_mcp.services.olog_client import DEFAULT_MAX_LOGS, OlogClient
+from epics_pv_mcp.services.olog_client import (
+    DEFAULT_MAX_LOGS,
+    OlogClient,
+    unroundtrippable_attachment_filenames,
+)
 from epics_pv_mcp.services.olog_exceptions import OlogConnectionError, OlogError, OlogResponseError
 
 
@@ -887,6 +891,175 @@ async def query_olog_add_attachment(
             "entry": entry,
             "attachments_uploaded": [{"id": u["id"], "filename": u["filename"]} for u in uploads],
         }
+
+    try:
+        return await asyncio.to_thread(_run)
+    except OlogConnectionError as exc:
+        raise EpicsConnectionError(f"Olog: {exc}") from exc
+    except OlogError as exc:
+        raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
+
+
+async def query_olog_update(
+    log_id: str,
+    title: str | None = None,
+    description: str | None = None,
+    level: str | None = None,
+    logbooks: list[str] | None = None,
+    tags: list[str] | None = None,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    """Edit an EXISTING Olog entry's fields (OA3). MUTATING, gated, WHOLE-MODE ONLY.
+
+    Default-disabled (no ``EPICS_MCP_OLOG_URL`` → ``enabled: false``, no network). WHOLE-MODE ONLY
+    for the same structural reason as ``add_log_attachment``: the server's update is DESTRUCTIVE (it
+    prunes any attachment not resubmitted and NULLS any field not sent), so a safe edit must
+    round-trip the target entry's FULL content — readable only whole (loopback +
+    ``EPICS_MCP_OLOG_ASSUME_TEST_DATA``). Against a redacted server it is refused.
+
+    ``None`` means "leave unchanged"; only the fields passed are overlaid. The write goes
+    through the SAME :class:`~epics_pv_mcp.olog_safety.OlogWriteGate` as create, but the
+    allowlist is keyed on the **UNION** of the entry's current logbooks and the ones it would
+    end up in: moving an entry INTO a logbook and pulling it OUT of one are both writes to that
+    logbook, so gating on either side alone leaves a hole. Backs ``update_log_entry``.
+    """
+    cfg = get_config()
+    if not cfg.olog_url:
+        return {"enabled": False, "updated": False, "note": _OLOG_DISABLED_NOTE}
+    if (
+        title is None
+        and description is None
+        and level is None
+        and logbooks is None
+        and tags is None
+    ):
+        raise EpicsError(
+            "update_log_entry needs at least one field to change "
+            "(title, description, level, logbooks or tags)",
+            error_code="INVALID_INPUT",
+        )
+    stripped_id = log_id.strip()
+    # isascii() too: isdigit() alone accepts non-ASCII digits that int() handles inconsistently.
+    if not (stripped_id.isascii() and stripped_id.isdigit()):
+        raise EpicsError(
+            "update_log_entry needs a numeric log_id (the id of the entry to edit)",
+            error_code="INVALID_INPUT",
+        )
+    if title is not None and not title.strip():
+        raise EpicsError(
+            "update_log_entry: title must not be empty — unlike create, Olog's update does NOT "
+            "reject an empty title, so the entry would silently lose it",
+            error_code="INVALID_INPUT",
+        )
+    caller = "update_log_entry"
+
+    def _run() -> dict[str, object]:
+        auth = basic_auth_header(cfg.olog_write_user, cfg.olog_write_password)
+        client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=auth)
+        # Whole-mode FIRST — before any read or write. Required for the round-trip source AND it
+        # implies the loopback write-URL boundary; a redacted/remote server is refused structurally.
+        if not client.whole_mode:
+            raise OlogWriteDeniedError(
+                "Olog write refused: update_log_entry needs a declared local test sandbox "
+                "(loopback EPICS_MCP_OLOG_URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA). Editing an entry "
+                "must round-trip its full content — the server's update prunes any attachment and "
+                "nulls any field not resubmitted — which is withheld against a redacted server."
+            )
+        raw = client.get_raw_entry(stripped_id)
+        if raw is None:
+            raise EpicsError(
+                f"update_log_entry: no Olog entry with id {stripped_id}",
+                error_code="OLOG_HTTP_404",
+            )
+        # Safe-refuse BEFORE the gate: Olog matches attachments by filename (case-insensitively), so
+        # a duplicate/missing filename would be silently dropped by the very round-trip that is
+        # supposed to preserve it. A loud refusal beats a quietly lost file.
+        unsafe = unroundtrippable_attachment_filenames(raw)
+        if unsafe:
+            raise EpicsError(
+                f"update_log_entry: entry {stripped_id} cannot be edited safely — its attachments "
+                f"({', '.join(unsafe)}) would not survive the round-trip, because Olog matches "
+                "attachments by filename (case-insensitively) and would silently drop the "
+                "duplicate/unnamed one.",
+                error_code="INVALID_INPUT",
+            )
+        raw_logbooks = raw.get("logbooks")
+        logbook_items = raw_logbooks if isinstance(raw_logbooks, list) else []
+        current_logbooks = [
+            str(item["name"]) for item in logbook_items if isinstance(item, dict) and "name" in item
+        ]
+        # The set the entry actually lives in AFTER the write (what must be non-empty)...
+        effective_logbooks = logbooks if logbooks is not None else current_logbooks
+        if not effective_logbooks:
+            raise EpicsError(
+                "update_log_entry: an entry must stay in at least one logbook",
+                error_code="INVALID_INPUT",
+            )
+        # ...and the union of before+after (what the allowlist must cover — a move writes to both).
+        gate_logbooks = sorted(set(current_logbooks) | set(effective_logbooks))
+        raw_level = raw.get("level")
+        entry_level = raw_level if isinstance(raw_level, str) else None
+        title_len = len(title) if title is not None else len(str(raw.get("title") or ""))
+        gate = get_olog_safety()
+        # Gate ordering mirrors create/add: the cheap deterministic checks (env / URL / allowlist)
+        # first, then the name validation reads, then the rate token last.
+        gate.check_write_preconditions(gate_logbooks, caller=caller)
+        # Olog's update does NOT validate logbook/tag existence (create does) — an unknown name
+        # would be stored silently as a phantom reference, so it is checked here.
+        if logbooks is not None:
+            unknown = sorted(set(logbooks) - set(client.list_logbooks()))
+            if unknown:
+                raise EpicsError(
+                    f"update_log_entry: unknown logbook(s) {', '.join(unknown)} — Olog's update "
+                    "would store them silently as phantom references.",
+                    error_code="INVALID_INPUT",
+                )
+        if tags is not None:
+            unknown_tags = sorted(set(tags) - set(client.list_tags()))
+            if unknown_tags:
+                raise EpicsError(
+                    f"update_log_entry: unknown tag(s) {', '.join(unknown_tags)} — Olog's update "
+                    "would store them silently as phantom references.",
+                    error_code="INVALID_INPUT",
+                )
+        gate.check_write_allowed(gate_logbooks, caller=caller, attachment_bytes=0)
+        warnings: list[str] = []
+        if description is None and not isinstance(raw.get("source"), str):
+            warnings.append(
+                "This entry carries no raw 'source' (a legacy/old-client entry). Olog will "
+                "regenerate its body from the description through the CommonMark renderer, so "
+                "markup-significant characters in the visible text may be rewritten."
+            )
+        try:
+            entry = client.update_log_entry(
+                raw,
+                title=title,
+                description=description,
+                level=level,
+                logbooks=logbooks,
+                tags=tags,
+            )
+        except Exception as exc:  # broad on purpose: audit ANY failed edit, then re-raise
+            gate.audit_write_failed(
+                logbooks=gate_logbooks,
+                level=level if level is not None else entry_level,
+                title_len=title_len,
+                error_code=_olog_error_code(exc),
+                caller=caller,
+            )
+            raise
+        gate.audit_write(
+            entry_id=str(entry.get("id", stripped_id)),
+            logbooks=gate_logbooks,
+            level=level if level is not None else entry_level,
+            title_len=title_len,
+            owner=cfg.olog_write_user,
+            caller=caller,
+        )
+        result: dict[str, object] = {"enabled": True, "updated": True, "entry": entry}
+        if warnings:
+            result["warnings"] = warnings
+        return result
 
     try:
         return await asyncio.to_thread(_run)

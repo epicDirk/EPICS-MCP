@@ -21,6 +21,24 @@ carry breaking changes).
   file — it refuses to overwrite and refuses a symlink target (no data loss, no boundary escape).
   Verified against a live loopback Olog with a byte-identical round-trip. The no-attachment create
   path is unchanged.
+- **Olog entry editing (OA3).** New write tool `update_log_entry(log_id, title?, description?,
+  level?, logbooks?, tags?)` edits an existing entry via `POST /logs/multipart` (the `logEntry` part
+  with no file parts — the same server core, and the same already-probed transport, as OA1b). An
+  omitted argument means **unchanged**: the tool round-trips the target entry's full content and
+  overlays only what was passed, so attachments, properties and unedited fields survive the
+  server's destructive full-replace. **Whole-mode only**; same write gate as create, but the logbook
+  allowlist is keyed on the **UNION** of the entry's current and resulting logbooks — moving an entry
+  *into* a logbook and pulling it *out* of one are both writes to that logbook, so gating on either
+  side alone left a hole. Compensates three server behaviours measured in the Olog source: a body
+  edit is written to the raw `source` (under `markup=commonmark` the server regenerates
+  `description` from it, so a new description beside a stale source would be silently overwritten);
+  logbook/tag names are validated client-side (the update, unlike create, does not validate them and
+  would store phantom references); and an empty title is rejected here because the server accepts it.
+  An entry whose attachments have duplicate or missing filenames is **refused** rather than edited —
+  attachment retention is filename-keyed (`Attachment.compareTo` inside a `TreeSet`), so such an
+  entry cannot round-trip without silently losing a file. Note the server re-sets `owner` to the
+  write service account on every update, and editing a legacy entry without a raw `source` makes it
+  re-render the visible body (returned as a `warnings` entry). 13 guards, each mutant-red-proven.
 - **Olog attach-to-existing (OA1b).** New write tool `add_log_attachment(log_id, attachments,
   embed_image_base64?)` attaches file(s) to an EXISTING entry via `POST /logs/multipart`. That
   endpoint is the server's DESTRUCTIVE `updateLog` (it `retainAll`-prunes any attachment not
