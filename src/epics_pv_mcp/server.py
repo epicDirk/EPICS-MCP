@@ -89,8 +89,10 @@ def build_instructions(display_tools_available: bool) -> str:
         "(create_log_entry / reply_to_log, which can carry attachments of any file type, "
         "add_log_attachment to attach files to an EXISTING entry, and update_log_entry to edit an "
         "existing entry's title/body/level/logbooks/tags — the last two whole-mode only, each a "
-        "full-entry round-trip that preserves attachments and every field it was not asked to "
-        "change (update_log_entry does overwrite the fields you pass, and gates on the UNION of "
+        "full-entry round-trip that preserves attachments and every CONTENT field it was not "
+        "asked to change — but NOT the owner, which the server re-stamps with the write service "
+        "account on every call to either tool "
+        "(update_log_entry also overwrites the fields you pass, and gates on the UNION of "
         "the entry's current and resulting logbooks)) "
         "behind an "
         "OWN gate (EPICS_MCP_ALLOW_OLOG_WRITE + a "
@@ -1079,7 +1081,10 @@ async def add_log_attachment(
     EPICS_MCP_OLOG_ASSUME_TEST_DATA). Against a redacted/remote server it is refused. Same gate as
     create_log_entry (env gate + test-server URL boundary + rate limit + size cap), with the logbook
     allowlist keyed on the TARGET entry's OWN logbooks (read first). The attach is purely ADDITIVE:
-    existing attachments and every field are preserved. Needs at least one attachment (attachments
+    existing attachments and every CONTENT field are preserved — but the entry's OWNER is
+    re-stamped with the write service account, because this endpoint IS the destructive update
+    (the original author then survives only in the server-side archived version, which no tool
+    here can read). Needs at least one attachment (attachments
     or embed_image_base64). With EPICS_MCP_OLOG_URL unset returns enabled=false.
     """
     return await _add_log_attachment(
@@ -1153,7 +1158,9 @@ async def update_log_entry(
     both).
 
     Three server behaviours worth knowing: the entry's OWNER is re-set to the write service account
-    on every edit (the original author survives only in the server's archived version); editing a
+    on every edit (the original author survives only in the server's archived version — which
+    is NOT reachable from this server, so recovery is manual, by someone with direct Olog
+    access); editing a
     legacy entry that has no raw body source makes the server re-render its visible text (reported
     back as a warning); and an entry whose attachments have duplicate or missing filenames is
     REFUSED, because Olog matches attachments by filename and would silently drop one. Needs at

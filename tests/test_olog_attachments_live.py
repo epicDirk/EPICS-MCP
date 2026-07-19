@@ -22,6 +22,10 @@ _URL = os.environ.get("EPICS_MCP_OLOG_URL")
 _WRITE = os.environ.get("EPICS_MCP_ALLOW_OLOG_WRITE", "").lower() == "true"
 _LOGBOOKS = os.environ.get("EPICS_MCP_OLOG_WRITE_LOGBOOKS", "")
 _DOWNLOAD = os.environ.get("EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD", "").lower() == "true"
+# A SECOND principal, distinct from the write service account. Only with two accounts can the
+# server's owner re-stamp become visible at all (see test_add_attachment_restamps_the_owner).
+_OTHER_USER = os.environ.get("EPICS_MCP_OLOG_TEST_OTHER_USER")
+_OTHER_PASSWORD = os.environ.get("EPICS_MCP_OLOG_TEST_OTHER_PASSWORD")
 
 pytestmark = [
     pytest.mark.live,
@@ -142,7 +146,11 @@ def test_add_attachment_is_additive_and_byte_identical(client: OlogClient) -> No
     names = {a["filename"] for a in attachments}
     assert first["filename"] in names and second["filename"] in names
 
-    # and every field is UNCHANGED (updateLog would wipe a field not round-tripped) — anti-overwrite
+    # and every CONTENT field is unchanged (updateLog would wipe a field not round-tripped) —
+    # anti-overwrite. NOT every field: `owner` IS re-stamped by the server on every call to this
+    # endpoint. This test cannot see that, because it creates and attaches as the SAME account, so
+    # before and after are identical either way — see
+    # test_add_attachment_restamps_the_owner, which uses a second principal to make it visible.
     assert after["title"] == "OA1b additive attach"
     assert "original" in str(after["source"])
     logbooks = after["logbooks"]
@@ -154,3 +162,61 @@ def test_add_attachment_is_additive_and_byte_identical(client: OlogClient) -> No
     b2, _n2, _t2 = client.get_attachment(log_id, second["filename"])
     assert b1 == _PNG
     assert b2 == _BLOB
+
+
+@pytest.mark.skipif(
+    not (_OTHER_USER and _OTHER_PASSWORD),
+    reason=(
+        "the owner re-stamp is only visible with a SECOND principal: set "
+        "EPICS_MCP_OLOG_TEST_OTHER_USER + _OTHER_PASSWORD to an account that is not the write "
+        "service account (a stock Olog ships 'user' and 'admin')"
+    ),
+)
+def test_add_attachment_restamps_the_owner(client: OlogClient) -> None:
+    """OQ4: attaching a file REWRITES the entry's author. Measured, not read off the source.
+
+    ``POST /logs/multipart`` delegates straight to the server's ``updateLog``, which calls
+    ``persistedLog.setOwner(principal.getName())`` UNCONDITIONALLY — so a caller who only meant to
+    add a file also takes over authorship of someone else's entry. The original author then exists
+    only in the server-side archived version, which this server cannot read.
+
+    A mock can never show this: it knows what the client SENDS, never what the server DOES. And the
+    sibling additive test cannot show it either, because it creates and attaches as the same
+    account. Hence the second principal: the entry is created as somebody else, so a re-stamp is the
+    only thing that can change the owner.
+    """
+    logbook = _LOGBOOKS.split(",")[0].strip()
+    assert _URL is not None  # guarded by the module skipif
+    other = OlogClient(
+        _URL,
+        timeout=15.0,
+        auth_header=basic_auth_header(_OTHER_USER or "", _OTHER_PASSWORD or ""),
+        assume_test_data=True,
+    )
+    created = other.create_log_entry(
+        title="OQ4 owner re-stamp probe",
+        logbooks=[logbook],
+        description="written by the OTHER principal (synthetic test artifact)",
+    )
+    log_id = str(created["id"])
+    author_before = str(created["owner"])
+    assert author_before != os.environ["EPICS_MCP_OLOG_WRITE_USER"], (
+        "the probe is vacuous unless the two principals actually differ"
+    )
+
+    # the write service account attaches ONE file and touches nothing else
+    raw = other.get_raw_entry(log_id)
+    assert raw is not None
+    client.add_attachment(log_id, raw, [_upload(_BLOB, "oq4-owner.bob", None)])
+
+    after = client.get_raw_entry(log_id)
+    assert after is not None
+    assert after["owner"] == os.environ["EPICS_MCP_OLOG_WRITE_USER"], (
+        "the server did NOT re-stamp the owner — if this ever fails, the caveat in the guide, the "
+        "README, the tool descriptions and the server instructions is wrong and must be revisited"
+    )
+    assert after["owner"] != author_before  # authorship really moved
+    # ...while the CONTENT the attach never touched is still intact (the caveat is about owner ONLY)
+    assert after["title"] == "OQ4 owner re-stamp probe"
+    attachments = after["attachments"]
+    assert isinstance(attachments, list) and len(attachments) == 1

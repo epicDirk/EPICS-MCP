@@ -61,7 +61,7 @@ graph LR
 - Analysis cores are **pure and deterministic**: same input → same output, no hidden
   clock/random/network; protocol access is injected as checker callables.
 - The server **reads by default and mutates only through a gate**: `set_pv_value` is triple-gated,
-  and the Olog logbook writes (`create_log_entry` / `reply_to_log`) sit behind their own separate
+  and the Olog logbook writes (`create_log_entry` / `reply_to_log` / `add_log_attachment` / `update_log_entry` — the last two MUTATE an existing entry) sit behind their own separate
   gate. Nothing is reached until a launcher points the address lists / `*_URL` vars somewhere —
   which a deployment may well have done, so treat reach as configuration, not as an invariant
   (see the README's *Safety & network posture*).

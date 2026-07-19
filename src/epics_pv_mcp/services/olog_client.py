@@ -1079,7 +1079,8 @@ class OlogClient:
         (LogResource.java:537-558). So this ROUND-TRIPS *raw_entry* verbatim — existing attachment
         metadata re-listed so ``retainAll`` keeps them (the bytes stay server-side, nothing is
         resent), and every overwrite-field carried through — and only APPENDS the new attachment
-        metadata + the new ``files`` parts. The write is thus purely additive: nothing pruned, no
+        metadata + the new ``files`` parts. The write is thus additive for CONTENT: nothing pruned,
+        no content
         field wiped.
 
         ⚠️ That retention is **filename-keyed, not id-keyed** (``Attachment.compareTo`` inside a
@@ -1169,7 +1170,8 @@ class OlogClient:
 
         Caveats worth knowing at the call site: the server re-sets ``owner`` to the write service
         account on EVERY update (LogResource.java:550) — the original author survives only in the
-        archived version (:531) — and it does NOT validate logbook/tag existence on update (unlike
+        archived version (:531), which this server cannot read, so recovery is manual — and it does
+        NOT validate logbook/tag existence on update (unlike
         create) nor the ``level`` on ANY write path, which is why the service checks edited names
         and the level itself (see ``_reject_unknown_level``). *raw_entry* comes from
         :meth:`get_raw_entry` (whole-mode only); the server's own numeric id is round-tripped

@@ -17,7 +17,7 @@ operational knowledge (see the Knowledge Persistence Policy in `CLAUDE.md`).
 
 - **Read-only by default.** The mutating tools are gated OFF. `set_pv_value` needs
   `EPICS_MCP_ALLOW_PV_WRITE=true` **plus** a regex allowlist, a rate limit and an audit log. The Olog
-  logbook writers (`create_log_entry` / `reply_to_log`) sit behind a **separate** gate — see the Olog
+  logbook writers (`create_log_entry`, `reply_to_log`, `add_log_attachment` and `update_log_entry`) sit behind a **separate** gate — see the Olog
   write posture below; `ALLOW_PV_WRITE` is untouched by it.
 - **Localhost-isolated by default.** The server opens no non-local connection until its launcher
   widens the EPICS address list (`EPICS_PVA_ADDR_LIST` / `EPICS_CA_ADDR_LIST` and the matching
@@ -185,7 +185,7 @@ A `set_pv_value` write leaves a `PV_WRITE` audit line at each stage, correlated 
 Every terminal line shares the `op=<id>` of its `ATTEMPT`, so an interrupted write is never a silent
 gap in the trail. (A direct, non-tool call to the audit helpers logs `op=-`.)
 
-### Olog write posture (`create_log_entry` / `reply_to_log`)
+### Olog write posture (all four write tools)
 
 Posting to the logbook is the server's first mutating operation against a REST service, so it has its
 own gate — distinct from `set_pv_value`, and it never touches `ALLOW_PV_WRITE`. Four things must line
@@ -234,8 +234,15 @@ gated identically, with the logbook allowlist keyed on the TARGET entry's OWN lo
 is **whole-mode only**: Olog's update endpoint is destructive — it `retainAll`-prunes any attachment not
 resubmitted and overwrites title/body/logbooks/tags/level/properties — so a safe attach
 must round-trip the target entry's FULL content, readable only whole (loopback + `ASSUME_TEST_DATA`).
-Against a redacted/remote server it is refused. The write is thus purely ADDITIVE: existing attachments
-and every field survive; only the new file(s) are added.
+Against a redacted/remote server it is refused. The write is purely ADDITIVE for CONTENT:
+existing attachments and every content field survive, and only the new file(s) are added.
+
+⚠️ **One field does NOT survive: `owner`.** Because this endpoint IS the destructive update,
+the server re-stamps the entry's owner with the write service account on every attach — the
+original author then exists only in the server-side archived version. Attaching a file to
+someone else's entry therefore rewrites its authorship. This is the same behaviour documented
+for `update_log_entry` below; it was previously described here as "every field survives",
+which was the opposite of what the server does.
 
 ⚠️ **Attachment retention is FILENAME-keyed, not id-keyed** (measured in the server source, and the
 single most surprising fact about this endpoint). `retainAll` tests membership against the SUBMITTED
@@ -266,6 +273,12 @@ empty title is **not** rejected server-side. Note also that the server re-sets `
 service account on EVERY update — the original author survives only in the archived version — and that
 editing a legacy entry with no raw `source` makes the server re-render its visible body (reported back
 as a warning).
+
+⚠️ **The archived version is not reachable from this server.** It is cited here and in the code as
+the reason a re-stamped owner or an overwritten field is recoverable, but no MCP tool can read or
+restore it — recovery is manual, by someone with direct access to the Olog service (its history
+API or its datastore). Treat every edit as effectively irreversible from here, and take the
+`owner` re-stamp as permanent for any purpose this server can serve.
 
 **Download** (`download_log_attachment` — by `log_id`+`filename`, or by GridFS `attachment_id`) and the
 filenames in `list_log_attachments`: raw bytes and filenames are author free text and BYPASS the entry
