@@ -342,26 +342,40 @@ class OlogWriteGate:
             self._timestamps.popleft()
 
     def _setup_audit_logger(self) -> logging.Logger:
-        """Create the dedicated Olog audit logger (its OWN name, distinct from the PV audit)."""
+        """Create the dedicated Olog audit logger (its OWN name, distinct from the PV audit).
+
+        The audit sink is VALIDATED on every construction — not only the first — mirroring
+        SafetyLayer._setup_audit_logger (QA 2026-07-17): a broken audit path fails closed as
+        SafetyConfigError even when an earlier gate already attached a handler to the process-global
+        ``epics_pv_mcp.olog_audit`` logger. Gating the whole block on ``if not audit.handlers`` used
+        to skip the FileHandler path check on repeat construction. At most ONE handler is attached;
+        a duplicate built only to validate the path is discarded.
+        """
         audit = logging.getLogger("epics_pv_mcp.olog_audit")
         audit.setLevel(logging.INFO)
+        handler: logging.Handler
+        if self._config.audit_log_file:
+            # Fail-closed: a broken/unwritable audit path fails as SafetyConfigError at init, not as
+            # a raw OSError at the first write. Built UNCONDITIONALLY so the path check runs on
+            # every construction (now truly symmetric to SafetyLayer).
+            try:
+                handler = logging.FileHandler(self._config.audit_log_file)
+            except OSError as exc:
+                raise SafetyConfigError(
+                    f"Invalid EPICS_MCP_AUDIT_LOG_FILE {self._config.audit_log_file!r}: {exc}",
+                    details={"audit_log_file": self._config.audit_log_file},
+                ) from exc
+        else:
+            handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%dT%H:%M:%S")
+        )
+        # Attach at most one handler (dedup on repeated init). The handler above was built
+        # unconditionally, so its path validation already ran; if the logger is already configured,
+        # close the extra one (a StreamHandler over sys.stderr does not own the stream).
         if not audit.handlers:
-            handler: logging.Handler
-            if self._config.audit_log_file:
-                # Fail-closed: a broken/unwritable audit path fails as SafetyConfigError at init,
-                # symmetric to SafetyLayer, not as a raw OSError at the first write.
-                try:
-                    handler = logging.FileHandler(self._config.audit_log_file)
-                except OSError as exc:
-                    raise SafetyConfigError(
-                        f"Invalid EPICS_MCP_AUDIT_LOG_FILE {self._config.audit_log_file!r}: {exc}",
-                        details={"audit_log_file": self._config.audit_log_file},
-                    ) from exc
-            else:
-                handler = logging.StreamHandler(sys.stderr)
-            handler.setFormatter(
-                logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%dT%H:%M:%S")
-            )
             audit.addHandler(handler)
             self._audit_handler = handler
+        else:
+            handler.close()
         return audit

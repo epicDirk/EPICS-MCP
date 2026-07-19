@@ -126,7 +126,8 @@ _CLIENT_INFO = "epics-pv-mcp"
 
 # DS-PRIVACY output allowlist: the only entry fields that may leave whenever the posture redacts
 # (a DECLARED loopback sandbox returns the whole entry — see _expand_log_entry). ``title``/
-# are kept for their PRESENCE but their value is withheld (they are free text). Everything not
+# ``description`` are kept for their PRESENCE but their value is withheld (they are free text).
+# Everything not
 # listed — ``owner``, ``source``, ``properties``, raw ``attachments``, and any field a future Olog
 # version adds — is dropped, so a new person-bearing field never leaks by default.
 _LOG_ALLOWLIST = frozenset(

@@ -828,6 +828,14 @@ async def query_olog_download(
             "download needs output_path (a workspace file to write) or as_base64=true",
             error_code="INVALID_INPUT",
         )
+    if as_base64 and output_path:
+        # Contradictory sinks: base64 would silently win (the elif below never runs) and the
+        # smaller base64 cap would apply — an output_path handover for a >5 MiB file would then
+        # fail spuriously. Refuse up front rather than pick one silently.
+        raise EpicsError(
+            "download takes either output_path or as_base64, not both",
+            error_code="INVALID_INPUT",
+        )
     cfg = get_config()
     if not cfg.olog_url:
         return {"enabled": False, "downloaded": False, "note": _OLOG_DISABLED_NOTE}

@@ -392,6 +392,23 @@ class TestGateConfigFailClosed:
             audit.handlers.clear()
             audit.handlers.extend(saved)
 
+    def test_audit_path_validated_on_repeated_construction(self, tmp_path: Path) -> None:
+        # QA 2026-07-19 (OA1-QA #A3): the audit-path guard must not be skipped just because an
+        # EARLIER gate already attached a handler to the process-global olog_audit logger. A later
+        # OlogWriteGate with a broken audit path must STILL fail closed — mirrors
+        # test_safety.py::test_audit_path_validated_on_repeated_construction (the 2026-07-17 fix
+        # this makes OlogWriteGate symmetric to).
+        audit = logging.getLogger(_AUDIT_LOGGER)
+        saved = audit.handlers[:]
+        audit.handlers.clear()
+        try:
+            OlogWriteGate(EpicsConfig())  # first construction registers a stderr handler
+            with pytest.raises(SafetyConfigError):
+                OlogWriteGate(EpicsConfig(audit_log_file=str(tmp_path / "nope" / "audit.log")))
+        finally:
+            audit.handlers.clear()
+            audit.handlers.extend(saved)
+
 
 # ======================================================================================
 # OlogClient.create_log_entry: JSON shape, redaction, error mapping

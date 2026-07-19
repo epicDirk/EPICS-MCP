@@ -842,8 +842,9 @@ async def create_log_entry(
     attachments: Annotated[
         str | None,
         Field(
-            description="Comma-separated workspace file path(s) to upload with the entry — "
-            "any file type, arbitrary size (create-with-attachments, PUT /logs/multipart)"
+            description="Comma-separated workspace file path(s) to upload with the entry — any "
+            "file type, up to EPICS_MCP_OLOG_ATTACH_MAX_BYTES total (default 50 MiB; "
+            "create-with-attachments, PUT /logs/multipart)"
         ),
     ] = None,
     embed_image_base64: Annotated[
@@ -909,7 +910,7 @@ async def reply_to_log(
         str | None,
         Field(
             description="Comma-separated workspace file path(s) to upload with the reply "
-            "(any type/size)"
+            "(any type, up to EPICS_MCP_OLOG_ATTACH_MAX_BYTES total, default 50 MiB)"
         ),
     ] = None,
     embed_image_base64: Annotated[
@@ -923,10 +924,9 @@ async def reply_to_log(
     MUTATING. Same gate, service account, and DS-PRIVACY redaction as create_log_entry — it threads
     the new entry to log_id via the Olog Log Entry Group. A reply is its own entry, so it carries
     its
-    OWN attachments (workspace file paths, any type/size). A log_id that identifies no existing
-    entry
-    returns a clear HTTP 400 error. Disabled by default (needs EPICS_MCP_OLOG_URL +
-    EPICS_MCP_ALLOW_OLOG_WRITE).
+    OWN attachments (workspace file paths, any type, capped by EPICS_MCP_OLOG_ATTACH_MAX_BYTES). A
+    log_id that identifies no existing entry returns a clear HTTP 400 error. Disabled by default
+    (needs EPICS_MCP_OLOG_URL + EPICS_MCP_ALLOW_OLOG_WRITE).
     """
     return await _reply_to_log(
         log_id=log_id,
@@ -973,7 +973,7 @@ async def download_log_attachment(
         str | None,
         Field(
             description="Workspace file path to write the bytes to (a NEW file) — the default "
-            "handover for any size"
+            "handover, up to EPICS_MCP_OLOG_ATTACH_MAX_BYTES (default 50 MiB)"
         ),
     ] = None,
     as_base64: Annotated[
@@ -995,7 +995,9 @@ async def download_log_attachment(
     byte fetch happens (bytes bypass the entry redaction, and the by-id endpoint has no server-side
     per-log auth, so byte egress is a deliberate opt-in). Bytes cross the boundary written to
     output_path (a NEW workspace file, EPICS_MCP_ALLOWED_ROOTS-checked) or base64 in the result
-    (as_base64, small files). With EPICS_MCP_OLOG_URL unset returns enabled=false.
+    (as_base64, small files) — pass exactly one, not both. Either way the body is capped by
+    EPICS_MCP_OLOG_ATTACH_MAX_BYTES (default 50 MiB; a base64 result is capped smaller still). With
+    EPICS_MCP_OLOG_URL unset returns enabled=false.
     """
     return await _download_log_attachment(
         log_id=log_id,

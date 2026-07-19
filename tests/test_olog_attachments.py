@@ -725,6 +725,18 @@ class TestServiceDownload:
         result = await query_olog_download(attachment_id="abc", as_base64=True)
         assert result["content_base64"] == base64.b64encode(b"XY").decode()
 
+    # --- RED-PROOF (OA1-QA #A1): output_path AND as_base64 both set is a contradiction and refused
+    # up front, so as_base64 can never silently drop an explicit output_path (nor apply its smaller
+    # cap to a would-be file handover). ---
+    @pytest.mark.asyncio
+    async def test_refuses_both_output_path_and_base64(self, tmp_path: Path) -> None:
+        _set_config(olog_url=_LOOPBACK)
+        with pytest.raises(EpicsError) as exc:
+            await query_olog_download(
+                log_id="1", filename="a.png", output_path=str(tmp_path / "x.bin"), as_base64=True
+            )
+        assert exc.value.error_code == "INVALID_INPUT"
+
 
 def _list_client(entry: dict[str, object] | None) -> Callable[..., object]:
     class _Fake:
