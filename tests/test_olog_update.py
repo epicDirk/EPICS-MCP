@@ -275,6 +275,21 @@ class TestClientUpdate:
             client.update_log_entry(entry, title="new")
         assert captured == {}  # nothing was written
 
+    def test_edited_level_overlays_the_raw_value(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # RED-PROOF (the level overlay): every OTHER update_log_entry call in this file omits
+        # `level`, so only the ELSE branch of the overlay was ever executed — sabotaging it to
+        # `raw_entry.get("level")` left the whole suite green. The value must differ from
+        # _RAW_ENTRY["level"] ("Info"), or both branches produce the same payload and the mutant
+        # survives. The sibling service-level assertion (TestServiceUpdate) cannot cover this: it
+        # monkeypatches OlogClient away, so the wire payload is never built.
+        captured = _capture_post(monkeypatch)
+        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        client.update_log_entry(_RAW_ENTRY, level="Problem")
+        log_json = _sent_log_json(captured)
+        assert log_json["level"] == "Problem"  # the caller's level wins over the raw entry's
+        assert log_json["title"] == "existing title"  # ...and nothing else moved
+        assert log_json["source"] == "raw **body**"
+
 
 # ======================================================================================
 # Service: guards, gate, audit
