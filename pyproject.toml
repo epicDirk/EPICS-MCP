@@ -80,6 +80,9 @@ target-version = "py312"
 [tool.ruff.lint]
 # Regelsatz nach MCP-Parität (phoebus-display-mcp): BLE = blinde except Exception,
 # T20 = kein print() (stdout ist der JSON-RPC-Kanal des stdio-Servers).
+# Ur-Quelle des Regelsatzes ist QUALITY-STANDARD.md §2 des opi-foundry-Workspace; er kam über
+# phoebus-display-mcp hierher. Die Zwischenstufe hatte das Zitat verloren — wer den Satz erbt oder
+# ändert, erbt damit auch die Begründung, statt nur eine kopierbare Liste (2026-07-19).
 select = ["E", "F", "I", "W", "UP", "B", "SIM", "RUF", "PERF", "ANN", "BLE", "T20"]
 # Deutsche Typografie in Kommentaren/Docstrings ist Projekt-Konvention — keine
 # "ambiguous unicode"-Funde für Gedankenstrich, typografische Anführungszeichen, Apostroph.
