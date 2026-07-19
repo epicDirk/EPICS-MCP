@@ -40,7 +40,13 @@ from epics_pv_mcp.services.olog_client import (
     attachment_round_trip,
     unroundtrippable_attachment_filenames,
 )
-from epics_pv_mcp.services.olog_exceptions import OlogResponseError, OlogRoundTripUnsafe
+from epics_pv_mcp.services.olog_exceptions import (
+    OlogAttachmentDownloadDenied,
+    OlogConnectionError,
+    OlogResponseError,
+    OlogRoundTripUnsafe,
+    OlogWholeModeRequired,
+)
 
 _AUDIT_LOGGER = "epics_pv_mcp.olog_audit"
 _LOOPBACK = "http://localhost:8080/Olog"
@@ -292,6 +298,42 @@ class TestClientUpdate:
 
 
 # ======================================================================================
+# _olog_error_code: the discrete token reported to the caller AND written to the audit
+# ======================================================================================
+
+
+class TestOlogErrorCode:
+    """The mapper had NO direct test, which is why its fallback branch could stay wrong."""
+
+    def test_refusals_carry_their_own_code_not_internal(self) -> None:
+        # The class of three: all are permanent refusals that never wrap an HTTP response, and all
+        # three used to fall through to INTERNAL — i.e. "transient, try again".
+        assert checkers_module._olog_error_code(OlogRoundTripUnsafe("x")) == "INVALID_INPUT"
+        assert checkers_module._olog_error_code(OlogWholeModeRequired("x")) == "OLOG_WRITE_DENIED"
+        assert (
+            checkers_module._olog_error_code(OlogAttachmentDownloadDenied("x"))
+            == "OLOG_ATTACHMENT_DOWNLOAD_DENIED"
+        )
+
+    def test_connection_and_response_branches_survive_the_new_one(self) -> None:
+        # ORDER REGRESSION: OlogConnectionError and OlogResponseError are themselves OlogError
+        # subclasses, so a naively hoisted `isinstance(exc, OlogError)` branch would swallow both —
+        # and with them the HTTP-status resolution. This pins the precedence.
+        assert checkers_module._olog_error_code(OlogConnectionError("x")) == "OLOG_CONNECTION_ERROR"
+        assert checkers_module._olog_error_code(OlogResponseError("x")) == "OLOG_RESPONSE_ERROR"
+
+    def test_unknown_exception_still_falls_back_to_internal(self) -> None:
+        # The fallback is still right for what it was meant for: something genuinely unclassified.
+        assert checkers_module._olog_error_code(RuntimeError("boom")) == "INTERNAL"
+
+    def test_code_never_carries_the_exception_message(self) -> None:
+        # SEC-5: the audit is metadata-only. A code derived from the message would leak free text
+        # into the audit trail through the back door.
+        code = checkers_module._olog_error_code(OlogRoundTripUnsafe("secret file name.png"))
+        assert "secret" not in code and "png" not in code
+
+
+# ======================================================================================
 # Service: guards, gate, audit
 # ======================================================================================
 
@@ -436,6 +478,50 @@ class TestServiceUpdate:
         assert "event=FAILED" in caplog.text
         assert "caller=update_log_entry" in caplog.text
         assert "corrected title" not in caplog.text  # metadata only, never the text
+
+    @pytest.mark.asyncio
+    async def test_failed_edit_audit_names_the_entry(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # RED-PROOF: the server archives and mutates BEFORE answering, so a timeout leaves an
+        # APPLIED edit in front of a client that sees FAILED. Without the id, the only record of the
+        # attempt cannot say WHICH entry may now be altered. (audit_write_failed omitted entry_id on
+        # a create-specific rationale — "none exists for a failed create" — that does not hold for
+        # an edit.)
+        config_module._config = _write_config(olog_write_logbooks="Ops")
+        _install_fake(monkeypatch)
+
+        def boom(*args: object, **kwargs: object) -> dict[str, object]:
+            raise OlogResponseError("Olog timed out (HTTP 504)")
+
+        monkeypatch.setattr(_UpdateCaptureClient, "update_log_entry", boom)
+        with caplog.at_level(logging.INFO, logger=_AUDIT_LOGGER), pytest.raises(EpicsError):
+            await query_olog_update("17", title="corrected title")
+        assert "event=FAILED" in caplog.text
+        assert "entry_id=17" in caplog.text
+        assert "owner=" not in caplog.text  # SEC-5 unchanged: the id, never the owner
+
+    @pytest.mark.asyncio
+    async def test_refusal_error_codes_are_not_internal(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # RED-PROOF (OQ5): a REFUSAL reported as INTERNAL reads as a transient server fault and
+        # invites a retry — and every retry burns a rate token and writes another FAILED line for a
+        # write that never happened. Both the raised error AND the audit must carry the honest code,
+        # which is why the fix sits in _olog_error_code (the audit calls it directly) and not in an
+        # except clause.
+        config_module._config = _write_config(olog_write_logbooks="Ops")
+        _install_fake(monkeypatch)
+
+        def boom(*args: object, **kwargs: object) -> dict[str, object]:
+            raise OlogRoundTripUnsafe("attachments would not survive the round-trip")
+
+        monkeypatch.setattr(_UpdateCaptureClient, "update_log_entry", boom)
+        with caplog.at_level(logging.INFO, logger=_AUDIT_LOGGER), pytest.raises(EpicsError) as exc:
+            await query_olog_update("17", title="x")
+        assert exc.value.error_code == "INVALID_INPUT"
+        assert "error_code=INVALID_INPUT" in caplog.text
+        assert "INTERNAL" not in caplog.text
 
     @pytest.mark.asyncio
     async def test_gate_deny_when_current_logbook_not_allowlisted(

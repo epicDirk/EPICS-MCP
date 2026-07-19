@@ -1039,6 +1039,37 @@ class TestServiceAddAttachment:
         assert "caller=add_log_attachment" in caplog.text
 
     @pytest.mark.asyncio
+    async def test_failed_attach_is_audited_and_names_the_entry(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        tmp_path: Path,
+    ) -> None:
+        # This branch had NO test at all: only the ALLOW path was covered, so a broken FAILED-audit
+        # call could not go red here (mypy caught one that pytest did not). Same reasoning as the
+        # update path — POST /logs/multipart IS the destructive updateLog, so a timeout can leave
+        # the entry mutated while the caller sees FAILED; the record must name it.
+        _set_config(olog_url=_LOOPBACK, allow_olog_write=True, olog_write_logbooks="Ops")
+        _AddCaptureClient.whole = True
+        _AddCaptureClient.raw = {"id": 17, "logbooks": [{"name": "Ops"}], "title": "existing"}
+        _AddCaptureClient.calls = {}
+
+        def boom(*args: object, **kwargs: object) -> dict[str, object]:
+            raise OlogResponseError("Olog timed out (HTTP 504)")
+
+        monkeypatch.setattr(checkers_module, "OlogClient", _AddCaptureClient)
+        monkeypatch.setattr(_AddCaptureClient, "add_attachment", boom)
+        f = tmp_path / "plot.png"
+        f.write_bytes(b"PNGDATA")
+        with caplog.at_level(logging.INFO, logger=_AUDIT_LOGGER), pytest.raises(EpicsError):
+            await query_olog_add_attachment("17", attachments=[str(f)], id_factory=lambda: "uidA")
+        assert "event=FAILED" in caplog.text
+        assert "entry_id=17" in caplog.text
+        assert "caller=add_log_attachment" in caplog.text
+        assert "plot.png" not in caplog.text  # SEC-5: still metadata-only
+        assert "owner=" not in caplog.text
+
+    @pytest.mark.asyncio
     async def test_missing_entry_is_found_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _set_config(olog_url=_LOOPBACK)
         monkeypatch.setattr(checkers_module, "OlogClient", _list_client(None))

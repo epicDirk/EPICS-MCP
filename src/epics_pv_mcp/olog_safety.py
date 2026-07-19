@@ -251,14 +251,24 @@ class OlogWriteGate:
         error_code: str,
         in_reply_to: str | None = None,
         caller: str = "create_log_entry",
+        entry_id: str | None = None,
     ) -> None:
         """Log a write that passed the gate but FAILED at the HTTP layer.
 
-        SEC-5: NO ``entry_id`` (none exists for a failed create) and NO ``owner``; metadata only.
+        SEC-5: still NO ``owner``; metadata only.
+
+        ``entry_id`` is optional because a failed CREATE has none — but that is a statement about
+        create, and it was wrongly generalised to every write. An EDIT (update_log_entry,
+        add_log_attachment) targets an entry that already exists, and the server archives and
+        mutates it BEFORE the response goes out: a timeout leaves an APPLIED write in front of a
+        client that sees FAILED. Omitting the id there makes the one record of the attempt unable to
+        say WHICH entry may now be altered. The id is a server-minted integer, never free text, so
+        it carries no more than the ALLOW record already does.
         """
+        entry_suffix = f" entry_id={entry_id}" if entry_id is not None else ""
         self._emit(
             f"OLOG_WRITE event=FAILED logbooks={self._join(logbooks)} level={self._lvl(level)} "
-            f"title_len={title_len} error_code={error_code}"
+            f"title_len={title_len} error_code={error_code}{entry_suffix}"
             f"{self._reply_suffix(in_reply_to)} caller={caller}"
         )
 

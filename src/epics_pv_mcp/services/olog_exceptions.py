@@ -6,6 +6,8 @@ plane, while ``except OlogError`` still catches just this one). The 5th REST pla
 ``services/_http`` and ``services/checkers``.
 """
 
+from typing import ClassVar
+
 from epics_pv_mcp.services.rest_exceptions import (
     RestClientError,
     RestConnectionError,
@@ -14,7 +16,24 @@ from epics_pv_mcp.services.rest_exceptions import (
 
 
 class OlogError(RestClientError):
-    """Base error for the Olog client."""
+    """Base error for the Olog client.
+
+    ``error_code`` is the discrete, freetext-free token that
+    :func:`~epics_pv_mcp.services.checkers._olog_error_code` reports to the caller AND writes into
+    the write audit. Each subclass carries its own, mirroring how :class:`EpicsError` and its
+    subclasses work — so a new Olog exception brings its code with it instead of silently landing on
+    the fallback.
+
+    That fallback used to be the only behaviour, and it was wrong for every REFUSAL in this module:
+    ``INTERNAL`` reads as a transient server fault, which invites a retry that burns a rate token
+    and writes a FAILED audit line for a write that never happened. A refusal is permanent — the
+    caller must fix the request, not repeat it.
+
+    Kept freetext-free on purpose (SEC-5): the audit is metadata-only, so a code must never be
+    derived from an exception message.
+    """
+
+    error_code: ClassVar[str] = "INTERNAL"
 
 
 class OlogFilterValueError(ValueError):
@@ -36,9 +55,15 @@ class OlogFilterValueError(ValueError):
 class OlogConnectionError(OlogError, RestConnectionError):
     """Failed to establish a connection to the Olog service."""
 
+    error_code: ClassVar[str] = "OLOG_CONNECTION_ERROR"
+
 
 class OlogResponseError(OlogError, RestResponseError):
     """Unexpected response (HTTP error / bad payload) from the Olog service."""
+
+    # Refined to OLOG_HTTP_<status> by _olog_error_code when the served status is known;
+    # this is the honest fallback for a response that carried no readable status.
+    error_code: ClassVar[str] = "OLOG_RESPONSE_ERROR"
 
 
 class OlogWholeModeRequired(OlogError):
@@ -52,6 +77,10 @@ class OlogWholeModeRequired(OlogError):
     the raw attachment list). Against a redacted server the operation is refused. The service checks
     ``whole_mode`` up front; this backstop fires only if a raw read is reached, so a redacted entry
     is never round-tripped. NOT a server error — it never wraps an HTTP response."""
+
+    # Same condition, same code as the service-level twin that normally catches this first:
+    # checkers raises OlogWriteDeniedError (= OLOG_WRITE_DENIED) for a non-whole-mode write.
+    error_code: ClassVar[str] = "OLOG_WRITE_DENIED"
 
 
 class OlogRoundTripUnsafe(OlogError):
@@ -70,6 +99,10 @@ class OlogRoundTripUnsafe(OlogError):
     re-checks as a defense-in-depth backstop. NOT a server error — it never wraps an HTTP
     response."""
 
+    # Mirrors the service-level pre-check for exactly this case, which already raises
+    # EpicsError(INVALID_INPUT) — the layer that catches it must not change the verdict.
+    error_code: ClassVar[str] = "INVALID_INPUT"
+
 
 class OlogAttachmentDownloadDenied(OlogError):
     """Raw attachment bytes were requested but the read posture forbids them (OA1).
@@ -85,3 +118,7 @@ class OlogAttachmentDownloadDenied(OlogError):
     bytes can slip out through a code path that forgot the check. NOT a server error — it never
     wraps
     an HTTP response."""
+
+    # A read-side privacy refusal: neither the write code nor a transport code fits, so it
+    # gets its own — a caller can tell "the posture forbids this" from "the service failed".
+    error_code: ClassVar[str] = "OLOG_ATTACHMENT_DOWNLOAD_DENIED"

@@ -811,9 +811,20 @@ def _olog_error_code(exc: BaseException) -> str:
     """A discrete, freetext-free error code for an Olog failure (never a message string).
 
     An :class:`EpicsError` carries its own code; an Olog connection/response error maps to a
-    discrete token (the served HTTP status for a response error, when known); anything else is
-    INTERNAL. Never the exception message — a write FAILED audit must stay metadata-only (SEC-5),
-    which is also why this stays freetext-free now that the read path classifies errors with it."""
+    discrete token (the served HTTP status for a response error, when known); any other
+    :class:`OlogError` carries its code as a class attribute; anything else is INTERNAL. Never the
+    exception message — a write FAILED audit must stay metadata-only (SEC-5), which is also why this
+    stays freetext-free now that the read path classifies errors with it.
+
+    ORDER MATTERS. The ``OlogError`` branch is LAST because ``OlogConnectionError`` and
+    ``OlogResponseError`` are themselves OlogError subclasses: hoisting it would swallow both
+    existing branches, and with them the HTTP-status resolution. (Their class attributes carry the
+    same codes as a backstop, so a future reorder degrades to the honest token rather than to
+    INTERNAL — but the status refinement lives only here.)
+
+    Why the branch exists at all: every REFUSAL in ``olog_exceptions`` used to land on INTERNAL,
+    which reads as a transient fault and invites a retry — each attempt burning a rate token and
+    writing a FAILED audit line for a write that never happened."""
     if isinstance(exc, EpicsError):
         return exc.error_code
     if isinstance(exc, OlogConnectionError):
@@ -821,6 +832,8 @@ def _olog_error_code(exc: BaseException) -> str:
     if isinstance(exc, OlogResponseError):
         status = http_status(exc)
         return f"OLOG_HTTP_{status}" if status is not None else "OLOG_RESPONSE_ERROR"
+    if isinstance(exc, OlogError):
+        return exc.error_code
     return "INTERNAL"
 
 
@@ -1055,6 +1068,7 @@ async def query_olog_add_attachment(
                 title_len=title_len,
                 error_code=_olog_error_code(exc),
                 caller=caller,
+                entry_id=log_id,
             )
             raise
         gate.audit_write(
@@ -1231,6 +1245,7 @@ async def query_olog_update(
                 title_len=title_len,
                 error_code=_olog_error_code(exc),
                 caller=caller,
+                entry_id=stripped_id,
             )
             raise
         gate.audit_write(
