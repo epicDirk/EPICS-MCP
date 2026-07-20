@@ -54,6 +54,68 @@ def test_substitute_basic_undefined_and_nested() -> None:
     assert substitute("${A}", {"A": "$(B)", "B": "z"}) == "z"  # nested resolves
 
 
+# --- BG2: the $(NAME=default) grammar (epics-base macLib, modules/libcom/src/macLib) ---
+# Pre-fix, _MACRO_REF_RE required the char class to touch the closing bracket, so ANY
+# reference carrying a default did not match at all — not even with the macro defined.
+
+
+def test_substitute_default_form_defined_wins() -> None:
+    """A DEFINED macro beats its default (macCore.c:860-880). Pre-fix `$(P=DEF)` did not
+    match AT ALL — the reference stayed literal although P was defined."""
+    assert substitute("$(P=DEF)", {"P": "X:"}) == "X:"
+    assert substitute("${P=DEF}", {"P": "X:"}) == "X:"
+
+
+def test_substitute_default_form_falls_back_when_undefined() -> None:
+    assert substitute("$(P=DEF)", {}) == "DEF"
+    assert substitute("$(P=DEF)Foo:$(R=1)bar", {}) == "DEFFoo:1bar"
+
+
+def test_substitute_empty_default_yields_empty_string() -> None:
+    """`$(P=)` with P undefined -> "" (macLibTest.c:94), not the literal reference."""
+    assert substitute("$(P=)", {}) == ""
+
+
+def test_substitute_default_may_contain_equals() -> None:
+    """The default ends at a top-level ',' or the closing bracket; further '=' inside is
+    legal (macCore.c:812)."""
+    assert substitute("$(P=a=b)", {}) == "a=b"
+
+
+def test_substitute_default_may_be_a_macro() -> None:
+    assert substitute("$(P=$(Q))", {"Q": "z"}) == "z"
+    assert substitute("$(P=$(Q))", {"P": "X:", "Q": "z"}) == "X:"
+    assert substitute("${FOO=${BAZ}}", {"FOO": "BLETCH"}) == "BLETCH"
+
+
+def test_substitute_computed_name_still_resolves() -> None:
+    """Regression pin (GREEN pre-fix): a name that is itself a macro (macCore.c:798).
+    The naive scanner rewrite breaks exactly this case — it must keep working."""
+    assert substitute("$($(SEL)_PV)", {"SEL": "A", "A_PV": "hit"}) == "hit"
+
+
+def test_substitute_scoped_macro_comma_terminates_the_name() -> None:
+    """`$(A,B=1)`: a top-level ',' terminates the NAME (macCore.c:794); the scoped
+    arguments are recognised but NOT evaluated — undefined stays literal (needs-msi)."""
+    assert substitute("$(A,B=1)", {"A": "x"}) == "x"
+    assert substitute("$(A,B=1)", {}) == "$(A,B=1)"
+    assert substitute("${FOO=,BAR}", {}) == ""  # default ends at the top-level ','
+
+
+def test_substitute_name_charset_follows_maclib() -> None:
+    """macLib names end only at a top-level '=', ',' or the bracket — '-' is legal."""
+    assert substitute("$(P-1)", {"P-1": "x"}) == "x"
+
+
+def test_ioc_db_pvs_default_macros_resolve() -> None:
+    """BG2 integration: a record name built from default-form macros must land in
+    `resolved` — pre-fix it was stamped needs-msi (unresolved) although every macro
+    carries a usable default. This is the path that feeds the cross-plane gate."""
+    resolved, unresolved = ioc_db_pvs('record(ai, "$(P=DEV:)$(R=temp)value") {}\n', {})
+    assert resolved == {"DEV:tempvalue"}
+    assert unresolved == set()
+
+
 def test_ioc_db_pvs_resolved_and_needs_msi() -> None:
     db = (
         'record(bi, "$(P)status") {}\n'

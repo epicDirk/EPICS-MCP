@@ -56,8 +56,12 @@ _RECORD_RE = re.compile(r'record\s*\(\s*[A-Za-z0-9_]+\s*,\s*"([^"]+)"\s*\)')
 # (``_RECORD_RE`` deliberately keeps the substring match so ``grecord(...)`` is still recognised.)
 _ALIAS_RE = re.compile(r'(?<![A-Za-z0-9_])alias\s*\(\s*"([^"]+)"\s*(?:,\s*"([^"]+)"\s*)?\)')
 
-# A macro reference in either $(NAME) or ${NAME} form.
-_MACRO_REF_RE = re.compile(r"\$\{([A-Za-z0-9_]+)\}|\$\(([A-Za-z0-9_]+)\)")
+# Macro references ($(NAME), ${NAME}, $(NAME=default), $(NAME,scope=...)) are parsed by a
+# depth-counting scanner (below), NOT a regex: the macLib grammar allows '=' and ',' inside
+# a reference and NESTED references in both the name and the default ("$(P=$(Q))",
+# "$($(SEL)_PV)"), which no single pattern can match (epics-base macCore.c scans too).
+# The old regex here required the char class to touch the closing bracket, so ANY reference
+# carrying a default did not match at all — even with the macro defined (BG2).
 
 
 def _strip_line_comment(line: str) -> str:
@@ -92,22 +96,129 @@ def _strip_comment_lines(text: str) -> str:
     return "\n".join(_strip_line_comment(line) for line in text.splitlines())
 
 
-def substitute(text: str, macros: dict[str, str], *, max_depth: int = 10) -> str:
-    """Expand ``$(NAME)``/``${NAME}`` in *text* from *macros* (bounded, undefined stay literal).
+def _find_closing_bracket(text: str, start: int) -> int:
+    """Index of the bracket closing the reference opened at ``start+1``, or ``-1``.
 
-    Deterministic and pure: undefined macros are left untouched (so the caller can detect
-    "still unresolved"); nested macros resolve over up to *max_depth* passes.
+    Depth-counted so nested references (``$(P=$(Q))``, ``${FOO=${BAZ}}``) close at THEIR
+    bracket — the structural reason a regex cannot parse this grammar.
     """
+    depth = 0
+    index = start + 1
+    while index < len(text):
+        char = text[index]
+        if char in "({":
+            depth += 1
+        elif char in ")}":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return -1
 
-    def _repl(match: re.Match[str]) -> str:
-        name = match.group(1) or match.group(2)
-        return macros.get(name, match.group(0))
 
-    for _ in range(max_depth):
-        expanded = _MACRO_REF_RE.sub(_repl, text)
-        if expanded == text:
+def _split_body(body: str) -> tuple[str, str]:
+    """Split a reference body into ``(name, raw_rest)`` at the first TOP-LEVEL ``=``/``,``.
+
+    Per macLib the name ends there (macCore.c:794); ``raw_rest`` keeps its leading ``=``
+    (a default follows) or ``,`` (scoped-macro arguments follow), or is ``""``.
+    """
+    depth = 0
+    for index, char in enumerate(body):
+        if char in "({":
+            depth += 1
+        elif char in ")}":
+            depth -= 1
+        elif depth == 0 and char in "=,":
+            return body[:index], body[index:]
+    return body, ""
+
+
+def _default_from_rest(rest: str) -> str | None:
+    """The default value carried by *rest*, or ``None`` when there is none.
+
+    Only a rest starting with ``=`` carries a default. It ends at a top-level ``,``
+    (scoped-macro arguments); further ``=`` inside are legal (macCore.c:812), and an
+    empty default is a real ``""`` (macLibTest.c:94).
+    """
+    if not rest.startswith("="):
+        return None
+    collected: list[str] = []
+    depth = 0
+    for char in rest[1:]:
+        if char in "({":
+            depth += 1
+        elif char in ")}":
+            depth -= 1
+        elif char == "," and depth == 0:
             break
-        text = expanded
+        collected.append(char)
+    return "".join(collected)
+
+
+def _expand_once(text: str, macros: dict[str, str]) -> tuple[str, bool]:
+    """One left-to-right expansion pass over *text*; returns ``(expanded, changed)``.
+
+    Semantics anchored to epics-base macLib (modules/libcom/src/macLib/macCore.c):
+    a DEFINED macro beats its default (:860-880) · an undefined macro WITH a default
+    expands to the default · the NAME may itself contain references (:798) and is
+    resolved first (``$($(SEL)_PV)``) · scoped arguments after a top-level ``,`` are
+    recognised, not evaluated. An undefined macro WITHOUT a default stays literal —
+    the project's needs-msi convention (callers detect "still unresolved"), deliberately
+    narrower than macLib's warning path.
+    """
+    out: list[str] = []
+    index = 0
+    changed = False
+    while index < len(text):
+        char = text[index]
+        if char != "$" or index + 1 >= len(text) or text[index + 1] not in "({":
+            out.append(char)
+            index += 1
+            continue
+        end = _find_closing_bracket(text, index)
+        if end == -1:  # unbalanced reference -> literal
+            out.append(char)
+            index += 1
+            continue
+        body = text[index + 2 : end]
+        name, rest = _split_body(body)
+        if "$" in name:
+            # Resolve the name itself first, re-emitting the still-bracketed reference
+            # for the next pass ($($(SEL)_PV) -> $(A_PV) -> hit).
+            expanded_name, name_changed = _expand_once(name, macros)
+            if name_changed:
+                opening = text[index + 1]
+                closing = ")" if opening == "(" else "}"
+                out.append(f"${opening}{expanded_name}{rest}{closing}")
+                index = end + 1
+                changed = True
+                continue
+        default = _default_from_rest(rest)
+        if name in macros:
+            out.append(macros[name])
+            changed = True
+        elif default is not None:
+            out.append(default)
+            changed = True
+        else:
+            out.append(text[index : end + 1])
+        index = end + 1
+    return "".join(out), changed
+
+
+def substitute(text: str, macros: dict[str, str], *, max_depth: int = 10) -> str:
+    """Expand ``$(NAME)``/``${NAME}``/``$(NAME=default)`` in *text* from *macros*.
+
+    Deterministic and pure, grammar per epics-base macLib (see :func:`_expand_once`):
+    a defined macro beats its default; an undefined macro WITH a default expands to the
+    default (an empty default is a real ``""``); an undefined macro WITHOUT a default
+    stays literal, so the caller can detect "still unresolved" (needs-msi). Nested and
+    recursive values resolve over up to *max_depth* passes; cycles terminate bounded.
+    """
+    for _ in range(max_depth):
+        text, changed = _expand_once(text, macros)
+        if not changed:
+            break
     return text
 
 
