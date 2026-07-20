@@ -724,7 +724,12 @@ async def test_monitor_format_failure_yields_none(monkeypatch: Any) -> None:
 
     events = await epics_client.pv_monitor("X:Y", duration=0.2, max_events=1)
 
-    assert events == [{"pv_name": "X:Y", "value": None}]
+    # QA: the fallback event must DECLARE itself — a bare {"value": None} was
+    # indistinguishable from a genuinely-None reading in the event count.
+    assert len(events) == 1
+    assert events[0]["pv_name"] == "X:Y"
+    assert events[0]["value"] is None
+    assert "extraction failed" in str(events[0]["note"])
 
 
 # ---------------------------------------------------------------------------
@@ -894,7 +899,12 @@ def test_format_value_real_p4p_ntmatrix_dim_mismatch_stays_flat_with_note() -> N
     json.dumps(result)
 
 
-def _nt_multi_channel(names: list[str], severities: list[int], connected: list[bool]) -> object:
+def _nt_multi_channel(
+    names: list[str],
+    severities: list[int],
+    connected: list[bool],
+    user_tags: list[int] | None = None,
+) -> object:
     """A real NTMultiChannel Value. `NTMultiChannel.wrap()` raises NotImplementedError and
     `.type()` returns a Value PROTOTYPE (not a Type) — hence Value(proto.type(), ...)."""
     import numpy as np
@@ -902,15 +912,15 @@ def _nt_multi_channel(names: list[str], severities: list[int], connected: list[b
     from p4p.nt import NTMultiChannel
 
     proto = NTMultiChannel("av").type()
-    return Value(
-        proto.type(),
-        {
-            "value": [np.float64(1.0), np.float64(2.0), np.float64(3.0)],
-            "channelName": names,
-            "severity": severities,
-            "isConnected": connected,
-        },
-    )
+    fields: dict[str, object] = {
+        "value": [np.float64(1.0), np.float64(2.0), np.float64(3.0)],
+        "channelName": names,
+        "severity": severities,
+        "isConnected": connected,
+    }
+    if user_tags is not None:
+        fields["userTag"] = user_tags
+    return Value(proto.type(), fields)
 
 
 def test_format_value_real_p4p_ntmultichannel_surfaces_channels() -> None:
@@ -942,6 +952,78 @@ def test_format_value_real_p4p_ntmultichannel_surfaces_channels() -> None:
     # The top-level alarm block of an NTMultiChannel is structural (says nothing about the
     # channels) — the value must carry the note that points readers at channels[].
     assert "note" in value and "channels[]" in str(value["note"])
+
+
+def test_format_value_real_p4p_ntmultichannel_surfaces_user_tag() -> None:
+    """QA: `userTag` is an NT-spec per-channel parallel array too — the fix that promised
+    "no more silently lost sibling fields" still dropped it."""
+    result = _format_value(
+        "MC:PV",
+        _nt_multi_channel(["A", "B", "C"], [0, 0, 0], [True, True, True], user_tags=[7, 8, 9]),
+    )
+    value = result["value"]
+    assert isinstance(value, dict)
+    channels = value["channels"]
+    assert isinstance(channels, list)
+    second = channels[1]
+    assert isinstance(second, dict)
+    assert second["user_tag"] == 8
+
+
+def test_format_value_extraction_failure_is_declared() -> None:
+    """QA: a crashed value extraction left a bare ``{"value": None}`` — indistinguishable
+    from a genuinely-None reading for every consumer that condenses this dict further
+    (validate/discover/write-readback/monitor). The fallback now declares itself in-band,
+    following the established data_omitted/note honesty pattern."""
+
+    class _Boom:
+        @property
+        def value(self) -> object:
+            raise RuntimeError("boom")
+
+    result = _format_value("BOOM:PV", _Boom())
+
+    assert result["value"] is None
+    assert "extraction failed" in str(result.get("note", ""))
+
+
+def test_format_value_real_p4p_ntmatrix_scalar_value_is_kept() -> None:
+    """A malformed NTMatrix whose value is a SCALAR must keep the scalar as one row —
+    pre-fix it was silently dropped to ``rows=[[]]`` (shape [0])."""
+    from p4p import Type, Value
+
+    t = Type([("value", "d"), ("dim", "ai")], id="epics:nt/NTMatrix:1.0")
+    result = _format_value("MAT:PV", Value(t, {"value": 7.5}))
+
+    value = result["value"]
+    assert isinstance(value, dict)
+    assert value["shape"] == [1]
+    assert value["rows"] == [[7.5]]
+    json.dumps(result)
+
+
+def test_extract_nt_matrix_non_integral_dim_is_not_trusted() -> None:
+    """A non-integral `dim` (only constructible via fakes — the real wire type is int[])
+    must not be int-truncated into a note that misquotes the wire: report flat + the RAW
+    dim in the note."""
+    from epics_pv_mcp.services.epics_client import _extract_nt_matrix
+
+    out = _extract_nt_matrix(SimpleNamespace(value=[1.0, 2.0, 3.0], dim=[1.5, 2.0]))
+
+    assert out["shape"] == [3]
+    assert out["rows"] == [[1.0, 2.0, 3.0]]
+    assert "1.5" in str(out.get("note", ""))  # the RAW dim, not a truncated [1, 2]
+
+
+def test_format_value_non_string_descriptor_is_omitted() -> None:
+    """A malformed non-string descriptor must not be str()-serialised into p4p-repr
+    garbage (this file forbids str() on p4p objects for exactly that reason)."""
+    from p4p import Type, Value
+
+    t = Type([("value", "d"), ("descriptor", ("S", None, [("a", "i")]))])
+    result = _format_value("DESC:PV", Value(t, {"value": 1.0, "descriptor": {"a": 5}}))
+
+    assert "descriptor" not in result
 
 
 def test_format_value_foreign_typed_structs_are_not_marker_routed() -> None:

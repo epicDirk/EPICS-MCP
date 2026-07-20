@@ -214,9 +214,17 @@ async def pv_monitor(
                     collected.append(_format_value(name, value))
                 except Exception:  # noqa: BLE001
                     # ein Monitor-Callback darf den Worker-Thread nie crashen; value=None
-                    # statt str(value) — der Wrapper-str() ergäbe ctime-Müll (s. _format_value).
+                    # statt str(value) — der Wrapper-str() ergäbe ctime-Müll (s. _format_value)
+                    # — aber DEKLARIERT, sonst zählt ein Format-Crash als echtes None-Event.
                     logger.debug("monitor format failed for PV %s", name, exc_info=True)
-                    collected.append({"pv_name": name, "value": None})
+                    collected.append(
+                        {
+                            "pv_name": name,
+                            "value": None,
+                            "note": "value extraction failed; value withheld "
+                            "(None is NOT a live reading)",
+                        }
+                    )
 
         sub = None
         try:
@@ -451,9 +459,19 @@ def _extract_nt_matrix(raw: object) -> dict[str, object]:
     the mismatch (the NTNDArray honesty pattern). Without this extractor the ``dim`` field
     was dropped entirely and a 2x3 serialised bit-identically to a 3x2.
     """
-    values = _jsonified_list(raw, "value")
-    dim_field = getattr(raw, "dim", None)
-    dims = [int(d) for d in dim_field] if dim_field is not None else []
+    values_obj = _jsonify(getattr(raw, "value", None))
+    if isinstance(values_obj, list):
+        values = values_obj
+    elif values_obj is None:
+        values = []
+    else:
+        values = [values_obj]  # malformed scalar value: keep it as one row, never drop it
+    raw_dims = _jsonified_list(raw, "dim")
+    # `dim` is int[] on the wire; a non-integral entry is only constructible via fakes and
+    # must NOT be int-truncated into a note that misquotes the wire — report flat + raw.
+    dims = [d for d in raw_dims if isinstance(d, int) and not isinstance(d, bool)]
+    if len(dims) != len(raw_dims):
+        dims = []  # a non-integral entry -> the whole dim is untrusted
     if len(dims) == 2 and dims[0] * dims[1] == len(values) and min(dims) >= 0:
         n_rows, n_cols = dims
         return {
@@ -461,8 +479,10 @@ def _extract_nt_matrix(raw: object) -> dict[str, object]:
             "rows": [values[r * n_cols : (r + 1) * n_cols] for r in range(n_rows)],
         }
     out: dict[str, object] = {"shape": [len(values)], "rows": [values]}
-    if dims and dims != [len(values)]:
-        out["note"] = f"NTMatrix dim {dims} does not match the {len(values)} values; reported flat."
+    if raw_dims and dims != [len(values)]:
+        out["note"] = (
+            f"NTMatrix dim {raw_dims} does not match the {len(values)} values; reported flat."
+        )
     return out
 
 
@@ -487,6 +507,7 @@ def _extract_nt_multi_channel(raw: object) -> dict[str, object]:
     connected = _jsonified_list(raw, "isConnected")
     seconds = _jsonified_list(raw, "secondsPastEpoch")
     nanos = _jsonified_list(raw, "nanoseconds")
+    user_tag = _jsonified_list(raw, "userTag")
 
     channels: list[dict[str, object]] = []
     for index in range(max(len(values), len(names))):
@@ -507,6 +528,9 @@ def _extract_nt_multi_channel(raw: object) -> dict[str, object]:
             channel["message"] = str(message[index])
         if index < len(connected):
             channel["connected"] = bool(connected[index])
+        tag = _int_or_none(user_tag, index)
+        if tag is not None:
+            channel["user_tag"] = tag
         secs = _int_or_none(seconds, index)
         if secs is not None:
             timestamp: dict[str, object] = {"seconds": secs}
@@ -661,11 +685,13 @@ def _extract_descriptor(raw: object) -> str | None:
     Previously dropped for ALL NT types (no block extractor claimed it). An unset
     descriptor arrives as ``""`` on the wire — absent and unset look the same there, and
     an empty description carries no information, so it is omitted rather than reported.
+    Only a genuine ``str`` is accepted: ``str()`` on a malformed non-string field would
+    serialise p4p repr garbage (the same trap :func:`_format_value` documents for values).
     """
     descriptor = getattr(raw, "descriptor", None)
-    if descriptor is None:
+    if not isinstance(descriptor, str):
         return None
-    return str(descriptor) or None
+    return descriptor or None
 
 
 # Metadata blocks, each extracted independently so a malformed one cannot corrupt the
@@ -714,8 +740,12 @@ def _format_value(pv_name: str, value: object) -> dict[str, object]:
             result["enum"] = enum
     except Exception:  # noqa: BLE001
         # Honest fallback: value stays None (NEVER str(value) — the wrapper's __str__
-        # prepends a ctime() and would emit garbage like "Thu Jan  1 1970 4.2").
+        # prepends a ctime() and would emit garbage like "Thu Jan  1 1970 4.2") — but
+        # DECLARED: a bare {"value": None} is indistinguishable from a genuinely-None
+        # reading for every consumer that condenses this dict (validate/discover/
+        # write-readback/monitor). Same honesty pattern as data_omitted.
         logger.debug("value extraction failed for PV %s", pv_name, exc_info=True)
+        result["note"] = "value extraction failed; value withheld (None is NOT a live reading)"
 
     for key, extractor in _BLOCK_EXTRACTORS:
         try:
