@@ -158,8 +158,17 @@ def _tracked_text_files() -> list[Path]:
             timeout=30,
             check=True,
         ).stdout
-    except (FileNotFoundError, subprocess.SubprocessError) as exc:
-        pytest.skip(f"git unavailable — cannot enumerate tracked files: {exc}")
+    except FileNotFoundError as exc:
+        # ONLY a missing git binary may skip. A FAILED git call (CalledProcessError:
+        # not-a-repo on an sdist, Windows "dubious ownership", …) must fail loudly —
+        # skipping it silently switched OFF the repo-wide privacy/hermeticity scan (QA:
+        # the skip guarded exactly the class of environment drift it should report).
+        pytest.skip(f"git binary unavailable — cannot enumerate tracked files: {exc}")
+    except subprocess.SubprocessError as exc:
+        pytest.fail(
+            f"git ls-files failed ({exc}) — the repo-wide privacy scan did NOT run; "
+            "fix the git environment (ownership/repo state) instead of skipping the guard"
+        )
     this = Path(__file__).resolve()
     files: list[Path] = []
     for rel in listing.splitlines():

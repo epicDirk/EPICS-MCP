@@ -46,13 +46,57 @@ def test_version_fallback_matches_pyproject() -> None:
     )
 
 
+#: stderr signatures of a build that failed for ENVIRONMENT reasons (offline resolver,
+#: unreachable index, proxy) — the only non-zero outcomes that may skip. Everything else
+#: (a broken [tool.hatch.build], a backend error, an include regression) is exactly the
+#: defect class this test exists to catch and must FAIL, not skip.
+_OFFLINE_BUILD_SIGNATURES = (
+    "failed to fetch",
+    "could not resolve",
+    "temporary failure in name resolution",
+    "connection refused",
+    "connection reset",
+    "network is unreachable",
+    "no route to host",
+    "proxy",
+    "timed out",
+)
+
+
+def _build_failure_action(returncode: int, stderr: str) -> str:
+    """Classify a wheel-build outcome: ``ok`` | ``skip`` (environment) | ``fail`` (defect).
+
+    QA: the former blanket ``returncode != 0 -> skip`` silently swallowed every REAL
+    packaging failure too — the test skipped exactly its own target class, while its
+    docstring promised "never a silent pass". Split out as a pure function so the
+    classification itself is unit-testable offline.
+    """
+    if returncode == 0:
+        return "ok"
+    lowered = stderr.lower()
+    if any(signature in lowered for signature in _OFFLINE_BUILD_SIGNATURES):
+        return "skip"
+    return "fail"
+
+
+def test_build_failure_classification_fails_on_real_defects() -> None:
+    """The classifier's contract, pinned: environment signatures skip, a real backend/
+    config error FAILS (pre-fix: everything non-zero skipped)."""
+    assert _build_failure_action(0, "") == "ok"
+    assert _build_failure_action(1, "error: Failed to fetch: https://pypi.org/simple/…") == "skip"
+    assert _build_failure_action(1, "getaddrinfo: Temporary failure in name resolution") == "skip"
+    assert _build_failure_action(1, "ValueError: invalid [tool.hatch.build] include") == "fail"
+    assert _build_failure_action(1, "hatchling.builders.plugin: unknown target") == "fail"
+
+
 def test_operator_guide_ships_in_the_wheel(tmp_path: Path) -> None:
     """The ``epics-pv://guide`` resource reads ``operator_guide.md`` as package data. The
     ``importlib.resources`` load test passes off the *source tree* in an editable install, so it
     cannot catch a wheel-exclusion regression (a stray ``[tool.hatch.build]`` include that forgets
     ``*.md``, a move/rename). This builds an actual wheel and asserts the file is inside it — the
     real inclusion guard for E1's ``pip install`` distribution DoD. Skipped only if the build
-    toolchain is unavailable (kept honest via the skip reason, never a silent pass)."""
+    TOOLCHAIN/ENVIRONMENT is unavailable (missing uv, timeout, offline resolver signature); a
+    build that fails for any other reason is a real packaging defect and FAILS."""
     repo_root = Path(epics_pv_mcp.__file__).resolve().parent.parent.parent  # …/EPICS-MCP-Server
     try:
         result = subprocess.run(
@@ -65,8 +109,14 @@ def test_operator_guide_ships_in_the_wheel(tmp_path: Path) -> None:
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
         pytest.skip(f"wheel build toolchain unavailable: {exc}")
-    if result.returncode != 0:
-        pytest.skip(f"wheel build failed (offline/toolchain): {result.stderr[-400:]}")
+    action = _build_failure_action(result.returncode, result.stderr)
+    if action == "skip":
+        pytest.skip(f"wheel build failed with an offline signature: {result.stderr[-400:]}")
+    if action == "fail":
+        pytest.fail(
+            "wheel build failed — a real packaging defect, not a toolchain gap:\n"
+            f"{result.stderr[-400:]}"
+        )
 
     wheels = list(tmp_path.glob("*.whl"))
     assert wheels, "uv build produced no wheel"
