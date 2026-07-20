@@ -427,13 +427,112 @@ def _extract_nt_ndarray(raw: object) -> dict[str, object]:
     return out
 
 
+def _int_or_none(column: list[object], index: int) -> int | None:
+    """``column[index]`` as int, or None when absent/short/non-numeric (defensive zip)."""
+    if index >= len(column):
+        return None
+    item = column[index]
+    return int(item) if isinstance(item, (int, float)) else None
+
+
+def _jsonified_list(raw: object, attr: str) -> list[object]:
+    """A parallel-array field of *raw* as a JSON-safe list (``[]`` when absent/non-array)."""
+    listed = _jsonify(getattr(raw, attr, None))
+    return listed if isinstance(listed, list) else []
+
+
+def _extract_nt_matrix(raw: object) -> dict[str, object]:
+    """NTMatrix -> ``{shape: [rows, cols], rows: [[...]]}`` (row-major, per the NT spec).
+
+    ``dim`` is ``int[2]`` in matrix order ``[rows, cols]`` (NOT reversed like NTNDArray's
+    ``dimension``) and is optional: absent -> the value is a vector, reported as ONE row
+    with ``shape == [len(value)]``. A ``dim`` that does not multiply to ``len(value)`` is
+    NOT trusted into a wrong reshape: the values stay flat and an honest ``note`` declares
+    the mismatch (the NTNDArray honesty pattern). Without this extractor the ``dim`` field
+    was dropped entirely and a 2x3 serialised bit-identically to a 3x2.
+    """
+    values = _jsonified_list(raw, "value")
+    dim_field = getattr(raw, "dim", None)
+    dims = [int(d) for d in dim_field] if dim_field is not None else []
+    if len(dims) == 2 and dims[0] * dims[1] == len(values) and min(dims) >= 0:
+        n_rows, n_cols = dims
+        return {
+            "shape": [n_rows, n_cols],
+            "rows": [values[r * n_cols : (r + 1) * n_cols] for r in range(n_rows)],
+        }
+    out: dict[str, object] = {"shape": [len(values)], "rows": [values]}
+    if dims and dims != [len(values)]:
+        out["note"] = f"NTMatrix dim {dims} does not match the {len(values)} values; reported flat."
+    return out
+
+
+def _extract_nt_multi_channel(raw: object) -> dict[str, object]:
+    """NTMultiChannel -> ONE record per channel: name, value, per-channel alarm/connect state.
+
+    The wire format is parallel arrays (``value[i]`` belongs to ``channelName[i]``); zipping
+    them back into per-channel records keeps the name<->value<->severity attribution intact.
+    Every per-channel array except ``value``/``channelName`` is optional per the NT spec, so
+    each is read defensively by index (a missing/short array simply omits that key).
+
+    The ``note`` counters a structural trap this extractor exists for: the TOP-LEVEL alarm
+    of an NTMultiChannel says nothing about the channels — it typically reads NO_ALARM right
+    next to a MAJOR channel, so the per-channel severities surfaced here are the ones that
+    matter. The top-level block is still reported (it IS on the wire), note included.
+    """
+    values = _jsonified_list(raw, "value")
+    names = _jsonified_list(raw, "channelName")
+    severity = _jsonified_list(raw, "severity")
+    status = _jsonified_list(raw, "status")
+    message = _jsonified_list(raw, "message")
+    connected = _jsonified_list(raw, "isConnected")
+    seconds = _jsonified_list(raw, "secondsPastEpoch")
+    nanos = _jsonified_list(raw, "nanoseconds")
+
+    channels: list[dict[str, object]] = []
+    for index in range(max(len(values), len(names))):
+        channel: dict[str, object] = {}
+        if index < len(names):
+            channel["name"] = str(names[index])
+        if index < len(values):
+            channel["value"] = values[index]
+        sev = _int_or_none(severity, index)
+        if sev is not None:
+            channel["severity"] = sev
+            channel["severity_text"] = _SEVERITY_TEXT.get(sev, str(sev))
+        stat = _int_or_none(status, index)
+        if stat is not None:
+            channel["status"] = stat
+            channel["status_text"] = _ALARM_STATUS_TEXT.get(stat, str(stat))
+        if index < len(message):
+            channel["message"] = str(message[index])
+        if index < len(connected):
+            channel["connected"] = bool(connected[index])
+        secs = _int_or_none(seconds, index)
+        if secs is not None:
+            timestamp: dict[str, object] = {"seconds": secs}
+            nano = _int_or_none(nanos, index)
+            if nano is not None:
+                timestamp["nanoseconds"] = nano
+            channel["timestamp"] = timestamp
+        channels.append(channel)
+    return {
+        "channels": channels,
+        "note": (
+            "per-channel alarm state lives in channels[] (severity/severity_text); the "
+            "top-level alarm block of an NTMultiChannel is structural and does not "
+            "aggregate the channels."
+        ),
+    }
+
+
 def _extract_value(raw: object) -> tuple[object, dict[str, object] | None]:
     """Return ``(value, enum_or_none)`` as JSON-serialisable data.
 
     Scalars pass through; arrays become lists; NTEnum keeps its numeric index plus an ``enum``
     block. DS-6: complex normative types that previously slipped through as a raw p4p wrapper
     (failing at the MCP JSON boundary) or as ``value=None`` are surfaced as real data — NTTable as
-    ``{labels, columns}``, NTNDArray as a shape/dtype summary (pixel data omitted), and every other
+    ``{labels, columns}``, NTNDArray as a shape/dtype summary (pixel data omitted), NTMatrix as
+    ``{shape, rows}``, NTMultiChannel as per-channel records ``{channels: [...]}``, and every other
     shape (nested struct, ``structure[]``, variant-union array, numpy array) via the robust
     :func:`_jsonify` converter. The value is never a raw p4p object or numpy array.
     """
@@ -452,6 +551,15 @@ def _extract_value(raw: object) -> tuple[object, dict[str, object] | None]:
         return _extract_nt_ndarray(raw), None
     if type_id.startswith("epics:nt/NTTable") or getattr(raw, "labels", None) is not None:
         return _extract_nt_table(raw), None
+    # NTMatrix is routed by type id ONLY: its structural marker (`dim`) is far too generic a
+    # field name and would capture foreign structs (pinned by the real-p4p generic-struct test).
+    if type_id.startswith("epics:nt/NTMatrix"):
+        return _extract_nt_matrix(raw), None
+    if (
+        type_id.startswith("epics:nt/NTMultiChannel")
+        or getattr(raw, "channelName", None) is not None
+    ):
+        return _extract_nt_multi_channel(raw), None
     # Everything else (scalar, numpy array, nested struct, structure[], union array) — one robust,
     # recursive converter that discriminates a p4p Value (-> todict) from a numpy array (-> tolist).
     return _jsonify(val_field), None

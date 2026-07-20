@@ -847,3 +847,98 @@ async def test_pv_get_batch_native_length_mismatch_raises(monkeypatch: Any) -> N
         await epics_client.pv_get_batch(["A:1", "B:2", "C:3"])
     assert ei.value.error_code == "UPSTREAM_CONTRACT_ERROR"
     assert ei.value.details == {"requested": 3, "received": 1}
+
+
+# --- NTMatrix / NTMultiChannel against REAL p4p (same rationale as the DS-6 block above).
+#     Pre-fix, both fell through to the generic converter, which kept ONLY the value field:
+#     two semantically different matrices came out bit-identical, and an NTMultiChannel lost
+#     its channel names and per-channel severities while the structurally-zero top-level
+#     alarm read NO_ALARM next to a MAJOR channel. Inequality proofs on purpose — they hit
+#     the bit-identity frontally and cannot be greened by cosmetic extra fields.
+
+
+def _nt_matrix(flat: list[float], dim: list[int]) -> object:
+    """A real NTMatrix Value (p4p has no NTMatrix wrapper class; ~10 lines by type id)."""
+    from p4p import Type, Value
+
+    t = Type([("value", "ad"), ("dim", "ai")], id="epics:nt/NTMatrix:1.0")
+    return Value(t, {"value": flat, "dim": dim})
+
+
+def test_format_value_real_p4p_ntmatrix_distinguishes_transposed_shapes() -> None:
+    """A 2x3 and a 3x2 NTMatrix over the same flat values must NOT serialise identically —
+    pre-fix the `dim` field was dropped and the shape was unrecoverable."""
+    flat = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+
+    two_by_three = _format_value("MAT:PV", _nt_matrix(flat, [2, 3]))
+    three_by_two = _format_value("MAT:PV", _nt_matrix(flat, [3, 2]))
+
+    assert two_by_three != three_by_two  # bit-identical pre-fix
+    value = two_by_three["value"]
+    assert isinstance(value, dict)
+    assert value["shape"] == [2, 3]
+    assert value["rows"] == [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+    json.dumps(two_by_three)
+
+
+def test_format_value_real_p4p_ntmatrix_dim_mismatch_stays_flat_with_note() -> None:
+    """A `dim` that does not multiply to len(value) must NOT be trusted into a wrong
+    reshape: the values stay flat (one row) and an honest note declares the mismatch."""
+    result = _format_value("MAT:PV", _nt_matrix([1.0, 2.0, 3.0], [2, 3]))
+
+    value = result["value"]
+    assert isinstance(value, dict)
+    assert value["shape"] == [3]
+    assert value["rows"] == [[1.0, 2.0, 3.0]]
+    assert "note" in value
+    json.dumps(result)
+
+
+def _nt_multi_channel(names: list[str], severities: list[int], connected: list[bool]) -> object:
+    """A real NTMultiChannel Value. `NTMultiChannel.wrap()` raises NotImplementedError and
+    `.type()` returns a Value PROTOTYPE (not a Type) — hence Value(proto.type(), ...)."""
+    import numpy as np
+    from p4p import Value
+    from p4p.nt import NTMultiChannel
+
+    proto = NTMultiChannel("av").type()
+    return Value(
+        proto.type(),
+        {
+            "value": [np.float64(1.0), np.float64(2.0), np.float64(3.0)],
+            "channelName": names,
+            "severity": severities,
+            "isConnected": connected,
+        },
+    )
+
+
+def test_format_value_real_p4p_ntmultichannel_surfaces_channels() -> None:
+    """An NTMultiChannel must surface channelName + per-channel severity/connected as one
+    record per channel. Pre-fix only the bare numbers survived: a MAJOR channel next to a
+    disconnected one serialised identically to an all-quiet, all-connected triple, and the
+    structural top-level alarm read NO_ALARM."""
+    loud = _format_value(
+        "MC:PV",
+        _nt_multi_channel(["ROOM:TEMP", "ROOM:PRESS", "ROOM:FLOW"], [0, 2, 1], [True, False, True]),
+    )
+    quiet = _format_value(
+        "MC:PV", _nt_multi_channel(["X:1", "X:2", "X:3"], [0, 0, 0], [False, False, False])
+    )
+
+    assert loud != quiet  # bit-identical pre-fix
+    dump = json.dumps(loud)
+    assert "ROOM:PRESS" in dump  # channel names were dropped entirely pre-fix
+    value = loud["value"]
+    assert isinstance(value, dict)
+    channels = value["channels"]
+    assert isinstance(channels, list)
+    press = channels[1]
+    assert isinstance(press, dict)
+    assert press["name"] == "ROOM:PRESS"
+    assert press["severity"] == 2
+    assert press["severity_text"] == "MAJOR"  # the MAJOR that NO_ALARM hid pre-fix
+    assert press["connected"] is False
+    # The top-level alarm block of an NTMultiChannel is structural (says nothing about the
+    # channels) — the value must carry the note that points readers at channels[].
+    assert "note" in value and "channels[]" in str(value["note"])
