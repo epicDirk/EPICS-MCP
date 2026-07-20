@@ -227,7 +227,8 @@ Attachments are the one Olog surface where raw bytes cross the boundary, so the 
 CS-Studio's own client) instead of the plain JSON `PUT /logs` — the no-attachment path is unchanged. It
 rides the SAME write gate as a plain post (env + URL boundary + logbook allowlist + rate limit), plus a
 **total-size cap** (`EPICS_MCP_OLOG_ATTACH_MAX_BYTES`, checked from file `stat` BEFORE any bytes are
-read, so an over-limit file is never loaded). Any file type is accepted (only HEIC is refused
+read and RE-CHECKED while reading — a file that grew past the cap between stat and read is refused,
+with at most one byte over budget ever read). Any file type is accepted (only HEIC is refused
 server-side, by content-sniff); an over-limit request is the server's HTTP 413. The audit line carries
 attachment COUNT + total BYTES, never a filename (a filename is author free text). Each attachment gets
 a client-minted UUID and an id-prefixed unique filename (`<uuid>_<name>`), so a by-name download can

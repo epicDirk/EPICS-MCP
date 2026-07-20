@@ -7,8 +7,9 @@ isolation, in three single-responsibility steps:
 * :func:`plan_attachments` — resolve + SIZE the upload (``stat`` only, NO file read): the write gate
   refuses an over-limit request before any bytes are materialised (anti-DoS). Mints the client-side
   UUIDs and the id-prefixed unique filenames, and builds the inline-image markup.
-* :func:`read_uploads` — materialise the planned specs into payloads (reads file bytes now the size
-  is gated).
+* :func:`read_uploads` — materialise the planned specs into payloads, RE-CHECKING the size budget
+  while reading (a file that grew between stat and read is refused; at most one byte over budget is
+  ever read).
 * :func:`write_download` — write downloaded bytes to a NEW, boundary-checked workspace file.
 
 UUIDs are INJECTED (a factory) so the logic stays deterministic — a ``take_screenshot`` → attachment
@@ -98,19 +99,37 @@ def plan_attachments(
     return AttachmentPlan(specs=specs, inline_markup=inline_markup, total_bytes=total)
 
 
-def read_uploads(specs: list[_Spec]) -> list[AttachmentUpload]:
-    """Materialise planned specs into upload payloads — reads file bytes now the size is gated."""
+def read_uploads(specs: list[_Spec], *, max_total_bytes: int) -> list[AttachmentUpload]:
+    """Materialise planned specs into upload payloads, RE-CHECKING the size while reading.
+
+    :func:`plan_attachments` sizes by ``stat`` and the write gate refuses an over-limit
+    TOTAL before any read — but a file can grow (or be swapped) between stat and read
+    (QA: TOCTOU), which used to materialise AND upload past the cap. Reading is therefore
+    budgeted: at most one byte over the remaining budget is ever read, and exceeding it
+    refuses with the gate's own error code (``OLOG_ATTACH_TOO_LARGE``). *max_total_bytes*
+    is the same cap the gate enforced (``olog_attach_max_bytes``).
+    """
     uploads: list[AttachmentUpload] = []
+    remaining = max_total_bytes
     for spec in specs:
         if spec.inline_bytes is not None:
             content = spec.inline_bytes
         elif spec.path is not None:
-            content = spec.path.read_bytes()
+            with spec.path.open("rb") as handle:
+                content = handle.read(max(remaining, 0) + 1)
         else:  # unreachable: plan_attachments always sets exactly one of the two
             raise EpicsError(
                 f"attachment {spec.filename!r} has neither a path nor inline bytes",
                 error_code="INTERNAL",
             )
+        if len(content) > remaining:
+            raise EpicsError(
+                f"Olog write refused: attachment {spec.filename!r} exceeds the remaining "
+                f"size budget at READ time (limit {max_total_bytes} bytes total, "
+                "EPICS_MCP_OLOG_ATTACH_MAX_BYTES) — the file changed between stat and read.",
+                error_code="OLOG_ATTACH_TOO_LARGE",
+            )
+        remaining -= len(content)
         uploads.append(
             AttachmentUpload(
                 id=spec.id,

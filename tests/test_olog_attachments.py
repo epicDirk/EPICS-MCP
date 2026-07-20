@@ -286,7 +286,7 @@ class TestAttachmentPrep:
         assert spec.content_type == "image/png"
         assert spec.inline_bytes is None
         # read is deferred until read_uploads
-        uploads = read_uploads(plan.specs)
+        uploads = read_uploads(plan.specs, max_total_bytes=1024)
         assert uploads[0]["content"] == b"PNGDATA"
         assert uploads[0]["filename"] == "uid1_plot.png"
 
@@ -300,7 +300,36 @@ class TestAttachmentPrep:
         assert spec.content_type == "image/png"
         assert spec.inline_bytes == data
         assert spec.filename == "uidX.png"
-        assert read_uploads(plan.specs)[0]["content"] == data
+        assert read_uploads(plan.specs, max_total_bytes=1024)[0]["content"] == data
+
+    def test_read_uploads_refuses_a_file_grown_past_the_cap(self, tmp_path: Path) -> None:
+        """QA (TOCTOU): plan_attachments sizes by ``stat``, the gate checks that sum —
+        but a file can grow (or be swapped) between stat and read. read_uploads used to
+        ``read_bytes()`` unconditionally, materialising AND uploading past the cap; the
+        thrice-documented "an over-limit file is never loaded" promise hung on filesystem
+        timing. It now re-checks while reading (at most one byte over budget is ever
+        read) and refuses with the gate's own error code."""
+        _set_config()
+        f = tmp_path / "grow.bin"
+        f.write_bytes(b"x" * 10)
+        plan = plan_attachments([str(f)], None, lambda: "uidG")  # stat: 10 bytes
+        f.write_bytes(b"x" * 100)  # grows past the budget AFTER the stat/gate
+        with pytest.raises(EpicsError) as excinfo:
+            read_uploads(plan.specs, max_total_bytes=50)
+        assert excinfo.value.error_code == "OLOG_ATTACH_TOO_LARGE"
+
+    def test_read_uploads_budget_is_cumulative(self, tmp_path: Path) -> None:
+        """Two files that each fit but together exceed the budget are refused — the cap
+        is the TOTAL upload, mirroring the gate's ``plan.total_bytes`` semantics."""
+        _set_config()
+        a, b = tmp_path / "a.bin", tmp_path / "b.bin"
+        a.write_bytes(b"x" * 30)
+        b.write_bytes(b"x" * 30)
+        ids = iter(["u1", "u2"])
+        plan = plan_attachments([str(a), str(b)], None, lambda: next(ids))
+        with pytest.raises(EpicsError) as excinfo:
+            read_uploads(plan.specs, max_total_bytes=50)
+        assert excinfo.value.error_code == "OLOG_ATTACH_TOO_LARGE"
 
     def test_plan_rejects_bad_base64(self) -> None:
         _set_config()

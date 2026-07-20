@@ -939,7 +939,11 @@ async def query_olog_create(
         # token — the token is taken only here, on the success path, once. File READ + network
         # follow.
         gate.check_write_allowed(logbooks, caller=caller, attachment_bytes=plan.total_bytes)
-        uploads = read_uploads(plan.specs) if plan.specs else None
+        uploads = (
+            read_uploads(plan.specs, max_total_bytes=get_config().olog_attach_max_bytes)
+            if plan.specs
+            else None
+        )
         effective_description = (
             (description or "") + plan.inline_markup if plan.inline_markup else description
         )
@@ -1061,7 +1065,7 @@ async def query_olog_add_attachment(
         gate.check_write_preconditions(target_logbooks, caller=caller)
         plan = plan_attachments(attachments, embed_image_base64, id_factory)
         gate.check_write_allowed(target_logbooks, caller=caller, attachment_bytes=plan.total_bytes)
-        uploads = read_uploads(plan.specs)
+        uploads = read_uploads(plan.specs, max_total_bytes=get_config().olog_attach_max_bytes)
         try:
             entry = client.add_attachment(log_id, raw, uploads, inline_markup=plan.inline_markup)
         except Exception as exc:  # broad on purpose: audit ANY failed attach, then re-raise

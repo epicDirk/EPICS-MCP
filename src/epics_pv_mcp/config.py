@@ -160,8 +160,10 @@ class EpicsConfig(BaseSettings):
     olog_allow_attachment_download: bool = False
     # Client-side anti-DoS cap on attachment bytes, both directions. On UPLOAD it caps the TOTAL
     # size,
-    # checked in the Olog write gate BEFORE the files are read (a stat-sum, so an over-limit file is
-    # never materialised). On DOWNLOAD it caps the body (a Content-Length over it is refused before
+    # checked in the Olog write gate BEFORE the files are read (a stat-sum) AND re-checked while
+    # reading (at most one byte over budget is ever read — a file that grew between stat and read
+    # is refused, QA/TOCTOU). On DOWNLOAD it caps the body (a Content-Length over it is refused
+    # before
     # any
     # read; the stream is accumulated only up to the cap), so a huge attachment never OOMs the
     # process
