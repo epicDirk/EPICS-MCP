@@ -15,6 +15,10 @@ from epics_pv_mcp.errors import PVTimeoutError, PVWriteDeniedError, RateLimitErr
 from epics_pv_mcp.safety import SafetyLayer
 from epics_pv_mcp.tools.write import _set_pv_value
 
+# E8: writes-ON SafetyLayer construction asserts the process EPICS search env is loopback-only.
+# The autouse strip leaves *_AUTO_ADDR_LIST unset = broadcast ON, so pin the loopback lane here.
+pytestmark = pytest.mark.usefixtures("loopback_write_env")
+
 
 @pytest.fixture(autouse=True)
 def _reset_singletons() -> Iterator[None]:

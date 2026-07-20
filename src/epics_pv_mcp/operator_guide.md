@@ -19,6 +19,13 @@ operational knowledge (see the Knowledge Persistence Policy in `CLAUDE.md`).
   `EPICS_MCP_ALLOW_PV_WRITE=true` **plus** a regex allowlist, a rate limit and an audit log. The Olog
   logbook writers (`create_log_entry`, `reply_to_log`, `add_log_attachment` and `update_log_entry`) sit behind a **separate** gate — see the Olog
   write posture below; `ALLOW_PV_WRITE` is untouched by it.
+- **Writes enabled ⇒ loopback-only search reach, enforced at boot.** With `ALLOW_PV_WRITE=true` the
+  server refuses to start (`SafetyConfigError`) unless the EPICS client search env is loopback-only:
+  every `EPICS_PVA/CA_ADDR_LIST` / `_NAME_SERVERS` token a loopback host AND both `*_AUTO_ADDR_LIST`
+  parser-faithfully disabled (`NO`; unset means ON). If a write-enabled process won't boot, the
+  message names the offending var — the fix is to loopback-scope the reach or disable writes, NEVER
+  to weaken the assert (a mis-scoped allowlist over a facility-reaching env is the exact footgun this
+  removes). The name-pattern scopes *what*, this scopes *where*.
 - **Network reach is the launcher's decision — do NOT assume isolation.** PV searches follow the
   standard EPICS env: the address lists (`EPICS_PVA_ADDR_LIST` / `EPICS_CA_ADDR_LIST`), the name
   servers (`EPICS_PVA_NAME_SERVERS` — TCP unicast, **not** subnet-bound), and the auto-address

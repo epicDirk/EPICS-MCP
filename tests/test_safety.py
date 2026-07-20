@@ -10,6 +10,12 @@ from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.errors import PVWriteDeniedError, RateLimitError, SafetyConfigError
 from epics_pv_mcp.safety import SafetyLayer, get_safety
 
+# E8: constructing a writes-ON SafetyLayer now asserts the process EPICS search env is
+# loopback-only. The autouse env strip (conftest) leaves *_AUTO_ADDR_LIST unset = broadcast ON,
+# which the reach assert (correctly) rejects — so every writes-on construction in this module
+# runs under the loopback lane. The reach go-red tests below override a var ON TOP of it.
+pytestmark = pytest.mark.usefixtures("loopback_write_env")
+
 
 class TestWriteGate:
     """Environment gate: allow_pv_write must be True."""
@@ -59,6 +65,85 @@ class TestPatternAllowlist:
         # Positive control: the guard forbids the SILENT empty default, not a DELIBERATE choice.
         # An operator may allow every PV with an explicit '.*' — that must construct fine.
         SafetyLayer(EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10))
+
+
+class TestWriteReachAssert:
+    """E8: writes ENABLED requires a loopback-only EPICS client search reach, else it fails closed.
+
+    The reach assert reads the process env by default (what p4p/libca read); these tests run under
+    the module-level loopback lane and override ONE var to a non-loopback value to prove each go-red
+    path. The negative (loopback lane accepted) proves the guard is not a blanket refusal.
+    """
+
+    def _writes_on(self) -> EpicsConfig:
+        return EpicsConfig(allow_pv_write=True, pv_write_pattern=r"^SIM:.*$", write_rate_limit=10)
+
+    def test_loopback_lane_constructs(self) -> None:
+        # Positive control: the sandbox loopback lane (set by loopback_write_env) is accepted.
+        SafetyLayer(self._writes_on())
+
+    def test_public_pva_addr_list_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "192.0.2.10")  # ESS-like public IP
+        with pytest.raises(SafetyConfigError) as exc:
+            SafetyLayer(self._writes_on())
+        assert "EPICS_PVA_ADDR_LIST" in str(exc.value)
+
+    def test_pva_name_servers_public_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EPICS_PVA_NAME_SERVERS", "gateway.example.org:5075")
+        with pytest.raises(SafetyConfigError):
+            SafetyLayer(self._writes_on())
+
+    def test_auto_addr_list_yes_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Subnet broadcast back ON — the exact combination the hard weiche forbids.
+        monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", "YES")
+        with pytest.raises(SafetyConfigError):
+            SafetyLayer(self._writes_on())
+
+    def test_auto_addr_list_unset_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Unset means broadcast ON (EPICS default) — must be rejected, not treated as "no target".
+        monkeypatch.delenv("EPICS_PVA_AUTO_ADDR_LIST", raising=False)
+        with pytest.raises(SafetyConfigError):
+            SafetyLayer(self._writes_on())
+
+    def test_host_docker_internal_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # A hostname is never trusted as loopback even if DNS would resolve it to 127.0.0.1.
+        monkeypatch.setenv("EPICS_CA_ADDR_LIST", "host.docker.internal")
+        with pytest.raises(SafetyConfigError):
+            SafetyLayer(self._writes_on())
+
+    def test_ipv6_non_loopback_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "[2001:db8::1]:5075")
+        with pytest.raises(SafetyConfigError):
+            SafetyLayer(self._writes_on())
+
+    def test_ipv6_loopback_accepted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Positive control: ::1 IS loopback — a bracketed IPv6 loopback with a port constructs.
+        monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "[::1]:5075")
+        SafetyLayer(self._writes_on())
+
+    def test_ca_auto_addr_list_yes_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Both providers are checked regardless of the configured provider.
+        monkeypatch.setenv("EPICS_CA_AUTO_ADDR_LIST", "YES")
+        with pytest.raises(SafetyConfigError):
+            SafetyLayer(self._writes_on())
+
+    def test_reach_check_skipped_when_writes_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The gate is a WRITE concern only: a read-only deploy with a wide-open reach constructs.
+        monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "192.0.2.10")
+        monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", "YES")
+        SafetyLayer(EpicsConfig(allow_pv_write=False))
+
+    def test_injected_environ_overrides_process_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # A public process env is IGNORED when a loopback environ is injected (determinism seam).
+        monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "192.0.2.10")
+        SafetyLayer(
+            self._writes_on(),
+            environ={
+                "EPICS_PVA_ADDR_LIST": "127.0.0.1",
+                "EPICS_PVA_AUTO_ADDR_LIST": "NO",
+                "EPICS_CA_AUTO_ADDR_LIST": "NO",
+            },
+        )
 
 
 class TestSafetyConfigGuard:

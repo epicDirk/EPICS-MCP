@@ -53,6 +53,27 @@ def _isolate_epics_search_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(var, raising=False)
 
 
+# The loopback lane a write-enabled SafetyLayer accepts (E8): both providers' search reach
+# pinned to loopback, subnet broadcast parser-faithfully OFF. Tests that construct a
+# writes-on SafetyLayer against the process env opt in via
+# ``pytestmark = pytest.mark.usefixtures("loopback_write_env")`` (the reach assert would
+# otherwise fire on the stripped env — unset *_AUTO_ADDR_LIST means broadcast ON).
+_LOOPBACK_WRITE_LANE = {
+    "EPICS_PVA_ADDR_LIST": "127.0.0.1",
+    "EPICS_PVA_NAME_SERVERS": "127.0.0.1:5075",
+    "EPICS_PVA_AUTO_ADDR_LIST": "NO",
+    "EPICS_CA_ADDR_LIST": "127.0.0.1",
+    "EPICS_CA_AUTO_ADDR_LIST": "NO",
+}
+
+
+@pytest.fixture
+def loopback_write_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set the EPICS search env to the loopback write lane (runs after the autouse strip)."""
+    for var, value in _LOOPBACK_WRITE_LANE.items():
+        monkeypatch.setenv(var, value)
+
+
 @pytest.fixture
 def config() -> EpicsConfig:
     """Default test config."""
@@ -79,8 +100,8 @@ def pattern_config() -> EpicsConfig:
 
 
 @pytest.fixture
-def safety(write_config: EpicsConfig) -> SafetyLayer:
-    """SafetyLayer with writes enabled."""
+def safety(write_config: EpicsConfig, loopback_write_env: None) -> SafetyLayer:
+    """SafetyLayer with writes enabled (needs the loopback lane — E8 reach assert)."""
     return SafetyLayer(write_config)
 
 

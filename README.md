@@ -78,6 +78,15 @@ This is a controls tool, so the trust questions come first:
   accepted one logs `ATTEMPT` before the I/O, then a terminal `ALLOW`/`FAILED` — or `UNKNOWN_PENDING`
   if it was cancelled mid-put (the value may still land at the IOC, so verify by read-back and never
   blindly retry).
+- **Writes enabled require a loopback-only search reach.** Enabling writes with the EPICS client
+  search env able to reach beyond loopback makes the server **refuse to start** (`SafetyConfigError`):
+  the name-pattern above scopes *what* may be written, this gate scopes *where* a write can
+  physically go, and both must hold. To write, the address lists (`EPICS_PVA/CA_ADDR_LIST`) and
+  name servers (`EPICS_PVA/CA_NAME_SERVERS`) must be loopback hosts only, and the subnet broadcast
+  must be off (`EPICS_PVA_AUTO_ADDR_LIST=NO` **and** `EPICS_CA_AUTO_ADDR_LIST=NO` — unset means ON).
+  The check is parser-faithful (a spelling the real client rejects still counts as broadcasting) and
+  resolution-free (a hostname is never trusted as loopback). This makes "read the facility, write
+  the facility" a start-time impossibility, not a discipline.
 - **Olog logbook write is a *separate* gate.** All four write tools — `create_log_entry`, `reply_to_log`, `add_log_attachment` and `update_log_entry` (the last two MUTATE an existing entry) — need
   `EPICS_MCP_ALLOW_OLOG_WRITE=true` **and** a **test-server URL boundary** (only a loopback Olog,
   or an exact **https** URL in `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` with

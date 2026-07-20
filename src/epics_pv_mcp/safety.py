@@ -1,13 +1,16 @@
 """Safety layer for PV write operations — gate, allowlist, rate-limit, audit."""
 
 import logging
+import os
 import re
 import sys
 import threading
 import time
 from collections import deque
+from collections.abc import Mapping
 
 from epics_pv_mcp.config import EpicsConfig, get_config
+from epics_pv_mcp.epics_address import write_reach_violations
 from epics_pv_mcp.errors import PVWriteDeniedError, RateLimitError, SafetyConfigError
 
 logger = logging.getLogger(__name__)
@@ -37,7 +40,7 @@ class SafetyLayer:
 
     _WINDOW_SECONDS = 60.0
 
-    def __init__(self, config: EpicsConfig) -> None:
+    def __init__(self, config: EpicsConfig, environ: Mapping[str, str] | None = None) -> None:
         self._config = config
         # Fail-closed: ein kaputtes Allowlist-Pattern darf die Schreib-Sperre
         # NICHT still aushebeln — lieber klar scheitern als ungeschützt schreiben.
@@ -62,6 +65,28 @@ class SafetyLayer:
                 "Set a pattern (e.g. '^MPS:.*$', or '.*' to deliberately allow all).",
                 details={"allow_pv_write": True, "pv_write_pattern": ""},
             )
+        # Fail-closed (E8): writes ENABLED while the EPICS client search env can reach beyond
+        # loopback means a mis-scoped allowlist could hit a production IOC. The name-pattern
+        # gate above scopes WHAT may be written; this gate scopes WHERE a write can physically
+        # go — both must hold. The check is parser-faithful (an *_AUTO_ADDR_LIST spelling the
+        # real client rejects keeps broadcasting) and resolution-free (a hostname is never
+        # trusted as loopback). ``environ`` is injectable for determinism; the singleton path
+        # reads the process env, which is exactly what p4p/libca will read. Server-side
+        # EPICS_CAS_*/EPICS_PVAS_* beacon vars do not exist in this client process and are
+        # deliberately not part of the check (see epics_address module docstring).
+        if config.allow_pv_write:
+            violations = write_reach_violations(os.environ if environ is None else environ)
+            if violations:
+                raise SafetyConfigError(
+                    "PV writes are ENABLED (EPICS_MCP_ALLOW_PV_WRITE=true) but the EPICS client "
+                    "search reach is not loopback-only — refusing to start a write-enabled "
+                    "process that could reach a real facility network. Violations: "
+                    + "; ".join(violations)
+                    + ". Fix: set EPICS_PVA/CA_ADDR_LIST and *_NAME_SERVERS to loopback hosts "
+                    "only, set EPICS_PVA_AUTO_ADDR_LIST=NO and EPICS_CA_AUTO_ADDR_LIST=NO, "
+                    "or disable writes.",
+                    details={"allow_pv_write": True, "reach_violations": violations},
+                )
         # Sliding-window timestamps of recent writes. G2 constrains
         # write_rate_limit to ge=1, so a *validated* config never produces a
         # negative maxlen. This fail-closed guard catches a config that bypassed
