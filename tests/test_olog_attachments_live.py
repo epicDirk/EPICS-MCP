@@ -23,6 +23,8 @@ _URL = os.environ.get("EPICS_MCP_OLOG_URL")
 _WRITE = os.environ.get("EPICS_MCP_ALLOW_OLOG_WRITE", "").lower() == "true"
 _LOGBOOKS = os.environ.get("EPICS_MCP_OLOG_WRITE_LOGBOOKS", "")
 _DOWNLOAD = os.environ.get("EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD", "").lower() == "true"
+_WRITE_USER = os.environ.get("EPICS_MCP_OLOG_WRITE_USER")
+_WRITE_PASSWORD = os.environ.get("EPICS_MCP_OLOG_WRITE_PASSWORD")
 # A SECOND principal, distinct from the write service account. Only with two accounts can the
 # server's owner re-stamp become visible at all (see test_add_attachment_restamps_the_owner).
 _OTHER_USER = os.environ.get("EPICS_MCP_OLOG_TEST_OTHER_USER")
@@ -34,12 +36,19 @@ pytestmark = pytest.mark.live
 @pytest.fixture(autouse=True)
 def _require_live_stack() -> None:
     """Setup-time gate (S30): skip silently by default, fail loudly when a live run is
-    demanded (EPICS_MCP_REQUIRE_LIVE=1) and the plane is not configured."""
+    demanded (EPICS_MCP_REQUIRE_LIVE=1) and the plane is not configured.
+
+    QA fix: the gate must include the WRITE CREDS — the client fixture reads them with
+    ``os.environ[...]``, so a missing credential used to KeyError at setup instead of
+    skipping (undemanded) / failing with the reason (demanded). The prerequisites are the
+    import-time module constants (the same values the test bodies use — one consistent
+    snapshot); only the DEMAND is read fresh.
+    """
     assert_live_available(
-        bool(_URL and _WRITE and _LOGBOOKS and _DOWNLOAD),
+        bool(_URL and _WRITE and _LOGBOOKS and _DOWNLOAD and _WRITE_USER and _WRITE_PASSWORD),
         "live attachment round-trip needs a WRITABLE loopback Olog with attachment download "
         "enabled: EPICS_MCP_OLOG_URL + _ALLOW_OLOG_WRITE + _WRITE_LOGBOOKS + "
-        "_ALLOW_ATTACHMENT_DOWNLOAD + write creds",
+        "_ALLOW_ATTACHMENT_DOWNLOAD + write creds (_WRITE_USER/_WRITE_PASSWORD)",
         demanded=live_demanded(os.environ),
     )
 
@@ -57,7 +66,7 @@ def client() -> OlogClient:
     auth = basic_auth_header(
         os.environ["EPICS_MCP_OLOG_WRITE_USER"], os.environ["EPICS_MCP_OLOG_WRITE_PASSWORD"]
     )
-    assert _URL is not None  # guarded by the module skipif
+    assert _URL is not None  # guarded by the module gate
     return OlogClient(
         _URL, timeout=15.0, auth_header=auth, assume_test_data=True, allow_attachment_download=True
     )

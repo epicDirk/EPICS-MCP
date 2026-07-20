@@ -51,7 +51,9 @@ pytestmark = pytest.mark.live
 @pytest.fixture(autouse=True)
 def _require_live_stack() -> None:
     """Setup-time gate (S30): skip silently by default, fail loudly when a live run is
-    demanded (EPICS_MCP_REQUIRE_LIVE=1) and the proxy rig is not configured."""
+    demanded (EPICS_MCP_REQUIRE_LIVE=1) and the proxy rig is not configured. The
+    prerequisites are the import-time module constants (the same snapshot the test bodies
+    use); only the DEMAND is read fresh."""
     assert_live_available(
         bool(_PROXY and _CA and _USER and _PASS and _LOGBOOK),
         "remote-https Olog upload needs a local TLS proxy: OA1C_PROXY_URL + OA1C_CA_BUNDLE + "

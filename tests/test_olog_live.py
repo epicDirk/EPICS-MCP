@@ -520,7 +520,8 @@ def test_server_does_not_validate_a_written_level() -> None:
             and os.environ.get("EPICS_MCP_OLOG_WRITE_USER")
         ),
         "pins the server behaviour that justifies the write-side level refusal: needs a WRITABLE "
-        "loopback Olog (EPICS_MCP_ALLOW_OLOG_WRITE + _WRITE_LOGBOOKS + write creds)",
+        "loopback Olog (EPICS_MCP_ALLOW_OLOG_WRITE + _WRITE_LOGBOOKS + _WRITE_USER; the "
+        "password is read with a '' default — a wrong one fails loudly as 401)",
         demanded=live_demanded(os.environ),
     )
     logbook = str(os.environ["EPICS_MCP_OLOG_WRITE_LOGBOOKS"]).split(",")[0].strip()
