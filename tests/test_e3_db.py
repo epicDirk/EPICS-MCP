@@ -107,6 +107,55 @@ def test_substitute_name_charset_follows_maclib() -> None:
     assert substitute("$(P-1)", {"P-1": "x"}) == "x"
 
 
+def test_substitute_bracket_types_do_not_cross_match() -> None:
+    """QA: macLib is bracket-TYPE-faithful (macCore.c:793 — macEnd is "=,)" for `$(` and
+    "=,}" for `${`): for a `$(` reference a `}` is a NAME character, never a terminator.
+    A cross-matching scanner RESOLVED the typo `$(P}` — minting a PV name the IOC never
+    serves, straight into the cross-plane gate."""
+    assert substitute("$(P}", {"P": "x"}) == "$(P}"
+    assert substitute("${P)", {"P": "x"}) == "${P)"
+    resolved, unresolved = ioc_db_pvs('record(ai, "$(P}status") {}\n', {"P": "X:"})
+    assert resolved == set()
+    assert unresolved == {"$(P}status"}
+
+
+def test_substitute_bare_brackets_do_not_nest() -> None:
+    """macLib scans raw characters: a bare '(' inside a default does not nest — only a
+    '$'-introduced reference does. `$(P=f(x))` closes at the FIRST ')' (default "f(x",
+    trailing ")" stays literal) — macLib-identical in both branches."""
+    assert substitute("$(P=f(x))", {}) == "f(x)"
+    assert substitute("$(P=f(x))", {"P": "v"}) == "v)"
+
+
+def test_substitute_expanded_name_is_looked_up_verbatim() -> None:
+    """QA: macLib copies an expanded name VERBATIM into the lookup buffer (macCore.c:798)
+    — a '=' arriving from a macro VALUE never becomes a default separator. Re-parsing the
+    re-emitted text did exactly that and fabricated "B_PV" into the resolved set."""
+    assert substitute("$($(SEL)_PV)", {"SEL": "A=B"}) == "$($(SEL)_PV)"
+    assert substitute("$($(SEL)_PV)", {"SEL": "A=B", "A=B_PV": "hit"}) == "hit"
+    resolved, unresolved = ioc_db_pvs('record(ai, "$($(SEL)_PV)") {}\n', {"SEL": "A=B"})
+    assert resolved == set()
+    assert unresolved == {"$($(SEL)_PV)"}
+
+
+def test_substitute_name_with_bare_dollar_still_resolves() -> None:
+    """A '$' NOT followed by a bracket is an ordinary name character (macLib) — the
+    unresolved-reference check must look for '$('/'${', not for a bare '$'."""
+    assert substitute("$(A$B)", {"A$B": "x"}) == "x"
+
+
+def test_substitute_pathological_nesting_never_raises() -> None:
+    """QA: `ioc_db_pvs` documents "Never raises" — the name-expansion recursion must be
+    depth-BOUNDED, not stack-bounded (2000-deep nesting raised RecursionError). Hostile
+    depth resolves to nothing and stays a literal (needs-msi), without an exception."""
+    hostile = "$(" * 2000 + "X" + ")" * 2000
+    result = substitute(hostile, {})
+    assert "$(" in result
+    resolved, unresolved = ioc_db_pvs(f'record(ai, "{hostile}") {{}}\n', {})
+    assert resolved == set()
+    assert len(unresolved) == 1
+
+
 def test_ioc_db_pvs_default_macros_resolve() -> None:
     """BG2 integration: a record name built from default-form macros must land in
     `resolved` — pre-fix it was stamped needs-msi (unresolved) although every macro

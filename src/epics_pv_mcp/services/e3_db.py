@@ -96,21 +96,37 @@ def _strip_comment_lines(text: str) -> str:
     return "\n".join(_strip_line_comment(line) for line in text.splitlines())
 
 
+def _nested_ref_opens(text: str, index: int) -> str | None:
+    """The expected CLOSER when ``text[index:]`` opens a nested reference, else ``None``.
+
+    Only a ``$``-introduced bracket opens a reference (macLib scans raw characters — a
+    bare bracket is an ordinary character), and each reference closes with ITS bracket
+    type only (macCore.c:793: macEnd is ``"=,)"`` for ``$(`` and ``"=,}"`` for ``${``).
+    """
+    if text[index] == "$" and index + 1 < len(text) and text[index + 1] in "({":
+        return ")" if text[index + 1] == "(" else "}"
+    return None
+
+
 def _find_closing_bracket(text: str, start: int) -> int:
     """Index of the bracket closing the reference opened at ``start+1``, or ``-1``.
 
-    Depth-counted so nested references (``$(P=$(Q))``, ``${FOO=${BAZ}}``) close at THEIR
-    bracket — the structural reason a regex cannot parse this grammar.
+    Bracket-TYPE-faithful (see :func:`_nested_ref_opens`): for a ``$(`` reference a
+    ``}`` is a NAME character, never a terminator — a cross-matching scanner would
+    RESOLVE the typo ``$(P}`` and mint a PV name the IOC never serves. Nested
+    references (``$(P=$(Q))``, ``${FOO=${BAZ}}``) close at their own bracket.
     """
-    depth = 0
-    index = start + 1
+    expected = [")" if text[start + 1] == "(" else "}"]
+    index = start + 2
     while index < len(text):
-        char = text[index]
-        if char in "({":
-            depth += 1
-        elif char in ")}":
-            depth -= 1
-            if depth == 0:
+        closer = _nested_ref_opens(text, index)
+        if closer is not None:
+            expected.append(closer)
+            index += 2
+            continue
+        if text[index] == expected[-1]:
+            expected.pop()
+            if not expected:
                 return index
         index += 1
     return -1
@@ -120,16 +136,23 @@ def _split_body(body: str) -> tuple[str, str]:
     """Split a reference body into ``(name, raw_rest)`` at the first TOP-LEVEL ``=``/``,``.
 
     Per macLib the name ends there (macCore.c:794); ``raw_rest`` keeps its leading ``=``
-    (a default follows) or ``,`` (scoped-macro arguments follow), or is ``""``.
+    (a default follows) or ``,`` (scoped-macro arguments follow), or is ``""``. Top-level
+    means outside any NESTED reference (bare brackets do not nest — raw-character scan).
     """
-    depth = 0
-    for index, char in enumerate(body):
-        if char in "({":
-            depth += 1
-        elif char in ")}":
-            depth -= 1
-        elif depth == 0 and char in "=,":
+    expected: list[str] = []
+    index = 0
+    while index < len(body):
+        closer = _nested_ref_opens(body, index)
+        if closer is not None:
+            expected.append(closer)
+            index += 2
+            continue
+        char = body[index]
+        if expected and char == expected[-1]:
+            expected.pop()
+        elif not expected and char in "=,":
             return body[:index], body[index:]
+        index += 1
     return body, ""
 
 
@@ -138,33 +161,56 @@ def _default_from_rest(rest: str) -> str | None:
 
     Only a rest starting with ``=`` carries a default. It ends at a top-level ``,``
     (scoped-macro arguments); further ``=`` inside are legal (macCore.c:812), and an
-    empty default is a real ``""`` (macLibTest.c:94).
+    empty default is a real ``""`` (macLibTest.c:94). Nesting rule as in
+    :func:`_split_body` — only ``$``-introduced references nest.
     """
     if not rest.startswith("="):
         return None
     collected: list[str] = []
-    depth = 0
-    for char in rest[1:]:
-        if char in "({":
-            depth += 1
-        elif char in ")}":
-            depth -= 1
-        elif char == "," and depth == 0:
+    expected: list[str] = []
+    index = 1
+    while index < len(rest):
+        closer = _nested_ref_opens(rest, index)
+        if closer is not None:
+            expected.append(closer)
+            collected.append(rest[index])
+            collected.append(rest[index + 1])
+            index += 2
+            continue
+        char = rest[index]
+        if expected and char == expected[-1]:
+            expected.pop()
+        elif not expected and char == ",":
             break
         collected.append(char)
+        index += 1
     return "".join(collected)
 
 
-def _expand_once(text: str, macros: dict[str, str]) -> tuple[str, bool]:
+def _has_macro_ref(text: str) -> bool:
+    """True when *text* still carries a reference — a bare ``$`` is an ordinary char."""
+    return "$(" in text or "${" in text
+
+
+#: Bound for the name-expansion recursion. macLib bounds its own recursion too; without a
+#: bound, hostile nesting depth (measured: 2000) blows the Python stack — and both
+#: ``ioc_db_pvs`` and ``load_ioc_db`` promise "never raises". Real e3 names nest 1-2 deep.
+_MAX_NAME_EXPANSION_DEPTH = 32
+
+
+def _expand_once(text: str, macros: dict[str, str], *, name_depth: int = 0) -> tuple[str, bool]:
     """One left-to-right expansion pass over *text*; returns ``(expanded, changed)``.
 
     Semantics anchored to epics-base macLib (modules/libcom/src/macLib/macCore.c):
     a DEFINED macro beats its default (:860-880) · an undefined macro WITH a default
-    expands to the default · the NAME may itself contain references (:798) and is
-    resolved first (``$($(SEL)_PV)``) · scoped arguments after a top-level ``,`` are
+    expands to the default · the NAME may itself contain references (:798), is resolved
+    first and looked up VERBATIM — a ``=``/``,`` arriving from a macro VALUE never
+    becomes a separator (macLib copies the expansion into the lookup buffer; re-parsing
+    it would fabricate resolutions) · scoped arguments after a top-level ``,`` are
     recognised, not evaluated. An undefined macro WITHOUT a default stays literal —
     the project's needs-msi convention (callers detect "still unresolved"), deliberately
-    narrower than macLib's warning path.
+    narrower than macLib's warning path; a name whose INNER references stay unresolved
+    keeps the whole reference literal rather than emitting a half-expanded hybrid.
     """
     out: list[str] = []
     index = 0
@@ -182,17 +228,23 @@ def _expand_once(text: str, macros: dict[str, str]) -> tuple[str, bool]:
             continue
         body = text[index + 2 : end]
         name, rest = _split_body(body)
-        if "$" in name:
-            # Resolve the name itself first, re-emitting the still-bracketed reference
-            # for the next pass ($($(SEL)_PV) -> $(A_PV) -> hit).
-            expanded_name, name_changed = _expand_once(name, macros)
-            if name_changed:
-                opening = text[index + 1]
-                closing = ")" if opening == "(" else "}"
-                out.append(f"${opening}{expanded_name}{rest}{closing}")
+        if _has_macro_ref(name):
+            if name_depth >= _MAX_NAME_EXPANSION_DEPTH:
+                out.append(text[index : end + 1])  # hostile depth -> literal, never raise
                 index = end + 1
-                changed = True
                 continue
+            expanded_name = name
+            for _ in range(_MAX_NAME_EXPANSION_DEPTH):
+                expanded_name, inner_changed = _expand_once(
+                    expanded_name, macros, name_depth=name_depth + 1
+                )
+                if not inner_changed:
+                    break
+            if _has_macro_ref(expanded_name):
+                out.append(text[index : end + 1])  # inner refs unresolved -> whole literal
+                index = end + 1
+                continue
+            name = expanded_name  # verbatim lookup; separators from values stay inert
         default = _default_from_rest(rest)
         if name in macros:
             out.append(macros[name])
