@@ -59,8 +59,12 @@ Olog `get_log_entry` HTTP 404. **Naming HTTP 204/404 is definitive only once the
 it is the Naming Service** via its `/rest/swagger.json` beacon (S13) — otherwise the "not
 registered" answer is withheld, so a foreign/misconfigured URL's 404 no longer mints a false
 `name_typo`. (Archiver and Olog 404 stay ungated — the same latent question, deferred as
-lower-severity.) Junk list items are never silently dropped, missing fields never zero-filled,
-non-strings never stringified into names.
+lower-severity.) On every top-level listing and record, junk list items are never silently
+dropped, missing fields never zero-filled, non-strings never stringified into names. The one
+deliberate exception is metadata INSIDE an already-anchored record (a channel's
+properties/tags, a log entry's logbook/tag names): there a malformed element is dropped rather
+than sinking the whole record — documented at the two projection helpers — and even there
+nothing is ever fabricated (a `null` never becomes the string `"None"`).
 
 ## Safety & network posture
 

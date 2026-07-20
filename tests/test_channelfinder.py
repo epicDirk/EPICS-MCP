@@ -59,6 +59,38 @@ def test_project_extracts_ioc_host_tags(monkeypatch: pytest.MonkeyPatch) -> None
     assert out[0]["tags"] == ("alarm", "archived")  # sorted, deterministic
 
 
+def test_project_never_fabricates_from_malformed_properties(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """QA: a null property value was str()-minted into the literal string "None" — flowing
+    through the allowlist into host_name and device_lookup's source_host; a non-str name
+    was stringified into an invented key; junk items vanished without the documented
+    rationale. The projection stays LENIENT (inside an anchored record — same rationale as
+    olog_client._names) but never fabricates: malformed entries drop whole."""
+    client = ChannelFinderClient("http://cf:8080/ChannelFinder")
+    payload = [
+        {
+            "name": "SYS:PV1",
+            "owner": "cf",
+            "properties": [
+                {"name": "hostName", "value": None},  # null value -> dropped, NOT "None"
+                {"name": 7, "value": "x"},  # non-str name -> dropped, NOT key "7"
+                "junk",  # non-dict entry -> dropped
+                {"name": "iocName", "value": "IOC1"},
+            ],
+            "tags": [{"name": 3}, "junk", {"name": "archived"}],
+        }
+    ]
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+
+    out = client.find_channels("SYS:*")
+
+    assert out[0]["host_name"] is None  # pre-fix: the fabricated string "None"
+    assert out[0]["ioc_name"] == "IOC1"
+    assert out[0]["properties"] == {"iocName": "IOC1"}
+    assert out[0]["tags"] == ("archived",)
+
+
 def test_project_redacts_person_owner_and_recceiverid(monkeypatch: pytest.MonkeyPatch) -> None:
     """DS-PRIVACY: a service-account owner (recceiver) is kept, a person's username owner is
     redacted to "", and the opaque properties['recceiverID'] is dropped — technical provenance

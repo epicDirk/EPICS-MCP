@@ -183,19 +183,34 @@ class ChannelFinderClient:
         raw_props = channel.get("properties")
         props: dict[str, str] = {}
         if isinstance(raw_props, list):
+            # LENIENT by design and ONLY inside an already-anchored record (the record's
+            # identity is guarded below; olog_client._names documents the same rationale):
+            # one malformed property must not sink the whole channel. Lenient never means
+            # FABRICATING though (QA): a null value used to be str()-minted into the
+            # literal string "None" — flowing through the allowlist into host_name and
+            # device_lookup's source_host — and a non-str name was stringified into an
+            # invented key. Malformed entries are dropped whole instead.
             for prop in raw_props:
-                if isinstance(prop, dict) and "name" in prop:
-                    props[str(prop["name"])] = str(prop.get("value", ""))
+                if not isinstance(prop, dict):
+                    continue
+                prop_name = prop.get("name")
+                prop_value = prop.get("value")
+                if isinstance(prop_name, str) and prop_name and isinstance(prop_value, str):
+                    props[prop_name] = prop_value
         # DS-PRIVACY: allowlist surfaced properties (deny-by-default; see _safe_property_names).
-        props = {
-            str(k): str(v) for k, v in project_allowlist(props, self._safe_property_names).items()
-        }
+        # isinstance narrows the generic allowlist result back to str — values ARE str here
+        # (built above), and narrowing never fabricates (unlike the former str() minting).
+        allowlisted = project_allowlist(props, self._safe_property_names)
+        props = {k: v for k, v in allowlisted.items() if isinstance(v, str)}
         raw_tags = channel.get("tags")
         tags: list[str] = []
         if isinstance(raw_tags, list):
-            tags.extend(
-                str(tag["name"]) for tag in raw_tags if isinstance(tag, dict) and "name" in tag
-            )
+            for tag in raw_tags:
+                if not isinstance(tag, dict):
+                    continue
+                tag_name = tag.get("name")
+                if isinstance(tag_name, str) and tag_name:
+                    tags.append(tag_name)
         raw_owner = str(channel.get("owner", ""))
         owner = raw_owner if raw_owner in self._safe_owner_accounts else ""
         # S11: the identity field is required. A record without a usable name used to become
