@@ -26,20 +26,24 @@ import os
 import pytest
 
 from epics_pv_mcp.services.channelfinder_client import ChannelFinderClient
+from tests.live_gate import assert_live_available, live_demanded
 
-pytestmark = [
-    pytest.mark.live,
-    pytest.mark.skipif(
-        not (
+pytestmark = pytest.mark.live
+
+
+@pytest.fixture(autouse=True)
+def _require_live_stack() -> None:
+    """Setup-time gate (S30): skip silently by default, fail loudly when a live run is
+    demanded (EPICS_MCP_REQUIRE_LIVE=1) and the plane is not configured."""
+    assert_live_available(
+        bool(
             os.environ.get("EPICS_MCP_CHANNELFINDER_URL")
             and os.environ.get("EPICS_MCP_LIVE_CF_GLOB")
         ),
-        reason=(
-            "live ChannelFinder probe: set EPICS_MCP_CHANNELFINDER_URL and EPICS_MCP_LIVE_CF_GLOB "
-            "(a mixed-case glob matching a few channels, e.g. 'SIM-DEV01*Temp*')"
-        ),
-    ),
-]
+        "live ChannelFinder probe: set EPICS_MCP_CHANNELFINDER_URL and EPICS_MCP_LIVE_CF_GLOB "
+        "(a mixed-case glob matching a few channels, e.g. 'SIM-DEV01*Temp*')",
+        demanded=live_demanded(os.environ),
+    )
 
 
 @pytest.fixture

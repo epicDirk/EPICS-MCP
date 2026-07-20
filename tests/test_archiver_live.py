@@ -22,22 +22,27 @@ import pytest
 
 from epics_pv_mcp.services._time_window import TimeWindowFormatError
 from epics_pv_mcp.services.archiver_client import ArchiverClient, HistoryResult, Sample
+from tests.live_gate import assert_live_available, live_demanded
 
-pytestmark = [
-    pytest.mark.live,
-    pytest.mark.skipif(
-        not (
+pytestmark = pytest.mark.live
+
+
+@pytest.fixture(autouse=True)
+def _require_live_stack() -> None:
+    """Setup-time gate (S30): skip silently by default, fail loudly when a live run is
+    demanded (EPICS_MCP_REQUIRE_LIVE=1) and the plane is not configured."""
+    assert_live_available(
+        bool(
             os.environ.get("EPICS_MCP_ARCHIVER_URL")
             and os.environ.get("EPICS_MCP_LIVE_ARCHIVER_PV")
             and os.environ.get("EPICS_MCP_LIVE_ARCHIVER_GLOB")
         ),
-        reason=(
-            "live Archiver probe: set EPICS_MCP_ARCHIVER_URL, EPICS_MCP_LIVE_ARCHIVER_PV "
-            "(an archived PV with history) and EPICS_MCP_LIVE_ARCHIVER_GLOB (a name glob "
-            "matching some archived PVs)"
-        ),
-    ),
-]
+        "live Archiver probe: set EPICS_MCP_ARCHIVER_URL, EPICS_MCP_LIVE_ARCHIVER_PV "
+        "(an archived PV with history) and EPICS_MCP_LIVE_ARCHIVER_GLOB (a name glob "
+        "matching some archived PVs)",
+        demanded=live_demanded(os.environ),
+    )
+
 
 # A window far in the past — the negative control. Fixed, not clock-derived, so runs reproduce.
 _PAST = ("2020-01-01T00:00:00Z", "2020-01-02T00:00:00Z")

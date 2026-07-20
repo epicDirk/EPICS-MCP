@@ -17,6 +17,7 @@ import pytest
 
 from epics_pv_mcp.services._http import basic_auth_header
 from epics_pv_mcp.services.olog_client import AttachmentUpload, OlogClient
+from tests.live_gate import assert_live_available, live_demanded
 
 _URL = os.environ.get("EPICS_MCP_OLOG_URL")
 _WRITE = os.environ.get("EPICS_MCP_ALLOW_OLOG_WRITE", "").lower() == "true"
@@ -27,17 +28,21 @@ _DOWNLOAD = os.environ.get("EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD", "").lower
 _OTHER_USER = os.environ.get("EPICS_MCP_OLOG_TEST_OTHER_USER")
 _OTHER_PASSWORD = os.environ.get("EPICS_MCP_OLOG_TEST_OTHER_PASSWORD")
 
-pytestmark = [
-    pytest.mark.live,
-    pytest.mark.skipif(
-        not (_URL and _WRITE and _LOGBOOKS and _DOWNLOAD),
-        reason=(
-            "live attachment round-trip needs a WRITABLE loopback Olog with attachment download "
-            "enabled: EPICS_MCP_OLOG_URL + _ALLOW_OLOG_WRITE + _WRITE_LOGBOOKS + "
-            "_ALLOW_ATTACHMENT_DOWNLOAD + write creds"
-        ),
-    ),
-]
+pytestmark = pytest.mark.live
+
+
+@pytest.fixture(autouse=True)
+def _require_live_stack() -> None:
+    """Setup-time gate (S30): skip silently by default, fail loudly when a live run is
+    demanded (EPICS_MCP_REQUIRE_LIVE=1) and the plane is not configured."""
+    assert_live_available(
+        bool(_URL and _WRITE and _LOGBOOKS and _DOWNLOAD),
+        "live attachment round-trip needs a WRITABLE loopback Olog with attachment download "
+        "enabled: EPICS_MCP_OLOG_URL + _ALLOW_OLOG_WRITE + _WRITE_LOGBOOKS + "
+        "_ALLOW_ATTACHMENT_DOWNLOAD + write creds",
+        demanded=live_demanded(os.environ),
+    )
+
 
 # A real 1x1 transparent PNG (so the server sees genuine image bytes) + an arbitrary non-image blob.
 _PNG = base64.b64decode(
@@ -164,14 +169,6 @@ def test_add_attachment_is_additive_and_byte_identical(client: OlogClient) -> No
     assert b2 == _BLOB
 
 
-@pytest.mark.skipif(
-    not (_OTHER_USER and _OTHER_PASSWORD),
-    reason=(
-        "the owner re-stamp is only visible with a SECOND principal: set "
-        "EPICS_MCP_OLOG_TEST_OTHER_USER + _OTHER_PASSWORD to an account that is not the write "
-        "service account (a stock Olog ships 'user' and 'admin')"
-    ),
-)
 def test_add_attachment_restamps_the_owner(client: OlogClient) -> None:
     """OQ4: attaching a file REWRITES the entry's author. Measured, not read off the source.
 
@@ -185,8 +182,15 @@ def test_add_attachment_restamps_the_owner(client: OlogClient) -> None:
     account. Hence the second principal: the entry is created as somebody else, so a re-stamp is the
     only thing that can change the owner.
     """
+    assert_live_available(
+        bool(_OTHER_USER and _OTHER_PASSWORD),
+        "the owner re-stamp is only visible with a SECOND principal: set "
+        "EPICS_MCP_OLOG_TEST_OTHER_USER + _OTHER_PASSWORD to an account that is not the write "
+        "service account (a stock Olog ships 'user' and 'admin')",
+        demanded=live_demanded(os.environ),
+    )
     logbook = _LOGBOOKS.split(",")[0].strip()
-    assert _URL is not None  # guarded by the module skipif
+    assert _URL is not None  # guarded by the module gate
     other = OlogClient(
         _URL,
         timeout=15.0,

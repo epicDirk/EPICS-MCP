@@ -26,17 +26,22 @@ import pytest
 
 from epics_pv_mcp.services._time_window import TimeWindowFormatError
 from epics_pv_mcp.services.alarm_client import AlarmClient
+from tests.live_gate import assert_live_available, live_demanded
 
-pytestmark = [
-    pytest.mark.live,
-    pytest.mark.skipif(
-        not (os.environ.get("EPICS_MCP_ALARM_URL") and os.environ.get("EPICS_MCP_LIVE_ALARM_PV")),
-        reason=(
-            "live Alarm probe: set EPICS_MCP_ALARM_URL and EPICS_MCP_LIVE_ALARM_PV "
-            "(a PV/substring with alarm history on that logger)"
-        ),
-    ),
-]
+pytestmark = pytest.mark.live
+
+
+@pytest.fixture(autouse=True)
+def _require_live_stack() -> None:
+    """Setup-time gate (S30): skip silently by default, fail loudly when a live run is
+    demanded (EPICS_MCP_REQUIRE_LIVE=1) and the plane is not configured."""
+    assert_live_available(
+        bool(os.environ.get("EPICS_MCP_ALARM_URL") and os.environ.get("EPICS_MCP_LIVE_ALARM_PV")),
+        "live Alarm probe: set EPICS_MCP_ALARM_URL and EPICS_MCP_LIVE_ALARM_PV "
+        "(a PV/substring with alarm history on that logger)",
+        demanded=live_demanded(os.environ),
+    )
+
 
 # A window far in the past — the negative control. Fixed, not clock-derived, so runs are
 # reproducible.
@@ -57,8 +62,12 @@ def pv() -> str:
 def configured_pv() -> str:
     """A PV that IS in the alarm tree — the positive control for the config probes."""
     value = os.environ.get("EPICS_MCP_LIVE_ALARM_CONFIGURED_PV")
-    if not value:
-        pytest.skip("set EPICS_MCP_LIVE_ALARM_CONFIGURED_PV to a PV present in the alarm tree")
+    assert_live_available(
+        bool(value),
+        "set EPICS_MCP_LIVE_ALARM_CONFIGURED_PV to a PV present in the alarm tree",
+        demanded=live_demanded(os.environ),
+    )
+    assert value is not None  # narrowed by the gate above
     return value
 
 

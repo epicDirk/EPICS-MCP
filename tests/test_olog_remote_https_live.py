@@ -36,6 +36,7 @@ from epics_pv_mcp.services._http import basic_auth_header, is_ssl_error
 from epics_pv_mcp.services.checkers import query_olog_create
 from epics_pv_mcp.services.olog_client import AttachmentUpload, OlogClient
 from epics_pv_mcp.services.olog_exceptions import OlogConnectionError
+from tests.live_gate import assert_live_available, live_demanded
 
 _PROXY = os.environ.get("OA1C_PROXY_URL")  # e.g. https://olog.localtest.me:8443/Olog
 _CA = os.environ.get("OA1C_CA_BUNDLE")  # path to the self-signed cert.pem
@@ -44,16 +45,20 @@ _PASS = os.environ.get("OA1C_WRITE_PASSWORD", "")
 _LOGBOOK = os.environ.get("OA1C_LOGBOOK", "")
 _LOOPBACK = os.environ.get("OA1C_LOOPBACK_URL", "http://localhost:8080/Olog")
 
-pytestmark = [
-    pytest.mark.live,
-    pytest.mark.skipif(
-        not (_PROXY and _CA and _USER and _PASS and _LOGBOOK),
-        reason=(
-            "remote-https Olog upload needs a local TLS proxy: OA1C_PROXY_URL + OA1C_CA_BUNDLE + "
-            "OA1C_WRITE_USER + OA1C_WRITE_PASSWORD + OA1C_LOGBOOK"
-        ),
-    ),
-]
+pytestmark = pytest.mark.live
+
+
+@pytest.fixture(autouse=True)
+def _require_live_stack() -> None:
+    """Setup-time gate (S30): skip silently by default, fail loudly when a live run is
+    demanded (EPICS_MCP_REQUIRE_LIVE=1) and the proxy rig is not configured."""
+    assert_live_available(
+        bool(_PROXY and _CA and _USER and _PASS and _LOGBOOK),
+        "remote-https Olog upload needs a local TLS proxy: OA1C_PROXY_URL + OA1C_CA_BUNDLE + "
+        "OA1C_WRITE_USER + OA1C_WRITE_PASSWORD + OA1C_LOGBOOK",
+        demanded=live_demanded(os.environ),
+    )
+
 
 _PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="

@@ -143,12 +143,14 @@ testpaths = ["tests"]
 pythonpath = ["tests"]
 asyncio_mode = "auto"
 # `live` = tests that need a running local EPICS test stack. Opt-in: set the target plane's
-# `EPICS_MCP_*` vars, then `uv run pytest -m live`. Each live module self-skips via
-# `pytest.mark.skipif` on its own `EPICS_MCP_*` URL var (and, where present, an extra
-# `EPICS_MCP_LIVE_*` fixture var - each tests/test_*_live.py docstring lists that plane's vars),
-# so the default run and CI stay green with those vars unset. Deliberately NO
-# `addopts = -m "not live"` (would change default pytest for everyone and is brittle); the
-# per-module skipif already keeps the default/CI green without the stack.
+# `EPICS_MCP_*` vars, then `uv run pytest -m live`. Each live module gates itself at SETUP time
+# via tests/live_gate.py (assert_live_available): with the plane vars unset it SKIPS, so the
+# default run and CI stay green — but a DEMANDED live run (EPICS_MCP_REQUIRE_LIVE=1) turns a
+# missing prerequisite into a LOUD failure instead of a silent skip (S30; previously
+# `pytest -m live` in an empty env exited 0 with everything skipped — indistinguishable from a
+# fulfilled live run). The demand applies to the SELECTED set: scope a partial live run with
+# `-m live -k <plane>`; data-dependent skips INSIDE a running probe stay skips. Deliberately NO
+# `addopts = -m "not live"` (would change default pytest for everyone and is brittle).
 markers = [
-    "live: needs a running local EPICS stack; opt-in via -m live + the plane's EPICS_MCP_* vars",
+    "live: needs a running local EPICS stack; opt-in via -m live + the plane's EPICS_MCP_* vars; EPICS_MCP_REQUIRE_LIVE=1 turns a missing prerequisite into a loud failure",
 ]

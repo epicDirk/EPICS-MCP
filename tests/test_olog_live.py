@@ -29,14 +29,21 @@ from epics_pv_mcp.services._time_window import TimeWindowFormatError
 from epics_pv_mcp.services.olog_client import OlogClient
 from epics_pv_mcp.services.olog_exceptions import OlogError, OlogFilterValueError
 from epics_pv_mcp.services.redact import FREETEXT_WITHHELD
+from tests.live_gate import assert_live_available, live_demanded
 
-pytestmark = [
-    pytest.mark.live,
-    pytest.mark.skipif(
-        not os.environ.get("EPICS_MCP_OLOG_URL"),
-        reason="live Olog probe: set EPICS_MCP_OLOG_URL (e.g. the phoebus-olog compose)",
-    ),
-]
+pytestmark = pytest.mark.live
+
+
+@pytest.fixture(autouse=True)
+def _require_live_stack() -> None:
+    """Setup-time gate (S30): skip silently by default, fail loudly when a live run is
+    demanded (EPICS_MCP_REQUIRE_LIVE=1) and the plane is not configured."""
+    assert_live_available(
+        bool(os.environ.get("EPICS_MCP_OLOG_URL")),
+        "live Olog probe: set EPICS_MCP_OLOG_URL (e.g. the phoebus-olog compose)",
+        demanded=live_demanded(os.environ),
+    )
+
 
 # A window wide enough to contain any sandbox entry, expressed two ways. Fixed, not clock-derived.
 _WIDE_ISO = ("2020-01-01T00:00:00Z", "2030-01-01T00:00:00Z")
@@ -489,17 +496,6 @@ def test_unknown_id_error_is_loud_not_a_not_found(client: OlogClient) -> None:
 # ======================================================================================
 
 
-@pytest.mark.skipif(
-    not (
-        os.environ.get("EPICS_MCP_ALLOW_OLOG_WRITE", "").lower() == "true"
-        and os.environ.get("EPICS_MCP_OLOG_WRITE_LOGBOOKS")
-        and os.environ.get("EPICS_MCP_OLOG_WRITE_USER")
-    ),
-    reason=(
-        "pins the server behaviour that justifies the write-side level refusal: needs a WRITABLE "
-        "loopback Olog (EPICS_MCP_ALLOW_OLOG_WRITE + _WRITE_LOGBOOKS + write creds)"
-    ),
-)
 def test_server_does_not_validate_a_written_level() -> None:
     """The PREMISE of the OQ1 guard, measured instead of read off the Java source.
 
@@ -517,6 +513,16 @@ def test_server_does_not_validate_a_written_level() -> None:
     Deliberately bypasses the service layer and drives the client directly — the service is exactly
     what refuses, so going through it could never observe the server.
     """
+    assert_live_available(
+        bool(
+            os.environ.get("EPICS_MCP_ALLOW_OLOG_WRITE", "").lower() == "true"
+            and os.environ.get("EPICS_MCP_OLOG_WRITE_LOGBOOKS")
+            and os.environ.get("EPICS_MCP_OLOG_WRITE_USER")
+        ),
+        "pins the server behaviour that justifies the write-side level refusal: needs a WRITABLE "
+        "loopback Olog (EPICS_MCP_ALLOW_OLOG_WRITE + _WRITE_LOGBOOKS + write creds)",
+        demanded=live_demanded(os.environ),
+    )
     logbook = str(os.environ["EPICS_MCP_OLOG_WRITE_LOGBOOKS"]).split(",")[0].strip()
     url = os.environ["EPICS_MCP_OLOG_URL"]
     client = OlogClient(

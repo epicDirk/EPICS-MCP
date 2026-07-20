@@ -27,20 +27,24 @@ import pytest
 
 from epics_pv_mcp.services.naming_client import NamingServiceClient
 from epics_pv_mcp.services.naming_identity import probe_naming_identity
+from tests.live_gate import assert_live_available, live_demanded
 
-pytestmark = [
-    pytest.mark.live,
-    pytest.mark.skipif(
-        not (
+pytestmark = pytest.mark.live
+
+
+@pytest.fixture(autouse=True)
+def _require_live_stack() -> None:
+    """Setup-time gate (S30): skip silently by default, fail loudly when a live run is
+    demanded (EPICS_MCP_REQUIRE_LIVE=1) and the plane is not configured."""
+    assert_live_available(
+        bool(
             os.environ.get("EPICS_MCP_NAMING_URL")
             and os.environ.get("EPICS_MCP_LIVE_NAMING_DEVICE")
         ),
-        reason=(
-            "live Naming probe: set EPICS_MCP_NAMING_URL and EPICS_MCP_LIVE_NAMING_DEVICE "
-            "(a registered device name on that service)"
-        ),
-    ),
-]
+        "live Naming probe: set EPICS_MCP_NAMING_URL and EPICS_MCP_LIVE_NAMING_DEVICE "
+        "(a registered device name on that service)",
+        demanded=live_demanded(os.environ),
+    )
 
 
 @pytest.fixture
