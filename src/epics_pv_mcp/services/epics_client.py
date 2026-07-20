@@ -645,14 +645,29 @@ def _extract_value_alarm(raw: object) -> dict[str, object] | None:
     return out
 
 
+def _extract_descriptor(raw: object) -> str | None:
+    """The optional NT ``descriptor`` — the free-text description every NT type may carry.
+
+    Previously dropped for ALL NT types (no block extractor claimed it). An unset
+    descriptor arrives as ``""`` on the wire — absent and unset look the same there, and
+    an empty description carries no information, so it is omitted rather than reported.
+    """
+    descriptor = getattr(raw, "descriptor", None)
+    if descriptor is None:
+        return None
+    return str(descriptor) or None
+
+
 # Metadata blocks, each extracted independently so a malformed one cannot corrupt the
-# value or the other blocks (per-block robustness).
-_BLOCK_EXTRACTORS: list[tuple[str, Callable[[object], dict[str, object] | None]]] = [
+# value or the other blocks (per-block robustness). A falsy block (None, "", {}) is
+# omitted from the result.
+_BLOCK_EXTRACTORS: list[tuple[str, Callable[[object], dict[str, object] | str | None]]] = [
     ("alarm", _extract_alarm),
     ("timestamp", _extract_timestamp),
     ("display", _extract_display),
     ("control", _extract_control),
     ("value_alarm", _extract_value_alarm),
+    ("descriptor", _extract_descriptor),
 ]
 
 
@@ -671,8 +686,9 @@ def _format_value(pv_name: str, value: object) -> dict[str, object]:
     message), ``timestamp`` (seconds/nanoseconds), ``display`` (units, precision OR format,
     description, display limits), ``control`` (drive limits, min_step), ``value_alarm``
     (``active`` flag plus the configured HIHI/HIGH/LOW/LOLO limits; NaN/unset limits and the
-    per-PVA-unmapped per-level severities are omitted). Display/control limit pairs that are
-    equal (zero-width = unset) are omitted.
+    per-PVA-unmapped per-level severities are omitted), ``descriptor`` (the NT free-text
+    description; empty = omitted). Display/control limit pairs that are equal (zero-width =
+    unset) are omitted.
 
     Robustness: each block is extracted independently; a malformed block is skipped (logged
     at debug) and never corrupts the value or the other blocks. The function never raises.

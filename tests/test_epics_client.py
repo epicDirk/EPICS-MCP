@@ -942,3 +942,30 @@ def test_format_value_real_p4p_ntmultichannel_surfaces_channels() -> None:
     # The top-level alarm block of an NTMultiChannel is structural (says nothing about the
     # channels) — the value must carry the note that points readers at channels[].
     assert "note" in value and "channels[]" in str(value["note"])
+
+
+def test_format_value_real_p4p_descriptor_surfaces() -> None:
+    """The optional NT `descriptor` (free-text description every NT type may carry) must
+    reach the output — pre-fix it was dropped for ALL NT types (no block extractor)."""
+    from p4p import Type, Value
+
+    t = Type([("value", "d"), ("descriptor", "s")], id="epics:nt/NTScalar:1.0")
+    v = Value(t, {"value": 4.2, "descriptor": "simulated readback"})
+
+    result = _format_value("DESC:PV", v)
+
+    assert result["descriptor"] == "simulated readback"
+    json.dumps(result)
+
+
+def test_format_value_real_p4p_empty_descriptor_is_omitted() -> None:
+    """An unset descriptor arrives as "" on the wire — it carries no information and must
+    be omitted, not reported as an empty string."""
+    from p4p import Type, Value
+
+    t = Type([("value", "d"), ("descriptor", "s")], id="epics:nt/NTScalar:1.0")
+    v = Value(t, {"value": 4.2})  # descriptor left unset -> "" default
+
+    result = _format_value("DESC:PV", v)
+
+    assert "descriptor" not in result
