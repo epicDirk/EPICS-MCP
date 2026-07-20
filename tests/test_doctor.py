@@ -847,6 +847,49 @@ async def test_live_posture_names_every_set_search_path(
         assert var in live.detail
 
 
+@pytest.mark.parametrize("value", ["false", "FALSE ", "0 ", " no", "off"])
+async def test_live_posture_rejects_off_spellings_pvxs_does_not_parse(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """BG14-QA: pvxs' parse_bool accepts ONLY case-insensitive "NO" or exactly "0" —
+    untrimmed (PickOne passes the raw getenv value); anything else is a parse error that
+    keeps the DEFAULT, and the default is broadcast (pvxs src/config.cpp, pvxs/client.h).
+    Claiming isolation for a spelling the real parser rejects would be exactly the false
+    claim BG14 removed — "false" is the likeliest real-world case, since this repo's own
+    env convention is `EPICS_MCP_*=false`."""
+    _set_config(monkeypatch)
+    monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", value)
+    report = await run_doctor()
+    live = _plane(report, "live")
+    assert live.detail is not None
+    assert "localhost-isolated" not in live.detail
+
+
+@pytest.mark.parametrize(
+    ("value", "isolated"),
+    [
+        ("no", True),
+        ("NO", True),
+        ("nope", True),  # strstr: any substring "no" disables — pinned so the semantics stay honest
+        ("No", False),  # mixed case matches neither strstr("no") nor strstr("NO")
+        ("false", False),
+        ("0", False),
+    ],
+)
+async def test_live_posture_ca_off_is_substring_case_sensitive(
+    monkeypatch: pytest.MonkeyPatch, value: str, isolated: bool
+) -> None:
+    """libca disables the auto search only when the value CONTAINS "no" or "NO" as a
+    case-sensitive substring (epics-base modules/ca/src/client/iocinf.cpp) — "false",
+    "0" and even "No" keep broadcasting on a ca provider."""
+    _set_config(monkeypatch, provider="ca")
+    monkeypatch.setenv("EPICS_CA_AUTO_ADDR_LIST", value)
+    report = await run_doctor()
+    live = _plane(report, "live")
+    assert live.detail is not None
+    assert ("localhost-isolated" in live.detail) is isolated
+
+
 # --- cli_doctor.main: exit codes + render (the deliberate 0/1/2 convention) ---
 
 

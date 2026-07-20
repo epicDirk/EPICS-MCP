@@ -707,9 +707,25 @@ _SEARCH_LIST_VARS = (
     "EPICS_PVA_NAME_SERVERS",  # TCP unicast to named servers — NOT subnet-bound
     "EPICS_CA_NAME_SERVERS",
 )
-# Spellings that pvxs/libca parse as an explicit "no auto search". Anything else (including
-# unset and unparseable) leaves the auto search ON — that is the EPICS default.
-_AUTO_ADDR_OFF = frozenset({"no", "false", "0"})
+
+
+def _auto_addr_search_disabled(provider: str, value: str) -> bool:
+    """Whether *value* actually disables the auto-addr search for THIS provider's parser.
+
+    Deliberately parser-faithful, not generous: honouring a spelling the real parser
+    rejects (e.g. ``false``, or a padded ``"0 "``) would claim isolation while the client
+    keeps broadcasting — the exact false claim BG14 removed. The two parsers differ:
+
+    * pvxs ``parse_bool`` (repos/pvxs/src/config.cpp) accepts ONLY case-insensitive
+      ``NO`` or exactly ``0`` — untrimmed (PickOne hands over the raw getenv value);
+      anything else is a parse error that keeps the DEFAULT, and the default is ON.
+    * libca (epics-base modules/ca/src/client/iocinf.cpp) disables only when the value
+      CONTAINS the substring ``no`` or ``NO`` (case-sensitive strstr) — ``false``, ``0``
+      and even ``No`` keep broadcasting.
+    """
+    if provider == "ca":
+        return "no" in value or "NO" in value
+    return value == "0" or value.upper() == "NO"
 
 
 def _live_search_posture(provider: str) -> str:
@@ -731,8 +747,10 @@ def _live_search_posture(provider: str) -> str:
         if value:
             paths.append(f"{var} ({value})")
     auto_var = "EPICS_PVA_AUTO_ADDR_LIST" if provider == "pva" else "EPICS_CA_AUTO_ADDR_LIST"
-    auto_value = os.environ.get(auto_var, "").strip()
-    if auto_value.lower() not in _AUTO_ADDR_OFF:
+    # Raw value, deliberately NOT normalised: neither parser trims, and normalising here
+    # would make the doctor honour spellings the real client rejects (see the helper).
+    auto_value = os.environ.get(auto_var, "")
+    if not _auto_addr_search_disabled(provider, auto_value):
         state = f"={auto_value}" if auto_value else " unset, default ON"
         paths.append(f"auto-addr subnet broadcast ({auto_var}{state})")
     if paths:
