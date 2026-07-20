@@ -536,28 +536,38 @@ def _extract_value(raw: object) -> tuple[object, dict[str, object] | None]:
     shape (nested struct, ``structure[]``, variant-union array, numpy array) via the robust
     :func:`_jsonify` converter. The value is never a raw p4p object or numpy array.
     """
+    type_id = _type_id(raw)
+    # Routing discipline (QA-hardened): an EXPLICIT type id is authoritative. The structural
+    # markers below (choices/dimension/labels/channelName) would otherwise capture foreign
+    # structs and mint them into NT shapes — a fabricated enum index, a wrong-shape NTNDArray
+    # summary withholding the real values, an NTMultiChannel note on a non-NTMultiChannel.
+    # They stay ONLY as a fallback for ANONYMOUS values: a fake without getID() reports "",
+    # a bare p4p struct reports "structure"; anything else is routed by its id or converted
+    # generically. NTMatrix has no marker at all — `dim` is far too generic a field name
+    # (pinned by the real-p4p generic-struct test).
+    anonymous = type_id in ("", "structure")
     val_field = getattr(raw, "value", raw)
     choices = getattr(val_field, "choices", None)
-    if choices is not None:
+    if choices is not None and (type_id.startswith("epics:nt/NTEnum") or anonymous):
         # NTEnum: the value field is a struct {index, choices}.
         index = int(getattr(val_field, "index", 0))
         labels = [str(c) for c in choices]
         label = labels[index] if 0 <= index < len(labels) else None
         return index, {"index": index, "label": label, "choices": labels}
-    type_id = _type_id(raw)
     # NTNDArray + NTTable get a bespoke shape BEFORE the generic converter (an NTNDArray value IS an
     # array that must be summarised, not dumped whole; an NTTable gets {labels, columns}).
-    if type_id.startswith("epics:nt/NTNDArray") or getattr(raw, "dimension", None) is not None:
+    if type_id.startswith("epics:nt/NTNDArray") or (
+        anonymous and getattr(raw, "dimension", None) is not None
+    ):
         return _extract_nt_ndarray(raw), None
-    if type_id.startswith("epics:nt/NTTable") or getattr(raw, "labels", None) is not None:
+    if type_id.startswith("epics:nt/NTTable") or (
+        anonymous and getattr(raw, "labels", None) is not None
+    ):
         return _extract_nt_table(raw), None
-    # NTMatrix is routed by type id ONLY: its structural marker (`dim`) is far too generic a
-    # field name and would capture foreign structs (pinned by the real-p4p generic-struct test).
     if type_id.startswith("epics:nt/NTMatrix"):
         return _extract_nt_matrix(raw), None
-    if (
-        type_id.startswith("epics:nt/NTMultiChannel")
-        or getattr(raw, "channelName", None) is not None
+    if type_id.startswith("epics:nt/NTMultiChannel") or (
+        anonymous and getattr(raw, "channelName", None) is not None
     ):
         return _extract_nt_multi_channel(raw), None
     # Everything else (scalar, numpy array, nested struct, structure[], union array) — one robust,

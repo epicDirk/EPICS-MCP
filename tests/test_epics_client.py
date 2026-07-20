@@ -944,6 +944,78 @@ def test_format_value_real_p4p_ntmultichannel_surfaces_channels() -> None:
     assert "note" in value and "channels[]" in str(value["note"])
 
 
+def test_format_value_foreign_typed_structs_are_not_marker_routed() -> None:
+    """QA: a value with an EXPLICIT foreign type id must go through the generic converter
+    — the structural markers (choices/dimension/labels/channelName) exist for id-less
+    fakes and anonymous structs only. Pre-fix each marker captured foreign structs: a
+    custom OptionSet was minted into an NTEnum with a FABRICATED index=0 contradicting
+    its own data, a `dimension` sibling produced a wrong-shape NTNDArray summary that
+    withheld the real values, and a `channelName` sibling got the NTMultiChannel note
+    stamped onto a non-NTMultiChannel."""
+    from p4p import Type, Value
+
+    option_set = _format_value(
+        "OPT:PV",
+        Value(
+            Type(
+                [("value", ("S", None, [("choices", "as"), ("active", "s"), ("n", "i")]))],
+                id="my:custom/OptionSet:1.0",
+            ),
+            {"value": {"choices": ["A", "B", "C"], "active": "B", "n": 3}},
+        ),
+    )
+    assert "enum" not in option_set  # pre-fix: fabricated {"index": 0, "label": "A", ...}
+    assert option_set["value"] == {"choices": ["A", "B", "C"], "active": "B", "n": 3}
+
+    grid = _format_value(
+        "GRID:PV",
+        Value(
+            Type([("value", "ad"), ("dimension", "ai")], id="my:custom/Grid:1.0"),
+            {"value": [1.0, 2.0, 3.0], "dimension": [3]},
+        ),
+    )
+    assert grid["value"] == [1.0, 2.0, 3.0]  # pre-fix: {"shape": [1], "data_omitted": true, ...}
+
+    axes = _format_value(
+        "AXES:PV",
+        Value(
+            Type([("value", "ad"), ("labels", "as")], id="my:custom/Axes:1.0"),
+            {"value": [1.0, 2.0], "labels": ["x", "y"]},
+        ),
+    )
+    assert axes["value"] == [1.0, 2.0]  # pre-fix: {"labels": [...], "columns": {}}
+
+    roster = _format_value(
+        "ROSTER:PV",
+        Value(
+            Type([("value", "ad"), ("channelName", "as")], id="my:custom/Roster:1.0"),
+            {"value": [1.0, 2.0], "channelName": ["X", "Y"]},
+        ),
+    )
+    assert roster["value"] == [1.0, 2.0]
+    assert "channels" not in json.dumps(roster)  # pre-fix: misrouted + misleading note
+    for result in (option_set, grid, axes, roster):
+        json.dumps(result)
+
+
+def test_format_value_anonymous_marker_structs_still_fall_back() -> None:
+    """Counter-control: the markers stay a FALLBACK for ANONYMOUS values (a bare p4p
+    struct reports getID() == "structure"; fakes have no getID at all) — NT-shaped data
+    from an id-stripping provider keeps its bespoke extraction."""
+    from p4p import Type, Value
+
+    anon = _format_value(
+        "ANON:PV",
+        Value(
+            Type([("value", "ad"), ("channelName", "as")]),  # no id -> "structure"
+            {"value": [1.0, 2.0], "channelName": ["X", "Y"]},
+        ),
+    )
+    value = anon["value"]
+    assert isinstance(value, dict)
+    assert "channels" in value
+
+
 def test_format_value_real_p4p_descriptor_surfaces() -> None:
     """The optional NT `descriptor` (free-text description every NT type may carry) must
     reach the output — pre-fix it was dropped for ALL NT types (no block extractor)."""
