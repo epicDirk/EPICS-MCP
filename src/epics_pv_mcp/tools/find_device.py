@@ -72,11 +72,12 @@ async def _find_device(
 
     Read-only. *query* is a device / PV channel (protocol prefix optional); *match* is
     ``exact``/``prefix``/``substring`` (matched against the protocol-stripped channel).
-    *displays_dir* is the project/dataset ROOT. Live values come from p4p, localhost-isolated by
-    default (does NOT reach ESS production until the launcher widens the EPICS address list); the
-    live read is capped to ``max_batch_size`` channels with an honest note (the screen list stays
-    complete). Source IOC comes from ChannelFinder, disabled by default (empty
-    ``EPICS_MCP_CHANNELFINDER_URL`` → no source IOC, honest note). ``ca``-only PVs are not read
+    *displays_dir* is the project/dataset ROOT. Live values come from p4p; reach follows the
+    launcher's EPICS search env (address lists / name servers / auto-addr search — run
+    ``epics-doctor`` for the effective posture); the live read is capped to ``max_batch_size``
+    channels with an honest note (the screen list stays complete). Source IOC comes from
+    ChannelFinder, disabled by default (empty ``EPICS_MCP_CHANNELFINDER_URL`` → no source IOC,
+    honest note). ``ca``-only PVs are not read
     under the single ``pva`` provider. Returns ``{"report": <JSON>, "markdown": <rendered>}``.
     Raises :class:`EpicsError` (``INVALID_INPUT``) on an empty query or a missing displays dir.
     """

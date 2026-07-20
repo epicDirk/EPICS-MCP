@@ -220,11 +220,12 @@ async def find_device(
     """Find which operator screens show device X, read its channels live, and join the serving IOC.
 
     Read-only (Wedge-2 live counterpart of the offline find_screen). The reverse-lookup — which
-    operator screens reference the device — is offline + macro-aware. Live values come from p4p,
-    localhost-isolated by default (does NOT reach ESS production until the launcher widens the EPICS
-    address list); the live read is capped to max_batch_size channels (honest note; screens stay
-    complete). Source IOC comes from ChannelFinder, disabled by default (empty
-    EPICS_MCP_CHANNELFINDER_URL → no source IOC, honest note); a CAPPED ChannelFinder fetch adds a
+    operator screens reference the device — is offline + macro-aware. Live values come from p4p;
+    reach follows the launcher's EPICS search env (address lists / name servers / auto-addr search
+    — run epics-doctor for the effective posture); the live read is capped to max_batch_size
+    channels (honest note; screens stay complete). Source IOC comes from ChannelFinder, disabled
+    by default (empty EPICS_MCP_CHANNELFINDER_URL → no source IOC, honest note); a CAPPED
+    ChannelFinder fetch adds a
     note that the source-IOC join may be incomplete — a channel without source_ioc may simply have
     fallen past the cap, not be unregistered (F16). ca-only PVs are not read under the
     single pva provider. displays_dir is the project/dataset ROOT. Returns

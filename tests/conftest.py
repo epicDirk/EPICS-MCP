@@ -28,6 +28,31 @@ if importlib.util.find_spec("opi_navigation") is None:
     ]
 
 
+# --- EPICS search-path env isolation (BG14) --------------------------------------------------
+# The live-plane posture (services/doctor._check_live) reads the process env directly. Without
+# isolation, posture tests would measure the MACHINE (a developer's EPICS_PVA_ADDR_LIST or
+# EPICS_PVA_NAME_SERVERS leaks into the assertion) instead of the code. No test in this suite
+# legitimately consumes a pre-set search var (measured: zero hits across tests/); a test that
+# needs one sets it explicitly via monkeypatch. The live REST modules key on EPICS_MCP_* URLs,
+# which are untouched here.
+
+_EPICS_SEARCH_ENV_VARS = (
+    "EPICS_PVA_ADDR_LIST",
+    "EPICS_CA_ADDR_LIST",
+    "EPICS_PVA_NAME_SERVERS",
+    "EPICS_CA_NAME_SERVERS",
+    "EPICS_PVA_AUTO_ADDR_LIST",
+    "EPICS_CA_AUTO_ADDR_LIST",
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_epics_search_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Strip the EPICS search-path vars so posture assertions measure the code, not the machine."""
+    for var in _EPICS_SEARCH_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+
 @pytest.fixture
 def config() -> EpicsConfig:
     """Default test config."""

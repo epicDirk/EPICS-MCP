@@ -698,16 +698,56 @@ async def _check_olog(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
     return await _run_probe("olog", _run, _id)
 
 
+# The EPICS client-search env vars, i.e. every way a PV search can leave this host. The list
+# vars are enumerated individually (never or-folded — a fallback chain would mask all but the
+# first); the *_AUTO_ADDR_LIST pair is handled separately because its UNSET state means ON.
+_SEARCH_LIST_VARS = (
+    "EPICS_PVA_ADDR_LIST",
+    "EPICS_CA_ADDR_LIST",
+    "EPICS_PVA_NAME_SERVERS",  # TCP unicast to named servers — NOT subnet-bound
+    "EPICS_CA_NAME_SERVERS",
+)
+# Spellings that pvxs/libca parse as an explicit "no auto search". Anything else (including
+# unset and unparseable) leaves the auto search ON — that is the EPICS default.
+_AUTO_ADDR_OFF = frozenset({"no", "false", "0"})
+
+
+def _live_search_posture(provider: str) -> str:
+    """The PV search-path posture of THIS process, read from the same env pvxs reads.
+
+    Read from ``os.environ``, deliberately NOT from a p4p ``Context.conf()``: the doctor's
+    no-probe path guarantees no default egress, and merely building a Context binds sockets
+    and starts worker threads. The env interpretation is pinned to the pvxs sources instead:
+    ``EPICS_PVA_NAME_SERVERS`` alone is a full search path (TCP unicast, not subnet-bound —
+    pvxs ``src/client.cpp`` ``startNS()``), and ``autoAddrList`` DEFAULTS TO TRUE (pvxs
+    ``pvxs/client.h``), so even a null environment broadcasts searches into the local
+    subnets. ``localhost-isolated`` is therefore claimed ONLY when every search list is
+    unset AND the active provider's auto-addr search is explicitly disabled — never as a
+    default posture.
+    """
+    paths: list[str] = []
+    for var in _SEARCH_LIST_VARS:
+        value = os.environ.get(var, "").strip()
+        if value:
+            paths.append(f"{var} ({value})")
+    auto_var = "EPICS_PVA_AUTO_ADDR_LIST" if provider == "pva" else "EPICS_CA_AUTO_ADDR_LIST"
+    auto_value = os.environ.get(auto_var, "").strip()
+    if auto_value.lower() not in _AUTO_ADDR_OFF:
+        state = f"={auto_value}" if auto_value else " unset, default ON"
+        paths.append(f"auto-addr subnet broadcast ({auto_var}{state})")
+    if paths:
+        return "search paths: " + "; ".join(paths)
+    return "localhost-isolated (no search list set, auto-addr search explicitly disabled)"
+
+
 async def _check_live(cfg: EpicsConfig, probe_pv: str | None, timeout: float) -> PlaneCheck:
     """The live/PVA plane. INFO-only by default (no p4p call); a real pass/fail with ``probe_pv``.
 
-    The live plane has no URL — its config is ``provider`` + the EPICS address-list env. Without a
+    The live plane has no URL — its config is ``provider`` + the EPICS search-path env. Without a
     probe PV there is nothing to connect to, so this reports the posture (no default egress). Only
     ``probe_pv`` triggers a live read.
     """
-    addr = os.environ.get("EPICS_PVA_ADDR_LIST") or os.environ.get("EPICS_CA_ADDR_LIST")
-    posture = f"address list set ({addr})" if addr else "localhost-isolated (no address list set)"
-    base = f"provider={cfg.provider}, {posture}"
+    base = f"provider={cfg.provider}, {_live_search_posture(cfg.provider)}"
     if not probe_pv:
         return PlaneCheck(
             plane="live",

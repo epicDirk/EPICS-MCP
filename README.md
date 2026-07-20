@@ -22,10 +22,13 @@ PV?"*, *"why is it disconnected?"*, *"which screens show this device?"*, *"is it
 archived and alarm-configured?"* — instead of you clicking through CS-Studio, the
 Archiver Appliance UI and ChannelFinder by hand.
 
-It is **read-only by default** and **localhost-isolated by default**: out of the box it
-reads live PVs on your machine and does **not** reach your production IOCs or any ESS
-service until you explicitly widen the EPICS address list and set the optional service
-URLs (see [Safety & network posture](#safety--network-posture)).
+It is **read-only by default**, and its network reach is decided by the **launcher's EPICS
+search-path environment**: the address lists, `EPICS_PVA_NAME_SERVERS` (TCP unicast, not
+subnet-bound), and the auto-address search — which EPICS defaults to **ON**, so even a null
+environment broadcasts PV searches into the local subnets. The optional REST services stay
+off until their URLs are set. Do not assume isolation from this document — run
+`epics-doctor` to see what an instance actually reaches (see
+[Safety & network posture](#safety--network-posture)).
 
 ## The planes it sees
 
@@ -93,12 +96,14 @@ This is a controls tool, so the trust questions come first:
   exists, then re-applied — the allowlist and projection stay intact meanwhile. `epics-doctor`
   reports the effective posture. Note this is a *runtime output* policy, unrelated to keeping
   person data out of committed files (see `CLAUDE.md`).
-- **Network reach is the launcher's decision, not this server's.** Out of the box it opens no
-  non-local connection: the EPICS address lists (`EPICS_PVA_ADDR_LIST` / `EPICS_CA_ADDR_LIST` and
-  the matching `*_AUTO_ADDR_LIST`) and the `*_URL` vars are empty, so nothing is reached. A
-  deployment may well point them at a real facility — so do **not** assume isolation from this
-  document; run `epics-doctor` to see what your instance actually reaches. The write gates above
-  hold either way.
+- **Network reach is the launcher's decision, not this server's.** PV searches follow the
+  standard EPICS env: the address lists (`EPICS_PVA_ADDR_LIST` / `EPICS_CA_ADDR_LIST`), the name
+  servers (`EPICS_PVA_NAME_SERVERS` — TCP unicast, **not** subnet-bound), and the auto-address
+  search (`*_AUTO_ADDR_LIST`), which EPICS defaults to **ON** when unset — even an empty
+  environment broadcasts PV searches into the local subnets. A deployment may well point the env
+  at a real facility — so do **not** assume isolation from this document; run `epics-doctor` to
+  see what your instance actually reaches (it claims `localhost-isolated` only when every search
+  list is unset and the auto search is explicitly disabled). The write gates above hold either way.
 - **Optional service planes are off until configured.** ChannelFinder, Archiver, Alarm and
   Naming stay disabled until their `*_URL` env vars are set; an empty/unset URL means *no
   client and no network call*. The ESS Naming plane has **no built-in host** — no egress

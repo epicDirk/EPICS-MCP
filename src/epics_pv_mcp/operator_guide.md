@@ -19,9 +19,13 @@ operational knowledge (see the Knowledge Persistence Policy in `CLAUDE.md`).
   `EPICS_MCP_ALLOW_PV_WRITE=true` **plus** a regex allowlist, a rate limit and an audit log. The Olog
   logbook writers (`create_log_entry`, `reply_to_log`, `add_log_attachment` and `update_log_entry`) sit behind a **separate** gate — see the Olog
   write posture below; `ALLOW_PV_WRITE` is untouched by it.
-- **Localhost-isolated by default.** The server opens no non-local connection until its launcher
-  widens the EPICS address list (`EPICS_PVA_ADDR_LIST` / `EPICS_CA_ADDR_LIST` and the matching
-  `*_AUTO_ADDR_LIST`). Until then it does not reach any production network.
+- **Network reach is the launcher's decision — do NOT assume isolation.** PV searches follow the
+  standard EPICS env: the address lists (`EPICS_PVA_ADDR_LIST` / `EPICS_CA_ADDR_LIST`), the name
+  servers (`EPICS_PVA_NAME_SERVERS` — TCP unicast, **not** subnet-bound), and the auto-address
+  search (`*_AUTO_ADDR_LIST`), which EPICS defaults to **ON**: even a null environment broadcasts
+  PV searches into the local subnets. Run `epics-doctor` for the effective posture; it claims
+  `localhost-isolated` only when every search list is unset AND the auto search is explicitly
+  disabled.
 - **REST planes are opt-in.** Each REST plane stays disabled until its `*_URL` env var is set; an
   empty URL means no client and no network call.
 
@@ -192,8 +196,8 @@ own gate — distinct from `set_pv_value`, and it never touches `ALLOW_PV_WRITE`
 up before a write proceeds, each fail-closed and audited as `DENY` before the raise:
 
 - **Env gate.** `EPICS_MCP_ALLOW_OLOG_WRITE=true` (default false = every write denied).
-- **Test-server URL boundary.** Unlike PV write (implicitly safe via the address-list localhost
-  isolation), Olog speaks HTTP to an arbitrary URL. A write is refused unless the `OLOG_URL` host is
+- **Test-server URL boundary.** Unlike PV write (bounded by its own gate + regex allowlist, with
+  reach decided by the launcher's EPICS search env), Olog speaks HTTP to an arbitrary URL. A write is refused unless the `OLOG_URL` host is
   **loopback** (the local Olog), or the exact **https** base URL is in
   `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` **and** `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true`. A private
   (non-loopback) host — and any plain-http remote (Basic creds are cleartext) — is refused by default;

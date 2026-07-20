@@ -47,15 +47,17 @@ Only set the planes you use. See `.env.example` for the full commented list and 
 
 | Plane | Variable(s) | Notes |
 |-------|-------------|-------|
-| Live PV (PVA/CA) | `EPICS_MCP_PROVIDER`, plus the standard `EPICS_PVA_ADDR_LIST` / `EPICS_CA_ADDR_LIST` (+ `*_AUTO_ADDR_LIST`) | No URL — the p4p provider + the EPICS address list. Localhost-isolated until the address list is widened. |
+| Live PV (PVA/CA) | `EPICS_MCP_PROVIDER`, plus the standard EPICS search env: `EPICS_PVA_ADDR_LIST` / `EPICS_CA_ADDR_LIST`, `EPICS_PVA_NAME_SERVERS`, `*_AUTO_ADDR_LIST` | No URL — reach follows the EPICS search env. ⚠️ The auto-addr search defaults to **ON** when unset (subnet broadcast); `epics-doctor` prints the effective posture. |
 | ChannelFinder | `EPICS_MCP_CHANNELFINDER_URL` (+ `_AUTH`, `_MAX_RESULTS`) | Service root incl. context path, e.g. `http://channelfinder:8080/ChannelFinder`. |
 | Archiver Appliance | `EPICS_MCP_ARCHIVER_URL` (mgmt `:17665`), `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` (retrieval `:17668`), `_AUTH` | See the cluster/port assumptions in section 5. |
 | Alarm Logger | `EPICS_MCP_ALARM_URL` (+ `_AUTH`) | Phoebus Alarm Logger REST root. |
 | Naming Service | `EPICS_MCP_NAMING_URL` | No built-in host — no egress unless set. |
 | Olog logbook | `EPICS_MCP_OLOG_URL` (+ `_AUTH`, `_ASSUME_TEST_DATA`) | REST root incl. context path. Output is DS-PRIVACY-redacted (author dropped / free text withheld) — **unless BOTH the URL is loopback AND `EPICS_MCP_OLOG_ASSUME_TEST_DATA=true`**, where entries come back whole (ESS-spec pending; `epics-doctor` prints the effective posture). |
 
-Network posture: the server opens no non-local connection until its launcher widens the EPICS
-address list; the REST planes stay off until their `*_URL` is set. Writes are gated off by default
+Network posture: PV reach is decided by the launcher's EPICS search-path env — address lists, name
+servers, and the auto-addr search, which defaults to **ON** (subnet broadcast) when unset; a
+genuinely localhost-isolated instance needs every list unset **and** `*_AUTO_ADDR_LIST=NO`. The REST
+planes stay off until their `*_URL` is set. Writes are gated off by default
 (`EPICS_MCP_ALLOW_PV_WRITE=false`) and additionally need a regex allowlist, a rate limit and an audit
 log.
 

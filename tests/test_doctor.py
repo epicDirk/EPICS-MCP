@@ -782,6 +782,71 @@ async def test_live_plane_probe_generic_exception_disconnected(
     assert live.detail is not None and "ValueError" in live.detail
 
 
+# --- live plane posture (BG14): the isolation claim must be TRUE, not a default ---
+# conftest's _isolate_epics_search_env strips every search var first; each test then sets
+# exactly the environment it asserts about.
+
+
+async def test_live_posture_sees_name_servers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BG14 red proof 1: `EPICS_PVA_NAME_SERVERS` alone is a search path — TCP unicast to the
+    named servers, NOT subnet-bound (pvxs client.cpp startNS()). Pre-fix the posture ignored
+    the var entirely and claimed `localhost-isolated` while the client dialed out."""
+    _set_config(monkeypatch)
+    monkeypatch.setenv("EPICS_PVA_NAME_SERVERS", "192.0.2.55:5075")
+    report = await run_doctor()
+    live = _plane(report, "live")
+    assert live.detail is not None
+    assert "localhost-isolated" not in live.detail
+    # The active search path is NAMED, not just vaguely "not isolated".
+    assert "EPICS_PVA_NAME_SERVERS" in live.detail
+
+
+async def test_live_posture_honours_auto_addr_list_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BG14 red proof 2 (the stronger one): with NOTHING set, pvxs still broadcasts PV
+    searches into the local subnets — autoAddrList defaults to true (pvxs pvxs/client.h).
+    The unconditional `localhost-isolated (no address list set)` claim was wrong even for
+    the null environment; this test kills the unconditional formulation, not just one
+    forgotten variable."""
+    _set_config(monkeypatch)
+    report = await run_doctor()
+    live = _plane(report, "live")
+    assert live.detail is not None
+    assert "localhost-isolated" not in live.detail
+    assert "auto-addr" in live.detail  # the default-on broadcast path is named
+
+
+async def test_live_posture_isolated_only_when_auto_addr_explicitly_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Positive control: the isolation claim survives in exactly the one state where it is
+    true — every search list unset AND the auto-addr search explicitly disabled."""
+    _set_config(monkeypatch)
+    monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", "NO")
+    monkeypatch.setenv("EPICS_CA_AUTO_ADDR_LIST", "NO")
+    report = await run_doctor()
+    live = _plane(report, "live")
+    assert live.detail is not None
+    assert "localhost-isolated" in live.detail
+
+
+async def test_live_posture_names_every_set_search_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """All set search vars appear in the posture — none is masked by another (pre-fix the
+    `or` fallback reported ONLY the PVA list and swallowed the rest)."""
+    _set_config(monkeypatch)
+    monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "192.0.2.255")
+    monkeypatch.setenv("EPICS_CA_ADDR_LIST", "192.0.2.254")
+    monkeypatch.setenv("EPICS_PVA_NAME_SERVERS", "192.0.2.55:5075")
+    report = await run_doctor()
+    live = _plane(report, "live")
+    assert live.detail is not None
+    for var in ("EPICS_PVA_ADDR_LIST", "EPICS_CA_ADDR_LIST", "EPICS_PVA_NAME_SERVERS"):
+        assert var in live.detail
+
+
 # --- cli_doctor.main: exit codes + render (the deliberate 0/1/2 convention) ---
 
 
