@@ -77,6 +77,41 @@ def test_session_forwards_optional_auth_header() -> None:
     assert session.headers["authorization"] == "Bearer tok"
 
 
+def test_session_retries_zero_yields_single_attempt_default_still_three() -> None:
+    """Q2: der Aufrufer kann ``retries=0`` verlangen — genau EIN Versuch, kein durch die
+    Retry-Zahl multiplizierter Timeout mehr (der bisher unausdrückbare Fall „ein Versuch, langer
+    Timeout"). ``retries=0`` spiegelt die No-Retry-Adapter-Form von :func:`build_write_session`
+    (``max_retries.total == 0`` auf beiden Schemata). Der Default bleibt bei 3, damit bestehende
+    Aufrufer unverändert die geteilte 3-Retry-Politik bekommen."""
+    single = build_retrying_session(retries=0)
+    for scheme in ("http://x", "https://x"):
+        adapter = single.get_adapter(scheme)
+        assert isinstance(adapter, HTTPAdapter)
+        retries = adapter.max_retries
+        total = retries.total if isinstance(retries, Retry) else retries
+        assert total == 0
+    default = build_retrying_session()
+    for scheme in ("http://x", "https://x"):
+        adapter = default.get_adapter(scheme)
+        assert isinstance(adapter, HTTPAdapter)
+        assert isinstance(adapter.max_retries, Retry)
+        assert adapter.max_retries.total == 3
+
+
+def test_session_retries_and_backoff_are_honoured_when_overridden() -> None:
+    """Beide Stellschrauben sind parametrisierbar; die Werte landen auf der gemounteten
+    ``Retry``-Politik, während die geteilte 502/503/504-``status_forcelist`` erhalten bleibt."""
+    session = build_retrying_session(retries=5, backoff_factor=1.5)
+    for scheme in ("http://x", "https://x"):
+        adapter = session.get_adapter(scheme)
+        assert isinstance(adapter, HTTPAdapter)
+        retries = adapter.max_retries
+        assert isinstance(retries, Retry)
+        assert retries.total == 5
+        assert retries.backoff_factor == 1.5
+        assert set(retries.status_forcelist or ()) == {502, 503, 504}
+
+
 # --- TLS verify resolution at the single chokepoint (DS-1) ---
 
 

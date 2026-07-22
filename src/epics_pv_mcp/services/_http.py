@@ -134,13 +134,24 @@ def build_retrying_session(
     accept: str = "application/json",
     auth_header: str | None = None,
     verify: bool | str | None = None,
+    retries: int = 3,
+    backoff_factor: float = 0.5,
 ) -> requests.Session:
     """Return a :class:`requests.Session` with the accept header, optional auth, and a retry policy.
 
-    The single source of the retry policy (3 retries, backoff 0.5, ``status_forcelist`` 502/503/504)
-    shared by every REST client — change it here and all planes inherit it. urllib3 ships with
-    requests, but the ``Retry`` import stays guarded so a stripped environment degrades to no-retry
-    rather than failing at construction.
+    The single source of the retry policy (default 3 retries, backoff 0.5, ``status_forcelist``
+    502/503/504) shared by every REST client — change the defaults here and all planes inherit them.
+    urllib3 ships with requests, but the ``Retry`` import stays guarded so a stripped environment
+    degrades to no-retry rather than failing at construction.
+
+    ``retries`` and ``backoff_factor`` are parametrized (Q2) so a caller can request ``retries=0`` —
+    a SINGLE attempt with no retry-multiplied timeout, the „one attempt, long timeout" shape this
+    factory could not express before (urllib3 applies the per-request ``timeout`` PER attempt, so a
+    3-retry session's worst case is ≈ 4×T plus backoff, with no wall-clock deadline). The default
+    stays ``(3, 0.5)`` so every existing caller is unchanged. The ``retries=0`` path mirrors
+    :func:`build_write_session`'s no-retry adapter shape (``HTTPAdapter(max_retries=0)`` → requests
+    builds ``Retry(total=0)``), keeping the redirect/other guards consistent with a no-retry session
+    rather than carrying a ``status_forcelist`` that ``total=0`` would never consult anyway.
 
     TLS trust is resolved HERE, the single place every REST session is built, so all four clients
     (and the crossplane/coverage adapters and the direct diagnose naming client) inherit it without
@@ -165,15 +176,25 @@ def build_retrying_session(
     session.verify = verify
     if verify is not True:
         session.trust_env = False
-    try:
-        from urllib3.util.retry import Retry
+    if retries <= 0:
+        # Single attempt (Q2 „one attempt, long timeout"): reuse build_write_session's no-retry
+        # adapter shape. No Retry import needed — requests builds Retry(total=0) from the int, so
+        # even a stripped environment gets a deterministic no-retry adapter here.
+        no_retry = HTTPAdapter(max_retries=0)
+        session.mount("http://", no_retry)
+        session.mount("https://", no_retry)
+    else:
+        try:
+            from urllib3.util.retry import Retry
 
-        retry = Retry(total=3, backoff_factor=0.5, status_forcelist=[502, 503, 504])
-        adapter = HTTPAdapter(max_retries=retry)
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
-    except ImportError:
-        pass  # urllib3 retry unavailable — proceed without
+            retry = Retry(
+                total=retries, backoff_factor=backoff_factor, status_forcelist=[502, 503, 504]
+            )
+            adapter = HTTPAdapter(max_retries=retry)
+            session.mount("http://", adapter)
+            session.mount("https://", adapter)
+        except ImportError:
+            pass  # urllib3 retry unavailable — proceed without
     return session
 
 
