@@ -316,13 +316,20 @@ class AlarmClient:
         # S11: unreadable used to read as ([], False) — "no alarms in the window" — and junk
         # records were silently dropped (a fabricated, smaller history). Both raise now.
         records = _require_alarm_records(data, "/search/alarm")
+        # QA(2026-07-22): capture the server-side truncation signal (the ``size = max_events + 1``
+        # over-fetch) BEFORE any client-side filtering below consumes it. Otherwise the config:
+        # filter could drop the +1 probe record and flip ``capped`` to False on a genuinely
+        # truncated window — a silent false-completeness breaking the honest-``capped`` invariant.
+        server_truncated = len(records) > max_events
         if command is not None:
             # MA-2b(b): ``command`` maps server-side to the ``enabled`` field, which is set on BOTH
             # state: and config: docs (a state-change doc carries enabled=false intrinsically).
             # Restrict to config: docs so "which alarm CONFIGS were enabled/disabled" is not swamped
             # by state-change events — the config-path prefix distinguishes them. A client-side
-            # correctness guard, independent of whether the server honoured the param.
+            # correctness guard, independent of whether the server honoured the param. NOTE: with a
+            # truncated window (capped) the config: docs among the newest page can be crowded out by
+            # state: docs — capped stays True to flag it; raise max_events or narrow the window.
             records = [record for record in records if str(record["config"]).startswith("config:")]
-        capped = len(records) > max_events
+        capped = server_truncated or len(records) > max_events
         events = [_project_alarm_event(record) for record in records[:max_events]]
         return events, capped

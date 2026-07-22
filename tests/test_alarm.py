@@ -687,3 +687,27 @@ async def test_get_alarm_history_tool_severity_and_command_are_enums() -> None:
         and "MINOR_ACK" in severity_schema
         and "UNDEFINED" in severity_schema
     )
+
+
+def test_get_alarm_history_command_capped_survives_config_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """QA(2026-07-22): the client-side config: filter must NOT consume the size=max_events+1
+    over-fetch sentinel — a truncated window whose newest page holds a dropped state: doc must
+    still report capped=True. Mutant (capped computed AFTER the filter) -> capped=False on a
+    truncated window -> this fails (the silent false-completeness the QA found)."""
+    client = AlarmClient("http://alarm")
+    # max_events=2 -> the client requests size=3; the server returns 3 newest docs (the window IS
+    # truncated), one of them a state: doc the config: filter drops.
+    raw = [
+        {"config": "config:/Accelerator/DEV/A", "pv": "A", "enabled": False},
+        {"config": "state:/Accelerator/DEV/B", "pv": "B", "enabled": False},
+        {"config": "config:/Accelerator/DEV/C", "pv": "C", "enabled": False},
+    ]
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(raw)))
+    events, capped = client.get_alarm_history(
+        "A", "2026-06-01", "2026-06-02", max_events=2, command="Disabled"
+    )
+    assert capped is True  # window truncated (3 > 2) though the filter left exactly 2 config docs
+    assert len(events) == 2
+    assert all(str(event["config"]).startswith("config:") for event in events)

@@ -193,37 +193,62 @@ def test_unconfigured_pv_in_a_real_tree_is_still_false(
     assert configured is False
 
 
-# --- MA-2b(a/c) server-side filters: honoured, or silently ignored + broadened? (differential) ---
+# --- MA-2b(a/c) alarm filters: honoured, ignored, or over-restricting? (two controls each) ---
+# (each probe pairs a negative control with a positive control on the filter VALUE — see below)
 #
 # The alarm-logger IGNORES an unsupported query param (its parser's default branch is a bare
-# `break;`) and BROADENS the result instead of erroring. A mock cannot see this — only a live
-# negative control can: an IMPOSSIBLE filter value must return nothing while the unfiltered window
-# holds events. If the filter were ignored, the impossible value would return the full (broadened)
-# set and these go red — which is exactly what earns the tool description the right to drop
-# "UNVERIFIED" for the server that passes them.
+# `break;`) and BROADENS the result. A NEGATIVE control (impossible value -> []) catches that. But a
+# negative control ALONE is NOT enough — this repo's server-decided rule (CLAUDE.md) names the exact
+# "filter that blocks everything" case: a server that returns [] for EVERY value passes a
+# negative-only test yet silently drops real data. So each probe ALSO carries a POSITIVE control on
+# the filter VALUE, derived from the unfiltered window itself (the tree lives in each event's
+# `config` path, the severity in its `severity` field): a real value must return a NON-EMPTY result.
+# BOTH controls must hold before the get_alarm_history tool description may drop "UNVERIFIED" for a
+# given server; a negative control alone earns nothing (QA 2026-07-22).
 
 
 def test_root_filter_is_honoured(client: AlarmClient, pv: str) -> None:
-    """root differential: an UNMATCHED tree must return nothing while the unfiltered window holds
-    events — else the server ignored root and silently broadened."""
-    assert _count(client, pv, "7 days"), _NO_REFERENCE  # positive control
-    nonsense, capped = client.get_alarm_history(
+    """root two controls: an UNMATCHED tree returns nothing (negative — catches silent broadening),
+    AND the pv's OWN tree (derived from the unfiltered events) returns a non-empty result (positive
+    — catches a server that over-restricts / blocks everything)."""
+    unfiltered, _ = _events(client, pv, "7 days")
+    assert unfiltered, _NO_REFERENCE  # baseline — without events neither control is evaluable
+    nonsense, ncap = client.get_alarm_history(
         pv, start="7 days", end="now", max_events=_MAX_EVENTS, root="ZZZNoSuchTree"
     )
-    assert not capped and nonsense == [], (
-        "root was ignored: an unmatched tree still returned events — the server silently broadened"
+    assert not ncap and nonsense == [], (
+        "root ignored: an unmatched tree still returned events — the server silently broadened"
     )
+    real_tree = str(unfiltered[0]["config"]).split("/")[
+        1
+    ]  # config = 'state:/<tree>/…' | 'config:/…'
+    matched, _ = client.get_alarm_history(
+        pv, start="7 days", end="now", max_events=_MAX_EVENTS, root=real_tree
+    )
+    assert matched, f"root over-restricts: the pv's own tree {real_tree!r} matched nothing"
 
 
 def test_severity_filter_is_honoured(client: AlarmClient, pv: str) -> None:
-    """severity differential: an impossible severity must return nothing while the unfiltered
-    window holds events — else the server ignored severity and silently broadened."""
-    assert _count(client, pv, "7 days"), _NO_REFERENCE  # positive control
-    nonsense, capped = client.get_alarm_history(
+    """severity two controls: an impossible severity returns nothing (negative), AND a severity that
+    actually appears in the unfiltered window returns a non-empty result (positive)."""
+    unfiltered, _ = _events(client, pv, "7 days")
+    assert unfiltered, _NO_REFERENCE  # baseline
+    nonsense, ncap = client.get_alarm_history(
         pv, start="7 days", end="now", max_events=_MAX_EVENTS, severity="ZZZNOSUCH"
     )
-    assert not capped and nonsense == [], (
-        "severity was ignored: an impossible severity still returned events (silent broadening)"
+    assert not ncap and nonsense == [], (
+        "severity ignored: an impossible severity still returned events (silent broadening)"
+    )
+    present = next((str(e["severity"]) for e in unfiltered if e.get("severity")), None)
+    if present is None:
+        pytest.skip(
+            "no event in the window carries a severity — the positive control is not evaluable"
+        )
+    matched, _ = client.get_alarm_history(
+        pv, start="7 days", end="now", max_events=_MAX_EVENTS, severity=present
+    )
+    assert matched, (
+        f"severity over-restricts: {present!r} appears unfiltered but filtered to nothing"
     )
 
 
