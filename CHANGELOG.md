@@ -125,6 +125,19 @@ carry breaking changes).
 
 ### Changed
 
+- **ChannelFinder filter semantics VERIFIED against a live server (MA-2 Teil C, 2026-07-22).** A
+  differential live probe (positive + negative controls) confirmed the `find_channels` property/tag
+  filters behave as documented, so the "UNVERIFIED until a differential live probe" caveat is dropped
+  from the tool description, the `find_channels` docstring, `README.md` and the operator guide (the "0
+  results ≠ unknown property" honesty rule stays — a structural fact, not a provisional marker). Five
+  new controls in `tests/test_channelfinder_live.py`, all on the surfaced `pvStatus` property: a
+  positive strict-subset (`has_properties` returns a non-empty subset whose members carry the value),
+  an absence-partition (`lacks_properties` + `has_properties={p: "*"}` sum to the unfiltered count), a
+  value-negation (`not_property_values` drops that value only), `count_only`↔list agreement, and an
+  impossible-value collapse (an unknown value → 0 — the very reason "0 ≠ unknown property" holds).
+  They run under `pytest -m live` with `EPICS_MCP_CHANNELFINDER_URL` + `EPICS_MCP_LIVE_CF_GLOB`, and
+  skip silently otherwise.
+
 - **Refusals no longer report as `INTERNAL` (OQ5).** `OlogError` carries `error_code` as a class
   attribute and each subclass sets its own, mirroring `EpicsError`. `OlogRoundTripUnsafe` →
   `INVALID_INPUT`, `OlogWholeModeRequired` → `OLOG_WRITE_DENIED`, `OlogAttachmentDownloadDenied` →

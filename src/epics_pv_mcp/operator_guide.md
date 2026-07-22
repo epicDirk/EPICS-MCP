@@ -590,10 +590,9 @@ messages embed the full request URL — an internal host would leak into this fi
   (`has_properties`/`lacks_properties`/`not_property_values`/`has_tags`/`lacks_tags`) and `count_only`
   for an exact match count via `/count` without pulling the matches. Property filtering is gated to
   the DS-privacy safe-property allowlist (a redacted property like `accessGroup` is refused with
-  `INVALID_INPUT`); widen it with `EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES`. Two honesty rules:
-  the filter semantics are **UNVERIFIED** until a differential live probe, and an unknown/misspelled
-  property name is **not a server error** — it narrows the result to 0, indistinguishable from a
-  genuinely empty match (there is no vocabulary-discovery endpoint yet).
+  `INVALID_INPUT`); widen it with `EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES`. One honesty rule:
+  an unknown/misspelled property name is **not a server error** — it narrows the result to 0,
+  indistinguishable from a genuinely empty match (there is no vocabulary-discovery endpoint yet).
 - **Enumerate PVs by pattern?** `discover_pvs` with a wildcard (`*`/`?`) routes to ChannelFinder —
   the same registry `find_channels` queries — so hits are `registered` (registry membership, not a
   live connect; use `get_pvs`/`get_pv_value` for liveness). A concrete name instead does a live p4p

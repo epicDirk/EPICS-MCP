@@ -379,8 +379,7 @@ async def find_channels(
         Field(
             description=(
                 "Property filter {name: value-glob}; use '*' as the value for 'property present, "
-                "any value'. Distinct properties are AND-ed. Gated to the safe-property allowlist. "
-                "UNVERIFIED server-side until a live probe."
+                "any value'. Distinct properties are AND-ed. Gated to the safe-property allowlist."
             )
         ),
     ] = None,
@@ -430,8 +429,7 @@ async def find_channels(
     exact match count. CAVEATS: (1) property filtering is gated to the DS-privacy safe-property
     allowlist (a redacted property like accessGroup is refused — filtering it would reconstruct the
     partition the projection hides); expand EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES to filter on
-    more. (2) The filter semantics are UNVERIFIED against a live server until a differential probe
-    runs. (3) An unknown/misspelled property name is NOT a server error — it narrows the result to
+    more. (2) An unknown/misspelled property name is NOT a server error — it narrows the result to
     0, indistinguishable from a genuinely empty match.
 
     A malformed registry record (a non-dict element, or one without a usable name) raises a loud

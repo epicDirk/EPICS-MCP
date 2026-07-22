@@ -129,3 +129,96 @@ def test_live_channels_satisfy_the_strict_schema(client: ChannelFinderClient, gl
         "pin anything. Check EPICS_MCP_LIVE_CF_GLOB."
     )
     assert all(isinstance(channel["name"], str) and channel["name"] for channel in channels)
+
+
+# --- MA-2 filter controls: the property/tag filters the tool description marks UNVERIFIED until a
+# --- live probe. Differential (positive + negative controls), all on ``pvStatus`` — a SURFACED,
+# --- always-allowlisted property, so these need no §8 allowlist override to run. Counts assert via
+# --- the uncapped ``/count`` endpoint; any pulled list is checked against the cap itself (there is
+# --- no ``capped`` flag on ``find_channels`` — truncation shows only as ``len == _MAX_RESULTS``.
+
+
+def test_filter_positive_is_a_strict_subset(client: ChannelFinderClient, glob: str) -> None:
+    """Positive control: a value filter returns a NON-EMPTY subset and every member actually
+    carries that value. Without the member check, ``has_properties`` being silently dropped would
+    still pass — it would return the whole glob, which is also non-empty. ``pvStatus`` is surfaced,
+    so the value is verifiable on each record."""
+    total = client.count_channels(glob)
+    matches = client.find_channels(
+        glob, max_results=_MAX_RESULTS, has_properties={"pvStatus": "Inactive"}
+    )
+    assert 0 < len(matches) < _MAX_RESULTS, (
+        f"{glob!r} filtered on pvStatus=Inactive returned {len(matches)} channels — need a "
+        "non-empty, un-capped subset (pick a glob that straddles Active and Inactive)"
+    )
+    assert len(matches) <= total, "a filtered subset cannot exceed the unfiltered count"
+    assert all(c["properties"].get("pvStatus") == "Inactive" for c in matches), (
+        "has_properties was ignored: a returned channel does not carry the value it filtered on"
+    )
+
+
+def test_filter_absence_partitions_the_glob(client: ChannelFinderClient, glob: str) -> None:
+    """Absence control: ``lacks_properties=[p]`` and ``has_properties={p: '*'}`` are exact
+    complements, so their counts must sum to the unfiltered total. Uses the uncapped ``/count``
+    endpoint (no cap guard needed) and proves ``lacks_properties`` does not silently broaden."""
+    total = client.count_channels(glob)
+    lacking = client.count_channels(glob, lacks_properties=["pvStatus"])
+    having = client.count_channels(glob, has_properties={"pvStatus": "*"})
+    assert lacking + having == total, (
+        f"lacks({lacking}) + has-present({having}) != total({total}) — the absence filter does "
+        "not partition the glob"
+    )
+    # No member of the 'lacks' set carries the property. Vacuously true when ``lacking == 0``,
+    # but non-vacuous the moment a glob includes property-less channels.
+    without = client.find_channels(glob, max_results=_MAX_RESULTS, lacks_properties=["pvStatus"])
+    assert len(without) < _MAX_RESULTS
+    assert all("pvStatus" not in c["properties"] for c in without)
+
+
+def test_filter_negation_excludes_that_value_only(client: ChannelFinderClient, glob: str) -> None:
+    """Negation control: ``not_property_values={p: v}`` drops the channels whose ``p == v`` while
+    keeping the other-valued ones. Pull a concrete ``Active`` channel, then assert it is ABSENT
+    from the negated result AND that an ``Inactive`` channel SURVIVES — the two-sided proof a
+    single 'it returned fewer' count could not give."""
+    active = client.find_channels(
+        glob, max_results=_MAX_RESULTS, has_properties={"pvStatus": "Active"}
+    )
+    assert active and len(active) < _MAX_RESULTS, (
+        f"{glob!r} has no un-capped Active channel to negate against — pick a glob that has one"
+    )
+    an_active_name = active[0]["name"]
+
+    negated = client.find_channels(
+        glob, max_results=_MAX_RESULTS, not_property_values={"pvStatus": "Active"}
+    )
+    assert len(negated) < _MAX_RESULTS
+    negated_names = {c["name"] for c in negated}
+    assert an_active_name not in negated_names, (
+        "not_property_values did not exclude the channel whose value it negated"
+    )
+    assert any(c["properties"].get("pvStatus") == "Inactive" for c in negated), (
+        "the negation dropped the non-Active channels too — it is not a value negation"
+    )
+
+
+def test_count_only_agrees_with_the_list(client: ChannelFinderClient, glob: str) -> None:
+    """count_only cross-check: the ``/count`` endpoint and the pulled list must agree on the SAME
+    filtered query. Kept under the cap so the list is complete — otherwise this would measure the
+    cap, not the count."""
+    listed = client.find_channels(
+        glob, max_results=_MAX_RESULTS, has_properties={"pvStatus": "Active"}
+    )
+    assert len(listed) < _MAX_RESULTS, "list hit the cap — count_only would legitimately disagree"
+    counted = client.count_channels(glob, has_properties={"pvStatus": "Active"})
+    assert counted == len(listed), (
+        f"count_only({counted}) != len(find_channels)({len(listed)}) for the same filter"
+    )
+
+
+def test_impossible_value_collapses_to_zero(client: ChannelFinderClient, glob: str) -> None:
+    """Negative control on the VALUE axis: an impossible ``pvStatus`` value must collapse to 0, not
+    broaden. This is exactly why '0 matches != unknown property' holds — an unknown VALUE and an
+    unknown property NAME both narrow to nothing, indistinguishably."""
+    impossible = {"pvStatus": "ZZZ-no-such-status-XYZ"}
+    assert client.find_channels(glob, max_results=_MAX_RESULTS, has_properties=impossible) == []
+    assert client.count_channels(glob, has_properties=impossible) == 0
