@@ -10,6 +10,7 @@ important test of the phase. All host/URL/person tokens are SYNTHETIC (facility-
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import ClassVar
@@ -407,6 +408,72 @@ class TestGateConfigFailClosed:
             with pytest.raises(SafetyConfigError):
                 OlogWriteGate(EpicsConfig(audit_log_file=str(tmp_path / "nope" / "audit.log")))
         finally:
+            audit.handlers.clear()
+            audit.handlers.extend(saved)
+
+
+class TestOlogAuditSink:
+    """K1/K2 (symmetrisch zu test_safety.py::TestAuditSink): der Olog-Audit-FileHandler muss
+    UTF-8 kodieren UND UTC stempeln. Ein ``μ``/``Ω``/``ä`` in einer Audit-Zeile (Logbuch-Name,
+    Level, Titel-Länge — nie Freitext) fällt ohne ``encoding="utf-8"`` unter cp1252 spurlos weg
+    (``Handler.handleError`` schluckt den ``UnicodeEncodeError``); ein Lokalzeit-Stempel ist beim
+    Vorfall-Nachvollzug mehrdeutig.
+    """
+
+    def test_audit_file_handler_encodes_utf8(self, tmp_path: Path) -> None:
+        # K1 (portabler Red-Proof): ``.encoding`` muss "utf-8" sein (ohne Angabe: None).
+        audit = logging.getLogger(_AUDIT_LOGGER)
+        saved = audit.handlers[:]
+        audit.handlers.clear()
+        try:
+            gate = OlogWriteGate(EpicsConfig(audit_log_file=str(tmp_path / "olog-audit.log")))
+            handler = gate._audit_handler
+            assert isinstance(handler, logging.FileHandler)
+            assert handler.encoding == "utf-8"
+        finally:
+            for h in audit.handlers[:]:
+                h.close()
+            audit.handlers.clear()
+            audit.handlers.extend(saved)
+
+    def test_audit_line_with_unicode_units_survives(self, tmp_path: Path) -> None:
+        # K1 (funktionaler Beleg): eine Audit-Zeile mit μ/Ω/ä landet unverfälscht in der Datei.
+        # Ω (U+03A9) ist in cp1252 nicht darstellbar → auf Windows sicherer Red-Proof-Trigger.
+        audit = logging.getLogger(_AUDIT_LOGGER)
+        saved = audit.handlers[:]
+        audit.handlers.clear()
+        try:
+            log_path = tmp_path / "olog-audit.log"
+            gate = OlogWriteGate(EpicsConfig(audit_log_file=str(log_path)))
+            probe = "OLOG_WRITE logbook=Ström-50Ω title_len=12 μ ä"
+            gate._emit(probe)
+            handler = gate._audit_handler
+            assert handler is not None
+            handler.flush()
+            assert probe in log_path.read_text(encoding="utf-8")
+        finally:
+            for h in audit.handlers[:]:
+                h.close()
+            audit.handlers.clear()
+            audit.handlers.extend(saved)
+
+    def test_audit_formatter_stamps_utc(self, tmp_path: Path) -> None:
+        # K2: Formatter konvertiert auf UTC (time.gmtime) und endet mit literalem 'Z'.
+        audit = logging.getLogger(_AUDIT_LOGGER)
+        saved = audit.handlers[:]
+        audit.handlers.clear()
+        try:
+            gate = OlogWriteGate(EpicsConfig(audit_log_file=str(tmp_path / "olog-audit.log")))
+            handler = gate._audit_handler
+            assert isinstance(handler, logging.FileHandler)
+            formatter = handler.formatter
+            assert formatter is not None
+            assert formatter.converter is time.gmtime
+            record = logging.LogRecord(_AUDIT_LOGGER, logging.INFO, __file__, 1, "m", None, None)
+            assert formatter.formatTime(record, formatter.datefmt).endswith("Z")
+        finally:
+            for h in audit.handlers[:]:
+                h.close()
             audit.handlers.clear()
             audit.handlers.extend(saved)
 

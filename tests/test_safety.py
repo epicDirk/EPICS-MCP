@@ -1,6 +1,7 @@
 """Tests for the SafetyLayer (write gate, pattern allowlist, rate limiting, audit)."""
 
 import logging
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -397,3 +398,76 @@ class TestSafetyConfig:
             assert all(r is results[0] for r in results)
         finally:
             safety_mod._safety = original
+
+
+class TestAuditSink:
+    """K1/K2: der Audit-FileHandler muss UTF-8 kodieren UND UTC stempeln.
+
+    Beide Defekte sind STILL verlustbehaftet: ein ``μ``/``Ω``/``ä`` (echte EPICS-Einheiten,
+    schwedische Namen) in einer Audit-Zeile löst ohne ``encoding="utf-8"`` unter der Plattform-
+    Locale (Windows cp1252) einen ``UnicodeEncodeError`` aus, den die stdlib-``Handler.handleError``
+    SCHLUCKT — die Zeile verschwindet spurlos; und ein naiver Lokalzeit-Stempel ist beim
+    Nachvollzug eines Vorfalls über Zonen/Sommerzeit hinweg mehrdeutig.
+    """
+
+    def test_audit_file_handler_encodes_utf8(self, tmp_path: Path) -> None:
+        # K1 (portabler Red-Proof): der FileHandler trägt explizit encoding="utf-8". Ohne die
+        # Angabe ist ``.encoding`` None (Plattform-Locale) — auf jeder Plattform rot messbar.
+        audit = logging.getLogger("epics_pv_mcp.audit")
+        saved = audit.handlers[:]
+        audit.handlers.clear()
+        try:
+            sl = SafetyLayer(EpicsConfig(audit_log_file=str(tmp_path / "audit.log")))
+            handler = sl._audit_handler
+            assert isinstance(handler, logging.FileHandler)  # ein echter Datei-Sink
+            assert handler.encoding == "utf-8"
+        finally:
+            for h in audit.handlers[:]:
+                h.close()
+            audit.handlers.clear()
+            audit.handlers.extend(saved)
+
+    def test_audit_line_with_unicode_units_survives(self, tmp_path: Path) -> None:
+        # K1 (funktionaler Beleg): eine Audit-Zeile mit μ/Ω/ä landet unverfälscht in der Datei.
+        # Auf cp1252 (Windows) fällt sie ohne encoding="utf-8" spurlos weg (handleError schluckt
+        # den UnicodeEncodeError). Ω (U+03A9) ist in cp1252 nicht darstellbar → sicherer Trigger.
+        audit = logging.getLogger("epics_pv_mcp.audit")
+        saved = audit.handlers[:]
+        audit.handlers.clear()
+        try:
+            log_path = tmp_path / "audit.log"
+            sl = SafetyLayer(EpicsConfig(audit_log_file=str(log_path)))
+            probe = "SIM:PS-01:Cur-RB 12 μA 50 Ω Håkan-ä"
+            sl._emit("UNIT_PROBE pv=%s", probe)
+            handler = sl._audit_handler
+            assert handler is not None
+            handler.flush()
+            assert probe in log_path.read_text(encoding="utf-8")
+        finally:
+            for h in audit.handlers[:]:
+                h.close()
+            audit.handlers.clear()
+            audit.handlers.extend(saved)
+
+    def test_audit_formatter_stamps_utc(self, tmp_path: Path) -> None:
+        # K2: der Formatter muss auf time.gmtime (UTC) konvertieren und mit literalem 'Z' enden.
+        # Framework-Zeit bleibt Framework-Zeit — kein datetime.now() in der Logik.
+        audit = logging.getLogger("epics_pv_mcp.audit")
+        saved = audit.handlers[:]
+        audit.handlers.clear()
+        try:
+            sl = SafetyLayer(EpicsConfig(audit_log_file=str(tmp_path / "audit.log")))
+            handler = sl._audit_handler
+            assert isinstance(handler, logging.FileHandler)
+            formatter = handler.formatter
+            assert formatter is not None
+            assert formatter.converter is time.gmtime
+            record = logging.LogRecord(
+                "epics_pv_mcp.audit", logging.INFO, __file__, 1, "m", None, None
+            )
+            assert formatter.formatTime(record, formatter.datefmt).endswith("Z")
+        finally:
+            for h in audit.handlers[:]:
+                h.close()
+            audit.handlers.clear()
+            audit.handlers.extend(saved)

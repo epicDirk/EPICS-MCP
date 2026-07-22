@@ -491,6 +491,22 @@ class TestClientDownload:
         # space → %20 (a single path segment), matching CS-Studio's URLEncoder + '+'→'%20'
         assert captured["url"] == f"{_LOOPBACK}/logs/attachments/12/my%20plot.png"
 
+    def test_by_name_url_quotes_log_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # S1: the log_id path segment must be percent-encoded too, not only the filename. A raw
+        # space is invalid and a raw '/' would retarget the request to a different Olog route.
+        captured: dict[str, str] = {}
+
+        def fake_get_bytes(
+            session: object, url: str, timeout: float, **k: object
+        ) -> tuple[bytes, str | None, str | None]:
+            captured["url"] = url
+            return (b"DATA", "plot.png", "image/png")
+
+        monkeypatch.setattr(olog_client_module, "rest_get_bytes", fake_get_bytes)
+        client = OlogClient(_LOOPBACK, assume_test_data=True, allow_attachment_download=True)
+        client.get_attachment("4 2/x", "plot.png")
+        assert captured["url"] == f"{_LOOPBACK}/logs/attachments/4%202%2Fx/plot.png"
+
     def test_by_id_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         captured: dict[str, str] = {}
 
@@ -960,6 +976,16 @@ class TestClientAddAttachment:
         assert client.whole_mode is False
         with pytest.raises(OlogWholeModeRequired):
             client.get_raw_entry("17")
+
+    def test_get_raw_entry_quotes_log_id_in_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # S1: the whole-mode round-trip read must percent-encode the log_id in the URL path too
+        # (mirrors get_log_entry / get_attachment). A raw '/' would retarget the GET.
+        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        assert client.whole_mode is True
+        get = MagicMock(return_value=_ok_resp(_RAW_ENTRY))
+        monkeypatch.setattr(client.session, "get", get)
+        client.get_raw_entry("4 2/x")
+        assert get.call_args.args[0] == f"{_LOOPBACK}/logs/4%202%2Fx"
 
 
 class _AddCaptureClient:

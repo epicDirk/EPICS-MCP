@@ -294,7 +294,12 @@ class SafetyLayer:
             # Write als roher FileNotFoundError crashen — symmetrisch zur Regex-Validierung im
             # __init__ klar als SafetyConfigError scheitern. Läuft bei JEDER Konstruktion.
             try:
-                handler = logging.FileHandler(self._config.audit_log_file)
+                # encoding="utf-8": ohne die Angabe nimmt FileHandler die Plattform-Locale
+                # (Windows cp1252) — ein μ/Ω/ä in einer Audit-Zeile (echte EPICS-Einheiten,
+                # schwedische Namen) löst dann einen UnicodeEncodeError aus, den die stdlib
+                # ``Handler.handleError`` STILL schluckt (s. _emit-Docstring): die Zeile fällt
+                # spurlos weg. UTF-8 fixiert die Kodierung plattformunabhängig.
+                handler = logging.FileHandler(self._config.audit_log_file, encoding="utf-8")
             except OSError as exc:
                 raise SafetyConfigError(
                     f"Invalid EPICS_MCP_AUDIT_LOG_FILE {self._config.audit_log_file!r}: {exc}",
@@ -302,9 +307,12 @@ class SafetyLayer:
                 ) from exc
         else:
             handler = logging.StreamHandler(sys.stderr)
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%dT%H:%M:%S")
-        )
+        # UTC-Zeitstempel: der Formatter bleibt bei Framework-Zeit (kein datetime.now() in der
+        # Logik) — nur der converter wird auf gmtime gedreht. Das literale 'Z' im datefmt markiert
+        # UTC; %z bliebe unter gmtime leer, deshalb wird es hart geschrieben.
+        formatter = logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%dT%H:%M:%SZ")
+        formatter.converter = time.gmtime
+        handler.setFormatter(formatter)
         # Attach at most one handler (dedup on repeated init). The handler above was built
         # unconditionally, so its path validation already ran; if the logger is already
         # configured, close the extra one (frees the duplicate file descriptor — a

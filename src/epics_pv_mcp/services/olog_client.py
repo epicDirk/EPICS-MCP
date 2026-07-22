@@ -776,7 +776,7 @@ class OlogClient:
         the documented contract, not the only signal seen in the wild; a 401 propagates loudly.
         """
         try:
-            data = self._get(f"{self.base_url}/logs/{log_id}", {})
+            data = self._get(f"{self.base_url}/logs/{quote(log_id, safe='')}", {})
         except OlogResponseError as exc:
             if is_http_404(exc):
                 return None
@@ -1008,7 +1008,11 @@ class OlogClient:
         size-capped (*max_bytes*, default the configured upload cap) so a huge object never OOMs.
         """
         self._require_attachment_bytes_allowed()
-        url = f"{self.base_url}/logs/attachments/{log_id}/{quote(filename, safe='')}"
+        # Both path segments are percent-encoded (safe="") so a space / '/' / '+' in either the log
+        # id or the filename stays a single path element instead of retargeting the request.
+        log_seg = quote(log_id, safe="")
+        name_seg = quote(filename, safe="")
+        url = f"{self.base_url}/logs/attachments/{log_seg}/{name_seg}"
         return rest_get_bytes(
             self.session,
             url,
@@ -1056,7 +1060,7 @@ class OlogClient:
                 "server."
             )
         try:
-            data = self._get(f"{self.base_url}/logs/{log_id}", {})
+            data = self._get(f"{self.base_url}/logs/{quote(log_id, safe='')}", {})
         except OlogResponseError as exc:
             if is_http_404(exc):
                 return None

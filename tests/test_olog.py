@@ -352,6 +352,17 @@ def test_get_log_entry_404_is_not_found(monkeypatch: pytest.MonkeyPatch) -> None
     assert client.get_log_entry("999") is None
 
 
+def test_get_log_entry_quotes_log_id_in_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S1: a log_id carrying a space or ``/`` must be percent-encoded into the URL path segment.
+    An unquoted ``/`` would silently RETARGET the GET to a different Olog route (e.g. ``a/b`` →
+    ``/logs/a/b`` instead of the entry id ``a/b``); a space is an invalid raw path char."""
+    client = OlogClient("http://olog")
+    get = Mock(return_value=_resp(_RAW_ENTRY))
+    monkeypatch.setattr(client.session, "get", get)
+    client.get_log_entry("4 2/x")
+    assert get.call_args.args[0] == "http://olog/logs/4%202%2Fx"
+
+
 def test_get_log_entry_non_404_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
     """A NON-404 failure (5xx / unreachable) must PROPAGATE — a could-not-read is never reported
     as 'not found' (the inverse of the 404 case)."""
