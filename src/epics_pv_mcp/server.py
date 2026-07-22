@@ -42,7 +42,7 @@ from epics_pv_mcp.tools.archiver import (
     _is_archived,
     _list_archived_pvs,
 )
-from epics_pv_mcp.tools.channelfinder import _find_channels
+from epics_pv_mcp.tools.channelfinder import _find_channels, _list_channel_vocabulary
 from epics_pv_mcp.tools.diagnose_connection import _diagnose_connection
 from epics_pv_mcp.tools.discover import _discover_pvs
 from epics_pv_mcp.tools.info import _get_pv_info
@@ -448,6 +448,36 @@ async def find_channels(
         lacks_tags=lacks_tags,
         count_only=count_only,
     )
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def list_channel_vocabulary(
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """List which property keys and tag names you can filter find_channels on.
+
+    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_CHANNELFINDER_URL is
+    set. Answers "what can I hand to find_channels' has_properties / lacks_properties /
+    not_property_values (property keys) and has_tags / lacks_tags (tag names)?" as
+    {enabled, properties, tags} — NAMES only (the DS-privacy owner and value are never surfaced).
+
+    properties is the allowlisted subset that actually exists in this ChannelFinder: it lists only
+    the safe-property names find_channels accepts as filters (a non-allowlisted, person-bearing
+    property like ENGINEER is excluded and would be refused anyway) — expand
+    EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES to surface more. tags is the full, ungated server
+    tag set. An empty list means the CF instance has no such names; enabled=false (with a note)
+    means CF is not configured — the two are distinct. An unreadable/unreachable listing raises
+    loudly rather than reporting an empty vocabulary.
+    """
+    return await _list_channel_vocabulary(timeout)
 
 
 @mcp.tool(

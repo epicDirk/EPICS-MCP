@@ -540,6 +540,43 @@ async def query_channels(
         ) from exc
 
 
+async def query_channel_vocabulary(timeout: float = 5.0) -> dict[str, object]:
+    """List the ChannelFinder property + tag NAMES a caller can filter ``find_channels`` on.
+
+    Default-disabled: with ``EPICS_MCP_CHANNELFINDER_URL`` unset, returns ``enabled: false`` and
+    makes no network call. ``properties`` is the DS-privacy allowlisted subset that exists in this
+    instance (so it never advertises a key ``find_channels`` would refuse); ``tags`` is the full
+    server tag set (tags are ungated). Both fetched in one worker: if either listing is
+    unreadable/unreachable the call fails loudly (an unreadable listing must never read as an empty
+    vocabulary). No filter input → no ``ValueError`` gate arm (unlike :func:`query_channels`).
+    """
+    cfg = get_config()
+    if not cfg.channelfinder_url:
+        return {"enabled": False, "properties": [], "tags": [], "note": _CF_DISABLED_NOTE}
+
+    def _run() -> dict[str, object]:
+        client = ChannelFinderClient(
+            cfg.channelfinder_url,
+            timeout=timeout,
+            auth_header=cfg.channelfinder_auth or None,
+        )
+        return {
+            "enabled": True,
+            "properties": client.list_properties(),
+            "tags": client.list_tags(),
+        }
+
+    try:
+        return await asyncio.to_thread(_run)
+    except ChannelFinderConnectionError as exc:
+        raise EpicsConnectionError(f"ChannelFinder: {exc}") from exc
+    except ChannelFinderError as exc:
+        # S11 §8: the server ANSWERED — an unreadable payload is not an outage.
+        raise EpicsError(
+            f"ChannelFinder: {exc}", error_code=_channelfinder_error_code(exc)
+        ) from exc
+
+
 async def query_naming_lookup(name: str, timeout: float = 5.0) -> dict[str, object]:
     """Look up an ESS device name in the Naming Service: is it registered + ACTIVE?
 

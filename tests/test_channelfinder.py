@@ -22,7 +22,7 @@ from epics_pv_mcp.services.channelfinder_exceptions import (
     ChannelFinderConnectionError,
     ChannelFinderResponseError,
 )
-from epics_pv_mcp.tools.channelfinder import _find_channels
+from epics_pv_mcp.tools.channelfinder import _find_channels, _list_channel_vocabulary
 
 
 def _resp(payload: object, *, ok: bool = True) -> Mock:
@@ -673,3 +673,103 @@ async def test_tool_count_disabled_makes_no_call(monkeypatch: pytest.MonkeyPatch
     )
     result = await _find_channels("X*", count_only=True)
     assert result["enabled"] is False
+
+
+# --- MA-2 CF-Query-Fläche: list_channel_vocabulary (property + tag NAME discovery) ---
+
+
+def test_list_properties_intersects_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    """list_properties surfaces ONLY allowlisted property names present on the server, sorted.
+
+    A non-allowlisted name (ENGINEER — a person-bearing cfstore property) is excluded, exactly as
+    ``_project`` reduces per-channel properties to ``_safe_property_names``. Otherwise the tool
+    would advertise filter keys ``find_channels`` refuses with INVALID_INPUT. The list route
+    carries ``owner``/``value`` — both dropped (name-only).
+    """
+    client = ChannelFinderClient("http://cf:8080/ChannelFinder")
+    payload = [
+        {"name": "pvStatus", "owner": "cf", "value": "", "channels": []},
+        {"name": "iocName", "owner": "cf", "value": "", "channels": []},
+        {"name": "ENGINEER", "owner": "alice", "value": "Alice A", "channels": []},
+    ]
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    assert client.list_properties() == ["iocName", "pvStatus"]  # sorted, allowlisted only
+
+
+def test_list_tags_returns_all_names_sorted_owner_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tags are ungated (as in find_channels' _project): every tag name is returned, sorted, with
+    the per-tag ``owner`` dropped (name-only)."""
+    client = ChannelFinderClient("http://cf")
+    payload = [
+        {"name": "sim", "owner": "alice", "channels": []},
+        {"name": "archived", "owner": "bob", "channels": []},
+    ]
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    assert client.list_tags() == ["archived", "sim"]  # sorted, ungated, owner never surfaced
+
+
+def test_list_vocabulary_strict_on_bad_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S11: a non-list payload or an item without a string 'name' RAISES, never collapses to [] —
+    the listing IS the answer, so 'unreadable' must not read as 'there are none'."""
+    client = ChannelFinderClient("http://cf")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp({"not": "a list"})))
+    with pytest.raises(ChannelFinderResponseError):
+        client.list_tags()
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([{"owner": "x"}])))
+    with pytest.raises(ChannelFinderResponseError):
+        client.list_properties()
+
+
+def test_list_vocabulary_empty_is_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An empty server list yields [] (valid — genuinely no tags/properties), NOT a raise."""
+    client = ChannelFinderClient("http://cf")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([])))
+    assert client.list_tags() == []
+    assert client.list_properties() == []
+
+
+@pytest.mark.asyncio
+async def test_vocabulary_disabled_makes_no_network_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no URL configured, the tool returns enabled=false with empty vocab + a note, and never
+    constructs a client (gate lives in services/checkers.query_channel_vocabulary)."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(channelfinder_url=""),
+    )
+
+    def _boom(*args: object, **kwargs: object) -> ChannelFinderClient:
+        raise AssertionError("client must not be constructed when disabled")
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _boom)
+    result = await _list_channel_vocabulary()
+    assert result["enabled"] is False
+    assert result["properties"] == []
+    assert result["tags"] == []
+    assert "note" in result
+
+
+@pytest.mark.asyncio
+async def test_vocabulary_enabled_returns_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The enabled path returns the property + tag NAME lists the client produced."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(channelfinder_url="http://cf"),
+    )
+
+    class _Fake:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def list_properties(self) -> list[str]:
+            return ["iocName", "pvStatus"]
+
+        def list_tags(self) -> list[str]:
+            return ["archived", "sim"]
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _Fake)
+    result = await _list_channel_vocabulary()
+    assert result["enabled"] is True
+    assert result["properties"] == ["iocName", "pvStatus"]
+    assert result["tags"] == ["archived", "sim"]

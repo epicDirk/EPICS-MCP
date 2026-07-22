@@ -76,6 +76,34 @@ def resolve_safe_property_names(cfg: EpicsConfig) -> frozenset[str]:
     return _resolve_allowlist(cfg.channelfinder_safe_property_names, _SAFE_PROPERTY_NAMES)
 
 
+def _named_list(data: object, endpoint: str) -> list[str]:
+    """STRICT name extraction for the top-level ``/resources/properties`` / ``/resources/tags``
+    listings (S11 — the ChannelFinder sibling of :func:`olog_client._named_list`).
+
+    Both routes return a list of ``{name, owner, …}`` structs (``PropertyDto``/``TagDto``). The
+    listing IS the answer to "what can I filter on", so an unreadable payload must never collapse to
+    ``[]`` — that would fabricate "there are no properties/tags", indistinguishable from a genuinely
+    empty server, and tell anyone validating a filter name "this one does not exist". A non-list, or
+    an item that is not a dict with a string ``name``, RAISES; an EMPTY list is valid (returns
+    ``[]``). Only ``name`` is read — the DS-privacy ``owner`` (a person's ESS username on a
+    CF-web-UI/cfstore object) and ``value`` are dropped.
+    """
+    if not isinstance(data, list):
+        raise ChannelFinderResponseError(
+            f"ChannelFinder {endpoint} returned an unreadable payload "
+            f"(expected a list, got {type(data).__name__}); the listing is not readable."
+        )
+    names: list[str] = []
+    for item in data:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            raise ChannelFinderResponseError(
+                f"ChannelFinder {endpoint} returned an unreadable item "
+                f"(expected a dict with a string 'name', got {type(item).__name__})."
+            )
+        names.append(item["name"])
+    return names
+
+
 # MA-2 CF-Query-Fläche. The reserved ChannelFinder query params (the ``switch`` cases in the vendor
 # ``ChannelRepository.getBuiltQuery``). A caller-supplied property/tag NAME must never collide with
 # one of these, and — critically — a trailing ``!`` (the vendor's negation marker on the KEY) must
@@ -252,6 +280,19 @@ class ChannelFinderClient:
         # returning an EXACT match count as a bare JSON number, independent of ~size.
         return f"{self.base_url}/resources/channels/count"
 
+    @property
+    def properties_url(self) -> str:
+        # MA-2 CF-Query-Fläche: the vendor property-definition list route
+        # (PropertyController.list → GET {root}/resources/properties). The list endpoint returns
+        # every PropertyDto with an empty ``channels`` (no join) — only ``name`` is meaningful here.
+        return f"{self.base_url}/resources/properties"
+
+    @property
+    def tags_url(self) -> str:
+        # MA-2 CF-Query-Fläche: the vendor tag-definition list route
+        # (TagController.list → GET {root}/resources/tags).
+        return f"{self.base_url}/resources/tags"
+
     def find_channels(
         self,
         name_pattern: str,
@@ -356,6 +397,48 @@ class ChannelFinderClient:
             raise ChannelFinderResponseError(
                 f"ChannelFinder /count returned a non-numeric string: {data!r}"
             ) from exc
+
+    def list_properties(self) -> list[str]:
+        """The ChannelFinder property NAMES a caller can filter ``find_channels`` on, sorted.
+
+        Fetches ``/resources/properties`` and reduces it to the DS-privacy
+        ``self._safe_property_names`` allowlist — the SAME gate ``_project`` applies to per-channel
+        properties and ``_build_query_params`` enforces on ``has_properties``. So this lists exactly
+        the property keys that are both present in this instance AND accepted as a filter; a
+        non-allowlisted, person-bearing property (ENGINEER/LOCATION, a cfstore custom field) is
+        never surfaced and would be refused as a filter anyway. Raises
+        :class:`ChannelFinderResponseError` on an unreadable payload (never ``[]``); an empty CF
+        yields ``[]``.
+        """
+        data = rest_get_json(
+            self.session,
+            self.properties_url,
+            {},
+            self.timeout,
+            conn_exc=ChannelFinderConnectionError,
+            resp_exc=ChannelFinderResponseError,
+        )
+        names = _named_list(data, "GET /resources/properties")
+        return sorted(name for name in names if name in self._safe_property_names)
+
+    def list_tags(self) -> list[str]:
+        """The ChannelFinder tag NAMES a caller can filter ``find_channels`` on, sorted.
+
+        Fetches ``/resources/tags``. Tags are UNGATED (as in ``_project`` and
+        ``_build_query_params``, which validate but do not allowlist tag names), so every tag name
+        is returned — the per-tag ``owner`` is dropped (name-only). Raises
+        :class:`ChannelFinderResponseError` on an unreadable payload (never ``[]``); an empty CF
+        yields ``[]``.
+        """
+        data = rest_get_json(
+            self.session,
+            self.tags_url,
+            {},
+            self.timeout,
+            conn_exc=ChannelFinderConnectionError,
+            resp_exc=ChannelFinderResponseError,
+        )
+        return sorted(_named_list(data, "GET /resources/tags"))
 
     def _project(self, channel: dict[str, object]) -> ChannelInfo:
         """Project a raw channel JSON into a :class:`ChannelInfo`.

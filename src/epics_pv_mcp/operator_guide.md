@@ -73,7 +73,7 @@ are simply absent — that is an unmet optional extra, not a bug.
 <!-- BEGIN:tool-inventory (drift-guarded against @mcp.tool registrations — see tests/test_guide_matches_code.py) -->
 **Core — live PV + REST planes:**
 `get_pv_value` · `get_pvs` · `set_pv_value` · `get_pv_info` · `monitor_pv` · `discover_pvs` ·
-`find_channels` · `lookup_device_name` · `is_archived` · `get_pv_history` · `get_archive_info` ·
+`find_channels` · `list_channel_vocabulary` · `lookup_device_name` · `is_archived` · `get_pv_history` · `get_archive_info` ·
 `get_appliance_info` · `list_archived_pvs` · `is_alarm_configured` · `get_alarm_history` · `diagnose_connection` ·
 `search_logbook` · `get_log_entry` · `list_logbooks` · `list_tags` · `list_log_levels` ·
 `create_log_entry` · `reply_to_log` · `update_log_entry` · `add_log_attachment` ·
