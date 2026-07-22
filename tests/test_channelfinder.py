@@ -6,12 +6,14 @@ import pytest
 import requests
 
 from epics_pv_mcp.config import EpicsConfig
+from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
 from epics_pv_mcp.services._http import is_ssl_error
 from epics_pv_mcp.services.channelfinder_client import (
     _SAFE_OWNER_ACCOUNTS,
     _SAFE_PROPERTY_NAMES,
     ChannelFinderClient,
     ChannelInfo,
+    _build_query_params,
     _resolve_allowlist,
     resolve_safe_owner_accounts,
     resolve_safe_property_names,
@@ -401,3 +403,273 @@ async def test_find_channels_capped_is_honest_at_the_boundary(
     result = await _find_channels("X*", max_results=3)
     assert result["capped"] is True
     assert result["total"] == 3
+
+
+# --- MA-2 CF-Query-Fläche: _build_query_params (pure, deterministic) ---
+#
+# Exact-equality pins BOTH what we emit AND what we never emit (the AR-D discipline). The vendor
+# grammar (ChannelRepository.getBuiltQuery) is the ground truth: negation is a trailing '!' on the
+# KEY; prop!=* (value literally '*') means "lacks property"; tag lists are OR; ~name negation is
+# silently ignored server-side, so a '!' is never emitted on ~name / reserved keys.
+
+_ALLOW = frozenset({"pvStatus", "hostName", "iocName"})
+
+
+def test_build_params_name_only_is_todays_call() -> None:
+    """No filters ⇒ byte-identical to the pre-MA-2 params (the No-Filter regression invariant)."""
+    assert _build_query_params("SYS:*", 500, allowed_properties=_ALLOW) == {
+        "~name": "SYS:*",
+        "~size": "500",
+    }
+
+
+def test_build_params_has_properties_value_and_present() -> None:
+    params = _build_query_params(
+        "*", 10, has_properties={"pvStatus": "Inactive", "hostName": "*"}, allowed_properties=_ALLOW
+    )
+    assert params == {"~name": "*", "~size": "10", "pvStatus": "Inactive", "hostName": "*"}
+
+
+def test_build_params_lacks_property_is_bang_star() -> None:
+    """prop!=* ⇒ key 'prop!', value '*' (mustNot(nested(name==prop)); value MUST be '*')."""
+    params = _build_query_params("*", 10, lacks_properties=["pvStatus"], allowed_properties=_ALLOW)
+    assert params == {"~name": "*", "~size": "10", "pvStatus!": "*"}
+
+
+def test_build_params_not_property_value_is_bang_value() -> None:
+    params = _build_query_params(
+        "*", 10, not_property_values={"pvStatus": "Active"}, allowed_properties=_ALLOW
+    )
+    assert params == {"~name": "*", "~size": "10", "pvStatus!": "Active"}
+
+
+def test_build_params_tags_or_and_negation() -> None:
+    params = _build_query_params(
+        "*", 10, has_tags=["a", "b"], lacks_tags=["c"], allowed_properties=_ALLOW
+    )
+    assert params == {"~name": "*", "~size": "10", "~tag": "a|b", "~tag!": "c"}
+
+
+def test_build_params_no_size_for_count() -> None:
+    params = _build_query_params(
+        "*", 0, has_properties={"pvStatus": "Active"}, allowed_properties=_ALLOW, include_size=False
+    )
+    assert params == {"~name": "*", "pvStatus": "Active"}
+
+
+def test_build_params_empty_collections_emit_nothing() -> None:
+    """Empty/None collections ⇒ no filter param (never an accidental broaden/collapse)."""
+    assert _build_query_params(
+        "*", 10, has_properties={}, lacks_properties=[], has_tags=[], allowed_properties=_ALLOW
+    ) == {"~name": "*", "~size": "10"}
+
+
+# --- guards (each raises ValueError; the client maps it to EpicsError INVALID_INPUT) ---
+
+
+def test_build_params_gate_rejects_non_allowlisted_property() -> None:
+    """DS-privacy: a filter on a redacted property (e.g. accessGroup) is a redaction bypass —
+    it reconstructs the name→value partition the projection hides. Fail closed."""
+    with pytest.raises(ValueError, match="allowlist"):
+        _build_query_params("*", 10, has_properties={"accessGroup": "x"}, allowed_properties=_ALLOW)
+
+
+def test_build_params_empty_allowlist_disables_property_filter_but_not_tags() -> None:
+    with pytest.raises(ValueError, match="allowlist"):
+        _build_query_params(
+            "*", 10, has_properties={"pvStatus": "x"}, allowed_properties=frozenset()
+        )
+    # tags are not redacted → not gated
+    assert _build_query_params("*", 10, has_tags=["a"], allowed_properties=frozenset()) == {
+        "~name": "*",
+        "~size": "10",
+        "~tag": "a",
+    }
+
+
+@pytest.mark.parametrize("bad_name", ["~name", "~size", "pvStatus!"])
+def test_build_params_rejects_reserved_or_bang_names_across_all_surfaces(bad_name: str) -> None:
+    """No path may synthesise a '~name!' / reserved-collision / trailing-'!' key. The guard runs on
+    has_properties keys, lacks_properties items and not_property_values keys, before the '!'."""
+    allow = _ALLOW | {bad_name.rstrip("!").lstrip("~")}  # even if somehow allowlisted, still reject
+    with pytest.raises(ValueError):
+        _build_query_params("*", 10, has_properties={bad_name: "x"}, allowed_properties=allow)
+    with pytest.raises(ValueError):
+        _build_query_params("*", 10, lacks_properties=[bad_name], allowed_properties=allow)
+    with pytest.raises(ValueError):
+        _build_query_params("*", 10, not_property_values={bad_name: "x"}, allowed_properties=allow)
+
+
+def test_build_params_never_emits_a_name_bang_key() -> None:
+    """Explicit: lacks_properties=['~name'] must not synthesise the forbidden {'~name!': '*'}."""
+    with pytest.raises(ValueError):
+        _build_query_params(
+            "*", 10, lacks_properties=["~name"], allowed_properties=_ALLOW | {"~name"}
+        )
+
+
+def test_build_params_rejects_contradictory_property_across_args() -> None:
+    """Same property in >1 of the three property args (subsumes the 'prop!' key collision between
+    lacks_properties and not_property_values)."""
+    with pytest.raises(ValueError, match="contradict"):
+        _build_query_params(
+            "*",
+            10,
+            lacks_properties=["pvStatus"],
+            not_property_values={"pvStatus": "x"},
+            allowed_properties=_ALLOW,
+        )
+
+
+def test_build_params_rejects_contradictory_tag() -> None:
+    with pytest.raises(ValueError, match="contradict"):
+        _build_query_params("*", 10, has_tags=["a"], lacks_tags=["a"], allowed_properties=_ALLOW)
+
+
+def test_build_params_rejects_separator_in_negated_value() -> None:
+    """A |,; in a not_property_values value flips the single negation into an OR-of-negations
+    tautology (matches anything having the property) — reject. has_properties values keep OR."""
+    with pytest.raises(ValueError, match="separator"):
+        _build_query_params(
+            "*", 10, not_property_values={"pvStatus": "a|b"}, allowed_properties=_ALLOW
+        )
+    # has_properties value with a separator is the intended OR — allowed
+    assert _build_query_params(
+        "*", 10, has_properties={"pvStatus": "a|b"}, allowed_properties=_ALLOW
+    ) == {"~name": "*", "~size": "10", "pvStatus": "a|b"}
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"has_properties": {"pvStatus": "  "}},
+        {"has_properties": {"  ": "x"}},
+        {"not_property_values": {"pvStatus": ""}},
+        {"has_tags": ["  "]},
+    ],
+)
+def test_build_params_rejects_blank(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        _build_query_params("*", 10, allowed_properties=_ALLOW, **kwargs)  # type: ignore[arg-type]
+
+
+# --- count_channels (client) ---
+
+
+def test_count_channels_parses_bare_long(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = ChannelFinderClient("http://cf")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(1234)))
+    assert client.count_channels("*") == 1234
+
+
+def test_count_channels_parses_string_number(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = ChannelFinderClient("http://cf")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp("1234")))
+    assert client.count_channels("*") == 1234
+
+
+def test_count_channels_targets_the_count_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = ChannelFinderClient("http://cf:8080/ChannelFinder")
+    getter = Mock(return_value=_resp(0))
+    monkeypatch.setattr(client.session, "get", getter)
+    client.count_channels("*", has_properties={"pvStatus": "Inactive"})
+    assert getter.call_args.args[0] == "http://cf:8080/ChannelFinder/resources/channels/count"
+    # count carries the filter but NOT ~size, and stays gated to the default allowlist
+    assert getter.call_args.kwargs["params"] == {"~name": "*", "pvStatus": "Inactive"}
+
+
+@pytest.mark.parametrize("payload", [True, "notanumber", {"count": 1}])
+def test_count_channels_rejects_non_numeric(
+    payload: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """bool ⊂ int → a JSON boolean must NOT parse as a count; non-numeric bodies raise."""
+    client = ChannelFinderClient("http://cf")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    with pytest.raises(ChannelFinderResponseError):
+        client.count_channels("*")
+
+
+# --- tool layer: conditional forwarding + count_only + gate → EpicsError ---
+
+
+@pytest.mark.asyncio
+async def test_tool_no_filter_passes_no_extra_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The No-Filter path must call find_channels with NO filter kwargs — this is why the 4 fixed-
+    signature doubles stay green. A double WITHOUT **kwargs proves it (a TypeError would fail)."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(channelfinder_url="http://cf"),
+    )
+
+    class _StrictNoKwargs:
+        def __init__(self, *args: object, **kwargs: object) -> None: ...
+
+        def find_channels(self, name_pattern: str, max_results: int = 500) -> list[ChannelInfo]:
+            return []
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _StrictNoKwargs)
+    result = await _find_channels("X*")  # must not raise TypeError
+    assert result["enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_tool_forwards_set_filters(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(channelfinder_url="http://cf"),
+    )
+    captured: dict[str, object] = {}
+
+    class _Capture:
+        def __init__(self, *args: object, **kwargs: object) -> None: ...
+
+        def find_channels(
+            self, name_pattern: str, max_results: int = 500, **filters: object
+        ) -> list[ChannelInfo]:
+            captured.update(filters)
+            return []
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _Capture)
+    await _find_channels("X*", has_properties={"pvStatus": "Active"}, lacks_tags=["x"])
+    assert captured == {"has_properties": {"pvStatus": "Active"}, "lacks_tags": ["x"]}
+
+
+@pytest.mark.asyncio
+async def test_tool_count_only_returns_match_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    """count_only returns a DISTINCT {enabled, match_count} — never overloads total, no capped."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(channelfinder_url="http://cf"),
+    )
+
+    class _CountFake:
+        def __init__(self, *args: object, **kwargs: object) -> None: ...
+
+        def count_channels(self, name_pattern: str, **filters: object) -> int:
+            return 42
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _CountFake)
+    result = await _find_channels("X*", count_only=True)
+    assert result == {"enabled": True, "match_count": 42}
+
+
+@pytest.mark.asyncio
+async def test_tool_maps_bad_filter_to_invalid_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A gate/guard ValueError surfaces as EpicsError(INVALID_INPUT), before any network call."""
+    cfg = EpicsConfig(channelfinder_url="http://cf")  # default allowlist → accessGroup rejected
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.get_config", lambda: cfg)
+    monkeypatch.setattr("epics_pv_mcp.services.channelfinder_client.get_config", lambda: cfg)
+    with pytest.raises(EpicsError) as excinfo:
+        await _find_channels("X*", has_properties={"accessGroup": "x"})
+    assert excinfo.value.error_code == "INVALID_INPUT"
+    assert not isinstance(excinfo.value, EpicsConnectionError)
+
+
+@pytest.mark.asyncio
+async def test_tool_count_disabled_makes_no_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(channelfinder_url=""),
+    )
+    result = await _find_channels("X*", count_only=True)
+    assert result["enabled"] is False

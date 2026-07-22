@@ -76,6 +76,123 @@ def resolve_safe_property_names(cfg: EpicsConfig) -> frozenset[str]:
     return _resolve_allowlist(cfg.channelfinder_safe_property_names, _SAFE_PROPERTY_NAMES)
 
 
+# MA-2 CF-Query-Fläche. The reserved ChannelFinder query params (the ``switch`` cases in the vendor
+# ``ChannelRepository.getBuiltQuery``). A caller-supplied property/tag NAME must never collide with
+# one of these, and — critically — a trailing ``!`` (the vendor's negation marker on the KEY) must
+# never be synthesised on ``~name``: the server strips the ``!`` and filters ``~name`` POSITIVELY,
+# so ``~name!`` is a silent broaden, not a negation.
+_RESERVED_QUERY_KEYS = frozenset(
+    {"~name", "~tag", "~size", "~from", "~search_after", "~track_total_hits"}
+)
+# ChannelFinder splits a value on any of these into an OR (``valueSplitPattern`` ``[|,;]``).
+_VALUE_SEPARATORS = ("|", ",", ";")
+
+
+def _validate_filter_name(name: str, *, kind: str) -> str:
+    """Return the trimmed property/tag name, or raise ``ValueError``.
+
+    Rejects a blank name, a leading ``~`` (reserved-param collision) and a trailing ``!`` (the
+    vendor negation marker) — the three ways a caller string could smuggle in a reserved or negated
+    key such as the forbidden ``~name!``. Run on EVERY property-name-accepting surface BEFORE a
+    ``!`` is appended, so no code path can emit ``~name!``.
+    """
+    clean = name.strip()
+    if not clean:
+        raise ValueError(f"{kind} name must not be blank")
+    if clean.startswith("~"):
+        raise ValueError(f"{kind} name {name!r} must not start with '~' (reserved query param)")
+    if clean.endswith("!"):
+        raise ValueError(f"{kind} name {name!r} must not end with '!' (reserved for negation)")
+    return clean
+
+
+def _build_query_params(
+    name_pattern: str,
+    max_results: int,
+    *,
+    has_properties: dict[str, str] | None = None,
+    lacks_properties: list[str] | None = None,
+    not_property_values: dict[str, str] | None = None,
+    has_tags: list[str] | None = None,
+    lacks_tags: list[str] | None = None,
+    allowed_properties: frozenset[str],
+    include_size: bool = True,
+) -> dict[str, str]:
+    """Build the ChannelFinder GET query params from a name glob + optional filters.
+
+    Pure and deterministic (no I/O) so it is unit-testable in isolation, and shared by
+    :meth:`ChannelFinderClient.find_channels` and ``count_channels`` so both filter identically.
+
+    Vendor grammar (``ChannelRepository.getBuiltQuery``, verified): a non-``~`` key is a property
+    filter; negation is a trailing ``!`` on the KEY (``prop!``); ``prop!=*`` (value literally ``*``)
+    means "lacks the property"; ``prop!=value`` means "has the property, value != value" (a channel
+    lacking it does NOT match); tag values are OR / any-of; distinct property keys are AND. Unknown
+    params are NOT silently ignored (unlike Olog/Alarm) — the server treats any non-``~`` key as a
+    property filter, so a typo narrows the result to ~0 rather than being a no-op.
+
+    DS-PRIVACY: the property-filter axis is GATED to *allowed_properties* — the SAME allowlist the
+    response projection uses (:meth:`ChannelFinderClient._project`). Filtering on a redacted
+    property (e.g. ``accessGroup``) would reconstruct the exact name->value partition the projection
+    hides, so a non-allowlisted property name is refused (an empty allowlist disables property
+    filtering entirely). Tags are not redacted and are not gated.
+    """
+    params: dict[str, str] = {"~name": name_pattern}
+    if include_size:
+        params["~size"] = str(max_results)
+
+    # A property name may appear in at most one of the three property args (contradictory otherwise;
+    # this subsumes the ``prop!`` key collision between lacks_properties and not_property_values).
+    claimed: dict[str, str] = {}
+
+    def _claim_property(name: str, arg: str) -> str:
+        clean = _validate_filter_name(name, kind="property")
+        if clean not in allowed_properties:
+            raise ValueError(
+                f"property {name!r} is not on the ChannelFinder safe-property allowlist "
+                "(filtering is limited to surfaced technical properties — DS-privacy)"
+            )
+        if clean in claimed:
+            raise ValueError(
+                f"property {name!r} is contradictory: it appears in both "
+                f"{claimed[clean]!r} and {arg!r}"
+            )
+        claimed[clean] = arg
+        return clean
+
+    for name, value in (has_properties or {}).items():
+        clean = _claim_property(name, "has_properties")
+        if not value.strip():
+            raise ValueError(f"has_properties[{name!r}] value must not be blank")
+        params[clean] = value  # value '*' => present; a |,; separator is the intended OR
+
+    for name in lacks_properties or []:
+        clean = _claim_property(name, "lacks_properties")
+        params[f"{clean}!"] = "*"  # prop!=* => lacks the property (value MUST be '*')
+
+    for name, value in (not_property_values or {}).items():
+        clean = _claim_property(name, "not_property_values")
+        if not value.strip():
+            raise ValueError(f"not_property_values[{name!r}] value must not be blank")
+        if any(sep in value for sep in _VALUE_SEPARATORS):
+            raise ValueError(
+                f"not_property_values[{name!r}] must not contain a value separator (| , ;) — it "
+                "would flip the single negation into an OR-of-negations tautology"
+            )
+        params[f"{clean}!"] = value  # prop!=value => has prop whose value != value
+
+    clean_has_tags = [_validate_filter_name(t, kind="tag") for t in (has_tags or [])]
+    clean_lacks_tags = [_validate_filter_name(t, kind="tag") for t in (lacks_tags or [])]
+    overlap = sorted(set(clean_has_tags) & set(clean_lacks_tags))
+    if overlap:
+        raise ValueError(f"tag(s) {overlap} are contradictory: in both has_tags and lacks_tags")
+    if clean_has_tags:
+        params["~tag"] = "|".join(clean_has_tags)  # OR / any-of (vendor: split on [|,;])
+    if clean_lacks_tags:
+        params["~tag!"] = "|".join(clean_lacks_tags)
+
+    return params
+
+
 class ChannelInfo(TypedDict):
     """Projected, read-only view of one ChannelFinder channel."""
 
@@ -129,18 +246,43 @@ class ChannelFinderClient:
     def channels_url(self) -> str:
         return f"{self.base_url}/resources/channels"
 
+    @property
+    def count_url(self) -> str:
+        # MA-2: ChannelFinder's dedicated count endpoint (IChannel.java @GetMapping("/count")),
+        # returning an EXACT match count as a bare JSON number, independent of ~size.
+        return f"{self.base_url}/resources/channels/count"
+
     def find_channels(
         self,
         name_pattern: str,
         max_results: int = DEFAULT_MAX_RESULTS,
+        *,
+        has_properties: dict[str, str] | None = None,
+        lacks_properties: list[str] | None = None,
+        not_property_values: dict[str, str] | None = None,
+        has_tags: list[str] | None = None,
+        lacks_tags: list[str] | None = None,
     ) -> list[ChannelInfo]:
-        """Query channels by name glob (``*``/``?``), capped at *max_results*.
+        """Query channels by name glob (``*``/``?``) + optional property/tag filters, capped at
+        *max_results*.
 
-        Returns the projected channels (possibly empty). Raises
-        :class:`ChannelFinderConnectionError`/:class:`ChannelFinderResponseError` on
-        network/HTTP failures so the tool layer can surface them.
+        The optional filters (MA-2) narrow the search server-side; property filtering is gated to
+        the same DS-privacy allowlist as the projection (see :func:`_build_query_params`). Returns
+        the projected channels (possibly empty). Raises
+        :class:`ChannelFinderConnectionError`/:class:`ChannelFinderResponseError` on network/HTTP
+        failures, and :class:`ValueError` on an invalid/redacted filter (the tool layer maps it to
+        an ``INVALID_INPUT`` error).
         """
-        params = {"~name": name_pattern, "~size": str(max_results)}
+        params = _build_query_params(
+            name_pattern,
+            max_results,
+            has_properties=has_properties,
+            lacks_properties=lacks_properties,
+            not_property_values=not_property_values,
+            has_tags=has_tags,
+            lacks_tags=lacks_tags,
+            allowed_properties=self._safe_property_names,
+        )
         data = rest_get_json(
             self.session,
             self.channels_url,
@@ -164,6 +306,56 @@ class ChannelFinderClient:
                 )
             channels.append(self._project(channel))
         return channels
+
+    def count_channels(
+        self,
+        name_pattern: str,
+        *,
+        has_properties: dict[str, str] | None = None,
+        lacks_properties: list[str] | None = None,
+        not_property_values: dict[str, str] | None = None,
+        has_tags: list[str] | None = None,
+        lacks_tags: list[str] | None = None,
+    ) -> int:
+        """Return the EXACT number of channels matching the name glob + filters (MA-2).
+
+        Uses ChannelFinder's ``/resources/channels/count`` endpoint, which returns a true full-match
+        count as a bare JSON number — independent of ``~size`` and never window-capped — so it
+        answers "how many PVs match" without pulling the matches. Same filter grammar and the same
+        DS-privacy allowlist gate as :meth:`find_channels`. Raises
+        :class:`ChannelFinderResponseError` if the payload is not a numeric scalar (a JSON boolean
+        is rejected explicitly — ``bool`` is an ``int`` subclass).
+        """
+        params = _build_query_params(
+            name_pattern,
+            0,
+            has_properties=has_properties,
+            lacks_properties=lacks_properties,
+            not_property_values=not_property_values,
+            has_tags=has_tags,
+            lacks_tags=lacks_tags,
+            allowed_properties=self._safe_property_names,
+            include_size=False,
+        )
+        data = rest_get_json(
+            self.session,
+            self.count_url,
+            params,
+            self.timeout,
+            conn_exc=ChannelFinderConnectionError,
+            resp_exc=ChannelFinderResponseError,
+        )
+        # bool ⊂ int → guard it first, or a stray JSON `true` would parse as the count 1.
+        if isinstance(data, bool) or not isinstance(data, (int, str)):
+            raise ChannelFinderResponseError(
+                f"ChannelFinder /count returned a non-numeric payload (got {type(data).__name__})"
+            )
+        try:
+            return int(data)
+        except ValueError as exc:
+            raise ChannelFinderResponseError(
+                f"ChannelFinder /count returned a non-numeric string: {data!r}"
+            ) from exc
 
     def _project(self, channel: dict[str, object]) -> ChannelInfo:
         """Project a raw channel JSON into a :class:`ChannelInfo`.

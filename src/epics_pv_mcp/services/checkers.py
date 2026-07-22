@@ -24,6 +24,7 @@ home for its adapter, factory and query).
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
@@ -464,16 +465,44 @@ async def query_channels(
     name_pattern: str,
     max_results: int = DEFAULT_MAX_RESULTS,
     timeout: float = 5.0,
+    *,
+    has_properties: dict[str, str] | None = None,
+    lacks_properties: list[str] | None = None,
+    not_property_values: dict[str, str] | None = None,
+    has_tags: list[str] | None = None,
+    lacks_tags: list[str] | None = None,
+    count_only: bool = False,
 ) -> dict[str, object]:
     """Query ChannelFinder for channels whose name matches *name_pattern* (glob ``*``/``?``).
 
     Default-disabled: with ``EPICS_MCP_CHANNELFINDER_URL`` unset, returns ``enabled: false`` and
     makes no network call. Shared by the ``find_channels`` tool, ``find_device`` and the diagnose
     ChannelFinder plane.
+
+    MA-2 optional filters (property/tag, negation) narrow the search server-side; ``count_only``
+    returns an exact ``match_count`` from the ``/count`` endpoint instead of the channel list. A
+    rejected/redacted filter surfaces as an ``INVALID_INPUT`` :class:`EpicsError`.
     """
     cfg = get_config()
     if not cfg.channelfinder_url:
+        if count_only:
+            return {"enabled": False, "match_count": 0, "note": _CF_DISABLED_NOTE}
         return {"enabled": False, "channels": [], "total": 0, "note": _CF_DISABLED_NOTE}
+
+    # Conditional forwarding: pass ONLY the filters that are actually set, so the no-filter path is
+    # a byte-identical call to the pre-MA-2 code — that is what keeps ``find_device``/``diagnose``
+    # and the fixed-signature CF test doubles (which take no filter kwargs) working untouched.
+    filters: dict[str, Any] = {}
+    if has_properties:
+        filters["has_properties"] = has_properties
+    if lacks_properties:
+        filters["lacks_properties"] = lacks_properties
+    if not_property_values:
+        filters["not_property_values"] = not_property_values
+    if has_tags:
+        filters["has_tags"] = has_tags
+    if lacks_tags:
+        filters["lacks_tags"] = lacks_tags
 
     def _run() -> dict[str, object]:
         client = ChannelFinderClient(
@@ -481,10 +510,12 @@ async def query_channels(
             timeout=timeout,
             auth_header=cfg.channelfinder_auth or None,
         )
+        if count_only:
+            return {"enabled": True, "match_count": client.count_channels(name_pattern, **filters)}
         # S8-6: fetch one MORE than the cap and truncate, so ``capped`` is an honest
         # ``fetched > max_results`` (the Archiver pattern) rather than ``>= max_results``, which
         # false-flags exactly ``max_results`` real channels as truncated (an off-by-one).
-        fetched = client.find_channels(name_pattern, max_results=max_results + 1)
+        fetched = client.find_channels(name_pattern, max_results=max_results + 1, **filters)
         capped = len(fetched) > max_results
         channels = fetched[:max_results]
         return {
@@ -496,6 +527,10 @@ async def query_channels(
 
     try:
         return await asyncio.to_thread(_run)
+    except ValueError as exc:
+        # MA-2: a rejected/redacted filter (the _build_query_params guards) is BAD INPUT, not an
+        # outage — surface it as INVALID_INPUT, never as an unreachable/response error.
+        raise EpicsError(f"ChannelFinder: {exc}", error_code="INVALID_INPUT") from exc
     except ChannelFinderConnectionError as exc:
         raise EpicsConnectionError(f"ChannelFinder: {exc}") from exc
     except ChannelFinderError as exc:

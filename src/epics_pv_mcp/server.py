@@ -373,6 +373,47 @@ async def find_channels(
         Field(description="Cap on returned channels (a broad glob can match a whole site)"),
     ] = 500,
     timeout: Annotated[float, Field(description="Timeout in seconds")] = 5.0,
+    has_properties: Annotated[
+        dict[str, str] | None,
+        Field(
+            description=(
+                "Property filter {name: value-glob}; use '*' as the value for 'property present, "
+                "any value'. Distinct properties are AND-ed. Gated to the safe-property allowlist. "
+                "UNVERIFIED server-side until a live probe."
+            )
+        ),
+    ] = None,
+    lacks_properties: Annotated[
+        list[str] | None,
+        Field(description="Property names that must be ABSENT (e.g. PVs with no 'aa_policy')."),
+    ] = None,
+    not_property_values: Annotated[
+        dict[str, str] | None,
+        Field(
+            description=(
+                "Filter {name: value}: has the property with value != value. NOTE: a channel that "
+                "LACKS the property does NOT match (combine with lacks_properties for the true "
+                "complement, which needs two calls)."
+            )
+        ),
+    ] = None,
+    has_tags: Annotated[
+        list[str] | None,
+        Field(description="Required tags — ANY-of / OR (a channel with any listed tag matches)."),
+    ] = None,
+    lacks_tags: Annotated[
+        list[str] | None,
+        Field(description="Excluded tags — a channel with any listed tag is dropped."),
+    ] = None,
+    count_only: Annotated[
+        bool,
+        Field(
+            description=(
+                "Return only the exact match count as {enabled, match_count} (the /count endpoint) "
+                "instead of the channel list — for 'how many match' without pulling them."
+            )
+        ),
+    ] = False,
 ) -> dict[str, object]:
     """Query ChannelFinder: which IOC/host serves a PV, plus its tags/properties.
 
@@ -384,10 +425,28 @@ async def find_channels(
     And it is CASE-INSENSITIVE: '*temp*', '*Temp*' and '*TEMP*' return the identical set, so a
     hit may differ in case from what was asked (e.g. '*Temp*' matching '...MorTemPrd').
 
+    Optional MA-2 property/tag filters narrow the search server-side, and count_only returns the
+    exact match count. CAVEATS: (1) property filtering is gated to the DS-privacy safe-property
+    allowlist (a redacted property like accessGroup is refused — filtering it would reconstruct the
+    partition the projection hides); expand EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES to filter on
+    more. (2) The filter semantics are UNVERIFIED against a live server until a differential probe
+    runs. (3) An unknown/misspelled property name is NOT a server error — it narrows the result to
+    0, indistinguishable from a genuinely empty match.
+
     A malformed registry record (a non-dict element, or one without a usable name) raises a loud
     error — records are never silently dropped into a smaller, fabricated answer.
     """
-    return await _find_channels(name_pattern, max_results, timeout)
+    return await _find_channels(
+        name_pattern,
+        max_results,
+        timeout,
+        has_properties=has_properties,
+        lacks_properties=lacks_properties,
+        not_property_values=not_property_values,
+        has_tags=has_tags,
+        lacks_tags=lacks_tags,
+        count_only=count_only,
+    )
 
 
 @mcp.tool(
