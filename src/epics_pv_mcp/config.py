@@ -49,6 +49,13 @@ class EpicsConfig(BaseSettings):
     pv_write_pattern: str = ""
     # max writes per minute; ge=1 — "block all" is the allow_pv_write gate, not 0.
     write_rate_limit: int = Field(default=10, ge=1)
+    # S3 read throttle (sliding 60 s window): max REST reads before the shared GET chokepoint
+    # (rest_get_json/rest_get_bytes) raises RateLimitError — protects a facility from an unthrottled
+    # read burst. ge=0 and default 0 = DISABLED (unlike the write limits' ge=1): the posture is
+    # opt-in, so existing read behaviour is unchanged until an operator sets it. Over the limit it
+    # RAISES, never blocks — a blocking wait at that sync chokepoint would hold one of the shared
+    # worker threads and reintroduce the very starvation the K4 monitor bulkhead removes.
+    read_rate_limit: int = Field(default=0, ge=0)
     audit_log_file: str = ""  # path to audit log (empty = stderr)
 
     # --- Path boundary (opt-in; see paths.resolve_user_path) ---

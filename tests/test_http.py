@@ -7,6 +7,7 @@ exception hierarchy, and the single debug line that wakes the previously-dead RE
 from __future__ import annotations
 
 import logging
+import time
 from unittest.mock import Mock
 from urllib.parse import urlparse
 
@@ -17,9 +18,12 @@ from urllib3.util import parse_url
 from urllib3.util.retry import Retry
 
 from epics_pv_mcp.config import EpicsConfig
+from epics_pv_mcp.errors import RateLimitError
 from epics_pv_mcp.services._http import (
+    ReadThrottle,
     build_retrying_session,
     build_write_session,
+    get_read_throttle,
     get_shared_session,
     http_status,
     is_http_404,
@@ -27,6 +31,8 @@ from epics_pv_mcp.services._http import (
     is_loopback_url,
     is_retry_error,
     is_ssl_error,
+    reset_read_throttle,
+    rest_get_bytes,
     rest_get_json,
     rest_put_json,
     url_host,
@@ -582,3 +588,87 @@ def test_url_host_agrees_with_the_parser_that_connects() -> None:
 def test_is_https_url(url: str, expected: bool) -> None:
     """The write gate's remote-lane scheme check: https only, fail-closed on unparseable input."""
     assert is_https_url(url) is expected
+
+
+# --- ReadThrottle (S3: opt-in read rate limit at the shared GET chokepoint) ---
+
+
+def test_rest_get_json_throttled_over_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S3 at the chokepoint: with ``read_rate_limit=2`` the 3rd ``rest_get_json`` in the window is
+    DENIED with ``RateLimitError``, protecting the facility from an unthrottled read burst. RED
+    before the chokepoint is wired (rest_get_json ignored the throttle → the 3rd read passed)."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services._http.get_config",
+        lambda: EpicsConfig(read_rate_limit=2),
+    )
+    reset_read_throttle()
+    session = Mock()
+    session.get.return_value = _resp({"ok": True})
+
+    def _call() -> object:
+        return rest_get_json(
+            session,
+            "http://svc",
+            None,
+            5.0,
+            conn_exc=RestConnectionError,
+            resp_exc=RestResponseError,
+        )
+
+    _call()
+    _call()
+    with pytest.raises(RateLimitError):
+        _call()
+
+
+def test_rest_get_json_unthrottled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default ``read_rate_limit=0`` → the throttle is disabled → any number of reads pass. The
+    posture is opt-in, so a facility's existing read behaviour is unchanged until an operator sets
+    it."""
+    monkeypatch.setattr("epics_pv_mcp.services._http.get_config", lambda: EpicsConfig())
+    reset_read_throttle()
+    session = Mock()
+    session.get.return_value = _resp({"ok": True})
+    for _ in range(50):
+        rest_get_json(
+            session,
+            "http://svc",
+            None,
+            5.0,
+            conn_exc=RestConnectionError,
+            resp_exc=RestResponseError,
+        )
+    assert session.get.call_count == 50  # all 50 reads went through — no throttling
+
+
+def test_rest_get_bytes_shares_the_read_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The OTHER GET chokepoint counts against the SAME budget — attachment/byte reads are throttled
+    too, not just ``rest_get_json``. With the single token already spent, ``rest_get_bytes`` raises
+    before it ever issues the request."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services._http.get_config",
+        lambda: EpicsConfig(read_rate_limit=1),
+    )
+    reset_read_throttle()
+    get_read_throttle().check()  # spend the one token
+    session = Mock()
+    with pytest.raises(RateLimitError):
+        rest_get_bytes(
+            session,
+            "http://svc",
+            5.0,
+            conn_exc=RestConnectionError,
+            resp_exc=RestResponseError,
+        )
+    session.get.assert_not_called()  # throttle fired before any network call
+
+
+def test_read_throttle_window_slides() -> None:
+    """The window slides — a read older than 60 s is purged, so the budget refills over time rather
+    than being a permanent counter. Seed one stale timestamp directly (deterministic, no clock
+    mocking): the next check purges it and admits, and only then is the window full again."""
+    throttle = ReadThrottle(1)
+    throttle._timestamps.append(time.monotonic() - throttle._WINDOW_SECONDS - 1.0)
+    throttle.check()  # stale token purged → admitted
+    with pytest.raises(RateLimitError):
+        throttle.check()  # window is full again

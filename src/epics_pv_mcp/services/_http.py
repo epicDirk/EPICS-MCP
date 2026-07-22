@@ -20,6 +20,9 @@ import base64
 import functools
 import ipaddress
 import logging
+import threading
+import time
+from collections import deque
 from email.message import Message
 from typing import Any
 
@@ -29,6 +32,7 @@ import urllib3.util
 from requests.adapters import HTTPAdapter
 
 from epics_pv_mcp.config import get_config
+from epics_pv_mcp.errors import RateLimitError
 from epics_pv_mcp.services.rest_exceptions import RestConnectionError, RestResponseError
 
 logger = logging.getLogger(__name__)
@@ -333,6 +337,81 @@ def build_write_session(
     return session
 
 
+class ReadThrottle:
+    """A sliding-window read rate limiter for the shared REST GET chokepoint (S3).
+
+    A deliberate THIRD copy of the ``SafetyLayer`` / ``OlogWriteGate`` token bucket (a ``deque`` of
+    ``time.monotonic`` timestamps under a lock), kept SEPARATE so the tested write gates are never
+    touched. Unlike them it guards READS: the ~24 read tools all reach ``rest_get_json`` /
+    ``rest_get_bytes`` from worker threads (``asyncio.to_thread``), so the bucket is thread-safe,
+    and over the limit it RAISES (never blocks) — a blocking wait at this sync chokepoint would hold
+    one of the shared worker threads and reintroduce exactly the K4 starvation the monitor bulkhead
+    removes.
+
+    Disabled by default (``limit <= 0``): :meth:`check` returns immediately with no lock and no
+    allocation, so the posture stays opt-in — existing read behaviour is unchanged until
+    an operator sets ``EPICS_MCP_READ_RATE_LIMIT``.
+    """
+
+    _WINDOW_SECONDS = 60.0
+
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
+        # maxlen only when enabled; a disabled throttle never appends, so unbounded is fine.
+        self._timestamps: deque[float] = deque(maxlen=limit) if limit > 0 else deque()
+        self._lock = threading.Lock()
+
+    def check(self) -> None:
+        """Admit one read, or raise :class:`RateLimitError` if the sliding window is full.
+
+        Purge → len-check → append is ONE atomic step under the lock (symmetric with the write
+        gates), so two concurrent reads can never both pass and exceed the limit; ``now`` is sampled
+        inside the lock, and the raise runs OUTSIDE it — the deny path never appends a token."""
+        if self._limit <= 0:
+            return  # disabled — opt-in posture, no throttling, no lock taken
+        with self._lock:
+            now = time.monotonic()
+            self._purge_old(now)
+            over_limit = len(self._timestamps) >= self._limit
+            if not over_limit:
+                self._timestamps.append(now)  # record this read (admit path only)
+        if over_limit:
+            raise RateLimitError(
+                f"Read rate limit exceeded ({self._limit} reads per "
+                f"{self._WINDOW_SECONDS:.0f}s). Try again later.",
+                details={"limit": self._limit, "window_seconds": self._WINDOW_SECONDS},
+            )
+
+    def _purge_old(self, now: float) -> None:
+        """Remove timestamps older than the sliding window."""
+        cutoff = now - self._WINDOW_SECONDS
+        while self._timestamps and self._timestamps[0] < cutoff:
+            self._timestamps.popleft()
+
+
+_read_throttle: ReadThrottle | None = None
+_read_throttle_lock = threading.Lock()
+
+
+def get_read_throttle() -> ReadThrottle:
+    """Return the singleton read throttle, built from ``read_rate_limit`` on first use (thread-safe;
+    mirrors ``get_config`` / ``get_safety``). The limit is fixed for its lifetime; a config
+    change takes effect only after :func:`reset_read_throttle` (a test hook)."""
+    global _read_throttle
+    with _read_throttle_lock:
+        if _read_throttle is None:
+            _read_throttle = ReadThrottle(get_config().read_rate_limit)
+    return _read_throttle
+
+
+def reset_read_throttle() -> None:
+    """Drop the singleton so the next :func:`get_read_throttle` rebuilds it with the current config
+    (test isolation, or a reload wanting the new limit)."""
+    global _read_throttle
+    with _read_throttle_lock:
+        _read_throttle = None
+
+
 def rest_get_json(
     session: requests.Session,
     url: str,
@@ -356,6 +435,7 @@ def rest_get_json(
     redirect moves the data's true origin without changing the configured URL. A 3xx is not an HTTP
     error, so ``raise_for_status`` would wave it through — hence the explicit check.
     """
+    get_read_throttle().check()  # S3 read throttle — no-op unless read_rate_limit > 0
     try:
         resp = session.get(url, params=params, timeout=timeout, allow_redirects=allow_redirects)
         if not allow_redirects and resp.is_redirect:
@@ -613,6 +693,7 @@ def rest_get_bytes(
     is
     decided from the CONFIGURED host, so a followed hop would let a loopback URL serve bytes from a
     real server. Defaults to False here because the whole attachment surface is host-gated."""
+    get_read_throttle().check()  # S3 read throttle — no-op unless read_rate_limit > 0
     try:
         with session.get(
             url,

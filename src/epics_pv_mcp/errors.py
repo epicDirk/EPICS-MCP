@@ -49,7 +49,7 @@ class OlogWriteDeniedError(EpicsError):
 
 
 class RateLimitError(EpicsError):
-    """Raised when write rate limit is exceeded."""
+    """Raised when a rate limit is exceeded — a write gate (PV / Olog) or the S3 read throttle."""
 
     def __init__(self, message: str, details: dict[str, object] | None = None) -> None:
         super().__init__(message, error_code="RATE_LIMIT_EXCEEDED", details=details)

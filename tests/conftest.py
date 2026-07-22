@@ -13,7 +13,7 @@ from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.errors import RateLimitError
 from epics_pv_mcp.safety import SafetyLayer
 from epics_pv_mcp.services._concurrency import reset_monitor_executor
-from epics_pv_mcp.services._http import clear_shared_sessions
+from epics_pv_mcp.services._http import clear_shared_sessions, reset_read_throttle
 
 # The display-aware tools and their opi_navigation-coupled tests need the optional
 # `[displays]` extra. When opi_navigation is not installed (a standalone core install),
@@ -73,6 +73,16 @@ def _reset_monitor_executor() -> Iterator[None]:
     reset_monitor_executor()
     yield
     reset_monitor_executor()
+
+
+@pytest.fixture(autouse=True)
+def _reset_read_throttle() -> Iterator[None]:
+    """S3: the read throttle is a process-global singleton built at first use from config. Reset it
+    around every test so a test setting ``read_rate_limit`` never inherits a bucket from an earlier
+    one; the next test rebuilds it under its own config (default: disabled)."""
+    reset_read_throttle()
+    yield
+    reset_read_throttle()
 
 
 # The loopback lane a write-enabled SafetyLayer accepts (E8): both providers' search reach

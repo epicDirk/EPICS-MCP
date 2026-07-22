@@ -41,6 +41,11 @@ operational knowledge (see the Knowledge Persistence Policy in `CLAUDE.md`).
   read/write — so a burst of monitors cannot starve the rest of the server into an apparent hang.
   Raise it only if operators legitimately need more simultaneous long monitors; the ceiling bounds
   monitors alone.
+- **Reads can be throttled (opt-in).** `EPICS_MCP_READ_RATE_LIMIT` (default 0 = off) caps REST reads
+  per 60 s at the shared GET chokepoint; over the limit a read is DENIED (`RateLimitError`), never
+  blocked — a blocking wait there would hold a worker thread and reintroduce the monitor starvation
+  above. Turn it on to protect a production facility from an unthrottled read burst. It bounds only
+  the REST planes (ChannelFinder/Archiver/Alarm/Naming/Olog), not live p4p PV reads.
 
 ## The planes
 
