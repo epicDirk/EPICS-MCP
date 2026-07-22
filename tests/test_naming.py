@@ -6,6 +6,9 @@ from unittest.mock import Mock
 import pytest
 import requests
 
+from epics_pv_mcp.config import EpicsConfig
+from epics_pv_mcp.errors import RateLimitError
+from epics_pv_mcp.services._http import reset_read_throttle
 from epics_pv_mcp.services.naming_client import NamingServiceClient
 from epics_pv_mcp.services.naming_exceptions import (
     NamingServiceConnectionError,
@@ -414,3 +417,22 @@ def test_definitive_negative_is_not_cached_refetches(monkeypatch: pytest.MonkeyP
     for _ in range(3):
         assert client.validate_name("SAME:name")["registered"] is False
     assert get.call_count == 3
+
+
+def test_naming_lookup_consumes_the_read_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S3: the Naming device lookup uses a DIRECT ``session.get`` (not ``rest_get_json`` — it needs
+    the raw 204/404 for its identity-gated negative answer, which rest_get_json swallows), so it
+    consults the shared read throttle itself. Otherwise the documented "bounds the REST planes incl.
+    Naming" would be a false promise. With ``read_rate_limit=2`` the 3rd DISTINCT lookup is denied.
+    RED before naming was wired to the throttle (the 3rd lookup went straight through)."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services._http.get_config",
+        lambda: EpicsConfig(read_rate_limit=2),
+    )
+    reset_read_throttle()
+    client = NamingServiceClient(base_url="http://naming.example/")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp({"name": "OK"})))
+    client._get_device_name("DEV-A")
+    client._get_device_name("DEV-B")
+    with pytest.raises(RateLimitError):
+        client._get_device_name("DEV-C")

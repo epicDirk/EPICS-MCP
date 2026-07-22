@@ -48,6 +48,9 @@ def reset_monitor_executor() -> None:
     must not inherit a pool sized by an earlier one). ``wait=False`` + ``cancel_futures=True``:
     pending work is dropped and running monitors are not awaited (tests drive them to completion
     first)."""
+    # wait=False so the reset never blocks on a mid-flight 60 s monitor; cancel_futures drops only
+    # QUEUED work. Tests drive their futures to completion before resetting, so no monitor is
+    # orphaned in practice — a future test that asserts WHILE a monitor runs would want wait=True.
     global _monitor_executor
     with _monitor_executor_lock:
         if _monitor_executor is not None:

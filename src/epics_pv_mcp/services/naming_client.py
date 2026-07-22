@@ -18,7 +18,7 @@ from urllib.parse import quote as url_quote
 
 import requests
 
-from epics_pv_mcp.services._http import get_shared_session
+from epics_pv_mcp.services._http import get_read_throttle, get_shared_session
 from epics_pv_mcp.services.naming_exceptions import (
     NamingServiceConnectionError,
     NamingServiceNotFound,
@@ -131,6 +131,12 @@ class NamingServiceClient:
         """
         if name in self._names_cache:
             return self._names_cache[name]
+        # S3 throttle: this Naming lookup uses a DIRECT session.get, NOT rest_get_json (it needs
+        # the raw 204/404 for its identity-gated negative answer, which rest_get_json swallows),
+        # so it must consult the shared read throttle itself — otherwise the documented "bounds the
+        # REST planes incl. Naming" would be false. No-op unless read_rate_limit > 0; a cache
+        # hit returns above without reaching here, so it costs no token.
+        get_read_throttle().check()
         try:
             resp = self.session.get(
                 self.names_url + url_quote(name, safe="-:"), timeout=self.timeout

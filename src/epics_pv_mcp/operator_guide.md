@@ -45,7 +45,10 @@ operational knowledge (see the Knowledge Persistence Policy in `CLAUDE.md`).
   per 60 s at the shared GET chokepoint; over the limit a read is DENIED (`RateLimitError`), never
   blocked — a blocking wait there would hold a worker thread and reintroduce the monitor starvation
   above. Turn it on to protect a production facility from an unthrottled read burst. It bounds only
-  the REST planes (ChannelFinder/Archiver/Alarm/Naming/Olog), not live p4p PV reads.
+  the REST planes (ChannelFinder/Archiver/Alarm/Naming/Olog), not live p4p PV reads. Two caveats:
+  reachability self-checks use HTTP HEAD and are exempt (a single probe, not a burst); and a
+  multi-GET tool like `coverage_audit` spends ~2 tokens per PV, so set the limit ABOVE that fan-out
+  or the tool aborts mid-run with a loud `RATE_LIMIT_EXCEEDED` (never a silent partial result).
 
 ## The planes
 

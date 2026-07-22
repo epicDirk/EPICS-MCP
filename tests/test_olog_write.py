@@ -817,3 +817,22 @@ class TestCreateLevelVocabulary:
         monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _boom)
         with pytest.raises(OlogWriteDeniedError):
             await query_olog_create(title="t", logbooks=["Ops"], level="Urgnet")
+
+
+def test_write_session_is_distinct_from_the_shared_read_session() -> None:
+    """K5 hardening pin: the READ session is now a PROCESS-SHARED cached session, but the Olog WRITE
+    session must stay a SEPARATE per-instance session (build_write_session: no retries, trust_env
+    off — a non-idempotent PUT must never be replayed, and must not inherit the read pool).
+    A refactor collapsing write onto the shared read session would leak the read pool + 3-retry
+    policy into writes; this goes red on that mutant."""
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+
+    client = OlogClient("http://olog:8080/Olog")
+    assert client._write_session is not client.session  # distinct objects
+    # ...and it is a no-retry write session, not the shared 3-retry read session
+    adapter = client._write_session.get_adapter("http://x")
+    assert isinstance(adapter, HTTPAdapter)
+    retries = adapter.max_retries
+    total = retries.total if isinstance(retries, Retry) else retries
+    assert total == 0

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
+from http.cookiejar import DefaultCookiePolicy
 from unittest.mock import Mock
 from urllib.parse import urlparse
 
@@ -306,6 +307,22 @@ def test_shared_session_reresolves_verify_on_config_change(
     assert first is not second
     assert first.verify == "a.pem"
     assert second.verify == "b.pem"
+
+
+def test_shared_session_blocks_cookies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """K5 hardening: the shared session is hit concurrently from worker threads, and a requests
+    cookie jar is the one per-request-MUTABLE shared state — a Set-Cookie mutating it while another
+    thread iterates it in prepare_request races (RuntimeError: dictionary changed size). These are
+    stateless REST reads, so the shared session blocks all cookie storage via a DefaultCookiePolicy
+    with an EMPTY allowed_domains (set_ok is False for every domain). RED before the policy: a fresh
+    jar's policy has allowed_domains=None (allow)."""
+    monkeypatch.setattr("epics_pv_mcp.services._http.get_config", lambda: EpicsConfig())
+    session = get_shared_session(auth_header=None)
+    policy = session.cookies._policy
+    assert isinstance(policy, DefaultCookiePolicy)
+    # allowed_domains() returns the empty tuple when blocking every domain; a default jar returns
+    # None (allow), so this fails without the block-all policy.
+    assert policy.allowed_domains() == ()
 
 
 # --- rest_exceptions root ---
@@ -617,8 +634,11 @@ def test_rest_get_json_throttled_over_limit(monkeypatch: pytest.MonkeyPatch) -> 
 
     _call()
     _call()
-    with pytest.raises(RateLimitError):
+    with pytest.raises(RateLimitError) as exc_info:
         _call()
+    # the read denial carries the machine-readable contract callers key on
+    assert exc_info.value.error_code == "RATE_LIMIT_EXCEEDED"
+    assert exc_info.value.details == {"limit": 2, "window_seconds": 60.0}
 
 
 def test_rest_get_json_unthrottled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

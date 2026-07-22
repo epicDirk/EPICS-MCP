@@ -24,6 +24,7 @@ import threading
 import time
 from collections import deque
 from email.message import Message
+from http.cookiejar import DefaultCookiePolicy
 from typing import Any
 
 import requests
@@ -247,9 +248,11 @@ def get_shared_session(
     ``verify`` is resolved from config HERE, before the cache key, so a config change (a reload, or
     a test's monkeypatched ``get_config``) selects a DIFFERENT cache entry rather than serving a
     session built under the old TLS trust — the one correctness trap of caching a config-derived
-    object. The clients never mutate their session (only ``.get``/``.head``/``.verify`` reads, and
-    requests' cookie jar is domain-scoped), so sharing is safe across worker threads and across
-    the several hosts a no-auth session may reach; per-request ``timeout`` stays per call. Reset via
+    object. Sharing is safe across worker threads: the clients only READ their session
+    (``.get``/``.head``/``.verify``), the urllib3 pools are thread-safe, and the one piece of
+    per-request-MUTABLE state — the cookie jar — is DISABLED on these sessions (see
+    :func:`_shared_session_cached`), so no unsynchronised state travels between the several hosts a
+    no-auth session may reach. Per-request ``timeout`` stays per call. Reset via
     :func:`clear_shared_sessions` (test isolation / a reload wanting fresh pools).
     """
     if verify is None:
@@ -269,7 +272,7 @@ def _shared_session_cached(
     """Memoised core of :func:`get_shared_session`. ``verify`` is already resolved (never ``None``)
     so it is a faithful part of the cache key. Separate function only so the resolution above sits
     OUTSIDE the ``lru_cache`` key."""
-    return build_retrying_session(
+    session = build_retrying_session(
         accept=accept,
         auth_header=auth_header,
         verify=verify,
@@ -277,6 +280,14 @@ def _shared_session_cached(
         backoff_factor=backoff_factor,
         pool_maxsize=_SHARED_POOL_MAXSIZE,
     )
+    # This session is shared across worker threads. A requests cookie jar is the ONE piece
+    # of per-request-MUTABLE state on a Session: a Set-Cookie from one plane mutates the jar while
+    # another thread iterates it in prepare_request → an unsynchronised "dictionary changed size"
+    # race (cookielib iterates without its lock). These are stateless REST reads that need no
+    # cookies, so block cookie storage outright (DefaultCookiePolicy with an EMPTY allowed_domains =
+    # set_ok False for every domain) → the jar never mutates and the shared session is thread-safe.
+    session.cookies.set_policy(DefaultCookiePolicy(allowed_domains=[]))
+    return session
 
 
 def clear_shared_sessions() -> None:
