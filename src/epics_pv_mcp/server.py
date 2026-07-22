@@ -598,11 +598,13 @@ async def is_alarm_configured(
         str,
         Field(
             description=(
-                "Alarm config-tree name (top-level topic, e.g. Accelerator). CASE-SENSITIVE: a "
-                "wrong or mis-cased name yields configured=null (withheld), never false."
+                "Alarm config-tree name — REQUIRED, no default (the trees are site-specific, so "
+                "there is no correct universal default; a guessed one silently matches nothing). "
+                "Top-level topic selecting the ES index. CASE-SENSITIVE: a wrong or mis-cased name "
+                "yields configured=null (withheld), never false."
             )
         ),
-    ] = "Accelerator",
+    ],
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
 ) -> dict[str, object]:
     """Report whether a PV has an alarm configuration (Phoebus Alarm Logger /search/alarm/config).

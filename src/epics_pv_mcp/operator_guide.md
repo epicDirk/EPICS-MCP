@@ -565,10 +565,12 @@ messages embed the full request URL — an internal host would leak into this fi
   'requires ChannelFinder' note, never a bare empty that reads as 'no such PV'.
 - **`is_alarm_configured` answers `configured:null`.** The alarm tree itself returned nothing, so
   "this PV is not configured" cannot be told apart from "that is not the tree name" — the answer is
-  withheld, and a `note` says so. The tree name is **case-sensitive** in the query even though the
-  server lower-cases it to pick the index, so `accelerator` selects the right index and matches
-  nothing. Re-run with the tree spelled as the logger stores it (`Accelerator`). The `config` field
-  in the response echoes your input — it is not the server confirming the tree.
+  withheld, and a `note` says so. The tree name is **REQUIRED** (no default — the trees are
+  site-specific, so there is no correct universal one; a guessed default silently matches nothing)
+  and **case-sensitive** in the query even though the server lower-cases it to pick the index, so a
+  mis-cased name (`mytree` vs `MyTree`) selects the right index yet matches nothing. Re-run with the
+  tree spelled exactly as the logger stores it. The `config` field in the response echoes your input
+  — it is not the server confirming the tree.
 - **A ChannelFinder glob finds nothing / finds odd casing.** The glob is **anchored**: a bare
   substring (`Ctrl-EVR-01`) matches 0 — wrap it in stars (`*Ctrl-EVR-01*`). And it is
   **case-insensitive**: `*Temp*` legitimately matches `...MorTemPrd`, so a hit may differ in case

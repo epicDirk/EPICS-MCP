@@ -29,8 +29,11 @@ from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmRe
 from epics_pv_mcp.services.alarm_time import normalize_alarm_time
 from epics_pv_mcp.services.redact import project_allowlist, redact_record
 
-# Default alarm config-tree (topic) name; the leading path segment that selects the ES index.
-DEFAULT_ALARM_CONFIG = "Accelerator"
+# MA-2b(d): there is deliberately NO default alarm-tree name. The former ``"Accelerator"`` default
+# matched nothing at a real facility (the tree names are site-specific — DTL/BIS/FBIS/… — and a
+# committed default cannot name one without violating the facility-agnostic guardrail), so it made
+# ``is_alarm_configured`` silently withhold. The caller MUST name the tree (the leading path segment
+# that selects the ES index).
 
 # DS-PRIVACY: a Phoebus alarm config-CHANGE document carries ``user`` and ``host`` — WHO last
 # changed the alarm config — alongside the technical settings, AND its authored free-text fields
@@ -180,7 +183,7 @@ class AlarmClient:
             ) from exc
 
     def is_alarm_configured(
-        self, pv: str, config_name: str = DEFAULT_ALARM_CONFIG
+        self, pv: str, config_name: str
     ) -> tuple[bool | None, dict[str, object]]:
         """Return ``(configured, detail)`` — True iff alarm tree *config_name* contains *pv*.
 

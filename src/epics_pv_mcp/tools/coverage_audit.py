@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import asyncio
 
-from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG
 from epics_pv_mcp.services.coverage import render_markdown
 from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
 from epics_pv_mcp.services.orchestration import CoverageRequest, build_coverage_report
@@ -32,7 +31,7 @@ async def _coverage_audit(
     query_channelfinder: bool = False,
     query_archiver: bool = False,
     query_alarm: bool = False,
-    alarm_config: str = DEFAULT_ALARM_CONFIG,
+    alarm_config: str | None = None,
     context_cap: int = DEFAULT_PV_CONTEXT_CAP,
     windows_paths: bool = False,
 ) -> dict[str, object]:
@@ -44,8 +43,10 @@ async def _coverage_audit(
     only). *query_channelfinder* is the anchor (needs its URL); without it no
     coverage verdict is possible, only the raw display set. *query_archiver*/*query_alarm* add the
     archive/alarm planes (need their ``*_URL``); each missing URL withholds that plane with a note.
-    *alarm_config* is the alarm tree name (default ``Accelerator``). *context_cap*/*windows_paths*
-    tune the PV-inventory (higher cap = more complete, slower; default Linux path resolution).
+    *alarm_config* is the alarm tree name — REQUIRED when the alarm plane is active (requested AND
+    its URL set); there is no default (the trees are site-specific), so opting into the alarm plane
+    without naming a tree is a loud INVALID_INPUT rather than a silent scan of a guessed tree.
+    *context_cap*/*windows_paths* tune the PV-inventory (higher cap = more complete, slower).
 
     Returns ``{"report": <CoverageReport JSON>, "markdown": <rendered report>}``.
     Raises :class:`EpicsError` (``INVALID_INPUT``) when *displays_dir* does not exist.

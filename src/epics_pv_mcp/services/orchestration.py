@@ -24,7 +24,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from epics_pv_mcp.paths import resolve_user_path
-from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG
 from epics_pv_mcp.services.checkers import (
     build_alarm_checker,
     build_archiver_checker,
@@ -122,7 +121,7 @@ class CoverageRequest:
     query_channelfinder: bool = False
     query_archiver: bool = False
     query_alarm: bool = False
-    alarm_config: str = DEFAULT_ALARM_CONFIG
+    alarm_config: str | None = None
     context_cap: int = DEFAULT_PV_CONTEXT_CAP
     windows_paths: bool = False
 

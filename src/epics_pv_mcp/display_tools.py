@@ -171,8 +171,15 @@ async def coverage_audit(
         bool, Field(description="add the alarm plane (per-PV is_alarm_configured)")
     ] = False,
     alarm_config: Annotated[
-        str, Field(description="alarm config-tree name (default Accelerator)")
-    ] = "Accelerator",
+        str | None,
+        Field(
+            description=(
+                "alarm config-tree name — REQUIRED when the alarm plane is active (query_alarm AND "
+                "its URL set); no default (site-specific trees), so opting into the alarm plane "
+                "without naming a tree is a loud INVALID_INPUT, not a silent wrong scan"
+            )
+        ),
+    ] = None,
     context_cap: Annotated[
         int, Field(description="max per-display reachability contexts the PV-inventory explores")
     ] = DEFAULT_PV_CONTEXT_CAP,

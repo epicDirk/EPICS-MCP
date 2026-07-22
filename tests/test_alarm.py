@@ -35,7 +35,7 @@ def test_is_alarm_configured_true(monkeypatch: pytest.MonkeyPatch) -> None:
         "get",
         Mock(return_value=_resp([{"config": "config:/Accelerator/DEV-TEST01/X", "enabled": True}])),
     )
-    configured, detail = client.is_alarm_configured("X")
+    configured, detail = client.is_alarm_configured("X", config_name="Accelerator")
     assert configured is True
     assert detail["config"] == "config:/Accelerator/DEV-TEST01/X"
 
@@ -54,7 +54,7 @@ def test_is_alarm_configured_detail_strips_person_fields(monkeypatch: pytest.Mon
         "some_future_field": "leak?",
     }
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([raw])))
-    configured, detail = client.is_alarm_configured("X")
+    configured, detail = client.is_alarm_configured("X", config_name="Accelerator")
     assert configured is True
     assert detail["config"] == "config:/Accelerator/DEV-TEST01/X"
     assert detail["enabled"] is True
@@ -85,7 +85,7 @@ def test_is_alarm_configured_withholds_authored_freetext(monkeypatch: pytest.Mon
         "host": "ws-ctrl-042",
     }
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([raw])))
-    _, detail = client.is_alarm_configured("Vac-VVMC-01:Pos-R")
+    _, detail = client.is_alarm_configured("Vac-VVMC-01:Pos-R", config_name="Accelerator")
     # authored free-text values are withheld — no person can leak inside the prose / a mailto action
     for field in ("description", "guidance", "displays", "commands", "actions"):
         assert detail[field] == FREETEXT_WITHHELD, field
@@ -114,7 +114,7 @@ def test_is_alarm_configured_drops_config_msg_person_data(monkeypatch: pytest.Mo
         "message_time": 1746093720000,
     }
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([raw])))
-    _, detail = client.is_alarm_configured("Vac-VVMC-01:Pos-R")
+    _, detail = client.is_alarm_configured("Vac-VVMC-01:Pos-R", config_name="Accelerator")
     assert detail == {
         "config": "config:/Accelerator/Vacuum/Vac-VVMC-01:Pos-R",
         "enabled": True,
@@ -133,7 +133,7 @@ def test_is_alarm_configured_false_when_tree_answers(monkeypatch: pytest.MonkeyP
         "get",
         Mock(side_effect=[_resp([]), _resp([{"config": "config:/Accelerator/C/Other"}])]),
     )
-    configured, detail = client.is_alarm_configured("X")
+    configured, detail = client.is_alarm_configured("X", config_name="Accelerator")
     assert configured is False
     assert detail == {}
 
@@ -144,7 +144,7 @@ def test_is_alarm_configured_withheld_when_tree_silent(monkeypatch: pytest.Monke
     # (200 + []), so False was a guess dressed as a fact. Both queries empty → withheld (None).
     client = AlarmClient("http://alarm")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([])))
-    configured, detail = client.is_alarm_configured("X")
+    configured, detail = client.is_alarm_configured("X", config_name="Accelerator")
     assert configured is None
     assert detail == {}
 
@@ -155,7 +155,7 @@ def test_is_alarm_configured_hit_does_not_probe_the_tree(monkeypatch: pytest.Mon
     client = AlarmClient("http://alarm")
     getter = Mock(return_value=_resp([{"config": "config:/Accelerator/C/X"}]))
     monkeypatch.setattr(client.session, "get", getter)
-    configured, _ = client.is_alarm_configured("X")
+    configured, _ = client.is_alarm_configured("X", config_name="Accelerator")
     assert configured is True
     assert getter.call_count == 1
 
@@ -186,7 +186,7 @@ def test_is_alarm_configured_unreadable_payload_raises(
         Mock(side_effect=[_resp(payload), _resp([{"config": "config:/Accelerator/C/Other"}])]),
     )
     with pytest.raises(AlarmResponseError):
-        client.is_alarm_configured("X")
+        client.is_alarm_configured("X", config_name="Accelerator")
 
 
 @pytest.mark.parametrize(
@@ -207,7 +207,7 @@ def test_is_alarm_configured_unreadable_record_raises(
         Mock(side_effect=[_resp(payload), _resp([{"config": "config:/Accelerator/C/Other"}])]),
     )
     with pytest.raises(AlarmResponseError):
-        client.is_alarm_configured("X")
+        client.is_alarm_configured("X", config_name="Accelerator")
 
 
 def test_is_alarm_configured_junk_tree_probe_withholds(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -219,7 +219,7 @@ def test_is_alarm_configured_junk_tree_probe_withholds(monkeypatch: pytest.Monke
         "get",
         Mock(side_effect=[_resp([]), _resp([123])]),
     )
-    configured, detail = client.is_alarm_configured("X")
+    configured, detail = client.is_alarm_configured("X", config_name="Accelerator")
     assert configured is None
     assert detail == {}
 
@@ -278,7 +278,7 @@ def test_is_alarm_configured_false_on_leaf_mismatch(monkeypatch: pytest.MonkeyPa
         "get",
         Mock(return_value=_resp([{"config": "config:/Accelerator/C/XY"}])),
     )
-    configured, _ = client.is_alarm_configured("X")
+    configured, _ = client.is_alarm_configured("X", config_name="Accelerator")
     assert configured is False
 
 
@@ -304,7 +304,7 @@ def test_is_alarm_configured_connection_error(monkeypatch: pytest.MonkeyPatch) -
         client.session, "get", Mock(side_effect=requests.exceptions.ConnectionError())
     )
     with pytest.raises(AlarmConnectionError):
-        client.is_alarm_configured("X")
+        client.is_alarm_configured("X", config_name="Accelerator")
 
 
 # --- tools ---
@@ -324,7 +324,7 @@ async def test_is_alarm_configured_tool_disabled_no_network(
         raise AssertionError("client must not be constructed when disabled")
 
     monkeypatch.setattr("epics_pv_mcp.services.checkers.AlarmClient", _boom)
-    result = await _is_alarm_configured("X")
+    result = await _is_alarm_configured("X", "Accelerator")
     assert result["enabled"] is False
     assert result["configured"] is None
 
@@ -345,7 +345,7 @@ async def test_is_alarm_configured_tool_enabled(monkeypatch: pytest.MonkeyPatch)
             return True, {"config": f"config:/{config_name}/C/{pv}"}
 
     monkeypatch.setattr("epics_pv_mcp.services.checkers.AlarmClient", _Fake)
-    result = await _is_alarm_configured("X")
+    result = await _is_alarm_configured("X", "Accelerator")
     assert result["enabled"] is True
     assert result["configured"] is True
     assert result["config"] == "Accelerator"
@@ -578,3 +578,37 @@ def test_check_connectivity_raises_on_transport_failure(monkeypatch: pytest.Monk
     )
     with pytest.raises(AlarmConnectionError):
         client.check_connectivity()
+
+
+# --- MA-2b(d): the alarm tree is required (no silent 'Accelerator' default that matches nothing) --
+
+
+async def test_is_alarm_configured_tool_requires_config_name() -> None:
+    """MA-2b(d): the alarm tree is a REQUIRED tool parameter — no silent 'Accelerator' default that
+    matches nothing at a real facility (is_alarm_configured would else always withhold). Mutant
+    (a default restored) -> config_name drops out of the schema's 'required' -> this fails."""
+    from epics_pv_mcp.server import mcp
+
+    tools = await mcp.list_tools()
+    tool = next(t for t in tools if t.name == "is_alarm_configured")
+    required = tool.inputSchema.get("required", [])
+    assert "pv" in required
+    assert "config_name" in required
+
+
+async def test_query_alarm_configured_without_tree_withholds_no_guess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MA-2b(d): with no tree named, query_alarm_configured withholds honestly instead of probing a
+    guessed default tree — the AlarmClient must NOT even be constructed (no network for a guess)."""
+    from epics_pv_mcp.services import checkers
+
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(alarm_url="http://alarm"))
+
+    def _boom(*args: object, **kwargs: object) -> object:
+        raise AssertionError("no client / no guessed-tree probe when the tree is None")
+
+    monkeypatch.setattr(checkers, "AlarmClient", _boom)
+    result = await checkers.query_alarm_configured("SIM:PV-NoTree")
+    assert result["configured"] is None
+    assert result.get("withheld") is True

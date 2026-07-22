@@ -29,7 +29,7 @@ from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
 from epics_pv_mcp.services._http import http_status
 from epics_pv_mcp.services._time_window import TimeWindowFormatError
-from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG, AlarmClient
+from epics_pv_mcp.services.alarm_client import AlarmClient
 from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmError
 from epics_pv_mcp.services.archiver_client import ArchiverClient
 from epics_pv_mcp.services.archiver_exceptions import ArchiverConnectionError, ArchiverError
@@ -143,7 +143,7 @@ class AlarmConfigChecker:
         self,
         url: str,
         auth: str | None,
-        config_name: str = DEFAULT_ALARM_CONFIG,
+        config_name: str,
         timeout: float = 5.0,
     ) -> None:
         self._client = AlarmClient(url, timeout=timeout, auth_header=auth)
@@ -214,13 +214,25 @@ def build_archiver_checker(query_archiver: bool) -> ArchivedChecker | None:
     return ArchiverChecker(cfg.archiver_url, cfg.archiver_auth or None)
 
 
-def build_alarm_checker(query_alarm: bool, alarm_config: str) -> AlarmChecker | None:
-    """Build the Alarm checker iff requested AND ``EPICS_MCP_ALARM_URL`` is set (else None)."""
+def build_alarm_checker(query_alarm: bool, alarm_config: str | None) -> AlarmChecker | None:
+    """Build the Alarm checker iff requested AND ``EPICS_MCP_ALARM_URL`` is set (else None).
+
+    MA-2b(d): when the plane is actually active (requested AND URL set) the caller MUST name the
+    alarm tree — a missing ``alarm_config`` is a LOUD ``INVALID_INPUT`` rather than a silent scan of
+    a guessed default tree that matches nothing. When the plane is inactive (not requested / URL
+    unset) a missing tree is moot, so it returns ``None`` without complaint.
+    """
     if not query_alarm:
         return None
     cfg = get_config()
     if not cfg.alarm_url:
         return None
+    if alarm_config is None:
+        raise EpicsError(
+            "The alarm plane was requested but no alarm tree (alarm_config) was named; there is no "
+            "correct default tree (they are site-specific). Name the tree to query.",
+            error_code="INVALID_INPUT",
+        )
     return AlarmConfigChecker(cfg.alarm_url, cfg.alarm_auth or None, config_name=alarm_config)
 
 
@@ -258,6 +270,13 @@ _ALARM_TREE_UNKNOWN_NOTE = (
     "Alarm config tree {config!r} returned no configuration at all — unknown or misspelled tree "
     "name (it is CASE-SENSITIVE here), or an empty tree. Answer withheld rather than reported as "
     "'not configured'."
+)
+
+# MA-2b(d): no alarm tree named. There is no correct default (site-specific trees), so we withhold
+# rather than probe a guessed tree that would match nothing and read as "not configured".
+_ALARM_NO_TREE_NOTE = (
+    "No alarm config tree was named, so alarm config cannot be checked — there is no correct "
+    "default tree (they are site-specific). Answer withheld; name the tree to query."
 )
 
 
@@ -330,17 +349,33 @@ async def query_archived(pv: str, timeout: float = 5.0) -> dict[str, object]:
 
 async def query_alarm_configured(
     pv: str,
-    config_name: str = DEFAULT_ALARM_CONFIG,
+    config_name: str | None = None,
     timeout: float = 5.0,
 ) -> dict[str, object]:
     """Report whether *pv* has an alarm configuration (Alarm Logger /search/alarm/config).
 
     Default-disabled: with ``EPICS_MCP_ALARM_URL`` unset, returns ``enabled: false`` and makes no
     network call. Shared by the ``is_alarm_configured`` tool and the diagnose Alarm plane.
+
+    MA-2b(d): *config_name* (the alarm tree) has NO default — there is no correct one (the trees are
+    site-specific and a committed default cannot name one). With it ``None`` the answer is withheld
+    honestly (``configured: None`` + a note) instead of probing a guessed tree that matches nothing;
+    NO network call is made for the guess. The ``is_alarm_configured`` tool makes the tree required,
+    so a user never reaches this branch — ``diagnose`` (which has no tree to offer) degrades to an
+    honest withheld here instead of a silently-wrong answer.
     """
     cfg = get_config()
     if not cfg.alarm_url:
         return {"enabled": False, "pv": pv, "configured": None, "note": _ALARM_DISABLED_NOTE}
+    if config_name is None:
+        return {
+            "enabled": True,
+            "pv": pv,
+            "config": None,
+            "configured": None,
+            "withheld": True,
+            "note": _ALARM_NO_TREE_NOTE,
+        }
 
     def _run() -> dict[str, object]:
         client = AlarmClient(cfg.alarm_url, timeout=timeout, auth_header=cfg.alarm_auth or None)

@@ -19,7 +19,6 @@ from pathlib import Path
 
 from epics_pv_mcp.cli_common import configure_stdout
 from epics_pv_mcp.errors import EpicsError
-from epics_pv_mcp.services.alarm_client import DEFAULT_ALARM_CONFIG
 from epics_pv_mcp.services.coverage import render_markdown
 from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
 from epics_pv_mcp.services.orchestration import CoverageRequest, build_coverage_report
@@ -64,8 +63,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--alarm-config",
-        default=DEFAULT_ALARM_CONFIG,
-        help=f"alarm config-tree name to query (default {DEFAULT_ALARM_CONFIG})",
+        default=None,
+        help="alarm config-tree name; REQUIRED with --alarm (URL set) — no default (site-specific "
+        "trees), so --alarm without it is a loud INVALID_INPUT, not a silent scan",
     )
     parser.add_argument(
         "--context-cap",

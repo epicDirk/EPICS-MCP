@@ -91,7 +91,7 @@ def test_alarm_checker_translates_error_to_runtimeerror(monkeypatch: pytest.Monk
             raise AlarmConnectionError("down")
 
     monkeypatch.setattr(checkers, "AlarmClient", _FailClient)
-    checker = checkers.AlarmConfigChecker("http://alarm", None)
+    checker = checkers.AlarmConfigChecker("http://alarm", None, config_name="Accelerator")
     with pytest.raises(RuntimeError, match="Alarm query failed"):
         checker.is_alarm_configured("X")
 
@@ -106,7 +106,8 @@ def test_alarm_checker_success_returns_bool(monkeypatch: pytest.MonkeyPatch) -> 
             return True, {}
 
     monkeypatch.setattr(checkers, "AlarmClient", _OkClient)
-    assert checkers.AlarmConfigChecker("http://alarm", None).is_alarm_configured("X") is True
+    checker = checkers.AlarmConfigChecker("http://alarm", None, config_name="Accelerator")
+    assert checker.is_alarm_configured("X") is True
 
 
 # --- build_* factories: config gates (not requested / URL unset → None; both set → built) ---
@@ -126,6 +127,22 @@ def test_build_alarm_checker_gates_on_request_and_url(monkeypatch: pytest.Monkey
     assert checkers.build_alarm_checker(True, "Accelerator") is None  # requested but URL unset
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(alarm_url="http://alarm"))
     assert checkers.build_alarm_checker(True, "Accelerator") is not None
+
+
+def test_build_alarm_checker_requires_tree_when_plane_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MA-2b(d): opting into the alarm plane (URL set + requested) without naming a tree is a LOUD
+    error, not a silent scan of a guessed 'Accelerator' tree that matches nothing. Mutant (a default
+    tree restored) -> no raise -> this fails. When the plane is NOT active (not requested / URL
+    unset) a missing tree is moot -> None, no raise."""
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(alarm_url="http://alarm"))
+    with pytest.raises(EpicsError):
+        checkers.build_alarm_checker(True, None)
+    # Plane inactive -> a missing tree is irrelevant, so no raise (returns None).
+    assert checkers.build_alarm_checker(False, None) is None
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(alarm_url=""))
+    assert checkers.build_alarm_checker(True, None) is None
 
 
 # --- query_* error branches: the per-service error → EpicsConnectionError translation ---
@@ -162,7 +179,7 @@ async def test_query_alarm_configured_translates_error_to_epics_connection(
 
     monkeypatch.setattr(checkers, "AlarmClient", _FailClient)
     with pytest.raises(EpicsConnectionError, match="Alarm Logger"):
-        await checkers.query_alarm_configured("X")
+        await checkers.query_alarm_configured("X", "Accelerator")
 
 
 async def test_query_channels_translates_error_to_epics_connection(
@@ -204,7 +221,7 @@ async def test_query_alarm_configured_response_error_is_not_a_connection_error(
 
     monkeypatch.setattr(checkers, "AlarmClient", _FailClient)
     with pytest.raises(EpicsError, match="Alarm Logger") as excinfo:
-        await checkers.query_alarm_configured("X")
+        await checkers.query_alarm_configured("X", "Accelerator")
     assert not isinstance(excinfo.value, EpicsConnectionError)  # the server ANSWERED
 
 
