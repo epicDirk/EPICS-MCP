@@ -193,6 +193,40 @@ def test_unconfigured_pv_in_a_real_tree_is_still_false(
     assert configured is False
 
 
+# --- MA-2b(a/c) server-side filters: honoured, or silently ignored + broadened? (differential) ---
+#
+# The alarm-logger IGNORES an unsupported query param (its parser's default branch is a bare
+# `break;`) and BROADENS the result instead of erroring. A mock cannot see this — only a live
+# negative control can: an IMPOSSIBLE filter value must return nothing while the unfiltered window
+# holds events. If the filter were ignored, the impossible value would return the full (broadened)
+# set and these go red — which is exactly what earns the tool description the right to drop
+# "UNVERIFIED" for the server that passes them.
+
+
+def test_root_filter_is_honoured(client: AlarmClient, pv: str) -> None:
+    """root differential: an UNMATCHED tree must return nothing while the unfiltered window holds
+    events — else the server ignored root and silently broadened."""
+    assert _count(client, pv, "7 days"), _NO_REFERENCE  # positive control
+    nonsense, capped = client.get_alarm_history(
+        pv, start="7 days", end="now", max_events=_MAX_EVENTS, root="ZZZNoSuchTree"
+    )
+    assert not capped and nonsense == [], (
+        "root was ignored: an unmatched tree still returned events — the server silently broadened"
+    )
+
+
+def test_severity_filter_is_honoured(client: AlarmClient, pv: str) -> None:
+    """severity differential: an impossible severity must return nothing while the unfiltered
+    window holds events — else the server ignored severity and silently broadened."""
+    assert _count(client, pv, "7 days"), _NO_REFERENCE  # positive control
+    nonsense, capped = client.get_alarm_history(
+        pv, start="7 days", end="now", max_events=_MAX_EVENTS, severity="ZZZNOSUCH"
+    )
+    assert not capped and nonsense == [], (
+        "severity was ignored: an impossible severity still returned events (silent broadening)"
+    )
+
+
 # --- S11 schema anchor: the strict client schema, pinned against the REAL payload ---
 
 
