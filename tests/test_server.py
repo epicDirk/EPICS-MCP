@@ -855,3 +855,34 @@ def test_prune_tool_schemas_never_crashes_core(
     with caplog.at_level(logging.ERROR):
         server._prune_tool_schemas(server.mcp)  # must NOT raise
     assert any("_prune_tool_schemas" in record.message for record in caplog.records)
+
+
+# MA-Q3 tools/list size-gate ceiling (chars of the compact ListToolsResult wire payload). Set
+# deliberately above the current post-MA-Q1 value (64499) with headroom, and BELOW the un-pruned
+# baseline (70237) so a regression that stops the pruning also trips it. Raising it is a conscious,
+# reviewed one-line change with a rationale — never a silent bump.
+_TOOLS_LIST_WIRE_CEILING = 70_000
+
+
+@pytest.mark.asyncio
+async def test_tools_list_within_budget() -> None:
+    """MA-Q3 size-gate: the wire tools/list payload must stay within the agreed ceiling. MA-Q1
+    shrank it to 64499 and is framed as 'a precondition for every new tool', but nothing guarded the
+    byte budget — a new tool, an SDK change that inflates the wire, or a regression that stops the
+    pruning could grow it back UNNOTICED with a green suite. This is that missing guard.
+
+    RELATIONAL (a ``<=`` ceiling, not an exact count) so both the core-only lane (28 tools) and the
+    full lane (32) pass — a count-pinned assert would break core-only CI. Provably red: lower the
+    ceiling below the current 64499. Also catches a broken prune: the un-pruned payload is 70237,
+    which exceeds the 70000 ceiling."""
+    from mcp.types import ListToolsResult
+
+    from epics_pv_mcp.server import mcp
+
+    tools = await mcp.list_tools()
+    wire = len(ListToolsResult(tools=tools).model_dump_json(by_alias=True, exclude_none=True))
+    assert wire <= _TOOLS_LIST_WIRE_CEILING, (
+        f"tools/list wire payload grew to {wire} chars (> {_TOOLS_LIST_WIRE_CEILING} ceiling) — "
+        "decide consciously: trim the new tool's schema/description, or raise the ceiling with a "
+        "rationale (MA-Q3). Never bump it silently."
+    )

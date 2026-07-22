@@ -9,6 +9,15 @@ carry breaking changes).
 
 ### Added
 
+- **MA-Q3 tools/list size-gate (test-only guard).** A relational `<=` ceiling test
+  (`test_tools_list_within_budget`, ceiling 70000) so the wire `tools/list` payload MA-Q1 shrank cannot
+  silently regrow — a new tool, an SDK change that inflates the wire, or a regression that stops the pruning
+  now turns a green suite RED. This is the guard behind MA-Q1's "precondition for every new tool" framing,
+  which was previously documented intent only (no test asserted the byte budget). Relational (not a count) so
+  the core-only [28 tools] and full [32] lanes both pass; provably red below the current 64499; also catches a
+  broken prune (the un-pruned payload is 70237 > 70000). Headroom is deliberate — raising the ceiling is a
+  conscious, reviewed one-line change with a rationale, never a silent bump.
+
 - **New `list_channel_vocabulary` tool — discover what `find_channels` can be filtered on (MA-2 CF-Query-Fläche).**
   The MA-2 filters (`has_properties`/`lacks_properties`/`not_property_values`/`has_tags`/`lacks_tags`)
   were ergonomically dead: a caller had no way to learn which property keys and tag names exist. The new
