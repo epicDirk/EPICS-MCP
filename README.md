@@ -38,7 +38,7 @@ framed in these terms:
 | Plane | Source | Tools |
 |-------|--------|-------|
 | **Live** | p4p (PVAccess / Channel Access) | `get_pv_value`, `get_pvs`, `get_pv_info`, `monitor_pv`, `discover_pvs`, `set_pv_value` |
-| **Registry** | ChannelFinder | `find_channels`, `diagnose_connection`, `coverage_audit` |
+| **Registry** | ChannelFinder | `find_channels`, `list_channel_vocabulary`, `diagnose_connection`, `coverage_audit` |
 | **History** | EPICS Archiver Appliance | `is_archived`, `get_pv_history`, `get_archive_info` |
 | **Alarm** | Phoebus Alarm Logger | `is_alarm_configured`, `get_alarm_history` |
 | **Naming** | ESS Naming Service | `lookup_device_name`, `diagnose_connection`, `crossplane_check` |
@@ -207,6 +207,7 @@ To reach a real control system, set the address list in the launcher's environme
 | Tool | Service | Enabled by |
 |------|---------|-----------|
 | `find_channels` | ChannelFinder — which IOC/host serves a PV + tags/properties; optional property/tag filters (`has_properties`/`lacks_properties` incl. `prop!=*` "lacks", `not_property_values`, `has_tags`/`lacks_tags`) and `count_only` for the exact match count via `/count`. Property filtering is gated to the DS-privacy safe-property allowlist (a redacted property like `accessGroup` is refused); filter semantics are UNVERIFIED until a differential live probe | `EPICS_MCP_CHANNELFINDER_URL` |
+| `list_channel_vocabulary` | ChannelFinder — the property keys + tag names `find_channels` can be filtered on, NAMES only (`{enabled, properties, tags}`). `properties` is the allowlisted subset present in this instance (never advertises a key `find_channels` would refuse); `tags` is the full server tag set. An empty list ≠ CF unconfigured (`enabled:false`); an unreadable listing raises | `EPICS_MCP_CHANNELFINDER_URL` |
 | `is_archived` | Archiver Appliance — is a PV being archived? (+ connection_state / last_event / is_monitored, plus the connection-history cluster connection_loss_regain_count / connection_first_established / connection_last_restablished, from the same getPVStatus call) | `EPICS_MCP_ARCHIVER_URL` |
 | `get_pv_history` | Archiver Appliance — archived samples over an ISO-8601 window (+ the getData.json `meta` block: EGU units, PREC precision; `status` = ok/empty/withheld so an empty result is never mistaken for "could not read"; one unreadable sample withholds the whole result) | `EPICS_MCP_ARCHIVER_URL` |
 | `get_archive_info` | Archiver Appliance — how a PV is archived (sampling method/period, STS/MTS/LTS retention, DBRType, archived fields, source host, the alarm/display/control limits + units/precision — the nine numeric limits read `"0.0"` when unset, so `"0.0"` ≠ a literal zero limit — and controlling_pv/policy_name/modification_time); `found:false` ONLY on the 404 (never-archived) — an unreadable 2xx errors, never a false `found` | `EPICS_MCP_ARCHIVER_URL` |

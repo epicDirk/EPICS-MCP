@@ -9,6 +9,23 @@ carry breaking changes).
 
 ### Added
 
+- **New `list_channel_vocabulary` tool — discover what `find_channels` can be filtered on (MA-2 CF-Query-Fläche).**
+  The MA-2 filters (`has_properties`/`lacks_properties`/`not_property_values`/`has_tags`/`lacks_tags`)
+  were ergonomically dead: a caller had no way to learn which property keys and tag names exist. The new
+  read-only, no-`pv` tool lists them as `{enabled, properties, tags}` — NAMES only (the DS-privacy `owner`
+  and `value` on the vendor `PropertyDto`/`TagDto` are dropped). `properties` is fetched from
+  `/resources/properties` and reduced to the SAME safe-property allowlist `find_channels` enforces (and
+  `_project` surfaces), so it lists only the keys that both exist in this instance AND are accepted as a
+  filter — a non-allowlisted, person-bearing property like `ENGINEER` is never advertised (it would be
+  refused with `INVALID_INPUT` anyway); expand `EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES` to surface
+  more. `tags` (from `/resources/tags`) is the full, ungated server tag set (tags are ungated in
+  `find_channels` too). Strict like the Olog `_named_list` (S11): an unreadable/non-list listing RAISES
+  rather than collapsing to `[]` — the listing IS the answer, so "unreadable" must never read as "there
+  are none"; an empty list is valid, and `enabled:false` (CF unconfigured) is distinct from it. Reuses
+  `EPICS_MCP_CHANNELFINDER_URL`/`_AUTH` — no new env var. `list_tools` 31 → 32, no schema change (the
+  tool returns an untyped `dict`). Red-proof-first: client tests (allowlist intersection, ungated tags,
+  strict-raise on bad payload, empty→`[]`) + the tool disabled/enabled pair.
+
 - **New `get_appliance_info` tool — surface the Archiver `getApplianceInfo` body (Fundort 3, decision KK).**
   The MGMT `getApplianceInfo` body names WHICH appliance this is (`identity`) and where each plane is
   served (`mgmt_url`/`engine_url`/`etl_url`/`retrieval_url`/`data_retrieval_url`, `cluster_inet_port`)
