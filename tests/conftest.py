@@ -12,6 +12,7 @@ import pytest
 from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.errors import RateLimitError
 from epics_pv_mcp.safety import SafetyLayer
+from epics_pv_mcp.services._concurrency import reset_monitor_executor
 from epics_pv_mcp.services._http import clear_shared_sessions
 
 # The display-aware tools and their opi_navigation-coupled tests need the optional
@@ -62,6 +63,16 @@ def _clear_shared_session_cache() -> Iterator[None]:
     clear_shared_sessions()
     yield
     clear_shared_sessions()
+
+
+@pytest.fixture(autouse=True)
+def _reset_monitor_executor() -> Iterator[None]:
+    """K4: the dedicated monitor executor is a process-global singleton sized at first use from
+    config. Reset it around every test so a test setting ``monitor_max_concurrency`` never
+    inherits a pool sized by an earlier one; the next test rebuilds it under its own config."""
+    reset_monitor_executor()
+    yield
+    reset_monitor_executor()
 
 
 # The loopback lane a write-enabled SafetyLayer accepts (E8): both providers' search reach

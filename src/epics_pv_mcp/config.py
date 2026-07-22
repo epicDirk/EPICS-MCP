@@ -65,6 +65,12 @@ class EpicsConfig(BaseSettings):
     max_batch_size: int = Field(default=100, ge=1)
     max_monitor_duration: float = Field(default=60.0, gt=0)
     max_monitor_events: int = Field(default=1000, ge=1)
+    # K4 bulkhead: pv_monitor blocks a worker thread up to max_monitor_duration (60 s). Monitors run
+    # on a DEDICATED ThreadPoolExecutor of this width (services/_concurrency.py), NOT the shared
+    # asyncio default pool (min(32, cpu+4)) — so >= this many concurrent monitors can no longer
+    # starve every other to_thread call (REST plane checks, PV reads/writes) into an apparent hang.
+    # ge=1: a 0-width pool could never run a monitor. Default 8 is well below the default pool.
+    monitor_max_concurrency: int = Field(default=8, ge=1)
     # Live-probe timeout for the diagnose_connection tool (fail-fast; a disconnected PV should not
     # hang the diagnosis). Separate from default_timeout so read latency and diagnosis can differ.
     diagnose_timeout: float = Field(default=5.0, gt=0)

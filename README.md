@@ -305,6 +305,7 @@ All settings are read from environment variables with the `EPICS_MCP_` prefix.
 | `EPICS_MCP_MAX_BATCH_SIZE` | `100` | Max PVs per batch read (≥ 1) |
 | `EPICS_MCP_MAX_MONITOR_DURATION` | `60.0` | Max monitor subscription duration in seconds (> 0) |
 | `EPICS_MCP_MAX_MONITOR_EVENTS` | `1000` | Max events per monitor subscription (≥ 1) |
+| `EPICS_MCP_MONITOR_MAX_CONCURRENCY` | `8` | Dedicated monitor-executor width; caps concurrent long monitors so they cannot starve the shared thread pool (≥ 1) |
 | `EPICS_MCP_DIAGNOSE_TIMEOUT` | `5.0` | Live-probe timeout for `diagnose_connection` (> 0) |
 
 **Write safety** (all writes blocked unless enabled)

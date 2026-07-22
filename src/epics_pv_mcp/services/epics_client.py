@@ -20,6 +20,7 @@ from epics_pv_mcp.errors import (
     PVNotFoundError,
     PVTimeoutError,
 )
+from epics_pv_mcp.services._concurrency import get_monitor_executor
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +245,12 @@ async def pv_monitor(
             if sub is not None:
                 sub.close()
 
-    await asyncio.to_thread(_monitor_thread)
+    # K4 bulkhead: run the blocking p4p subscription on the DEDICATED monitor executor, not the
+    # shared asyncio default pool. A monitor holds its thread up to max_monitor_duration (60 s), so
+    # dispatching it here (instead of asyncio.to_thread) keeps a burst of monitors from starving the
+    # default pool that every other to_thread call — REST checks, PV reads/writes — depends on.
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(get_monitor_executor(), _monitor_thread)
 
     if error_holder:
         raise error_holder[0]

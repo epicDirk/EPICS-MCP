@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -730,6 +731,30 @@ async def test_monitor_format_failure_yields_none(monkeypatch: Any) -> None:
     assert events[0]["pv_name"] == "X:Y"
     assert events[0]["value"] is None
     assert "extraction failed" in str(events[0]["note"])
+
+
+# --- K4 bulkhead: pv_monitor runs on a dedicated executor, not the shared default pool ---
+
+
+async def test_pv_monitor_runs_on_dedicated_executor(monkeypatch: Any) -> None:
+    """K4 bulkhead: pv_monitor must run its blocking p4p subscription on the DEDICATED monitor
+    executor, not the shared asyncio default executor. Otherwise >= monitor_max_concurrency
+    concurrent monitors (each blocking up to max_monitor_duration = 60 s) occupy the whole default
+    pool, and every other ``to_thread`` call (REST plane checks, PV reads/writes, the Olog write
+    path) queues behind them — the server appears hung though nothing crashed. The worker thread's
+    name proves which executor ran it. RED before K4 (``asyncio.to_thread`` → the default pool,
+    whose threads are NOT named ``epics-monitor``)."""
+    captured: dict[str, str] = {}
+
+    class _ThreadNameContext:
+        def monitor(self, name: str, cb: Any) -> _FakeSub:
+            captured["thread"] = threading.current_thread().name
+            return _FakeSub()
+
+    monkeypatch.setattr(epics_client, "get_context", lambda: _ThreadNameContext())
+    await epics_client.pv_monitor("X:Y", duration=0.0, max_events=1)
+
+    assert captured["thread"].startswith("epics-monitor")
 
 
 # ---------------------------------------------------------------------------

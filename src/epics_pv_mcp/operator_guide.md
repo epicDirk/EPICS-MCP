@@ -35,6 +35,12 @@ operational knowledge (see the Knowledge Persistence Policy in `CLAUDE.md`).
   disabled.
 - **REST planes are opt-in.** Each REST plane stays disabled until its `*_URL` env var is set; an
   empty URL means no client and no network call.
+- **Long monitors run in a dedicated pool.** `monitor_pv` holds a worker thread for up to
+  `EPICS_MCP_MAX_MONITOR_DURATION` (60 s). Those blocking subscriptions run on a DEDICATED executor
+  sized by `EPICS_MCP_MONITOR_MAX_CONCURRENCY` (default 8), NOT the shared pool behind every other
+  read/write — so a burst of monitors cannot starve the rest of the server into an apparent hang.
+  Raise it only if operators legitimately need more simultaneous long monitors; the ceiling bounds
+  monitors alone.
 
 ## The planes
 
