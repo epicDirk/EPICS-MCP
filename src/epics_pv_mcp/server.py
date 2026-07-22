@@ -399,11 +399,21 @@ async def find_channels(
     ] = None,
     has_tags: Annotated[
         list[str] | None,
-        Field(description="Required tags — ANY-of / OR (a channel with any listed tag matches)."),
+        Field(
+            description=(
+                "Required tags — ANY-of / OR (a channel with any listed tag matches). "
+                "Tag-filter semantics UNVERIFIED server-side until a live probe."
+            )
+        ),
     ] = None,
     lacks_tags: Annotated[
         list[str] | None,
-        Field(description="Excluded tags — a channel with any listed tag is dropped."),
+        Field(
+            description=(
+                "Excluded tags — a channel with any listed tag is dropped. "
+                "Tag-filter semantics UNVERIFIED server-side until a live probe."
+            )
+        ),
     ] = None,
     count_only: Annotated[
         bool,
@@ -430,7 +440,9 @@ async def find_channels(
     allowlist (a redacted property like accessGroup is refused — filtering it would reconstruct the
     partition the projection hides); expand EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES to filter on
     more. (2) An unknown/misspelled property name is NOT a server error — it narrows the result to
-    0, indistinguishable from a genuinely empty match.
+    0, indistinguishable from a genuinely empty match. (3) The PROPERTY filters and count_only were
+    differentially live-verified (2026-07-22); the TAG filters (has_tags/lacks_tags) remain
+    UNVERIFIED against a live server until a probe exercises them.
 
     A malformed registry record (a non-dict element, or one without a usable name) raises a loud
     error — records are never silently dropped into a smaller, fabricated answer.

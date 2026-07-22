@@ -62,9 +62,10 @@ carry breaking changes).
   response projection (`resolve_safe_property_names`) — filtering on a redacted property (e.g.
   `accessGroup`) is refused, because it would reconstruct the name→value partition the projection
   hides; an empty allowlist disables property filtering (tags are not redacted, not gated). To filter
-  on more properties, expand `EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES`. **Honest caveats** (in the
-  tool description): the filter semantics are UNVERIFIED until a differential live probe; and 0 results
-  cannot distinguish an unknown property name from a genuinely empty match. Guards raise
+  on more properties, expand `EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES`. **Honest caveats** (as
+  shipped in this entry; the property filters were later live-verified — see the "### Changed" entry;
+  the tag filters remain unverified): the filter semantics are UNVERIFIED until a differential live
+  probe; and 0 results cannot distinguish an unknown property name from a genuinely empty match. Guards raise
   `INVALID_INPUT` on a redacted/reserved (`~name`/`!`)/contradictory/separator-in-negation filter, so
   no path can emit the forbidden `~name!`. No new tool (`list_tools` stays 30), no schema change (the
   tool returns an untyped `dict`). Red-proof: the `_build_query_params` exact-equality tests pin both
@@ -125,12 +126,15 @@ carry breaking changes).
 
 ### Changed
 
-- **ChannelFinder filter semantics VERIFIED against a live server (MA-2 Teil C, 2026-07-22).** A
-  differential live probe (positive + negative controls) confirmed the `find_channels` property/tag
-  filters behave as documented, so the "UNVERIFIED until a differential live probe" caveat is dropped
-  from the tool description, the `find_channels` docstring, `README.md` and the operator guide (the "0
-  results ≠ unknown property" honesty rule stays — a structural fact, not a provisional marker). Five
-  new controls in `tests/test_channelfinder_live.py`, all on the surfaced `pvStatus` property: a
+- **ChannelFinder PROPERTY filter semantics VERIFIED against a live server (MA-2 Teil C, 2026-07-22).**
+  A differential live probe (positive + negative controls) confirmed the `find_channels` PROPERTY
+  filters (`has_properties`/`lacks_properties`/`not_property_values`) and `count_only` behave as
+  documented, so the "UNVERIFIED until a differential live probe" caveat is dropped for them from the
+  tool description, the `find_channels` docstring, `README.md` and the operator guide (the "0 results
+  ≠ unknown property" honesty rule stays — a structural fact, not a provisional marker). The TAG
+  filters (`has_tags`/`lacks_tags`) remain UNVERIFIED — the sandbox ChannelFinder carries no tags to
+  probe them; their caveat is re-scoped to the tag axis, not dropped. Five new controls in
+  `tests/test_channelfinder_live.py`, all on the surfaced `pvStatus` property: a
   positive strict-subset (`has_properties` returns a non-empty subset whose members carry the value),
   an absence-partition (`lacks_properties` + `has_properties={p: "*"}` sum to the unfiltered count), a
   value-negation (`not_property_values` drops that value only), `count_only`↔list agreement, and an
