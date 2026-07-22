@@ -80,6 +80,29 @@ _TYPE_INFO_FIELDS: tuple[tuple[str, str], ...] = (
     ("modificationTime", "modification_time"),  # config last changed (pairs with creation_time)
 )
 
+# getApplianceInfo field -> surfaced snake_case key (Fundort 3). The MGMT ``getApplianceInfo`` body
+# is the appliance's own topology: its ``identity`` plus the per-plane root URLs (mgmt/engine/etl/
+# retrieval/dataRetrieval) and the ``clusterInetPort``, plus a ``version`` string the handler adds
+# from version.txt. doctor reads only ``identity`` and discards the rest; this surfaces the whole
+# body so an agent can tell WHICH appliance/cluster it is on (enumerating the wrong cluster yields a
+# complete-looking list of the wrong PVs) and WHICH plane is served WHERE (the split/proxied-vs-
+# single-JVM question behind the mgmt-:17665 / retrieval-:17668 confusion). Kept as a projection
+# allowlist so an unexpected field is never surfaced. Field names are the vendor getApplianceInfo
+# JSON body (GetApplianceInfo.java / ApplianceInfo.java: JSONEncoder introspects the ApplianceInfo
+# bean, so the wire keys equal the field names) — a JSON CONTRACT, not a live measurement.
+_APPLIANCE_INFO_FIELDS: tuple[tuple[str, str], ...] = (
+    ("identity", "identity"),
+    ("mgmtURL", "mgmt_url"),
+    ("engineURL", "engine_url"),
+    ("retrievalURL", "retrieval_url"),
+    ("etlURL", "etl_url"),
+    ("dataRetrievalURL", "data_retrieval_url"),
+    ("clusterInetPort", "cluster_inet_port"),
+    # Added by the handler from ui/comm/version.txt; OMIT-WHEN-NULL (an older appliance may lack
+    # it), so never promised always-present. Distinct from the retrieval-probe product-version.
+    ("version", "version"),
+)
+
 
 class Sample(TypedDict):
     """One archived sample (the getData.json ``data[]`` element)."""
@@ -324,6 +347,59 @@ class ArchiverClient:
             "getPVTypeInfo returned an unreadable payload (expected a type-info record carrying "
             f"a non-empty 'pvName', got {type(data).__name__}); "
             "this is NOT the 404 'no record' signal."
+        )
+
+    def get_appliance_info(self) -> dict[str, object]:
+        """Return the appliance's own topology (Archiver MGMT ``getApplianceInfo``) — Fundort 3.
+
+        The MGMT ``getApplianceInfo`` body names WHICH appliance this is (``identity``) and where
+        each plane is served (``mgmt_url``/``engine_url``/``etl_url``/``retrieval_url``/
+        ``data_retrieval_url``, ``cluster_inet_port``), plus a ``version`` string. doctor's
+        ``_identify_archiver`` fetches the SAME body but keeps only ``identity`` and throws the rest
+        away; this surfaces the whole body via the :data:`_APPLIANCE_INFO_FIELDS` projection
+        allowlist (an unexpected field is never surfaced; a field the body lacks — e.g. ``version``
+        on a pre-version.txt appliance — is OMITTED, not surfaced as ``null``). It answers the two
+        questions doctor's identity-only check cannot serve to a tool caller: "am I pointed at the
+        intended cluster (before I trust list_archived_pvs / get_pv_history)?" and "is this a
+        split/proxied deployment — which plane is served where?".
+
+        No not-found duality (there is no PV): a served non-2xx PROPAGATES as an ArchiverError —
+        deliberately UNLIKE getPVTypeInfo, whose 404 means "PV not archived". A 404 here means the
+        WRONG endpoint (the retrieval webapp serves ``/retrieval/bpl``, not ``/mgmt/bpl``), not
+        "no appliance". A 2xx whose body carries no non-empty ``identity`` string RAISES rather than
+        fabricating an empty success (the getPVStatus/getPVTypeInfo S11 anchor discipline).
+
+        The URLs embed internal cluster-member host names; this is surfaced un-redacted BY DESIGN —
+        the body is pure technical infra (no person data), consistent with the shipped
+        ``host_name``/``data_stores`` fields of :meth:`get_pv_type_info`. Field names + the
+        all-string value contract are the vendor getApplianceInfo JSON body
+        (``GetApplianceInfo.java`` / ``ApplianceInfo.java``) — a JSON CONTRACT, not a measurement.
+        """
+        record = self._require_appliance_record(
+            self._get(f"{self.base_url}/mgmt/bpl/getApplianceInfo", {})
+        )
+        result: dict[str, object] = {}
+        for source_key, out_key in _APPLIANCE_INFO_FIELDS:
+            if source_key in record:
+                result[out_key] = record[source_key]
+        return result
+
+    @staticmethod
+    def _require_appliance_record(data: object) -> dict[str, object]:
+        """Return the getApplianceInfo record dict, or RAISE (S11 anchor discipline).
+
+        The vendor body is a single JSON object whose ``identity`` is the always-present anchor
+        (the appliance names itself; doctor requires it non-empty too). A non-dict, a list wrapper
+        (out of contract — unlike getPVTypeInfo, getApplianceInfo is never list-wrapped), or a dict
+        without a non-empty string ``identity`` is not a getApplianceInfo record and RAISES — a
+        wrong-endpoint 200 must never be projected as a valid-but-empty appliance.
+        """
+        if isinstance(data, dict) and isinstance(data.get("identity"), str) and data["identity"]:
+            return data
+        raise ArchiverResponseError(
+            "getApplianceInfo returned an unreadable payload (expected a single object carrying a "
+            f"non-empty 'identity', got {type(data).__name__}); the MGMT endpoint may be wrong "
+            "(the retrieval webapp serves /retrieval/bpl, not /mgmt/bpl)."
         )
 
     def get_all_pvs(

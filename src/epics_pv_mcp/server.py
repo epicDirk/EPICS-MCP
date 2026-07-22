@@ -36,6 +36,7 @@ from epics_pv_mcp.services.diagnose import (
 from epics_pv_mcp.tool_errors import translate_epics_errors
 from epics_pv_mcp.tools.alarm import _get_alarm_history, _is_alarm_configured
 from epics_pv_mcp.tools.archiver import (
+    _get_appliance_info,
     _get_archive_info,
     _get_pv_history,
     _is_archived,
@@ -593,6 +594,34 @@ async def get_archive_info(
     epics-pv://guide.
     """
     return await _get_archive_info(pv, timeout)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
+@translate_epics_errors
+async def get_appliance_info(
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
+) -> dict[str, object]:
+    """Report the Archiver Appliance's own topology (Archiver MGMT getApplianceInfo).
+
+    Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.
+    Names WHICH appliance this is (identity) and where each plane is served (mgmt_url/engine_url/
+    etl_url/retrieval_url/data_retrieval_url, cluster_inet_port) plus a version string. Answers two
+    questions the per-PV archiver tools cannot: "am I pointed at the intended cluster before I trust
+    list_archived_pvs / get_pv_history (enumerating the wrong cluster silently yields a
+    complete-looking list of the WRONG PVs)?" and "is this a split/proxied deployment — which plane
+    is served where (the mgmt- vs retrieval-webapp question)?". No pv arg and no found key: the
+    appliance answers or the call errors. version is OMITTED when the appliance lacks it (not
+    "always present"); a 404 here means the WRONG endpoint (retrieval serves /retrieval/bpl, not
+    /mgmt/bpl), not "no appliance". See epics-pv://guide.
+    """
+    return await _get_appliance_info(timeout)
 
 
 @mcp.tool(

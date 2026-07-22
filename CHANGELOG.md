@@ -9,6 +9,30 @@ carry breaking changes).
 
 ### Added
 
+- **New `get_appliance_info` tool — surface the Archiver `getApplianceInfo` body (Fundort 3, decision KK).**
+  The MGMT `getApplianceInfo` body names WHICH appliance this is (`identity`) and where each plane is
+  served (`mgmt_url`/`engine_url`/`etl_url`/`retrieval_url`/`data_retrieval_url`, `cluster_inet_port`)
+  plus a `version` string — but nothing surfaced it: the doctor plane-check fetches the SAME body and
+  keeps only `identity`, discarding the rest. The new read-only, appliance-scoped tool (no `pv` arg)
+  projects the whole body through an `_APPLIANCE_INFO_FIELDS` allowlist so an unexpected field is
+  never surfaced and an absent field (e.g. `version` on a pre-`version.txt` appliance) is OMITTED, not
+  `null`. It answers two questions the per-PV archiver tools cannot: "am I pointed at the intended
+  cluster before I trust `list_archived_pvs`/`get_pv_history` (the wrong cluster silently yields a
+  complete-looking list of the WRONG PVs)?" and "is this a split/proxied deployment — which plane is
+  served where?". Field names + the all-string contract are the vendor `getApplianceInfo` JSON body
+  (`GetApplianceInfo.java`/`ApplianceInfo.java`) — a JSON contract, not a live measurement. Deliberate
+  differences from the sibling `get_archive_info`: **no `found` key** (there is no PV present/absent
+  duality) and **a served 404 PROPAGATES** as an error (it means the wrong endpoint — the retrieval
+  webapp serves `/retrieval/bpl`, not `/mgmt/bpl` — not "not found"). A 2xx whose body carries no
+  non-empty `identity` raises rather than fabricating an empty success (the getPVStatus/getPVTypeInfo
+  S11 anchor discipline). The plane URLs embed internal cluster-member host names, surfaced
+  un-redacted BY DESIGN — pure technical infra (no person data), consistent with the shipped
+  `host_name`/`data_stores` fields of `get_archive_info`. `list_tools` 30 → 31, no schema change (the
+  tool returns an untyped `dict`). Red-proof: `test_get_appliance_info_projects_fields` /
+  `_omits_absent_fields` (exact-equality, also pin that a non-allowlisted extra — incl. a plausible
+  future `serverStartEpochSeconds` — is dropped), `_unreadable_2xx_raises`, `_served_error_propagates`
+  (404 + 500), and the tool disabled/enabled pair.
+
 - **ChannelFinder query filters + exact count on `find_channels` (MA-2 CF-Query-Fläche).** The tool
   gained additive, server-side filters — `has_properties` (`{name: value-glob}`, `"*"` = present),
   `lacks_properties` (`prop!=*` — "does NOT have the property"), `not_property_values` (`prop!=value`

@@ -19,6 +19,8 @@ from epics_pv_mcp.services.archiver_exceptions import (
 from epics_pv_mcp.services.archiver_time import normalize_archiver_time
 from epics_pv_mcp.services.checkers import _archiver_error_code
 from epics_pv_mcp.tools.archiver import (
+    _DISABLED_NOTE,
+    _get_appliance_info,
     _get_archive_info,
     _get_pv_history,
     _is_archived,
@@ -481,6 +483,110 @@ def test_get_pv_type_info_non_404_error_propagates(monkeypatch: pytest.MonkeyPat
         client.get_pv_type_info("X")
 
 
+# --- client: get_appliance_info (Fundort 3 — the getApplianceInfo body doctor discards) ---
+
+
+def test_get_appliance_info_projects_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fundort 3: get_appliance_info surfaces the WHOLE getApplianceInfo body that doctor discards
+    (doctor reads only ``identity``). Exact-equality pins two invariants: all 8 vendor fields ARE
+    projected onto snake_case keys, AND any non-allowlisted extra is dropped — even a plausible
+    future field like ``serverStartEpochSeconds`` that this appliance version does not send. Field
+    names + the all-string contract are the vendor getApplianceInfo JSON body (GetApplianceInfo.java
+    / ApplianceInfo.java), not a live measurement."""
+    client = ArchiverClient("http://archiver:17665")
+    body = {
+        "identity": "appliance0",
+        "mgmtURL": "http://archiver:17665/mgmt/bpl",
+        "engineURL": "http://archiver:17665/engine/bpl",
+        "retrievalURL": "http://archiver:17665/retrieval/bpl",
+        "etlURL": "http://archiver:17665/etl/bpl",
+        "dataRetrievalURL": "http://archiver:17665/retrieval",
+        "clusterInetPort": "archiver:16670",
+        "version": "Archiver Appliance 2.2.1",
+        "serverStartEpochSeconds": "1717200000",  # not in this version's body — must NOT leak
+        "someUnknownField": "SHOULD NOT be surfaced",
+    }
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(body)))
+    result = client.get_appliance_info()
+    assert result == {
+        "identity": "appliance0",
+        "mgmt_url": "http://archiver:17665/mgmt/bpl",
+        "engine_url": "http://archiver:17665/engine/bpl",
+        "retrieval_url": "http://archiver:17665/retrieval/bpl",
+        "etl_url": "http://archiver:17665/etl/bpl",
+        "data_retrieval_url": "http://archiver:17665/retrieval",
+        "cluster_inet_port": "archiver:16670",
+        "version": "Archiver Appliance 2.2.1",
+    }
+    assert "server_start_epoch_seconds" not in result
+    assert "serverStartEpochSeconds" not in result
+    assert "someUnknownField" not in result
+
+
+def test_get_appliance_info_omits_absent_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A body missing optional keys (``version`` on a pre-version.txt appliance, a plane URL) omits
+    them — no null noise. ``identity`` is the always-present anchor: the appliance names itself."""
+    client = ArchiverClient("http://archiver:17665")
+    body = {"identity": "appliance0", "mgmtURL": "http://archiver:17665/mgmt/bpl"}
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(body)))
+    result = client.get_appliance_info()
+    assert result == {"identity": "appliance0", "mgmt_url": "http://archiver:17665/mgmt/bpl"}
+    assert "version" not in result
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"identity": ""},
+        {"mgmtURL": "http://archiver:17665/mgmt/bpl"},
+        [{"identity": "appliance0"}],
+        "nope",
+        None,
+        123,
+    ],
+    ids=[
+        "empty-dict",
+        "empty-identity",
+        "no-identity",
+        "list-wrapped",
+        "string",
+        "null",
+        "int",
+    ],
+)
+def test_get_appliance_info_unreadable_2xx_raises(
+    monkeypatch: pytest.MonkeyPatch, payload: object
+) -> None:
+    """A 2xx whose body is not a getApplianceInfo record (no non-empty ``identity``, wrapped in a
+    list, or non-dict) RAISES rather than fabricating an empty success — a wrong-endpoint 200 (e.g.
+    the retrieval webapp answering on /mgmt/bpl) must never read as a valid-but-empty appliance.
+    Mirrors the getPVStatus/getPVTypeInfo S11 anchor discipline; ``identity`` is the anchor. The
+    vendor body is a single object, so a list wrapper is out of contract (unlike getPVTypeInfo)."""
+    client = ArchiverClient("http://archiver:17665")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
+    with pytest.raises(ArchiverResponseError):
+        client.get_appliance_info()
+
+
+@pytest.mark.parametrize("status", [404, 500])
+def test_get_appliance_info_served_error_propagates(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    """Unlike getPVTypeInfo (where 404 = 'PV not archived' → found:False), a no-arg getApplianceInfo
+    has no not-found duality: a served non-2xx — INCLUDING 404 — means the WRONG endpoint (the
+    retrieval webapp serves /retrieval/bpl, not /mgmt/bpl) and PROPAGATES as an ArchiverError, never
+    a swallowed empty answer."""
+    client = ArchiverClient("http://archiver:17665")
+    http_error = requests.exceptions.HTTPError(str(status))
+    http_error.response = Mock(status_code=status)
+    resp = Mock()
+    resp.raise_for_status.side_effect = http_error
+    monkeypatch.setattr(client.session, "get", Mock(return_value=resp))
+    with pytest.raises(ArchiverError):
+        client.get_appliance_info()
+
+
 # --- two-URL routing (split deployment: mgmt :17665 vs retrieval :17668) ---
 
 
@@ -831,6 +937,54 @@ async def test_get_archive_info_tool_enabled(monkeypatch: pytest.MonkeyPatch) ->
     assert result["dbr_type"] == "DBR_SCALAR_DOUBLE"
     assert result["sampling_method"] == "MONITOR"
     assert result["data_stores"] == ["pb://localhost?name=STS"]
+
+
+@pytest.mark.asyncio
+async def test_get_appliance_info_tool_disabled_no_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Disabled (EPICS_MCP_ARCHIVER_URL unset) → {enabled:false, note} and NO client construction.
+    The shape has no ``found``/``pv`` key: getApplianceInfo has no PV present/absent duality."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="")
+    )
+
+    def _boom(*args: object, **kwargs: object) -> ArchiverClient:
+        raise AssertionError("client must not be constructed when disabled")
+
+    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _boom)
+    result = await _get_appliance_info()
+    assert result == {"enabled": False, "note": _DISABLED_NOTE}
+
+
+@pytest.mark.asyncio
+async def test_get_appliance_info_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_get_appliance_info builds the client (MGMT base) and surfaces the projected body under
+    enabled:true — exact-equality pins the {enabled, **projection} shape (no pv, no found)."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.tools.archiver.get_config",
+        lambda: EpicsConfig(archiver_url="http://archiver:17665"),
+    )
+
+    class _Fake:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def get_appliance_info(self) -> dict[str, object]:
+            return {
+                "identity": "appliance0",
+                "mgmt_url": "http://archiver:17665/mgmt/bpl",
+                "version": "Archiver Appliance 2.2.1",
+            }
+
+    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    result = await _get_appliance_info()
+    assert result == {
+        "enabled": True,
+        "identity": "appliance0",
+        "mgmt_url": "http://archiver:17665/mgmt/bpl",
+        "version": "Archiver Appliance 2.2.1",
+    }
 
 
 # --- check_connectivity (E2 doctor probe: getApplianceInfo, 2xx required) ---

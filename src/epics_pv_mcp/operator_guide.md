@@ -74,7 +74,7 @@ are simply absent — that is an unmet optional extra, not a bug.
 **Core — live PV + REST planes:**
 `get_pv_value` · `get_pvs` · `set_pv_value` · `get_pv_info` · `monitor_pv` · `discover_pvs` ·
 `find_channels` · `lookup_device_name` · `is_archived` · `get_pv_history` · `get_archive_info` ·
-`list_archived_pvs` · `is_alarm_configured` · `get_alarm_history` · `diagnose_connection` ·
+`get_appliance_info` · `list_archived_pvs` · `is_alarm_configured` · `get_alarm_history` · `diagnose_connection` ·
 `search_logbook` · `get_log_entry` · `list_logbooks` · `list_tags` · `list_log_levels` ·
 `create_log_entry` · `reply_to_log` · `update_log_entry` · `add_log_attachment` ·
 `list_log_attachments` · `download_log_attachment`
@@ -549,6 +549,15 @@ messages embed the full request URL — an internal host would leak into this fi
   (`upper_alarm_limit`=HIHI … `*_ctrl_limit`=DRVH/DRVL) and `controlling_pv`/`policy_name`/
   `modification_time`. ⚠️ The nine numeric limits are ALWAYS present and read `"0.0"` when the PV
   had no ctrl info — `"0.0"` may mean "no limit configured", not a literal zero.
+- **Which appliance am I on? cluster topology?** `get_appliance_info` (no PV) surfaces the whole
+  MGMT `getApplianceInfo` body — the appliance `identity`, the per-plane root URLs
+  (`mgmt_url`/`engine_url`/`etl_url`/`retrieval_url`/`data_retrieval_url`), `cluster_inet_port` and a
+  `version` string — of which the doctor plane-check keeps only `identity`. Use it to confirm you are
+  pointed at the intended cluster BEFORE trusting `list_archived_pvs`/`get_pv_history` (enumerating
+  the wrong cluster silently returns a complete-looking list of the WRONG PVs), and to read a
+  split/proxied deployment's plane layout. `version` is omitted when the appliance lacks it (not
+  "always present"). A served **404** here means the wrong endpoint — the retrieval webapp serves
+  `/retrieval/bpl`, not `/mgmt/bpl` — and propagates as an error, never a false empty answer.
 - **Alarm configured / history?** `is_alarm_configured` (`configured` is `true`/`false`/`null`;
   `null` = withheld, see the config-tree recipe below) / `get_alarm_history` (`start` + `end`
   required; `pv` is matched as a wildcard SUBSTRING of the config path — `Value` matches both

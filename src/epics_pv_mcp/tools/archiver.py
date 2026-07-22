@@ -185,3 +185,32 @@ async def _get_archive_info(pv: str, timeout: float = 5.0) -> dict[str, object]:
     except ArchiverError as exc:
         # The server ANSWERED (a served 4xx/5xx) — that is not an outage.
         raise EpicsError(f"Archiver: {exc}", error_code=_archiver_error_code(exc)) from exc
+
+
+async def _get_appliance_info(timeout: float = 5.0) -> dict[str, object]:
+    """Report the appliance's own topology (Archiver MGMT ``getApplianceInfo``) — Fundort 3.
+
+    Tool-only (not shared with diagnose), like :func:`_get_archive_info`: builds the client against
+    the MGMT root. Default-disabled — with ``EPICS_MCP_ARCHIVER_URL`` unset it returns
+    ``{enabled: false, note}`` and makes NO network call. The result shape has no ``pv``/``found``
+    key: getApplianceInfo is appliance-scoped, with no PV present/absent duality — the appliance
+    answers (``enabled: true`` + the projected body) or the call errors. A served non-2xx
+    (including a 404 = wrong endpoint) propagates as an ArchiverError, never a swallowed answer.
+    """
+    cfg = get_config()
+    if not cfg.archiver_url:
+        return {"enabled": False, "note": _DISABLED_NOTE}
+
+    def _run() -> dict[str, object]:
+        client = ArchiverClient(
+            cfg.archiver_url, timeout=timeout, auth_header=cfg.archiver_auth or None
+        )
+        return {"enabled": True, **client.get_appliance_info()}
+
+    try:
+        return await asyncio.to_thread(_run)
+    except ArchiverConnectionError as exc:
+        raise EpicsConnectionError(f"Archiver: {exc}") from exc
+    except ArchiverError as exc:
+        # The server ANSWERED (a served 4xx/5xx) — that is not an outage.
+        raise EpicsError(f"Archiver: {exc}", error_code=_archiver_error_code(exc)) from exc
