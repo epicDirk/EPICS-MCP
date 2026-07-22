@@ -61,6 +61,19 @@ come from a git-ignored file and are **absent on a fresh CI / public-fork checko
 test is the CI-effective check — best-effort, not a proof, so the hand-transcription rule above is what
 actually keeps it out.
 
+**Accepted carve-out — the bare facility acronym.** "Facility-agnostic" here means *no specific
+infrastructure or identity leaks* — it does **not** mean the facility's short name never appears. The bare
+acronym and its product proper-nouns (the naming service, the site gateway, and similar named services)
+are the actual names of the software this server talks to and collide with generic technical vocabulary,
+so `_SITE_RE` **deliberately does not scrub them** (see its inline comment: *no generic facility
+abbreviations — they collide with real system names*). What the guard *does* keep out is unchanged and
+load-bearing: facility domains, cluster / host names, live device/PV names, person names, and username
+filesystem paths. So a reviewer who sees the bare facility name in a tool description or the guide should
+read it as an accepted product name, **not** a leak; a reviewer who sees a domain, host, live PV or person
+name must still reject it. A genuinely site-neutral public fork would additionally template even the bare
+acronym / product names out — that is a separate, larger job (tracked on the roadmap), not a silent hole
+in this guard.
+
 ## Server-decided parameters: no promise before a differential live probe (hard)
 
 A parameter whose semantics live on the **server** must not carry a **documented promise** until a
