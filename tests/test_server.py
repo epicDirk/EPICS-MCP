@@ -357,6 +357,16 @@ def test_mcp_instructions_wired_to_capability_flag() -> None:
     assert mcp.instructions == build_instructions(_DISPLAY_TOOLS_AVAILABLE)
 
 
+def test_build_instructions_under_2048_bytes() -> None:
+    """MA-1 Commit B: the initialize-handshake instructions must stay a tight header — under 2048
+    bytes in BOTH capability branches — so the operator guide (epics-pv://guide) carries the detail
+    and MA-2/2b keep head-room for new tool lines. Red at the pre-MA-1 size (3108 / 3003 bytes)."""
+    from epics_pv_mcp.server import build_instructions
+
+    assert len(build_instructions(True).encode("utf-8")) < 2048
+    assert len(build_instructions(False).encode("utf-8")) < 2048
+
+
 def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
