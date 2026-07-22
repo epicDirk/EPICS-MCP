@@ -58,6 +58,26 @@ _TYPE_INFO_FIELDS: tuple[tuple[str, str], ...] = (
     ("creationTime", "creation_time"),
     ("applianceIdentity", "appliance"),
     ("paused", "paused"),
+    # AR-D: alarm/display/control limits + unit/precision — fetched in the SAME getPVTypeInfo call
+    # and previously discarded. The appliance renames the EPICS dbr fields to its own camelCase
+    # (PVTypeInfo.java) and serializes every numeric limit as a STRING (JSONEncoder .toString()).
+    # ⚠️ These nine numeric limits are autoboxed ``double`` (never null) → ALWAYS present, reading
+    # ``"0.0"`` when the PV had no ctrl info. So ``"0.0"`` can mean "no limit configured", not a
+    # literal zero — the guard cannot omit them. ``units`` (a String) IS omitted when null.
+    ("upperAlarmLimit", "upper_alarm_limit"),  # HIHI
+    ("upperWarningLimit", "upper_warning_limit"),  # HIGH
+    ("lowerWarningLimit", "lower_warning_limit"),  # LOW
+    ("lowerAlarmLimit", "lower_alarm_limit"),  # LOLO
+    ("upperDisplayLimit", "upper_display_limit"),  # HOPR
+    ("lowerDisplayLimit", "lower_display_limit"),  # LOPR
+    ("upperCtrlLimit", "upper_ctrl_limit"),  # DRVH
+    ("lowerCtrlLimit", "lower_ctrl_limit"),  # DRVL
+    ("precision", "precision"),  # PREC
+    ("units", "units"),  # EGU
+    # AR-D: cheap owner-relevant config from the same record (omitted when the field is null).
+    ("controllingPV", "controlling_pv"),  # the PV that gates/decimates this one's archiving, if any
+    ("policyName", "policy_name"),  # which archiving policy applies
+    ("modificationTime", "modification_time"),  # config last changed (pairs with creation_time)
 )
 
 
@@ -204,9 +224,17 @@ class ArchiverClient:
         ``status``. This surfaces the useful extra fields at ~zero cost (the SAME single call):
         ``connection_state`` (is the source IOC connected right now), ``last_event`` (time of the
         last archived sample), ``is_monitored`` (monitored vs. scanned), ``sampling_period`` and
-        ``appliance``. Fields the record does not carry (e.g. the ``Unknown``/paused fallback) are
+        ``appliance``. AR-D adds the connection-history diagnostic cluster from the same record:
+        ``connection_loss_regain_count`` (how often the IOC connection dropped — "does this PV
+        flap?"), ``connection_first_established`` and ``connection_last_restablished`` (first/last
+        (re)connect time; ``"Never"`` if the connection never dropped). Fields the record does not
+        carry (e.g. the ``Unknown``/paused fallback, or the whole cluster for a non-archived PV) are
         OMITTED rather than surfaced as ``null`` noise. ``archived``/``status`` are always present.
         The Archiver MGMT record carries no person data, so no allowlist redaction is needed here.
+
+        Field names + the all-string value contract are the Archiver Appliance getPVStatus response
+        (vendor source ``EngineChannelStatus.java``); ``connection_last_restablished`` mirrors the
+        appliance's upstream typo verbatim so the projection key matches the wire key.
         """
         record = self.get_pv_status(pv)
         status = str(record["status"])  # validated by get_pv_status (S11)
@@ -217,6 +245,14 @@ class ArchiverClient:
             ("isMonitored", "is_monitored"),
             ("samplingPeriod", "sampling_period"),
             ("appliance", "appliance"),
+            # AR-D: the connection-history cluster — already fetched in the SAME getPVStatus record,
+            # answers "does this PV flap, and when did it last (re)connect?". Present only for
+            # actively-archived PVs (the ``if source_key in record`` guard omits it otherwise).
+            # ``connectionLastRestablished`` carries an UPSTREAM TYPO (missing the second 'e') — the
+            # left-hand source key must match the appliance verbatim (EngineChannelStatus.java:127).
+            ("connectionLossRegainCount", "connection_loss_regain_count"),
+            ("connectionFirstEstablished", "connection_first_established"),
+            ("connectionLastRestablished", "connection_last_restablished"),
         ):
             if source_key in record:
                 result[out_key] = record[source_key]
@@ -232,6 +268,14 @@ class ArchiverClient:
         ``creation_time`` — projected onto snake_case keys via the :data:`_TYPE_INFO_FIELDS`
         allowlist (so a free-text field like ``userParams`` is never surfaced). Fields the record
         lacks are OMITTED, not surfaced as ``null``.
+
+        AR-D also surfaces the alarm/display/control limits + unit/precision (``upper_alarm_limit``
+        = HIHI, ``upper_warning_limit`` = HIGH, ``lower_*`` too, ``upper_display_limit`` = HOPR,
+        ``*_ctrl_limit`` = DRVH/DRVL, ``precision``, ``units`` = EGU) and cheap config
+        (``controlling_pv``, ``policy_name``, ``modification_time``). ⚠️ The nine numeric limits are
+        ALWAYS present and read ``"0.0"`` when the PV lacks ctrl info — ``"0.0"`` may mean "no limit
+        configured", not a literal zero. Field names + the all-string values are the Archiver
+        Appliance getPVTypeInfo response (vendor source ``PVTypeInfo.java``).
 
         Returns ``{"found": True, ...}`` when the appliance has a type-info record for *pv*, or
         ``{"found": False}`` when it has none (unknown / never-archived PV). The appliance signals

@@ -328,6 +328,22 @@ def test_get_pv_type_info_projects_fields(monkeypatch: pytest.MonkeyPatch) -> No
         "creationTime": "2026-06-01T00:00:00.000Z",
         "applianceIdentity": "appliance0",
         "paused": "false",
+        # AR-D: alarm/display/control limits — the appliance renames the dbr fields to camelCase
+        # and serializes every numeric limit as a STRING (PVTypeInfo.java, JSONEncoder .toString()).
+        "upperAlarmLimit": "90.0",  # HIHI
+        "upperWarningLimit": "80.0",  # HIGH
+        "lowerWarningLimit": "20.0",  # LOW
+        "lowerAlarmLimit": "10.0",  # LOLO
+        "upperDisplayLimit": "100.0",  # HOPR
+        "lowerDisplayLimit": "0.0",  # LOPR
+        "upperCtrlLimit": "100.0",  # DRVH
+        "lowerCtrlLimit": "0.0",  # DRVL
+        "precision": "3",  # PREC
+        "units": "V",  # EGU
+        # AR-D: cheap owner-relevant config from the same record
+        "controllingPV": "MASTER:PV",
+        "policyName": "Default",
+        "modificationTime": "2026-06-02T00:00:00.000Z",
         "userParams": "SHOULD NOT be surfaced",
     }
     client = ArchiverClient("http://arch:17665")
@@ -351,6 +367,19 @@ def test_get_pv_type_info_projects_fields(monkeypatch: pytest.MonkeyPatch) -> No
         "creation_time": "2026-06-01T00:00:00.000Z",
         "appliance": "appliance0",
         "paused": "false",
+        "upper_alarm_limit": "90.0",
+        "upper_warning_limit": "80.0",
+        "lower_warning_limit": "20.0",
+        "lower_alarm_limit": "10.0",
+        "upper_display_limit": "100.0",
+        "lower_display_limit": "0.0",
+        "upper_ctrl_limit": "100.0",
+        "lower_ctrl_limit": "0.0",
+        "precision": "3",
+        "units": "V",
+        "controlling_pv": "MASTER:PV",
+        "policy_name": "Default",
+        "modification_time": "2026-06-02T00:00:00.000Z",
     }
     assert "pvName" not in result  # non-allowlisted input field must not leak
     assert "userParams" not in result  # free-text field deliberately dropped
@@ -538,8 +567,55 @@ def test_get_archive_status_omits_absent_fields(monkeypatch: pytest.MonkeyPatch)
         "is_monitored",
         "sampling_period",
         "appliance",
+        "connection_loss_regain_count",
+        "connection_first_established",
+        "connection_last_restablished",
     ):
         assert absent not in result
+
+
+def test_get_archive_status_surfaces_connection_cluster_and_drops_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AR-D: get_archive_status also surfaces the getPVStatus connection-history cluster
+    (connectionLossRegainCount / connectionFirstEstablished / connectionLastRestablished) alongside
+    the DS-4A fields — the already-fetched-but-discarded diagnostic bytes ("does this PV flap? when
+    did it last reconnect?"). Exact-equality pins TWO invariants the DS-4A per-key asserts missed:
+    the new cluster IS surfaced, AND any non-allowlisted extra (``lastRotateLogs`` epoch-0 noise,
+    ``someUnknownField``) is dropped. Source keys + the all-string value contract are the Archiver
+    Appliance getPVStatus response (vendor source EngineChannelStatus.java:119-128); note the
+    upstream typo ``connectionLastRestablished`` (missing the second 'e')."""
+    client = ArchiverClient("http://arch:17665")
+    record = {
+        "pvName": "X",
+        "status": "Being archived",
+        "connectionState": "true",
+        "lastEvent": "Jun/01/2026 10:00:00 UTC",
+        "isMonitored": "true",
+        "samplingPeriod": "1.0",
+        "appliance": "appliance0",
+        "connectionLossRegainCount": "3",
+        "connectionFirstEstablished": "Jun/01/2026 09:00:00 UTC",
+        "connectionLastRestablished": "Jun/01/2026 09:30:00 UTC",
+        "lastRotateLogs": "Jan/01/1970 00:00:00 UTC",  # epoch-0 noise, deliberately NOT surfaced
+        "someUnknownField": "SHOULD NOT be surfaced",
+    }
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([record])))
+    result = client.get_archive_status("X")
+    assert result == {
+        "archived": True,
+        "status": "Being archived",
+        "connection_state": "true",
+        "last_event": "Jun/01/2026 10:00:00 UTC",
+        "is_monitored": "true",
+        "sampling_period": "1.0",
+        "appliance": "appliance0",
+        "connection_loss_regain_count": "3",
+        "connection_first_established": "Jun/01/2026 09:00:00 UTC",
+        "connection_last_restablished": "Jun/01/2026 09:30:00 UTC",
+    }
+    assert "last_rotate_logs" not in result  # epoch-0 noise, deliberately not allowlisted
+    assert "someUnknownField" not in result  # non-allowlisted field must not leak
 
 
 # --- tools: is_archived / get_pv_history / get_archive_info ---
@@ -611,6 +687,7 @@ async def test_is_archived_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None
                 "connection_state": True,
                 "last_event": "Jun/01/2026 10:00:00 UTC",
                 "is_monitored": True,
+                "connection_loss_regain_count": "3",
             }
 
     monkeypatch.setattr("epics_pv_mcp.services.checkers.ArchiverClient", _Fake)
@@ -620,6 +697,7 @@ async def test_is_archived_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None
     assert result["status"] == "Being archived"
     assert result["connection_state"] is True  # DS-4A: enriched getPVStatus fields surfaced
     assert result["is_monitored"] is True
+    assert result["connection_loss_regain_count"] == "3"  # AR-D: cluster reaches the tool
 
 
 @pytest.mark.asyncio
