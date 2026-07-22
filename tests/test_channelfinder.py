@@ -22,6 +22,7 @@ from epics_pv_mcp.services.channelfinder_exceptions import (
     ChannelFinderConnectionError,
     ChannelFinderResponseError,
 )
+from epics_pv_mcp.services.checkers import _CF_DISABLED_NOTE
 from epics_pv_mcp.tools.channelfinder import _find_channels, _list_channel_vocabulary
 
 
@@ -744,10 +745,8 @@ async def test_vocabulary_disabled_makes_no_network_call(monkeypatch: pytest.Mon
 
     monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _boom)
     result = await _list_channel_vocabulary()
-    assert result["enabled"] is False
-    assert result["properties"] == []
-    assert result["tags"] == []
-    assert "note" in result
+    # Exact shape: enabled=false + empty vocab + the disabled note, and NO unexpected keys.
+    assert result == {"enabled": False, "properties": [], "tags": [], "note": _CF_DISABLED_NOTE}
 
 
 @pytest.mark.asyncio
@@ -773,3 +772,30 @@ async def test_vocabulary_enabled_returns_names(monkeypatch: pytest.MonkeyPatch)
     assert result["enabled"] is True
     assert result["properties"] == ["iocName", "pvStatus"]
     assert result["tags"] == ["archived", "sim"]
+
+
+@pytest.mark.asyncio
+async def test_vocabulary_enabled_empty_is_not_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A CONFIGURED ChannelFinder with no vocabulary yields enabled=true + empty lists — DISTINCT
+    from the disabled envelope (enabled=false + note). Locks the documented invariant that an empty
+    vocabulary must never collapse into a 'disabled' appearance (e.g. a regression to
+    ``enabled = bool(properties or tags)``). Empty is genuinely reachable: a configured CF whose
+    allowlisted-property intersection is empty and which has no tags."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(channelfinder_url="http://cf"),
+    )
+
+    class _Empty:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def list_properties(self) -> list[str]:
+            return []
+
+        def list_tags(self) -> list[str]:
+            return []
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _Empty)
+    result = await _list_channel_vocabulary()
+    assert result == {"enabled": True, "properties": [], "tags": []}  # no note, enabled distinct
