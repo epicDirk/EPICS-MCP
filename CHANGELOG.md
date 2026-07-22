@@ -9,6 +9,26 @@ carry breaking changes).
 
 ### Added
 
+- **ChannelFinder query filters + exact count on `find_channels` (MA-2 CF-Query-Fläche).** The tool
+  gained additive, server-side filters — `has_properties` (`{name: value-glob}`, `"*"` = present),
+  `lacks_properties` (`prop!=*` — "does NOT have the property"), `not_property_values` (`prop!=value`
+  — has it, value differs), `has_tags`/`lacks_tags` (OR / any-of) — plus `count_only`, which returns
+  `{enabled, match_count}` from the `/resources/channels/count` endpoint (an exact, window-free count
+  without pulling the matches). The wire grammar is taken from the vendor source
+  (`ChannelRepository.getBuiltQuery`): negation is a trailing `!` on the key, and an unknown property
+  name is a property filter, NOT a silently-ignored param, so a typo narrows the result to ~0.
+  **DS-privacy:** the property-filter axis is gated to the same safe-property allowlist as the
+  response projection (`resolve_safe_property_names`) — filtering on a redacted property (e.g.
+  `accessGroup`) is refused, because it would reconstruct the name→value partition the projection
+  hides; an empty allowlist disables property filtering (tags are not redacted, not gated). To filter
+  on more properties, expand `EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES`. **Honest caveats** (in the
+  tool description): the filter semantics are UNVERIFIED until a differential live probe; and 0 results
+  cannot distinguish an unknown property name from a genuinely empty match. Guards raise
+  `INVALID_INPUT` on a redacted/reserved (`~name`/`!`)/contradictory/separator-in-negation filter, so
+  no path can emit the forbidden `~name!`. No new tool (`list_tools` stays 30), no schema change (the
+  tool returns an untyped `dict`). Red-proof: the `_build_query_params` exact-equality tests pin both
+  what is emitted and what is never emitted, plus the conditional-forwarding regression.
+
 - **Surface already-fetched-but-discarded Archiver fields (AR-D).** Two projections harvest fields
   the appliance already returns in the SAME call and previously threw away — no extra HTTP request.
   `get_archive_status` (via `is_archived`) now also surfaces the getPVStatus connection-history
