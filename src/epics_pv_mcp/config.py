@@ -1,10 +1,29 @@
 """Configuration for the EPICS PV MCP Server, loaded from environment variables."""
 
+import os
 import threading
-from typing import Literal
+import warnings
+from typing import Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
+
+
+class UnknownEpicsEnvVarWarning(UserWarning):
+    """An ``EPICS_MCP_*`` environment variable matched no ``EpicsConfig`` field and was ignored.
+
+    pydantic-settings' default ``extra="ignore"`` DROPS an unknown ``EPICS_MCP_FOO`` without a
+    trace, so a typo (e.g. ``EPICS_MCP_CHANNELFINDR_URL`` for ``…CHANNELFINDER_URL``) silently
+    leaves the real setting at its default. This warning surfaces the likely typo. It subclasses
+    ``UserWarning`` so a deployment can filter or escalate it.
+    """
+
+
+# ``EPICS_MCP_*`` names deliberately OUTSIDE the config schema: read by the TEST harness / live gate
+# (tests/live_gate.py + the *_live.py modules), never by the server. Their stripped, lowercased
+# remainders start with one of these prefixes, so the unknown-var guard below does not
+# false-positive on a legitimate opt-in live run that sets them.
+_RESERVED_ENV_REMAINDER_PREFIXES = ("live_", "olog_test_", "require_live")
 
 
 class EpicsConfig(BaseSettings):
@@ -172,6 +191,33 @@ class EpicsConfig(BaseSettings):
     # profile); this is the MCP's own fail-fast, not a mirror of the server value (reading GET /Olog
     # serverConfig is deferred, OA10).
     olog_attach_max_bytes: int = Field(default=52_428_800, ge=1)
+
+    @model_validator(mode="after")
+    def _warn_on_unknown_env_vars(self) -> Self:
+        """Warn (never fail) for an ``EPICS_MCP_*`` env var that maps to no config field.
+
+        ``env_prefix`` + the default ``extra="ignore"`` means an unknown var is dropped silently,
+        so a typo would never surface. This scans the process environment once per construction and
+        warns for each ``EPICS_MCP_`` key whose stripped, lowercased remainder is neither a declared
+        field nor a reserved test-harness name. A warning, not a ``ValidationError`` — an unknown
+        var is a likely mistake but not provably fatal (it may belong to a different tool sharing
+        the process).
+        """
+        prefix = "EPICS_MCP_"
+        known_fields = set(type(self).model_fields)
+        for name in os.environ:
+            if not name.startswith(prefix):
+                continue
+            remainder = name[len(prefix) :].lower()
+            if remainder in known_fields or remainder.startswith(_RESERVED_ENV_REMAINDER_PREFIXES):
+                continue
+            warnings.warn(
+                f"Environment variable {name!r} matches no EpicsConfig setting and was ignored — "
+                "check for a typo (the config prefix is EPICS_MCP_).",
+                UnknownEpicsEnvVarWarning,
+                stacklevel=2,
+            )
+        return self
 
 
 _config: EpicsConfig | None = None

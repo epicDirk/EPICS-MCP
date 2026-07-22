@@ -136,7 +136,7 @@ async def test_find_device_tool_rejects_displays_dir_outside_allowed_roots(
 @pytest.mark.asyncio
 async def test_server_find_device_maps_error_to_tool_error(tmp_path: Path) -> None:
     """The server wrapper maps EpicsError to ToolError with the error_code tag."""
-    from fastmcp.exceptions import ToolError
+    from mcp.server.fastmcp.exceptions import ToolError
 
     from epics_pv_mcp.display_tools import find_device
 

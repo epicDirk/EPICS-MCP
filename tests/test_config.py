@@ -1,5 +1,7 @@
 """Tests for EpicsConfig and get_config singleton."""
 
+import warnings
+
 import pytest
 from pydantic import ValidationError
 
@@ -139,6 +141,36 @@ class TestEpicsConfigValidation:
     def test_valid_lowercase_provider_accepted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("EPICS_MCP_PROVIDER", "ca")
         assert EpicsConfig().provider == "ca"
+
+
+class TestUnknownEnvVarGuard:
+    """R2: pydantic-settings drops an unknown ``EPICS_MCP_*`` var silently (extra=ignore default),
+    so a typo like ``EPICS_MCP_CHANNELFINDR_URL`` leaves the real setting at its default with no
+    hint. The guard warns on the likely typo; a correct var and a reserved test-harness var stay
+    quiet."""
+
+    def test_unknown_var_warns(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EPICS_MCP_CHANNELFINDR_URL", "x")  # typo of CHANNELFINDER_URL
+        with pytest.warns(UserWarning, match="EPICS_MCP_CHANNELFINDR_URL"):
+            EpicsConfig()
+
+    def test_known_var_does_not_warn(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EPICS_MCP_CHANNELFINDER_URL", "http://cf:8080/ChannelFinder")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            cfg = EpicsConfig()
+        assert cfg.channelfinder_url == "http://cf:8080/ChannelFinder"
+        assert not [w for w in caught if "EPICS_MCP_CHANNELFINDER_URL" in str(w.message)]
+
+    def test_reserved_live_test_var_does_not_warn(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # EPICS_MCP_LIVE_* / _OLOG_TEST_* / _REQUIRE_LIVE are read by the TEST harness (live_gate,
+        # the *_live.py modules), never by the server — they are intentionally not config fields and
+        # must not trip the guard during an opt-in live run.
+        monkeypatch.setenv("EPICS_MCP_LIVE_ALARM_PV", "SIM:X")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            EpicsConfig()
+        assert not [w for w in caught if "EPICS_MCP_LIVE_ALARM_PV" in str(w.message)]
 
 
 class TestGetConfigSingleton:

@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import json
 import sys
 
+from epics_pv_mcp.cli_common import configure_stdout
 from epics_pv_mcp.services.diagnose import DiagnoseReport, diagnose
 
 
@@ -89,9 +89,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="emit the raw report as JSON")
     args = parser.parse_args(argv)
 
-    # The verdict contains Unicode (⇒/en-dash); force UTF-8 so a cp1252 console doesn't crash.
-    with contextlib.suppress(AttributeError, ValueError):
-        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    configure_stdout()
 
     report = asyncio.run(
         diagnose(

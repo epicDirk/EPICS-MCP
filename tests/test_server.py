@@ -8,8 +8,8 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastmcp.exceptions import ToolError
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 
 from epics_pv_mcp.errors import PVNotFoundError, PVTimeoutError
 

@@ -6,7 +6,7 @@ in one place instead of 15× untested.
 """
 
 import pytest
-from fastmcp.exceptions import ToolError
+from mcp.server.fastmcp.exceptions import ToolError
 
 from epics_pv_mcp.errors import EpicsError, PVNotFoundError
 from epics_pv_mcp.tool_errors import translate_epics_errors
@@ -53,3 +53,19 @@ async def test_base_error_code_default() -> None:
 
     with pytest.raises(ToolError, match=r"\[UNKNOWN\] nope"):
         await boom()
+
+
+async def test_decorator_raises_the_mcp_runtime_tool_error() -> None:
+    """Q1: pin that the decorator raises ``mcp.server.fastmcp``'s ToolError — the class the runtime
+    (server.py builds on ``mcp.server.fastmcp.FastMCP``) actually knows — NOT the identically-named
+    but DISTINCT class from the standalone ``fastmcp`` package. Raising the wrong class defeats the
+    tool-boundary translation; the module is pinned so an import can't silently regress."""
+    from mcp.server.fastmcp.exceptions import ToolError as RuntimeToolError
+
+    @translate_epics_errors
+    async def boom() -> str:
+        raise PVNotFoundError("nope")
+
+    with pytest.raises(RuntimeToolError) as exc_info:
+        await boom()
+    assert type(exc_info.value).__module__ == "mcp.server.fastmcp.exceptions"

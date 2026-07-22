@@ -14,10 +14,10 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import contextlib
 import sys
 from pathlib import Path
 
+from epics_pv_mcp.cli_common import configure_stdout
 from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.services.crossplane import render_markdown
 from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
@@ -68,10 +68,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # The report contains Unicode (emoji/en-dash); force UTF-8 so a cp1252 Windows
-    # console doesn't crash on encode.
-    with contextlib.suppress(AttributeError, ValueError):
-        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    configure_stdout()
 
     # One request → the SAME orchestrator the MCP tool calls (no duplicated join). Path validation
     # (canonicalize + existence + allowed_roots) happens inside run_crossplane via
