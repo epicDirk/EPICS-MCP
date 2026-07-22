@@ -378,16 +378,22 @@ async def test_olog_tools_expose_typed_output_schema() -> None:
     e.g. reply_to_log must share OlogCreateResult; (2) the envelope keys are present — completeness
     (mypy --strict guards the inverse, an undeclared key in a return literal); (3) the non-nullable
     scalar/array fields carry the right JSON ``type`` — catches a value-type regression that
-    key-presence alone misses. Nullable ``X | None`` fields (content_type, filename,
-    total_matches, default_level, attachment_count) render as ``anyOf`` with no top-level
-    ``type``, so are checked for presence only."""
+    key-presence alone misses. Only ALWAYS-PRESENT fields are type-checked here; the
+    sometimes-absent fields are typed ``X | None`` (so FastMCP's null-for-an-omitted-key stays
+    schema-valid — see test_olog_structured_output_conforms_to_its_schema) and render as ``anyOf``
+    with no top-level ``type``, so they are checked for presence only."""
     from epics_pv_mcp.server import mcp
 
-    # tool: (TypedDict title, {property: expected JSON type} for non-nullable scalar/array fields)
+    # tool: (TypedDict title, {property: expected JSON type}) for the ALWAYS-PRESENT non-nullable
+    # fields only. Sometimes-absent fields (capped, note, entry, attachments_uploaded, warnings,
+    # withheld, size_bytes, content_base64, output_path) are typed X | None so FastMCP's
+    # null-for-an-omitted-key stays schema-valid (see
+    # test_olog_structured_output_conforms_to_its_schema); they render as anyOf with no top-level
+    # type and are intentionally NOT type-checked here.
     specs: dict[str, tuple[str, dict[str, str]]] = {
         "search_logbook": (
             "OlogSearchResult",
-            {"enabled": "boolean", "entries": "array", "total": "integer", "capped": "boolean"},
+            {"enabled": "boolean", "entries": "array", "total": "integer"},
         ),
         "get_log_entry": ("OlogEntryResult", {"enabled": "boolean", "id": "string"}),
         "list_logbooks": ("OlogLogbooksResult", {"enabled": "boolean", "logbooks": "array"}),
@@ -395,30 +401,24 @@ async def test_olog_tools_expose_typed_output_schema() -> None:
         "list_log_levels": ("OlogLevelsResult", {"enabled": "boolean", "levels": "array"}),
         "create_log_entry": (
             "OlogCreateResult",
-            {"enabled": "boolean", "created": "boolean", "attachments_uploaded": "array"},
+            {"enabled": "boolean", "created": "boolean"},
         ),
         "reply_to_log": ("OlogCreateResult", {"enabled": "boolean", "created": "boolean"}),
         "add_log_attachment": (
             "OlogAddAttachmentResult",
-            {"enabled": "boolean", "added": "boolean", "attachments_uploaded": "array"},
+            {"enabled": "boolean", "added": "boolean"},
         ),
         "update_log_entry": (
             "OlogUpdateResult",
-            {"enabled": "boolean", "updated": "boolean", "warnings": "array"},
+            {"enabled": "boolean", "updated": "boolean"},
         ),
         "download_log_attachment": (
             "OlogDownloadResult",
-            {
-                "enabled": "boolean",
-                "downloaded": "boolean",
-                "size_bytes": "integer",
-                "content_base64": "string",
-                "output_path": "string",
-            },
+            {"enabled": "boolean", "downloaded": "boolean"},
         ),
         "list_log_attachments": (
             "OlogListAttachmentsResult",
-            {"enabled": "boolean", "attachments": "array", "withheld": "boolean"},
+            {"enabled": "boolean", "attachments": "array"},
         ),
     }
     tools = {tool.name: tool for tool in await mcp.list_tools()}
@@ -433,6 +433,105 @@ async def test_olog_tools_expose_typed_output_schema() -> None:
             assert field in properties, f"{name}: outputSchema missing {field!r}"
             actual = properties[field].get("type")
             assert actual == json_type, f"{name}.{field}: schema type {actual!r} != {json_type!r}"
+
+
+def _schema_permits_null(prop: dict[str, Any]) -> bool:
+    """True iff a JSON-schema property accepts a null value.
+
+    A property permits null if it carries no type constraint at all, is itself ``type: null``, or is
+    an ``anyOf``/``oneOf`` with a null branch — the shape FastMCP emits for an ``X | None`` field
+    (``anyOf[{type: T}, {type: null}]``). A bare ``{"type": "boolean"}`` does NOT permit null.
+    """
+    if "type" not in prop and "anyOf" not in prop and "oneOf" not in prop:
+        return True
+    if prop.get("type") == "null":
+        return True
+    branches = prop.get("anyOf", []) + prop.get("oneOf", [])
+    return any(
+        isinstance(b, dict) and (b.get("type") == "null" or "type" not in b) for b in branches
+    )
+
+
+# The envelope keys each Olog tool emits on EVERY return path — so FastMCP never serializes them
+# as a spurious null. Every OTHER advertised property is sometimes-absent and therefore MUST permit
+# null (see test_olog_structured_output_conforms_to_its_schema).
+_OLOG_ALWAYS_PRESENT: dict[str, set[str]] = {
+    "search_logbook": {"enabled", "entries", "total"},
+    "get_log_entry": {"enabled", "id"},
+    "list_logbooks": {"enabled", "logbooks"},
+    "list_tags": {"enabled", "tags"},
+    "list_log_levels": {"enabled", "levels"},
+    "create_log_entry": {"enabled", "created"},
+    "reply_to_log": {"enabled", "created"},
+    "add_log_attachment": {"enabled", "added"},
+    "update_log_entry": {"enabled", "updated"},
+    "download_log_attachment": {"enabled", "downloaded"},
+    "list_log_attachments": {"enabled", "id", "attachments"},
+}
+
+
+@pytest.mark.asyncio
+async def test_olog_structured_output_conforms_to_its_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MA-1 follow-up: every Olog tool's EMITTED structuredContent must conform to its own
+    outputSchema. FastMCP serializes an omitted ``total=False`` key as JSON ``null`` (its
+    ``convert_result`` dumps the model WITHOUT ``exclude_none``), so a property that is sometimes
+    absent MUST permit null in the schema — otherwise the server advertises a schema its own output
+    violates. Pre-fix that was 8/11 tools on the disabled path alone and all 11 once ``note`` is
+    absent on a success path. Green once the sometimes-absent fields are typed ``X | None``.
+
+    Part A (runtime, real serialization): drive each tool on the disabled path through
+    ``mcp.call_tool`` and assert every None-valued key in the emitted structuredContent permits null
+    in the schema — the direct bug repro. Part B (static, all 11): every advertised property
+    outside the always-present envelope must permit null, extending the check to the
+    note/success-only fields of the write + download tools without mocking the write gate.
+    """
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import mcp
+    from epics_pv_mcp.services import checkers_olog
+
+    # Force the disabled path deterministically (independent of the ambient EPICS_MCP_OLOG_URL).
+    monkeypatch.setattr(checkers_olog, "get_config", lambda: EpicsConfig(olog_url=""))
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    # Minimal args that reach each tool's disabled return. download_log_attachment validates its
+    # identity/sink BEFORE the config gate, so it needs a fully-specified pair.
+    disabled_args: dict[str, dict[str, Any]] = {
+        "search_logbook": {},
+        "get_log_entry": {"log_id": "1"},
+        "list_logbooks": {},
+        "list_tags": {},
+        "list_log_levels": {},
+        "create_log_entry": {"title": "t", "logbooks": "Ops"},
+        "reply_to_log": {"log_id": "1", "title": "t", "logbooks": "Ops"},
+        "add_log_attachment": {"log_id": "1"},
+        "update_log_entry": {"log_id": "1"},
+        "download_log_attachment": {"attachment_id": "1", "as_base64": True},
+        "list_log_attachments": {"log_id": "1"},
+    }
+
+    # Part A — the emitted structuredContent conforms on the disabled path. FastMCP's call_tool
+    # returns a (content, structuredContent) tuple; we assert on the structured dict.
+    for name, args in disabled_args.items():
+        _content, structured = cast(tuple[object, dict[str, Any]], await mcp.call_tool(name, args))
+        properties = (tools[name].outputSchema or {}).get("properties", {})
+        for key, value in structured.items():
+            if value is None:
+                assert _schema_permits_null(properties[key]), (
+                    f"{name}.{key}: emitted null but its outputSchema property forbids null "
+                    f"({properties[key]})"
+                )
+
+    # Part B — every sometimes-absent advertised property permits null (uniform over all 11 tools).
+    for name, always in _OLOG_ALWAYS_PRESENT.items():
+        properties = (tools[name].outputSchema or {}).get("properties", {})
+        for prop_name, prop_schema in properties.items():
+            if prop_name in always:
+                continue
+            assert _schema_permits_null(prop_schema), (
+                f"{name}.{prop_name}: sometimes-absent property must permit null in its "
+                f"outputSchema (FastMCP dumps an omitted key as null), got {prop_schema}"
+            )
 
 
 def test_installed_but_broken_extra_keeps_all_surfaces_consistent(

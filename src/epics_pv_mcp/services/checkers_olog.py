@@ -43,14 +43,19 @@ from epics_pv_mcp.services.olog_exceptions import (
     OlogResponseError,
 )
 
-# --- Tool result shapes (MA-1 Commit C) -------------------------------------------------------
+# --- Tool result shapes (MA-1 Commit C; nullability hardened in the MA-1 follow-up) ------------
 # One ``total=False`` TypedDict per query function: every key across the function's return paths
 # (disabled / not-found / withheld / success + the conditionally-added note/warnings/attachments/
-# download-sink keys). total=False = all optional, so a schema with no ``required`` and permissive
-# extras; the nested entry/entries/attachments projections stay ``dict[str, object]`` because their
-# inner keys differ between whole-mode and redacted-mode reads. FastMCP turns these into a typed
-# ``outputSchema`` (properties) instead of the bare ``{additionalProperties: true}`` a plain dict
-# yields. mypy --strict checks every ``return {...}`` literal against its declared shape here.
+# download-sink keys). Every field ABSENT on some return path is typed ``X | None``, because
+# FastMCP serializes an omitted total=False key as JSON ``null`` (its ``convert_result`` dumps the
+# model WITHOUT ``exclude_none``): a non-nullable type would make the emitted structuredContent
+# violate the tool's own advertised outputSchema (measured: 8/11 tools on the disabled path, all 11
+# once ``note`` is absent — MA-1 QA finding). Only fields present on EVERY return path (``enabled``
+# + each tool's core status/payload fields) stay non-nullable. The nested entry/entries/attachments
+# projections keep ``dict[str, object]`` inner shapes (whole-mode vs redacted-mode variance).
+# FastMCP turns these into a typed ``outputSchema`` (``properties``; ``anyOf[T, null]`` for the
+# nullable fields) instead of the bare ``{additionalProperties: true}`` a plain dict yields.
+# mypy --strict checks every ``return {...}`` literal against its declared shape here.
 
 
 class OlogSearchResult(TypedDict, total=False):
@@ -58,71 +63,71 @@ class OlogSearchResult(TypedDict, total=False):
     entries: list[dict[str, object]]
     total: int
     total_matches: int | None
-    capped: bool
-    note: str
+    capped: bool | None
+    note: str | None
 
 
 class OlogEntryResult(TypedDict, total=False):
     enabled: bool
     id: str
     found: bool | None
-    entry: dict[str, object]
-    note: str
+    entry: dict[str, object] | None
+    note: str | None
 
 
 class OlogLogbooksResult(TypedDict, total=False):
     enabled: bool
     logbooks: list[str]
-    note: str
+    note: str | None
 
 
 class OlogTagsResult(TypedDict, total=False):
     enabled: bool
     tags: list[str]
-    note: str
+    note: str | None
 
 
 class OlogLevelsResult(TypedDict, total=False):
     enabled: bool
     levels: list[str]
     default_level: str | None
-    note: str
+    note: str | None
 
 
 class OlogCreateResult(TypedDict, total=False):
     enabled: bool
     created: bool
-    entry: dict[str, object]
-    attachments_uploaded: list[dict[str, object]]
-    note: str
+    entry: dict[str, object] | None
+    attachments_uploaded: list[dict[str, object]] | None
+    note: str | None
 
 
 class OlogAddAttachmentResult(TypedDict, total=False):
     enabled: bool
     added: bool
-    entry: dict[str, object]
-    attachments_uploaded: list[dict[str, object]]
-    note: str
+    entry: dict[str, object] | None
+    attachments_uploaded: list[dict[str, object]] | None
+    note: str | None
 
 
 class OlogUpdateResult(TypedDict, total=False):
     enabled: bool
     updated: bool
-    entry: dict[str, object]
-    warnings: list[str]
-    note: str
+    entry: dict[str, object] | None
+    warnings: list[str] | None
+    note: str | None
 
 
 class OlogDownloadResult(TypedDict, total=False):
     enabled: bool
     downloaded: bool
-    withheld: bool
-    size_bytes: int
+    withheld: bool | None
+    size_bytes: int | None
     content_type: str | None
     filename: str | None
-    content_base64: str
-    output_path: str
-    note: str
+    content_base64: str | None
+    output_path: str | None
+    note: str | None
 
 
 class OlogListAttachmentsResult(TypedDict, total=False):
@@ -131,8 +136,8 @@ class OlogListAttachmentsResult(TypedDict, total=False):
     found: bool | None
     attachments: list[dict[str, object]]
     attachment_count: int | None
-    withheld: bool
-    note: str
+    withheld: bool | None
+    note: str | None
 
 
 _OLOG_DISABLED_NOTE = (
