@@ -604,3 +604,254 @@ def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
     finally:
         monkeypatch.undo()  # restore find_spec + sys.modules BEFORE the clean reload
         importlib.reload(server)  # restore the real module for the rest of the suite
+
+
+# --- MA-Q1: tools/list schema hygiene (_prune_tool_schemas post-pass) -------------------------
+
+# The 11 Olog tools whose TypedDict return yields a TYPED outputSchema (properties present); every
+# OTHER tool returns dict[str, object] -> its information-empty outputSchema is dropped to None by
+# A2. Named here as an INDEPENDENT source of truth (not reflected from the code). These are core
+# tools, so the set is identical on a core-only ([displays] absent, 28 tools) and a full (32)
+# install -> the assertions are RELATIONAL, never a COUNT (which would break the core-only lane).
+_OLOG_TYPED_OUTPUT_TOOLS = frozenset(
+    {
+        "search_logbook",
+        "get_log_entry",
+        "list_logbooks",
+        "list_tags",
+        "list_log_levels",
+        "create_log_entry",
+        "reply_to_log",
+        "add_log_attachment",
+        "update_log_entry",
+        "download_log_attachment",
+        "list_log_attachments",
+    }
+)
+
+# The four tools that carry a parameter literally NAMED ``title`` (the schema-aware-strip trap).
+_TITLE_PARAMETER_TOOLS = ("create_log_entry", "reply_to_log", "update_log_entry", "search_logbook")
+
+
+def _count_title_keys(node: object) -> int:
+    """Naive, traversal-independent count of EVERY ``title`` key in a schema structure — annotation
+    OR real property name. Deliberately NOT schema-aware, so it cross-checks the production strip
+    without sharing its logic."""
+    total = 0
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "title":
+                total += 1
+            total += _count_title_keys(value)
+    elif isinstance(node, list):
+        for item in node:
+            total += _count_title_keys(item)
+    return total
+
+
+# JSON-Schema keyword vocabulary, restated locally so this walker stays independent of production.
+_JSCHEMA_MAP_KW = frozenset(
+    {"properties", "$defs", "definitions", "patternProperties", "dependentSchemas"}
+)
+_JSCHEMA_SUB_KW = frozenset(
+    {"items", "additionalProperties", "not", "if", "then", "else", "propertyNames"}
+)
+_JSCHEMA_LIST_KW = frozenset({"anyOf", "allOf", "oneOf", "prefixItems"})
+
+
+def _schema_nodes_with_title(node: object, path: str = "root") -> list[str]:
+    """Schema-aware walk: a label for every SCHEMA NODE that still carries a ``title`` ANNOTATION,
+    walking a properties/$defs map by its VALUES so a property NAMED ``title`` is not mistaken for
+    an annotation. An independent re-statement of the spec the production strip enforces."""
+    hits: list[str] = []
+    if isinstance(node, dict):
+        if "title" in node:
+            hits.append(path)
+        for key, value in node.items():
+            if key in _JSCHEMA_MAP_KW:
+                if isinstance(value, dict):
+                    for name, sub in value.items():
+                        hits += _schema_nodes_with_title(sub, f"{path}.{key}[{name}]")
+            elif key in _JSCHEMA_SUB_KW:
+                hits += _schema_nodes_with_title(value, f"{path}.{key}")
+            elif key in _JSCHEMA_LIST_KW and isinstance(value, list):
+                for i, sub in enumerate(value):
+                    hits += _schema_nodes_with_title(sub, f"{path}.{key}[{i}]")
+    elif isinstance(node, list):
+        for i, item in enumerate(node):
+            hits += _schema_nodes_with_title(item, f"{path}[{i}]")
+    return hits
+
+
+def test_strip_schema_title_annotations_preserves_title_property() -> None:
+    """MA-Q1 unit guard (provably red against a NAIVE strip): the schema-aware strip removes every
+    ``title`` ANNOTATION but keeps a property literally NAMED ``title`` — with its description — and
+    never touches ``required``. A naive 'pop every title key' deletes ``properties['title']`` and
+    fails this test; that is the falsification the critical algorithm exists to prevent."""
+    from epics_pv_mcp.server import _strip_schema_title_annotations
+
+    schema: dict[str, Any] = {
+        "type": "object",
+        "title": "SomeArguments",  # a schema-node annotation -> must go
+        "required": ["title"],
+        "properties": {
+            "title": {"type": "string", "title": "Title", "description": "the entry title"},
+            "count": {"type": "integer", "title": "Count"},
+            "nested": {
+                "type": "object",
+                "title": "Nested",
+                "properties": {"title": {"type": "string", "title": "Title"}},
+            },
+        },
+    }
+    _strip_schema_title_annotations(schema)
+
+    assert "title" not in schema  # top-level annotation gone
+    assert schema["required"] == ["title"]  # required untouched
+    assert "title" in schema["properties"]  # the real title PARAMETER survives
+    assert schema["properties"]["title"]["description"] == "the entry title"  # + its description
+    assert "title" not in schema["properties"]["title"]  # its annotation gone
+    assert "title" not in schema["properties"]["count"]  # sibling annotation gone
+    # nested object: its annotation gone, its own ``title`` property (+ that property's annotation)
+    nested = schema["properties"]["nested"]
+    assert "title" not in nested
+    assert "title" in nested["properties"]
+    assert "title" not in nested["properties"]["title"]
+
+
+@pytest.mark.asyncio
+async def test_input_schemas_carry_no_title_annotation() -> None:
+    """MA-Q1 A1: after the post-pass, NO inputSchema node advertises a ``title`` annotation
+    (schema-aware walk). Red on the pre-strip code (pydantic emits titles on every node)."""
+    from epics_pv_mcp.server import mcp
+
+    for tool in await mcp.list_tools():
+        residual = _schema_nodes_with_title(tool.inputSchema)
+        assert not residual, f"{tool.name}: title annotation(s) survived at {residual}"
+
+
+@pytest.mark.asyncio
+async def test_only_real_title_parameters_remain() -> None:
+    """MA-Q1 A1 (traversal-independent cross-check): the ONLY ``title`` keys left across all
+    inputSchemas are the real ``title`` PARAMETER names — one per tool that declares one at the top
+    level. Naive count == count of tools with a top-level ``title`` property. Red pre-strip
+    (annotations inflate the naive count)."""
+    from epics_pv_mcp.server import mcp
+
+    tools = await mcp.list_tools()
+    residual = sum(_count_title_keys(t.inputSchema) for t in tools)
+    expected = sum(1 for t in tools if "title" in (t.inputSchema.get("properties") or {}))
+    assert residual == expected, (
+        f"{residual} residual 'title' keys != {expected} real title parameters — "
+        "an annotation survived or a real title parameter was deleted"
+    )
+
+
+@pytest.mark.asyncio
+async def test_title_parameter_tools_keep_their_title_property() -> None:
+    """MA-Q1 critical trap: the four tools with a ``title`` PARAMETER still expose
+    ``properties['title']`` WITH its description. A naive 'pop every title key' deletes it. Red on a
+    naive strip."""
+    from epics_pv_mcp.server import mcp
+
+    tools = {t.name: t for t in await mcp.list_tools()}
+    for name in _TITLE_PARAMETER_TOOLS:
+        properties = tools[name].inputSchema.get("properties") or {}
+        assert "title" in properties, f"{name}: title parameter lost from properties"
+        assert properties["title"].get("description"), (
+            f"{name}: title parameter kept but its description was stripped"
+        )
+
+
+@pytest.mark.asyncio
+async def test_every_required_arg_exists_in_properties() -> None:
+    """MA-Q1 critical trap (the falsifiable core): for every tool, each ``required`` entry exists
+    in ``properties``. A naive title-strip leaves ``title`` in create_log_entry/reply_to_log's
+    ``required`` but deletes it from ``properties`` — a required arg hidden from the wire while
+    pydantic still enforces it. Red on a naive strip."""
+    from epics_pv_mcp.server import mcp
+
+    for tool in await mcp.list_tools():
+        schema = tool.inputSchema
+        properties = schema.get("properties") or {}
+        for req in schema.get("required", []):
+            assert req in properties, (
+                f"{tool.name}: required arg {req!r} missing from properties "
+                "(schema-breaking title strip?)"
+            )
+
+
+@pytest.mark.asyncio
+async def test_output_schema_typed_only_for_olog_tools() -> None:
+    """MA-Q1 A2 (RELATIONAL — not a count, so core-only [28] and full [32] both pass): a tool
+    advertises an outputSchema WITH properties iff it is one of the 11 typed Olog tools; every other
+    present tool advertises NONE. Proves the empty schemas were dropped AND the 11 typed ones kept.
+    Red on a blanket drop (Olog schemas gone) or no drop (empty schemas remain)."""
+    from epics_pv_mcp.server import mcp
+
+    tools = await mcp.list_tools()
+    for tool in tools:
+        schema = tool.outputSchema
+        if tool.name in _OLOG_TYPED_OUTPUT_TOOLS:
+            assert schema is not None and schema.get("properties"), (
+                f"{tool.name}: typed Olog outputSchema was dropped"
+            )
+        else:
+            assert schema is None, (
+                f"{tool.name}: expected no outputSchema, got {schema!r} (empty one not dropped)"
+            )
+    # every named typed tool is actually present (they are core tools, not display-gated)
+    present = {t.name for t in tools}
+    assert present >= _OLOG_TYPED_OUTPUT_TOOLS, (
+        f"missing typed Olog tools: {sorted(_OLOG_TYPED_OUTPUT_TOOLS - present)}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_field_descriptions_survive_the_strip() -> None:
+    """MA-Q1: stripping the ``title`` ANNOTATIONS must not touch field ``description``s — the
+    point-of-need semantics the repo DoD requires. Spot-check a distinctive, anchored one."""
+    from epics_pv_mcp.server import mcp
+
+    tools = {t.name: t for t in await mcp.list_tools()}
+    name_pattern = tools["find_channels"].inputSchema["properties"]["name_pattern"]
+    assert "ANCHORED" in name_pattern["description"]
+
+
+@pytest.mark.asyncio
+async def test_stripped_tool_still_returns_structured_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MA-Q1 A2 is ADVERTISE-ONLY: dropping the wire outputSchema leaves the RUNTIME
+    ``fn_metadata.output_schema`` intact, so a stripped tool still returns structuredContent at call
+    time. Drive ``is_archived`` (a stripped tool) on its deterministic disabled path (no network)
+    and assert it still yields a structured dict."""
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import mcp
+    from epics_pv_mcp.services import checkers
+
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(archiver_url=""))
+    _content, structured = cast(
+        tuple[object, dict[str, Any]],
+        await mcp.call_tool("is_archived", {"pv": "SIM:PS-01:Cur-RB"}),
+    )
+    # Reached the disabled path AND produced structuredContent despite the dropped wire schema.
+    assert structured.get("enabled") is False
+
+
+def test_prune_tool_schemas_never_crashes_core(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """MA-Q1 trap #2 (crash-guard): the post-pass runs at MODULE IMPORT and mutates a
+    cached_property — an unguarded raise (e.g. a future frozen model) would take down the whole core
+    PV server. Force an internal raise and assert _prune_tool_schemas swallows it (logs ERROR, no
+    propagation). Red if the try/except is removed (the RuntimeError would propagate out)."""
+    import epics_pv_mcp.server as server
+
+    def _boom(_node: object) -> None:
+        raise RuntimeError("frozen model")
+
+    monkeypatch.setattr(server, "_strip_schema_title_annotations", _boom)
+    with caplog.at_level(logging.ERROR):
+        server._prune_tool_schemas(server.mcp)  # must NOT raise
+    assert any("_prune_tool_schemas" in record.message for record in caplog.records)

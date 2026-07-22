@@ -164,6 +164,92 @@ _low_level_server = getattr(mcp, "_mcp_server", None)
 if _low_level_server is not None:
     _low_level_server.version = __version__
 
+
+# JSON-Schema keywords by the shape of their value, so _strip_schema_title_annotations walks the
+# structure correctly: a name->schema MAP (recurse the VALUES, keep the property-name KEYS), a
+# single subschema, or a LIST of subschemas. A ``title`` key anywhere else is an annotation.
+_SCHEMA_MAP_KEYWORDS = frozenset(
+    {"properties", "$defs", "definitions", "patternProperties", "dependentSchemas"}
+)
+_SCHEMA_SUBSCHEMA_KEYWORDS = frozenset(
+    {"items", "additionalProperties", "not", "if", "then", "else", "propertyNames"}
+)
+_SCHEMA_LIST_KEYWORDS = frozenset({"anyOf", "allOf", "oneOf", "prefixItems"})
+
+
+def _strip_schema_title_annotations(node: object) -> None:
+    """Remove the JSON-Schema ``title`` ANNOTATION from every schema node IN PLACE, but NEVER a
+    property NAMED ``title`` out of a ``properties``/``$defs``/… map.
+
+    The distinction is the whole point (MA-Q1). pydantic emits a ``title`` on the top-level schema
+    AND on every property — a Title-Case derivation of the key ("Pv Name"), worth nothing to a host
+    that reads the schema as text, so dropping it is lossless (~4.7k WIRE). But four Olog tools
+    (``create_log_entry``/``reply_to_log`` [required], ``update_log_entry``, ``search_logbook``)
+    have a PARAMETER named ``title``. A naive "pop every ``title`` key" would delete
+    ``properties["title"]`` and leave it dangling in ``required`` — a required argument hidden from
+    the wire schema while pydantic still enforces it, silently breaking the write tools. So a
+    name->schema map is walked by its VALUES only (property names kept); a ``title`` annotation is
+    popped only where it annotates the CURRENT schema node.
+    """
+    if isinstance(node, dict):
+        node.pop("title", None)  # the title annotation OF THIS schema node
+        for key, value in node.items():
+            if key in _SCHEMA_MAP_KEYWORDS:
+                # name->schema MAP: keep the KEYS (property names!), clean the VALUES only
+                if isinstance(value, dict):
+                    for subschema in value.values():
+                        _strip_schema_title_annotations(subschema)
+            elif key in _SCHEMA_SUBSCHEMA_KEYWORDS:
+                _strip_schema_title_annotations(value)  # a single subschema (or a bool — no-op)
+            elif key in _SCHEMA_LIST_KEYWORDS and isinstance(value, list):
+                for subschema in value:
+                    _strip_schema_title_annotations(subschema)
+    elif isinstance(node, list):
+        # defensive: draft-04 tuple-form ``items`` is a list of schemas
+        for item in node:
+            _strip_schema_title_annotations(item)
+
+
+def _prune_tool_schemas(mcp: FastMCP) -> None:
+    """Post-registration ``tools/list`` schema hygiene (MA-Q1) — two LOSSLESS passes over every
+    registered tool, shrinking the wire payload with no loss of capability:
+
+    - **A1** — strip the derived pydantic ``title`` annotations from each inputSchema
+      (:func:`_strip_schema_title_annotations`, schema-aware so real ``title`` parameters survive).
+    - **A2** — drop the INFORMATION-EMPTY outputSchemas. A ``dict[str, object]`` return yields
+      ``{additionalProperties: true, title: …DictOutput, type: object}``, which validates nothing.
+      Setting ``Tool.output_schema = None`` (a ``@cached_property`` whose assignment shadows the
+      instance cache) removes it from the wire, while ``fn_metadata.output_schema`` stays intact →
+      the tool still returns ``structuredContent`` at call time (an advertise-only drop). The 11
+      typed Olog outputSchemas (they carry ``properties``) are KEPT — test-pinned.
+
+    Runs at MODULE IMPORT and mutates a ``@cached_property``, so the whole body is wrapped in a
+    broad ``try/except`` that logs loud and no-ops — mirroring :func:`_load_display_registrar`: an
+    optional hygiene pass must NEVER crash the core PV server (e.g. a future frozen model that
+    raises on the assignment). Call AFTER ``_display_registrar(mcp)`` so the four display-registrar
+    tools are in the manager and get pruned too.
+    """
+    try:
+        manager = getattr(mcp, "_tool_manager", None)
+        if manager is None:
+            logger.error(
+                "FastMCP exposes no _tool_manager; tools/list schema hygiene skipped "
+                "(core tools remain, their schemas just stay un-pruned)."
+            )
+            return
+        for tool in manager.list_tools():
+            _strip_schema_title_annotations(tool.parameters)  # A1
+            output_schema = tool.output_schema  # A2 — read the cached_property once
+            if output_schema is not None and not output_schema.get("properties"):
+                tool.output_schema = None
+    except Exception:  # an optional hygiene pass must never crash core — logged loud
+        logger.error(
+            "tools/list schema hygiene (_prune_tool_schemas) failed; core PV tools remain "
+            "available with un-pruned schemas.",
+            exc_info=True,
+        )
+
+
 # === Tools ===
 
 
@@ -1560,6 +1646,13 @@ async def diagnose_connection(
 # server runs standalone and no surface over-claims the display tools.
 if _display_registrar is not None:
     _display_registrar(mcp)
+
+
+# tools/list schema hygiene (MA-Q1): strip derived inputSchema titles + drop empty outputSchemas.
+# MUST run AFTER _display_registrar so the four registrar tools (validate_pvs / crossplane_check /
+# coverage_audit / find_device) are in the manager and get pruned too. Crash-guarded internally —
+# an optional hygiene pass must never take down the core PV server.
+_prune_tool_schemas(mcp)
 
 
 # === Resources ===

@@ -126,6 +126,25 @@ carry breaking changes).
 
 ### Changed
 
+- **`tools/list` schema hygiene — lossless payload reduction (MA-Q1, precondition for new tools).**
+  A single post-registration pass `_prune_tool_schemas(mcp)` (in `server.py`, run AFTER the display-tool
+  registrar, wrapped in a crash-guarding `try/except` that mirrors `_load_display_registrar` — an optional
+  hygiene pass must never take down the core PV server) shrinks the wire `tools/list` payload with NO loss
+  of capability: **70,237 → 64,499 chars** (compact `model_dump_json(by_alias=True, exclude_none=True)`, the
+  transport form; +`instructions` the budget is 66,172 vs a soft ~60k target). Two passes: **A1** strips the
+  derived pydantic `title` ANNOTATIONS from every inputSchema — SCHEMA-AWARE, so the four Olog tools with a
+  parameter literally named `title` (`create_log_entry`/`reply_to_log` [required], `update_log_entry`,
+  `search_logbook`) keep that parameter (a naive "pop every `title` key" would delete `properties["title"]`
+  and leave it dangling in `required`, silently breaking the write tools). **A2** drops the 21 information-empty
+  outputSchemas (`{additionalProperties: true, …DictOutput}`, which validate nothing) via
+  `Tool.output_schema = None` — an advertise-only drop: `fn_metadata.output_schema` stays intact, so the tools
+  still return `structuredContent` at call time. The 11 typed Olog outputSchemas (they carry `properties`) are
+  KEPT (test-pinned). `list_tools` unchanged (32 with `[displays]`, 28 core-only). New relational regression
+  tests in `tests/test_server.py`, each proven able to go red via a mutant (naive strip, no strip, blanket
+  drop, cleared runtime schema, removed crash-guard). This is a PARTIAL step toward the ~60k soft target:
+  the remaining ~6k would need capacity-sensitive description compression, deliberately left as separate,
+  scoped follow-up work.
+
 - **ChannelFinder PROPERTY filter semantics VERIFIED against a live server (MA-2 Teil C, 2026-07-22).**
   A differential live probe (positive + negative controls) confirmed the `find_channels` PROPERTY
   filters (`has_properties`/`lacks_properties`/`not_property_values`) and `count_only` behave as
