@@ -22,6 +22,18 @@ from epics_pv_mcp.services.checkers import (
     query_olog_tags,
     query_olog_update,
 )
+from epics_pv_mcp.services.checkers_olog import (
+    OlogAddAttachmentResult,
+    OlogCreateResult,
+    OlogDownloadResult,
+    OlogEntryResult,
+    OlogLevelsResult,
+    OlogListAttachmentsResult,
+    OlogLogbooksResult,
+    OlogSearchResult,
+    OlogTagsResult,
+    OlogUpdateResult,
+)
 from epics_pv_mcp.services.olog_client import DEFAULT_MAX_LOGS
 
 
@@ -55,7 +67,7 @@ async def _search_logbook(
     level: str | None = None,
     title: str | None = None,
     timeout: float = 5.0,
-) -> dict[str, object]:
+) -> OlogSearchResult:
     """Search the Phoebus Olog logbook (see services.olog_client for the output posture).
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_search`.
@@ -75,7 +87,7 @@ async def _search_logbook(
     )
 
 
-async def _get_log_entry(log_id: str, timeout: float = 5.0) -> dict[str, object]:
+async def _get_log_entry(log_id: str, timeout: float = 5.0) -> OlogEntryResult:
     """Return one Olog entry by id (see services.olog_client for the output posture).
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_entry`.
@@ -83,7 +95,7 @@ async def _get_log_entry(log_id: str, timeout: float = 5.0) -> dict[str, object]
     return await query_olog_entry(log_id, timeout=timeout)
 
 
-async def _list_logbooks(timeout: float = 5.0) -> dict[str, object]:
+async def _list_logbooks(timeout: float = 5.0) -> OlogLogbooksResult:
     """List the valid Olog logbook names (name-only; owners dropped).
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_logbooks`.
@@ -91,7 +103,7 @@ async def _list_logbooks(timeout: float = 5.0) -> dict[str, object]:
     return await query_olog_logbooks(timeout=timeout)
 
 
-async def _list_tags(timeout: float = 5.0) -> dict[str, object]:
+async def _list_tags(timeout: float = 5.0) -> OlogTagsResult:
     """List the valid Olog tag names.
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_tags`.
@@ -99,7 +111,7 @@ async def _list_tags(timeout: float = 5.0) -> dict[str, object]:
     return await query_olog_tags(timeout=timeout)
 
 
-async def _list_log_levels(timeout: float = 5.0) -> dict[str, object]:
+async def _list_log_levels(timeout: float = 5.0) -> OlogLevelsResult:
     """List the valid Olog log-level names (+ the default level).
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_levels`.
@@ -116,7 +128,7 @@ async def _create_log_entry(
     attachments: str | None = None,
     embed_image_base64: str | None = None,
     timeout: float = 5.0,
-) -> dict[str, object]:
+) -> OlogCreateResult:
     """Create a Phoebus Olog log entry, optionally with attachments. MUTATING, gated; the response
     follows the same output posture as a read.
 
@@ -148,7 +160,7 @@ async def _reply_to_log(
     attachments: str | None = None,
     embed_image_base64: str | None = None,
     timeout: float = 5.0,
-) -> dict[str, object]:
+) -> OlogCreateResult:
     """Reply to an existing Olog entry (threads via the Log Entry Group). MUTATING, gated, redacted.
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_create` with
@@ -174,7 +186,7 @@ async def _add_log_attachment(
     attachments: str | None = None,
     embed_image_base64: str | None = None,
     timeout: float = 5.0,
-) -> dict[str, object]:
+) -> OlogAddAttachmentResult:
     """Attach files to an EXISTING Olog entry. MUTATING, gated, whole-mode only.
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_add_attachment`.
@@ -196,7 +208,7 @@ async def _update_log_entry(
     logbooks: str | None = None,
     tags: str | None = None,
     timeout: float = 5.0,
-) -> dict[str, object]:
+) -> OlogUpdateResult:
     """Edit an EXISTING Olog entry's fields. MUTATING, gated, whole-mode only.
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_update`. An argument left
@@ -222,7 +234,7 @@ async def _download_log_attachment(
     output_path: str | None = None,
     as_base64: bool = False,
     timeout: float = 5.0,
-) -> dict[str, object]:
+) -> OlogDownloadResult:
     """Download one Olog attachment's raw bytes (posture-gated).
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_download`.
@@ -237,7 +249,7 @@ async def _download_log_attachment(
     )
 
 
-async def _list_log_attachments(log_id: str, timeout: float = 5.0) -> dict[str, object]:
+async def _list_log_attachments(log_id: str, timeout: float = 5.0) -> OlogListAttachmentsResult:
     """List one Olog entry's attachments (filenames whole-mode only).
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_list_attachments`.

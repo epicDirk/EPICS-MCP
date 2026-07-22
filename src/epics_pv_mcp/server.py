@@ -15,6 +15,18 @@ from epics_pv_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_pv_mcp.prompts import diagnose_pv as _diagnose_pv
 from epics_pv_mcp.resources import get_epics_config, get_guide, get_health
 from epics_pv_mcp.safety import get_safety
+from epics_pv_mcp.services.checkers_olog import (
+    OlogAddAttachmentResult,
+    OlogCreateResult,
+    OlogDownloadResult,
+    OlogEntryResult,
+    OlogLevelsResult,
+    OlogListAttachmentsResult,
+    OlogLogbooksResult,
+    OlogSearchResult,
+    OlogTagsResult,
+    OlogUpdateResult,
+)
 from epics_pv_mcp.services.diagnose import (
     DEFAULT_CHECK_ALARM,
     DEFAULT_CHECK_ARCHIVER,
@@ -724,7 +736,7 @@ async def search_logbook(
         ),
     ] = None,
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> OlogSearchResult:
     """Search the Phoebus Olog electronic logbook (Olog REST /logs/search).
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_OLOG_URL is set.
@@ -800,7 +812,7 @@ async def search_logbook(
 async def get_log_entry(
     log_id: Annotated[str, Field(description="Olog log entry id")],
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> OlogEntryResult:
     """Fetch one Phoebus Olog entry by id (Olog REST /logs/{id}).
 
     Read-only. Disabled by default — returns enabled=false with found=null (the plane was NOT
@@ -827,7 +839,7 @@ async def get_log_entry(
 @translate_epics_errors
 async def list_logbooks(
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> OlogLogbooksResult:
     """List the valid Phoebus Olog logbook names (Olog REST /logbooks).
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_OLOG_URL is set. Returns
@@ -848,7 +860,7 @@ async def list_logbooks(
 @translate_epics_errors
 async def list_tags(
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> OlogTagsResult:
     """List the valid Phoebus Olog tag names (Olog REST /tags).
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_OLOG_URL is set. Returns
@@ -869,7 +881,7 @@ async def list_tags(
 @translate_epics_errors
 async def list_log_levels(
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> OlogLevelsResult:
     """List the valid Phoebus Olog log levels (Olog REST /levels).
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_OLOG_URL is set. Levels
@@ -935,7 +947,7 @@ async def create_log_entry(
         ),
     ] = None,
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> OlogCreateResult:
     """Post a new entry to the Phoebus Olog electronic logbook (Olog REST PUT /logs).
 
     MUTATING. Disabled by default and behind its OWN gate (separate from set_pv_value): it needs
@@ -1007,7 +1019,7 @@ async def reply_to_log(
         Field(description="A single small base64-encoded image to embed inline in the reply body"),
     ] = None,
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> OlogCreateResult:
     """Reply to an existing Phoebus Olog entry (Olog REST PUT /logs?inReplyTo=log_id).
 
     MUTATING. Same gate, service account, and DS-PRIVACY redaction as create_log_entry — it threads
@@ -1055,7 +1067,7 @@ async def add_log_attachment(
         Field(description="A single small base64-encoded image to embed inline in the entry body"),
     ] = None,
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> OlogAddAttachmentResult:
     """Attach one or more files to an EXISTING Phoebus Olog entry (Olog REST POST /logs/multipart).
 
     MUTATING and WHOLE-MODE ONLY. Olog's update endpoint is destructive — it prunes any attachment
@@ -1128,7 +1140,7 @@ async def update_log_entry(
         ),
     ] = None,
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> OlogUpdateResult:
     """Edit an EXISTING Phoebus Olog entry's fields (Olog REST POST /logs/multipart).
 
     MUTATING and WHOLE-MODE ONLY. Olog's update is destructive — it prunes any attachment not
@@ -1202,7 +1214,7 @@ async def download_log_attachment(
         ),
     ] = False,
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> OlogDownloadResult:
     """Download one Phoebus Olog attachment's raw bytes (GET /logs/attachments/{id}/{name} or
     /attachment/{id}).
 
@@ -1240,7 +1252,7 @@ async def download_log_attachment(
 async def list_log_attachments(
     log_id: Annotated[str, Field(description="Id of the Olog entry whose attachments to list")],
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> OlogListAttachmentsResult:
     """List one Phoebus Olog entry's attachments.
 
     Returns each attachment's id + fileMetadataDescription always, and its filename ONLY from a

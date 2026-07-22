@@ -7,6 +7,7 @@ build_* config gates, and the query_* error→EpicsConnectionError translation.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from unittest.mock import Mock
 
 import pytest
@@ -264,7 +265,7 @@ async def test_query_olog_response_error_is_not_a_connection_error(
             raise OlogResponseError("unreadable payload")
 
     monkeypatch.setattr(checkers_olog, "OlogClient", _FailClient)
-    calls = {
+    calls: dict[str, Callable[[], Awaitable[object]]] = {
         "get_log_entry": lambda: checkers.query_olog_entry("1"),
         "list_logbooks": lambda: checkers.query_olog_logbooks(),
         "list_tags": lambda: checkers.query_olog_tags(),

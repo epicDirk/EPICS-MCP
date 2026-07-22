@@ -367,6 +367,74 @@ def test_build_instructions_under_2048_bytes() -> None:
     assert len(build_instructions(False).encode("utf-8")) < 2048
 
 
+@pytest.mark.asyncio
+async def test_olog_tools_expose_typed_output_schema() -> None:
+    """MA-1 Commit C: each Olog tool advertises a STRUCTURED outputSchema — its per-function
+    TypedDict's typed ``properties`` — not the bare ``{additionalProperties: true}`` a plain
+    ``dict[str, object]`` return yields. Red before the retype (no ``properties`` at all).
+
+    Three independent red directions so the guard is not one-way (CLAUDE.md: a one-way guard
+    under-protects): (1) the schema ``title`` is the mapped TypedDict — catches a mis-wired tool,
+    e.g. reply_to_log must share OlogCreateResult; (2) the envelope keys are present — completeness
+    (mypy --strict guards the inverse, an undeclared key in a return literal); (3) the non-nullable
+    scalar/array fields carry the right JSON ``type`` — catches a value-type regression that
+    key-presence alone misses. Nullable ``X | None`` fields (content_type, filename,
+    total_matches, default_level, attachment_count) render as ``anyOf`` with no top-level
+    ``type``, so are checked for presence only."""
+    from epics_pv_mcp.server import mcp
+
+    # tool: (TypedDict title, {property: expected JSON type} for non-nullable scalar/array fields)
+    specs: dict[str, tuple[str, dict[str, str]]] = {
+        "search_logbook": (
+            "OlogSearchResult",
+            {"enabled": "boolean", "entries": "array", "total": "integer", "capped": "boolean"},
+        ),
+        "get_log_entry": ("OlogEntryResult", {"enabled": "boolean", "id": "string"}),
+        "list_logbooks": ("OlogLogbooksResult", {"enabled": "boolean", "logbooks": "array"}),
+        "list_tags": ("OlogTagsResult", {"enabled": "boolean", "tags": "array"}),
+        "list_log_levels": ("OlogLevelsResult", {"enabled": "boolean", "levels": "array"}),
+        "create_log_entry": (
+            "OlogCreateResult",
+            {"enabled": "boolean", "created": "boolean", "attachments_uploaded": "array"},
+        ),
+        "reply_to_log": ("OlogCreateResult", {"enabled": "boolean", "created": "boolean"}),
+        "add_log_attachment": (
+            "OlogAddAttachmentResult",
+            {"enabled": "boolean", "added": "boolean", "attachments_uploaded": "array"},
+        ),
+        "update_log_entry": (
+            "OlogUpdateResult",
+            {"enabled": "boolean", "updated": "boolean", "warnings": "array"},
+        ),
+        "download_log_attachment": (
+            "OlogDownloadResult",
+            {
+                "enabled": "boolean",
+                "downloaded": "boolean",
+                "size_bytes": "integer",
+                "content_base64": "string",
+                "output_path": "string",
+            },
+        ),
+        "list_log_attachments": (
+            "OlogListAttachmentsResult",
+            {"enabled": "boolean", "attachments": "array", "withheld": "boolean"},
+        ),
+    }
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    for name, (title, field_types) in specs.items():
+        schema = tools[name].outputSchema or {}
+        properties = schema.get("properties", {})
+        assert properties, f"{name}: outputSchema carries no typed properties"
+        assert schema.get("title") == title, (
+            f"{name}: wrong TypedDict wired ({schema.get('title')!r} != {title!r})"
+        )
+        for field, json_type in field_types.items():
+            assert field in properties, f"{name}: outputSchema missing {field!r}"
+            actual = properties[field].get("type")
+            assert actual == json_type, f"{name}.{field}: schema type {actual!r} != {json_type!r}"
+
+
 def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

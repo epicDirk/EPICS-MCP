@@ -18,6 +18,7 @@ import asyncio
 import base64
 import uuid
 from collections.abc import Callable
+from typing import TypedDict
 
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsConnectionError, EpicsError, OlogWriteDeniedError
@@ -41,6 +42,98 @@ from epics_pv_mcp.services.olog_exceptions import (
     OlogFilterValueError,
     OlogResponseError,
 )
+
+# --- Tool result shapes (MA-1 Commit C) -------------------------------------------------------
+# One ``total=False`` TypedDict per query function: every key across the function's return paths
+# (disabled / not-found / withheld / success + the conditionally-added note/warnings/attachments/
+# download-sink keys). total=False = all optional, so a schema with no ``required`` and permissive
+# extras; the nested entry/entries/attachments projections stay ``dict[str, object]`` because their
+# inner keys differ between whole-mode and redacted-mode reads. FastMCP turns these into a typed
+# ``outputSchema`` (properties) instead of the bare ``{additionalProperties: true}`` a plain dict
+# yields. mypy --strict checks every ``return {...}`` literal against its declared shape here.
+
+
+class OlogSearchResult(TypedDict, total=False):
+    enabled: bool
+    entries: list[dict[str, object]]
+    total: int
+    total_matches: int | None
+    capped: bool
+    note: str
+
+
+class OlogEntryResult(TypedDict, total=False):
+    enabled: bool
+    id: str
+    found: bool | None
+    entry: dict[str, object]
+    note: str
+
+
+class OlogLogbooksResult(TypedDict, total=False):
+    enabled: bool
+    logbooks: list[str]
+    note: str
+
+
+class OlogTagsResult(TypedDict, total=False):
+    enabled: bool
+    tags: list[str]
+    note: str
+
+
+class OlogLevelsResult(TypedDict, total=False):
+    enabled: bool
+    levels: list[str]
+    default_level: str | None
+    note: str
+
+
+class OlogCreateResult(TypedDict, total=False):
+    enabled: bool
+    created: bool
+    entry: dict[str, object]
+    attachments_uploaded: list[dict[str, object]]
+    note: str
+
+
+class OlogAddAttachmentResult(TypedDict, total=False):
+    enabled: bool
+    added: bool
+    entry: dict[str, object]
+    attachments_uploaded: list[dict[str, object]]
+    note: str
+
+
+class OlogUpdateResult(TypedDict, total=False):
+    enabled: bool
+    updated: bool
+    entry: dict[str, object]
+    warnings: list[str]
+    note: str
+
+
+class OlogDownloadResult(TypedDict, total=False):
+    enabled: bool
+    downloaded: bool
+    withheld: bool
+    size_bytes: int
+    content_type: str | None
+    filename: str | None
+    content_base64: str
+    output_path: str
+    note: str
+
+
+class OlogListAttachmentsResult(TypedDict, total=False):
+    enabled: bool
+    id: str
+    found: bool | None
+    attachments: list[dict[str, object]]
+    attachment_count: int | None
+    withheld: bool
+    note: str
+
 
 _OLOG_DISABLED_NOTE = (
     "Phoebus Olog is disabled. Set EPICS_MCP_OLOG_URL to the Olog REST root "
@@ -152,7 +245,7 @@ async def query_olog_search(
     level: str | None = None,
     title: str | None = None,
     timeout: float = 5.0,
-) -> dict[str, object]:
+) -> OlogSearchResult:
     """Search the Phoebus Olog logbook. Read-only, gated.
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns a structured ``enabled: false``
@@ -176,7 +269,7 @@ async def query_olog_search(
     if not cfg.olog_url:
         return {"enabled": False, "entries": [], "total": 0, "note": _OLOG_DISABLED_NOTE}
 
-    def _run() -> dict[str, object]:
+    def _run() -> OlogSearchResult:
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
         entries, capped, total_matches = client.search_logbook(
             text=text,
@@ -190,7 +283,7 @@ async def query_olog_search(
             level=level,
             title=title,
         )
-        result: dict[str, object] = {
+        result: OlogSearchResult = {
             "enabled": True,
             "entries": entries,
             "total": len(entries),
@@ -227,7 +320,7 @@ async def query_olog_search(
         raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
 
 
-async def query_olog_entry(log_id: str, timeout: float = 5.0) -> dict[str, object]:
+async def query_olog_entry(log_id: str, timeout: float = 5.0) -> OlogEntryResult:
     """Return one Olog entry by id (URL+declaration-bound posture). Read-only, config-gated.
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` with
@@ -241,7 +334,7 @@ async def query_olog_entry(log_id: str, timeout: float = 5.0) -> dict[str, objec
     if not cfg.olog_url:
         return {"enabled": False, "id": log_id, "found": None, "note": _OLOG_DISABLED_NOTE}
 
-    def _run() -> dict[str, object]:
+    def _run() -> OlogEntryResult:
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
         entry = client.get_log_entry(log_id)
         if entry is None:
@@ -258,7 +351,7 @@ async def query_olog_entry(log_id: str, timeout: float = 5.0) -> dict[str, objec
         raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
 
 
-async def query_olog_logbooks(timeout: float = 5.0) -> dict[str, object]:
+async def query_olog_logbooks(timeout: float = 5.0) -> OlogLogbooksResult:
     """List the valid Olog logbook names. Read-only, config-gated, name-only (owners dropped).
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes no
@@ -270,7 +363,7 @@ async def query_olog_logbooks(timeout: float = 5.0) -> dict[str, object]:
     if not cfg.olog_url:
         return {"enabled": False, "logbooks": [], "note": _OLOG_DISABLED_NOTE}
 
-    def _run() -> dict[str, object]:
+    def _run() -> OlogLogbooksResult:
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
         return {"enabled": True, "logbooks": client.list_logbooks()}
 
@@ -284,7 +377,7 @@ async def query_olog_logbooks(timeout: float = 5.0) -> dict[str, object]:
         raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
 
 
-async def query_olog_tags(timeout: float = 5.0) -> dict[str, object]:
+async def query_olog_tags(timeout: float = 5.0) -> OlogTagsResult:
     """List the valid Olog tag names. Read-only, config-gated (a ``Tag`` has no owner — PII-free).
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes no
@@ -295,7 +388,7 @@ async def query_olog_tags(timeout: float = 5.0) -> dict[str, object]:
     if not cfg.olog_url:
         return {"enabled": False, "tags": [], "note": _OLOG_DISABLED_NOTE}
 
-    def _run() -> dict[str, object]:
+    def _run() -> OlogTagsResult:
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
         return {"enabled": True, "tags": client.list_tags()}
 
@@ -309,7 +402,7 @@ async def query_olog_tags(timeout: float = 5.0) -> dict[str, object]:
         raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
 
 
-async def query_olog_levels(timeout: float = 5.0) -> dict[str, object]:
+async def query_olog_levels(timeout: float = 5.0) -> OlogLevelsResult:
     """List the valid Olog log levels. Read-only, config-gated (a ``Level`` has no owner).
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes no
@@ -330,10 +423,10 @@ async def query_olog_levels(timeout: float = 5.0) -> dict[str, object]:
             "note": _OLOG_DISABLED_NOTE,
         }
 
-    def _run() -> dict[str, object]:
+    def _run() -> OlogLevelsResult:
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
         names, default_level, note = client.list_log_levels()
-        result: dict[str, object] = {
+        result: OlogLevelsResult = {
             "enabled": True,
             "levels": names,
             "default_level": default_level,
@@ -430,7 +523,7 @@ async def query_olog_create(
     timeout: float = 5.0,
     *,
     id_factory: Callable[[], str] = _default_olog_id_factory,
-) -> dict[str, object]:
+) -> OlogCreateResult:
     """Create (or, with *in_reply_to*, reply to) an Olog log entry. MUTATING, gated, redacted.
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes NO
@@ -458,7 +551,7 @@ async def query_olog_create(
 
     caller = "reply_to_log" if in_reply_to is not None else "create_log_entry"
 
-    def _run() -> dict[str, object]:
+    def _run() -> OlogCreateResult:
         gate = get_olog_safety()
         # Cheap gate checks FIRST — env / URL boundary / logbook allowlist — BEFORE any filesystem
         # I/O, so a denied write never even stats the attachment paths (no file-existence oracle for
@@ -523,7 +616,7 @@ async def query_olog_create(
             attachment_count=len(plan.specs),
             attachment_bytes=plan.total_bytes,
         )
-        result: dict[str, object] = {"enabled": True, "created": True, "entry": entry}
+        result: OlogCreateResult = {"enabled": True, "created": True, "entry": entry}
         if uploads is not None:
             # Filenames are author free text → whole-mode only; ids are UUIDs (safe) → always.
             result["attachments_uploaded"] = [
@@ -553,7 +646,7 @@ async def query_olog_add_attachment(
     timeout: float = 5.0,
     *,
     id_factory: Callable[[], str] = _default_olog_id_factory,
-) -> dict[str, object]:
+) -> OlogAddAttachmentResult:
     """Attach files to an EXISTING Olog entry (OA1b). MUTATING, gated, WHOLE-MODE ONLY.
 
     Default-disabled (no ``EPICS_MCP_OLOG_URL`` → ``enabled: false``, no network). WHOLE-MODE ONLY:
@@ -579,7 +672,7 @@ async def query_olog_add_attachment(
         )
     caller = "add_log_attachment"
 
-    def _run() -> dict[str, object]:
+    def _run() -> OlogAddAttachmentResult:
         auth = basic_auth_header(cfg.olog_write_user, cfg.olog_write_password)
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=auth)
         # Whole-mode FIRST — before any read or write. It is required for the round-trip source AND
@@ -657,7 +750,7 @@ async def query_olog_update(
     logbooks: list[str] | None = None,
     tags: list[str] | None = None,
     timeout: float = 5.0,
-) -> dict[str, object]:
+) -> OlogUpdateResult:
     """Edit an EXISTING Olog entry's fields (OA3). MUTATING, gated, WHOLE-MODE ONLY.
 
     Default-disabled (no ``EPICS_MCP_OLOG_URL`` → ``enabled: false``, no network). WHOLE-MODE ONLY
@@ -702,7 +795,7 @@ async def query_olog_update(
         )
     caller = "update_log_entry"
 
-    def _run() -> dict[str, object]:
+    def _run() -> OlogUpdateResult:
         auth = basic_auth_header(cfg.olog_write_user, cfg.olog_write_password)
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=auth)
         # Whole-mode FIRST — before any read or write. Required for the round-trip source AND it
@@ -808,7 +901,7 @@ async def query_olog_update(
             owner=cfg.olog_write_user,
             caller=caller,
         )
-        result: dict[str, object] = {"enabled": True, "updated": True, "entry": entry}
+        result: OlogUpdateResult = {"enabled": True, "updated": True, "entry": entry}
         if warnings:
             result["warnings"] = warnings
         return result
@@ -828,7 +921,7 @@ async def query_olog_download(
     output_path: str | None = None,
     as_base64: bool = False,
     timeout: float = 5.0,
-) -> dict[str, object]:
+) -> OlogDownloadResult:
     """Download one Olog attachment's raw bytes. Read-only, config-gated, and POSTURE-gated (OA1).
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` +
@@ -867,7 +960,7 @@ async def query_olog_download(
     if not cfg.olog_url:
         return {"enabled": False, "downloaded": False, "note": _OLOG_DISABLED_NOTE}
 
-    def _run() -> dict[str, object]:
+    def _run() -> OlogDownloadResult:
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
         # Posture FIRST: if raw bytes may not leave, withhold structurally — no byte fetch at all.
         if not client.attachment_bytes_allowed:
@@ -892,7 +985,7 @@ async def query_olog_download(
             )
         else:  # unreachable — the outer guards ensure one identity is fully specified
             raise EpicsError("download identity is incomplete", error_code="INVALID_INPUT")
-        result: dict[str, object] = {
+        result: OlogDownloadResult = {
             "enabled": True,
             "downloaded": True,
             "size_bytes": len(content),
@@ -915,7 +1008,9 @@ async def query_olog_download(
         raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
 
 
-async def query_olog_list_attachments(log_id: str, timeout: float = 5.0) -> dict[str, object]:
+async def query_olog_list_attachments(
+    log_id: str, timeout: float = 5.0
+) -> OlogListAttachmentsResult:
     """List one Olog entry's attachments (id + fileMetadataDescription; filename whole-mode only).
 
     Read-only, config-gated. Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset returns
@@ -934,7 +1029,7 @@ async def query_olog_list_attachments(log_id: str, timeout: float = 5.0) -> dict
             "note": _OLOG_DISABLED_NOTE,
         }
 
-    def _run() -> dict[str, object]:
+    def _run() -> OlogListAttachmentsResult:
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
         entry = client.get_log_entry(log_id)
         if entry is None:
@@ -958,14 +1053,17 @@ async def query_olog_list_attachments(log_id: str, timeout: float = 5.0) -> dict
                 "attachments": attachments,
                 "attachment_count": len(attachments),
             }
-        # Redacted mode: no raw list — only the synthesised count; filenames withheld.
+        # Redacted mode: no raw list — only the synthesised count; filenames withheld. entry is an
+        # untyped dict, so narrow the count to int|None at runtime (a non-int would be a projection
+        # bug — surface None, not a wrong-typed value).
+        raw_count = entry.get("attachment_count")
         return {
             "enabled": True,
             "id": log_id,
             "found": True,
             "attachments": [],
             "withheld": True,
-            "attachment_count": entry.get("attachment_count"),
+            "attachment_count": raw_count if isinstance(raw_count, int) else None,
             "note": _ATTACH_LIST_WITHHELD_NOTE,
         }
 
