@@ -9,6 +9,28 @@ carry breaking changes).
 
 ### Added
 
+- **Surface already-fetched-but-discarded Archiver fields (AR-D).** Two projections harvest fields
+  the appliance already returns in the SAME call and previously threw away — no extra HTTP request.
+  `get_archive_status` (via `is_archived`) now also surfaces the getPVStatus connection-history
+  cluster: `connection_loss_regain_count` (the flapping counter — "did the IOC connection drop, and
+  how often?"), `connection_first_established` and `connection_last_restablished` (first/last
+  reconnect time, `"Never"` if it never dropped). `get_archive_info` (getPVTypeInfo) now also
+  surfaces the alarm/display/control limits + unit/precision (`upper_alarm_limit`=HIHI,
+  `upper_warning_limit`=HIGH, the `lower_*` mirror, `*_display_limit`=HOPR/LOPR, `*_ctrl_limit`=
+  DRVH/DRVL, `precision`, `units`=EGU) plus `controlling_pv`/`policy_name`/`modification_time`.
+  Field names and the all-string value contract are the Archiver Appliance response as serialized by
+  its own source (`EngineChannelStatus.java` for getPVStatus, `PVTypeInfo.java` for getPVTypeInfo) —
+  a JSON contract, not a live measurement; the existing `if key in record` allowlist guard omits any
+  field a given appliance/PV lacks. TWO honest caveats baked into the docstrings: (1) the getPVStatus
+  key `connectionLastRestablished` carries an UPSTREAM TYPO (missing the second "e"), preserved
+  verbatim so the projection matches the wire; (2) the nine numeric getPVTypeInfo limits are always
+  present and read `"0.0"` when the PV had no ctrl info, so `"0.0"` may mean "no limit configured",
+  not a literal zero — the guard cannot omit an always-present key. `lastRotateLogs` is deliberately
+  NOT surfaced (the appliance never sets it → epoch-0 noise). No new tool, no schema change (the
+  Archiver tools return an untyped `dict`). Red-proof: `test_get_pv_type_info_projects_fields` and
+  `test_get_archive_status_surfaces_connection_cluster_and_drops_unknown` (exact-equality, also pin
+  that any non-allowlisted extra is dropped).
+
 - **`epics-doctor` alarm plane now checks its Elasticsearch backend (`backend_down`, MA-2b(e)).**
   The alarm transport probe is a blind HEAD, so it reported the plane healthy even when the alarm
   logger's Elasticsearch — which backs its search and history tools — was dead. The identity probe

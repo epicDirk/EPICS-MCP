@@ -445,10 +445,12 @@ async def is_archived(
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.
     Beyond archived/status the result surfaces the MGMT record's connection_state (source IOC
     connected now?), last_event (time of the last archived sample), is_monitored, sampling_period
-    and appliance when present — same single getPVStatus call, no extra cost. An unreadable
-    getPVStatus payload raises a loud error — never a fabricated archived=false: the appliance
-    answers even an UNKNOWN pv with a real record (status "Not being archived", measured), so
-    that record is the only definitive negative.
+    and appliance when present, plus the connection-history cluster connection_loss_regain_count
+    ("does it flap?"), connection_first_established and connection_last_restablished (first/last
+    (re)connect time, "Never" if it never dropped) for an archived PV — one getPVStatus call, no
+    extra cost. An unreadable getPVStatus payload raises a loud error — never a fabricated
+    archived=false: the appliance answers even an UNKNOWN pv with a real record (status "Not being
+    archived", measured), so that record is the only definitive negative.
 
     is_archived answers only for a NAMED PV. To ENUMERATE the archived PVs use list_archived_pvs
     (getAllPVs / getPVsForThisAppliance, NOT getMatchingPVs — it 404s on split/proxied deployments).
@@ -516,7 +518,12 @@ async def get_archive_info(
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.
     Complements is_archived (live connection state) and get_pv_history (the samples): surfaces the
     archive CONFIGURATION — sampling method/period, retention (the STS/MTS/LTS data_stores),
-    computed event/storage rates, dbr_type, archived fields, source host_name and creation_time.
+    computed event/storage rates, dbr_type, archived fields, source host_name and creation_time,
+    the alarm/display/control limits + units/precision (upper_alarm_limit=HIHI, upper_warning_limit=
+    HIGH, lower_* likewise, *_display_limit=HOPR/LOPR, *_ctrl_limit=DRVH/DRVL, precision, units=EGU)
+    and controlling_pv/policy_name/modification_time. NOTE: the nine numeric limits are always
+    present and read "0.0" when the PV had no ctrl info — "0.0" may mean "no limit configured", not
+    a literal zero.
     found is false when the appliance has no type-info record for the PV (unknown / never
     archived) — it signals that with HTTP 404 and ONLY that; an unreadable 2xx raises a loud
     error instead of a false found (neither a fabricated "not archived" nor, for an unrelated

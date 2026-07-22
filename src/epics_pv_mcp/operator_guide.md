@@ -541,6 +541,14 @@ messages embed the full request URL — an internal host would leak into this fi
 - **Archived? how? history?** `is_archived` / `get_archive_info` / `get_pv_history`. History `status` is
   `ok` / `empty` / `withheld` — a bare `[]` means only a truly empty history, not "could not read";
   a single unreadable sample withholds the whole result rather than being silently skipped.
+  Both status tools harvest fields the appliance already returns in the same call (no extra request):
+  `is_archived` adds the getPVStatus connection-history cluster `connection_loss_regain_count` (the
+  flapping counter), `connection_first_established` and `connection_last_restablished` (`"Never"` if
+  never dropped — note the appliance's upstream typo "Restablished", preserved verbatim);
+  `get_archive_info` adds the getPVTypeInfo alarm/display/control limits + `units`/`precision`
+  (`upper_alarm_limit`=HIHI … `*_ctrl_limit`=DRVH/DRVL) and `controlling_pv`/`policy_name`/
+  `modification_time`. ⚠️ The nine numeric limits are ALWAYS present and read `"0.0"` when the PV
+  had no ctrl info — `"0.0"` may mean "no limit configured", not a literal zero.
 - **Alarm configured / history?** `is_alarm_configured` (`configured` is `true`/`false`/`null`;
   `null` = withheld, see the config-tree recipe below) / `get_alarm_history` (`start` + `end`
   required; `pv` is matched as a wildcard SUBSTRING of the config path — `Value` matches both
