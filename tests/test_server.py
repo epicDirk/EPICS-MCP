@@ -375,64 +375,45 @@ async def test_olog_tools_expose_typed_output_schema() -> None:
 
     Three independent red directions so the guard is not one-way (CLAUDE.md: a one-way guard
     under-protects): (1) the schema ``title`` is the mapped TypedDict — catches a mis-wired tool,
-    e.g. reply_to_log must share OlogCreateResult; (2) the envelope keys are present — completeness
-    (mypy --strict guards the inverse, an undeclared key in a return literal); (3) the non-nullable
-    scalar/array fields carry the right JSON ``type`` — catches a value-type regression that
-    key-presence alone misses. Only ALWAYS-PRESENT fields are type-checked here; the
-    sometimes-absent fields are typed ``X | None`` (so FastMCP's null-for-an-omitted-key stays
-    schema-valid — see test_olog_structured_output_conforms_to_its_schema) and render as ``anyOf``
-    with no top-level ``type``, so they are checked for presence only."""
+    e.g. reply_to_log must share OlogCreateResult; (2) every advertised property is present and
+    mapped — completeness (mypy --strict guards the inverse, an undeclared key in a return literal);
+    (3) every field carries the right JSON BASE type, read via :func:`_base_type` from the bare
+    ``type`` (a non-nullable field) OR the non-null branch of the ``anyOf`` (an ``X | None`` field).
+    Checking the base type of the NULLABLE fields too closes a widening that hides behind
+    nullability: ``found: bool | None`` -> ``int | None`` passes mypy (bool ⊆ int) and stays
+    an anyOf, so a bare-``type`` check skips it — but it flips the base type boolean -> integer."""
     from epics_pv_mcp.server import mcp
 
-    # tool: (TypedDict title, {property: expected JSON type}) for the ALWAYS-PRESENT non-nullable
-    # fields only. Sometimes-absent fields (capped, note, entry, attachments_uploaded, warnings,
-    # withheld, size_bytes, content_base64, output_path) are typed X | None so FastMCP's
-    # null-for-an-omitted-key stays schema-valid (see
-    # test_olog_structured_output_conforms_to_its_schema); they render as anyOf with no top-level
-    # type and are intentionally NOT type-checked here.
-    specs: dict[str, tuple[str, dict[str, str]]] = {
-        "search_logbook": (
-            "OlogSearchResult",
-            {"enabled": "boolean", "entries": "array", "total": "integer"},
-        ),
-        "get_log_entry": ("OlogEntryResult", {"enabled": "boolean", "id": "string"}),
-        "list_logbooks": ("OlogLogbooksResult", {"enabled": "boolean", "logbooks": "array"}),
-        "list_tags": ("OlogTagsResult", {"enabled": "boolean", "tags": "array"}),
-        "list_log_levels": ("OlogLevelsResult", {"enabled": "boolean", "levels": "array"}),
-        "create_log_entry": (
-            "OlogCreateResult",
-            {"enabled": "boolean", "created": "boolean"},
-        ),
-        "reply_to_log": ("OlogCreateResult", {"enabled": "boolean", "created": "boolean"}),
-        "add_log_attachment": (
-            "OlogAddAttachmentResult",
-            {"enabled": "boolean", "added": "boolean"},
-        ),
-        "update_log_entry": (
-            "OlogUpdateResult",
-            {"enabled": "boolean", "updated": "boolean"},
-        ),
-        "download_log_attachment": (
-            "OlogDownloadResult",
-            {"enabled": "boolean", "downloaded": "boolean"},
-        ),
-        "list_log_attachments": (
-            "OlogListAttachmentsResult",
-            {"enabled": "boolean", "attachments": "array"},
-        ),
+    titles = {
+        "search_logbook": "OlogSearchResult",
+        "get_log_entry": "OlogEntryResult",
+        "list_logbooks": "OlogLogbooksResult",
+        "list_tags": "OlogTagsResult",
+        "list_log_levels": "OlogLevelsResult",
+        "create_log_entry": "OlogCreateResult",
+        "reply_to_log": "OlogCreateResult",  # shares OlogCreateResult — must NOT be its own type
+        "add_log_attachment": "OlogAddAttachmentResult",
+        "update_log_entry": "OlogUpdateResult",
+        "download_log_attachment": "OlogDownloadResult",
+        "list_log_attachments": "OlogListAttachmentsResult",
     }
     tools = {tool.name: tool for tool in await mcp.list_tools()}
-    for name, (title, field_types) in specs.items():
+    for name, title in titles.items():
         schema = tools[name].outputSchema or {}
         properties = schema.get("properties", {})
         assert properties, f"{name}: outputSchema carries no typed properties"
         assert schema.get("title") == title, (
             f"{name}: wrong TypedDict wired ({schema.get('title')!r} != {title!r})"
         )
-        for field, json_type in field_types.items():
-            assert field in properties, f"{name}: outputSchema missing {field!r}"
-            actual = properties[field].get("type")
-            assert actual == json_type, f"{name}.{field}: schema type {actual!r} != {json_type!r}"
+        for field, prop in properties.items():
+            assert field in _OLOG_FIELD_BASE_TYPE, (
+                f"{name}.{field}: unmapped Olog field — add its expected base type to "
+                "_OLOG_FIELD_BASE_TYPE"
+            )
+            actual = _base_type(prop)
+            assert actual == _OLOG_FIELD_BASE_TYPE[field], (
+                f"{name}.{field}: schema base type {actual!r} != {_OLOG_FIELD_BASE_TYPE[field]!r}"
+            )
 
 
 def _schema_permits_null(prop: dict[str, Any]) -> bool:
@@ -450,6 +431,56 @@ def _schema_permits_null(prop: dict[str, Any]) -> bool:
     return any(
         isinstance(b, dict) and (b.get("type") == "null" or "type" not in b) for b in branches
     )
+
+
+def _base_type(prop: dict[str, Any]) -> str | None:
+    """The non-null JSON base type of a property — the bare ``type`` of a non-nullable field, or the
+    non-null branch of the ``anyOf`` FastMCP emits for an ``X | None`` field. ``None`` if absent."""
+    declared = prop.get("type")
+    if isinstance(declared, str) and declared != "null":
+        return declared
+    for branch in prop.get("anyOf", []) + prop.get("oneOf", []):
+        if isinstance(branch, dict):
+            inner = branch.get("type")
+            if isinstance(inner, str) and inner != "null":
+                return inner
+    return None
+
+
+# The JSON base type every Olog outputSchema property must advertise (the non-null type for an
+# X | None field, the bare type otherwise). An INDEPENDENT source of truth — hardcoded, NOT
+# reflected from the TypedDicts — so a base-type WIDENING of an annotation is caught even when
+# nullability hides it from a bare-``type`` check (found bool | None -> int | None: mypy-legal since
+# bool ⊆ int, anyOf-shaped so a presence check skips it, but boolean -> integer here).
+_OLOG_FIELD_BASE_TYPE: dict[str, str] = {
+    "enabled": "boolean",
+    "entries": "array",
+    "total": "integer",
+    "total_matches": "integer",
+    "capped": "boolean",
+    "note": "string",
+    "id": "string",
+    "found": "boolean",
+    "entry": "object",
+    "logbooks": "array",
+    "tags": "array",
+    "levels": "array",
+    "default_level": "string",
+    "created": "boolean",
+    "added": "boolean",
+    "updated": "boolean",
+    "attachments_uploaded": "array",
+    "warnings": "array",
+    "downloaded": "boolean",
+    "withheld": "boolean",
+    "size_bytes": "integer",
+    "content_type": "string",
+    "filename": "string",
+    "content_base64": "string",
+    "output_path": "string",
+    "attachments": "array",
+    "attachment_count": "integer",
+}
 
 
 # The envelope keys each Olog tool emits on EVERY return path — so FastMCP never serializes them
