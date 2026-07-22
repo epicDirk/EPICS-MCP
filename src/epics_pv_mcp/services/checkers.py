@@ -407,6 +407,11 @@ async def query_alarm_history(
     end: str,
     max_events: int = 100,
     timeout: float = 5.0,
+    *,
+    root: str | None = None,
+    command: str | None = None,
+    severity: str | None = None,
+    current_severity: str | None = None,
 ) -> dict[str, object]:
     """Report the alarm history of *pv* over ``[start, end]`` (Alarm Logger ``/search/alarm``).
 
@@ -422,7 +427,16 @@ async def query_alarm_history(
 
     def _run() -> dict[str, object]:
         client = AlarmClient(cfg.alarm_url, timeout=timeout, auth_header=cfg.alarm_auth or None)
-        events, capped = client.get_alarm_history(pv, start, end, max_events)
+        events, capped = client.get_alarm_history(
+            pv,
+            start,
+            end,
+            max_events,
+            root=root,
+            command=command,
+            severity=severity,
+            current_severity=current_severity,
+        )
         return {
             "enabled": True,
             "pv": pv,

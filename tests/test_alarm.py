@@ -547,7 +547,7 @@ async def test_get_alarm_history_tool_enabled(monkeypatch: pytest.MonkeyPatch) -
             pass
 
         def get_alarm_history(
-            self, pv: str, start: str, end: str, max_events: int = 100
+            self, pv: str, start: str, end: str, max_events: int = 100, **kwargs: object
         ) -> tuple[list[dict[str, object]], bool]:
             return [{"severity": "MAJOR", "pv": pv}], True
 
@@ -612,3 +612,78 @@ async def test_query_alarm_configured_without_tree_withholds_no_guess(
     result = await checkers.query_alarm_configured("SIM:PV-NoTree")
     assert result["configured"] is None
     assert result.get("withheld") is True
+
+
+# --- MA-2b(a/b/c): server-side alarm-history filters root / command / severity -----------------
+# Source-verified (AlarmLogSearchUtil.java): root -> config-field OR over state:/config: + index
+# narrowing; command Enabled/Disabled -> the `enabled` keyword field (true/false) on BOTH doc types;
+# severity/current_severity -> wildcard on the respective keyword field. An UNSUPPORTED param is
+# silently ignored server-side (broadens), so the tool boundary Literal-restricts what it can.
+
+
+def test_get_alarm_history_forwards_server_filters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MA-2b(a/c): root/severity/current_severity are forwarded as server-side query params (a
+    single GET, no tree-probe). Mutant (a filter not added to params) -> missing key -> fails."""
+    client = AlarmClient("http://alarm")
+    getter = Mock(return_value=_resp([]))
+    monkeypatch.setattr(client.session, "get", getter)
+    client.get_alarm_history(
+        "X", "2026-06-01", "2026-06-02", root="DTL", severity="MAJOR", current_severity="OK"
+    )
+    params = getter.call_args.kwargs["params"]
+    assert params["root"] == "DTL"
+    assert params["severity"] == "MAJOR"
+    assert params["current_severity"] == "OK"
+
+
+def test_get_alarm_history_omits_unset_filters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No filter set -> the param is absent, preserving today's all-trees/all-severity search."""
+    client = AlarmClient("http://alarm")
+    getter = Mock(return_value=_resp([]))
+    monkeypatch.setattr(client.session, "get", getter)
+    client.get_alarm_history("X", "2026-06-01", "2026-06-02")
+    params = getter.call_args.kwargs["params"]
+    assert "root" not in params
+    assert "severity" not in params
+    assert "current_severity" not in params
+    assert "command" not in params
+
+
+def test_get_alarm_history_command_restricts_to_config_docs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MA-2b(b): command= filters the `enabled` field on BOTH doc types; a state doc carries
+    enabled=false intrinsically, so the client restricts results to config: docs so 'which configs
+    are disabled' is not swamped by state-change events. Mutant (no config restriction) -> the state
+    doc leaks -> this fails. The command value is also forwarded to the server."""
+    client = AlarmClient("http://alarm")
+    raw = [
+        {"config": "state:/DTL/DEV/X", "pv": "X", "severity": "MAJOR", "enabled": False},
+        {"config": "config:/DTL/DEV/X", "pv": "X", "enabled": False},
+    ]
+    getter = Mock(return_value=_resp(raw))
+    monkeypatch.setattr(client.session, "get", getter)
+    events, _ = client.get_alarm_history("X", "2026-06-01", "2026-06-02", command="Disabled")
+    assert getter.call_args.kwargs["params"]["command"] == "Disabled"
+    assert [event["config"] for event in events] == ["config:/DTL/DEV/X"]
+
+
+async def test_get_alarm_history_tool_severity_and_command_are_enums() -> None:
+    """MA-2b(b/c): command/severity/current_severity are Literal-restricted at the tool boundary
+    (structural typo-rejection — an unsupported value would otherwise be silently ignored by the
+    server and broaden). Mutant (free str) -> the enum vanishes from the schema -> this fails."""
+    import json
+
+    from epics_pv_mcp.server import mcp
+
+    tools = await mcp.list_tools()
+    tool = next(t for t in tools if t.name == "get_alarm_history")
+    props = tool.inputSchema["properties"]
+    command_schema = json.dumps(props["command"])
+    assert "Enabled" in command_schema and "Disabled" in command_schema
+    severity_schema = json.dumps(props["severity"])
+    assert (
+        "MAJOR" in severity_schema
+        and "MINOR_ACK" in severity_schema
+        and "UNDEFINED" in severity_schema
+    )

@@ -234,7 +234,7 @@ async def test_query_alarm_history_response_error_is_not_a_connection_error(
         def __init__(self, *args: object, **kwargs: object) -> None: ...
 
         def get_alarm_history(
-            self, pv: str, start: str, end: str, max_events: int = 100
+            self, pv: str, start: str, end: str, max_events: int = 100, **kwargs: object
         ) -> tuple[list[dict[str, object]], bool]:
             raise AlarmResponseError("unreadable payload")
 

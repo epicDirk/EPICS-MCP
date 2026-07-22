@@ -251,7 +251,16 @@ class AlarmClient:
         )
 
     def get_alarm_history(
-        self, pv: str, start: str, end: str, max_events: int = 100
+        self,
+        pv: str,
+        start: str,
+        end: str,
+        max_events: int = 100,
+        *,
+        root: str | None = None,
+        command: str | None = None,
+        severity: str | None = None,
+        current_severity: str | None = None,
     ) -> tuple[list[dict[str, object]], bool]:
         """Return ``(events, capped)`` — the alarm state/history of *pv* over ``[start, end]``.
 
@@ -288,10 +297,32 @@ class AlarmClient:
             "end": normalize_alarm_time(end, param="end"),
             "size": str(max_events + 1),
         }
+        # MA-2b(a/b/c): optional server-side filters (AlarmLogSearchUtil). Added ONLY when set, so
+        # the unset default preserves the all-trees / all-severity search. ⚠ SERVER-DECIDED: the
+        # logger SILENTLY IGNORES an unsupported query param (its switch default is a bare
+        # ``break;``) — an older logger BROADENS the result instead of erroring, so whether the
+        # running server honours these is a live-probe question, not a promise. root selects the
+        # config tree(s); severity/current_severity match the alarm severity fields; command maps to
+        # the ``enabled`` field (Enabled→true / Disabled→false).
+        if root is not None:
+            params["root"] = root
+        if command is not None:
+            params["command"] = command
+        if severity is not None:
+            params["severity"] = severity
+        if current_severity is not None:
+            params["current_severity"] = current_severity
         data = self._get(f"{self.base_url}/search/alarm", params)
         # S11: unreadable used to read as ([], False) — "no alarms in the window" — and junk
         # records were silently dropped (a fabricated, smaller history). Both raise now.
         records = _require_alarm_records(data, "/search/alarm")
+        if command is not None:
+            # MA-2b(b): ``command`` maps server-side to the ``enabled`` field, which is set on BOTH
+            # state: and config: docs (a state-change doc carries enabled=false intrinsically).
+            # Restrict to config: docs so "which alarm CONFIGS were enabled/disabled" is not swamped
+            # by state-change events — the config-path prefix distinguishes them. A client-side
+            # correctness guard, independent of whether the server honoured the param.
+            records = [record for record in records if str(record["config"]).startswith("config:")]
         capped = len(records) > max_events
         events = [_project_alarm_event(record) for record in records[:max_events]]
         return events, capped

@@ -624,6 +624,25 @@ async def is_alarm_configured(
     return await _is_alarm_configured(pv, config_name, timeout)
 
 
+# MA-2b(c): the 9 EPICS alarm severities (Phoebus SeverityLevel) — the definitional value set of the
+# alarm-logger `severity`/`current_severity` keyword fields. A Literal at the boundary is Tier 1
+# (structurally rejects a typo the server would otherwise silently ignore, broadening the result).
+_AlarmSeverity = Literal[
+    "OK",
+    "MINOR",
+    "MAJOR",
+    "INVALID",
+    "UNDEFINED",
+    "MINOR_ACK",
+    "MAJOR_ACK",
+    "INVALID_ACK",
+    "UNDEFINED_ACK",
+]
+# MA-2b(b): the alarm-logger `command` param honours ONLY Enabled/Disabled (mapped to the `enabled`
+# field true/false); any other value is a silent server-side no-op — so restrict it structurally.
+_AlarmCommand = Literal["Enabled", "Disabled"]
+
+
 @mcp.tool(
     annotations=ToolAnnotations(
         readOnlyHint=True,
@@ -665,6 +684,44 @@ async def get_alarm_history(
         # can still under-report capped — documented on AlarmClient.get_alarm_history.)
         Field(description="Cap on returned events, newest first", ge=1, le=999),
     ] = 100,
+    root: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Filter to alarm config tree(s), comma-separated (top-level topic names). "
+                "SERVER-SIDE + UNVERIFIED: a logger that does not support it silently IGNORES it "
+                "and broadens the result (no error). Omit (None) to search all trees."
+            )
+        ),
+    ] = None,
+    command: Annotated[
+        _AlarmCommand | None,
+        Field(
+            description=(
+                "Filter to config changes that Enabled/Disabled the alarm (maps to the `enabled` "
+                "field; results are restricted to config-change docs so state events do not swamp "
+                "them). SERVER-SIDE + UNVERIFIED. Omit (None) for no command filter."
+            )
+        ),
+    ] = None,
+    severity: Annotated[
+        _AlarmSeverity | None,
+        Field(
+            description=(
+                "Filter on the alarm severity field (one of the 9 EPICS severities). SERVER-SIDE + "
+                "UNVERIFIED (an unsupported value is silently ignored and broadens). Omit for any."
+            )
+        ),
+    ] = None,
+    current_severity: Annotated[
+        _AlarmSeverity | None,
+        Field(
+            description=(
+                "Filter on the CURRENT alarm severity field (9 EPICS severities). SERVER-SIDE + "
+                "UNVERIFIED. Omit for any."
+            )
+        ),
+    ] = None,
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
 ) -> dict[str, object]:
     """Fetch the alarm state history of a PV over a window (Phoebus Alarm Logger /search/alarm).
@@ -683,8 +740,26 @@ async def get_alarm_history(
     would misread is rejected before any request rather than sent: the Alarm Logger does not reject
     an unreadable time, it silently takes it as 'now' and answers 200 with an empty list that is
     indistinguishable from 'nothing alarmed'.
+
+    Optional server-side filters narrow the search: root = alarm config tree(s); command =
+    Enabled/Disabled config changes (restricted to config-change docs); severity/current_severity =
+    the alarm severity. ⚠ These are SERVER-DECIDED and UNVERIFIED — the Alarm Logger silently
+    IGNORES a filter it does not support and BROADENS the result instead of erroring, so a returned
+    set can be wider than the filter implies until the running server's support is probed. The
+    command values (Enabled/Disabled) and the 9 severities ARE the definitional value set and are
+    Literal-enforced at this boundary.
     """
-    return await _get_alarm_history(pv, start, end, max_events, timeout)
+    return await _get_alarm_history(
+        pv,
+        start,
+        end,
+        max_events,
+        timeout,
+        root=root,
+        command=command,
+        severity=severity,
+        current_severity=current_severity,
+    )
 
 
 @mcp.tool(

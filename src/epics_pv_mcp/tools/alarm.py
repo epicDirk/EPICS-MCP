@@ -29,11 +29,25 @@ async def _get_alarm_history(
     end: str,
     max_events: int = 100,
     timeout: float = 5.0,
+    *,
+    root: str | None = None,
+    command: str | None = None,
+    severity: str | None = None,
+    current_severity: str | None = None,
 ) -> dict[str, object]:
     """Report the alarm state/history of *pv* over ``[start, end]`` (Alarm Logger /search/alarm).
 
-    Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_alarm_history`.
+    Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_alarm_history`. The optional
+    server-side filters *root*/*command*/*severity*/*current_severity* are passed straight through.
     """
     return await query_alarm_history(
-        pv, start=start, end=end, max_events=max_events, timeout=timeout
+        pv,
+        start=start,
+        end=end,
+        max_events=max_events,
+        timeout=timeout,
+        root=root,
+        command=command,
+        severity=severity,
+        current_severity=current_severity,
     )

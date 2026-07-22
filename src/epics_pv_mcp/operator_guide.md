@@ -544,6 +544,15 @@ messages embed the full request URL — an internal host would leak into this fi
   required; `pv` is matched as a wildcard SUBSTRING of the config path — `Value` matches both
   `...:Temp1Value` and `...:12VValue`). A `false` is a true negative only if the Alarm Logger was
   running at config-import time — otherwise treat it as unreliable; the tool cannot flag this.
+- **Narrow an alarm-history query.** `get_alarm_history` has optional SERVER-SIDE filters:
+  `root` (config tree name(s), comma-separated), `command` (`Enabled`/`Disabled` — the config
+  change that turned an alarm on/off; maps to the `enabled` field and is restricted to config-change
+  docs so state events do not swamp it), and `severity`/`current_severity` (the 9 EPICS severities
+  `OK`/`MINOR`/`MAJOR`/`INVALID`/`UNDEFINED` and their `_ACK` variants). ⚠ **UNVERIFIED, and the
+  failure mode is silent:** the Alarm Logger IGNORES a query parameter it does not support (its
+  parser's default branch is a bare `break;`), so an older logger BROADENS the result instead of
+  erroring — a returned set can be wider than the filter implies. Confirm a filter with a
+  differential probe (a value that must match vs. one that must not) before trusting it.
 - **An Olog search answers 401.** On an anonymous read that is almost never a credentials problem:
   Olog's error dispatch requires authentication, so it returns **401 in place of its own 400** —
   every server-side rejection looks like "unauthorized". Check the query (the time window first);
