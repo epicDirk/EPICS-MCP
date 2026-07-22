@@ -320,14 +320,31 @@ async def monitor_pv(
 async def discover_pvs(
     pattern: Annotated[
         str,
-        Field(description="PV name or pattern to search for"),
+        Field(
+            description=(
+                "Concrete PV name, or a wildcard glob (* ?) resolved via ChannelFinder — the glob "
+                "is ANCHORED and CASE-INSENSITIVE: a bare substring matches nothing, wrap it in * "
+                "to match inside a name"
+            )
+        ),
     ],
     timeout: Annotated[
         float | None,
         Field(description="Timeout in seconds (default: EPICS_MCP_DEFAULT_TIMEOUT)"),
     ] = None,
 ) -> dict[str, object]:
-    """Discover PVs by name. Wildcard patterns require ChannelFinder infrastructure."""
+    """Discover PVs by name.
+
+    A CONCRETE name is connected via p4p (status found/not_found/timeout/error, plus the value on a
+    hit). A WILDCARD pattern (* ? [ ]) is delegated to ChannelFinder, the runtime PV registry: each
+    hit is a REGISTERED channel with status 'registered' — registry membership, NOT a live connect,
+    so use get_pvs/get_pv_value for liveness — carrying ioc_name/host_name and an honest 'capped'
+    when a broad glob truncates the registry. The wildcard glob is interpreted by the ChannelFinder
+    SERVER and is ANCHORED + CASE-INSENSITIVE (measured live 2026-07-15): a bare substring matches
+    nothing, so wrap it in *. Wildcard discovery needs ChannelFinder (EPICS_MCP_CHANNELFINDER_URL);
+    with it unset the wildcard branch returns an honest 'requires ChannelFinder' note rather than a
+    bare empty result that would read as 'no such PV'.
+    """
     return await _discover_pvs(pattern, timeout)
 
 

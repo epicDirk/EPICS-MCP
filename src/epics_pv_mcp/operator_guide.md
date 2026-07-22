@@ -558,6 +558,11 @@ messages embed the full request URL — an internal host would leak into this fi
   `INVALID_ARGUMENT` is an argument combination that cannot be answered at all. Only
   `EPICS_CONNECTION_FAILED` means unreachable.
 - **Which IOC/host serves a PV?** `find_channels`.
+- **Enumerate PVs by pattern?** `discover_pvs` with a wildcard (`*`/`?`) routes to ChannelFinder —
+  the same registry `find_channels` queries — so hits are `registered` (registry membership, not a
+  live connect; use `get_pvs`/`get_pv_value` for liveness). A concrete name instead does a live p4p
+  probe. Wildcard enumeration needs `EPICS_MCP_CHANNELFINDER_URL`; unset, it returns an honest
+  'requires ChannelFinder' note, never a bare empty that reads as 'no such PV'.
 - **`is_alarm_configured` answers `configured:null`.** The alarm tree itself returned nothing, so
   "this PV is not configured" cannot be told apart from "that is not the tree name" — the answer is
   withheld, and a `note` says so. The tree name is **case-sensitive** in the query even though the
