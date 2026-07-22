@@ -13,7 +13,7 @@ import pytest
 
 from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
-from epics_pv_mcp.services import checkers
+from epics_pv_mcp.services import checkers, checkers_olog
 from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
 from epics_pv_mcp.services.archiver_exceptions import ArchiverConnectionError
 from epics_pv_mcp.services.channelfinder_exceptions import (
@@ -25,6 +25,33 @@ from epics_pv_mcp.services.naming_exceptions import (
     NamingServiceResponseError,
 )
 from epics_pv_mcp.services.olog_exceptions import OlogResponseError
+
+# --- MA-1 split contract: the Olog surface lives in checkers_olog, re-exported by checkers ---
+
+
+def test_checkers_reexports_olog_surface_from_checkers_olog() -> None:
+    """The ten ``query_olog_*`` functions and the private ``_olog_error_code`` moved to
+    :mod:`~.checkers_olog` (MA-1) and are re-exported by :mod:`~.checkers` as the SAME objects, so
+    ``from ...checkers import query_olog_*`` keeps working. ``OlogClient`` no longer lives in the
+    ``checkers`` namespace — patching it there would be a silent no-op."""
+    names = (
+        "query_olog_add_attachment",
+        "query_olog_create",
+        "query_olog_download",
+        "query_olog_entry",
+        "query_olog_levels",
+        "query_olog_list_attachments",
+        "query_olog_logbooks",
+        "query_olog_search",
+        "query_olog_tags",
+        "query_olog_update",
+        "_olog_error_code",
+    )
+    for name in names:
+        assert getattr(checkers, name) is getattr(checkers_olog, name), name
+    assert not hasattr(checkers, "OlogClient")
+    assert hasattr(checkers_olog, "OlogClient")
+
 
 # --- checker adapters: error → RuntimeError (the pure core withholds, never false-flags) ---
 
@@ -222,7 +249,7 @@ async def test_query_olog_response_error_is_not_a_connection_error(
 ) -> None:
     """Each of the three remaining olog query functions has its own except block — each must
     stop relabelling a ResponseError as 'Olog unreachable' (search already splits)."""
-    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(olog_url="http://olog"))
+    monkeypatch.setattr(checkers_olog, "get_config", lambda: EpicsConfig(olog_url="http://olog"))
 
     class _FailClient:
         def __init__(self, *args: object, **kwargs: object) -> None: ...
@@ -236,7 +263,7 @@ async def test_query_olog_response_error_is_not_a_connection_error(
         def list_tags(self) -> list[str]:
             raise OlogResponseError("unreadable payload")
 
-    monkeypatch.setattr(checkers, "OlogClient", _FailClient)
+    monkeypatch.setattr(checkers_olog, "OlogClient", _FailClient)
     calls = {
         "get_log_entry": lambda: checkers.query_olog_entry("1"),
         "list_logbooks": lambda: checkers.query_olog_logbooks(),

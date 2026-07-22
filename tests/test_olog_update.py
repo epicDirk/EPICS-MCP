@@ -29,7 +29,7 @@ import pytest
 
 import epics_pv_mcp.config as config_module
 import epics_pv_mcp.olog_safety as olog_safety_module
-import epics_pv_mcp.services.checkers as checkers_module
+import epics_pv_mcp.services.checkers_olog as checkers_module
 import epics_pv_mcp.services.olog_client as olog_client_module
 from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.errors import EpicsError, OlogWriteDeniedError

@@ -616,7 +616,7 @@ class TestToolOrchestration:
     @pytest.mark.asyncio
     async def test_create_tool_disabled_no_network(self, monkeypatch: pytest.MonkeyPatch) -> None:
         config_module._config = EpicsConfig(olog_url="")
-        monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _boom)
+        monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _boom)
         result = await _create_log_entry(title="t", logbooks="Ops")
         assert result["enabled"] is False
         assert result["created"] is False
@@ -629,7 +629,7 @@ class TestToolOrchestration:
         config_module._config = EpicsConfig(
             olog_url="http://localhost:8080/Olog", allow_olog_write=False
         )
-        monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _boom)
+        monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _boom)
         with pytest.raises(OlogWriteDeniedError):
             await _create_log_entry(title="t", logbooks="Ops")
 
@@ -638,7 +638,7 @@ class TestToolOrchestration:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         config_module._config = _write_config()
-        monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _FakeClient)
+        monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _FakeClient)
         result = await _create_log_entry(title="Vacuum trip", logbooks="Ops", description="d")
         assert result["enabled"] is True
         assert result["created"] is True
@@ -662,7 +662,7 @@ class TestToolOrchestration:
                 captured["in_reply_to"] = kwargs.get("in_reply_to")
                 return {"id": 7, "title": FREETEXT_WITHHELD, "logbooks": ["Ops"]}
 
-        monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _Fake)
+        monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _Fake)
         result = await _reply_to_log(log_id="42", title="re", logbooks="Ops")
         assert result["created"] is True
         assert captured["in_reply_to"] == "42"
@@ -674,7 +674,7 @@ class TestToolOrchestration:
         # The core regression: a person named in the free-text title/description NEVER reaches the
         # audit — audit_write only ever sees title_len, never the text.
         config_module._config = _write_config()
-        monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _FakeClient)
+        monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _FakeClient)
         with caplog.at_level(logging.INFO, logger=_AUDIT_LOGGER):
             result = await query_olog_create(
                 title="Vacuum trip found by z.person",
@@ -705,7 +705,7 @@ class TestToolOrchestration:
             def create_log_entry(self, **kwargs: object) -> dict[str, object]:
                 raise OlogResponseError("Olog rejected the entry (HTTP 400)")
 
-        monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _FailingClient)
+        monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _FailingClient)
         with (
             caplog.at_level(logging.INFO, logger=_AUDIT_LOGGER),
             # S11 §8: the server ANSWERED (a served 400) — since the split this surfaces as
@@ -756,7 +756,7 @@ class TestCreateLevelVocabulary:
         # RED-PROOF: create had the same hole as update — `level="Urgnet"` was stored verbatim and
         # the entry then matched no level filter. Checking only update would move the asymmetry.
         config_module._config = _write_config()
-        monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _LevelCountingClient)
+        monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _LevelCountingClient)
         with pytest.raises(EpicsError) as exc:
             await query_olog_create(title="t", logbooks=["Ops"], level="Urgnet")
         assert exc.value.error_code == "INVALID_INPUT"
@@ -765,7 +765,7 @@ class TestCreateLevelVocabulary:
     @pytest.mark.asyncio
     async def test_blank_level_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
         config_module._config = _write_config()
-        monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _LevelCountingClient)
+        monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _LevelCountingClient)
         with pytest.raises(EpicsError) as exc:
             await query_olog_create(title="t", logbooks=["Ops"], level="")
         assert exc.value.error_code == "INVALID_INPUT"
@@ -782,7 +782,7 @@ class TestCreateLevelVocabulary:
         # test_sec3_empty_logbooks_denied_without_rate_token: with rate_limit=1, a valid create must
         # still succeed after repeated refusals.
         config_module._config = _write_config(olog_write_rate_limit=1)
-        monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _LevelCountingClient)
+        monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _LevelCountingClient)
         for _ in range(3):
             with pytest.raises(EpicsError):
                 await query_olog_create(title="t", logbooks=["Ops"], level="Urgnet")
@@ -799,7 +799,7 @@ class TestCreateLevelVocabulary:
         # exactly ONE HTTP call. Without this, OQ1 would have doubled the request count of the
         # most-used write tool for every caller, including those that never pass a level.
         config_module._config = _write_config()
-        monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _LevelCountingClient)
+        monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _LevelCountingClient)
         _LevelCountingClient.levels_calls = 0
         result = await query_olog_create(title="t", logbooks=["Ops"])
         assert result["created"] is True
@@ -814,7 +814,7 @@ class TestCreateLevelVocabulary:
         config_module._config = EpicsConfig(
             olog_url="http://localhost:8080/Olog", allow_olog_write=False
         )
-        monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _boom)
+        monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _boom)
         with pytest.raises(OlogWriteDeniedError):
             await query_olog_create(title="t", logbooks=["Ops"], level="Urgnet")
 

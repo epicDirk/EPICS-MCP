@@ -408,13 +408,13 @@ def test_search_logbook_connection_error(monkeypatch: pytest.MonkeyPatch) -> Non
 @pytest.mark.asyncio
 async def test_search_logbook_tool_disabled_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config", lambda: EpicsConfig(olog_url="")
+        "epics_pv_mcp.services.checkers_olog.get_config", lambda: EpicsConfig(olog_url="")
     )
 
     def _boom(*args: object, **kwargs: object) -> OlogClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _boom)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _boom)
     result = await _search_logbook(text="x")
     assert result["enabled"] is False
     assert result["total"] == 0
@@ -423,13 +423,13 @@ async def test_search_logbook_tool_disabled_no_network(monkeypatch: pytest.Monke
 @pytest.mark.asyncio
 async def test_get_log_entry_tool_disabled_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config", lambda: EpicsConfig(olog_url="")
+        "epics_pv_mcp.services.checkers_olog.get_config", lambda: EpicsConfig(olog_url="")
     )
 
     def _boom(*args: object, **kwargs: object) -> OlogClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _boom)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _boom)
     result = await _get_log_entry("1")
     assert result["enabled"] is False
     # S11 (Zusatzfläche 3): a DISABLED plane was the lone `found: False` among four
@@ -445,7 +445,7 @@ async def test_search_logbook_tool_enabled_is_redacted(monkeypatch: pytest.Monke
     """The LAYERING contract: the tool routes through the redacting client — a person named in the
     free-text title/description of a raw entry never reaches the tool result."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
 
@@ -461,7 +461,7 @@ async def test_search_logbook_tool_enabled_is_redacted(monkeypatch: pytest.Monke
             # 3-tuple mirrors the real client (entries, capped, total_matches).
             return [{"id": 7, "title": FREETEXT_WITHHELD, "logbooks": ["Ops"]}], False, 1
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _Fake)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _Fake)
     result = await _search_logbook(text="c.person")
     assert result["enabled"] is True
     assert result["total"] == 1
@@ -493,11 +493,11 @@ async def test_search_bad_time_is_not_a_connection_error(monkeypatch: pytest.Mon
     """An unusable time window is a bad ARGUMENT — nothing was ever sent, so 'cannot reach Olog'
     would be a lie. Pins that TimeWindowFormatError is not swept up by the OlogError branch."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.OlogClient",
+        "epics_pv_mcp.services.checkers_olog.OlogClient",
         _search_client_raising(TimeWindowFormatError("start='1 year': use days or weeks")),
     )
     with pytest.raises(EpicsError) as excinfo:
@@ -512,14 +512,16 @@ async def test_search_served_error_is_not_a_connection_error(
 ) -> None:
     """The server ANSWERED and said no — that is not an outage."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
     http_error = requests.exceptions.HTTPError("401")
     http_error.response = Mock(status_code=401)
     served = OlogResponseError("Olog rejected the search (HTTP 401)")
     served.__cause__ = http_error
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _search_client_raising(served))
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers_olog.OlogClient", _search_client_raising(served)
+    )
     with pytest.raises(EpicsError) as excinfo:
         await _search_logbook(text="x")
     assert excinfo.value.error_code == "OLOG_HTTP_401"
@@ -532,11 +534,11 @@ async def test_search_connection_failure_still_maps_to_connection_error(
 ) -> None:
     """Counter-test: the split must not over-reach — a real outage stays a connection error."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.OlogClient",
+        "epics_pv_mcp.services.checkers_olog.OlogClient",
         _search_client_raising(OlogConnectionError("no route to host")),
     )
     with pytest.raises(EpicsConnectionError) as excinfo:
@@ -547,7 +549,7 @@ async def test_search_connection_failure_still_maps_to_connection_error(
 @pytest.mark.asyncio
 async def test_get_log_entry_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
 
@@ -558,7 +560,7 @@ async def test_get_log_entry_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> No
         def get_log_entry(self, log_id: str) -> dict[str, object] | None:
             return {"id": 7, "title": FREETEXT_WITHHELD}
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _Fake)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _Fake)
     result = await _get_log_entry("7")
     assert result["enabled"] is True
     assert result["found"] is True
@@ -900,13 +902,13 @@ def test_list_tags_unreadable_2xx_raises(payload: object, monkeypatch: pytest.Mo
 @pytest.mark.asyncio
 async def test_list_logbooks_tool_disabled_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config", lambda: EpicsConfig(olog_url="")
+        "epics_pv_mcp.services.checkers_olog.get_config", lambda: EpicsConfig(olog_url="")
     )
 
     def _boom(*args: object, **kwargs: object) -> OlogClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _boom)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _boom)
     result = await _list_logbooks()
     assert result["enabled"] is False
     assert result["logbooks"] == []
@@ -915,13 +917,13 @@ async def test_list_logbooks_tool_disabled_no_network(monkeypatch: pytest.Monkey
 @pytest.mark.asyncio
 async def test_list_tags_tool_disabled_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config", lambda: EpicsConfig(olog_url="")
+        "epics_pv_mcp.services.checkers_olog.get_config", lambda: EpicsConfig(olog_url="")
     )
 
     def _boom(*args: object, **kwargs: object) -> OlogClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _boom)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _boom)
     result = await _list_tags()
     assert result["enabled"] is False
     assert result["tags"] == []
@@ -931,7 +933,7 @@ async def test_list_tags_tool_disabled_no_network(monkeypatch: pytest.MonkeyPatc
 async def test_list_logbooks_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """The enabled tool surfaces the client's name-only list (owner-drop pinned separately)."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
 
@@ -942,7 +944,7 @@ async def test_list_logbooks_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> No
         def list_logbooks(self) -> list[str]:
             return ["Operations", "Controls"]
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _Fake)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _Fake)
     result = await _list_logbooks()
     assert result["enabled"] is True
     assert result["logbooks"] == ["Operations", "Controls"]
@@ -951,7 +953,7 @@ async def test_list_logbooks_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> No
 @pytest.mark.asyncio
 async def test_list_tags_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
 
@@ -962,7 +964,7 @@ async def test_list_tags_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
         def list_tags(self) -> list[str]:
             return ["vacuum", "rf"]
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _Fake)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _Fake)
     result = await _list_tags()
     assert result["enabled"] is True
     assert result["tags"] == ["vacuum", "rf"]
@@ -1035,13 +1037,13 @@ def test_list_log_levels_unreadable_2xx_raises(
 @pytest.mark.asyncio
 async def test_list_log_levels_tool_disabled_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config", lambda: EpicsConfig(olog_url="")
+        "epics_pv_mcp.services.checkers_olog.get_config", lambda: EpicsConfig(olog_url="")
     )
 
     def _boom(*args: object, **kwargs: object) -> OlogClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _boom)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _boom)
     result = await _list_log_levels()
     assert result["enabled"] is False
     assert result["levels"] == []
@@ -1051,7 +1053,7 @@ async def test_list_log_levels_tool_disabled_no_network(monkeypatch: pytest.Monk
 @pytest.mark.asyncio
 async def test_list_log_levels_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
 
@@ -1062,7 +1064,7 @@ async def test_list_log_levels_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> 
         def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
             return ["Info", "Problem"], "Info", None
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _Fake)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _Fake)
     result = await _list_log_levels()
     assert result["enabled"] is True
     assert result["levels"] == ["Info", "Problem"]
@@ -1077,7 +1079,7 @@ async def test_list_log_levels_propagates_the_withholding_note(
     """The note is the whole point of withholding an ambiguous default — a service that computed it
     and then dropped it would surface a bare null the caller cannot interpret."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
 
@@ -1088,7 +1090,7 @@ async def test_list_log_levels_propagates_the_withholding_note(
         def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
             return ["A", "B"], None, "marks 2 levels as default"
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _Ambiguous)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _Ambiguous)
     result = await _list_log_levels()
     assert result["default_level"] is None
     assert result["note"] == "marks 2 levels as default"
@@ -1110,7 +1112,7 @@ async def test_list_log_levels_splits_outage_from_bad_answer(
     ANSWERED and we could not read it". Collapsing them sends the reader after the wrong problem
     (S11 section 8 — the same split search already lives)."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
 
@@ -1121,7 +1123,7 @@ async def test_list_log_levels_splits_outage_from_bad_answer(
         def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
             raise raised
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _Broken)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _Broken)
     with pytest.raises(expected):
         await _list_log_levels()
 
@@ -1212,7 +1214,7 @@ def test_search_refuses_a_blank_filter_before_any_request(
 async def test_blank_filter_surfaces_as_invalid_input(monkeypatch: pytest.MonkeyPatch) -> None:
     """The service maps it to INVALID_INPUT, not to a transport/response code: nothing was sent."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
     with pytest.raises(EpicsError) as excinfo:
@@ -1290,10 +1292,10 @@ async def test_service_forwards_level_and_title_to_the_client(
     """The checkers -> client pass-through, which nothing else exercises: a facet the service
     silently fails to forward would leave the search UNFILTERED while looking filtered."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _FakeSearch)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _FakeSearch)
     await _search_logbook(level="Problem", title="vacuum", size=7)
     assert _FakeSearch.seen["level"] == "Problem"
     assert _FakeSearch.seen["title"] == "vacuum"
@@ -1306,7 +1308,7 @@ async def test_empty_page_past_the_end_is_not_annotated(monkeypatch: pytest.Monk
     total_matches says something DID match — annotating that would contradict the very payload it
     is attached to, and would blame a level that is doing its job."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
 
@@ -1317,7 +1319,7 @@ async def test_empty_page_past_the_end_is_not_annotated(monkeypatch: pytest.Monk
         def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
             raise AssertionError("/levels must not be fetched for an empty PAGE")
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _PastTheEnd)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _PastTheEnd)
     result = await _search_logbook(level="Warning", offset=999)
     assert result["total"] == 0
     assert result["total_matches"] == 12
@@ -1330,10 +1332,10 @@ async def test_note_does_not_judge_a_wildcard_level(monkeypatch: pytest.MonkeyPa
     part cannot be checked against the name list — declaring it 'not a configured level' would deny
     the real cause. It is named as unchecked instead."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _FakeSearch)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _FakeSearch)
     result = await _search_logbook(level="Zzz*")
     assert "note" not in result  # nothing checkable was unknown -> no verdict at all
 
@@ -1345,10 +1347,10 @@ async def test_note_on_a_mixed_or_list_does_not_generalise(
     """An OR-ed filter is not all-or-nothing. With one valid and one invalid value the search DID
     run on the valid one, so the note must name the unknown part AND say the search still ran."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _FakeSearch)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _FakeSearch)
     result = await _search_logbook(level="Info,Warnign")
     note = result["note"]
     assert isinstance(note, str)
@@ -1361,10 +1363,10 @@ async def test_note_on_a_mixed_or_list_does_not_generalise(
 @pytest.mark.asyncio
 async def test_empty_result_names_an_unknown_level(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _FakeSearch)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _FakeSearch)
     result = await _search_logbook(level="Warning")
     note = result["note"]
     assert isinstance(note, str)
@@ -1383,10 +1385,10 @@ async def test_empty_result_for_a_known_level_is_not_annotated(
     and noise trains the reader to skip the note that matters. Also pins the case-insensitive
     comparison — the server matches case-insensitively, so the cross-check must too."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _FakeSearch)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _FakeSearch)
     result = await _search_logbook(level="problem")
     assert "note" not in result
 
@@ -1396,7 +1398,7 @@ async def test_nonempty_result_is_never_annotated(monkeypatch: pytest.MonkeyPatc
     """The extra /levels lookup runs ONLY on an empty result — a result that found something needs
     no excuse, and must not pay for a second round trip."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
 
@@ -1406,7 +1408,7 @@ async def test_nonempty_result_is_never_annotated(monkeypatch: pytest.MonkeyPatc
         def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
             raise AssertionError("/levels must not be fetched when the search found something")
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _Found)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _Found)
     result = await _search_logbook(level="Warning")
     assert "note" not in result
 
@@ -1418,14 +1420,14 @@ async def test_unreadable_levels_lookup_says_so_and_keeps_the_result(
     """A failed cross-check must neither overturn a search that succeeded (withheld is not no) nor
     be swallowed into what would read as a clean bill of health."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
     )
 
     class _LevelsDown(_FakeSearch):
         levels_error: ClassVar[Exception | None] = OlogResponseError("levels unreadable")
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.OlogClient", _LevelsDown)
+    monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _LevelsDown)
     result = await _search_logbook(level="Warning")
     assert result["enabled"] is True  # the search itself still succeeded
     note = result["note"]
