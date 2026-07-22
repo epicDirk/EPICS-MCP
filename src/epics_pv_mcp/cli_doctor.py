@@ -62,6 +62,7 @@ _STATUS_MARK = {
     "api_error": "✗",
     "unreachable": "✗",
     "disconnected": "✗",
+    "backend_down": "✗",
 }
 
 

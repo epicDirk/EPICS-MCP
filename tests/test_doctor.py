@@ -30,6 +30,7 @@ from epics_pv_mcp.services.doctor import (
     PrivacyReport,
     _classify_failure,
     _identify,
+    _identify_alarm,
     _identify_archiver,
     _identify_naming,
     _identify_retrieval_plane,
@@ -146,6 +147,10 @@ def _identity_never_touches_the_network(monkeypatch: pytest.MonkeyPatch) -> None
     # merely slow is how "no network" rots.
     monkeypatch.setattr("epics_pv_mcp.services.doctor.rest_get_json", lambda *_a, **_k: {})
     monkeypatch.setattr("epics_pv_mcp.services.doctor._identify", _identified)
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.doctor._identify_alarm",
+        lambda *_a, **_k: _identified("alarm"),
+    )
     monkeypatch.setattr(
         "epics_pv_mcp.services.doctor._identify_archiver",
         lambda *_a, **_k: _identified("archiver"),
@@ -429,6 +434,92 @@ def test_retrieval_identity_is_anchored_at_a_word_boundary(
     _payload(monkeypatch, {"version": version})
     check = _identify_retrieval_plane("http://arch.example:17668", None, 5.0)
     assert (check.status, check.identified) == ("unverified", False)
+
+
+# --- the alarm plane also checks its Elasticsearch backend (MA-2b(e)) ---
+#
+# The alarm logger's GET / beacon reports elastic.status ALONGSIDE its name. The transport probe is
+# a blind HEAD (check_connectivity), so it reports "reachable" even when ES is dead — and the search
+# history tools would then fail while the doctor said "✓ ok". _identify_alarm reads elastic.status
+# from the SAME body the name check already parses (no second request). The healthy sentinel is
+# EXACTLY "Connected"; a dead ES yields a string starting "Failed to connect to elastic " (measured
+# from the Phoebus source SearchController.info(); GET / returns HTTP 200 either way, so the failure
+# is body-only and a HEAD can never see it).
+
+
+def test_alarm_elastic_down_is_backend_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reachable + identified, but ES is down → a hard failure, not a silent ok.
+
+    Red-proof: the pre-change alarm path used the shared name-only ``_identify``, which returns
+    ``ok`` for this exact body — the blind-HEAD lie this change closes.
+    """
+    _payload(
+        monkeypatch,
+        {
+            "name": "Alarm logging Service",
+            "elastic": {"status": "Failed to connect to elastic boom"},
+        },
+    )
+    check = _identify_alarm("http://alarm.example", None, 5.0)
+    assert check.status == "backend_down"
+    assert check.reachable is True
+    assert check.identified is True  # identity WAS established; the failure is the backend
+    assert check.status in _FAILING_STATUSES  # exit 1
+    assert "Failed to connect to elastic boom" in (check.detail or "")
+
+
+def test_alarm_elastic_connected_is_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The healthy sentinel is EXACTLY "Connected" → ok/identified, unchanged from before."""
+    _payload(monkeypatch, {"name": "Alarm logging Service", "elastic": {"status": "Connected"}})
+    check = _identify_alarm("http://alarm.example", None, 5.0)
+    assert (check.status, check.identified) == ("ok", True)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param({"name": "Alarm logging Service"}, id="no-elastic-key"),
+        pytest.param({"name": "Alarm logging Service", "elastic": {}}, id="no-status-field"),
+        pytest.param(
+            {"name": "Alarm logging Service", "elastic": {"status": 42}}, id="non-string-status"
+        ),
+        pytest.param(
+            {"name": "Alarm logging Service", "elastic": "not-a-dict"}, id="non-dict-elastic"
+        ),
+    ],
+)
+def test_alarm_missing_elastic_status_falls_back_to_ok(
+    monkeypatch: pytest.MonkeyPatch, body: object
+) -> None:
+    """We never invent a failure we cannot prove: a missing / unreadable ``elastic.status`` is
+    ``ok``, not ``backend_down`` (the withheld-≠-no discipline of every other identity path)."""
+    _payload(monkeypatch, body)
+    check = _identify_alarm("http://alarm.example", None, 5.0)
+    assert (check.status, check.identified) == ("ok", True)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(
+            {"name": "", "elastic": {"status": "Failed to connect to elastic x"}}, id="empty-name"
+        ),
+        pytest.param(
+            {"name": "Olog Service", "elastic": {"status": "Failed to connect to elastic x"}},
+            id="foreign-name",
+        ),
+    ],
+)
+def test_alarm_name_check_precedes_the_elastic_check(
+    monkeypatch: pytest.MonkeyPatch, body: object
+) -> None:
+    """The identity gate runs FIRST: an unusable / foreign name is ``unverified`` (an honest "don't
+    know"), never ``backend_down`` — even when ``elastic.status`` says the backend is down. We do
+    not report a backend failure for a service we cannot confirm IS the alarm logger."""
+    _payload(monkeypatch, body)
+    check = _identify_alarm("http://alarm.example", None, 5.0)
+    assert check.status == "unverified"
+    assert check.status in _NON_FAILING_STATUSES
 
 
 def test_unknown_status_fails_closed() -> None:

@@ -79,6 +79,7 @@ PlaneStatus = Literal[
     "api_error",
     "unreachable",
     "disconnected",
+    "backend_down",
 ]
 
 #: Statuses that are honestly clean → exit 0. An ALLOWLIST, not a failure denylist: with a denylist
@@ -114,8 +115,14 @@ _INCONCLUSIVE_STATUSES: frozenset[str] = frozenset({"identity_probe_failed"})
 #: ``PlaneStatus`` exactly. The fail-closed guarantee still comes from ``ok`` being an allowlist of
 #: the OTHER two sets (an unclassified status is in neither, so it is not clean and not inconclusive
 #: → it fails), never from this denylist.
+#:
+#: ``backend_down`` is here (MA-2b(e)): the plane's transport is reachable AND it named itself, but
+#: a backend it depends on is measurably down (the alarm logger reporting its Elasticsearch as not
+#: ``"Connected"``). That is a real failure — the plane's tools will not work — which the blind
+#: HEAD probe used to hide as ``ok``. Distinct from ``unverified`` (identity unproven, an honest
+#: "don't know", exit 0): here identity IS proven and the service reports its OWN backend broken.
 _FAILING_STATUSES: frozenset[str] = frozenset(
-    {"config_error", "ca_error", "api_error", "unreachable", "disconnected"}
+    {"config_error", "ca_error", "api_error", "unreachable", "disconnected", "backend_down"}
 )
 
 
@@ -319,20 +326,34 @@ def _identify(plane: str, base_url: str, auth_header: str | None, timeout: float
     ``unverified`` is honest (exit 0); ``identity_probe_failed`` is inconclusive (exit 3, never a
     silent all-clear) — see :data:`_NON_FAILING_STATUSES` / :data:`_INCONCLUSIVE_STATUSES`.
     """
-    expected = _SERVICE_NAMES[plane]
     payload = _fetch_beacon(base_url, auth_header, timeout)
     if isinstance(payload, Exception):
         return _identity_fetch_failure(plane, payload)
+    verdict = _classify_phoebus_name(plane, payload)
+    if verdict is not None:
+        return verdict
+    return PlaneCheck(
+        plane=plane, configured=True, reachable=True, ca_ok=True, status="ok", identified=True
+    )
 
+
+def _classify_phoebus_name(plane: str, payload: object) -> PlaneCheck | None:
+    """Classify a Phoebus-family beacon body by the ``name`` it reports — the shared identity core
+    of :func:`_identify` and :func:`_identify_alarm`, so the S14 foreign-name handling cannot drift.
+
+    Returns the verdict when the name is unusable or foreign (:func:`_unverified` — honest doubt,
+    exit 0), or ``None`` when the name matches this plane EXACTLY. ``None`` means "this IS the
+    service": the caller may then trust it and inspect further body fields (the alarm plane reads
+    ``elastic.status`` from here). *payload* is an already-fetched body, never an Exception — the
+    fetch failure is handled by the caller before this."""
+    expected = _SERVICE_NAMES[plane]
     name = payload.get("name") if isinstance(payload, dict) else None
     if not isinstance(name, str) or not name.strip():
         return _unverified(
             plane, "transport reachable, but the response carries no service name to check"
         )
     if name == expected:
-        return PlaneCheck(
-            plane=plane, configured=True, reachable=True, ca_ok=True, status="ok", identified=True
-        )
+        return None
     # A KNOWN foreign name keeps its plane mapping in the detail — that is the actionable clue
     # when the config really is cross-wired (status stays unverified either way, S14).
     hint = next(
@@ -376,6 +397,23 @@ def _identity_probe_failed(plane: str, detail: str) -> PlaneCheck:
         ca_ok=True,
         status="identity_probe_failed",
         identified=False,
+        detail=detail,
+    )
+
+
+def _backend_down(plane: str, detail: str) -> PlaneCheck:
+    """Transport reachable AND the service named itself, but a backend it depends on is measurably
+    DOWN — so the plane's tools will fail even though the endpoint answered. A hard failure
+    (:data:`_FAILING_STATUSES`, exit 1). Distinct from :func:`_unverified` (identity unproven, an
+    honest "don't know", exit 0): here identity IS established (``identified`` stays True) and the
+    service reports its OWN backend broken. The specific reason travels in *detail*."""
+    return PlaneCheck(
+        plane=plane,
+        configured=True,
+        reachable=True,
+        ca_ok=True,
+        status="backend_down",
+        identified=True,
         detail=detail,
     )
 
@@ -621,6 +659,49 @@ async def _check_retrieval_plane(cfg: EpicsConfig, timeout: float) -> PlaneCheck
     return await _run_probe("archiver_retrieval", _run, _id)
 
 
+#: The exact ``elastic.status`` the Alarm Logger reports when its Elasticsearch is healthy (measured
+#: from the Phoebus source ``SearchController.info()``: the field is set to this literal right after
+#: a successful ``client.info()`` call). A dead ES yields a string starting ``"Failed to connect to
+#: elastic "`` instead. The match is EXACT (an equality, not a prefix) for the same reason the
+#: service names are: anything that is not this sentinel is, by construction, a failure string.
+_ALARM_ELASTIC_CONNECTED = "Connected"
+
+
+def _identify_alarm(base_url: str, auth_header: str | None, timeout: float) -> PlaneCheck:
+    """Name the Alarm Logger AND check the Elasticsearch it depends on — from ONE ``GET /`` body.
+
+    The identity gate is exactly the shared :func:`_classify_phoebus_name` (the alarm logger is a
+    Phoebus-family service that names itself), so a fetch failure, an unnameable body, or a foreign
+    name are handled identically to :func:`_identify`. What is layered on top: once the name
+    confirms this IS the alarm logger, ``elastic.status`` is read from the SAME payload (no second
+    request). The logger's search/history tools are backed by Elasticsearch — a healthy transport
+    with a dead ES is a real, actionable failure that the blind HEAD (``check_connectivity``) used
+    to hide as ``ok`` (this is MA-2b(e)). Only a status that is PRESENT and explicitly not
+    :data:`_ALARM_ELASTIC_CONNECTED` yields :func:`_backend_down`; a missing or unreadable
+    ``elastic.status`` falls back to ``ok`` — we never claim a failure we cannot prove (the same
+    withheld-≠-no discipline as every other identity path). ``GET /`` returns HTTP 200 even when ES
+    is down, so the failure is body-only and this is the only place it can be seen."""
+    payload = _fetch_beacon(base_url, auth_header, timeout)
+    if isinstance(payload, Exception):
+        return _identity_fetch_failure("alarm", payload)
+    verdict = _classify_phoebus_name("alarm", payload)
+    if verdict is not None:
+        return verdict
+
+    # Named correctly → now the added check: is the Elasticsearch it searches actually up?
+    elastic = payload.get("elastic") if isinstance(payload, dict) else None
+    status = elastic.get("status") if isinstance(elastic, dict) else None
+    if isinstance(status, str) and status != _ALARM_ELASTIC_CONNECTED:
+        return _backend_down(
+            "alarm",
+            "transport reachable and identified as the alarm logger, but its Elasticsearch backend "
+            f"is not connected (elastic.status={status!r}) — alarm search and history will fail",
+        )
+    return PlaneCheck(
+        plane="alarm", configured=True, reachable=True, ca_ok=True, status="ok", identified=True
+    )
+
+
 async def _check_alarm(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
     if not cfg.alarm_url:
         return _disabled("alarm", "EPICS_MCP_ALARM_URL")
@@ -631,7 +712,7 @@ async def _check_alarm(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
         ).check_connectivity()
 
     def _id() -> PlaneCheck:
-        return _identify("alarm", cfg.alarm_url, cfg.alarm_auth or None, timeout)
+        return _identify_alarm(cfg.alarm_url, cfg.alarm_auth or None, timeout)
 
     return await _run_probe("alarm", _run, _id)
 
