@@ -503,9 +503,12 @@ async def diagnose(
     probe_timeout = timeout if timeout is not None else cfg.diagnose_timeout
 
     # M7: the live probe has NO data dependency on the explanatory planes (derive_cause needs
-    # both, but neither needs the other), so it shares the single gather. Worst case (a
-    # disconnected PV) is then ~1×timeout instead of ~2×timeout. _probe_live is total-catching,
-    # so it never aborts the gather.
+    # both, but neither needs the other), so it shares the single gather rather than running
+    # serially ahead of them — that removes the probe's own ~1×timeout from the critical path,
+    # NOT the whole wall-clock. The gather's worst case is its SLOWEST branch: the live probe is
+    # p4p (~1×timeout, no retry), but the HTTP explanatory planes build a retrying session
+    # (build_retrying_session, retries=3), so a disconnected plane can cost ~4×timeout + backoff.
+    # _probe_live is total-catching, so it never aborts the gather.
     live, channelfinder, naming, archiver, alarm = await asyncio.gather(
         _probe_live(pv_name, probe_timeout),
         _gather_channelfinder(pv_name, check_channelfinder, probe_timeout),
