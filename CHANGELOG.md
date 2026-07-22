@@ -9,6 +9,19 @@ carry breaking changes).
 
 ### Added
 
+- **`epics-doctor` alarm plane now checks its Elasticsearch backend (`backend_down`, MA-2b(e)).**
+  The alarm transport probe is a blind HEAD, so it reported the plane healthy even when the alarm
+  logger's Elasticsearch — which backs its search and history tools — was dead. The identity probe
+  already fetches the logger's `GET /` beacon and parses the body to read its `name`; it now reads
+  `elastic.status` from that SAME body (no second request) and, once the name confirms this IS the
+  alarm logger, reports a new `backend_down` status (exit `1`, glyph `✗`) when the status is present
+  and not `"Connected"`. `backend_down` is distinct from `unverified`: identity IS proven and the
+  service reports its OWN backend broken. A missing or unreadable `elastic.status` falls back to `ok`
+  — no failure is claimed that cannot be proven. The healthy sentinel (`"Connected"`) and the
+  HTTP-200-even-when-down contract are pinned to the Phoebus source `SearchController.info()`; the
+  shared name-classification is factored into `_classify_phoebus_name` so the S14 handling cannot
+  drift between `_identify` and the new `_identify_alarm`.
+
 - **Write-side `level` validation (OQ1).** `create_log_entry`, `reply_to_log` and
   `update_log_entry` now refuse a `level` the server does not list, and refuse a blank one
   separately (it would silently CLEAR the entry's level). Matched EXACTLY — no OR-separators, no

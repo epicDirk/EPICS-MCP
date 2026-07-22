@@ -375,7 +375,8 @@ reports, per plane, whether it is reachable, whether the CA bundle works, whethe
 service **identifies itself as the one that URL should point at**, and what the ChannelFinder
 redaction is set to. A disabled plane (empty `*_URL`) is reported honestly, never a failure. Exit
 `0` = nothing failed and no identity probe failed, `1` = a configured plane HARD-failed
-(`unreachable` / `ca_error` / `api_error` / `config_error` / probe-disconnect), `2` = a usage error,
+(`unreachable` / `ca_error` / `api_error` / `config_error` / `backend_down` / probe-disconnect),
+`2` = a usage error,
 `3` = INCONCLUSIVE — a plane is reachable but its identity probe FAILED (a served non-2xx like a
 401/404, a transport error, or a refused redirect): not a hard failure, but not a silent all-clear
 either. Run it first in a new facility to confirm the `.env`; add `--probe-pv NAME` to also pass/fail
@@ -395,6 +396,7 @@ also asked to **name itself**:
 | `?` | `unverified` | reachable and ANSWERED 2xx, but could not prove what it is (a body with no usable `name`, an unreadable/HTML body — or a beacon naming a *different* service, with that name in the detail). **Honest, not healthy** — exit stays `0` |
 | `!` | `identity_probe_failed` | reachable, but the identity probe FAILED (a served non-2xx like a `401` auth wall or `404`, a transport error, or a refused redirect on the identity endpoint). Reachable but suspect — **not** a hard failure (the plane's tool endpoints may work), **not** a silent all-clear either: exit `3` (INCONCLUSIVE) |
 | `✗` | `config_error` | the configuration is self-contradictory, no probe is even attempted (e.g. `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` set while `EPICS_MCP_ARCHIVER_URL` is empty — every archiver tool gates on the latter, so that retrieval URL is never used). Exit `1` |
+| `✗` | `backend_down` | reachable AND the service named itself, but a backend it depends on is measurably down — the alarm logger reports its Elasticsearch as not `Connected`, so its search/history tools will fail. The blind HEAD used to hide this as `ok`; unlike `unverified`, identity IS proven here and the service reports its OWN backend broken. Exit `1` |
 
 `unverified` is not a failure on purpose: that a healthy service answers its beacon anonymously is
 measured at one site, and making that a hard failure everywhere would be an overclaim. The same

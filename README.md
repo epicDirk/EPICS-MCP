@@ -254,7 +254,9 @@ epics-coverage   --displays <project-root> --scope DEV: # coverage matrix (needs
 disconnect / a broken link is a result, not a crash). **`epics-doctor` is the deliberate exception**
 — it is a scriptable pass/fail, so it exits `0` when nothing failed and no identity probe failed,
 `1` when a configured plane HARD-fails (unreachable / CA error / API error / probe-disconnect /
-config_error — e.g. a retrieval URL with no archiver URL, which no tool would ever use),
+config_error — e.g. a retrieval URL with no archiver URL, which no tool would ever use — or
+backend_down, a reachable+identified plane whose backend is down, e.g. the alarm logger's
+Elasticsearch),
 `2` on a usage error, and `3` (INCONCLUSIVE) when a plane is reachable but its identity probe
 FAILED — a served non-2xx like a 401/404, a transport error, or a refused redirect on the identity
 endpoint. Exit 3 is not a hard failure (the plane's tool endpoints may work) but not a silent

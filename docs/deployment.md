@@ -24,7 +24,9 @@ setting those variables for *your* services — no code change. This guide walks
 
    Exit `0` = nothing failed and no identity probe failed; `1` = a configured plane HARD-failed
    (including `config_error` — the variables contradict each other, e.g. a retrieval URL with no
-   archiver URL); `2` = usage error; `3` = INCONCLUSIVE — a plane is reachable but its identity
+   archiver URL — and `backend_down` — a reachable, identified plane whose backend is down, e.g. the
+   alarm logger's Elasticsearch); `2` = usage error; `3` = INCONCLUSIVE — a plane is reachable but
+   its identity
    probe FAILED (a served non-2xx like a 401/404, a transport error, or a refused redirect on the
    identity endpoint): not a hard failure, but not a silent all-clear either. A URL that ANSWERS
    with a *different* known service's name is reported `unverified` (exit `0`) with that name in the
