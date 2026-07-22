@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict
 
-from epics_pv_mcp.services._http import build_retrying_session, is_http_404, rest_get_json
+from epics_pv_mcp.services._http import get_shared_session, is_http_404, rest_get_json
 from epics_pv_mcp.services.archiver_exceptions import (
     ArchiverConnectionError,
     ArchiverResponseError,
@@ -140,7 +140,7 @@ class ArchiverClient:
         self.base_url = base_url.rstrip("/")
         self.retrieval_url = (retrieval_url or base_url).rstrip("/")
         self.timeout = timeout
-        self.session = build_retrying_session(auth_header=auth_header)
+        self.session = get_shared_session(auth_header=auth_header)
 
     def _get(self, url: str, params: dict[str, str]) -> object:
         """Issue a GET and return parsed JSON, translating failures to Archiver exceptions."""

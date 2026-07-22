@@ -100,8 +100,8 @@ import requests
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.services._http import (
     MultipartFiles,
-    build_retrying_session,
     build_write_session,
+    get_shared_session,
     http_status,
     is_http_400,
     is_http_404,
@@ -559,7 +559,7 @@ class OlogClient:
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.session = build_retrying_session(auth_header=auth_header)
+        self.session = get_shared_session(auth_header=auth_header)
         # Keep the auth header on the instance so the lazily-built WRITE session
         # (:attr:`_write_session`) can carry it too — a constructor-local is out of the
         # cached_property's reach. The read `session` above stays byte-identical (auth on it is

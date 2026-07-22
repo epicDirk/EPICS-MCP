@@ -18,7 +18,7 @@ from urllib.parse import quote as url_quote
 
 import requests
 
-from epics_pv_mcp.services._http import build_retrying_session
+from epics_pv_mcp.services._http import get_shared_session
 from epics_pv_mcp.services.naming_exceptions import (
     NamingServiceConnectionError,
     NamingServiceNotFound,
@@ -61,8 +61,8 @@ class NamingServiceClient:
         # without this, ``http://naming:8080/enotify-web`` produced ``…enotify-webrest/…`` → 404).
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        # Shared session builder (accept header + 3-retry/502-503-504 policy); naming needs no auth.
-        self.session = build_retrying_session()
+        # Shared cached session (accept header + 3-retry/502-503-504 policy); naming needs no auth.
+        self.session = get_shared_session()
 
         self._names_cache: dict[str, dict[str, object]] = {}
         #: The service-identity verdict (S13), probed at most once per instance on the first

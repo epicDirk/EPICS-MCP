@@ -20,6 +20,7 @@ from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.services._http import (
     build_retrying_session,
     build_write_session,
+    get_shared_session,
     http_status,
     is_http_404,
     is_https_url,
@@ -236,6 +237,69 @@ def test_naming_client_session_inherits_ca_from_config(
     client = NamingServiceClient(base_url="http://naming")
     assert client.session.verify == "ca.pem"
     assert client.session.trust_env is False
+
+
+# --- get_shared_session (K5: connection reuse across per-call client instances) ---
+
+
+def test_two_clients_reuse_one_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """K5: the five REST clients are rebuilt on EVERY tool-call (each in its own ``_run()`` thread),
+    so a fresh ``requests.Session`` per ``__init__`` paid a new TCP/TLS handshake each time. Two
+    independently constructed clients with the same ``(auth, verify)`` must now share ONE cached
+    session — the point of the connection-reuse change. RED before K5 (each ``__init__`` built its
+    own session, so the two were distinct instances)."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services._http.get_config",
+        lambda: EpicsConfig(),
+    )
+    first = ChannelFinderClient("http://cf", auth_header=None)
+    second = ChannelFinderClient("http://cf", auth_header=None)
+    assert first.session is second.session
+
+
+def test_shared_session_differs_by_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Different auth headers must NOT collapse onto one session — a client sending a Basic header
+    and a no-auth client sharing one session would leak the credential to the wrong host."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services._http.get_config",
+        lambda: EpicsConfig(),
+    )
+    no_auth = get_shared_session(auth_header=None)
+    with_auth = get_shared_session(auth_header="Basic dXNlcjpwYXNz")
+    assert no_auth is not with_auth
+    assert "authorization" not in no_auth.headers
+    assert with_auth.headers["authorization"] == "Basic dXNlcjpwYXNz"
+
+
+def test_shared_session_has_pooled_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The cached session's adapter is pooled to the executor width (32) so the ~32-thread REST
+    fan-out reuses connections instead of discarding one per over-the-limit request (requests'
+    default pool_maxsize is 10). Both schemes carry it."""
+    monkeypatch.setattr(
+        "epics_pv_mcp.services._http.get_config",
+        lambda: EpicsConfig(),
+    )
+    session = get_shared_session(auth_header=None)
+    for scheme in ("http://x", "https://x"):
+        adapter = session.get_adapter(scheme)
+        assert isinstance(adapter, HTTPAdapter)
+        assert adapter._pool_maxsize == 32
+
+
+def test_shared_session_reresolves_verify_on_config_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cache key uses the RESOLVED verify, so a config change selects a DIFFERENT entry rather
+    than serving a session built under the old TLS trust — the one correctness trap of caching a
+    config-derived object. Same call, two CA bundles → two sessions."""
+    target = "epics_pv_mcp.services._http.get_config"
+    monkeypatch.setattr(target, lambda: EpicsConfig(ca_bundle="a.pem"))
+    first = get_shared_session(auth_header=None)
+    monkeypatch.setattr(target, lambda: EpicsConfig(ca_bundle="b.pem"))
+    second = get_shared_session(auth_header=None)
+    assert first is not second
+    assert first.verify == "a.pem"
+    assert second.verify == "b.pem"
 
 
 # --- rest_exceptions root ---

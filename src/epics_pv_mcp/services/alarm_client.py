@@ -24,7 +24,7 @@ Session + Retry on 502/503/504, per-service exceptions).
 
 from __future__ import annotations
 
-from epics_pv_mcp.services._http import build_retrying_session, rest_get_json
+from epics_pv_mcp.services._http import get_shared_session, rest_get_json
 from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
 from epics_pv_mcp.services.alarm_time import normalize_alarm_time
 from epics_pv_mcp.services.redact import project_allowlist, redact_record
@@ -149,7 +149,7 @@ class AlarmClient:
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.session = build_retrying_session(auth_header=auth_header)
+        self.session = get_shared_session(auth_header=auth_header)
 
     def _get(self, url: str, params: dict[str, str]) -> object:
         """Issue a GET and return parsed JSON, translating failures to Alarm client exceptions."""

@@ -17,6 +17,7 @@ to a withheld verdict or an ``EpicsError``) now leaves a server-side trace it di
 from __future__ import annotations
 
 import base64
+import functools
 import ipaddress
 import logging
 from email.message import Message
@@ -136,6 +137,7 @@ def build_retrying_session(
     verify: bool | str | None = None,
     retries: int = 3,
     backoff_factor: float = 0.5,
+    pool_maxsize: int | None = None,
 ) -> requests.Session:
     """Return a :class:`requests.Session` with the accept header, optional auth, and a retry policy.
 
@@ -165,6 +167,11 @@ def build_retrying_session(
     ``REQUESTS_CA_BUNDLE`` path working. Tradeoff: ``trust_env=False`` also disables proxy /
     ``NO_PROXY`` / netrc environment, which is why it is pinned ONLY when an explicit CA decision is
     in play (the internal-network REST planes), not on the default.
+
+    ``pool_maxsize`` sizes the ``HTTPAdapter`` connection pool. Left ``None`` it keeps requests'
+    default (10). :func:`get_shared_session` passes the executor width so a process-cached session
+    reused across the ~32-thread REST fan-out keeps connections warm instead of discarding one per
+    over-the-limit request.
     """
     session = requests.Session()
     session.headers.update({"accept": accept})
@@ -179,8 +186,13 @@ def build_retrying_session(
     if retries <= 0:
         # Single attempt (Q2 „one attempt, long timeout"): reuse build_write_session's no-retry
         # adapter shape. No Retry import needed — requests builds Retry(total=0) from the int, so
-        # even a stripped environment gets a deterministic no-retry adapter here.
-        no_retry = HTTPAdapter(max_retries=0)
+        # even a stripped environment gets a deterministic no-retry adapter here. pool_maxsize is
+        # passed only when set, so the default path keeps requests' own default (10).
+        no_retry = (
+            HTTPAdapter(max_retries=0)
+            if pool_maxsize is None
+            else HTTPAdapter(max_retries=0, pool_maxsize=pool_maxsize)
+        )
         session.mount("http://", no_retry)
         session.mount("https://", no_retry)
     else:
@@ -190,12 +202,84 @@ def build_retrying_session(
             retry = Retry(
                 total=retries, backoff_factor=backoff_factor, status_forcelist=[502, 503, 504]
             )
-            adapter = HTTPAdapter(max_retries=retry)
+            adapter = (
+                HTTPAdapter(max_retries=retry)
+                if pool_maxsize is None
+                else HTTPAdapter(max_retries=retry, pool_maxsize=pool_maxsize)
+            )
             session.mount("http://", adapter)
             session.mount("https://", adapter)
         except ImportError:
             pass  # urllib3 retry unavailable — proceed without
     return session
+
+
+_SHARED_POOL_MAXSIZE = 32
+"""Connection-pool size for the cached read sessions (K5). Matches the default asyncio executor
+width (``min(32, cpu+4)``) so that up to ~32 concurrent REST reads on one host reuse the pool
+instead of each opening — and requests then discarding — its own connection (requests' default
+``pool_maxsize`` is 10, which serialises and logs 'Connection pool is full' under our fan-out)."""
+
+
+def get_shared_session(
+    *,
+    accept: str = "application/json",
+    auth_header: str | None = None,
+    verify: bool | str | None = None,
+    retries: int = 3,
+    backoff_factor: float = 0.5,
+) -> requests.Session:
+    """Return a PROCESS-CACHED :class:`requests.Session` for one read configuration (K5).
+
+    The five REST clients are re-instantiated on every tool-call — each inside its own ``_run()``
+    closure dispatched via :func:`asyncio.to_thread` — so building a fresh session per ``__init__``
+    paid a new TCP/TLS handshake on every call (no leak, pure waste). This memoises ONE session per
+    distinct ``(accept, auth_header, verify, retries, backoff_factor)``. The session is NOT bound to
+    a URL, so ``base_url`` is deliberately absent from the key: two same-auth clients (even for
+    different service hosts) share one pooled session, and the pool keys connections per host
+    itself. The cache is keyed on the *resolved* ``verify`` (below), and the adapter carries
+    ``pool_maxsize`` = the executor width (:data:`_SHARED_POOL_MAXSIZE`).
+
+    ``verify`` is resolved from config HERE, before the cache key, so a config change (a reload, or
+    a test's monkeypatched ``get_config``) selects a DIFFERENT cache entry rather than serving a
+    session built under the old TLS trust — the one correctness trap of caching a config-derived
+    object. The clients never mutate their session (only ``.get``/``.head``/``.verify`` reads, and
+    requests' cookie jar is domain-scoped), so sharing is safe across worker threads and across
+    the several hosts a no-auth session may reach; per-request ``timeout`` stays per call. Reset via
+    :func:`clear_shared_sessions` (test isolation / a reload wanting fresh pools).
+    """
+    if verify is None:
+        cfg = get_config()
+        verify = cfg.ca_bundle or cfg.tls_verify
+    return _shared_session_cached(accept, auth_header, verify, retries, backoff_factor)
+
+
+@functools.cache
+def _shared_session_cached(
+    accept: str,
+    auth_header: str | None,
+    verify: bool | str,
+    retries: int,
+    backoff_factor: float,
+) -> requests.Session:
+    """Memoised core of :func:`get_shared_session`. ``verify`` is already resolved (never ``None``)
+    so it is a faithful part of the cache key. Separate function only so the resolution above sits
+    OUTSIDE the ``lru_cache`` key."""
+    return build_retrying_session(
+        accept=accept,
+        auth_header=auth_header,
+        verify=verify,
+        retries=retries,
+        backoff_factor=backoff_factor,
+        pool_maxsize=_SHARED_POOL_MAXSIZE,
+    )
+
+
+def clear_shared_sessions() -> None:
+    """Drop every cached shared read session. Called by the test-isolation fixture (each test gets
+    a clean cache, so a session built under one test's monkeypatched config never leaks into the
+    next) and available to a config reload that wants fresh connection pools."""
+    _shared_session_cached.cache_clear()
 
 
 def build_write_session(

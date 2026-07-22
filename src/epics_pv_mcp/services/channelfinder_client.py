@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import TypedDict
 
 from epics_pv_mcp.config import EpicsConfig, get_config
-from epics_pv_mcp.services._http import build_retrying_session, rest_get_json
+from epics_pv_mcp.services._http import get_shared_session, rest_get_json
 from epics_pv_mcp.services.channelfinder_exceptions import (
     ChannelFinderConnectionError,
     ChannelFinderResponseError,
@@ -98,7 +98,7 @@ class ChannelFinderClient:
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.session = build_retrying_session(auth_header=auth_header)
+        self.session = get_shared_session(auth_header=auth_header)
         # DS-PRIVACY: resolve the (site-configurable) allowlists ONCE at construction from config,
         # falling back to the ESS defaults when unset. ``_project`` reads these instance fields —
         # a facility can set its own service accounts / technical properties (or redact everything).

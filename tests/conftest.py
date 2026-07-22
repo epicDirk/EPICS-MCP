@@ -4,7 +4,7 @@ import collections
 import importlib.util
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Protocol
 
 import pytest
@@ -12,6 +12,7 @@ import pytest
 from epics_pv_mcp.config import EpicsConfig
 from epics_pv_mcp.errors import RateLimitError
 from epics_pv_mcp.safety import SafetyLayer
+from epics_pv_mcp.services._http import clear_shared_sessions
 
 # The display-aware tools and their opi_navigation-coupled tests need the optional
 # `[displays]` extra. When opi_navigation is not installed (a standalone core install),
@@ -51,6 +52,16 @@ def _isolate_epics_search_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Strip the EPICS search-path vars so posture assertions measure the code, not the machine."""
     for var in _EPICS_SEARCH_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _clear_shared_session_cache() -> Iterator[None]:
+    """K5: the HTTP read-session factory memoises per config in a PROCESS-global lru_cache. Clear it
+    around every test so a session built under one test's monkeypatched ``get_config`` never leaks
+    into the next — deterministic sessions regardless of test order."""
+    clear_shared_sessions()
+    yield
+    clear_shared_sessions()
 
 
 # The loopback lane a write-enabled SafetyLayer accepts (E8): both providers' search reach
