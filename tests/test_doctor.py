@@ -522,6 +522,84 @@ def test_alarm_name_check_precedes_the_elastic_check(
     assert check.status in _NON_FAILING_STATUSES
 
 
+@pytest.mark.parametrize(
+    "exc",
+    [
+        pytest.param(requests.exceptions.HTTPError("401"), id="auth-wall"),
+        pytest.param(requests.exceptions.ConnectionError("gone"), id="transport"),
+        pytest.param(RuntimeError("refused to follow a redirect"), id="redirect-refused"),
+    ],
+)
+def test_alarm_failed_probe_is_identity_probe_failed(
+    monkeypatch: pytest.MonkeyPatch, exc: Exception
+) -> None:
+    """_identify_alarm has its OWN fetch-failure branch (it is the alarm plane's PRODUCTION identity
+    probe since MA-2b(e), not the shared _identify): a served non-2xx / transport error / refused
+    redirect on the GET / beacon must be ``identity_probe_failed`` (exit 3), never a silent
+    all-clear. Mirrors the shared-_identify S12 guard so the invariant holds on the new entry point.
+
+    Red-proof (mutation): deleting the ``if isinstance(payload, Exception)`` branch in
+    _identify_alarm lets the exception fall through to _classify_phoebus_name(exc) → name=None →
+    unverified (exit 0), reintroducing the S12 silent-exit-0 regression on the alarm plane — this
+    test then goes red.
+    """
+    _raises(monkeypatch, exc)
+    check = _identify_alarm("http://alarm.example", None, 5.0)
+    assert (check.status, check.identified) == ("identity_probe_failed", False)
+    assert check.status in _INCONCLUSIVE_STATUSES
+    assert check.status not in _NON_FAILING_STATUSES
+
+
+def test_alarm_unreadable_2xx_body_stays_unverified(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 2xx alarm beacon whose body is not JSON is honest ``unverified`` (answered, not nameable),
+    NOT ``identity_probe_failed`` — the same ValueError carve-out as the shared _identify path, now
+    exercised through _identify_alarm's OWN fetch-failure branch (the alarm production entry
+    point)."""
+    cause = json.JSONDecodeError("Expecting value", "<html>login</html>", 0)
+    exc = requests.exceptions.RequestException(
+        "Request failed (http://alarm.example): bad JSON body"
+    )
+    exc.__cause__ = cause  # what rest_get_json chains on a 2xx-but-unparseable body
+    _raises(monkeypatch, exc)
+    check = _identify_alarm("http://alarm.example", None, 5.0)
+    assert (check.status, check.identified) == ("unverified", False)
+    assert check.status in _NON_FAILING_STATUSES
+
+
+async def test_alarm_backend_down_flows_through_run_doctor_to_exit_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end WIRING lock: a reachable alarm logger with a dead Elasticsearch must reach
+    run_doctor as ``backend_down`` → ``report.ok`` False (exit 1), THROUGH the real _identify_alarm.
+
+    This is the one test that pins _check_alarm to _identify_alarm rather than the old name-only
+    _identify. The four unit tests above call _identify_alarm directly, and the autouse fixture
+    stubs BOTH _identify and _identify_alarm to the same identified=True value — so reverting the
+    wiring line (_check_alarm._id → _identify("alarm", ...)) is otherwise invisible to every test.
+    Here the REAL _identify_alarm and a real rest_get_json body are restored over the autouse stubs;
+    with the wiring reverted, _check_alarm would call the STILL-STUBBED _identify → status 'ok' →
+    this fails.
+
+    Red-proof (mutation): point _check_alarm._id back at _identify and this test goes red (status
+    'ok', report.ok True) — the exact pre-MA-2b(e) blind-HEAD behaviour the change removes.
+    """
+    _set_config(monkeypatch, alarm_url="http://alarm.example")
+    monkeypatch.setattr("epics_pv_mcp.services.doctor.AlarmClient", _OkClient)
+    # Restore the REAL probe + a GET / body over the autouse stubs so the real chain runs.
+    monkeypatch.setattr("epics_pv_mcp.services.doctor._identify_alarm", _identify_alarm)
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.doctor.rest_get_json",
+        lambda *_a, **_k: {
+            "name": "Alarm logging Service",
+            "elastic": {"status": "Failed to connect to elastic boom"},
+        },
+    )
+    report = await run_doctor()
+    alarm = _plane(report, "alarm")
+    assert (alarm.status, alarm.identified) == ("backend_down", True)
+    assert report.ok is False  # backend_down ∈ _FAILING_STATUSES → exit 1
+
+
 def test_unknown_status_fails_closed() -> None:
     """The allowlist is the point: a new or mistyped status must FAIL, not slip through as exit 0.
 

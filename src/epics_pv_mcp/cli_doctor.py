@@ -13,7 +13,7 @@ a scriptable pass/fail):
 * ``0`` — nothing failed and no identity probe failed (healthy, honestly disabled/info-only, or
   reachable with its identity ``unverified`` — a 2xx that just could not be named);
 * ``1`` — a configured plane HARD-failed (unreachable / ca_error / api_error / config_error /
-  probe-disconnect);
+  backend_down / probe-disconnect);
 * ``2`` — a usage error (bad arguments, or an internal EpicsError);
 * ``3`` — INCONCLUSIVE: a configured plane is reachable but its identity probe FAILED (a served
   non-2xx like a 401/404, a transport error, or a refused redirect on the identity endpoint). Not a
