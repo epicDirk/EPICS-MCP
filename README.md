@@ -78,6 +78,13 @@ This is a controls tool, so the trust questions come first:
   accepted one logs `ATTEMPT` before the I/O, then a terminal `ALLOW`/`FAILED` — or `UNKNOWN_PENDING`
   if it was cancelled mid-put (the value may still land at the IOC, so verify by read-back and never
   blindly retry).
+- **Every write is read back (always-on).** After a sanctioned put the server reads the value back
+  and compares it to what was written: the result carries `verified` (true within tolerance / false
+  mismatch / null not verifiable) plus `readback`/`tolerance`/`note`, and a `READBACK_OK` /
+  `READBACK_MISMATCH` / `READBACK_UNVERIFIED` audit line follows the `ALLOW`. A mismatch is **not**
+  an error (the put happened) — it is a loud `verified=false` plus the audit line, the direct
+  countermeasure to a silent wrong-write. Tolerance is the record's `control.min_step` (> 0) or
+  `EPICS_MCP_READBACK_TOLERANCE`.
 - **Writes enabled require a loopback-only search reach.** Enabling writes with the EPICS client
   search env able to reach beyond loopback makes the server **refuse to start** (`SafetyConfigError`):
   the name-pattern above scopes *what* may be written, this gate scopes *where* a write can

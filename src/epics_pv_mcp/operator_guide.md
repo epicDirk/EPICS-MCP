@@ -206,9 +206,19 @@ A `set_pv_value` write leaves a `PV_WRITE` audit line at each stage, correlated 
   cancel. **Operator action:** treat the value as *possibly written* — read the PV back to establish
   the real state; do **not** blindly retry (a retry can double-apply to hardware). This is why a cancel
   is never logged as `FAILED` (which would wrongly imply nothing was written).
+- `event=READBACK_OK` / `event=READBACK_MISMATCH` / `event=READBACK_UNVERIFIED` — the readback verdict,
+  emitted **after** `ALLOW`. The write is **always** read back and compared against what was written:
+  `READBACK_OK` = within tolerance; `READBACK_MISMATCH` = a genuine mismatch — **the loud signal for a
+  wrong or not-landed write; the value is NOT reverted** (a wrong value may now sit at the IOC);
+  `READBACK_UNVERIFIED` = the readback could not be obtained (timeout / value withheld) — an absence of
+  evidence, never a mismatch. The tolerance is the record's own `control.min_step` when it carries one
+  (> 0, the IOC's drive resolution), else `EPICS_MCP_READBACK_TOLERANCE` fed through a magnitude-safe
+  `math.isclose`. The same verdict rides back in the tool result (`verified` true/false/null plus
+  `readback`/`tolerance`/`note`), so a silent wrong-write cannot hide.
 
-Every terminal line shares the `op=<id>` of its `ATTEMPT`, so an interrupted write is never a silent
-gap in the trail. (A direct, non-tool call to the audit helpers logs `op=-`.)
+Every terminal line shares the `op=<id>` of its `ATTEMPT` (the `READBACK_*` line too), so an interrupted
+or misverified write is never a silent gap in the trail. (A direct, non-tool call to the audit helpers
+logs `op=-`.)
 
 ### Olog write posture (all four write tools)
 

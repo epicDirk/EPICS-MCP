@@ -108,6 +108,9 @@ def build_instructions(display_tools_available: bool) -> str:
         "The PV-mutating tool set_pv_value is gated OFF by default and additionally requires "
         "EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, a rate limit and an audit log — a "
         "separate gate from the Olog one, and it stays off. "
+        "After a sanctioned write it reads the value back and returns a structured result "
+        "(verified/readback/tolerance) plus a READBACK audit event, so a wrong or not-landed value "
+        "is surfaced, not silently accepted. "
         "REST-backed tools stay disabled until their *_URL env vars are set. "
         "Network reach is decided by the LAUNCHER, not this server: a deployment may well point "
         "the EPICS env at a real facility, so do NOT assume isolation — run epics-doctor to see "
@@ -376,6 +379,15 @@ async def set_pv_value(
 
     Protected by safety layer: environment gate, regex allowlist, rate-limit (10/min default),
     and audit logging — the load-bearing, client-independent guard.
+
+    Readback verification (always-on): after the write the value is read back and compared against
+    what was written. The result carries ``verified`` (true = within tolerance / false = mismatch /
+    null = not verifiable, e.g. a readback timeout), plus ``readback``, ``tolerance`` and ``note``,
+    and a ``READBACK_OK``/``READBACK_MISMATCH``/``READBACK_UNVERIFIED`` audit line follows the
+    ``ALLOW``. A mismatch does NOT raise — the put happened (``status`` stays ``"success"``); the
+    loud signal is ``verified=false`` plus the audit event, so a wrong or not-landed value is
+    surfaced rather than accepted silently. Tolerance is the record's ``control.min_step`` when it
+    has one (> 0), else ``EPICS_MCP_READBACK_TOLERANCE``.
 
     Client-side consent hint (advisory, NOT a gate): the tools/list entry carries
     _meta["anthropic/requiresUserInteraction"]=true. A client that honours it prompts a human
