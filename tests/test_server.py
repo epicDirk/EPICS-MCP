@@ -654,7 +654,18 @@ _JSCHEMA_MAP_KW = frozenset(
     {"properties", "$defs", "definitions", "patternProperties", "dependentSchemas"}
 )
 _JSCHEMA_SUB_KW = frozenset(
-    {"items", "additionalProperties", "not", "if", "then", "else", "propertyNames"}
+    {
+        "items",
+        "additionalProperties",
+        "not",
+        "if",
+        "then",
+        "else",
+        "propertyNames",
+        "contains",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+    }
 )
 _JSCHEMA_LIST_KW = frozenset({"anyOf", "allOf", "oneOf", "prefixItems"})
 
@@ -719,6 +730,29 @@ def test_strip_schema_title_annotations_preserves_title_property() -> None:
     assert "title" not in nested["properties"]["title"]
 
 
+def test_strip_covers_2020_12_subschema_keywords() -> None:
+    """MA-Q1a (a): the strip must descend into the JSON-Schema 2020-12 single-subschema keywords
+    ``contains`` / ``unevaluatedItems`` / ``unevaluatedProperties`` too, or a ``title`` annotation
+    under them survives on the wire. Asserted STRUCTURALLY (direct dict access), NOT via the
+    independent walker ``_schema_nodes_with_title``, which reads the mirrored ``_JSCHEMA_SUB_KW`` —
+    so a red-proof reverting BOTH sets would blind the walker and pass falsely; the structural check
+    stays valid when only the production ``_SCHEMA_SUBSCHEMA_KEYWORDS`` is reverted. Red before the
+    three keywords join the production set (the recursion never descends into them)."""
+    from epics_pv_mcp.server import _strip_schema_title_annotations
+
+    schema: dict[str, Any] = {
+        "type": "object",
+        "contains": {"type": "string", "title": "Contained"},
+        "unevaluatedItems": {"type": "number", "title": "UnevalItems"},
+        "unevaluatedProperties": {"type": "boolean", "title": "UnevalProps"},
+    }
+    _strip_schema_title_annotations(schema)
+
+    assert "title" not in schema["contains"]
+    assert "title" not in schema["unevaluatedItems"]
+    assert "title" not in schema["unevaluatedProperties"]
+
+
 @pytest.mark.asyncio
 async def test_input_schemas_carry_no_title_annotation() -> None:
     """MA-Q1 A1: after the post-pass, NO inputSchema node advertises a ``title`` annotation
@@ -779,6 +813,21 @@ async def test_every_required_arg_exists_in_properties() -> None:
                 f"{tool.name}: required arg {req!r} missing from properties "
                 "(schema-breaking title strip?)"
             )
+
+
+def test_is_information_empty_output_schema_precise() -> None:
+    """MA-Q1a (b): A2 drops ONLY the accept-all object form (a ``dict[str, object]`` return yields
+    ``{type: object, additionalProperties: true}`` with no ``properties``); a typed schema, an
+    array / ``RootModel`` return, and a ``$ref`` are all KEPT. Provably red against the old
+    ``not schema.get('properties')`` predicate: mutate the helper body back to it and the array /
+    ``$ref`` / bare-object cases (which also lack ``properties``) flip to True."""
+    from epics_pv_mcp.server import _is_information_empty_output_schema as empty
+
+    assert empty({"type": "object", "additionalProperties": True}) is True  # accept-all -> drop
+    assert empty({"type": "object", "properties": {"x": {}}}) is False  # typed -> keep
+    assert empty({"type": "array", "items": {"type": "string"}}) is False  # array return -> keep
+    assert empty({"$ref": "#/$defs/Foo"}) is False  # $ref -> keep
+    assert empty({"type": "object"}) is False  # not accept-all (no additionalProperties) -> keep
 
 
 @pytest.mark.asyncio
@@ -855,6 +904,58 @@ def test_prune_tool_schemas_never_crashes_core(
     with caplog.at_level(logging.ERROR):
         server._prune_tool_schemas(server.mcp)  # must NOT raise
     assert any("_prune_tool_schemas" in record.message for record in caplog.records)
+
+
+def test_prune_isolates_a_single_failing_tool(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """MA-Q1a (f): a raise while pruning ONE tool is isolated — that tool is logged and skipped, the
+    OTHERS are still pruned (no half-pruned, inconsistent state). The load-bearing assertion is
+    ``good.output_schema is None``: good was reached and pruned DESPITE bad raising first. Red on
+    the pre-fix single outer try/except — the first raise (bad) aborts the whole loop, so good is
+    never reached and keeps its schema. ``bad`` is enumerated BEFORE ``good`` on purpose: reverse
+    the order and the pre-fix code prunes good first, so the red-proof would be lost.
+
+    Driven through a minimal fake manager/tool (not the real ``mcp``): ``server.mcp`` is already
+    pruned at import, so a real re-run would be idempotent and could not exhibit the isolation. The
+    loop's per-tool robustness is the unit under test; ``_prune_tool_schemas`` reads only
+    ``_tool_manager``, ``list_tools()``, and each tool's ``parameters`` / ``output_schema`` /
+    ``name`` — so the fake is faithful."""
+    import epics_pv_mcp.server as server
+
+    class _FakeTool:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.parameters: dict[str, Any] = {"type": "object", "title": name}
+            self.output_schema: dict[str, Any] | None = {
+                "type": "object",
+                "additionalProperties": True,  # accept-all form -> A2 drops it to None
+            }
+
+    bad = _FakeTool("bad")
+    good = _FakeTool("good")
+
+    class _FakeManager:
+        def list_tools(self) -> list[_FakeTool]:
+            return [bad, good]  # bad FIRST — the red-proof depends on this order
+
+    class _FakeMcp:
+        _tool_manager = _FakeManager()
+
+    real_strip = server._strip_schema_title_annotations
+
+    def _strip_maybe_boom(node: object) -> None:
+        if node is bad.parameters:
+            raise RuntimeError("boom in one tool")
+        real_strip(node)
+
+    monkeypatch.setattr(server, "_strip_schema_title_annotations", _strip_maybe_boom)
+    with caplog.at_level(logging.ERROR):
+        server._prune_tool_schemas(cast(Any, _FakeMcp()))  # must NOT raise
+
+    assert good.output_schema is None  # LOAD-BEARING: good pruned despite bad raising first
+    assert bad.output_schema is not None  # bad untouched (its body raised) — doc only
+    assert any("bad" in record.message for record in caplog.records)  # the failing tool was named
 
 
 # MA-Q3 tools/list size-gate ceiling (chars of the compact ListToolsResult wire payload). Set

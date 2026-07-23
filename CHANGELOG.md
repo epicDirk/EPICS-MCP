@@ -9,12 +9,25 @@ carry breaking changes).
 
 ### Added
 
+- **MA-Q1a tools/list schema-hygiene hardening (nit/low follow-ups to MA-Q1).** Robustness and
+  precision polish on `_prune_tool_schemas`, with NO wire change — `tools/list` stays 64499 characters,
+  `list_tools` 32/28. The title-strip now also descends into the JSON-Schema 2020-12 single-subschema
+  keywords `contains` / `unevaluatedItems` / `unevaluatedProperties` (a `title` under one of them would
+  otherwise survive). A2's empty-outputSchema test is tightened, via a named helper
+  `_is_information_empty_output_schema`, to the exact accept-all object form
+  (`{type: object, additionalProperties: true}` with no `properties`) — so a future array / `RootModel`
+  return, which also lacks a top-level `properties`, is no longer dropped by mistake. The prune loop now
+  isolates each tool in its own `try/except`: one broken tool is logged and skipped, the others still
+  prune, so the pass never leaves a half-pruned state. Each code fix ships a provably-red regression
+  test; plus three doc corrections (A1 contributes ~3.7k, not ~4.7k; a truthful crash-guard raise-source
+  example; the ceiling is a character budget, not a byte budget).
+
 - **MA-Q3 tools/list size-gate (test-only guard).** A relational `<=` ceiling test
   (`test_tools_list_within_budget`, ceiling 70000) so the wire `tools/list` payload MA-Q1 shrank cannot
   silently regrow — a new tool, an SDK change that inflates the wire, or a regression that stops the pruning
   now turns a green suite RED. This is the guard behind MA-Q1's "precondition for every new tool" framing,
-  which was previously documented intent only (no test asserted the byte budget). Relational (not a count) so
-  the core-only [28 tools] and full [32] lanes both pass; provably red below the current 64499; also catches a
+  which was previously documented intent only (no test asserted the character budget). Relational (not a count) so
+  the core-only [28 tools] and full [32] lanes both pass; provably red below the current 64499 characters; also catches a
   broken prune (the un-pruned payload is 70237 > 70000). Headroom is deliberate — raising the ceiling is a
   conscious, reviewed one-line change with a rationale, never a silent bump.
 

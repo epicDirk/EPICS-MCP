@@ -172,7 +172,20 @@ _SCHEMA_MAP_KEYWORDS = frozenset(
     {"properties", "$defs", "definitions", "patternProperties", "dependentSchemas"}
 )
 _SCHEMA_SUBSCHEMA_KEYWORDS = frozenset(
-    {"items", "additionalProperties", "not", "if", "then", "else", "propertyNames"}
+    {
+        "items",
+        "additionalProperties",
+        "not",
+        "if",
+        "then",
+        "else",
+        "propertyNames",
+        # JSON-Schema 2020-12 single-subschema keywords — a ``title`` under any of these is an
+        # annotation on that subschema, so the strip must descend here too.
+        "contains",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+    }
 )
 _SCHEMA_LIST_KEYWORDS = frozenset({"anyOf", "allOf", "oneOf", "prefixItems"})
 
@@ -183,7 +196,7 @@ def _strip_schema_title_annotations(node: object) -> None:
 
     The distinction is the whole point (MA-Q1). pydantic emits a ``title`` on the top-level schema
     AND on every property — a Title-Case derivation of the key ("Pv Name"), worth nothing to a host
-    that reads the schema as text, so dropping it is lossless (~4.7k WIRE). But four Olog tools
+    that reads the schema as text, so dropping it is lossless (~3.7k WIRE). But four Olog tools
     (``create_log_entry``/``reply_to_log`` [required], ``update_log_entry``, ``search_logbook``)
     have a PARAMETER named ``title``. A naive "pop every ``title`` key" would delete
     ``properties["title"]`` and leave it dangling in ``required`` — a required argument hidden from
@@ -210,6 +223,24 @@ def _strip_schema_title_annotations(node: object) -> None:
             _strip_schema_title_annotations(item)
 
 
+def _is_information_empty_output_schema(schema: dict[str, object]) -> bool:
+    """True ONLY for the accept-all object form pydantic emits for a ``dict[str, object]`` return
+    (``{type: object, additionalProperties: true}`` with no ``properties``) — the information-empty
+    shape A2 drops. A typed schema (``properties`` present), an array / ``RootModel`` return, or a
+    ``$ref`` is NOT this form and stays kept on the wire.
+
+    Precise on purpose (MA-Q1a): the earlier ``not output_schema.get("properties")`` predicate keyed
+    only on the absence of ``properties``. A future non-object return (an array / RootModel) also
+    lacks a top-level ``properties`` and would have been dropped by mistake; keying on the full
+    accept-all shape drops exactly the ``dict[str, object]`` schemas and nothing else.
+    """
+    return (
+        schema.get("type") == "object"
+        and not schema.get("properties")
+        and schema.get("additionalProperties") is True
+    )
+
+
 def _prune_tool_schemas(mcp: FastMCP) -> None:
     """Post-registration ``tools/list`` schema hygiene (MA-Q1) — two LOSSLESS passes over every
     registered tool, shrinking the wire payload with no loss of capability:
@@ -223,11 +254,15 @@ def _prune_tool_schemas(mcp: FastMCP) -> None:
       the tool still returns ``structuredContent`` at call time (an advertise-only drop). The 11
       typed Olog outputSchemas (they carry ``properties``) are KEPT — test-pinned.
 
-    Runs at MODULE IMPORT and mutates a ``@cached_property``, so the whole body is wrapped in a
-    broad ``try/except`` that logs loud and no-ops — mirroring :func:`_load_display_registrar`: an
-    optional hygiene pass must NEVER crash the core PV server (e.g. a future frozen model that
-    raises on the assignment). Call AFTER ``_display_registrar(mcp)`` so the four display-registrar
-    tools are in the manager and get pruned too.
+    Runs at MODULE IMPORT and mutates a ``@cached_property``. Each tool is pruned inside its OWN
+    ``try/except`` — a single broken tool is logged and skipped while the others still prune, so the
+    pass never leaves a half-pruned, inconsistent state — and the whole loop sits inside a broad
+    ``try/except`` too, so this optional hygiene pass can NEVER crash the core PV server (mirroring
+    :func:`_load_display_registrar`). The demonstrable in-guard raise source is the strip,
+    :func:`_strip_schema_title_annotations`, hitting a pathological / deeply-nested schema — a
+    future SDK where assigning the ``@cached_property`` becomes validating or immutable is another.
+    Call AFTER ``_display_registrar(mcp)`` so the four display-registrar tools are in the manager
+    and get pruned too.
     """
     try:
         manager = getattr(mcp, "_tool_manager", None)
@@ -238,10 +273,18 @@ def _prune_tool_schemas(mcp: FastMCP) -> None:
             )
             return
         for tool in manager.list_tools():
-            _strip_schema_title_annotations(tool.parameters)  # A1
-            output_schema = tool.output_schema  # A2 — read the cached_property once
-            if output_schema is not None and not output_schema.get("properties"):
-                tool.output_schema = None
+            try:
+                _strip_schema_title_annotations(tool.parameters)  # A1
+                output_schema = tool.output_schema  # A2 — read the cached_property once
+                if output_schema is not None and _is_information_empty_output_schema(output_schema):
+                    tool.output_schema = None
+            except Exception:  # one broken tool must not abort the pass — log it, keep pruning
+                logger.error(
+                    "tools/list schema hygiene (_prune_tool_schemas) failed for tool %r; "
+                    "skipping it, other tools still pruned.",
+                    getattr(tool, "name", "<unknown>"),
+                    exc_info=True,
+                )
     except Exception:  # an optional hygiene pass must never crash core — logged loud
         logger.error(
             "tools/list schema hygiene (_prune_tool_schemas) failed; core PV tools remain "
@@ -1652,6 +1695,10 @@ if _display_registrar is not None:
 # MUST run AFTER _display_registrar so the four registrar tools (validate_pvs / crossplane_check /
 # coverage_audit / find_device) are in the manager and get pruned too. Crash-guarded internally —
 # an optional hygiene pass must never take down the core PV server.
+# A ONE-SHOT positional pass at module import: safe because no tool is registered after this line.
+# Re-pruning dynamically from a list_tools wrapper is deliberately deferred — a regression that
+# regrows the wire is caught by the size-gate (test_tools_list_within_budget) and the relational
+# tests.
 _prune_tool_schemas(mcp)
 
 
