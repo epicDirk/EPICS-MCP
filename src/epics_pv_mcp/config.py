@@ -57,6 +57,13 @@ class EpicsConfig(BaseSettings):
     # worker threads and reintroduce the very starvation the K4 monitor bulkhead removes.
     read_rate_limit: int = Field(default=0, ge=0)
     audit_log_file: str = ""  # path to audit log (empty = stderr)
+    # O3 readback verification (always-on): after a sanctioned write the value is read back and
+    # compared against what was written. This is the FALLBACK tolerance — it feeds BOTH the relative
+    # and absolute axis of math.isclose — used only when the record carries no usable min_step
+    # (control.min_step > 0 is preferred: the IOC's own drive resolution). Combining rel+abs keeps
+    # the compare magnitude-safe AND value≈0-safe. There is deliberately NO on/off switch: readback
+    # is always-on so a silent wrong-write cannot hide (a switch would reopen that hole).
+    readback_tolerance: float = Field(default=1e-6, ge=0)
 
     # --- Path boundary (opt-in; see paths.resolve_user_path) ---
     # os.pathsep-separated roots that file/dir tool arguments must resolve under.

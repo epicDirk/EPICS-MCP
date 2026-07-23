@@ -321,6 +321,7 @@ All settings are read from environment variables with the `EPICS_MCP_` prefix.
 | `EPICS_MCP_WRITE_RATE_LIMIT` | `10` | Max writes per minute (≥ 1) |
 | `EPICS_MCP_READ_RATE_LIMIT` | `0` | Max REST reads per 60 s (0 = disabled, opt-in); over the limit the shared GET chokepoint raises rather than blocks |
 | `EPICS_MCP_AUDIT_LOG_FILE` | _(empty)_ | Audit log path (empty = stderr) |
+| `EPICS_MCP_READBACK_TOLERANCE` | `1e-06` | Fallback tolerance for the always-on post-write readback verification (feeds both `math.isclose` axes); used only when the record has no usable `control.min_step` (≥ 0) |
 
 **Path boundary**
 
