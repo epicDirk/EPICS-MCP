@@ -47,8 +47,12 @@ class TestSetPvValueSuccess:
         sl = SafetyLayer(cfg)
         mock_get_safety.return_value = sl
 
-        # Mock the old value read
-        mock_pv_get.return_value = {"pv_name": "TEST:PV", "value": 10.0}
+        # O3: pv_get is now called TWICE — once for the old value (audit), once for the readback.
+        # side_effect gives the old read then the readback (20.0 == written "20.0" → verified).
+        mock_pv_get.side_effect = [
+            {"pv_name": "TEST:PV", "value": 10.0},
+            {"pv_name": "TEST:PV", "value": 20.0},
+        ]
 
         # Mock the put (returns None)
         mock_pv_put.return_value = None
@@ -59,10 +63,14 @@ class TestSetPvValueSuccess:
         assert result["pv_name"] == "TEST:PV"
         assert result["old_value"] == 10.0
         assert result["new_value"] == "20.0"
+        # O3: the structured readback verdict rides along in the same result dict.
+        assert result["verified"] is True
+        assert result["readback"] == 20.0
 
-        # M1/C1: no explicit timeout → the wrapper passes None, so pv_get/pv_put apply
-        # the server's default_timeout (not a hardcoded 5.0).
-        mock_pv_get.assert_awaited_once_with("TEST:PV", None)
+        # M1/C1: no explicit timeout → the wrapper passes None, so pv_get/pv_put apply the
+        # server's default_timeout (not a hardcoded 5.0). pv_get is awaited twice (old + readback).
+        assert mock_pv_get.await_count == 2
+        mock_pv_get.assert_awaited_with("TEST:PV", None)
         mock_pv_put.assert_awaited_once_with("TEST:PV", "20.0", None)
 
 
@@ -226,16 +234,21 @@ class TestSetPvValueAuditTrail:
         mock_get_safety.return_value = SafetyLayer(
             EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
         )
-        mock_pv_get.return_value = {"pv_name": "TEST:PV", "value": 1.0}
+        # O3: old read, then the readback (2.0 == written "2.0" → READBACK_OK after ALLOW).
+        mock_pv_get.side_effect = [
+            {"pv_name": "TEST:PV", "value": 1.0},
+            {"pv_name": "TEST:PV", "value": 2.0},
+        ]
         mock_pv_put.return_value = None
 
         with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
             await _set_pv_value("TEST:PV", "2.0")
 
         events = _audit_events(caplog)
-        # ATTEMPT is emitted BEFORE the terminal record, and they share one op.
-        assert [e for e, _ in events] == ["ATTEMPT", "ALLOW"]
-        assert events[0][1] is not None and events[0][1] == events[1][1]
+        # ATTEMPT before the put, ALLOW after it, then the O3 READBACK verdict — all one op.
+        assert [e for e, _ in events] == ["ATTEMPT", "ALLOW", "READBACK_OK"]
+        ops = {op for _, op in events}
+        assert events[0][1] is not None and ops == {events[0][1]}
 
     @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
     @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
@@ -300,6 +313,96 @@ class TestSetPvValueAuditTrail:
         # ATTEMPT (before the put) then UNKNOWN_PENDING (on cancel), correlated by op.
         assert [e for e, _ in events] == ["ATTEMPT", "UNKNOWN_PENDING"]
         assert events[0][1] is not None and events[0][1] == events[1][1]
-        # A cancelled write is NEVER labelled ALLOW or FAILED.
+        # A cancelled write is NEVER labelled ALLOW or FAILED — and never reaches the readback.
         assert "event=ALLOW" not in caplog.text
         assert "event=FAILED" not in caplog.text
+        assert "READBACK" not in caplog.text
+
+
+class TestSetPvValueReadback:
+    """O3: after the ALLOW, the write reads the value back and returns a structured verdict.
+
+    A mismatch or an unreadable readback is NEVER a tool error — the write already happened; the
+    loudness is the ``verified`` field plus the ``READBACK_*`` audit event, not an exception.
+    """
+
+    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.get_safety")
+    async def test_mismatch_is_success_with_verified_false(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        # Written "20.0" but the IOC holds 99.0 → a genuine mismatch.
+        mock_pv_get.side_effect = [
+            {"pv_name": "TEST:PV", "value": 10.0},
+            {"pv_name": "TEST:PV", "value": 99.0},
+        ]
+        mock_pv_put.return_value = None
+
+        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+            result = await _set_pv_value("TEST:PV", "20.0")
+
+        # The put succeeded (status success), but verification FAILED — loud via field + audit.
+        assert result["status"] == "success"
+        assert result["verified"] is False
+        assert result["readback"] == 99.0
+        assert "event=READBACK_MISMATCH" in caplog.text
+        assert "event=ALLOW" in caplog.text  # the write itself was still allowed
+
+    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.get_safety")
+    async def test_readback_timeout_is_not_verifiable_not_an_error(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        # Old read succeeds; the readback pv_get times out — "not verifiable", NOT a failure.
+        mock_pv_get.side_effect = [
+            {"pv_name": "TEST:PV", "value": 10.0},
+            PVTimeoutError("readback timed out"),
+        ]
+        mock_pv_put.return_value = None
+
+        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+            result = await _set_pv_value("TEST:PV", "20.0")  # must NOT raise
+
+        assert result["status"] == "success"
+        assert result["verified"] is None
+        assert result["readback"] is None
+        assert "event=READBACK_UNVERIFIED" in caplog.text
+
+    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.get_safety")
+    async def test_readback_value_none_is_not_verifiable(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+    ) -> None:
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        # The readback carried value None + a note (the p4p extraction fallback) — not a reading.
+        mock_pv_get.side_effect = [
+            {"pv_name": "TEST:PV", "value": 10.0},
+            {"pv_name": "TEST:PV", "value": None, "note": "value extraction failed"},
+        ]
+        mock_pv_put.return_value = None
+
+        result = await _set_pv_value("TEST:PV", "20.0")
+        assert result["status"] == "success"
+        assert result["verified"] is None

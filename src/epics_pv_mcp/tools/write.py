@@ -4,7 +4,9 @@ import asyncio
 import itertools
 import logging
 
+from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsError
+from epics_pv_mcp.readback import ReadbackVerification, WriteResult, verify_readback
 from epics_pv_mcp.safety import get_safety
 from epics_pv_mcp.services.epics_client import pv_get, pv_put
 
@@ -72,9 +74,36 @@ async def _set_pv_value(
     # record can never be lost to a late cancel. Keep this tail await-free.
     safety.audit_write(pv_name, old_value, value, operation_id=operation_id)
 
-    return {
-        "status": "success",
-        "pv_name": pv_name,
-        "old_value": old_value,
-        "new_value": value,
-    }
+    # O3 readback verification (always-on). The write already SUCCEEDED and is ALLOW-audited above;
+    # read the just-written value back and compare it to what was written, so a wrong / not-landed
+    # value becomes LOUD — a structured verdict plus a READBACK audit event — instead of a bare
+    # "success" (the "stiller Irrtum" countermeasure). A NEW await is legal ONLY here, after the
+    # await-free ALLOW tail: moving it above the audit_write line would break the UNKNOWN_PENDING
+    # vs ALLOW ordering. A readback that fails (timeout / unreadable) or yields no live value is
+    # "not verifiable" — never a tool error, never a mismatch (the write happened regardless); only
+    # a genuine value difference is a mismatch. A cancel of the readback await is a BaseException,
+    # so it propagates unchanged (never swallowed here, never mislabelled FAILED).
+    try:
+        readback_raw = await pv_get(pv_name, timeout)
+    except Exception:  # noqa: BLE001 — a failed readback is "not verifiable", not a write failure
+        logger.warning("readback failed for %s; write not verifiable", pv_name, exc_info=True)
+        verification = ReadbackVerification(
+            verified=None, note="not verifiable: readback pv_get failed (timeout/unreadable)"
+        )
+    else:
+        verification = verify_readback(value, readback_raw, get_config().readback_tolerance)
+
+    safety.audit_readback(
+        pv_name, value, verification.readback, verification.verified, operation_id=operation_id
+    )
+
+    return WriteResult(
+        status="success",
+        pv_name=pv_name,
+        old_value=old_value,
+        new_value=value,
+        readback=verification.readback,
+        verified=verification.verified,
+        tolerance=verification.tolerance,
+        note=verification.note,
+    ).model_dump()
