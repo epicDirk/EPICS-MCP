@@ -1,0 +1,509 @@
+"""Per-gate deny-path contract test — what makes the write-gate contract CI-enforced, not prose.
+
+The contract lives in ``CLAUDE.md`` ("Write-gate contract: what any in-server write gate must
+provide (hard)"). Its six points are: (1) an env on/off gate, default OFF; (2) an allowlist whose
+empty-semantics are fail-closed in a deliberate per-surface *shape*; (3) a rate limit where a write
+denied by the gate consumes no token; (4) a mandatory, metadata-only, durable audit of every gate
+verdict; (5) a fail-closed reach/URL boundary where the surface has network reach; (6) an honest
+scope statement plus **every deny path must be red-provable**.
+
+This module is point 6 made executable, and it is the template a THIRD write surface inherits.
+It has two halves that must agree:
+
+* **Executable rows** — :data:`DENY_PATHS` lists every way each gate can refuse. Each row is driven
+  for real and checked on four axes: the typed exception, its machine-readable ``error_code``,
+  exactly one terminal ``event=DENY`` audit line carrying the expected code, and the point-3
+  invariant that the denial consumed no rate token.
+* **A drift guard** — the AST scan counts the ``_audit_deny`` call sites per gate module and
+  compares them against the same canonical map. A new deny path that nobody registered here fails
+  the build instead of shipping untested.
+
+The two gates deliberately differ where the contract says the shape is a per-surface choice:
+the PV gate *refuses to start* on an empty name-pattern and emits ATTEMPT/UNKNOWN around its
+mid-flight-interruptible put; the Olog gate *constructs and denies at runtime* on an empty logbook
+allowlist and has no mid-flight window. Neither is fail-open — see contract point 2.
+
+**Why the no-token assertion compares CONTENT, not length.** Two of the nine rows are rate-limit
+denials, and a rate-limit denial can only fire once the window is FULL: at the moment of refusal the
+token deque holds ``maxlen`` entries, so ``len(...) == 0`` is unreachable there. Comparing the
+length before and after is worse than useless — the deque is at ``maxlen``, so a wrongly appended
+token *evicts* an old one and the length is unchanged, leaving the guard green under the very bug it
+exists to catch. Comparing the deque's *contents* goes red on all nine rows. For the same reason a
+config with ``rate_limit=0`` (an empty deque) must never be used to make this assertion look easy:
+it would pass without proving anything.
+
+**Deliberately OUT of scope** — three distinct buckets, kept apart because they fail differently:
+
+1. *Boot refuses.* A write-enabled process with no durable audit sink configured refuses to start
+   (contract point 4); that is ``test_server.py::test_main_refuses_write_enabled_without_durable_
+   audit_sink``, not a per-call denial.
+2. *Posture-dependent construction refuses (PV).* An empty write pattern or a non-loopback EPICS
+   search reach raise ``SafetyConfigError`` from ``SafetyLayer.__init__`` — before an audit logger
+   exists, so they emit no DENY line by construction. Covered in ``test_safety.py``.
+3. *Lazy construction refuses (Olog).* The same class of failure, but the Olog gate is built on
+   first use, so its unwritable-sink refusal surfaces at the first write rather than at boot.
+   Covered in ``test_olog_write.py``.
+
+Also out of scope, and for a different reason: ``BOUNDS_DENY`` (``safety.py::audit_bounds_deny``) is
+a real audited event but *not* a gate verdict — it fires after the gate admitted the write, so it
+legitimately HAS consumed a token and would (correctly) violate the point-3 invariant asserted here.
+
+**Known gap, recorded rather than hidden.** Some Olog writes are refused *before* this gate is
+consulted (whole-mode preconditions in ``services/checkers_olog.py`` for ``add_log_attachment`` and
+``update_log_entry``). Those refusals emit **no audit line at all**, and today they raise
+``OlogWriteDeniedError`` with the gate's own ``OLOG_WRITE_DENIED`` code — so a caller cannot tell
+them from an audited gate DENY. Contract point 4 therefore scopes the audit promise to *gate
+verdicts* and forbids a pre-gate refusal from carrying the gate's error code; closing that gap is
+tracked separately (it changes an error class and is not a test-only change).
+
+**On live coverage, per surface — the premise is not the same on both.** For the PV gate every deny
+path raises before any network I/O, so a live deny test would execute identical code beside an
+unused socket; the in-memory rows are the honest coverage. For the Olog gate that premise does
+**not** hold: on the attachment/update tool paths a real HTTP round-trip happens before the gate is
+consulted, so these rows prove the gate *method*, not the ordering inside the tool path. Contract
+point 6 prefers a live deny test over an in-memory one, and today **no write gate has one** — a
+known, recorded gap, not a solved problem.
+"""
+
+from __future__ import annotations
+
+import ast
+import collections
+import logging
+from collections import Counter
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Protocol
+
+import pytest
+
+import epics_pv_mcp.config as config_module
+import epics_pv_mcp.olog_safety as olog_safety_module
+import epics_pv_mcp.safety as safety_module
+from epics_pv_mcp.config import EpicsConfig
+from epics_pv_mcp.errors import EpicsError, OlogWriteDeniedError, PVWriteDeniedError, RateLimitError
+from epics_pv_mcp.olog_safety import OlogWriteGate
+from epics_pv_mcp.safety import SafetyLayer
+
+# A writes-ON SafetyLayer asserts its EPICS search reach at construction (E8). The autouse env
+# strip in conftest leaves *_AUTO_ADDR_LIST unset, which is parser-faithfully "broadcast ON", so
+# without the loopback lane every writes-on build below would raise SafetyConfigError instead.
+pytestmark = pytest.mark.usefixtures("loopback_write_env")
+
+_PV_AUDIT_LOGGER = "epics_pv_mcp.audit"
+_OLOG_AUDIT_LOGGER = "epics_pv_mcp.olog_audit"
+_AUDIT_DENY = "_audit_deny"
+
+# Synthetic placeholders only (facility-agnostic guard): a made-up power-supply setpoint and a
+# made-up logbook host. Nothing here names a real device, host or person.
+_PV_TARGET = "SIM:PS-01:Cur-SP"
+_PV_ALLOWLIST = r"^SIM:PS-01:.*-SP$"
+_PV_OFF_ALLOWLIST = "SIM:PS-02:Cur-SP"
+
+# Small enough to fill the window in two calls, and >=1 so the deque is never empty — an empty
+# deque would make the no-token assertion vacuous (see module docstring).
+_RATE_LIMIT = 2
+
+
+@pytest.fixture(autouse=True)
+def _reset_singletons() -> Iterator[None]:
+    """Reset the config and both write-gate singletons so every row builds its gate fresh."""
+    config_module._config = None
+    safety_module._safety = None
+    olog_safety_module._olog_safety = None
+    yield
+    config_module._config = None
+    safety_module._safety = None
+    olog_safety_module._olog_safety = None
+
+
+class _WriteGate(Protocol):
+    """The seam every write gate shares — the sliding-window token deque of contract point 3."""
+
+    _timestamps: collections.deque[float]
+
+
+@dataclass(frozen=True)
+class DenyPath:
+    """One way a write gate can refuse, as an executable contract row.
+
+    ``arm`` returns a freshly built gate already in the state where this path fires, together with
+    the thunk that triggers the refusal — so the two gates' differently-shaped
+    ``check_write_allowed`` signatures stay inside their own closures and the test body stays
+    uniform.
+    """
+
+    path_id: str
+    module: str
+    """Gate module filename — ties this row to the AST scan below."""
+    audit_logger: str
+    arm: Callable[[], tuple[_WriteGate, Callable[[], None]]]
+    exception: type[EpicsError]
+    exception_error_code: str
+    audit_error_code: str
+    """The code in the DENY audit line. NOT always the exception's own — see attach_too_large."""
+
+
+# ======================================================================================
+# PV gate (SafetyLayer) — env gate, name allowlist, rate limit
+# ======================================================================================
+
+
+def _arm_pv_env_off() -> tuple[_WriteGate, Callable[[], None]]:
+    gate = SafetyLayer(EpicsConfig())  # the shipping default: writes OFF (contract point 1)
+    return gate, lambda: gate.check_write_allowed(_PV_TARGET)
+
+
+def _arm_pv_allowlist_miss() -> tuple[_WriteGate, Callable[[], None]]:
+    gate = SafetyLayer(
+        EpicsConfig(allow_pv_write=True, pv_write_pattern=_PV_ALLOWLIST, write_rate_limit=10)
+    )
+    return gate, lambda: gate.check_write_allowed(_PV_OFF_ALLOWLIST)
+
+
+def _arm_pv_rate_limit() -> tuple[_WriteGate, Callable[[], None]]:
+    # The window must be FULL for this path to fire at all — hence a NON-empty token deque at the
+    # moment of denial, which is exactly why the invariant compares contents and not length.
+    gate = SafetyLayer(
+        EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=_RATE_LIMIT)
+    )
+    for _ in range(_RATE_LIMIT):
+        gate.check_write_allowed(_PV_TARGET)
+    return gate, lambda: gate.check_write_allowed(_PV_TARGET)
+
+
+# ======================================================================================
+# Olog gate (OlogWriteGate) — logbooks, env gate, URL boundary, allowlist, size cap, rate limit
+# ======================================================================================
+
+
+def _olog_config(
+    *,
+    olog_url: str = "http://localhost:8080/Olog",
+    allow_olog_write: bool = True,
+    olog_write_logbooks: str = "Ops",
+    olog_write_rate_limit: int = 5,
+    olog_attach_max_bytes: int = 1024,
+) -> EpicsConfig:
+    """Olog writes enabled against a loopback sandbox; every value synthetic."""
+    return EpicsConfig(
+        olog_url=olog_url,
+        allow_olog_write=allow_olog_write,
+        olog_write_logbooks=olog_write_logbooks,
+        olog_write_rate_limit=olog_write_rate_limit,
+        olog_attach_max_bytes=olog_attach_max_bytes,
+        olog_write_user="epics-pv-logbook-svc",
+        olog_write_password="pw",
+    )
+
+
+def _arm_olog_empty_logbooks() -> tuple[_WriteGate, Callable[[], None]]:
+    # An empty list would slip through the "logbooks ⊆ allowlist" check (set() <= anything), so the
+    # gate guards it first.
+    gate = OlogWriteGate(_olog_config())
+    return gate, lambda: gate.check_write_allowed([])
+
+
+def _arm_olog_env_off() -> tuple[_WriteGate, Callable[[], None]]:
+    gate = OlogWriteGate(_olog_config(allow_olog_write=False))
+    return gate, lambda: gate.check_write_allowed(["Ops"])
+
+
+def _arm_olog_boundary_reject() -> tuple[_WriteGate, Callable[[], None]]:
+    # Non-loopback and not exactly allowlisted → refused (contract point 5).
+    gate = OlogWriteGate(_olog_config(olog_url="http://logbook-remote:8080/Olog"))
+    return gate, lambda: gate.check_write_allowed(["Ops"])
+
+
+def _arm_olog_allowlist_miss() -> tuple[_WriteGate, Callable[[], None]]:
+    gate = OlogWriteGate(_olog_config(olog_write_logbooks="Ops"))
+    return gate, lambda: gate.check_write_allowed(["Maintenance"])
+
+
+def _arm_olog_attach_too_large() -> tuple[_WriteGate, Callable[[], None]]:
+    gate = OlogWriteGate(_olog_config(olog_attach_max_bytes=1024))
+    return gate, lambda: gate.check_write_allowed(["Ops"], attachment_bytes=2048)
+
+
+def _arm_olog_rate_limit() -> tuple[_WriteGate, Callable[[], None]]:
+    gate = OlogWriteGate(_olog_config(olog_write_rate_limit=_RATE_LIMIT))
+    for _ in range(_RATE_LIMIT):
+        gate.check_write_allowed(["Ops"])
+    return gate, lambda: gate.check_write_allowed(["Ops"])
+
+
+# ======================================================================================
+# The canonical map — the single place a new deny path gets registered
+# ======================================================================================
+
+DENY_PATHS: tuple[DenyPath, ...] = (
+    DenyPath(
+        path_id="pv_env_off",
+        module="safety.py",
+        audit_logger=_PV_AUDIT_LOGGER,
+        arm=_arm_pv_env_off,
+        exception=PVWriteDeniedError,
+        exception_error_code="PV_WRITE_DENIED",
+        audit_error_code="PV_WRITE_DENIED",
+    ),
+    DenyPath(
+        path_id="pv_allowlist_miss",
+        module="safety.py",
+        audit_logger=_PV_AUDIT_LOGGER,
+        arm=_arm_pv_allowlist_miss,
+        exception=PVWriteDeniedError,
+        exception_error_code="PV_WRITE_DENIED",
+        audit_error_code="PV_WRITE_DENIED",
+    ),
+    DenyPath(
+        path_id="pv_rate_limit",
+        module="safety.py",
+        audit_logger=_PV_AUDIT_LOGGER,
+        arm=_arm_pv_rate_limit,
+        exception=RateLimitError,
+        exception_error_code="RATE_LIMIT_EXCEEDED",
+        audit_error_code="RATE_LIMIT_EXCEEDED",
+    ),
+    DenyPath(
+        path_id="olog_empty_logbooks",
+        module="olog_safety.py",
+        audit_logger=_OLOG_AUDIT_LOGGER,
+        arm=_arm_olog_empty_logbooks,
+        exception=OlogWriteDeniedError,
+        exception_error_code="OLOG_WRITE_DENIED",
+        audit_error_code="OLOG_WRITE_DENIED",
+    ),
+    DenyPath(
+        path_id="olog_env_off",
+        module="olog_safety.py",
+        audit_logger=_OLOG_AUDIT_LOGGER,
+        arm=_arm_olog_env_off,
+        exception=OlogWriteDeniedError,
+        exception_error_code="OLOG_WRITE_DENIED",
+        audit_error_code="OLOG_WRITE_DENIED",
+    ),
+    DenyPath(
+        path_id="olog_boundary_reject",
+        module="olog_safety.py",
+        audit_logger=_OLOG_AUDIT_LOGGER,
+        arm=_arm_olog_boundary_reject,
+        exception=OlogWriteDeniedError,
+        exception_error_code="OLOG_WRITE_DENIED",
+        audit_error_code="OLOG_WRITE_DENIED",
+    ),
+    DenyPath(
+        path_id="olog_allowlist_miss",
+        module="olog_safety.py",
+        audit_logger=_OLOG_AUDIT_LOGGER,
+        arm=_arm_olog_allowlist_miss,
+        exception=OlogWriteDeniedError,
+        exception_error_code="OLOG_WRITE_DENIED",
+        audit_error_code="OLOG_WRITE_DENIED",
+    ),
+    DenyPath(
+        path_id="olog_attach_too_large",
+        module="olog_safety.py",
+        audit_logger=_OLOG_AUDIT_LOGGER,
+        arm=_arm_olog_attach_too_large,
+        exception=OlogWriteDeniedError,
+        # The ONE row where the audit code and the exception code diverge: the gate audits the
+        # specific reason while the raised error carries the generic gate code. Pinned here so the
+        # divergence is deliberate and visible rather than an accident nobody checks.
+        exception_error_code="OLOG_WRITE_DENIED",
+        audit_error_code="OLOG_ATTACH_TOO_LARGE",
+    ),
+    DenyPath(
+        path_id="olog_rate_limit",
+        module="olog_safety.py",
+        audit_logger=_OLOG_AUDIT_LOGGER,
+        arm=_arm_olog_rate_limit,
+        exception=RateLimitError,
+        exception_error_code="RATE_LIMIT_EXCEEDED",
+        audit_error_code="RATE_LIMIT_EXCEEDED",
+    ),
+)
+
+
+# ======================================================================================
+# Half 1 — every registered deny path, driven for real
+# ======================================================================================
+
+
+@pytest.mark.parametrize("path", DENY_PATHS, ids=lambda path: path.path_id)
+def test_deny_path_satisfies_the_contract(path: DenyPath, caplog: pytest.LogCaptureFixture) -> None:
+    """Contract points 3, 4 and 6 for ONE deny path of ONE gate.
+
+    RED-PROOF (per row, by deleting the guard that row asserts):
+    * (i)/(iv): drop the ``raise`` from that path in ``safety.py`` / ``olog_safety.py`` →
+      ``DID NOT RAISE``.
+    * (ii): drop that path's ``self._audit_deny(...)`` call → ``expected exactly one DENY line,
+      got []``.
+    * (iii): the deny branches append no token, so DELETING them proves nothing about the token
+      invariant. The mutant that drives it red is the opposite one — append a token on the deny
+      path (e.g. ``self._timestamps.append(time.monotonic())`` before the raise) → the content
+      comparison fails on every row, including the two rate-limit rows where a length comparison
+      would stay green because the full deque merely evicts its oldest entry.
+    """
+    gate, fire = path.arm()
+    tokens_before = list(gate._timestamps)
+    caplog.clear()  # priming a rate window must not leak into the assertions below
+
+    with (
+        caplog.at_level(logging.INFO, logger=path.audit_logger),
+        pytest.raises(path.exception) as excinfo,
+    ):
+        fire()
+
+    # (i) + (iv) the refusal is typed AND machine-readable
+    assert excinfo.value.error_code == path.exception_error_code
+
+    # (ii) exactly ONE terminal DENY line, carrying this path's reason, and no success record
+    deny_lines = [record.message for record in caplog.records if "event=DENY" in record.message]
+    assert len(deny_lines) == 1, f"expected exactly one DENY line, got {deny_lines}"
+    assert f"error_code={path.audit_error_code}" in deny_lines[0]
+    assert "event=ALLOW" not in caplog.text
+
+    # (iii) a write denied BY THE GATE consumes no rate token (contract point 3)
+    assert list(gate._timestamps) == tokens_before, "a gate denial must not consume a rate token"
+
+
+def test_rate_limited_rows_deny_on_a_non_empty_window() -> None:
+    """The no-token invariant must not be provable by accident on an empty deque.
+
+    If a future edit set a rate limit of 0 (or primed nothing), the two rate-limit rows would assert
+    ``[] == []`` and prove nothing. Pin that they really do deny with a FULL window.
+    """
+    for path in DENY_PATHS:
+        if not path.path_id.endswith("rate_limit"):
+            continue
+        gate, _ = path.arm()
+        assert len(gate._timestamps) == _RATE_LIMIT, (
+            f"{path.path_id}: expected a full token window before the denial, "
+            f"got {len(gate._timestamps)}"
+        )
+
+
+# ======================================================================================
+# Half 2 — the drift guard: the code's deny call sites vs. the canonical map
+# ======================================================================================
+
+_GATE_PACKAGE_DIR = Path(safety_module.__file__).parent
+
+EXPECTED_DENY_CALL_SITES: dict[str, Counter[str]] = {
+    "safety.py": Counter({"PV_WRITE_DENIED": 2, "RATE_LIMIT_EXCEEDED": 1}),
+    "olog_safety.py": Counter(
+        {"OLOG_WRITE_DENIED": 4, "OLOG_ATTACH_TOO_LARGE": 1, "RATE_LIMIT_EXCEEDED": 1}
+    ),
+}
+
+
+def _discover_gate_modules() -> dict[str, ast.Module]:
+    """Every package module that defines an ``_audit_deny`` — i.e. every in-server write gate.
+
+    Discovered by scanning, not hard-coded: a THIRD gate module enrols itself automatically and
+    then fails :func:`test_deny_call_sites_match_the_canonical_map` until someone registers its
+    deny paths above. Hard-coding two paths here would let a third gate ship unwatched.
+    """
+    modules: dict[str, ast.Module] = {}
+    for module_path in sorted(_GATE_PACKAGE_DIR.glob("*.py")):
+        tree = ast.parse(module_path.read_text(encoding="utf-8"))
+        if any(
+            isinstance(node, ast.FunctionDef) and node.name == _AUDIT_DENY
+            for node in ast.walk(tree)
+        ):
+            modules[module_path.name] = tree
+    return modules
+
+
+def _audit_deny_error_codes(module_name: str, tree: ast.Module) -> Counter[str]:
+    """Count the ``error_code`` literal of every ``self._audit_deny(...)`` call site in *tree*.
+
+    The parameter position is read from the module's OWN ``_audit_deny`` signature (``self``
+    excluded) rather than hard-coded: the two existing gates already disagree — the PV gate takes
+    ``pv_name`` first, the Olog gate takes ``error_code`` first — so a fixed index would be a coin
+    flip for a third. Keyword form is honoured too, and a call whose code cannot be resolved to a
+    string literal fails LOUDLY: an unreadable call site must never be miscounted as absent, which
+    would read exactly like "this deny path was removed".
+    """
+    index: int | None = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == _AUDIT_DENY:
+            parameters = [argument.arg for argument in node.args.args if argument.arg != "self"]
+            assert "error_code" in parameters, (
+                f"{module_name}: {_AUDIT_DENY} has no error_code parameter ({parameters}) — "
+                "the drift-guard anchor broke"
+            )
+            index = parameters.index("error_code")
+            break
+    assert index is not None, f"{module_name}: no {_AUDIT_DENY} definition — the anchor broke"
+
+    codes: Counter[str] = Counter()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr != _AUDIT_DENY:
+            continue
+        keyword = next((kw for kw in node.keywords if kw.arg == "error_code"), None)
+        if keyword is not None:
+            value: ast.expr | None = keyword.value
+        else:
+            value = node.args[index] if index < len(node.args) else None
+        assert isinstance(value, ast.Constant) and isinstance(value.value, str), (
+            f"{module_name}:{node.lineno}: {_AUDIT_DENY} is not called with a literal error_code, "
+            "so the drift guard cannot read it — pass a literal, or teach the guard to resolve it. "
+            "Failing loudly rather than counting this call site as absent."
+        )
+        codes[value.value] += 1
+    return codes
+
+
+def test_deny_call_sites_match_the_canonical_map() -> None:
+    """The gates' audited deny call sites are exactly the ones registered in this module.
+
+    Counts, not a set of codes: nine paths share only five codes (four Olog paths are all
+    ``OLOG_WRITE_DENIED``), so set equality would stay green when a tenth path reuses an existing
+    code — the most likely way this drifts, given the Olog gate's numbered check list grows in
+    place.
+
+    Honest limit: counting call sites cannot see a path that WIDENS an existing condition instead of
+    adding a new ``_audit_deny``, nor a refusal that never calls the gate at all (see the known gap
+    in the module docstring).
+
+    RED-PROOF: add or delete any ``self._audit_deny("…")`` call in either gate, or change one of its
+    code literals, and this fails with the differing Counter — including the case where the new
+    path reuses an existing code, which a set comparison would have missed.
+    """
+    discovered = _discover_gate_modules()
+    assert discovered, "no write-gate module found — the AST anchor broke"
+    assert set(discovered) == set(EXPECTED_DENY_CALL_SITES), (
+        "the set of write-gate modules changed — register the new gate's deny paths in DENY_PATHS "
+        f"and EXPECTED_DENY_CALL_SITES. found={sorted(discovered)} "
+        f"expected={sorted(EXPECTED_DENY_CALL_SITES)}"
+    )
+    for module_name, tree in discovered.items():
+        codes = _audit_deny_error_codes(module_name, tree)
+        assert codes, f"{module_name}: no {_AUDIT_DENY} call sites — the AST anchor broke"
+        assert codes == EXPECTED_DENY_CALL_SITES[module_name], (
+            f"{module_name}: audited deny call sites drifted from the canonical map. "
+            f"code={dict(codes)} map={dict(EXPECTED_DENY_CALL_SITES[module_name])}"
+        )
+
+
+def test_canonical_map_covers_every_audited_deny_call_site() -> None:
+    """The executable rows and the AST truth describe the SAME deny paths.
+
+    Without this, the two halves could drift apart silently: someone could add a row here that no
+    gate implements, or bump a count in ``EXPECTED_DENY_CALL_SITES`` without adding the row that
+    actually drives the new path red.
+
+    RED-PROOF: delete any entry from ``DENY_PATHS`` (or add one for a path no gate implements) and
+    the per-module Counters differ.
+    """
+    from_rows: dict[str, Counter[str]] = {}
+    for path in DENY_PATHS:
+        from_rows.setdefault(path.module, Counter())[path.audit_error_code] += 1
+    assert from_rows == EXPECTED_DENY_CALL_SITES, (
+        "DENY_PATHS and EXPECTED_DENY_CALL_SITES disagree — every audited deny call site needs "
+        f"exactly one executable row. rows={ {k: dict(v) for k, v in from_rows.items()} }"
+    )
