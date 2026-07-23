@@ -79,6 +79,12 @@ This is a controls tool, so the trust questions come first:
   if it was cancelled mid-put (the value may still land at the IOC, so verify by read-back and never
   blindly retry). A write-enabled server **refuses to start** unless `EPICS_MCP_AUDIT_LOG_FILE` names
   a durable path — an ephemeral stderr audit would lose this trail on restart.
+- **Every write is bounds-checked (always-on).** Before the put, the written value is checked
+  against the record's own drive limits (`control` DRVL/DRVH); an out-of-range value is refused with
+  `PVWriteBoundsError` (`PV_WRITE_OUT_OF_BOUNDS`) plus a `BOUNDS_DENY` audit event **before it
+  reaches the IOC** — the name/rate gate only allowlists the PV name, never the value. A record with
+  no declared limits (or a non-numeric value) is not bounds-checkable; the write proceeds and the
+  result's `bounds_note` says so.
 - **Every write is read back (always-on).** After a sanctioned put the server reads the value back
   and compares it to what was written: the result carries `verified` (true within tolerance / false
   mismatch / null not verifiable) plus `readback`/`tolerance`/`note`, and a `READBACK_OK` /

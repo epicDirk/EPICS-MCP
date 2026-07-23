@@ -109,8 +109,8 @@ def build_instructions(display_tools_available: bool) -> str:
         "The PV-mutating tool set_pv_value is gated OFF by default and additionally requires "
         "EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, a rate limit and an audit log — a "
         "separate gate from the Olog one, and it stays off. "
-        "A write-enabled server refuses to start unless EPICS_MCP_AUDIT_LOG_FILE names a durable "
-        "audit path (an ephemeral stderr audit would lose the trail on restart). "
+        "A write-enabled server needs a durable EPICS_MCP_AUDIT_LOG_FILE (else it refuses to "
+        "start) and refuses an out-of-range value before the put. "
         "After a sanctioned write it reads the value back and returns a structured result "
         "(verified/readback/tolerance) plus a READBACK audit event, so a wrong or not-landed value "
         "is surfaced, not silently accepted. "
@@ -383,6 +383,12 @@ async def set_pv_value(
     Protected by safety layer: environment gate, regex allowlist, rate-limit (10/min default),
     and audit logging to a durable path (EPICS_MCP_AUDIT_LOG_FILE — a write-enabled server refuses
     to start without one) — the load-bearing, client-independent guard.
+
+    Value bounds (always-on, pre-put): the written value is checked against the record's OWN drive
+    limits (control DRVL/DRVH, read on the pre-read). An out-of-range value raises
+    PVWriteBoundsError (error_code PV_WRITE_OUT_OF_BOUNDS) BEFORE the put — it never reaches the
+    IOC — and emits a BOUNDS_DENY audit event. A record that declares no drive limits (or a
+    non-numeric value) is not bounds-checkable; the write proceeds and ``bounds_note`` says so.
 
     Readback verification (always-on): after the write the value is read back and compared against
     what was written. The result carries ``verified`` (true = within tolerance / false = mismatch /

@@ -199,6 +199,10 @@ A write-enabled server **refuses to start** unless `EPICS_MCP_AUDIT_LOG_FILE` na
 ephemeral stderr audit would lose this trail on restart. The stages, each `op`-correlated:
 
 - `event=DENY` — the gate refused it (writes off / not in the allowlist / rate limit); nothing was sent.
+- `event=BOUNDS_DENY` — the value gate (O2) refused it: the PV is in the allowlist but the written
+  value is outside the record's own drive limits (`control` DRVL/DRVH). Refused **before** the put,
+  so nothing reached the IOC; carries the value + limits. (A record with no declared limits is not
+  bounds-checked and this line does not appear.)
 - `event=ATTEMPT` — emitted **before** the I/O; a durable record that this write was dispatched.
 - `event=ALLOW` — the put returned successfully.
 - `event=FAILED error_code=…` — the put raised (timeout, connection, or a bug tagged `INTERNAL`).
