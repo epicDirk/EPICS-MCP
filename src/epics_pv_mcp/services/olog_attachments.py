@@ -106,8 +106,19 @@ def read_uploads(specs: list[_Spec], *, max_total_bytes: int) -> list[Attachment
     TOTAL before any read — but a file can grow (or be swapped) between stat and read
     (QA: TOCTOU), which used to materialise AND upload past the cap. Reading is therefore
     budgeted: at most one byte over the remaining budget is ever read, and exceeding it
-    refuses with the gate's own error code (``OLOG_ATTACH_TOO_LARGE``). *max_total_bytes*
-    is the same cap the gate enforced (``olog_attach_max_bytes``).
+    refuses with ``OLOG_ATTACH_TOO_LARGE_AT_READ``. *max_total_bytes* is the same cap the gate
+    enforced (``olog_attach_max_bytes``).
+
+    Its OWN code, deliberately not the gate's ``OLOG_ATTACH_TOO_LARGE``, even though the two
+    refuse on the same cap. They are different events: the gate's is a **gate verdict** — it runs
+    before admission, writes a ``DENY`` audit line and consumes no rate token; this one runs
+    **after** the gate admitted the write, so the token is already spent, and it emits **no audit
+    line at all** (it is not a gate verdict, and it is raised outside the gate). The write-gate
+    contract (CLAUDE.md, point 4) forbids a refusal raised outside the gate from carrying the
+    gate's error code, precisely so a caller can tell "the cap denied this, audited, nothing was
+    consumed" from "the file changed under us after admission". Guarded by
+    ``tests/test_write_gate_contract.py::test_no_pre_gate_refusal_carries_a_gate_error_code``,
+    which is how this case was found.
     """
     uploads: list[AttachmentUpload] = []
     remaining = max_total_bytes
@@ -127,7 +138,7 @@ def read_uploads(specs: list[_Spec], *, max_total_bytes: int) -> list[Attachment
                 f"Olog write refused: attachment {spec.filename!r} exceeds the remaining "
                 f"size budget at READ time (limit {max_total_bytes} bytes total, "
                 "EPICS_MCP_OLOG_ATTACH_MAX_BYTES) — the file changed between stat and read.",
-                error_code="OLOG_ATTACH_TOO_LARGE",
+                error_code="OLOG_ATTACH_TOO_LARGE_AT_READ",
             )
         remaining -= len(content)
         uploads.append(

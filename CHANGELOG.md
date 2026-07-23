@@ -9,6 +9,41 @@ carry breaking changes).
 
 ### Added
 
+- **Pre-gate refusals no longer wear a write gate's error code — and the rule is now CI-enforced.**
+  The write-gate contract (`CLAUDE.md`, point 4) says *"a refusal raised outside the gate must not
+  carry the gate's error code"*: such a refusal writes **no audit line at all**, so reusing the
+  gate's code makes an un-audited refusal indistinguishable from an audited gate `DENY` and the
+  audit's coverage claim unfalsifiable from outside. Five call sites violated it. Four new codes,
+  each on a class that stays a **subclass** of the one it replaces, so every existing `except`
+  keeps catching it:
+  - `OlogWholeModeRequiredError` → **`OLOG_WHOLE_MODE_REQUIRED`** for the whole-mode preconditions
+    of `add_log_attachment` / `update_log_entry` (`services/checkers_olog.py`, raised *before*
+    `get_olog_safety()`), replacing `OLOG_WRITE_DENIED`.
+  - The client-side backstop `OlogWholeModeRequired` (`services/olog_exceptions.py`) moves to the
+    **same** code via its ClassVar, so one condition reports as one code on both layers.
+  - `ReadRateLimitError` → **`READ_RATE_LIMIT_EXCEEDED`** for the opt-in read throttle
+    (`services/_http.py::ReadThrottle.check`), which shared the write gates' audited
+    `RATE_LIMIT_EXCEEDED` although it guards reads, writes no audit line, and is reached from the
+    reads the Olog write tools perform before their gate. A named scope exception was considered
+    and rejected: a rule filed as "hard" that carries a carve-out from day one is prose again.
+  - **`OLOG_ATTACH_TOO_LARGE_AT_READ`** for the TOCTOU size re-check in
+    `services/olog_attachments.py::read_uploads` — found by the new guard, not by review. It is a
+    *post*-admission refusal (the rate token is already spent) and un-audited, so wearing the gate's
+    audited `OLOG_ATTACH_TOO_LARGE` hid exactly the distinction the contract is about.
+
+  The guard is `tests/test_write_gate_contract.py::test_no_pre_gate_refusal_carries_a_gate_error_code`:
+  an AST sweep of the whole flat `services/` package (~31 modules) for any exception raised with one
+  of the gates' audit codes, resolving class → code through both repo conventions (constructor in
+  `errors.py`, ClassVar in `services/*_exceptions.py`) and honouring a literal `error_code=` keyword.
+  The code set is **derived from** the canonical `DENY_PATHS` table, so a third gate widens the guard
+  in the same edit. Provably red: on the pre-fix tree it reports all five sites by file:line.
+  A companion behavioural test pins that the whole-mode refusal reports the new code **and** leaves
+  no audit record, with a positive control proving the audit logger is genuinely being captured.
+  Deliberately NOT changed: these refusals still emit no audit line — contract point 4 scopes the
+  audit promise to gate verdicts and writes that reach the I/O, and an audit call from `services/`
+  would sit outside the reach of the `_audit_deny` drift guard, buying a new blind spot as a "fix".
+  The reasoning is written at the raise sites, not only here.
+
 - **Annotation consistency / drift guard (test-only).** Four tests pin every tool's client-facing
   safety hints (`readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint`), which drive real
   client behaviour since MA-Q2 (K1 keys the consent invariant on `destructiveHint`; a honouring client
@@ -208,7 +243,9 @@ carry breaking changes).
 
 - **Refusals no longer report as `INTERNAL` (OQ5).** `OlogError` carries `error_code` as a class
   attribute and each subclass sets its own, mirroring `EpicsError`. `OlogRoundTripUnsafe` →
-  `INVALID_INPUT`, `OlogWholeModeRequired` → `OLOG_WRITE_DENIED`, `OlogAttachmentDownloadDenied` →
+  `INVALID_INPUT`, `OlogWholeModeRequired` → `OLOG_WHOLE_MODE_REQUIRED` (it landed on
+  `OLOG_WRITE_DENIED` first; corrected in place below, still unreleased),
+  `OlogAttachmentDownloadDenied` →
   `OLOG_ATTACHMENT_DOWNLOAD_DENIED`. `INTERNAL` reads as transient and invited retries that each
   burned a rate token and wrote a FAILED line for a write that never happened. The new branch is
   LAST in `_olog_error_code` — the connection/response branches are themselves `OlogError`

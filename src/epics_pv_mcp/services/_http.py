@@ -33,7 +33,7 @@ import urllib3.util
 from requests.adapters import HTTPAdapter
 
 from epics_pv_mcp.config import get_config
-from epics_pv_mcp.errors import RateLimitError
+from epics_pv_mcp.errors import ReadRateLimitError
 from epics_pv_mcp.services.rest_exceptions import RestConnectionError, RestResponseError
 
 logger = logging.getLogger(__name__)
@@ -373,11 +373,18 @@ class ReadThrottle:
         self._lock = threading.Lock()
 
     def check(self) -> None:
-        """Admit one read, or raise :class:`RateLimitError` if the sliding window is full.
+        """Admit one read, or raise :class:`ReadRateLimitError` if the sliding window is full.
 
         Purge → len-check → append is ONE atomic step under the lock (symmetric with the write
         gates), so two concurrent reads can never both pass and exceed the limit; ``now`` is sampled
-        inside the lock, and the raise runs OUTSIDE it — the deny path never appends a token."""
+        inside the lock, and the raise runs OUTSIDE it — the deny path never appends a token.
+
+        The refusal carries ``READ_RATE_LIMIT_EXCEEDED``, NOT the write gates' own
+        ``RATE_LIMIT_EXCEEDED``: this throttle is not a write gate, it writes no audit line, and it
+        is reached from the reads the Olog write tools perform *before* their gate is consulted.
+        Write-gate contract point 4 (CLAUDE.md) forbids a refusal raised outside a gate from
+        carrying that gate's code — otherwise a throttled read would be reported to the caller
+        exactly like an audited write DENY it never was."""
         if self._limit <= 0:
             return  # disabled — opt-in posture, no throttling, no lock taken
         with self._lock:
@@ -387,7 +394,7 @@ class ReadThrottle:
             if not over_limit:
                 self._timestamps.append(now)  # record this read (admit path only)
         if over_limit:
-            raise RateLimitError(
+            raise ReadRateLimitError(
                 f"Read rate limit exceeded ({self._limit} reads per "
                 f"{self._WINDOW_SECONDS:.0f}s). Try again later.",
                 details={"limit": self._limit, "window_seconds": self._WINDOW_SECONDS},

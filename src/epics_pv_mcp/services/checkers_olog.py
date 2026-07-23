@@ -21,7 +21,7 @@ from collections.abc import Callable
 from typing import TypedDict
 
 from epics_pv_mcp.config import get_config
-from epics_pv_mcp.errors import EpicsConnectionError, EpicsError, OlogWriteDeniedError
+from epics_pv_mcp.errors import EpicsConnectionError, EpicsError, OlogWholeModeRequiredError
 from epics_pv_mcp.olog_safety import get_olog_safety
 from epics_pv_mcp.services._http import basic_auth_header, http_status
 from epics_pv_mcp.services._time_window import TimeWindowFormatError
@@ -682,8 +682,18 @@ async def query_olog_add_attachment(
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=auth)
         # Whole-mode FIRST — before any read or write. It is required for the round-trip source AND
         # implies the loopback write-URL boundary; a redacted/remote server is refused structurally.
+        #
+        # PRE-GATE refusal, and deliberately NOT audited (write-gate contract point 4). The audit
+        # promise is scoped to *gate verdicts and writes that reach the I/O*; this is neither — the
+        # gate below has not been consulted, no rate token exists, no write was attempted. Calling
+        # the gate's _audit_deny from here would also emit a DENY line from OUTSIDE the two gate
+        # modules, i.e. outside the reach of the drift guard in tests/test_write_gate_contract.py
+        # that counts them — a new blind spot dressed up as a fix. What the contract DOES require is
+        # that this refusal not masquerade as an audited gate DENY, hence its own error code
+        # (OLOG_WHOLE_MODE_REQUIRED via OlogWholeModeRequiredError, a subclass of
+        # OlogWriteDeniedError so existing handlers still catch it).
         if not client.whole_mode:
-            raise OlogWriteDeniedError(
+            raise OlogWholeModeRequiredError(
                 "Olog write refused: add_log_attachment needs a declared local test sandbox "
                 "(loopback EPICS_MCP_OLOG_URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA). Attaching to an "
                 "existing entry must round-trip its full content — the server's update prunes any "
@@ -805,8 +815,10 @@ async def query_olog_update(
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=auth)
         # Whole-mode FIRST — before any read or write. Required for the round-trip source AND it
         # implies the loopback write-URL boundary; a redacted/remote server is refused structurally.
+        # PRE-GATE and un-audited on purpose, with its own error code — same reasoning as the twin
+        # in query_olog_add_attachment above (write-gate contract point 4).
         if not client.whole_mode:
-            raise OlogWriteDeniedError(
+            raise OlogWholeModeRequiredError(
                 "Olog write refused: update_log_entry needs a declared local test sandbox "
                 "(loopback EPICS_MCP_OLOG_URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA). Editing an entry "
                 "must round-trip its full content — the server's update prunes any attachment and "

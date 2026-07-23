@@ -48,13 +48,30 @@ Also out of scope, and for a different reason: ``BOUNDS_DENY`` (``safety.py::aud
 a real audited event but *not* a gate verdict — it fires after the gate admitted the write, so it
 legitimately HAS consumed a token and would (correctly) violate the point-3 invariant asserted here.
 
-**Known gap, recorded rather than hidden.** Some Olog writes are refused *before* this gate is
-consulted (whole-mode preconditions in ``services/checkers_olog.py`` for ``add_log_attachment`` and
-``update_log_entry``). Those refusals emit **no audit line at all**, and today they raise
-``OlogWriteDeniedError`` with the gate's own ``OLOG_WRITE_DENIED`` code — so a caller cannot tell
-them from an audited gate DENY. Contract point 4 therefore scopes the audit promise to *gate
-verdicts* and forbids a pre-gate refusal from carrying the gate's error code; closing that gap is
-tracked separately (it changes an error class and is not a test-only change).
+**Pre-gate refusals — the error-code axis is closed, the audit axis is a reasoned scope limit.**
+Some refusals happen *before* a gate is consulted: the whole-mode preconditions in
+``services/checkers_olog.py`` (``add_log_attachment`` / ``update_log_entry``), their client-side
+backstop in ``services/olog_exceptions.py``, and the read throttle in ``services/_http.py``. Where
+this module stands on each axis:
+
+* **Error code — closed, and now guarded as a RULE.** Those four used to carry the gates' own
+  ``OLOG_WRITE_DENIED`` / ``RATE_LIMIT_EXCEEDED``, so a caller could not tell an un-audited pre-gate
+  refusal from an audited gate DENY. They now carry ``OLOG_WHOLE_MODE_REQUIRED`` and
+  ``READ_RATE_LIMIT_EXCEEDED``, and :func:`test_no_pre_gate_refusal_carries_a_gate_error_code`
+  sweeps the whole ``services/`` package so a FIFTH case fails the build rather than shipping.
+* **Audit line — deliberately none, which is a scope limit, not an oversight.** Contract point 4
+  clamps the audit promise to *gate verdicts and writes that reach the I/O*; a pre-gate refusal is
+  neither — no gate ran, no token was taken, no write was attempted. Emitting a gate ``DENY`` from
+  ``services/`` would also put an audit call site OUTSIDE the reach of the ``_audit_deny`` drift
+  guard below (which scans the gate modules only), i.e. buy a new blind spot in the name of a fix.
+  The reasoning is written at the raise sites, and the behaviour is pinned by
+  :func:`test_pre_gate_refusal_is_coded_apart_and_writes_no_audit_line`.
+* **The read throttle's own code was the wider decision.** ``ReadThrottle`` guards READS, but it is
+  reached from the reads the Olog write tools do before their gate, and it shares the write gates'
+  audited ``RATE_LIMIT_EXCEEDED``. Giving it ``READ_RATE_LIMIT_EXCEEDED`` was preferred over
+  declaring a named exception to the rule: a rule filed as "hard" that carries a carve-out from day
+  one is prose again. The cost is a wider blast radius on the read path (the throttle is opt-in,
+  default off) and it was accepted knowingly.
 
 **On live coverage, per surface — the premise is not the same on both.** For the PV gate every deny
 path raises before any network I/O, so a live deny test would execute identical code beside an
@@ -69,9 +86,10 @@ from __future__ import annotations
 
 import ast
 import collections
+import importlib
 import logging
 from collections import Counter
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -81,8 +99,15 @@ import pytest
 import epics_pv_mcp.config as config_module
 import epics_pv_mcp.olog_safety as olog_safety_module
 import epics_pv_mcp.safety as safety_module
+import epics_pv_mcp.services.checkers_olog as checkers_olog
 from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import EpicsError, OlogWriteDeniedError, PVWriteDeniedError, RateLimitError
+from epics_pv_mcp.errors import (
+    EpicsError,
+    OlogWholeModeRequiredError,
+    OlogWriteDeniedError,
+    PVWriteDeniedError,
+    RateLimitError,
+)
 from epics_pv_mcp.olog_safety import OlogWriteGate
 from epics_pv_mcp.safety import SafetyLayer
 
@@ -488,6 +513,289 @@ def test_deny_call_sites_match_the_canonical_map() -> None:
             f"{module_name}: audited deny call sites drifted from the canonical map. "
             f"code={dict(codes)} map={dict(EXPECTED_DENY_CALL_SITES[module_name])}"
         )
+
+
+class _NotWholeModeOlogClient:
+    """An ``OlogClient`` stand-in whose only behaviour is "not whole-mode".
+
+    Every other method is deliberately absent: the refusal under test happens at the very top of
+    the service call, so a client that reached ANY other method would fail loudly with an
+    ``AttributeError`` instead of passing the test for the wrong reason.
+    """
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        pass
+
+    @property
+    def whole_mode(self) -> bool:
+        return False
+
+
+@pytest.mark.parametrize(
+    ("tool", "call"),
+    [
+        (
+            "add_log_attachment",
+            lambda: checkers_olog.query_olog_add_attachment("17", attachments=["/probe.bob"]),
+        ),
+        ("update_log_entry", lambda: checkers_olog.query_olog_update("17", title="probe")),
+    ],
+)
+async def test_pre_gate_refusal_is_coded_apart_and_writes_no_audit_line(
+    tool: str,
+    call: Callable[[], Awaitable[object]],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The behavioural half of contract point 4 for the whole-mode pre-gate refusals.
+
+    Two claims, and the second is the one that actually carries the rule:
+
+    1. The refusal reports ``OLOG_WHOLE_MODE_REQUIRED`` — its own code, not the gate's
+       ``OLOG_WRITE_DENIED`` — while remaining catchable as ``OlogWriteDeniedError``.
+    2. It writes **no audit line at all**. That is what makes its own code NECESSARY rather than
+       cosmetic, and it is the promise the contract scopes ("a refusal raised before the gate is
+       consulted writes no audit line").
+
+    A POSITIVE CONTROL runs first, through the same ``caplog`` at the same level: a real gate DENY
+    on the same logger IS captured. Without it, "no DENY line" would also pass if the audit logger
+    were simply not being captured — the failure mode a previous review of this suite caught, and
+    the reason ``caplog.set_level`` is set EXPLICITLY here instead of relying on the root level.
+
+    RED-PROOF (mutant): point ``OlogWholeModeRequiredError`` back at ``EpicsError.__init__(...,
+    error_code="OLOG_WRITE_DENIED")`` → claim 1 fails; add a ``get_olog_safety()._audit_deny(
+    "OLOG_WRITE_DENIED", caller)`` before either raise in ``checkers_olog`` → claim 2 fails.
+    """
+    caplog.set_level(logging.INFO, logger=_OLOG_AUDIT_LOGGER)
+
+    # --- positive control: this logger, at this level, DOES capture a gate DENY ---
+    control_gate, fire_control = _arm_olog_env_off()
+    with pytest.raises(OlogWriteDeniedError):
+        fire_control()
+    assert [r for r in caplog.records if "event=DENY" in r.message], (
+        "the audit logger is not being captured — the no-audit assertion below could never go red"
+    )
+    assert control_gate is not None
+    caplog.clear()
+
+    # --- the pre-gate refusal itself ---
+    config_module._config = _olog_config()
+    monkeypatch.setattr(checkers_olog, "OlogClient", _NotWholeModeOlogClient)
+
+    with pytest.raises(OlogWriteDeniedError) as excinfo:
+        await call()
+
+    assert isinstance(excinfo.value, OlogWholeModeRequiredError), tool
+    assert excinfo.value.error_code == "OLOG_WHOLE_MODE_REQUIRED", tool
+    assert excinfo.value.error_code != "OLOG_WRITE_DENIED"
+    assert caplog.records == [], (
+        f"{tool}: a pre-gate refusal must leave NO audit record, got "
+        f"{[r.message for r in caplog.records]}"
+    )
+
+
+# ======================================================================================
+# Half 3 — the RULE the drift guard above cannot see: no PRE-GATE refusal wears a gate code
+# ======================================================================================
+#
+# Half 2 counts ``_audit_deny`` call sites INSIDE the two gate modules. It is blind to the other
+# half of contract point 4: a refusal raised in the service layer ABOVE the gate, which emits no
+# audit line at all and must therefore not carry the gate's error code. Those refusals live in
+# ``services/`` — a directory the gate-module scan never opens.
+#
+# So this half scans the flat ``services/`` package for any exception raised with one of the codes
+# the gates write into their DENY audit lines. It asserts the RULE, not four known symptoms: a
+# FIFTH pre-gate refusal that reuses a gate code fails here the day it is written.
+
+_SERVICES_DIR = _GATE_PACKAGE_DIR / "services"
+
+# The modules that DEFINE this repo's coded exceptions. Two conventions coexist and both are read:
+# ``errors.py`` sets ``error_code`` in the CONSTRUCTOR, ``services/*_exceptions.py`` as a ClassVar.
+_EXCEPTION_MODULE_NAMES: tuple[str, ...] = (
+    "epics_pv_mcp.errors",
+    *(
+        f"epics_pv_mcp.services.{path.stem}"
+        for path in sorted(_SERVICES_DIR.glob("*_exceptions.py"))
+    ),
+)
+
+
+def _class_error_code(exception_class: type[BaseException]) -> str | None:
+    """The ``error_code`` of *exception_class*, read through whichever convention it uses.
+
+    ClassVar first (``services/*_exceptions.py``): a class-level ``error_code`` is visible on the
+    CLASS. Constructor second (``errors.py``): there the attribute is set on the instance, so the
+    class attribute lookup misses and the class has to be built once with a probe message. Anything
+    that carries no code at all (``OlogFilterValueError`` is a plain ``ValueError``) yields None and
+    is simply not part of the map.
+    """
+    class_level = getattr(exception_class, "error_code", None)
+    if isinstance(class_level, str):
+        return class_level
+    try:
+        probe = exception_class("probe")
+    except Exception:  # noqa: BLE001 — a class with a different signature is just not in the map
+        return None
+    instance_level = getattr(probe, "error_code", None)
+    return instance_level if isinstance(instance_level, str) else None
+
+
+def _exception_codes_by_origin() -> dict[tuple[str, str], str]:
+    """``(defining module, class name) -> error_code`` for every coded exception in this repo.
+
+    Keyed on the DEFINING module, not on the bare name, so the AST scan below can resolve a raised
+    name through the importing module's own ``from X import Y [as Z]`` — alias-proof, and immune to
+    two hierarchies happening to reuse a class name.
+    """
+    codes: dict[tuple[str, str], str] = {}
+    for module_name in _EXCEPTION_MODULE_NAMES:
+        module = importlib.import_module(module_name)
+        for name, member in vars(module).items():
+            if not isinstance(member, type) or not issubclass(member, BaseException):
+                continue
+            if member.__module__ != module_name:
+                continue  # re-exported from elsewhere; it is mapped at its own origin
+            code = _class_error_code(member)
+            if code is not None:
+                codes[(module_name, name)] = code
+    return codes
+
+
+def _gate_audit_codes() -> frozenset[str]:
+    """The codes the gates emit in their DENY audit lines — DERIVED from the canonical table.
+
+    Never hard-coded: a third gate registering rows with a new audit code widens this guard in the
+    same edit, instead of leaving it silently scoped to the two gates that existed when it was
+    written.
+    """
+    return frozenset(path.audit_error_code for path in DENY_PATHS)
+
+
+def _local_names_carrying_gate_codes(
+    tree: ast.Module, codes_by_origin: dict[tuple[str, str], str], gate_codes: frozenset[str]
+) -> dict[str, str]:
+    """The names, AS SPELLED IN THIS MODULE, that denote an exception carrying a gate audit code."""
+    local: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or node.module is None:
+            continue
+        for alias in node.names:
+            code = codes_by_origin.get((node.module, alias.name))
+            if code in gate_codes:
+                local[alias.asname or alias.name] = code
+    return local
+
+
+def _classvar_gate_code_findings(
+    module_name: str, tree: ast.Module, gate_codes: frozenset[str]
+) -> list[str]:
+    """Classes DEFINED under ``services/`` that pin a gate audit code as their ClassVar.
+
+    This is the shape the client-side backstops use, and it is how a pre-gate refusal acquires a
+    gate code without a single ``raise`` mentioning the string.
+    """
+    findings: list[str] = []
+    for class_node in (node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)):
+        for statement in class_node.body:
+            targets: list[ast.expr] = []
+            if isinstance(statement, ast.AnnAssign):
+                targets = [statement.target]
+                value = statement.value
+            elif isinstance(statement, ast.Assign):
+                targets = list(statement.targets)
+                value = statement.value
+            else:
+                continue
+            if not any(isinstance(t, ast.Name) and t.id == "error_code" for t in targets):
+                continue
+            if isinstance(value, ast.Constant) and value.value in gate_codes:
+                findings.append(
+                    f"{module_name}:{statement.lineno}: class {class_node.name} pins the gate "
+                    f"audit code {value.value!r} as its error_code"
+                )
+    return findings
+
+
+def _raise_gate_code_findings(
+    module_name: str,
+    tree: ast.Module,
+    local_names: dict[str, str],
+    gate_codes: frozenset[str],
+) -> list[str]:
+    """``raise <Exc>(...)`` statements under ``services/`` that carry a gate audit code.
+
+    Two spellings are resolved: the class itself carries the code (``raise OlogWriteDeniedError``),
+    or a generic error is raised with a literal ``error_code=`` keyword
+    (``raise EpicsError(..., error_code="OLOG_WRITE_DENIED")``) — the second is how the next
+    pre-gate refusal is most likely to be written.
+    """
+    findings: list[str] = []
+    for node in (n for n in ast.walk(tree) if isinstance(n, ast.Raise)):
+        call = node.exc
+        if not isinstance(call, ast.Call):
+            continue  # a bare re-raise carries whatever it caught — not a new refusal
+        keyword = next((kw for kw in call.keywords if kw.arg == "error_code"), None)
+        if isinstance(keyword, ast.keyword) and isinstance(keyword.value, ast.Constant):
+            if keyword.value.value in gate_codes:
+                findings.append(
+                    f"{module_name}:{node.lineno}: raises with a literal "
+                    f"error_code={keyword.value.value!r}"
+                )
+            continue  # an explicit code wins over the class default, gate code or not
+        if isinstance(call.func, ast.Name) and call.func.id in local_names:
+            findings.append(
+                f"{module_name}:{node.lineno}: raises {call.func.id} "
+                f"(error_code={local_names[call.func.id]!r})"
+            )
+    return findings
+
+
+def test_no_pre_gate_refusal_carries_a_gate_error_code() -> None:
+    """Contract point 4: "a refusal raised outside the gate must not carry the gate's error code."
+
+    Nothing under ``services/`` is a write gate — the two gates live one directory up, in
+    ``safety.py`` and ``olog_safety.py``. So every refusal raised here happens BEFORE a gate is
+    consulted, writes no audit line, and must be reportable apart from an audited gate DENY.
+    Otherwise the audit's coverage claim is unfalsifiable from outside: a caller seeing
+    ``OLOG_WRITE_DENIED`` cannot know whether a DENY line exists for it.
+
+    RED-PROOF (measured on ``f954cc6``, the commit before the fix): four findings —
+    ``checkers_olog.py`` raised ``OlogWriteDeniedError`` twice for its whole-mode preconditions,
+    ``olog_exceptions.py`` pinned ``OLOG_WRITE_DENIED`` on ``OlogWholeModeRequired``, and
+    ``_http.py`` raised the write gates' ``RateLimitError`` from the read throttle. Re-provable at
+    any time by pointing any one of those back at the gate's class or code.
+
+    Honest limits, so nobody reads more into a green run than it proves:
+    * It sees ``services/`` FLAT, the directory the four known cases live in — a future
+      sub-package would need its own sweep.
+    * A code computed at runtime (``error_code=_olog_error_code(exc)``, the re-raise wrappers) is
+      out of static reach. Those propagate an already-classified code rather than minting one.
+    * It proves the CODE axis of point 4 only. The AUDIT axis — that these refusals write no line —
+      is a deliberate scope decision documented at the raise sites, and is pinned behaviourally by
+      :func:`test_pre_gate_refusal_is_coded_apart_and_writes_no_audit_line`.
+    """
+    gate_codes = _gate_audit_codes()
+    assert gate_codes, "no gate audit codes derived from DENY_PATHS — the anchor broke"
+    codes_by_origin = _exception_codes_by_origin()
+    assert codes_by_origin, "no coded exceptions discovered — the import anchor broke"
+
+    module_paths = sorted(_SERVICES_DIR.glob("*.py"))
+    assert len(module_paths) > 20, (
+        f"only {len(module_paths)} modules found under {_SERVICES_DIR} — the scan anchor broke"
+    )
+
+    findings: list[str] = []
+    for module_path in module_paths:
+        tree = ast.parse(module_path.read_text(encoding="utf-8"))
+        local_names = _local_names_carrying_gate_codes(tree, codes_by_origin, gate_codes)
+        findings += _classvar_gate_code_findings(module_path.name, tree, gate_codes)
+        findings += _raise_gate_code_findings(module_path.name, tree, local_names, gate_codes)
+
+    assert not findings, (
+        "a refusal raised OUTSIDE a write gate carries one of the gates' audit error codes "
+        f"{sorted(gate_codes)} — give it its own code (write-gate contract point 4):\n  "
+        + "\n  ".join(findings)
+    )
 
 
 def test_canonical_map_covers_every_audited_deny_call_site() -> None:

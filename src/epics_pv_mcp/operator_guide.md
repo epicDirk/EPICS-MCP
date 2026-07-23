@@ -42,7 +42,9 @@ operational knowledge (see the Knowledge Persistence Policy in `CLAUDE.md`).
   Raise it only if operators legitimately need more simultaneous long monitors; the ceiling bounds
   monitors alone.
 - **Reads can be throttled (opt-in).** `EPICS_MCP_READ_RATE_LIMIT` (default 0 = off) caps REST reads
-  per 60 s at the shared GET chokepoint; over the limit a read is DENIED (`RateLimitError`), never
+  per 60 s at the shared GET chokepoint; over the limit a read is DENIED
+  (`ReadRateLimitError` → `READ_RATE_LIMIT_EXCEEDED`, its own code — never the write gates'
+  `RATE_LIMIT_EXCEEDED`, because this refusal writes no audit line and is not a gate verdict), never
   blocked — a blocking wait there would hold a worker thread and reintroduce the monitor starvation
   above. Turn it on to protect a production facility from an unthrottled read burst. It bounds only
   the REST planes (ChannelFinder/Archiver/Alarm/Naming/Olog), not live p4p PV reads. Two caveats:
@@ -229,8 +231,8 @@ logs `op=-`.)
 ### Olog write posture (all four write tools)
 
 Posting to the logbook is the server's first mutating operation against a REST service, so it has its
-own gate — distinct from `set_pv_value`, and it never touches `ALLOW_PV_WRITE`. Four things must line
-up before a write proceeds, each fail-closed and audited as `DENY` before the raise:
+own gate — distinct from `set_pv_value`, and it never touches `ALLOW_PV_WRITE`. Four **gate** checks
+must line up before a write proceeds, each fail-closed and audited as `DENY` before the raise:
 
 - **Env gate.** `EPICS_MCP_ALLOW_OLOG_WRITE=true` (default false = every write denied).
 - **Test-server URL boundary.** Unlike PV write (bounded by its own gate + regex allowlist, with
@@ -249,6 +251,18 @@ up before a write proceeds, each fail-closed and audited as `DENY` before the ra
   the Olog gate runs under `asyncio.to_thread`, i.e. real worker threads — can never both slip past it
   and exceed the window. The audit line is metadata-only — logbook names, level, title LENGTH, entry
   id, service-account owner — and **never** the `title`/`description` free text.
+
+And, on the two round-tripping tools only (`add_log_attachment` / `update_log_entry`), one further
+precondition that is **NOT** part of the gate:
+
+- **Whole-mode (pre-gate, un-audited, own error code).** Both tools must round-trip the target
+  entry's FULL content, so they refuse a redacted/remote server *before* the gate is consulted —
+  at the top of the call, before any read and before any rate token exists. Because it is not a
+  gate verdict it writes **no `DENY` audit line at all**, and precisely for that reason it carries
+  its **own** code, `OLOG_WHOLE_MODE_REQUIRED`, never the gate's `OLOG_WRITE_DENIED`: a caller must
+  be able to tell an un-audited pre-gate refusal from an audited gate DENY (write-gate contract
+  point 4). The exception is still a subclass of the gate's, so `except OlogWriteDeniedError`
+  catches both.
 
 The author (`owner`) is the write service account (`EPICS_MCP_OLOG_WRITE_USER`, a dedicated account —
 never a personal login), set server-side from the auth Principal; a caller cannot spoof it. Use a
@@ -276,7 +290,8 @@ gated identically, with the logbook allowlist keyed on the TARGET entry's OWN lo
 is **whole-mode only**: Olog's update endpoint is destructive — it `retainAll`-prunes any attachment not
 resubmitted and overwrites title/body/logbooks/tags/level/properties — so a safe attach
 must round-trip the target entry's FULL content, readable only whole (loopback + `ASSUME_TEST_DATA`).
-Against a redacted/remote server it is refused. The write is purely ADDITIVE for CONTENT:
+Against a redacted/remote server it is refused — by the **pre-gate** check above, un-audited and
+reported as `OLOG_WHOLE_MODE_REQUIRED`, not by the gate. The write is purely ADDITIVE for CONTENT:
 existing attachments and every content field survive, and only the new file(s) are added.
 
 ⚠️ **One field does NOT survive: `owner`.** Because this endpoint IS the destructive update,
@@ -302,7 +317,8 @@ anyway).
 
 **Edit an existing entry** (`update_log_entry` → `POST /logs/multipart` with the `logEntry` part and NO
 file parts) changes `title` / body / `level` / `logbooks` / `tags`. Same destructive endpoint, same
-**whole-mode only** rule, same gate — with one difference that matters: the logbook allowlist is keyed on
+**whole-mode only** pre-gate rule (same `OLOG_WHOLE_MODE_REQUIRED`, still un-audited), same gate — with
+one difference that matters: the logbook allowlist is keyed on
 the **UNION** of the entry's current and resulting logbooks, because moving an entry INTO a logbook and
 pulling it OUT of one are both writes to that logbook; gating on either side alone leaves a hole. An
 omitted argument means "unchanged" — the tool round-trips the whole entry and overlays only what was

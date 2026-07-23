@@ -19,7 +19,7 @@ from urllib3.util import parse_url
 from urllib3.util.retry import Retry
 
 from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import RateLimitError
+from epics_pv_mcp.errors import RateLimitError, ReadRateLimitError
 from epics_pv_mcp.services._http import (
     ReadThrottle,
     build_retrying_session,
@@ -612,7 +612,7 @@ def test_is_https_url(url: str, expected: bool) -> None:
 
 def test_rest_get_json_throttled_over_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     """S3 at the chokepoint: with ``read_rate_limit=2`` the 3rd ``rest_get_json`` in the window is
-    DENIED with ``RateLimitError``, protecting the facility from an unthrottled read burst. RED
+    DENIED with ``ReadRateLimitError``, protecting the facility from an unthrottled read burst. RED
     before the chokepoint is wired (rest_get_json ignored the throttle → the 3rd read passed)."""
     monkeypatch.setattr(
         "epics_pv_mcp.services._http.get_config",
@@ -634,10 +634,17 @@ def test_rest_get_json_throttled_over_limit(monkeypatch: pytest.MonkeyPatch) -> 
 
     _call()
     _call()
+    # Still catchable as RateLimitError (ReadRateLimitError subclasses it, so existing handlers
+    # keep working) but reported under its OWN code.
     with pytest.raises(RateLimitError) as exc_info:
         _call()
-    # the read denial carries the machine-readable contract callers key on
-    assert exc_info.value.error_code == "RATE_LIMIT_EXCEEDED"
+    assert isinstance(exc_info.value, ReadRateLimitError)
+    # The read denial carries the machine-readable contract callers key on — and it is deliberately
+    # NOT the write gates' RATE_LIMIT_EXCEEDED: this throttle is not a write gate, writes no audit
+    # line, and sits on reads the Olog write tools perform BEFORE their gate is consulted. The
+    # write-gate contract (CLAUDE.md, point 4) forbids a refusal raised outside a gate from
+    # carrying that gate's code.
+    assert exc_info.value.error_code == "READ_RATE_LIMIT_EXCEEDED"
     assert exc_info.value.details == {"limit": 2, "window_seconds": 60.0}
 
 

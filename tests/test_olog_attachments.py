@@ -308,7 +308,11 @@ class TestAttachmentPrep:
         ``read_bytes()`` unconditionally, materialising AND uploading past the cap; the
         thrice-documented "an over-limit file is never loaded" promise hung on filesystem
         timing. It now re-checks while reading (at most one byte over budget is ever
-        read) and refuses with the gate's own error code."""
+        read) and refuses — under its OWN code, not the gate's: this refusal runs AFTER the gate
+        admitted the write (the rate token is already spent) and writes no audit line, so the
+        write-gate contract (CLAUDE.md, point 4) forbids it from wearing the gate's
+        ``OLOG_ATTACH_TOO_LARGE``, which a caller must be able to read as "audited, nothing
+        consumed"."""
         _set_config()
         f = tmp_path / "grow.bin"
         f.write_bytes(b"x" * 10)
@@ -316,7 +320,7 @@ class TestAttachmentPrep:
         f.write_bytes(b"x" * 100)  # grows past the budget AFTER the stat/gate
         with pytest.raises(EpicsError) as excinfo:
             read_uploads(plan.specs, max_total_bytes=50)
-        assert excinfo.value.error_code == "OLOG_ATTACH_TOO_LARGE"
+        assert excinfo.value.error_code == "OLOG_ATTACH_TOO_LARGE_AT_READ"
 
     def test_read_uploads_budget_is_cumulative(self, tmp_path: Path) -> None:
         """Two files that each fit but together exceed the budget are refused — the cap
@@ -329,7 +333,7 @@ class TestAttachmentPrep:
         plan = plan_attachments([str(a), str(b)], None, lambda: next(ids))
         with pytest.raises(EpicsError) as excinfo:
             read_uploads(plan.specs, max_total_bytes=50)
-        assert excinfo.value.error_code == "OLOG_ATTACH_TOO_LARGE"
+        assert excinfo.value.error_code == "OLOG_ATTACH_TOO_LARGE_AT_READ"
 
     def test_plan_rejects_bad_base64(self) -> None:
         _set_config()
