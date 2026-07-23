@@ -9,6 +9,18 @@ carry breaking changes).
 
 ### Added
 
+- **Annotation consistency / drift guard (test-only).** Four tests pin every tool's client-facing
+  safety hints (`readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint`), which drive real
+  client behaviour since MA-Q2 (K1 keys the consent invariant on `destructiveHint`; a honouring client
+  derives permission prompts from them, so a mislabelled or silently drifted field is security-relevant).
+  A completeness law (every tool sets all four hints explicitly — `ToolAnnotations()` defaults them to
+  `None`, not a bool), a spec-consistency law (`destructiveHint=True ⟹ readOnlyHint=False`), and a
+  golden map of all 32 tools' hints. The golden map is load-bearing: it is the ONLY guard that catches a
+  SILENT change of an existing tool's annotations — e.g. flipping `set_pv_value` to
+  non-destructive/read-only — which the two structural laws AND the MA-Q2 consent guards all pass. Two-lane
+  robust (core-only 28 / full 32) via an AST-scan of the display-extra tools, with a pure set-logic helper
+  unit-tested against both lanes; each guard is provably red. No new tool; `tools/list` unchanged. Honest
+  limit: structure + drift, not semantics (whether a hint matches the tool's true behaviour — a review).
 - **MA-Q2 client-side consent hint on `set_pv_value`.** The `tools/list` entry for the sole
   PV-mutating tool now carries `_meta["anthropic/requiresUserInteraction"]=true`. A client that honours
   it — Claude Code from v2.1.199 — prompts a human on every call, even under `bypassPermissions`, and

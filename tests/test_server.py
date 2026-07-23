@@ -1,5 +1,6 @@
 """Tests for server-level tool wrappers (EpicsError → ToolError conversion)."""
 
+import ast
 import importlib.util
 import logging
 from collections.abc import Callable
@@ -1088,4 +1089,246 @@ async def test_consent_meta_tools_document_the_client_scope() -> None:
     assert not undocumented, (
         "consent-_meta tool(s) not documenting the client/version scope in their description: "
         f"{undocumented}"
+    )
+
+
+# ── Annotation consistency / drift guards ──────────────────────────────────────────────────────
+# Tool annotations (readOnlyHint/destructiveHint/idempotentHint/openWorldHint) drive REAL client
+# behaviour since MA-Q2: K1 keys the consent invariant on destructiveHint, and a honouring client
+# (Claude Code) derives permission prompts from them, so a mislabelled or silently drifted field is
+# security-relevant. These guards freeze a human-reviewed snapshot plus two structural laws so such
+# a change cannot pass unnoticed. Honest limit: they check STRUCTURE + DRIFT, not SEMANTICS (whether
+# a hint matches the tool's true behaviour -- that stays a review). Self-contained: no plan ref.
+
+# The four boolean hint fields, in the fixed order used by the golden map below.
+_ANNOTATION_HINTS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
+
+# Golden map {tool_name: (readOnlyHint, destructiveHint, idempotentHint, openWorldHint)}, measured
+# 2026-07-23 from the ToolAnnotations in server.py + display_tools.py -- a human-reviewed snapshot
+# of every tool's client-facing safety labels. Any live annotation change, or a new/renamed tool,
+# turns test_tool_annotations_match_golden_map RED until this map is CONSCIOUSLY updated: that edit
+# is the review checkpoint. Covers all 32 full-lane tools; the 4 display-extra tools are absent in
+# the core-only lane (tolerated -- see _annotation_drift). Regenerate by re-measuring, not by guess.
+_ANNOTATION_GOLDEN: dict[str, tuple[bool, bool, bool, bool]] = {
+    "add_log_attachment": (False, False, False, True),
+    "coverage_audit": (True, False, True, True),
+    "create_log_entry": (False, False, False, True),
+    "crossplane_check": (True, False, True, True),
+    "diagnose_connection": (True, False, True, True),
+    "discover_pvs": (True, False, True, True),
+    "download_log_attachment": (False, False, False, True),
+    "find_channels": (True, False, True, True),
+    "find_device": (True, False, True, True),
+    "get_alarm_history": (True, False, True, True),
+    "get_appliance_info": (True, False, True, True),
+    "get_archive_info": (True, False, True, True),
+    "get_log_entry": (True, False, True, True),
+    "get_pv_history": (True, False, True, True),
+    "get_pv_info": (True, False, True, True),
+    "get_pv_value": (True, False, True, True),
+    "get_pvs": (True, False, True, True),
+    "is_alarm_configured": (True, False, True, True),
+    "is_archived": (True, False, True, True),
+    "list_archived_pvs": (True, False, True, True),
+    "list_channel_vocabulary": (True, False, True, True),
+    "list_log_attachments": (True, False, True, True),
+    "list_log_levels": (True, False, True, True),
+    "list_logbooks": (True, False, True, True),
+    "list_tags": (True, False, True, True),
+    "lookup_device_name": (True, False, True, True),
+    "monitor_pv": (True, False, False, True),
+    "reply_to_log": (False, False, False, True),
+    "search_logbook": (True, False, True, True),
+    "set_pv_value": (False, True, False, True),
+    "update_log_entry": (False, True, False, True),
+    "validate_pvs": (True, False, True, True),
+}
+
+# The display-extra tools live in display_tools.py and register only with the [displays] extra, so
+# they are ABSENT in core-only CI (28 tools) and PRESENT in the full lane (32). AST-scanned, NEVER
+# imported: importing display_tools.py pulls opi_navigation (absent in core-only), which would break
+# collection there -- the same reason test_guide_matches_code.py AST-scans it.
+_DISPLAY_TOOLS_SRC = (
+    Path(__file__).resolve().parent.parent / "src" / "epics_pv_mcp" / "display_tools.py"
+)
+
+
+def _display_tool_names() -> set[str]:
+    """Top-level ``async def`` names in display_tools.py (the [displays]-extra tools)."""
+    source = _DISPLAY_TOOLS_SRC.read_text(encoding="utf-8")
+    return {
+        node.name
+        for node in ast.iter_child_nodes(ast.parse(source))
+        if isinstance(node, ast.AsyncFunctionDef)
+    }
+
+
+def _annotation_drift(
+    live_names: set[str], golden_names: set[str], display_extra: set[str]
+) -> tuple[set[str], set[str]]:
+    """The two-lane set logic of Guard C, as a PURE function so both lanes are unit-testable.
+
+    Returns ``(unclassified, unexpected_missing)`` -- both must be empty for Guard C to pass:
+      * ``unclassified`` = live tools absent from the golden map: a new tool must be consciously
+        classified.
+      * ``unexpected_missing`` = golden tools absent live that are NOT display-extra: a removed or
+        renamed core tool. A golden tool missing in the core-only lane is fine ONLY when it is a
+        display-extra tool; deriving the tolerance from ``display_extra`` (not a hard set-equality)
+        is what makes Guard C pass in BOTH the 28-tool core-only and the 32-tool full lane.
+
+    Load-bearing twice: this backward check also anchors Guard C against an empty ``live_names``.
+    On a registration break unexpected_missing becomes all non-display golden tools (non-empty =
+    red), so C is never vacuously green. A forward-only ``set(live) - golden`` check would drop that
+    anchor; keep both directions.
+    """
+    unclassified = live_names - golden_names
+    unexpected_missing = (golden_names - live_names) - display_extra
+    return unclassified, unexpected_missing
+
+
+def test_annotation_drift_set_logic_is_lane_robust() -> None:
+    """Guard C's pure set logic, proven for BOTH lanes without a core-only environment.
+
+    The local gate runs the full lane (32==32), so Guard C's tolerance branch (golden - live) is
+    never exercised locally: a mistaken ``set(live) == golden_keys`` would pass here yet break the
+    28-tool core-only CI, and would ship under the autonomous "green gates only" push policy. This
+    exercises the logic on synthetic 28- and 32-tool live sets so both lanes are red-provable.
+    """
+    golden = set(_ANNOTATION_GOLDEN)
+    display_extra = _display_tool_names()
+    assert display_extra <= golden, "every display-extra tool must be classified in the golden map"
+
+    # Full lane (32): every golden tool present → clean.
+    assert _annotation_drift(set(golden), golden, display_extra) == (set(), set())
+
+    # Core-only lane (28): the display-extra tools are absent → tolerated, still clean.
+    core_only = golden - display_extra
+    assert _annotation_drift(core_only, golden, display_extra) == (set(), set())
+
+    # A removed/renamed CORE tool (absent, NOT display-extra) → unexpected_missing ≠ ∅ (red).
+    a_core_tool = next(iter(golden - display_extra))
+    _, missing = _annotation_drift(core_only - {a_core_tool}, golden, display_extra)
+    assert missing == {a_core_tool}
+
+    # A new, unclassified tool → unclassified ≠ ∅ (red).
+    unclassified, _ = _annotation_drift(golden | {"brand_new_tool"}, golden, display_extra)
+    assert unclassified == {"brand_new_tool"}
+
+    # Empty live (registration break) → unexpected_missing = all non-display golden tools (red), so
+    # Guard C is anchored, never vacuously green.
+    _, missing_empty = _annotation_drift(set(), golden, display_extra)
+    assert missing_empty == golden - display_extra
+
+
+@pytest.mark.asyncio
+async def test_every_tool_carries_complete_annotations() -> None:
+    """Every tool MUST carry annotations with all four hint fields explicitly set (not None).
+
+    The four hints drive real client behaviour since MA-Q2, and the MCP client-side defaults are
+    surprising (destructiveHint defaults TRUE, readOnlyHint false): a partially-filled
+    ToolAnnotations silently mislabels a tool. Catches a new tool shipped without (complete)
+    annotations. NOT SDK-default-vacuous: ``ToolAnnotations()`` leaves all four fields None
+    (measured), so a real omission surfaces as None here, not as a benign bool default.
+
+    Provably red: drop a hint kwarg (or annotations=) on one tool in server.py -> offender.
+    """
+    from epics_pv_mcp.server import mcp
+
+    tools = await mcp.list_tools()
+    assert len(tools) >= 28, "list_tools() returned < core-lane count — tool registration broke"
+    offenders = [
+        t.name
+        for t in tools
+        if t.annotations is None
+        or any(getattr(t.annotations, hint) is None for hint in _ANNOTATION_HINTS)
+    ]
+    assert not offenders, (
+        f"tool(s) with missing/incomplete annotations: {offenders} — every tool must set all four "
+        "hints (readOnlyHint/destructiveHint/idempotentHint/openWorldHint) explicitly."
+    )
+
+
+@pytest.mark.asyncio
+async def test_destructive_tools_are_not_marked_read_only() -> None:
+    """``destructiveHint is True`` MUST imply ``readOnlyHint is False``, for every tool.
+
+    The MCP spec makes destructiveHint meaningful only when readOnlyHint is false: a tool marked
+    both is internally contradictory. A class-invariant keyed on the property (like K1), not a
+    point-check.
+
+    Non-vacuity note: this law's antecedent holds for exactly two tools today; were both ever set
+    destructive=False it would go vacuous. Its teeth against that live in Guard C's golden map
+    (which pins destructive=True for set_pv_value/update_log_entry): B and C are COUPLED, do not
+    drop C without revisiting B.
+
+    Provably red: flip set_pv_value's readOnlyHint to True (destructive stays True) -> offender.
+    """
+    from epics_pv_mcp.server import mcp
+
+    tools = await mcp.list_tools()
+    assert len(tools) >= 28, "list_tools() returned < core-lane count — tool registration broke"
+    offenders = [
+        t.name
+        for t in tools
+        if t.annotations
+        and t.annotations.destructiveHint is True
+        and t.annotations.readOnlyHint is not False
+    ]
+    assert not offenders, (
+        f"destructive tool(s) also marked read-only (contradictory): {offenders} — a tool with "
+        "destructiveHint=True must have readOnlyHint=False."
+    )
+
+
+@pytest.mark.asyncio
+async def test_tool_annotations_match_golden_map() -> None:
+    """Every tool's four annotation hints MUST match the frozen golden map — the drift guard.
+
+    The load-bearing guard: the ONLY one that catches a silent change of an EXISTING tool's
+    annotations -- e.g. flipping set_pv_value to destructive=False/read-only, which Guards A and
+    B AND the MA-Q2 consent guards K1/K2 all pass (A: annotations still present; B: vacuous once not
+    destructive; K1: drops out of the destructive net, consent _meta untouched; K2: consent _meta
+    still documented). A new/renamed tool or any hint change goes red until _ANNOTATION_GOLDEN is
+    consciously updated.
+
+    Two-lane robust (core-only CI = 28 tools, full = 32) via _annotation_drift: a golden tool absent
+    live is tolerated ONLY if it is display-extra. Honest limit: STRUCTURE + DRIFT, not SEMANTICS.
+
+    Provably red: change a golden tuple, flip a live annotation, or rename a tool.
+    """
+    from epics_pv_mcp.server import mcp
+
+    tools = await mcp.list_tools()
+    assert len(tools) >= 28, "list_tools() returned < core-lane count — tool registration broke"
+
+    golden_names = set(_ANNOTATION_GOLDEN)
+    unclassified, unexpected_missing = _annotation_drift(
+        {t.name for t in tools}, golden_names, _display_tool_names()
+    )
+    assert not unclassified, (
+        f"tool(s) not in the annotation golden map: {sorted(unclassified)} — classify their safety "
+        "hints in _ANNOTATION_GOLDEN (the review checkpoint for a new tool's client-facing labels)."
+    )
+    assert not unexpected_missing, (
+        f"golden tool(s) missing live and not display-extra: {sorted(unexpected_missing)} -- a "
+        "removed or renamed tool; update _ANNOTATION_GOLDEN."
+    )
+
+    mismatched: dict[str, tuple[object, ...]] = {}
+    for t in tools:
+        a = t.annotations
+        live = (
+            a.readOnlyHint if a else None,
+            a.destructiveHint if a else None,
+            a.idempotentHint if a else None,
+            a.openWorldHint if a else None,
+        )
+        if live != _ANNOTATION_GOLDEN[t.name]:
+            mismatched[t.name] = live
+    detail = ", ".join(
+        f"{name}: {live} vs {_ANNOTATION_GOLDEN[name]}" for name, live in sorted(mismatched.items())
+    )
+    assert not mismatched, (
+        f"tool annotation(s) drifted from the golden map (name: live vs golden): {detail} — update "
+        "_ANNOTATION_GOLDEN only after a conscious review of the client-facing hint."
     )
