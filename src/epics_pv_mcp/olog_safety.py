@@ -14,8 +14,12 @@ PV write path is never touched — three things diverge deliberately:
   auditable double action. The host is taken ONLY from
   ``urlparse(url).hostname`` (never ``.netloc`` / a substring): ``http://127.0.0.1@olog-prod/Olog``
   has hostname ``olog-prod`` and is refused.
-* **Deny-all empty allowlist.** Gate on + empty logbook allowlist = deny every write (the INVERSE
-  of the PV pattern, where an empty pattern allows all): a wrong logbook is a visible error.
+* **Deny-all empty allowlist.** Gate on + empty logbook allowlist = deny every write: a wrong
+  logbook is a visible error. BOTH write gates are fail-closed on empty, in DIFFERENT shapes:
+  the PV name-pattern (``SafetyLayer``) *refuses to start* when writes are on and the pattern is
+  empty (``SafetyConfigError``; only an explicit ``.*`` deliberately allows all), while this gate
+  constructs and denies at runtime. NOT an inverse (neither is fail-open) — the shape is a
+  deliberate per-surface choice; never describe either gate as "allow all on empty".
 * **Metadata-only audit.** The PV audit logs old/new VALUES; the Olog audit must NEVER log the
   ``title``/``description`` free text (that would route write around the READ redaction). Only
   logbook names, level, title LENGTH, entry id, and the service-account owner are recorded.
@@ -143,7 +147,9 @@ class OlogWriteGate:
                 details={"olog_url": self._config.olog_url},
             )
 
-        # 3. Logbook allowlist (empty allowlist = deny-all — the INVERSE of the PV pattern)
+        # 3. Logbook allowlist (empty allowlist = deny-all at runtime; the PV pattern is also
+        #    fail-closed on empty but in a DIFFERENT shape — refuse-to-start, not allow-all;
+        #    see this module's docstring / safety.py:61-67)
         if not set(logbooks) <= self._allowed_logbooks:
             self._audit_deny("OLOG_WRITE_DENIED", caller)
             raise OlogWriteDeniedError(
