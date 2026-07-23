@@ -30,6 +30,7 @@ import os
 
 import pytest
 
+from epics_pv_mcp.errors import PVWriteBoundsError
 from epics_pv_mcp.services.epics_client import pv_get
 from epics_pv_mcp.tools.write import _set_pv_value
 from tests.live_gate import assert_live_available, live_demanded
@@ -117,4 +118,47 @@ class TestLiveWriteReadback:
             )
         finally:
             # Restore the original value regardless of the assertion outcome.
+            await _set_pv_value(pv, str(baseline))
+
+
+class TestLiveWriteBounds:
+    """The O2 value-bounds guard against a real IOC: an out-of-range write is refused BEFORE the
+    put, so the live value is unchanged (the value never reached the IOC). The class a mock cannot
+    show — a mock only knows what the client sent, never that the record's own limits blocked it."""
+
+    async def test_out_of_range_write_is_refused_and_value_unchanged(self, pv: str) -> None:
+        # O2 only bites a record that DECLARES drive limits; a limitless record correctly fails
+        # open, so skip rather than silently passing AND landing the value. Probe control first.
+        info = await pv_get(pv, None)
+        control = info.get("control")
+        has_limits = (
+            isinstance(control, dict) and "limit_low" in control and "limit_high" in control
+        )
+        assert_live_available(
+            has_limits,
+            f"live bounds probe: {pv} declares no control drive limits (DRVL/DRVH) — point "
+            "EPICS_MCP_LIVE_WRITE_PV at a record WITH drive limits",
+            demanded=live_demanded(os.environ),
+        )
+        out_of_range = os.environ.get("EPICS_MCP_LIVE_OUT_OF_RANGE_VALUE")
+        assert_live_available(
+            bool(out_of_range),
+            "set EPICS_MCP_LIVE_OUT_OF_RANGE_VALUE to a value OUTSIDE the record's [DRVL, DRVH]",
+            demanded=live_demanded(os.environ),
+        )
+        assert out_of_range is not None  # narrowed by the gate above
+
+        baseline = await _read_numeric(pv)
+        try:
+            # The out-of-range write must be refused before the put — a real PVWriteBoundsError.
+            with pytest.raises(PVWriteBoundsError):
+                await _set_pv_value(pv, out_of_range)
+            # And the live value must be UNCHANGED: the put never happened. A missing guard would
+            # have landed the out-of-range value, so this reads it back and it must equal baseline.
+            after = await _read_numeric(pv)
+            assert math.isclose(after, baseline, rel_tol=1e-9, abs_tol=1e-9), (
+                f"out-of-range value landed at the IOC: {after!r} != baseline {baseline!r}"
+            )
+        finally:
+            # Defensive restore — even though the write should never have landed.
             await _set_pv_value(pv, str(baseline))
