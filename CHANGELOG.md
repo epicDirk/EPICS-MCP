@@ -9,6 +9,17 @@ carry breaking changes).
 
 ### Added
 
+- **MA-Q2 client-side consent hint on `set_pv_value`.** The `tools/list` entry for the sole
+  PV-mutating tool now carries `_meta["anthropic/requiresUserInteraction"]=true`. A client that honours
+  it — Claude Code from v2.1.199 — prompts a human on every call, even under `bypassPermissions`, and
+  fails closed on a recognising client (`dontAsk` and non-interactive `--permission-prompt-tool` runs
+  deny the call rather than writing silently; the Agent SDK `canUseTool` callback can still approve).
+  An older or non-recognising MCP client ignores the hint. This is advisory **Defense-in-Depth only** —
+  the server-side write gate (env gate + regex allowlist + rate-limit + audit) is unchanged and remains
+  the sole client-independent guard. A fail-closed class-invariant test keyed on `destructiveHint` (with
+  the Olog-write class explicitly deferred) ensures a future PV-write tool cannot ship without the hint,
+  and a drift-guard test ensures a consent tool documents the key in its description. No new tool;
+  `tools/list` stays 32/28 and within the size-gate ceiling.
 - **MA-Q1a tools/list schema-hygiene hardening (nit/low follow-ups to MA-Q1).** Robustness and
   precision polish on `_prune_tool_schemas`, with NO wire change — `tools/list` stays 64499 characters,
   `list_tools` 32/28. The title-strip now also descends into the JSON-Schema 2020-12 single-subschema

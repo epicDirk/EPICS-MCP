@@ -356,7 +356,12 @@ async def get_pvs(
         destructiveHint=True,
         idempotentHint=False,
         openWorldHint=True,
-    )
+    ),
+    # Advisory, CLIENT-side consent hint (NOT the load-bearing guard). A client that honours it
+    # obtains a human approval before each write; an older / other MCP client ignores it silently.
+    # The load-bearing, client-INDEPENDENT guard stays server-side (env gate + regex allowlist +
+    # rate-limit + audit, see safety.py). Kept red-provable by the consent-invariant test.
+    meta={"anthropic/requiresUserInteraction": True},
 )
 @translate_epics_errors
 async def set_pv_value(
@@ -369,8 +374,15 @@ async def set_pv_value(
 ) -> dict[str, object]:
     """Set a PV value. Requires EPICS_MCP_ALLOW_PV_WRITE=true.
 
-    Protected by safety layer: environment gate, regex allowlist,
-    rate-limit (10/min default), and audit logging.
+    Protected by safety layer: environment gate, regex allowlist, rate-limit (10/min default),
+    and audit logging — the load-bearing, client-independent guard.
+
+    Client-side consent hint (advisory, NOT a gate): the tools/list entry carries
+    _meta["anthropic/requiresUserInteraction"]=true. A client that honours it prompts a human
+    before every write - even under bypassPermissions - and, on a recognising client, fails closed:
+    a non-interactive run denies the call rather than writing silently, so a headless write needs a
+    reachable human (or the client's programmatic approval callback). An older or non-recognising
+    client ignores the hint; the server-side safety layer above is what actually gates the write.
     """
     return await _set_pv_value(pv_name, value, timeout)
 

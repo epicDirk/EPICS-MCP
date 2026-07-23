@@ -1014,3 +1014,74 @@ async def test_tools_list_within_budget() -> None:
         "decide consciously: trim the new tool's schema/description, or raise the ceiling with a "
         "rationale (MA-Q3). Never bump it silently."
     )
+
+
+# MA-Q2 client-side consent (_meta["anthropic/requiresUserInteraction"]). set_pv_value is the
+# only PV-mutating tool (destructiveHint=True) and the only one that actuates physical hardware,
+# so it advertises a consent hint that a honouring client turns into a per-call human approval
+# prompt. The load-bearing guard stays server-side (safety.py); this is Defense-in-Depth only.
+_CONSENT_META = {"anthropic/requiresUserInteraction": True}
+# The Olog-write class (update_log_entry etc.) is a SEPARATE, deliberately deferred governance
+# decision (its own gate); it is EXPLICITLY exempted so the consent invariant never silently skips
+# it. Goes loud-red if update_log_entry is ever renamed. Self-contained: no plan reference.
+_CONSENT_DEFERRED = frozenset({"update_log_entry"})
+
+
+@pytest.mark.asyncio
+async def test_destructive_tools_carry_consent_meta_or_are_explicitly_deferred() -> None:
+    """Every destructive tool MUST advertise the consent _meta (or be explicitly deferred).
+
+    A class-invariant keyed on ``destructiveHint``, not a point-check on one named tool: a future
+    2nd PV-write tool falls into the net the moment it is marked destructive, so it cannot ship
+    with a green suite and no consent hint (the failure a point-test would miss). The Olog-write
+    class is deferred via ``_CONSENT_DEFERRED`` (a separate governance decision), never skipped.
+
+    Provably red: drop the ``meta=`` kwarg on set_pv_value -> offenders == ['set_pv_value'].
+    """
+    from mcp.types import ListToolsResult
+
+    from epics_pv_mcp.server import mcp
+
+    tools = await mcp.list_tools()
+    offenders = [
+        t.name
+        for t in tools
+        if t.annotations
+        and t.annotations.destructiveHint is True
+        and t.name not in _CONSENT_DEFERRED
+        and t.meta != _CONSENT_META
+    ]
+    assert not offenders, (
+        f"destructive tool(s) missing client-side consent _meta: {offenders} - add "
+        "meta={'anthropic/requiresUserInteraction': True} to the @mcp.tool decorator, or "
+        "(Olog-write governance) add the tool to _CONSENT_DEFERRED with a rationale."
+    )
+    # ...and the consent reaches the wire under the _meta alias (what the client receives):
+    set_pv = {t.name: t for t in tools}["set_pv_value"]
+    wire = ListToolsResult(tools=[set_pv]).model_dump_json(by_alias=True, exclude_none=True)
+    assert '"_meta":{"anthropic/requiresUserInteraction":true}' in wire
+
+
+@pytest.mark.asyncio
+async def test_consent_meta_tools_document_the_client_scope() -> None:
+    """A tool carrying the consent _meta MUST document the key in its description.
+
+    Honesty drift-guard, encoded as a test (Tier 1) rather than a prose convention (which rots):
+    the _meta hint is client- and version-conditional and fails OPEN for a non-honouring client,
+    so the point-of-need docstring must name it. Stable marker = the key name itself (it does not
+    drift like a version number). Honest limit: it proves a caveat EXISTS, not that it is good.
+
+    Provably red: remove ``requiresUserInteraction`` from set_pv_value's docstring -> goes red.
+    """
+    from epics_pv_mcp.server import mcp
+
+    undocumented = [
+        t.name
+        for t in await mcp.list_tools()
+        if t.meta == _CONSENT_META
+        and not (t.description and "requiresUserInteraction" in t.description)
+    ]
+    assert not undocumented, (
+        "consent-_meta tool(s) not documenting the client/version scope in their description: "
+        f"{undocumented}"
+    )
