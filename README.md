@@ -77,7 +77,8 @@ This is a controls tool, so the trust questions come first:
   limit — every write is audit-logged: a rejected one is `DENY`d at the gate (nothing sent); an
   accepted one logs `ATTEMPT` before the I/O, then a terminal `ALLOW`/`FAILED` — or `UNKNOWN_PENDING`
   if it was cancelled mid-put (the value may still land at the IOC, so verify by read-back and never
-  blindly retry).
+  blindly retry). A write-enabled server **refuses to start** unless `EPICS_MCP_AUDIT_LOG_FILE` names
+  a durable path — an ephemeral stderr audit would lose this trail on restart.
 - **Every write is read back (always-on).** After a sanctioned put the server reads the value back
   and compares it to what was written: the result carries `verified` (true within tolerance / false
   mismatch / null not verifiable) plus `readback`/`tolerance`/`note`, and a `READBACK_OK` /
@@ -327,7 +328,7 @@ All settings are read from environment variables with the `EPICS_MCP_` prefix.
 | `EPICS_MCP_PV_WRITE_PATTERN` | _(empty)_ | Regex allowlist of writable PV names (e.g. `^TEST:.*`); **required** once writes are enabled — empty + writes on refuses to start |
 | `EPICS_MCP_WRITE_RATE_LIMIT` | `10` | Max writes per minute (≥ 1) |
 | `EPICS_MCP_READ_RATE_LIMIT` | `0` | Max REST reads per 60 s (0 = disabled, opt-in); over the limit the shared GET chokepoint raises rather than blocks |
-| `EPICS_MCP_AUDIT_LOG_FILE` | _(empty)_ | Audit log path (empty = stderr) |
+| `EPICS_MCP_AUDIT_LOG_FILE` | _(empty)_ | Audit log path; empty = stderr (ephemeral). **Required** when a write gate is on — a write-enabled server refuses to start without a durable path |
 | `EPICS_MCP_READBACK_TOLERANCE` | `1e-06` | Fallback tolerance for the always-on post-write readback verification (feeds both `math.isclose` axes); used only when the record has no usable `control.min_step` (≥ 0) |
 
 **Path boundary**

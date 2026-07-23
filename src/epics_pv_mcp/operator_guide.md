@@ -194,7 +194,9 @@ ESS-spec-pending anyway (see above), so this is a known, bounded gap, not an acc
 
 ### PV write posture (`set_pv_value`) — the audit trail
 
-A `set_pv_value` write leaves a `PV_WRITE` audit line at each stage, correlated by an `op=<id>` token:
+A `set_pv_value` write leaves a `PV_WRITE` audit line at each stage, correlated by an `op=<id>` token.
+A write-enabled server **refuses to start** unless `EPICS_MCP_AUDIT_LOG_FILE` names a durable path — an
+ephemeral stderr audit would lose this trail on restart. The stages, each `op`-correlated:
 
 - `event=DENY` — the gate refused it (writes off / not in the allowlist / rate limit); nothing was sent.
 - `event=ATTEMPT` — emitted **before** the I/O; a durable record that this write was dispatched.

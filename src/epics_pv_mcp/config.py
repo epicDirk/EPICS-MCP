@@ -56,7 +56,11 @@ class EpicsConfig(BaseSettings):
     # RAISES, never blocks — a blocking wait at that sync chokepoint would hold one of the shared
     # worker threads and reintroduce the very starvation the K4 monitor bulkhead removes.
     read_rate_limit: int = Field(default=0, ge=0)
-    audit_log_file: str = ""  # path to audit log (empty = stderr)
+    # Path to the write audit log; empty = stderr (ephemeral, lost on restart). REQUIRED once a
+    # write gate is on: a write-enabled server (ALLOW_PV_WRITE / ALLOW_OLOG_WRITE) refuses to start
+    # with an empty path (boot check in server.main()), so the ATTEMPT/ALLOW/DENY/READBACK/
+    # BOUNDS_DENY trail survives a restart — the record that surfaces a wrong write later.
+    audit_log_file: str = ""
     # O3 readback verification (always-on): after a sanctioned write the value is read back and
     # compared against what was written. This is the FALLBACK tolerance — it feeds BOTH the relative
     # and absolute axis of math.isclose — used only when the record carries no usable min_step

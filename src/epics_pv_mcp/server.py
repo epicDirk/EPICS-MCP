@@ -11,6 +11,7 @@ from pydantic import Field
 
 from epics_pv_mcp import __version__
 from epics_pv_mcp.config import get_config
+from epics_pv_mcp.errors import SafetyConfigError
 from epics_pv_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_pv_mcp.prompts import diagnose_pv as _diagnose_pv
 from epics_pv_mcp.resources import get_epics_config, get_guide, get_health
@@ -108,6 +109,8 @@ def build_instructions(display_tools_available: bool) -> str:
         "The PV-mutating tool set_pv_value is gated OFF by default and additionally requires "
         "EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, a rate limit and an audit log — a "
         "separate gate from the Olog one, and it stays off. "
+        "A write-enabled server refuses to start unless EPICS_MCP_AUDIT_LOG_FILE names a durable "
+        "audit path (an ephemeral stderr audit would lose the trail on restart). "
         "After a sanctioned write it reads the value back and returns a structured result "
         "(verified/readback/tolerance) plus a READBACK audit event, so a wrong or not-landed value "
         "is surfaced, not silently accepted. "
@@ -378,7 +381,8 @@ async def set_pv_value(
     """Set a PV value. Requires EPICS_MCP_ALLOW_PV_WRITE=true.
 
     Protected by safety layer: environment gate, regex allowlist, rate-limit (10/min default),
-    and audit logging — the load-bearing, client-independent guard.
+    and audit logging to a durable path (EPICS_MCP_AUDIT_LOG_FILE — a write-enabled server refuses
+    to start without one) — the load-bearing, client-independent guard.
 
     Readback verification (always-on): after the write the value is read back and compared against
     what was written. The result carries ``verified`` (true = within tolerance / false = mismatch /
@@ -1768,13 +1772,34 @@ def compare_machine_state(pv_prefix: str, reference_file: str = "") -> str:
 
 
 def main() -> None:
-    """Entry point for the MCP server."""
-    # Validate the write-safety config at boot (fail-fast) ONLY when writes are enabled — the
-    # one posture where the pattern / rate-limit / audit-sink config is used. Building the safety
-    # layer then refuses to start on a bad write gate (empty allowlist pattern or an unwritable
-    # audit path) instead of surfacing it on the first write. A read-only deploy (writes off, the
-    # default) never builds the layer, so an unusable audit path — a write concern — is harmless.
-    if get_config().allow_pv_write:
+    """Entry point for the MCP server.
+
+    Validates the write-safety config at boot (fail-fast) whenever a write gate is enabled — the
+    postures where the pattern / rate-limit / audit-sink config is used. A read-only deploy (every
+    write gate off, the default) skips all of it, so a stray audit path is harmless there.
+    """
+    config = get_config()
+    # A write-enabled instance whose audit sink is ephemeral stderr (no EPICS_MCP_AUDIT_LOG_FILE)
+    # loses every ATTEMPT/ALLOW/DENY/READBACK/BOUNDS_DENY record on restart — the one trail meant to
+    # surface a wrong write after the fact. Refuse to start without a DURABLE sink, symmetric with
+    # the empty-pattern / reach (E8) refusals and the unwritable-path refusal below. Covers BOTH the
+    # PV gate and the Olog write gate (they share the epics_pv_mcp.audit sink).
+    if (config.allow_pv_write or config.allow_olog_write) and not config.audit_log_file:
+        raise SafetyConfigError(
+            "A write gate is ENABLED (EPICS_MCP_ALLOW_PV_WRITE / EPICS_MCP_ALLOW_OLOG_WRITE) "
+            "but EPICS_MCP_AUDIT_LOG_FILE is empty — the audit trail would go to stderr and "
+            "vanish on restart. Set a durable audit log path so a wrong write stays "
+            "reconstructable.",
+            details={
+                "allow_pv_write": config.allow_pv_write,
+                "allow_olog_write": config.allow_olog_write,
+                "audit_log_file": "",
+            },
+        )
+    # Building the PV safety layer refuses to start on a bad PV write gate (empty allowlist pattern,
+    # a non-loopback reach, or an unwritable audit path) rather than on the first write.
+    # Only the PV gate has an eager layer; the Olog gate is built lazily on first use.
+    if config.allow_pv_write:
         get_safety()
     mcp.run()
 

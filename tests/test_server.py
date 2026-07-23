@@ -139,7 +139,9 @@ async def test_get_alarm_history_disabled_by_default(monkeypatch: pytest.MonkeyP
     assert result["events"] == []
 
 
-def test_main_validates_write_config_before_run(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_validates_write_config_before_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """S22: main() validates the write-safety config at BOOT (eager get_safety()) before mcp.run().
     A misconfig (writes enabled + empty allowlist pattern) must fail loudly at start, not silently
     run with every PV writable. Rot-Beweis against the former ``def main(): mcp.run()``."""
@@ -155,12 +157,66 @@ def test_main_validates_write_config_before_run(monkeypatch: pytest.MonkeyPatch)
     saved_config = config_module._config
     saved_safety = safety_module._safety
     try:
-        config_module._config = EpicsConfig(allow_pv_write=True, pv_write_pattern="")
+        # A durable audit path is set so the NEW boot audit-sink check does not fire first; this
+        # test pins the empty-PATTERN refuse specifically (writes on + empty allowlist pattern).
+        config_module._config = EpicsConfig(
+            allow_pv_write=True, pv_write_pattern="", audit_log_file=str(tmp_path / "audit.log")
+        )
         safety_module._safety = None
         with pytest.raises(SafetyConfigError):
             main()
         # The boot validation must fire BEFORE mcp.run() — the server never starts serving.
         assert not run_called
+    finally:
+        config_module._config = saved_config
+        safety_module._safety = saved_safety
+
+
+def test_main_refuses_write_enabled_without_durable_audit_sink(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loopback_write_env: None
+) -> None:
+    """A write-enabled instance with no EPICS_MCP_AUDIT_LOG_FILE must REFUSE to start: the audit
+    would flow to ephemeral stderr and vanish on restart, so a wrong write leaves no durable trace
+    (the top-level review's rank-1 write-safety gap). Symmetric with the empty-pattern / reach
+    refusals; covers BOTH the PV gate and the Olog write gate (they share the audit sink).
+
+    Rot-Beweis: remove the audit-sink check in main() and the writes-on/no-audit config below boots
+    (get_safety falls back to a stderr StreamHandler, no raise). ``loopback_write_env`` pins the E8
+    reach so the positive (boot) case builds the safety layer rather than tripping the reach guard.
+    """
+    import epics_pv_mcp.config as config_module
+    import epics_pv_mcp.safety as safety_module
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.errors import SafetyConfigError
+    from epics_pv_mcp.server import main, mcp
+
+    run_called: list[bool] = []
+    monkeypatch.setattr(mcp, "run", lambda *args, **kwargs: run_called.append(True))
+
+    saved_config = config_module._config
+    saved_safety = safety_module._safety
+    try:
+        # PV writes ON, a valid pattern, but NO audit path → the boot check must refuse.
+        config_module._config = EpicsConfig(allow_pv_write=True, pv_write_pattern=".*")
+        safety_module._safety = None
+        with pytest.raises(SafetyConfigError):
+            main()
+        assert not run_called
+
+        # The Olog write gate alone (PV write OFF) must trip the SAME check — shared sink.
+        config_module._config = EpicsConfig(allow_olog_write=True)
+        safety_module._safety = None
+        with pytest.raises(SafetyConfigError):
+            main()
+        assert not run_called
+
+        # With a durable audit path set, the write-enabled instance boots.
+        config_module._config = EpicsConfig(
+            allow_pv_write=True, pv_write_pattern=".*", audit_log_file=str(tmp_path / "audit.log")
+        )
+        safety_module._safety = None
+        main()
+        assert run_called == [True]
     finally:
         config_module._config = saved_config
         safety_module._safety = saved_safety
