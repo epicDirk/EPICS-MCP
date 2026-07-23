@@ -79,6 +79,9 @@ class WriteResult(BaseModel):
     tolerance: float | None = None
     #: Reason for a not-verifiable or mismatched readback.
     note: str | None = None
+    #: O2 value-bounds note: None when the value was checked in-range, else the honest reason it
+    #: was not bounds-checked (the record declares no drive limits — a deliberate fail-open).
+    bounds_note: str | None = None
 
 
 def _control_min_step(readback: Mapping[str, object]) -> float | None:

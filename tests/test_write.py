@@ -11,7 +11,12 @@ import pytest
 import epics_pv_mcp.config as config_module
 import epics_pv_mcp.safety as safety_module
 from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import PVTimeoutError, PVWriteDeniedError, RateLimitError
+from epics_pv_mcp.errors import (
+    PVTimeoutError,
+    PVWriteBoundsError,
+    PVWriteDeniedError,
+    RateLimitError,
+)
 from epics_pv_mcp.safety import SafetyLayer
 from epics_pv_mcp.tools.write import _set_pv_value
 
@@ -406,3 +411,93 @@ class TestSetPvValueReadback:
         result = await _set_pv_value("TEST:PV", "20.0")
         assert result["status"] == "success"
         assert result["verified"] is None
+
+
+class TestSetPvValueBounds:
+    """O2: before the put, the written value is checked against the record's drive limits. An
+    out-of-range value is REFUSED before the put (never reaches the IOC); a record with no drive
+    limits is not bounds-checkable and the write proceeds (fail-open) with an honest note."""
+
+    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.get_safety")
+    async def test_out_of_range_refused_before_put(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        # The pre-read carries real drive limits [0, 120]; 130 is out of range.
+        mock_pv_get.return_value = {
+            "pv_name": "TEST:PV",
+            "value": 80.0,
+            "control": {"limit_low": 0.0, "limit_high": 120.0, "min_step": 0.0},
+        }
+
+        with (
+            caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"),
+            pytest.raises(PVWriteBoundsError),
+        ):
+            await _set_pv_value("TEST:PV", "130")
+
+        # The put NEVER happened — the value never reached the IOC.
+        mock_pv_put.assert_not_awaited()
+        assert "event=BOUNDS_DENY" in caplog.text
+        # A refused-before-put write emits no ATTEMPT/ALLOW/READBACK.
+        assert "event=ATTEMPT" not in caplog.text
+        assert "event=ALLOW" not in caplog.text
+        assert "READBACK" not in caplog.text
+
+    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.get_safety")
+    async def test_in_range_proceeds_no_bounds_note(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+    ) -> None:
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        control = {"limit_low": 0.0, "limit_high": 120.0, "min_step": 0.0}
+        mock_pv_get.side_effect = [
+            {"pv_name": "TEST:PV", "value": 80.0, "control": control},
+            {"pv_name": "TEST:PV", "value": 81.0, "control": control},
+        ]
+        mock_pv_put.return_value = None
+
+        result = await _set_pv_value("TEST:PV", "81")
+        assert result["status"] == "success"
+        # In-range: checked and fine → no bounds note; the write went through.
+        assert result["bounds_note"] is None
+        mock_pv_put.assert_awaited_once()
+
+    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_pv_mcp.tools.write.get_safety")
+    async def test_unbounded_record_proceeds_with_bounds_note(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+    ) -> None:
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        # An enum-like record with NO control block → not bounds-checkable → fail-open.
+        mock_pv_get.side_effect = [
+            {"pv_name": "TEST:PV", "value": 0},
+            {"pv_name": "TEST:PV", "value": 1},
+        ]
+        mock_pv_put.return_value = None
+
+        result = await _set_pv_value("TEST:PV", "1")
+        assert result["status"] == "success"
+        # Fail-open carries an honest note so the un-checked write is visible.
+        assert result["bounds_note"] is not None
+        mock_pv_put.assert_awaited_once()

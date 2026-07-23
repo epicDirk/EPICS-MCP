@@ -4,8 +4,9 @@ import asyncio
 import itertools
 import logging
 
+from epics_pv_mcp.bounds import check_value_in_bounds
 from epics_pv_mcp.config import get_config
-from epics_pv_mcp.errors import EpicsError
+from epics_pv_mcp.errors import EpicsError, PVWriteBoundsError
 from epics_pv_mcp.readback import ReadbackVerification, WriteResult, verify_readback
 from epics_pv_mcp.safety import get_safety
 from epics_pv_mcp.services.epics_client import pv_get, pv_put
@@ -39,6 +40,26 @@ async def _set_pv_value(
     # attempted yet. Only the put below yields ATTEMPT/ALLOW/FAILED/UNKNOWN_PENDING records.
     old = await pv_get(pv_name, timeout)
     old_value = old.get("value")
+
+    # O2 value bounds (always-on, pre-put). The name/rate gate above allowlists only the PV NAME —
+    # never the value. Verify the written value against the record's OWN drive limits (control_t
+    # DRVL/DRVH, already on the pre-read `old`), and REFUSE an out-of-range value HERE, before the
+    # ATTEMPT/put, so it never reaches the IOC. A record that declares no drive limits (no control
+    # block, dropped DRVL==DRVH, or a non-numeric value) is not bounds-checkable → the write
+    # proceeds (fail-open) with an honest note in the result. No extra pv_get — this reuses `old`.
+    bounds = check_value_in_bounds(value, old)
+    if bounds.in_bounds is False:
+        safety.audit_bounds_deny(pv_name, value, bounds.limit_low, bounds.limit_high)
+        raise PVWriteBoundsError(
+            f"Value {value!r} is outside the drive limits "
+            f"[{bounds.limit_low}, {bounds.limit_high}] of PV '{pv_name}' — write refused.",
+            details={
+                "pv_name": pv_name,
+                "value": value,
+                "limit_low": bounds.limit_low,
+                "limit_high": bounds.limit_high,
+            },
+        )
 
     # Durable ATTEMPT record BEFORE the I/O (S24/N01). Minted + emitted AFTER the pre-read so a
     # cancelled/failed pre-read stays a bare tool error, and just before the put so a write that is
@@ -106,4 +127,5 @@ async def _set_pv_value(
         verified=verification.verified,
         tolerance=verification.tolerance,
         note=verification.note,
+        bounds_note=bounds.note,
     ).model_dump()
