@@ -9,6 +9,32 @@ carry breaking changes).
 
 ### Added
 
+- **The first LIVE write-gate deny test (`tests/test_write_gate_live.py`).** Contract point 6 prefers a
+  deny path observed against a real service over an in-memory assertion; until now no write gate had
+  one, and `CLAUDE.md` recorded that as an open gap. Exactly ONE path is covered live, deliberately:
+  **`olog_allowlist_miss` on `add_log_attachment` / `update_log_entry`** — the only deny path whose
+  *decision input* comes from the server (the target entry's logbooks, read back over HTTP), i.e. the
+  only class a mock cannot falsify, because a mock supplies the very payload shape the code assumes.
+  The call passes a log **id** and nothing else, so the refusal naming the target's logbook can only
+  have travelled id → `GET /logs/{id}` → gate. The other eight rows are argued out by name in the
+  module docstring (PV: every deny raises before the first I/O; Olog env-off / URL boundary: shadowed
+  by the whole-mode precondition on these tool paths; empty-logbooks: unreachable there; size cap: no
+  server-side input; rate limit: would need N real mutating writes). Built against the trap that
+  would make it worthless — all four Olog gate branches raise the same class, the same code and a
+  byte-identical audit line, so one missing env var would deny at branch 1 and leave a naive test
+  green: it matches the allowlist branch's OWN message, asserts the server-reported logbook name and
+  the exact code, demands all SIX env vars through `assert_live_available` (never a one-variable
+  gate), routes "no usable logbook" through that same gate rather than a bare `pytest.skip` (which
+  would defeat `EPICS_MCP_REQUIRE_LIVE`), and runs a POSITIVE CONTROL per tool so a deny-all allowlist
+  cannot masquerade as a working gate. Self-sufficient: it creates its own deny target through the RAW
+  client (which bypasses the gate by construction) instead of depending on a pre-existing corpus.
+  Provably red under two targeted mutants: branch 3 denying with branch 1's message, and branch 3
+  disabled. Deny tests mutate nothing (the refusal falls after a pure read); the controls write only
+  to entries the module created itself. Optional `EPICS_MCP_LIVE_OLOG_DENY_LOGBOOK` names the scratch
+  logbook — recommended, since Olog has no delete and the auto-derived name can be a logbook another
+  consumer treats as frozen. `CLAUDE.md`'s "honest limit" is re-scoped accordingly: **PV = not
+  applicable with a reason, Olog = one path live, the rest reasoned** — not "all deny paths proven".
+
 - **Pre-gate refusals no longer wear a write gate's error code — and the rule is now CI-enforced.**
   The write-gate contract (`CLAUDE.md`, point 4) says *"a refusal raised outside the gate must not
   carry the gate's error code"*: such a refusal writes **no audit line at all**, so reusing the

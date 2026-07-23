@@ -273,8 +273,21 @@ State this plainly where the gate is described, because the word "gate" invites 
 `tests/test_write_gate_contract.py`; point 6 and the empty-semantics *rationale* of point 2 are **prose**,
 the category that rots. No CI check proves a future gate author re-decided the empty-shape deliberately or
 scoped the audit claim honestly — the guard there is the review plus the red-provable deny tests of point 6.
-And point 6's own *live* preference is, at the time of writing, **unmet**: every deny path of both gates is
-proven red in memory, none against the wire. That is recorded here as a known gap rather than papered over.
+
+Point 6's own *live* preference, stated per surface rather than as one number:
+
+- **PV gate — not applicable, and that is a reason, not an excuse.** Every one of its deny paths raises
+  *before* the first network I/O. A live deny test would execute byte-identical code beside an unused
+  socket; the in-memory rows are the honest coverage there, not a lesser substitute.
+- **Olog gate — one path proven against the wire, the rest reasoned away.** `olog_allowlist_miss` on
+  `add_log_attachment` / `update_log_entry` is live-covered by `tests/test_write_gate_live.py`. It is the
+  only deny path whose *decision input* comes from the server (the target entry's logbooks, read back over
+  HTTP), i.e. the only one a mock cannot falsify — the mock supplies the very payload shape the code
+  assumes. The other Olog paths are argued out one by one in that module's docstring (env-off and the URL
+  boundary are shadowed by the whole-mode precondition on those tool paths; empty-logbooks is unreachable
+  there; the size cap has no server-side input; a rate-limit probe would need N real mutating writes).
+- **Not claimed:** that every gate refusal has been observed against a real service. It has not, and the
+  list above says which ones and why — recorded rather than papered over.
 
 ## Definition of Done (doc-sync)
 
