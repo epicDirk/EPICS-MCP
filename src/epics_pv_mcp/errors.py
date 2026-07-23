@@ -36,6 +36,20 @@ class PVWriteDeniedError(EpicsError):
         super().__init__(message, error_code="PV_WRITE_DENIED", details=details)
 
 
+class PVWriteBoundsError(PVWriteDeniedError):
+    """Raised when a PV write value is outside the record's own drive limits (control_t DRVL/DRVH).
+
+    A distinct denial reason from the name/rate gate (:class:`PVWriteDeniedError`): the PV IS in the
+    write allowlist, but the VALUE is out of range (O2). Subclasses ``PVWriteDeniedError`` so an
+    existing ``except PVWriteDeniedError`` still catches it, with a distinct ``error_code`` so a
+    caller can tell "fix the value" from "PV not allowlisted". Calls ``EpicsError.__init__``
+    directly because ``PVWriteDeniedError.__init__`` hardcodes ``error_code="PV_WRITE_DENIED"``.
+    """
+
+    def __init__(self, message: str, details: dict[str, object] | None = None) -> None:
+        EpicsError.__init__(self, message, error_code="PV_WRITE_OUT_OF_BOUNDS", details=details)
+
+
 class OlogWriteDeniedError(EpicsError):
     """Raised when an Olog logbook write is rejected by the Olog write gate.
 

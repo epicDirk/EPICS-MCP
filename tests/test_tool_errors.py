@@ -21,6 +21,20 @@ async def test_epics_error_becomes_tool_error_with_code() -> None:
         await boom()
 
 
+async def test_bounds_error_renders_its_own_code() -> None:
+    """O2: PVWriteBoundsError subclasses PVWriteDeniedError but must render its OWN error_code
+    (PV_WRITE_OUT_OF_BOUNDS), not the parent's PV_WRITE_DENIED. The __init__ override is the
+    trap this pins."""
+    from epics_pv_mcp.errors import PVWriteBoundsError
+
+    @translate_epics_errors
+    async def boom() -> str:
+        raise PVWriteBoundsError("out of range")
+
+    with pytest.raises(ToolError, match=r"\[PV_WRITE_OUT_OF_BOUNDS\] out of range"):
+        await boom()
+
+
 async def test_generic_exception_becomes_internal_tool_error() -> None:
     @translate_epics_errors
     async def boom() -> str:

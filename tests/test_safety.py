@@ -358,6 +358,23 @@ class TestAuditDeny:
             sl.check_write_allowed("TEST:3")
 
 
+class TestAuditBoundsDeny:
+    """The O2 value-bounds refusal leaves a BOUNDS_DENY audit record (event + value + limits)."""
+
+    def test_bounds_deny_emits_record(self, caplog: pytest.LogCaptureFixture) -> None:
+        sl = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+            sl.audit_bounds_deny("TEST:pv", "130", 0.0, 120.0)
+
+        assert "event=BOUNDS_DENY" in caplog.text
+        assert "pv=TEST:pv" in caplog.text
+        assert "value='130'" in caplog.text
+        assert "limit_low=0.0" in caplog.text
+        assert "limit_high=120.0" in caplog.text
+
+
 class TestSafetyConfig:
     """Fail-closed Konfig-Validierung + thread-sicherer Singleton."""
 

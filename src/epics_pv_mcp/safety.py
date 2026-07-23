@@ -284,6 +284,32 @@ class SafetyLayer:
             caller,
         )
 
+    def audit_bounds_deny(
+        self,
+        pv_name: str,
+        value: object,
+        limit_low: object,
+        limit_high: object,
+        caller: str = "set_pv_value",
+    ) -> None:
+        """Log a write REFUSED because its value is outside the record's drive limits (O2).
+
+        ``event=BOUNDS_DENY`` — the PV passed the name/rate gate but the written value lies outside
+        ``[limit_low, limit_high]`` (control_t DRVL/DRVH), so the put is refused BEFORE the I/O and
+        nothing reaches the IOC. Deliberately NOT reusing :meth:`_audit_deny`: this refusal happens
+        AFTER the pre-read, so it consumed its rate token (like a FAILED put) — unlike the gate
+        denies, whose docstring pins that a denial never consumes a token. Values/limits are numeric
+        metadata, never free text.
+        """
+        self._emit(
+            "PV_WRITE event=BOUNDS_DENY pv=%s value=%r limit_low=%r limit_high=%r caller=%s",
+            pv_name,
+            value,
+            limit_low,
+            limit_high,
+            caller,
+        )
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
