@@ -246,6 +246,44 @@ class SafetyLayer:
             caller,
         )
 
+    def audit_readback(
+        self,
+        pv_name: str,
+        written: object,
+        readback_value: object,
+        verified: bool | None,
+        operation_id: str = "-",
+        caller: str = "set_pv_value",
+    ) -> None:
+        """Log the O3 readback verdict of a completed write (``event=READBACK_*``).
+
+        Emitted AFTER the ALLOW record (:meth:`audit_write`): the write already succeeded, and this
+        is the independent verdict on whether the value read back matches what was written.
+
+        * ``READBACK_OK`` — the readback is within tolerance of the written value.
+        * ``READBACK_MISMATCH`` — a genuine mismatch. The loud, forensic signal for a wrong write;
+          the write is NOT reverted (a wrong value may now sit at the IOC).
+        * ``READBACK_UNVERIFIED`` — the readback could not be obtained (timeout / value withheld).
+          An absence of evidence, never a mismatch.
+
+        ``operation_id`` ties this line to the ATTEMPT/ALLOW records of the same write.
+        """
+        if verified is True:
+            event = "READBACK_OK"
+        elif verified is False:
+            event = "READBACK_MISMATCH"
+        else:
+            event = "READBACK_UNVERIFIED"
+        self._emit(
+            "PV_WRITE event=%s pv=%s written=%r readback=%r op=%s caller=%s",
+            event,
+            pv_name,
+            written,
+            readback_value,
+            operation_id,
+            caller,
+        )
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

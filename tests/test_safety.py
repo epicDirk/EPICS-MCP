@@ -244,6 +244,35 @@ class TestAuditWrite:
         assert "op=w7" in caplog.text
         assert "caller=set_pv_value" in caplog.text
 
+
+class TestAuditReadback:
+    """O3: audit_readback maps the tri-state verdict to READBACK_OK/MISMATCH/UNVERIFIED and carries
+    the written + readback values plus the op that correlates it to the same write's ALLOW line."""
+
+    def test_readback_ok(self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+            safety.audit_readback("TEST:pv", 20.0, 20.0, True, operation_id="w7")
+        assert "event=READBACK_OK" in caplog.text
+        assert "written=20.0" in caplog.text
+        assert "readback=20.0" in caplog.text
+        assert "op=w7" in caplog.text
+        assert "caller=set_pv_value" in caplog.text
+
+    def test_readback_mismatch(self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+            safety.audit_readback("TEST:pv", 20.0, 19.0, False, operation_id="w7")
+        assert "event=READBACK_MISMATCH" in caplog.text
+
+    def test_readback_unverified_on_none(
+        self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # verified None (readback not obtained) → UNVERIFIED, never OK, never MISMATCH.
+        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+            safety.audit_readback("TEST:pv", 20.0, None, None, operation_id="w7")
+        assert "event=READBACK_UNVERIFIED" in caplog.text
+        assert "event=READBACK_OK" not in caplog.text
+        assert "event=READBACK_MISMATCH" not in caplog.text
+
     def test_audit_write_unknown_record(
         self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture
     ) -> None:
