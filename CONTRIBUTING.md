@@ -34,6 +34,10 @@ absent, so the core suite stays green. A checkout with `--extra all` runs everyt
   operator guide (`src/epics_pv_mcp/operator_guide.md`), not just a commit body — see the Knowledge
   Persistence Policy in `CLAUDE.md`. A new tool must appear in the guide's tool inventory and any new
   `EPICS_MCP_*` var must be mentioned there; both are drift-checked by `test_guide_matches_code.py`.
+- A new **write** surface additionally satisfies all six points of the write-gate contract (`CLAUDE.md`)
+  and registers every one of its deny paths in `tests/test_write_gate_contract.py::DENY_PATHS` — each
+  one red-provable on a mutant. The drift guard there discovers gate modules by scanning, so a new gate
+  fails that test until it is registered; registering it is the work, not a formality.
 
 ## Live / sandbox tests
 
