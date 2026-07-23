@@ -241,7 +241,9 @@ class TestUrlBoundary:
 
 
 # ======================================================================================
-# OlogWriteGate: logbook allowlist (deny-all on empty — the INVERSE of PV)
+# OlogWriteGate: logbook allowlist (deny-all on empty — fail-closed like PV, in a DIFFERENT shape:
+# PV refuses to START on an empty pattern, this gate constructs and denies at runtime. NOT an
+# inverse — neither is fail-open; see the write-gate contract, point 2, in CLAUDE.md.)
 # ======================================================================================
 
 

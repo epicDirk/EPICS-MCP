@@ -11,9 +11,12 @@ PV write path is never touched — three things diverge deliberately:
   that isolation does NOT apply. So a write is refused unless ``olog_url`` resolves to a loopback
   host (the local Docker sandbox) OR is an allowlisted https URL with remote writes enabled (a
   plain-http remote is refused — Basic creds are cleartext) — a production write is a deliberate,
-  auditable double action. The host is taken ONLY from
-  ``urlparse(url).hostname`` (never ``.netloc`` / a substring): ``http://127.0.0.1@olog-prod/Olog``
-  has hostname ``olog-prod`` and is refused.
+  auditable double action. The host comes ONLY from :func:`~epics_pv_mcp.services._http.url_host`,
+  which parses with **urllib3 — the parser ``requests`` actually connects through** — never with a
+  second parser and never a substring of the authority: ``http://127.0.0.1@olog-prod/Olog`` has host
+  ``olog-prod`` and is refused. Naming ``urlparse`` here would be wrong AND dangerous: the two
+  parsers disagree on a hostile authority (see ``url_host``'s docstring for the measured case), and
+  a boundary validated with a different parser than the one that opens the socket is a bypass.
 * **Deny-all empty allowlist.** Gate on + empty logbook allowlist = deny every write: a wrong
   logbook is a visible error. BOTH write gates are fail-closed on empty, in DIFFERENT shapes:
   the PV name-pattern (``SafetyLayer``) *refuses to start* when writes are on and the pattern is
@@ -288,8 +291,9 @@ class OlogWriteGate:
         Three steps, in this order — the ORDER is load-bearing:
 
         1. **Unparseable → deny, before anything else** (SEC-2). ``url_host`` returns None for a
-           hostless/garbage URL and for a MALFORMED bracketed-IPv6 authority (``http://[::1]./Olog``
-           makes ``urlparse`` raise ``ValueError`` on Python 3.12+). This veto runs FIRST, so an
+           hostless/garbage URL, for a scheme-less base URL, and for a MALFORMED authority (a bad
+           bracketed IPv6 raises ``LocationParseError``/``ValueError`` in the urllib3 parser it uses
+           — the same parser ``requests`` connects with). This veto runs FIRST, so an
            unparseable URL is denied even if it is exactly allowlisted — a bad URL is a clean,
            audited DENY, never an uncaught crash and never a lucky pass.
         2. **Loopback → allow** (the local Docker sandbox).
