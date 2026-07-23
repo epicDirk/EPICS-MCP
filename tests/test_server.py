@@ -1021,6 +1021,10 @@ async def test_tools_list_within_budget() -> None:
 # so it advertises a consent hint that a honouring client turns into a per-call human approval
 # prompt. The load-bearing guard stays server-side (safety.py); this is Defense-in-Depth only.
 _CONSENT_META = {"anthropic/requiresUserInteraction": True}
+# Match on key-PRESENCE, not whole-dict equality: a tool may legitimately gain other anthropic/*
+# _meta keys later (maxResultSizeChars, alwaysLoad, ...). Whole-dict "==" would then drop the tool
+# from K2's coverage (vacuously green - the dangerous direction) and misfire the invariant.
+_CONSENT_KEY = next(iter(_CONSENT_META))
 # The Olog-write class (update_log_entry etc.) is a SEPARATE, deliberately deferred governance
 # decision (its own gate); it is EXPLICITLY exempted so the consent invariant never silently skips
 # it. Goes loud-red if update_log_entry is ever renamed. Self-contained: no plan reference.
@@ -1049,7 +1053,7 @@ async def test_destructive_tools_carry_consent_meta_or_are_explicitly_deferred()
         if t.annotations
         and t.annotations.destructiveHint is True
         and t.name not in _CONSENT_DEFERRED
-        and t.meta != _CONSENT_META
+        and (t.meta or {}).get(_CONSENT_KEY) is not True
     ]
     assert not offenders, (
         f"destructive tool(s) missing client-side consent _meta: {offenders} - add "
@@ -1078,7 +1082,7 @@ async def test_consent_meta_tools_document_the_client_scope() -> None:
     undocumented = [
         t.name
         for t in await mcp.list_tools()
-        if t.meta == _CONSENT_META
+        if (t.meta or {}).get(_CONSENT_KEY) is True
         and not (t.description and "requiresUserInteraction" in t.description)
     ]
     assert not undocumented, (
