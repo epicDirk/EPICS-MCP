@@ -892,9 +892,12 @@ def test_prune_tool_schemas_never_crashes_core(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """MA-Q1 trap #2 (crash-guard): the post-pass runs at MODULE IMPORT and mutates a
-    cached_property — an unguarded raise (e.g. a future frozen model) would take down the whole core
-    PV server. Force an internal raise and assert _prune_tool_schemas swallows it (logs ERROR, no
-    propagation). Red if the try/except is removed (the RuntimeError would propagate out)."""
+    cached_property — an unguarded raise while pruning would take down the whole core PV server.
+    Force the strip to raise on every tool and assert _prune_tool_schemas swallows it (logs ERROR,
+    no propagation). Since MA-Q1a the strip raise is caught PER-TOOL by the inner guard, so full red
+    needs BOTH try/excepts removed; each guard is red-proven on its own path elsewhere — the inner
+    by test_prune_isolates_a_single_failing_tool, the outer by
+    test_prune_outer_guard_swallows_a_broken_manager."""
     import epics_pv_mcp.server as server
 
     def _boom(_node: object) -> None:
@@ -904,6 +907,30 @@ def test_prune_tool_schemas_never_crashes_core(
     with caplog.at_level(logging.ERROR):
         server._prune_tool_schemas(server.mcp)  # must NOT raise
     assert any("_prune_tool_schemas" in record.message for record in caplog.records)
+
+
+def test_prune_outer_guard_swallows_a_broken_manager(caplog: pytest.LogCaptureFixture) -> None:
+    """MA-Q1a: the OUTER guard covers a failure the per-tool inner try/except cannot reach —
+    ``manager.list_tools()`` itself raising, before the loop is ever entered. Drive it and assert
+    _prune_tool_schemas swallows it (logs the outer 'core PV tools remain available' message, no
+    propagation). Red if the OUTER try/except is removed: the RuntimeError propagates out of
+    _prune_tool_schemas. The inner guard is red-proven separately by
+    test_prune_isolates_a_single_failing_tool."""
+    import epics_pv_mcp.server as server
+
+    class _BoomManager:
+        def list_tools(self) -> list[object]:
+            raise RuntimeError("manager exploded")
+
+    class _FakeMcp:
+        _tool_manager = _BoomManager()
+
+    with caplog.at_level(logging.ERROR):
+        server._prune_tool_schemas(cast(Any, _FakeMcp()))  # must NOT raise
+
+    assert any("core PV tools remain available" in record.message for record in caplog.records), (
+        "outer guard did not log its message — its own failure path is unexercised"
+    )
 
 
 def test_prune_isolates_a_single_failing_tool(
@@ -969,8 +996,8 @@ _TOOLS_LIST_WIRE_CEILING = 70_000
 async def test_tools_list_within_budget() -> None:
     """MA-Q3 size-gate: the wire tools/list payload must stay within the agreed ceiling. MA-Q1
     shrank it to 64499 and is framed as 'a precondition for every new tool', but nothing guarded the
-    byte budget — a new tool, an SDK change that inflates the wire, or a regression that stops the
-    pruning could grow it back UNNOTICED with a green suite. This is that missing guard.
+    character budget — a new tool, an SDK change that inflates the wire, or a regression that stops
+    the pruning could grow it back UNNOTICED with a green suite. This is that missing guard.
 
     RELATIONAL (a ``<=`` ceiling, not an exact count) so both the core-only lane (28 tools) and the
     full lane (32) pass — a count-pinned assert would break core-only CI. Provably red: lower the
