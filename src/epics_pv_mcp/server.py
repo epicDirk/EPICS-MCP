@@ -231,6 +231,40 @@ def _strip_schema_title_annotations(node: object) -> None:
             _strip_schema_title_annotations(item)
 
 
+def _strip_output_schema_field_annotations(node: object, *, is_root: bool = True) -> None:
+    """Shrink a TYPED outputSchema's wire payload IN PLACE (MA-Q1 A3, L1): drop the pydantic
+    ``title`` annotation from every FIELD-level node, and the ``default: null`` that every
+    ``total=False`` field carries. Both are wire noise — the model reads a field's name, type
+    and nullability, never these.
+
+    The ROOT ``title`` is KEPT: it is the TypedDict class name (e.g. ``AlarmConfiguredResult``).
+    The four ``*_exposes_typed_output_schema`` tests read it as the "which TypedDict got wired"
+    identity anchor. Schema-aware like :func:`_strip_schema_title_annotations`: a name->schema
+    map is walked by its VALUES, so a field NAMED ``title``/``default`` survives as a property
+    key (none exist in today's typed outputs; the guard is free and future-proof). Only a
+    ``default`` whose value is ``None`` is dropped, never a real default.
+    """
+    if isinstance(node, dict):
+        if not is_root:
+            node.pop("title", None)  # a FIELD-level title annotation (the root title is kept)
+        if "default" in node and node["default"] is None:
+            node.pop("default", None)  # the always-null total=False default — pure wire noise
+        for key, value in node.items():
+            if key in _SCHEMA_MAP_KEYWORDS:
+                # name->schema MAP: keep the KEYS (property names!), clean the VALUES only
+                if isinstance(value, dict):
+                    for subschema in value.values():
+                        _strip_output_schema_field_annotations(subschema, is_root=False)
+            elif key in _SCHEMA_SUBSCHEMA_KEYWORDS:
+                _strip_output_schema_field_annotations(value, is_root=False)
+            elif key in _SCHEMA_LIST_KEYWORDS and isinstance(value, list):
+                for subschema in value:
+                    _strip_output_schema_field_annotations(subschema, is_root=False)
+    elif isinstance(node, list):
+        for item in node:
+            _strip_output_schema_field_annotations(item, is_root=False)
+
+
 def _is_information_empty_output_schema(schema: dict[str, object]) -> bool:
     """True ONLY for the accept-all object form pydantic emits for a ``dict[str, object]`` return
     (``{type: object, additionalProperties: true}`` with no ``properties``) — the information-empty
@@ -250,7 +284,7 @@ def _is_information_empty_output_schema(schema: dict[str, object]) -> bool:
 
 
 def _prune_tool_schemas(mcp: FastMCP) -> None:
-    """Post-registration ``tools/list`` schema hygiene (MA-Q1) — two LOSSLESS passes over every
+    """Post-registration ``tools/list`` schema hygiene (MA-Q1) — three LOSSLESS passes over every
     registered tool, shrinking the wire payload with no loss of capability:
 
     - **A1** — strip the derived pydantic ``title`` annotations from each inputSchema
@@ -259,8 +293,18 @@ def _prune_tool_schemas(mcp: FastMCP) -> None:
       ``{additionalProperties: true, title: …DictOutput, type: object}``, which validates nothing.
       Setting ``Tool.output_schema = None`` (a ``@cached_property`` whose assignment shadows the
       instance cache) removes it from the wire, while ``fn_metadata.output_schema`` stays intact →
-      the tool still returns ``structuredContent`` at call time (an advertise-only drop). The 11
-      typed Olog outputSchemas (they carry ``properties``) are KEPT — test-pinned.
+      the tool still returns ``structuredContent`` at call time (an advertise-only drop). The typed
+      outputSchemas (they carry ``properties``) are KEPT — test-pinned — and A3 then strips them.
+    - **A3 (L1)** — for a KEPT typed outputSchema, strip the pydantic ``title`` annotation from
+      every FIELD-level node and the always-null ``total=False`` ``default`` from every field
+      (:func:`_strip_output_schema_field_annotations`). Both are wire noise; the model reads a
+      field's name + type + nullability. The ROOT ``title`` (the TypedDict class name) is KEPT —
+      the four ``*_exposes_typed_output_schema`` tests read it as the wired-TypedDict identity.
+      Unlike A2, A3 mutates the schema dict IN PLACE, and ``tool.output_schema`` IS
+      ``fn_metadata.output_schema`` (an alias, not a copy), so A3 also mutates the validation
+      schema. That is safe: ``convert_result`` validates ``structuredContent`` via the pydantic
+      ``output_model``, not this dict (only an ``is not None`` gate A3 leaves set) — so dropping
+      title/null-default changes the advertised wire only, never validation.
 
     Runs at MODULE IMPORT and mutates a ``@cached_property``. Each tool is pruned inside its OWN
     ``try/except`` — a single broken tool is logged and skipped while the others still prune, so the
@@ -283,9 +327,12 @@ def _prune_tool_schemas(mcp: FastMCP) -> None:
         for tool in manager.list_tools():
             try:
                 _strip_schema_title_annotations(tool.parameters)  # A1
-                output_schema = tool.output_schema  # A2 — read the cached_property once
-                if output_schema is not None and _is_information_empty_output_schema(output_schema):
-                    tool.output_schema = None
+                output_schema = tool.output_schema  # A2/A3 — read the cached_property once
+                if output_schema is not None:
+                    if _is_information_empty_output_schema(output_schema):
+                        tool.output_schema = None  # A2: drop the accept-all outputSchema
+                    else:
+                        _strip_output_schema_field_annotations(output_schema)  # A3 (L1)
             except Exception:  # one broken tool must not abort the pass — log it, keep pruning
                 logger.error(
                     "tools/list schema hygiene (_prune_tool_schemas) failed for tool %r; "

@@ -1105,6 +1105,30 @@ def _schema_nodes_with_title(node: object, path: str = "root") -> list[str]:
     return hits
 
 
+def _schema_nodes_with_null_default(node: object, path: str = "root") -> list[str]:
+    """Schema-aware walk: a label for every SCHEMA NODE carrying a ``default: null`` — the
+    always-null annotation a ``TypedDict total=False`` field emits, wire noise A3 strips. Walks a
+    properties/$defs map by its VALUES so a property NAMED ``default`` is never mistaken for it."""
+    hits: list[str] = []
+    if isinstance(node, dict):
+        if "default" in node and node["default"] is None:
+            hits.append(path)
+        for key, value in node.items():
+            if key in _JSCHEMA_MAP_KW:
+                if isinstance(value, dict):
+                    for name, sub in value.items():
+                        hits += _schema_nodes_with_null_default(sub, f"{path}.{key}[{name}]")
+            elif key in _JSCHEMA_SUB_KW:
+                hits += _schema_nodes_with_null_default(value, f"{path}.{key}")
+            elif key in _JSCHEMA_LIST_KW and isinstance(value, list):
+                for i, sub in enumerate(value):
+                    hits += _schema_nodes_with_null_default(sub, f"{path}.{key}[{i}]")
+    elif isinstance(node, list):
+        for i, item in enumerate(node):
+            hits += _schema_nodes_with_null_default(item, f"{path}[{i}]")
+    return hits
+
+
 def test_strip_schema_title_annotations_preserves_title_property() -> None:
     """MA-Q1 unit guard (provably red against a NAIVE strip): the schema-aware strip removes every
     ``title`` ANNOTATION but keeps a property literally NAMED ``title`` — with its description — and
@@ -1173,6 +1197,37 @@ async def test_input_schemas_carry_no_title_annotation() -> None:
     for tool in await mcp.list_tools():
         residual = _schema_nodes_with_title(tool.inputSchema)
         assert not residual, f"{tool.name}: title annotation(s) survived at {residual}"
+
+
+@pytest.mark.asyncio
+async def test_output_schema_fields_carry_no_title_annotation() -> None:
+    """MA-Q1 A3 (L1): a typed outputSchema keeps ONLY its ROOT ``title`` (the TypedDict identity
+    the four ``*_exposes_typed_output_schema`` tests read); every field node has its title
+    stripped. Red pre-A3 (pydantic emits a title annotation on every field)."""
+    from epics_pv_mcp.server import mcp
+
+    for tool in await mcp.list_tools():
+        if tool.name not in _TYPED_OUTPUT_TOOLS:
+            continue
+        assert tool.outputSchema is not None, f"{tool.name}: typed tool lost its outputSchema"
+        titled = _schema_nodes_with_title(tool.outputSchema)
+        assert titled == ["root"], (
+            f"{tool.name}: expected only the root title kept, got title nodes at {titled}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_output_schemas_carry_no_null_default() -> None:
+    """MA-Q1 A3 (L1): after the post-pass, NO typed-outputSchema node carries a ``default: null``
+    (the always-null ``total=False`` annotation). Red pre-A3 (every field emits default:null)."""
+    from epics_pv_mcp.server import mcp
+
+    for tool in await mcp.list_tools():
+        if tool.name not in _TYPED_OUTPUT_TOOLS:
+            continue
+        assert tool.outputSchema is not None, f"{tool.name}: typed tool lost its outputSchema"
+        residual = _schema_nodes_with_null_default(tool.outputSchema)
+        assert not residual, f"{tool.name}: null default(s) survived at {residual}"
 
 
 @pytest.mark.asyncio
