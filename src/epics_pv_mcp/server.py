@@ -16,6 +16,7 @@ from epics_pv_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_pv_mcp.prompts import diagnose_pv as _diagnose_pv
 from epics_pv_mcp.resources import get_epics_config, get_guide, get_health
 from epics_pv_mcp.safety import get_safety
+from epics_pv_mcp.services.checkers import AlarmConfiguredResult
 from epics_pv_mcp.services.checkers_olog import (
     OlogAddAttachmentResult,
     OlogCreateResult,
@@ -905,7 +906,7 @@ async def is_alarm_configured(
         ),
     ],
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> AlarmConfiguredResult:
     """Report whether a PV has an alarm configuration (Phoebus Alarm Logger /search/alarm/config).
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ALARM_URL is set.

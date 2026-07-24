@@ -744,6 +744,121 @@ async def test_archiver_history_structured_output_conforms_to_its_schema(
         )
 
 
+# The JSON base type every is_alarm_configured (AlarmConfiguredResult) property must advertise (the
+# non-null branch for an X | None field, the bare type otherwise). An INDEPENDENT source of truth —
+# hardcoded, NOT reflected from the TypedDict — so a base-type WIDENING of an annotation is caught
+# even where nullability hides it from a bare-``type`` check (the _ARCHIVER_HISTORY_BASE_TYPE /
+# _OLOG_FIELD_BASE_TYPE rationale, applied to the alarm-configured result). configured's non-null
+# branch is "boolean" — the client returns bool | None (not str), so a widen-to-str trips this.
+_ALARM_CONFIGURED_BASE_TYPE: dict[str, str] = {
+    "enabled": "boolean",
+    "pv": "string",
+    "configured": "boolean",
+    "config": "string",
+    "withheld": "boolean",
+    "detail": "object",
+    "note": "string",
+}
+
+# The keys is_alarm_configured emits on EVERY return path (disabled + no-tree + _run) and never as a
+# spurious null — enabled and pv. Every OTHER advertised property is sometimes-absent (configured is
+# present on every path but is None on the disabled/withheld/tree-unknown paths, so it too must
+# permit null) and MUST permit null (see the conformance test below).
+_ALARM_CONFIGURED_ALWAYS_PRESENT = frozenset({"enabled", "pv"})
+
+
+@pytest.mark.asyncio
+async def test_alarm_configured_exposes_typed_output_schema() -> None:
+    """S29 (2nd target): is_alarm_configured advertises a STRUCTURED outputSchema — its
+    AlarmConfiguredResult TypedDict's typed ``properties`` — not the bare
+    ``{additionalProperties: true}`` a plain ``dict[str, object]`` return yields. Red before the
+    retype (no ``properties`` at all).
+
+    Mirrors test_archiver_history_exposes_typed_output_schema for the single alarm tool: (1) the
+    schema title is AlarmConfiguredResult; (2) the advertised properties are EXACTLY the 7 mapped
+    fields — completeness both ways (mypy --strict guards an undeclared key in a return literal;
+    this guards a dropped one); (3) every field carries the right JSON BASE type, read via
+    :func:`_base_type` from the bare ``type`` (non-nullable) OR the non-null ``anyOf`` branch
+    (``X | None``). Checking the NULLABLE fields' base type too closes a widening that hides behind
+    nullability (e.g. configured: bool | None widened to int | None — mypy-legal since bool ⊆ int,
+    anyOf-shaped so a presence check skips it, but boolean -> integer here)."""
+    from epics_pv_mcp.server import mcp
+
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    schema = tools["is_alarm_configured"].outputSchema or {}
+    properties = schema.get("properties", {})
+    assert properties, "is_alarm_configured: outputSchema carries no typed properties"
+    assert schema.get("title") == "AlarmConfiguredResult", (
+        f"is_alarm_configured: wrong TypedDict wired ({schema.get('title')!r})"
+    )
+    assert set(properties) == set(_ALARM_CONFIGURED_BASE_TYPE), (
+        f"is_alarm_configured: advertised properties {sorted(properties)} != "
+        f"expected {sorted(_ALARM_CONFIGURED_BASE_TYPE)}"
+    )
+    for field, prop in properties.items():
+        actual = _base_type(prop)
+        assert actual == _ALARM_CONFIGURED_BASE_TYPE[field], (
+            f"is_alarm_configured.{field}: schema base type {actual!r} != "
+            f"{_ALARM_CONFIGURED_BASE_TYPE[field]!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_alarm_configured_structured_output_conforms_to_its_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S29 conformance (the MA-1 null trap for is_alarm_configured): the EMITTED structuredContent
+    must conform to its own outputSchema. FastMCP serializes an omitted ``total=False`` key as JSON
+    ``null`` (its ``convert_result`` dumps the model WITHOUT ``exclude_none``), so a field absent on
+    some return path — config/withheld/detail on the disabled path, plus note on a success path with
+    no note — MUST permit null in the schema. And ``configured`` is explicitly None on the disabled
+    path (the tri-state), so a non-nullable ``configured: bool`` would make the disabled-path output
+    violate the tool's own advertised schema.
+
+    Part A (runtime, real serialization): drive is_alarm_configured on the disabled path through
+    ``mcp.call_tool`` and assert every None-valued key in the emitted structuredContent permits null
+    — the direct bug repro. Part B (static): every advertised property outside the always-present
+    envelope must permit null, extending the check to note (absent only on a success path, which the
+    disabled path does not exercise)."""
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import mcp
+    from epics_pv_mcp.services import checkers
+
+    # Force the disabled path deterministically (independent of the ambient EPICS_MCP_ALARM_URL).
+    # query_alarm_configured resolves get_config in the checkers module's OWN namespace (a plain
+    # ``from ... import get_config``), so patch it THERE — NOT tools.alarm.get_config (the thin
+    # adapter has none) and NOT checkers_olog.get_config (a different module for the Olog cluster).
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(alarm_url=""))
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    properties = (tools["is_alarm_configured"].outputSchema or {}).get("properties", {})
+
+    # Part A — the emitted structuredContent conforms on the disabled path. FastMCP's call_tool
+    # returns a (content, structuredContent) tuple; we assert on the structured dict. config_name is
+    # required by the tool but the disabled path returns before it is read (checkers.py:369-370).
+    _content, structured = cast(
+        tuple[object, dict[str, Any]],
+        await mcp.call_tool(
+            "is_alarm_configured",
+            {"pv": "SIM:PS-01:Cur-RB", "config_name": "SomeTree"},
+        ),
+    )
+    for key, value in structured.items():
+        if value is None:
+            assert _schema_permits_null(properties[key]), (
+                f"is_alarm_configured.{key}: emitted null but its schema property forbids null "
+                f"({properties[key]})"
+            )
+
+    # Part B — every sometimes-absent advertised property permits null.
+    for prop_name, prop_schema in properties.items():
+        if prop_name in _ALARM_CONFIGURED_ALWAYS_PRESENT:
+            continue
+        assert _schema_permits_null(prop_schema), (
+            f"is_alarm_configured.{prop_name}: sometimes-absent property must permit null in its "
+            f"outputSchema (FastMCP dumps an omitted key as null), got {prop_schema}"
+        )
+
+
 def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -808,6 +923,7 @@ _TYPED_OUTPUT_TOOLS = frozenset(
         "download_log_attachment",
         "list_log_attachments",
         "get_pv_history",
+        "is_alarm_configured",
     }
 )
 

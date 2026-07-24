@@ -24,7 +24,7 @@ home for its adapter, factory and query).
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, TypedDict
 
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
@@ -348,11 +348,32 @@ async def query_archived(pv: str, timeout: float = 5.0) -> dict[str, object]:
         raise EpicsError(f"Archiver: {exc}", error_code=_archiver_error_code(exc)) from exc
 
 
+# --- Tool result shape (S29): is_alarm_configured's tri-state ------------------------------------
+# One total=False TypedDict over every key across query_alarm_configured's return paths (disabled /
+# no-tree-withheld / configured). Same MA-1 nullability rule as the Olog shapes
+# (services/checkers_olog.py:46-58): a field ABSENT on some return path — or present-but-sometimes-
+# None (``configured`` is None on the disabled/withheld/tree-unknown paths) — is typed ``X | None``,
+# because FastMCP serializes an omitted total=False key (and an explicit None) as JSON ``null`` (its
+# convert_result dumps the model WITHOUT ``exclude_none``); a non-nullable type makes the emitted
+# structuredContent violate the tool's own advertised outputSchema. Only ``enabled`` + ``pv`` are
+# present on EVERY path and never null. FastMCP yields a typed outputSchema (``properties``;
+# ``anyOf[T, null]`` for the nullable fields) instead of the bare ``{additionalProperties: true}`` a
+# plain dict yields; mypy --strict checks every ``return {...}`` literal below against this shape.
+class AlarmConfiguredResult(TypedDict, total=False):
+    enabled: bool
+    pv: str
+    configured: bool | None
+    config: str | None
+    withheld: bool | None
+    detail: dict[str, object] | None
+    note: str | None
+
+
 async def query_alarm_configured(
     pv: str,
     config_name: str | None = None,
     timeout: float = 5.0,
-) -> dict[str, object]:
+) -> AlarmConfiguredResult:
     """Report whether *pv* has an alarm configuration (Alarm Logger /search/alarm/config).
 
     Default-disabled: with ``EPICS_MCP_ALARM_URL`` unset, returns ``enabled: false`` and makes no
@@ -378,10 +399,10 @@ async def query_alarm_configured(
             "note": _ALARM_NO_TREE_NOTE,
         }
 
-    def _run() -> dict[str, object]:
+    def _run() -> AlarmConfiguredResult:
         client = AlarmClient(cfg.alarm_url, timeout=timeout, auth_header=cfg.alarm_auth or None)
         configured, detail = client.is_alarm_configured(pv, config_name=config_name)
-        result: dict[str, object] = {
+        result: AlarmConfiguredResult = {
             "enabled": True,
             "pv": pv,
             "config": config_name,

@@ -8,14 +8,18 @@ Default-disabled behaviour (no ``EPICS_MCP_ALARM_URL`` → no network call) is e
 
 from __future__ import annotations
 
-from epics_pv_mcp.services.checkers import query_alarm_configured, query_alarm_history
+from epics_pv_mcp.services.checkers import (
+    AlarmConfiguredResult,
+    query_alarm_configured,
+    query_alarm_history,
+)
 
 
 async def _is_alarm_configured(
     pv: str,
     config_name: str,
     timeout: float = 5.0,
-) -> dict[str, object]:
+) -> AlarmConfiguredResult:
     """Report whether *pv* has an alarm configuration (Alarm Logger /search/alarm/config).
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_alarm_configured`.
