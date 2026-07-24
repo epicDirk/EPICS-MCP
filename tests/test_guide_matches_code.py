@@ -79,6 +79,11 @@ def test_guide_tool_inventory_matches_registrations() -> None:
     from the guide (the Knowledge-Persistence-Policy's teeth — a new tool must be documented)."""
     guide = _guide_tool_tokens()
     code = _registered_tool_names()
+    # Non-empty floor (F23): set-equality passes vacuously as empty == empty if either
+    # scanner silently returns nothing (renamed decorator, reformatted inventory). Anchor
+    # both sides, like test_every_level_parameter_points_at_list_log_levels does.
+    assert guide, "guide tool inventory is empty — the inventory/token anchor broke"
+    assert code, "no registered tools found — the @mcp.tool / display AST anchor broke"
     assert guide == code, (
         f"guide tool inventory ↔ code drift: only-in-guide={sorted(guide - code)} "
         f"only-in-code={sorted(code - guide)}"
@@ -88,6 +93,10 @@ def test_guide_tool_inventory_matches_registrations() -> None:
 def test_guide_env_vars_exist() -> None:
     allowed = {"EPICS_MCP_" + name.upper() for name in EpicsConfig.model_fields}
     mentioned = set(_ENV_RE.findall(get_guide()))
+    # Non-empty floor (F23): the subset check passes vacuously when mentioned is empty.
+    # A silently-vanished EPICS_MCP_* surface would keep this guard green while guarding
+    # nothing; the guide documents the config, so >=1 mention is a real invariant.
+    assert mentioned, "guide mentions no EPICS_MCP_* vars — the env anchor broke"
     unknown = mentioned - allowed
     assert not unknown, f"guide mentions unknown EPICS_MCP_* env vars: {sorted(unknown)}"
 
