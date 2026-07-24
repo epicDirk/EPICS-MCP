@@ -234,6 +234,16 @@ carry breaking changes).
 
 ### Changed
 
+- **Three pre-gate refusal codes on the wire** (the full rationale, and the CI guard that now holds the
+  rule, are in the "Pre-gate refusals" entry under *Added*): `OLOG_WRITE_DENIED` →
+  **`OLOG_WHOLE_MODE_REQUIRED`** for the whole-mode preconditions of `add_log_attachment` /
+  `update_log_entry` and their client-side backstop; `RATE_LIMIT_EXCEEDED` →
+  **`READ_RATE_LIMIT_EXCEEDED`** for the opt-in read throttle; `OLOG_ATTACH_TOO_LARGE` →
+  **`OLOG_ATTACH_TOO_LARGE_AT_READ`** for the post-admission TOCTOU size re-check. A caller matching on
+  the code *string* sees a different value; every class stayed a subclass of the one it replaces, so
+  `except` clauses are unaffected. Listed here for completeness — none of the three codes was ever
+  released (Olog write, the read throttle and attachments all landed after `0.2.0`).
+
 - **`tools/list` schema hygiene — lossless payload reduction (MA-Q1, precondition for new tools).**
   A single post-registration pass `_prune_tool_schemas(mcp)` (in `server.py`, run AFTER the display-tool
   registrar, wrapped in a crash-guarding `try/except` that mirrors `_load_display_registrar` — an optional

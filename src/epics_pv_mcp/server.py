@@ -1789,7 +1789,9 @@ def main() -> None:
     # loses every ATTEMPT/ALLOW/DENY/READBACK/BOUNDS_DENY record on restart — the one trail meant to
     # surface a wrong write after the fact. Refuse to start without a DURABLE sink, symmetric with
     # the empty-pattern / reach (E8) refusals and the unwritable-path refusal below. Covers BOTH the
-    # PV gate and the Olog write gate (they share the epics_pv_mcp.audit sink).
+    # PV gate and the Olog write gate: they write to the same FILE (config.audit_log_file), each
+    # through its own logger (epics_pv_mcp.audit / epics_pv_mcp.olog_audit) — the sink is shared,
+    # the logger is not.
     if (config.allow_pv_write or config.allow_olog_write) and not config.audit_log_file:
         raise SafetyConfigError(
             "A write gate is ENABLED (EPICS_MCP_ALLOW_PV_WRITE / EPICS_MCP_ALLOW_OLOG_WRITE) "
@@ -1804,7 +1806,11 @@ def main() -> None:
         )
     # Building the PV safety layer refuses to start on a bad PV write gate (empty allowlist pattern,
     # a non-loopback reach, or an unwritable audit path) rather than on the first write.
-    # Only the PV gate has an eager layer; the Olog gate is built lazily on first use.
+    # Only the PV gate has an eager layer; the Olog gate is built lazily on first use. Deliberate
+    # asymmetry, not an oversight: an Olog-only deployment with an unwritable sink is caught at the
+    # first write instead of at boot — but still BEFORE any write I/O, because all three Olog write
+    # paths call get_olog_safety() ahead of their first mutating request. Detection is later; an
+    # un-audited write stays impossible.
     if config.allow_pv_write:
         get_safety()
     mcp.run()

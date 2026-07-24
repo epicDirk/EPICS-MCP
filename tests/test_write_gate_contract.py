@@ -58,7 +58,9 @@ this module stands on each axis:
   ``OLOG_WRITE_DENIED`` / ``RATE_LIMIT_EXCEEDED``, so a caller could not tell an un-audited pre-gate
   refusal from an audited gate DENY. They now carry ``OLOG_WHOLE_MODE_REQUIRED`` and
   ``READ_RATE_LIMIT_EXCEEDED``, and :func:`test_no_pre_gate_refusal_carries_a_gate_error_code`
-  sweeps the whole ``services/`` package so a FIFTH case fails the build rather than shipping.
+  sweeps BOTH layers the contract names — ``services/`` and ``tools/`` — resolving a raise through
+  aliases, relative imports, attribute callees, locally defined subclasses (minus the ones that
+  override the code) and plain ``raise Cls``, so a SIXTH case fails the build rather than shipping.
 * **Audit line — deliberately none, which is a scope limit, not an oversight.** Contract point 4
   clamps the audit promise to *gate verdicts and writes that reach the I/O*; a pre-gate refusal is
   neither — no gate ran, no token was taken, no write was attempted. Emitting a gate ``DENY`` from
@@ -603,23 +605,32 @@ async def test_pre_gate_refusal_is_coded_apart_and_writes_no_audit_line(
 # ======================================================================================
 #
 # Half 2 counts ``_audit_deny`` call sites INSIDE the two gate modules. It is blind to the other
-# half of contract point 4: a refusal raised in the service layer ABOVE the gate, which emits no
-# audit line at all and must therefore not carry the gate's error code. Those refusals live in
-# ``services/`` — a directory the gate-module scan never opens.
+# half of contract point 4: a refusal raised ABOVE the gate, which emits no audit line at all and
+# must therefore not carry the gate's error code. The contract names that layer explicitly — "a
+# precondition in the TOOL or service layer above it" — so both are scanned here, and neither is a
+# directory the gate-module scan opens.
 #
-# So this half scans the flat ``services/`` package for any exception raised with one of the codes
-# the gates write into their DENY audit lines. It asserts the RULE, not four known symptoms: a
-# FIFTH pre-gate refusal that reuses a gate code fails here the day it is written.
+# This half asserts the RULE, not the five known symptoms: a SIXTH pre-gate refusal that reuses a
+# gate code fails here the day it is written, in any of the spellings resolved below.
 
 _SERVICES_DIR = _GATE_PACKAGE_DIR / "services"
+_TOOLS_DIR = _GATE_PACKAGE_DIR / "tools"
+
+#: The flat packages ABOVE the gates, as ``(directory, package name)``. The package name is carried
+#: along because a RELATIVE import (``from ..errors import X``) can only be resolved against it.
+_SCANNED_PACKAGES: tuple[tuple[Path, str], ...] = (
+    (_SERVICES_DIR, "epics_pv_mcp.services"),
+    (_TOOLS_DIR, "epics_pv_mcp.tools"),
+)
 
 # The modules that DEFINE this repo's coded exceptions. Two conventions coexist and both are read:
-# ``errors.py`` sets ``error_code`` in the CONSTRUCTOR, ``services/*_exceptions.py`` as a ClassVar.
+# ``errors.py`` sets ``error_code`` in the CONSTRUCTOR, ``*_exceptions.py`` as a ClassVar.
 _EXCEPTION_MODULE_NAMES: tuple[str, ...] = (
     "epics_pv_mcp.errors",
     *(
-        f"epics_pv_mcp.services.{path.stem}"
-        for path in sorted(_SERVICES_DIR.glob("*_exceptions.py"))
+        f"{package}.{path.stem}"
+        for directory, package in _SCANNED_PACKAGES
+        for path in sorted(directory.glob("*_exceptions.py"))
     ),
 )
 
@@ -675,25 +686,138 @@ def _gate_audit_codes() -> frozenset[str]:
     return frozenset(path.audit_error_code for path in DENY_PATHS)
 
 
+def _absolute_module(node: ast.ImportFrom, package: str) -> str | None:
+    """The module an ``ImportFrom`` refers to, spelled absolutely.
+
+    ``node.module`` alone is a trap: for ``from ..errors import X`` it is the bare ``"errors"`` and
+    ``node.level`` (here 2) carries the rest. Looking it up unresolved simply misses — silently, the
+    worst failure mode for a guard. Level 1 means "this package", level 2 "the parent", and so on.
+    """
+    if node.level == 0:
+        return node.module
+    parts = package.split(".")
+    kept = len(parts) - (node.level - 1)
+    if kept <= 0:
+        return None  # climbs above the top-level package — not importable, nothing to resolve
+    base = ".".join(parts[:kept])
+    return f"{base}.{node.module}" if node.module else base
+
+
+def _module_aliases(tree: ast.Module) -> dict[str, str]:
+    """``spelled prefix -> absolute module`` for every plain ``import`` in this module.
+
+    Covers both ``import epics_pv_mcp.errors as errs`` (prefix ``errs``) and the un-aliased
+    ``import epics_pv_mcp.errors`` (prefix ``epics_pv_mcp.errors``), so an attribute-style raise can
+    be resolved back to its defining module.
+    """
+    return {
+        alias.asname or alias.name: alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+
+
+def _dotted_name(node: ast.expr) -> str | None:
+    """``a.b.C`` for a Name/Attribute chain, else None (a subscript or call in the path)."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        prefix = _dotted_name(node.value)
+        return f"{prefix}.{node.attr}" if prefix is not None else None
+    return None
+
+
+def _defines_own_error_code(class_node: ast.ClassDef) -> bool:
+    """Does this class set its OWN ``error_code``, rather than inheriting the base's?
+
+    Both repo conventions count: a ClassVar assignment, and an ``__init__`` that passes an
+    ``error_code=`` keyword on (the ``PVWriteBoundsError`` shape, calling ``EpicsError.__init__``
+    directly). Without this check the inheritance walk below would flag exactly the classes that
+    exist BECAUSE of contract point 4 — ``OlogWholeModeRequiredError`` and ``ReadRateLimitError``
+    both subclass a gate-code carrier and both override the code. That false positive is the whole
+    risk of resolving inheritance at all, so it is checked first.
+    """
+    for statement in class_node.body:
+        targets: list[ast.expr] = []
+        if isinstance(statement, ast.AnnAssign):
+            targets = [statement.target]
+        elif isinstance(statement, ast.Assign):
+            targets = list(statement.targets)
+        elif isinstance(statement, ast.FunctionDef) and statement.name == "__init__":
+            if any(
+                keyword.arg == "error_code"
+                for call in ast.walk(statement)
+                if isinstance(call, ast.Call)
+                for keyword in call.keywords
+            ):
+                return True
+            continue
+        else:
+            continue
+        if any(isinstance(target, ast.Name) and target.id == "error_code" for target in targets):
+            return True
+    return False
+
+
 def _local_names_carrying_gate_codes(
-    tree: ast.Module, codes_by_origin: dict[tuple[str, str], str], gate_codes: frozenset[str]
+    tree: ast.Module,
+    package: str,
+    codes_by_origin: dict[tuple[str, str], str],
+    gate_codes: frozenset[str],
 ) -> dict[str, str]:
-    """The names, AS SPELLED IN THIS MODULE, that denote an exception carrying a gate audit code."""
+    """The names, AS SPELLED IN THIS MODULE, that denote an exception carrying a gate audit code.
+
+    Three sources, because a name can reach a gate code three ways:
+
+    * ``from X import Y [as Z]`` — absolute or relative, both resolved to the defining module.
+    * ``import X [as Z]`` — the dotted spelling ``Z.Y`` is registered too, so an attribute-style
+      raise resolves.
+    * a class DEFINED here that inherits a gate-code carrier without overriding the code — the
+      shape a future pre-gate refusal is most likely to take, since the repo has just grown three
+      such subclasses (all of which DO override, and are therefore correctly left out).
+
+    The inheritance pass repeats to a fixpoint so a grandchild is caught as well.
+    """
     local: dict[str, str] = {}
+
     for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom) or node.module is None:
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        module = _absolute_module(node, package)
+        if module is None:
             continue
         for alias in node.names:
-            code = codes_by_origin.get((node.module, alias.name))
+            code = codes_by_origin.get((module, alias.name))
             if code in gate_codes:
                 local[alias.asname or alias.name] = code
+
+    for prefix, module in _module_aliases(tree).items():
+        for (origin, class_name), code in codes_by_origin.items():
+            if origin == module and code in gate_codes:
+                local[f"{prefix}.{class_name}"] = code
+
+    classes = [node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+    grew = True
+    while grew:
+        grew = False
+        for class_node in classes:
+            if class_node.name in local or _defines_own_error_code(class_node):
+                continue
+            for base in class_node.bases:
+                base_name = _dotted_name(base)
+                if base_name is not None and base_name in local:
+                    local[class_node.name] = local[base_name]
+                    grew = True
+                    break
+
     return local
 
 
 def _classvar_gate_code_findings(
     module_name: str, tree: ast.Module, gate_codes: frozenset[str]
 ) -> list[str]:
-    """Classes DEFINED under ``services/`` that pin a gate audit code as their ClassVar.
+    """Classes DEFINED in a scanned package that pin a gate audit code as their ClassVar.
 
     This is the shape the client-side backstops use, and it is how a pre-gate refusal acquires a
     gate code without a single ``raise`` mentioning the string.
@@ -720,60 +844,111 @@ def _classvar_gate_code_findings(
     return findings
 
 
+def _names_bound_to_gate_code_instances(
+    tree: ast.Module, local_names: dict[str, str]
+) -> dict[str, str]:
+    """``variable -> code`` for ``exc = <gate-code class>(...)``, so ``raise exc`` is still seen.
+
+    Building the exception first and raising the variable is ordinary Python, not a dodge — and it
+    would otherwise slip past the ``raise`` scan entirely.
+    """
+    bound: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+            continue
+        callee = _dotted_name(node.value.func)
+        if callee is None or callee not in local_names:
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                bound[target.id] = local_names[callee]
+    return bound
+
+
 def _raise_gate_code_findings(
     module_name: str,
     tree: ast.Module,
     local_names: dict[str, str],
     gate_codes: frozenset[str],
 ) -> list[str]:
-    """``raise <Exc>(...)`` statements under ``services/`` that carry a gate audit code.
+    """``raise`` statements above the gates that carry a gate audit code.
 
-    Two spellings are resolved: the class itself carries the code (``raise OlogWriteDeniedError``),
-    or a generic error is raised with a literal ``error_code=`` keyword
-    (``raise EpicsError(..., error_code="OLOG_WRITE_DENIED")``) — the second is how the next
-    pre-gate refusal is most likely to be written.
+    Four spellings are resolved, because the rule is about the CODE that reaches the caller, not
+    about one way of writing a raise:
+
+    * ``raise OlogWriteDeniedError(...)`` — the class carries the code (also as ``errs.Cls(...)``,
+      via the module-alias map, and as a locally defined subclass that does not override it).
+    * ``raise EpicsError(..., error_code="OLOG_WRITE_DENIED")`` — a literal keyword on a generic
+      error; an explicit code wins over the class default, so this is checked first.
+    * ``raise OlogWriteDeniedError`` — no parentheses. Python instantiates it for you; the caller
+      cannot tell the difference, and it is the cheapest way to slip past a callee-only scan.
+    * ``exc = OlogWriteDeniedError(...); raise exc`` — via the assignment map.
+
+    A bare ``raise`` (re-raising what was caught) is NOT a finding: it propagates an already
+    classified code rather than minting one.
     """
     findings: list[str] = []
+    bound_names = _names_bound_to_gate_code_instances(tree, local_names)
     for node in (n for n in ast.walk(tree) if isinstance(n, ast.Raise)):
-        call = node.exc
-        if not isinstance(call, ast.Call):
-            continue  # a bare re-raise carries whatever it caught — not a new refusal
-        keyword = next((kw for kw in call.keywords if kw.arg == "error_code"), None)
-        if isinstance(keyword, ast.keyword) and isinstance(keyword.value, ast.Constant):
-            if keyword.value.value in gate_codes:
+        raised = node.exc
+        if raised is None:
+            continue  # a bare `raise` re-raises what was caught — not a new refusal
+        if isinstance(raised, ast.Call):
+            keyword = next((kw for kw in raised.keywords if kw.arg == "error_code"), None)
+            if isinstance(keyword, ast.keyword) and isinstance(keyword.value, ast.Constant):
+                if keyword.value.value in gate_codes:
+                    findings.append(
+                        f"{module_name}:{node.lineno}: raises with a literal "
+                        f"error_code={keyword.value.value!r}"
+                    )
+                continue  # an explicit code wins over the class default, gate code or not
+            callee = _dotted_name(raised.func)
+            if callee is not None and callee in local_names:
                 findings.append(
-                    f"{module_name}:{node.lineno}: raises with a literal "
-                    f"error_code={keyword.value.value!r}"
+                    f"{module_name}:{node.lineno}: raises {callee} "
+                    f"(error_code={local_names[callee]!r})"
                 )
-            continue  # an explicit code wins over the class default, gate code or not
-        if isinstance(call.func, ast.Name) and call.func.id in local_names:
-            findings.append(
-                f"{module_name}:{node.lineno}: raises {call.func.id} "
-                f"(error_code={local_names[call.func.id]!r})"
-            )
+            continue
+        spelled = _dotted_name(raised)
+        if spelled is None:
+            continue
+        code = local_names.get(spelled) or bound_names.get(spelled)
+        if code is not None:
+            findings.append(f"{module_name}:{node.lineno}: raises {spelled} (error_code={code!r})")
     return findings
 
 
 def test_no_pre_gate_refusal_carries_a_gate_error_code() -> None:
     """Contract point 4: "a refusal raised outside the gate must not carry the gate's error code."
 
-    Nothing under ``services/`` is a write gate — the two gates live one directory up, in
-    ``safety.py`` and ``olog_safety.py``. So every refusal raised here happens BEFORE a gate is
-    consulted, writes no audit line, and must be reportable apart from an audited gate DENY.
-    Otherwise the audit's coverage claim is unfalsifiable from outside: a caller seeing
+    Nothing under ``services/`` or ``tools/`` is a write gate — the two gates live in ``safety.py``
+    and ``olog_safety.py`` one directory up. So every refusal raised in those two layers happens
+    BEFORE a gate is consulted, writes no audit line, and must be reportable apart from an audited
+    gate DENY. Otherwise the audit's coverage claim is unfalsifiable from outside: a caller seeing
     ``OLOG_WRITE_DENIED`` cannot know whether a DENY line exists for it.
+
+    ``tools/`` is scanned because the contract names it: *"a precondition in the TOOL or service
+    layer above it"*. It is clean today, so adding it is a no-op with a proof — which is the point:
+    the guard's reach should match the rule's reach, not the location of the last five findings.
 
     RED-PROOF (measured on ``f954cc6``, the commit before the fix): four findings —
     ``checkers_olog.py`` raised ``OlogWriteDeniedError`` twice for its whole-mode preconditions,
     ``olog_exceptions.py`` pinned ``OLOG_WRITE_DENIED`` on ``OlogWholeModeRequired``, and
-    ``_http.py`` raised the write gates' ``RateLimitError`` from the read throttle. Re-provable at
-    any time by pointing any one of those back at the gate's class or code.
+    ``_http.py`` raised the write gates' ``RateLimitError`` from the read throttle; the fifth
+    (``olog_attachments.py``) came from the literal-keyword branch. Re-provable at any time by
+    pointing any one of those back at the gate's class or code, or by dropping a probe module with
+    any of the spellings :func:`_raise_gate_code_findings` resolves into either scanned package.
 
     Honest limits, so nobody reads more into a green run than it proves:
-    * It sees ``services/`` FLAT, the directory the four known cases live in — a future
-      sub-package would need its own sweep.
+    * It sees both packages FLAT — a future sub-package would need its own sweep — and it does not
+      look at the src ROOT, where ``errors.py`` and the two gate modules legitimately carry these
+      codes and an exclusion list would be needed.
     * A code computed at runtime (``error_code=_olog_error_code(exc)``, the re-raise wrappers) is
-      out of static reach. Those propagate an already-classified code rather than minting one.
+      out of static reach. Those propagate an already-classified code rather than minting one —
+      but note that a *constructed* literal (``"OLOG_" + "WRITE_DENIED"``) would mint one and is
+      equally invisible here. Static analysis buys the common shapes, not every shape.
+    * A star-import (``from epics_pv_mcp.errors import *``) and a factory (``raise make_denial()``)
+      both hide the name this scan resolves.
     * It proves the CODE axis of point 4 only. The AUDIT axis — that these refusals write no line —
       is a deliberate scope decision documented at the raise sites, and is pinned behaviourally by
       :func:`test_pre_gate_refusal_is_coded_apart_and_writes_no_audit_line`.
@@ -783,17 +958,19 @@ def test_no_pre_gate_refusal_carries_a_gate_error_code() -> None:
     codes_by_origin = _exception_codes_by_origin()
     assert codes_by_origin, "no coded exceptions discovered — the import anchor broke"
 
-    module_paths = sorted(_SERVICES_DIR.glob("*.py"))
-    assert len(module_paths) > 20, (
-        f"only {len(module_paths)} modules found under {_SERVICES_DIR} — the scan anchor broke"
-    )
-
     findings: list[str] = []
-    for module_path in module_paths:
-        tree = ast.parse(module_path.read_text(encoding="utf-8"))
-        local_names = _local_names_carrying_gate_codes(tree, codes_by_origin, gate_codes)
-        findings += _classvar_gate_code_findings(module_path.name, tree, gate_codes)
-        findings += _raise_gate_code_findings(module_path.name, tree, local_names, gate_codes)
+    for directory, package in _SCANNED_PACKAGES:
+        module_paths = sorted(directory.glob("*.py"))
+        assert len(module_paths) > 10, (
+            f"only {len(module_paths)} modules found under {directory} — the scan anchor broke"
+        )
+        for module_path in module_paths:
+            tree = ast.parse(module_path.read_text(encoding="utf-8"))
+            local_names = _local_names_carrying_gate_codes(
+                tree, package, codes_by_origin, gate_codes
+            )
+            findings += _classvar_gate_code_findings(module_path.name, tree, gate_codes)
+            findings += _raise_gate_code_findings(module_path.name, tree, local_names, gate_codes)
 
     assert not findings, (
         "a refusal raised OUTSIDE a write gate carries one of the gates' audit error codes "
