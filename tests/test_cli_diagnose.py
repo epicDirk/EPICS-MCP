@@ -162,3 +162,12 @@ def test_main_missing_pv_name_is_argparse_usage_error() -> None:
     with pytest.raises(SystemExit) as exc:
         cli_diagnose.main([])  # pv_name is a required positional
     assert exc.value.code == 2  # argparse exits 2 on a usage error (distinct from the 0 contract)
+
+
+@pytest.mark.parametrize("bad", ["-1", "0"])
+def test_main_nonpositive_timeout_is_usage_error(bad: str) -> None:
+    """F22: --timeout <= 0 must fail as a usage error (exit 2), rejected at parse time — a <=0
+    timeout would otherwise flow into the live probe and make a healthy PV look disconnected."""
+    with pytest.raises(SystemExit) as exc:
+        cli_diagnose.main(["SYS:PV", "--timeout", bad])
+    assert exc.value.code == 2

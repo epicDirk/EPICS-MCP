@@ -294,6 +294,21 @@ carry breaking changes).
 
 ### Fixed
 
+- **`monitor_pv` reported `truncated` on a complete, exactly-full stream (F27).** The service
+  capped collection at `max_events` *before* appending, so `len(events) >= max_events` could not
+  tell "the cap cut the stream" from "exactly `max_events` arrived, then it went quiet" — and the
+  naive `>=`→`>` swap would have made `truncated` permanently False (a silent drop). `pv_monitor`
+  now over-collects exactly one canary event (`max_events + 1`), trims it, and returns
+  `(events, truncated)` with `truncated = len(collected) > max_events` — the same honest over-fetch
+  as `get_alarm_history`'s `size=max+1`. Proven red on the pre-fix cap via a real multi-event probe.
+
+- **`--timeout` accepted `-1` / `0` / `inf`, misdiagnosing a healthy service as unreachable (F22).**
+  `epics-doctor`, `epics-diagnose` and the `find_moderate_pv` diagnostic took a bare `type=float`,
+  so a non-positive or non-finite timeout flowed into a live probe and made a reachable plane look
+  `unreachable` — the opposite of what a diagnostic owes. A shared `cli_common.positive_timeout`
+  argparse type now rejects `<= 0`, `nan` and `inf` as a usage error (exit 2) at parse time, before
+  any probe.
+
 - **The attach documentation said the opposite of the truth (OQ4).** Five places claimed an
   attach preserves "every field". `POST /logs/multipart` delegates to the server's `updateLog`,
   which runs `setOwner(principal.getName())` unconditionally (`LogResource.java:550`) — attaching

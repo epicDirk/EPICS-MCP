@@ -19,7 +19,7 @@ import asyncio
 import json
 import sys
 
-from epics_pv_mcp.cli_common import configure_stdout
+from epics_pv_mcp.cli_common import configure_stdout, positive_timeout
 from epics_pv_mcp.services.diagnose import DiagnoseReport, diagnose
 
 
@@ -71,7 +71,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("pv_name", help="the PV to diagnose")
     parser.add_argument(
-        "--timeout", type=float, default=None, help="live-probe timeout (default: config, 5.0 s)"
+        "--timeout",
+        type=positive_timeout,
+        default=None,
+        help="live-probe timeout in seconds, > 0 (default: config, 5.0 s)",
     )
     parser.add_argument(
         "--no-channelfinder",

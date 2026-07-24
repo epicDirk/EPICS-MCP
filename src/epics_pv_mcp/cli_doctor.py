@@ -43,7 +43,7 @@ import json
 import sys
 from typing import Literal
 
-from epics_pv_mcp.cli_common import configure_stdout
+from epics_pv_mcp.cli_common import configure_stdout, positive_timeout
 from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.services.doctor import DoctorReport, run_doctor
 
@@ -166,7 +166,10 @@ def main(argv: list[str] | None = None) -> int:
         help="probe a live PV to pass/fail the live plane (default: info only, no live read)",
     )
     parser.add_argument(
-        "--timeout", type=float, default=None, help="per-plane timeout (default: config, 5.0 s)"
+        "--timeout",
+        type=positive_timeout,
+        default=None,
+        help="per-plane timeout in seconds, > 0 (default: config, 5.0 s)",
     )
     parser.add_argument("--json", action="store_true", help="emit the raw report as JSON")
     args = parser.parse_args(argv)

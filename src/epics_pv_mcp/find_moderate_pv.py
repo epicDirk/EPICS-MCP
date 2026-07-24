@@ -44,6 +44,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TypedDict
 
+from epics_pv_mcp.cli_common import positive_timeout
 from epics_pv_mcp.services.archiver_client import ArchiverClient, HistoryResult, Sample
 from epics_pv_mcp.services.archiver_exceptions import (
     ArchiverConnectionError,
@@ -245,7 +246,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--want", type=int, default=3, help="stop after this many verified candidates"
     )
     parser.add_argument(
-        "--timeout", type=float, default=120.0, help="per-request timeout in seconds"
+        "--timeout",
+        type=positive_timeout,
+        default=120.0,
+        help="per-request timeout in seconds, > 0",
     )
     args = parser.parse_args(argv)
     # Structurally impossible runs are usage errors, not honest-looking non-findings: with

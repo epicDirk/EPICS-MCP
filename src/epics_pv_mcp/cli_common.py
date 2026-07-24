@@ -6,9 +6,30 @@ inside a single command module (and be copy-pasted into the others).
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
+import math
 import sys
+
+
+def positive_timeout(value: str) -> float:
+    """An ``argparse`` ``type=`` for a ``--timeout``: a strictly-positive, FINITE number of seconds.
+
+    WHY: a bare ``type=float`` accepts ``-1`` (or ``0``), which then flows into a live probe as a
+    non-positive timeout and can make a HEALTHY service look ``unreachable``. The doctor/diagnose
+    CLIs exist to be honest, so a nonsense timeout must surface as a **usage error** (exit 2), not
+    as a misdiagnosis. The ``seconds > 0 and isfinite`` gate rejects ``0``/negatives, ``nan``
+    (``nan > 0`` is False) AND ``inf`` (``inf`` parses and is > 0, but "wait forever" defeats the
+    very timeout the flag sets); a genuinely large *finite* timeout is left untouched.
+    """
+    try:
+        seconds = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"not a number: {value!r}") from exc
+    if not (seconds > 0 and math.isfinite(seconds)):
+        raise argparse.ArgumentTypeError(f"must be a finite number > 0 seconds, got {value!r}")
+    return seconds
 
 
 def configure_stdout() -> None:

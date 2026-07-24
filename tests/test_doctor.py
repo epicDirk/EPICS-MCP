@@ -1073,6 +1073,15 @@ def test_cli_all_disabled_exits_zero(
     assert "disabled" in out
 
 
+@pytest.mark.parametrize("bad", ["-1", "0"])
+def test_cli_nonpositive_timeout_is_usage_error(bad: str) -> None:
+    """F22: --timeout <= 0 is a usage error (exit 2), rejected at parse time before any probe —
+    a <=0 timeout would otherwise flow into run_doctor and make a healthy plane look unreachable."""
+    with pytest.raises(SystemExit) as exc:
+        cli_doctor.main(["--timeout", bad])
+    assert exc.value.code == 2
+
+
 def test_cli_failing_plane_exits_one(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
