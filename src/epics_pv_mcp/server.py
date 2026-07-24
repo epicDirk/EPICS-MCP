@@ -242,7 +242,7 @@ def _strip_output_schema_field_annotations(node: object, *, is_root: bool = True
     identity anchor. Schema-aware like :func:`_strip_schema_title_annotations`: a name->schema
     map is walked by its VALUES, so a field NAMED ``title``/``default`` survives as a property
     key (none exist in today's typed outputs; the guard is free and future-proof). Only a
-    ``default`` whose value is ``None`` is dropped, never a real default.
+    ``default`` whose value is ``None`` is dropped, never a non-null default.
     """
     if isinstance(node, dict):
         if not is_root:
