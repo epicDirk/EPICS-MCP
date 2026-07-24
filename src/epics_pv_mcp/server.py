@@ -434,9 +434,9 @@ async def set_pv_value(
     to start without one) — the load-bearing, client-independent guard.
 
     Value bounds (always-on, pre-put): the written value is checked against the record's OWN drive
-    limits (control DRVL/DRVH, read on the pre-read). An out-of-range value raises
-    PVWriteBoundsError (error_code PV_WRITE_OUT_OF_BOUNDS) BEFORE the put — it never reaches the
-    IOC — and emits a BOUNDS_DENY audit event. A record that declares no drive limits (or a
+    limits (control DRVL/DRVH, read on the pre-read). An out-of-range value is denied with
+    error_code PV_WRITE_OUT_OF_BOUNDS BEFORE the put — it never reaches the IOC — and emits a
+    BOUNDS_DENY audit event. A record that declares no drive limits (or a
     non-numeric value) is not bounds-checkable; the write proceeds and ``bounds_note`` says so.
 
     Readback verification (always-on): after the write the value is read back and compared against
@@ -764,8 +764,7 @@ async def is_archived(
     archived=false: the appliance answers even an UNKNOWN pv with a real record (status "Not being
     archived", measured), so that record is the only definitive negative.
 
-    is_archived answers only for a NAMED PV. To ENUMERATE the archived PVs use list_archived_pvs
-    (getAllPVs / getPVsForThisAppliance, NOT getMatchingPVs — it 404s on split/proxied deployments).
+    is_archived answers only for a NAMED PV. To ENUMERATE the archived PVs use list_archived_pvs.
     See the epics-pv://guide resource.
     """
     return await _is_archived(pv, timeout)
@@ -841,9 +840,8 @@ async def get_archive_info(
     error instead of a false found (neither a fabricated "not archived" nor, for an unrelated
     body, a fabricated found=true).
 
-    get_archive_info answers only for a NAMED PV; list_archived_pvs enumerates them
-    (getAllPVs / getPVsForThisAppliance, NOT getMatchingPVs — 404s on split/proxied). See
-    epics-pv://guide.
+    get_archive_info answers only for a NAMED PV; list_archived_pvs enumerates them.
+    See epics-pv://guide.
     """
     return await _get_archive_info(pv, timeout)
 
@@ -965,7 +963,7 @@ async def is_alarm_configured(
     then says so. An unreadable payload or record raises a loud error instead of falling through
     to the tree probe as a false negative. config_name is CASE-SENSITIVE even though the server
     lower-cases it to pick the index (measured live 2026-07-15: 'accelerator' selects the right
-    index and matches nothing, reporting exactly like a genuinely unconfigured PV). The returned
+    index and matches nothing, exactly like an unconfigured PV). The returned
     config field echoes your input — it is NOT the server confirming the tree exists.
     """
     return await _is_alarm_configured(pv, config_name, timeout)

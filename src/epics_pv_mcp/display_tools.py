@@ -235,7 +235,7 @@ async def find_device(
     ChannelFinder fetch adds a
     note that the source-IOC join may be incomplete — a channel without source_ioc may simply have
     fallen past the cap, not be unregistered (F16). ca-only PVs are not read under the
-    single pva provider. displays_dir is the project/dataset ROOT. Returns
+    single pva provider. Returns
     {"report": <DeviceLookupReport JSON>, "markdown": <rendered report>}.
     """
     return await _find_device(query, displays_dir, match, timeout, context_cap, windows_paths)
