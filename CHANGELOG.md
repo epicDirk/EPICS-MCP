@@ -29,11 +29,13 @@ carry breaking changes).
   cannot masquerade as a working gate. Self-sufficient: it creates its own deny target through the RAW
   client (which bypasses the gate by construction) instead of depending on a pre-existing corpus.
   Provably red under two targeted mutants: branch 3 denying with branch 1's message, and branch 3
-  disabled. Deny tests mutate nothing (the refusal falls after a pure read); the controls write only
-  to entries the module created itself. Optional `EPICS_MCP_LIVE_OLOG_DENY_LOGBOOK` names the scratch
-  logbook — recommended, since Olog has no delete and the auto-derived name can be a logbook another
-  consumer treats as frozen. `CLAUDE.md`'s "honest limit" is re-scoped accordingly: **PV = not
-  applicable with a reason, Olog = one path live, the rest reasoned** — not "all deny paths proven".
+  disabled. The module is **not idempotent**: a full run leaves four entries (each deny test creates
+  its own target through the raw client before the gate refuses — only the *gated call* mutates
+  nothing — and each positive control creates one and then writes to it). Olog has no delete, so
+  every entry is labelled as a test artifact and **`EPICS_MCP_LIVE_OLOG_DENY_LOGBOOK` is required**:
+  it names the scratch logbook the deny targets go into, and unset is a refusal rather than a guess.
+  `CLAUDE.md`'s "honest limit" is re-scoped accordingly: **PV = not applicable with a reason,
+  Olog = one path live, the rest reasoned** — not "all deny paths proven".
 
 - **Pre-gate refusals no longer wear a write gate's error code — and the rule is now CI-enforced.**
   The write-gate contract (`CLAUDE.md`, point 4) says *"a refusal raised outside the gate must not

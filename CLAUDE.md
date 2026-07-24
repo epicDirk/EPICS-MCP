@@ -133,6 +133,15 @@ work.
    what the prompt asserts and cannot re-check it — measure premises before writing them into a
    prompt. And a verdict returned without findings (file:line, repro) is demanded back before
    acting on it.
+7. **A probe that WRITES owns its data space, and the target is named — never derived.** A live test
+   against a shared service needs a boundary on *what it may touch*, not just on which files it may
+   edit. Deriving the target from the server's own answer looks self-sufficient and is the opposite:
+   the server cannot know which of its resources somebody else has frozen, so the "obvious" pick is
+   an unowned one. Measured here: `tests/test_write_gate_live.py` derived its deny logbook as
+   `sorted(server_logbooks - allowlist)[0]`, which resolved by plain alphabetical order onto a
+   parallel window's frozen fixture logbook and left six entries in it — on a service with **no
+   delete**. An unnamed target is a refusal (through the live gate, so a demanded run goes red), not
+   a guess; and where the medium cannot forget, every artifact a probe leaves is labelled as one.
 
 Honest limit: these are prose rules — the category that rots (see above). No CI guard can prove
 they were followed; the guard is the adversarial counter-probe itself.

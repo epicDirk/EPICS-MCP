@@ -29,11 +29,13 @@ test **never passed to the service** — it can only have travelled id → HTTP 
 * ``olog_rate_limit`` — would need N real *mutating* writes to fill the window. The cost is real
   entries on a real service to prove a counter that has no server-side input at all.
 
-**Deliberately self-sufficient.** The deny target is created here, by this module, through the RAW
-client — which talks to Olog *without* passing the gate (contract point 6: the gate guards writes
-through the tool path, not the library). Hanging the test on a pre-existing corpus logbook would
-make it depend on an artifact no code in this repo declares or creates; it would rot into a silent
-skip the day that artifact is gone.
+**Deliberately self-sufficient — but never self-directed.** The deny *entry* is created here, by
+this module, through the RAW client, which talks to Olog *without* passing the gate (contract
+point 6: the gate guards writes through the tool path, not the library). Hanging the test on a
+pre-existing corpus entry would make it depend on an artifact no code in this repo declares; it
+would rot into a silent skip the day that artifact is gone. The *logbook* that entry goes into is
+the opposite case: it must be **named by the operator**, because only they know which logbook on
+this server is scratch and which one another consumer has frozen.
 
 **The trap this module is built against.** All four Olog gate branches raise the same exception with
 the same ``error_code`` and a byte-identical audit line. With one env var missing
@@ -48,16 +50,22 @@ prove. Countermeasures, all of them:
    from the un-audited whole-mode refusal above it.
 4. Demand all SIX env vars at setup through ``assert_live_available``, not a one-variable gate, so a
    demanded run (``EPICS_MCP_REQUIRE_LIVE=1``) goes red instead of skipping.
-5. Route "no usable logbook on this server" through the same live gate, never a bare
-   ``pytest.skip`` — a bare skip would silently defeat ``EPICS_MCP_REQUIRE_LIVE``.
+5. Route every "this server cannot host the probe" condition — an unnamed deny logbook, a name that
+   does not exist, a name inside the allowlist — through the same live gate, never a bare
+   ``pytest.skip``: a bare skip would silently defeat ``EPICS_MCP_REQUIRE_LIVE``.
 6. Run a POSITIVE CONTROL per tool: the same call against an ALLOWLISTED entry must get past the
    gate and change something. Without it, an allowlist that denies everything (an empty or wrong
    ``EPICS_MCP_OLOG_WRITE_LOGBOOKS``) would look exactly like a working gate.
 
-**Mutation, honestly scoped.** The two DENY tests mutate nothing: the refusal falls after a pure
-read. The two positive controls DO write — that is what makes them controls — and they write only to
-entries this module created itself, in the allowlisted logbook, with a title marking them as test
-artifacts (Olog has no delete; an entry cannot be cleaned up, only labelled).
+**Mutation, honestly scoped — and this module is NOT idempotent.** A full green run leaves **four**
+entries on the server: each of the two DENY tests creates its own target in the deny logbook first
+(``_create_entry``, through the raw client) and only then trips the gate — it is the *gated call*
+that mutates nothing, not the test. Each of the two positive controls creates an entry in the
+allowlisted logbook and then really writes to it (an attachment, a title) — that is what makes them
+controls. Every entry carries a title marking it as a test artifact, because **Olog has no delete**:
+an artifact can be labelled, never removed. That is also why the deny logbook must be named
+explicitly (see :func:`denied_logbook`) — an earlier revision derived it and deposited six entries
+in another window's frozen fixture logbook.
 
 Run::
 
@@ -67,9 +75,11 @@ with ``EPICS_MCP_OLOG_URL`` / ``_OLOG_ASSUME_TEST_DATA`` / ``_ALLOW_OLOG_WRITE``
 ``_OLOG_WRITE_LOGBOOKS`` / ``_OLOG_WRITE_USER`` / ``_OLOG_WRITE_PASSWORD`` set — and with
 ``EPICS_MCP_AUDIT_LOG_FILE`` UNSET (this module refuses to run otherwise; see the fixture).
 
-Optional but recommended: ``EPICS_MCP_LIVE_OLOG_DENY_LOGBOOK`` names the SCRATCH logbook the deny
-targets are created in. Without it the module derives one, and the derived name can be a logbook
-another consumer treats as a frozen fixture — see :func:`denied_logbook`.
+**Required, not optional:** ``EPICS_MCP_LIVE_OLOG_DENY_LOGBOOK`` names the SCRATCH logbook the deny
+targets are created in. Unset is a refusal, never a guess — see :func:`denied_logbook`. It is
+deliberately absent from ``EpicsConfig``, ``.env.example`` and the operator guide, like every other
+``EPICS_MCP_LIVE_*`` variable: ``test_guide_matches_code`` checks each ``EPICS_MCP_*`` token in the
+guide against the config and would go red.
 """
 
 from __future__ import annotations
@@ -179,40 +189,49 @@ def _allowlisted_logbooks() -> frozenset[str]:
 
 @pytest.fixture
 def denied_logbook(raw_client: OlogClient) -> str:
-    """A logbook that EXISTS on this server and is NOT in the write allowlist.
+    """The SCRATCH logbook the deny targets go into — **named by the operator, never derived**.
 
-    ⚠️ **Point ``EPICS_MCP_LIVE_OLOG_DENY_LOGBOOK`` at a SCRATCH logbook.** These tests create a
-    labelled entry in it, and Olog has no delete. Auto-derivation picks the first non-allowlisted
-    name the server reports, which can easily be a logbook someone else treats as a frozen fixture
-    — a probe entry would then change its counts. Naming the target explicitly is the safe mode;
-    derivation is the convenience fallback, kept so the module still runs on a bare sandbox.
+    ⚠️ These tests create a labelled entry in this logbook before the gate refuses, and **Olog has no
+    delete**. So the unset case is a refusal, not a guess.
 
-    Whichever route: the name is validated against the SERVER's own logbook list (an entry cannot be
-    created in a logbook that does not exist) and against the allowlist (it must be outside, or the
-    test would prove nothing). Both failures go through the live gate, never a bare ``pytest.skip``
-    — a bare skip would defeat ``EPICS_MCP_REQUIRE_LIVE`` for exactly the condition that makes this
-    test meaningful.
+    An earlier revision derived the name as ``sorted(server_logbooks - allowlist)[0]`` and kept that
+    as a "convenience fallback". On the machine this was written for, that expression resolves —
+    deterministically, by alphabetical order — to the frozen fixture logbook of a PARALLEL window,
+    and it deposited six entries there that cannot be removed. Deriving a write target from the
+    server's own answer looks self-sufficient and is the opposite: the server cannot know which of
+    its logbooks somebody else has frozen. Only the operator knows, so only the operator names it.
+    A write probe against a SHARED service owns its data space explicitly — see the evidence
+    discipline in ``CLAUDE.md``.
+
+    The name is still validated against the SERVER's own logbook list (an entry cannot be created in
+    a logbook that does not exist) and against the allowlist (it must be outside, or the test would
+    prove nothing). Every failure — unset, unknown, inside the allowlist — goes through the live
+    gate, never a bare ``pytest.skip``: a bare skip would defeat ``EPICS_MCP_REQUIRE_LIVE`` for
+    exactly the conditions that make this test meaningful.
+
+    RED-PROOF: run the module with all six prerequisites and ``EPICS_MCP_REQUIRE_LIVE=1`` but
+    without ``EPICS_MCP_LIVE_OLOG_DENY_LOGBOOK`` — it fails loudly here and creates nothing.
     """
-    on_server = set(raw_client.list_logbooks())
+    # The env check runs BEFORE the first server round-trip: live_gate's own contract puts the gate
+    # ahead of any connection attempt, and it keeps this refusal provable without a live Olog.
     named = os.environ.get("EPICS_MCP_LIVE_OLOG_DENY_LOGBOOK", "").strip()
-    if named:
-        assert_live_available(
-            named in on_server and named not in _allowlisted_logbooks(),
-            f"EPICS_MCP_LIVE_OLOG_DENY_LOGBOOK={named!r} must name a logbook that exists on this "
-            "Olog and is NOT in EPICS_MCP_OLOG_WRITE_LOGBOOKS",
-            demanded=live_demanded(os.environ),
-        )
-        return named
-
-    candidates = sorted(on_server - _allowlisted_logbooks())
     assert_live_available(
-        bool(candidates),
-        "every logbook on this Olog is inside EPICS_MCP_OLOG_WRITE_LOGBOOKS, so no allowlist-miss "
-        "target can be created — point the allowlist at a strict subset of the server's logbooks, "
-        "or name a scratch target in EPICS_MCP_LIVE_OLOG_DENY_LOGBOOK",
+        bool(named),
+        "EPICS_MCP_LIVE_OLOG_DENY_LOGBOOK is unset — name the SCRATCH logbook the deny probes may "
+        "write into (it must exist on this Olog and stay OUTSIDE EPICS_MCP_OLOG_WRITE_LOGBOOKS). "
+        "It is not derived: Olog has no delete, and the first non-allowlisted name a server "
+        "reports can be another consumer's frozen fixture",
         demanded=live_demanded(os.environ),
     )
-    return candidates[0]
+
+    on_server = set(raw_client.list_logbooks())
+    assert_live_available(
+        named in on_server and named not in _allowlisted_logbooks(),
+        f"EPICS_MCP_LIVE_OLOG_DENY_LOGBOOK={named!r} must name a logbook that exists on this "
+        "Olog and is NOT in EPICS_MCP_OLOG_WRITE_LOGBOOKS",
+        demanded=live_demanded(os.environ),
+    )
+    return named
 
 
 @pytest.fixture
@@ -256,7 +275,9 @@ def _create_entry(client: OlogClient, logbook: str) -> str:
 
 
 # ======================================================================================
-# The deny path, against the wire. Nothing here mutates: the refusal falls after a pure read.
+# The deny path, against the wire. Each test lays down its OWN target in the scratch deny logbook
+# first (a real entry — Olog has no delete); the gated call itself then mutates nothing, because the
+# refusal falls after a pure read.
 # ======================================================================================
 
 
