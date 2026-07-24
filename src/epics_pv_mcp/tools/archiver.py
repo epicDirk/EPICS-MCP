@@ -11,6 +11,7 @@ localhost isolation).
 from __future__ import annotations
 
 import asyncio
+from typing import Literal, TypedDict
 
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
@@ -31,6 +32,37 @@ _DISABLED_NOTE = (
 )
 
 
+# get_pv_history's tool result shape (S29 — typed MCP outputSchema; the pattern the Olog cluster set
+# in services/checkers_olog.py). ``total=False`` because the disabled path (below) carries only a
+# subset. Every field ABSENT on some return path is typed ``X | None``, because FastMCP serializes
+# an omitted total=False key as JSON ``null`` (its ``convert_result`` dumps the model WITHOUT
+# ``exclude_none``): a non-nullable type would make the emitted structuredContent violate the tool's
+# own advertised outputSchema (the MA-1 trap). Only ``enabled``/``pv``/``samples``/``total`` are on
+# EVERY path (disabled + enabled) and stay non-nullable; the disabled path omits
+# ``from``/``to``/``capped``/``meta``/``status``/``withheld_reason``, and a success path with no
+# note omits ``note`` — so all seven are nullable. ``samples`` and ``meta`` keep opaque ``dict``
+# shapes (the sample projection / getData.json meta block). Functional syntax is REQUIRED: ``from``
+# is a Python keyword and cannot be a class-syntax field name. mypy --strict checks every
+# ``return {...}`` literal below against this shape.
+ArchiverHistoryResult = TypedDict(
+    "ArchiverHistoryResult",
+    {
+        "enabled": bool,
+        "pv": str,
+        "samples": list[dict[str, object]],
+        "total": int,
+        "from": str | None,
+        "to": str | None,
+        "capped": bool | None,
+        "meta": dict[str, object] | None,
+        "status": Literal["ok", "empty", "withheld"] | None,
+        "withheld_reason": str | None,
+        "note": str | None,
+    },
+    total=False,
+)
+
+
 async def _is_archived(pv: str, timeout: float = 5.0) -> dict[str, object]:
     """Report whether *pv* is being archived (Archiver MGMT getPVStatus).
 
@@ -45,13 +77,13 @@ async def _get_pv_history(
     end: str,
     max_points: int = DEFAULT_MAX_POINTS,
     timeout: float = 5.0,
-) -> dict[str, object]:
+) -> ArchiverHistoryResult:
     """Fetch archived samples for *pv* between *start* and *end* (ISO-8601), capped."""
     cfg = get_config()
     if not cfg.archiver_url:
         return {"enabled": False, "pv": pv, "samples": [], "total": 0, "note": _DISABLED_NOTE}
 
-    def _run() -> dict[str, object]:
+    def _run() -> ArchiverHistoryResult:
         # get_pv_history hits /retrieval/data — in a split deployment that lives on a separate
         # Tomcat (:17668) from mgmt (:17665). Pass the retrieval URL; it falls back to
         # archiver_url inside ArchiverClient when the retrieval URL env is unset (single-JVM).
@@ -62,7 +94,7 @@ async def _get_pv_history(
             retrieval_url=cfg.archiver_retrieval_url or None,
         )
         history = client.get_pv_history(pv, start, end, max_points=max_points)
-        result: dict[str, object] = {
+        result: ArchiverHistoryResult = {
             "enabled": True,
             "pv": pv,
             "from": start,

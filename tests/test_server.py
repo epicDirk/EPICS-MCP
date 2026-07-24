@@ -622,6 +622,128 @@ async def test_olog_structured_output_conforms_to_its_schema(
             )
 
 
+# --- S29: get_pv_history typed output schema (ArchiverHistoryResult) --------------------------
+
+# The JSON base type get_pv_history's outputSchema advertises for each of ArchiverHistoryResult's 11
+# fields (the non-null type for an X | None field, the bare type otherwise). Independent source of
+# truth — hardcoded, NOT reflected from the TypedDict — so a base-type WIDENING of an annotation is
+# caught even where nullability hides it from a bare-``type`` check (the _OLOG_FIELD_BASE_TYPE
+# rationale, applied to the archiver result). status is a Literal["ok","empty","withheld"] | None,
+# which pydantic renders as anyOf[{enum:[...], type: string}, {type: null}] — the non-null branch
+# carries type "string", so a Literal that lost its members (widened to str) still trips this.
+_ARCHIVER_HISTORY_BASE_TYPE: dict[str, str] = {
+    "enabled": "boolean",
+    "pv": "string",
+    "samples": "array",
+    "total": "integer",
+    "from": "string",
+    "to": "string",
+    "capped": "boolean",
+    "meta": "object",
+    "status": "string",
+    "withheld_reason": "string",
+    "note": "string",
+}
+
+# The envelope keys get_pv_history emits on EVERY return path (disabled + enabled) — FastMCP never
+# serializes them as a spurious null. Every OTHER advertised property is sometimes-absent and MUST
+# permit null (see test_archiver_history_structured_output_conforms_to_its_schema).
+_ARCHIVER_HISTORY_ALWAYS_PRESENT = frozenset({"enabled", "pv", "samples", "total"})
+
+
+@pytest.mark.asyncio
+async def test_archiver_history_exposes_typed_output_schema() -> None:
+    """S29: get_pv_history advertises a STRUCTURED outputSchema — its ArchiverHistoryResult
+    TypedDict's typed ``properties`` — not the bare ``{additionalProperties: true}`` a plain
+    ``dict[str, object]`` return yields. Red before the retype (no ``properties`` at all).
+
+    Mirrors test_typed_tools_expose_typed_output_schema's directions for the single archiver tool:
+    (1) the schema title is ArchiverHistoryResult; (2) the advertised properties are EXACTLY the 11
+    mapped fields — completeness both ways (mypy --strict guards an undeclared key in a return
+    literal; this guards a dropped one); (3) every field carries the right JSON BASE type, read via
+    :func:`_base_type` from the bare ``type`` (non-nullable) OR the non-null ``anyOf`` branch
+    (``X | None``). Checking the NULLABLE fields' base type too closes a widening that hides behind
+    nullability (e.g. status's Literal collapsing to a bare string, or capped: bool | None widened
+    to int | None — mypy-legal since bool ⊆ int, anyOf-shaped so a presence check skips it)."""
+    from epics_pv_mcp.server import mcp
+
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    schema = tools["get_pv_history"].outputSchema or {}
+    properties = schema.get("properties", {})
+    assert properties, "get_pv_history: outputSchema carries no typed properties"
+    assert schema.get("title") == "ArchiverHistoryResult", (
+        f"get_pv_history: wrong TypedDict wired ({schema.get('title')!r})"
+    )
+    assert set(properties) == set(_ARCHIVER_HISTORY_BASE_TYPE), (
+        f"get_pv_history: advertised properties {sorted(properties)} != "
+        f"expected {sorted(_ARCHIVER_HISTORY_BASE_TYPE)}"
+    )
+    for field, prop in properties.items():
+        actual = _base_type(prop)
+        assert actual == _ARCHIVER_HISTORY_BASE_TYPE[field], (
+            f"get_pv_history.{field}: schema base type {actual!r} != "
+            f"{_ARCHIVER_HISTORY_BASE_TYPE[field]!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_archiver_history_structured_output_conforms_to_its_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S29 conformance (the MA-1 null trap for get_pv_history): the EMITTED structuredContent
+    must conform to its own outputSchema. FastMCP serializes an omitted ``total=False`` key as JSON
+    ``null`` (its ``convert_result`` dumps the model WITHOUT ``exclude_none``), so a field absent on
+    some return path — from/to/capped/meta/status/withheld_reason on the disabled path, plus note on
+    a success path with no note — MUST permit null in the schema. A non-nullable ``status:
+    Literal[...]`` would make the disabled-path output violate the tool's own advertised schema.
+
+    Part A (runtime, real serialization): drive get_pv_history on the disabled path through
+    ``mcp.call_tool`` and assert every None-valued key in the emitted structuredContent permits null
+    — the direct bug repro. Part B (static): every advertised property outside the always-present
+    envelope must permit null, extending the check to note (absent only on a success path, which the
+    disabled path does not exercise)."""
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import mcp
+    from epics_pv_mcp.tools import archiver
+
+    # Force the disabled path deterministically (independent of the ambient EPICS_MCP_ARCHIVER_URL).
+    # get_pv_history resolves get_config in the archiver module's OWN namespace (a plain
+    # ``from ... import get_config``), so patch it THERE — NOT checkers_olog.get_config, which the
+    # Olog conformance test patches (a different module for a different tool cluster).
+    monkeypatch.setattr(archiver, "get_config", lambda: EpicsConfig(archiver_url=""))
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    properties = (tools["get_pv_history"].outputSchema or {}).get("properties", {})
+
+    # Part A — the emitted structuredContent conforms on the disabled path. FastMCP's call_tool
+    # returns a (content, structuredContent) tuple; we assert on the structured dict.
+    _content, structured = cast(
+        tuple[object, dict[str, Any]],
+        await mcp.call_tool(
+            "get_pv_history",
+            {
+                "pv": "SIM:PS-01:Cur-RB",
+                "start": "2026-01-01T00:00:00.000Z",
+                "end": "2026-01-02T00:00:00.000Z",
+            },
+        ),
+    )
+    for key, value in structured.items():
+        if value is None:
+            assert _schema_permits_null(properties[key]), (
+                f"get_pv_history.{key}: emitted null but its outputSchema property forbids null "
+                f"({properties[key]})"
+            )
+
+    # Part B — every sometimes-absent advertised property permits null.
+    for prop_name, prop_schema in properties.items():
+        if prop_name in _ARCHIVER_HISTORY_ALWAYS_PRESENT:
+            continue
+        assert _schema_permits_null(prop_schema), (
+            f"get_pv_history.{prop_name}: sometimes-absent property must permit null in its "
+            f"outputSchema (FastMCP dumps an omitted key as null), got {prop_schema}"
+        )
+
+
 def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -665,12 +787,14 @@ def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
 
 # --- MA-Q1: tools/list schema hygiene (_prune_tool_schemas post-pass) -------------------------
 
-# The 11 Olog tools whose TypedDict return yields a TYPED outputSchema (properties present); every
-# OTHER tool returns dict[str, object] -> its information-empty outputSchema is dropped to None by
-# A2. Named here as an INDEPENDENT source of truth (not reflected from the code). These are core
-# tools, so the set is identical on a core-only ([displays] absent, 28 tools) and a full (32)
-# install -> the assertions are RELATIONAL, never a COUNT (which would break the core-only lane).
-_OLOG_TYPED_OUTPUT_TOOLS = frozenset(
+# The tools whose TypedDict return yields a TYPED outputSchema (properties present); every OTHER
+# tool returns dict[str, object] -> its information-empty outputSchema is dropped to None by A2.
+# Named here as an INDEPENDENT source of truth (not reflected from the code). The 11 Olog tools were
+# typed first (MA-1 Commit C); get_pv_history followed (S29 — its result-level status ok/empty/
+# withheld is exactly the kind of discriminant S29 surfaces on the wire). These are core tools, so
+# the set is identical on a core-only ([displays] absent, 28 tools) and a full (32) install -> the
+# assertions are RELATIONAL, never a COUNT (which would break the core-only lane).
+_TYPED_OUTPUT_TOOLS = frozenset(
     {
         "search_logbook",
         "get_log_entry",
@@ -683,6 +807,7 @@ _OLOG_TYPED_OUTPUT_TOOLS = frozenset(
         "update_log_entry",
         "download_log_attachment",
         "list_log_attachments",
+        "get_pv_history",
     }
 )
 
@@ -888,19 +1013,21 @@ def test_is_information_empty_output_schema_precise() -> None:
 
 
 @pytest.mark.asyncio
-async def test_output_schema_typed_only_for_olog_tools() -> None:
+async def test_output_schema_typed_only_for_typed_tools() -> None:
     """MA-Q1 A2 (RELATIONAL — not a count, so core-only [28] and full [32] both pass): a tool
-    advertises an outputSchema WITH properties iff it is one of the 11 typed Olog tools; every other
-    present tool advertises NONE. Proves the empty schemas were dropped AND the 11 typed ones kept.
-    Red on a blanket drop (Olog schemas gone) or no drop (empty schemas remain)."""
+    advertises an outputSchema WITH properties iff it is one of the typed tools (the 11 Olog tools +
+    get_pv_history); every other present tool advertises NONE. Proves the empty schemas were dropped
+    AND the typed ones kept. Red on a blanket drop (typed schemas gone) or no drop (empty schemas
+    remain). Also the built-in S29 red-proof: put get_pv_history in the set before its TypedDict
+    lands and this assertion goes red (its schema is still pruned to None)."""
     from epics_pv_mcp.server import mcp
 
     tools = await mcp.list_tools()
     for tool in tools:
         schema = tool.outputSchema
-        if tool.name in _OLOG_TYPED_OUTPUT_TOOLS:
+        if tool.name in _TYPED_OUTPUT_TOOLS:
             assert schema is not None and schema.get("properties"), (
-                f"{tool.name}: typed Olog outputSchema was dropped"
+                f"{tool.name}: typed outputSchema was dropped"
             )
         else:
             assert schema is None, (
@@ -908,8 +1035,8 @@ async def test_output_schema_typed_only_for_olog_tools() -> None:
             )
     # every named typed tool is actually present (they are core tools, not display-gated)
     present = {t.name for t in tools}
-    assert present >= _OLOG_TYPED_OUTPUT_TOOLS, (
-        f"missing typed Olog tools: {sorted(_OLOG_TYPED_OUTPUT_TOOLS - present)}"
+    assert present >= _TYPED_OUTPUT_TOOLS, (
+        f"missing typed tools: {sorted(_TYPED_OUTPUT_TOOLS - present)}"
     )
 
 

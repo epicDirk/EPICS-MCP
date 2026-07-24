@@ -37,6 +37,7 @@ from epics_pv_mcp.services.diagnose import (
 from epics_pv_mcp.tool_errors import translate_epics_errors
 from epics_pv_mcp.tools.alarm import _get_alarm_history, _is_alarm_configured
 from epics_pv_mcp.tools.archiver import (
+    ArchiverHistoryResult,
     _get_appliance_info,
     _get_archive_info,
     _get_pv_history,
@@ -748,7 +749,7 @@ async def get_pv_history(
         ),
     ] = 5000,
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> ArchiverHistoryResult:
     """Fetch archived samples for a PV over an ISO-8601 window (Archiver retrieval getData.json).
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set. The
