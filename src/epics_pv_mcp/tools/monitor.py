@@ -16,12 +16,12 @@ async def _monitor_pv(
     effective_duration = min(duration, cfg.max_monitor_duration)
     effective_max_events = min(max_events, cfg.max_monitor_events)
 
-    events = await pv_monitor(name, effective_duration, effective_max_events)
+    events, truncated = await pv_monitor(name, effective_duration, effective_max_events)
 
     return {
         "pv_name": name,
         "duration_seconds": effective_duration,
         "events": events,
         "total_events": len(events),
-        "truncated": len(events) >= effective_max_events,
+        "truncated": truncated,
     }

@@ -13,7 +13,7 @@ async def test_monitor_success() -> None:
     with patch(
         "epics_pv_mcp.tools.monitor.pv_monitor",
         new_callable=AsyncMock,
-        return_value=mock_events,
+        return_value=(mock_events, False),
     ):
         result = await _monitor_pv("TEST:PV", 5.0, 100)
 
@@ -25,7 +25,7 @@ async def test_monitor_success() -> None:
 
 async def test_monitor_clamped_duration() -> None:
     """Duration exceeding max_monitor_duration (60.0) should be clamped."""
-    mock_monitor = AsyncMock(return_value=[])
+    mock_monitor = AsyncMock(return_value=([], False))
     with patch("epics_pv_mcp.tools.monitor.pv_monitor", mock_monitor):
         await _monitor_pv("TEST:PV", 999.0, 100)
 
@@ -35,12 +35,14 @@ async def test_monitor_clamped_duration() -> None:
 
 
 async def test_monitor_truncated() -> None:
-    """When events == max_events, truncated should be True."""
+    """_monitor_pv surfaces the service's truncated flag verbatim — the honest over-fetch
+    detection lives in pv_monitor (see test_epics_client.py). With the service mocked, the
+    tool must pass (events, truncated) straight through."""
     mock_events = [{"pv_name": "TEST:PV", "value": float(i)} for i in range(100)]
     with patch(
         "epics_pv_mcp.tools.monitor.pv_monitor",
         new_callable=AsyncMock,
-        return_value=mock_events,
+        return_value=(mock_events, True),
     ):
         result = await _monitor_pv("TEST:PV", 5.0, 100)
 

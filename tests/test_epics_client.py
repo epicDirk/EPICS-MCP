@@ -723,14 +723,58 @@ async def test_monitor_format_failure_yields_none(monkeypatch: Any) -> None:
 
     monkeypatch.setattr(epics_client, "_format_value", _boom)
 
-    events = await epics_client.pv_monitor("X:Y", duration=0.2, max_events=1)
+    events, truncated = await epics_client.pv_monitor("X:Y", duration=0.2, max_events=1)
 
     # QA: the fallback event must DECLARE itself — a bare {"value": None} was
     # indistinguishable from a genuinely-None reading in the event count.
     assert len(events) == 1
+    assert truncated is False  # one event delivered, cap 1 → complete, not truncated
     assert events[0]["pv_name"] == "X:Y"
     assert events[0]["value"] is None
     assert "extraction failed" in str(events[0]["note"])
+
+
+class _MultiEventContext:
+    """Deliver *n* synthetic events synchronously on subscribe — drives the monitor's
+    over-fetch / truncation logic deterministically (F27)."""
+
+    def __init__(self, n: int) -> None:
+        self._n = n
+
+    def monitor(self, name: str, cb: Any) -> _FakeSub:
+        for i in range(self._n):
+            cb(float(i))  # _format_value is stubbed in the tests below
+        return _FakeSub()
+
+
+async def test_pv_monitor_flags_overflow_and_trims(monkeypatch: Any) -> None:
+    """F27 over-fetch-by-one: when MORE than max_events arrive, pv_monitor returns EXACTLY
+    max_events events and truncated=True — a dropped event is never reported as a complete
+    read. RED on the pre-fix cap (== max_events): it cannot tell overflow from an exactly-
+    full stream, and a naive `>` swap makes truncated permanently False (silent loss)."""
+    monkeypatch.setattr(
+        epics_client, "_format_value", lambda name, value: {"pv_name": name, "value": value}
+    )
+    monkeypatch.setattr(epics_client, "get_context", lambda: _MultiEventContext(5))
+
+    events, truncated = await epics_client.pv_monitor("X:Y", duration=0.2, max_events=3)
+
+    assert len(events) == 3
+    assert truncated is True
+
+
+async def test_pv_monitor_exact_fill_is_not_truncated(monkeypatch: Any) -> None:
+    """The complementary control: exactly max_events arrive, then the stream goes quiet →
+    truncated=False. This is the case the pre-fix `>=` wrongly flagged as truncated."""
+    monkeypatch.setattr(
+        epics_client, "_format_value", lambda name, value: {"pv_name": name, "value": value}
+    )
+    monkeypatch.setattr(epics_client, "get_context", lambda: _MultiEventContext(3))
+
+    events, truncated = await epics_client.pv_monitor("X:Y", duration=0.2, max_events=3)
+
+    assert len(events) == 3
+    assert truncated is False
 
 
 # --- K4 bulkhead: pv_monitor runs on a dedicated executor, not the shared default pool ---

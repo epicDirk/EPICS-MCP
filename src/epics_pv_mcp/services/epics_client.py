@@ -181,8 +181,13 @@ async def pv_monitor(
     name: str,
     duration: float | None = None,
     max_events: int | None = None,
-) -> list[dict[str, object]]:
-    """Monitor a PV for *duration* seconds, collecting up to *max_events*.
+) -> tuple[list[dict[str, object]], bool]:
+    """Monitor a PV for *duration* seconds, returning ``(events, truncated)``.
+
+    Collects up to *max_events* events; ``truncated`` is True iff MORE than *max_events*
+    actually arrived — detected by over-collecting exactly one extra "canary" event, then
+    trimming it off (the same honest over-fetch as ``get_alarm_history``'s ``size=max+1``).
+    A stream that delivers exactly *max_events* and then goes quiet is NOT truncated.
 
     Runs the p4p subscription in a background thread and uses
     ``threading.Event`` for clean cancellation.
@@ -208,7 +213,12 @@ async def pv_monitor(
             if stop_event.is_set():
                 return
             with lock:
-                if len(collected) >= max_events:
+                # Over-collect by one: stop only at max_events+1, so a later `len > max_events`
+                # honestly distinguishes "the cap cut the stream" (truncated) from "exactly
+                # max_events arrived, then it went quiet" (complete). The canary is trimmed off
+                # before returning. RED before: `>= max_events` reported truncated on an
+                # exactly-full-but-complete stream, and a plain `>` swap would make truncated dead.
+                if len(collected) >= max_events + 1:
                     stop_event.set()
                     return
                 try:
@@ -255,7 +265,9 @@ async def pv_monitor(
     if error_holder:
         raise error_holder[0]
 
-    return collected
+    # Honest truncation via the over-collect above: True only when the +1 canary was reached.
+    truncated = len(collected) > max_events
+    return collected[:max_events], truncated
 
 
 # ---------------------------------------------------------------------------
