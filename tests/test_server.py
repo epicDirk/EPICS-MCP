@@ -859,6 +859,118 @@ async def test_alarm_configured_structured_output_conforms_to_its_schema(
         )
 
 
+# The JSON base type every lookup_device_name (NameLookupResult) property must advertise (the
+# non-null branch for an X | None field, the bare type otherwise). An INDEPENDENT source of truth —
+# hardcoded, NOT reflected from the TypedDict — so a base-type WIDENING of an annotation is caught
+# even where nullability hides it from a bare-``type`` check (the _ALARM_CONFIGURED_BASE_TYPE
+# rationale, applied to the name-lookup result). registered's non-null branch is "boolean" —
+# NameStatus.registered is bool, so query_naming_lookup yields bool | None (not str), and a
+# widen-to-str would trip this.
+_NAME_LOOKUP_BASE_TYPE: dict[str, str] = {
+    "enabled": "boolean",
+    "name": "string",
+    "registered": "boolean",
+    "status": "string",
+    "message": "string",
+    "withheld": "boolean",
+    "note": "string",
+}
+
+# The keys lookup_device_name emits on EVERY return path (disabled + _run success + withheld) and
+# never as a spurious null — enabled and name. Every OTHER advertised property is sometimes-absent
+# (registered is present on every path but is None on the disabled/withheld paths, so it too must
+# permit null) and MUST permit null (see the conformance test below).
+_NAME_LOOKUP_ALWAYS_PRESENT = frozenset({"enabled", "name"})
+
+
+@pytest.mark.asyncio
+async def test_name_lookup_exposes_typed_output_schema() -> None:
+    """S29 (3rd target): lookup_device_name advertises a STRUCTURED outputSchema — its
+    NameLookupResult TypedDict's typed ``properties``, not the bare accept-all schema a plain
+    ``dict[str, object]`` return yields. Red before the retype (no properties at all).
+
+    Mirrors test_alarm_configured_exposes_typed_output_schema for the single naming tool: (1) the
+    schema title is NameLookupResult; (2) the advertised properties are EXACTLY the 7 mapped
+    fields — completeness both ways (mypy --strict guards an undeclared key in a literal; this
+    guards a dropped one); (3) every field carries the right JSON BASE type via :func:`_base_type`
+    from the bare ``type`` (non-nullable) OR the non-null ``anyOf`` branch (``X | None``). Also
+    checking the NULLABLE fields' base type closes a widening hidden behind nullability (e.g.
+    registered: bool | None widened to int | None — mypy-legal since bool ⊆ int, anyOf-shaped, so
+    a presence check skips it, but boolean -> integer here)."""
+    from epics_pv_mcp.server import mcp
+
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    schema = tools["lookup_device_name"].outputSchema or {}
+    properties = schema.get("properties", {})
+    assert properties, "lookup_device_name: outputSchema carries no typed properties"
+    assert schema.get("title") == "NameLookupResult", (
+        f"lookup_device_name: wrong TypedDict wired ({schema.get('title')!r})"
+    )
+    assert set(properties) == set(_NAME_LOOKUP_BASE_TYPE), (
+        f"lookup_device_name: advertised properties {sorted(properties)} != "
+        f"expected {sorted(_NAME_LOOKUP_BASE_TYPE)}"
+    )
+    for field, prop in properties.items():
+        actual = _base_type(prop)
+        assert actual == _NAME_LOOKUP_BASE_TYPE[field], (
+            f"lookup_device_name.{field}: schema base type {actual!r} != "
+            f"{_NAME_LOOKUP_BASE_TYPE[field]!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_name_lookup_structured_output_conforms_to_its_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S29 conformance (the MA-1 null trap for lookup_device_name): the EMITTED structuredContent
+    must conform to its own outputSchema. FastMCP serializes an omitted ``total=False`` key as JSON
+    ``null`` (its ``convert_result`` dumps the model WITHOUT ``exclude_none``), so a field absent on
+    some return path — status/message/withheld on the disabled path — MUST permit null there.
+    And ``registered`` is explicitly None on the disabled path (the tri-state), so a non-nullable
+    ``registered: bool`` would make the disabled-path output violate the tool's advertised schema.
+
+    Part A (runtime, real serialization): drive lookup_device_name on the disabled path through
+    ``mcp.call_tool`` and assert every None-valued key in the emitted structuredContent permits null
+    — the direct bug repro. Part B (static): every advertised property outside the always-present
+    envelope must permit null, extending the check to note (absent only on the success path, which
+    the disabled path does not exercise)."""
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import mcp
+    from epics_pv_mcp.services import checkers
+
+    # Force the disabled path deterministically (independent of the ambient EPICS_MCP_NAMING_URL).
+    # Unlike query_alarm_configured, query_naming_lookup does NOT call get_config directly — it
+    # delegates to build_naming_client (checkers.py), which resolves get_config in the checkers
+    # module's OWN namespace (a plain ``from ... import get_config``) and returns None on an empty
+    # naming_url. So patch checkers.get_config HERE — NOT tools.naming.get_config (the thin adapter
+    # has none) — to drive build_naming_client -> None -> the disabled ``client is None`` return.
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(naming_url=""))
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    properties = (tools["lookup_device_name"].outputSchema or {}).get("properties", {})
+
+    # Part A — the emitted structuredContent conforms on the disabled path. FastMCP's call_tool
+    # returns a (content, structuredContent) tuple; we assert on the structured dict.
+    _content, structured = cast(
+        tuple[object, dict[str, Any]],
+        await mcp.call_tool("lookup_device_name", {"name": "DEV-TEST01:Ctrl-EVR-01"}),
+    )
+    for key, value in structured.items():
+        if value is None:
+            assert _schema_permits_null(properties[key]), (
+                f"lookup_device_name.{key}: emitted null but its schema property forbids null "
+                f"({properties[key]})"
+            )
+
+    # Part B — every sometimes-absent advertised property permits null.
+    for prop_name, prop_schema in properties.items():
+        if prop_name in _NAME_LOOKUP_ALWAYS_PRESENT:
+            continue
+        assert _schema_permits_null(prop_schema), (
+            f"lookup_device_name.{prop_name}: sometimes-absent property must permit null in its "
+            f"outputSchema (FastMCP dumps an omitted key as null), got {prop_schema}"
+        )
+
+
 def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -924,6 +1036,7 @@ _TYPED_OUTPUT_TOOLS = frozenset(
         "list_log_attachments",
         "get_pv_history",
         "is_alarm_configured",
+        "lookup_device_name",
     }
 )
 

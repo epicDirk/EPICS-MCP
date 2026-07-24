@@ -598,7 +598,25 @@ async def query_channel_vocabulary(timeout: float = 5.0) -> dict[str, object]:
         ) from exc
 
 
-async def query_naming_lookup(name: str, timeout: float = 5.0) -> dict[str, object]:
+# Nullability mirrors AlarmConfiguredResult (see its comment above): FastMCP serializes an
+# omitted total=False key (and an explicit None) as JSON ``null`` (its convert_result dumps the
+# model WITHOUT ``exclude_none``), so a field ABSENT on some return path — status/message
+# (success-only), withheld (withheld-only), note (disabled/withheld) — or None on some path —
+# ``registered``, the tri-state — is typed ``X | None``. Only ``enabled`` + ``name`` are present
+# on EVERY path and never null. FastMCP then yields a typed outputSchema (``properties``;
+# ``anyOf[T, null]`` for the nullable fields) instead of the bare ``{additionalProperties: true}``
+# a plain dict yields; mypy --strict checks every ``return {...}`` literal below against this shape.
+class NameLookupResult(TypedDict, total=False):
+    enabled: bool
+    name: str
+    registered: bool | None
+    status: str | None
+    message: str | None
+    withheld: bool | None
+    note: str | None
+
+
+async def query_naming_lookup(name: str, timeout: float = 5.0) -> NameLookupResult:
     """Look up an ESS device name in the Naming Service: is it registered + ACTIVE?
 
     Read-only, config-gated. Default-disabled: with ``EPICS_MCP_NAMING_URL`` unset, returns a
@@ -624,7 +642,7 @@ async def query_naming_lookup(name: str, timeout: float = 5.0) -> dict[str, obje
     if client is None:
         return {"enabled": False, "name": name, "registered": None, "note": _NAMING_DISABLED_NOTE}
 
-    def _run() -> dict[str, object]:
+    def _run() -> NameLookupResult:
         # Probe reachability FIRST (mirrors diagnose._gather_naming) so an unreachable/timing-out
         # service is WITHHELD by the ``except`` below, not read as a definitive answer. A reachable
         # HEAD plus a 404 on deviceNames = the real "not registered" (validate_name returns

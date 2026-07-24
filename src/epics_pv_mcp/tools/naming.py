@@ -9,10 +9,10 @@ duplicating the gate or a ``services -> tools`` upward import (M9). Default-disa
 
 from __future__ import annotations
 
-from epics_pv_mcp.services.checkers import query_naming_lookup
+from epics_pv_mcp.services.checkers import NameLookupResult, query_naming_lookup
 
 
-async def _lookup_device_name(name: str, timeout: float = 5.0) -> dict[str, object]:
+async def _lookup_device_name(name: str, timeout: float = 5.0) -> NameLookupResult:
     """Look up whether an ESS device name is registered + ACTIVE in the Naming Service.
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_naming_lookup`.
