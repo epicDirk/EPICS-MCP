@@ -7,6 +7,36 @@ carry breaking changes).
 
 ## [Unreleased]
 
+### Changed
+
+- **Server-Runtime von SDK-gebündeltem FastMCP 1.0 (`mcp.server.fastmcp`) auf standalone `fastmcp`
+  migriert (`feat(deps)!`, Commit `6bd12c6`).** `server.py` / `display_tools.py` / `tool_errors.py`
+  nutzen jetzt `from fastmcp import FastMCP` bzw. `from fastmcp.exceptions import ToolError`
+  (`fastmcp>=3,<4`, resolved 3.4.4; `mcp>=1,<2` bleibt für `mcp.types.ToolAnnotations`). Das vereint
+  beide Projekt-MCPs (phoebus + epics-pv) auf **einen** Stack und löst den Zwei-`ToolError`-Footgun
+  **per Konstruktion** — nur noch genau ein `fastmcp` auf dem Pfad, also nur noch eine `ToolError`-Klasse.
+  - **Konstruktor:** `version=__version__` (ersetzt den früheren privaten `_mcp_server.version`-Reach;
+    der `initialize`-Handshake trägt `serverInfo.version` weiterhin — gemessen) und
+    `mask_error_details=False` (verhaltenserhaltend ggü. SDK-1.0, das kein Masking hatte).
+  - **`@mcp.tool(output_schema=None)`** an den **17** `dict[str, object]`-Tools (13 in `server.py`,
+    4 in `display_tools.py`) droppt das information-leere Accept-all-`outputSchema` **advertise-only** —
+    `structuredContent` bleibt zur Call-Zeit erhalten (gemessen). Die 15 getypten TypedDict-Tools
+    behalten ihr Schema.
+  - **tools/list-Budget:** core-lane **59683** Zeichen / all-lane 67976 (Deckel 70000).
+
+### Removed
+
+- **`_prune_tool_schemas` + 3 Helfer (`_strip_schema_title_annotations`,
+  `_strip_output_schema_field_annotations`, `_is_information_empty_output_schema`) und die
+  JSON-Schema-Keyword-Frozensets (~130 Zeilen) entfernt (Commit `6bd12c6`).** Standalone `fastmcp`
+  emittiert die schlanken Schemas **nativ** (keine derived-pydantic-`title`-Annotationen, keine
+  `default: null` der `total=False`-Felder, kein Root-TypedDict-`title`) — der Post-Registration-Prune-
+  Pass ist damit gegenstandslos. Der einzige Restbedarf (Accept-all-`outputSchema` droppen) ist jetzt
+  das public `output_schema=None` an den dict-Tools (s. **Changed**). Die drei zugehörigen
+  `*_exposes_typed_output_schema`-Tests verankern die TypedDict-Identität seither auf den **Feld-Set**
+  (`set(properties) == set(TypedDict.__annotations__)`) statt auf den weggefallenen Root-`title`-String;
+  die 6 Unit-Tests der gelöschten Prune-Funktionen sind mit entfernt.
+
 ### Added
 
 - **The first LIVE write-gate deny test (`tests/test_write_gate_live.py`).** Contract point 6 prefers a
@@ -95,7 +125,10 @@ carry breaking changes).
   the Olog-write class explicitly deferred) ensures a future PV-write tool cannot ship without the hint,
   and a drift-guard test ensures a consent tool documents the key in its description. No new tool;
   `tools/list` stays 32/28 and within the size-gate ceiling.
-- **MA-Q1a tools/list schema-hygiene hardening (nit/low follow-ups to MA-Q1).** Robustness and
+- **MA-Q1a tools/list schema-hygiene hardening (nit/low follow-ups to MA-Q1).** *(⚠️ ÜBERHOLT durch
+  die standalone-fastmcp-Migration `6bd12c6` — `_prune_tool_schemas` und seine Helfer sind entfernt,
+  s. Removed oben; die Zahlen 64499/70237 sind historisch, aktuell = 59683 core / 67976 all-lane,
+  nativ schlank.)* Robustness and
   precision polish on `_prune_tool_schemas`, with NO wire change — `tools/list` stays 64499 characters,
   `list_tools` 32/28. The title-strip now also descends into the JSON-Schema 2020-12 single-subschema
   keywords `contains` / `unevaluatedItems` / `unevaluatedProperties` (a `title` under one of them would
@@ -108,7 +141,10 @@ carry breaking changes).
   test; plus three doc corrections (A1 contributes ~3.7k, not ~4.7k; a truthful crash-guard raise-source
   example; the ceiling is a character budget, not a byte budget).
 
-- **MA-Q3 tools/list size-gate (test-only guard).** A relational `<=` ceiling test
+- **MA-Q3 tools/list size-gate (test-only guard).** *(⚠️ Teilweise überholt durch `6bd12c6`: der Guard
+  `test_tools_list_within_budget` besteht weiter (Deckel 70000), misst aber jetzt die nativ-schlanken
+  standalone-Schemas — es gibt keinen Prune-Pass mehr zum „Stoppen"/„Brechen"; aktuelle Zahl = 59683
+  core / 67976 all-lane, nicht 64499/70237.)* A relational `<=` ceiling test
   (`test_tools_list_within_budget`, ceiling 70000) so the wire `tools/list` payload MA-Q1 shrank cannot
   silently regrow — a new tool, an SDK change that inflates the wire, or a regression that stops the pruning
   now turns a green suite RED. This is the guard behind MA-Q1's "precondition for every new tool" framing,
@@ -245,6 +281,10 @@ carry breaking changes).
   released (Olog write, the read throttle and attachments all landed after `0.2.0`).
 
 - **`tools/list` schema hygiene — lossless payload reduction (MA-Q1, precondition for new tools).**
+  *(⚠️ ÜBERHOLT durch die standalone-fastmcp-Migration `6bd12c6`: der hier beschriebene Pass
+  `_prune_tool_schemas(mcp)` samt A1/A2/A3-Helfern ist entfernt — standalone `fastmcp` emittiert die
+  schlanken Schemas nativ; die Reduktion kommt jetzt „by construction", die Zahlen 70237→64499 sind
+  historisch, aktuell = 59683 core / 67976 all-lane. S. Removed/Changed oben.)*
   A single post-registration pass `_prune_tool_schemas(mcp)` (in `server.py`, run AFTER the display-tool
   registrar, wrapped in a crash-guarding `try/except` that mirrors `_load_display_registrar` — an optional
   hygiene pass must never take down the core PV server) shrinks the wire `tools/list` payload with NO loss

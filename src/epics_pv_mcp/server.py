@@ -169,9 +169,14 @@ mcp = FastMCP(
     "epics-pv-mcp",
     version=__version__,
     instructions=build_instructions(_DISPLAY_TOOLS_AVAILABLE),
-    # Standalone FastMCP lässt mask_error_details standardmäßig auf None; explizit False,
-    # damit der kuratierte ``[<code>] message`` / ``[INTERNAL] …``-ToolError-Text weiterhin
-    # den Client erreicht (SDK-1.0 hatte kein Masking — das erhält das Verhalten).
+    # mask_error_details steuert NUR, ob der Detail-Text einer NICHT-ToolError-Exception (ein
+    # echter interner Bug) den Client erreicht: True maskiert ihn zu "Error calling tool '<name>'",
+    # False/None geben ihn durch. Der kuratierte ``[<code>] message`` / ``[INTERNAL] …``-ToolError-
+    # Text erreicht den Client OHNEHIN unter allen Einstellungen (ToolError ist die absichtliche
+    # Client-Grenze — gemessen None/False/True). Explizit False = das ungemaskte SDK-1.0-Verhalten
+    # (verhaltenserhaltend), hier deckungsgleich mit dem standalone-Default None. Härtungs-Option
+    # (Dirk-Entscheidung, bewusst NICHT eigenmächtig geändert): True würde interne Exception-Strings
+    # maskieren — konsistenter mit der Redaktions-Posture, dafür ohne Detail bei einem Bug.
     mask_error_details=False,
 )
 

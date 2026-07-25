@@ -38,11 +38,15 @@ def test_health_version_matches_package_version() -> None:
 
 
 def test_low_level_server_version_attribute_exists() -> None:
-    """S1-2 early-warning guard: server.py sets the MCP handshake version via the PRIVATE FastMCP
-    attribute ``mcp._mcp_server``, reached with ``getattr(..., None)`` — which SILENTLY skips if a
-    FastMCP upgrade renames/removes it, shipping an unset handshake version with no test failure.
-    This asserts the attribute still exists and carries ``__version__``, turning that silent
-    regression into a loud one."""
+    """S1-2 early-warning guard: since the standalone-fastmcp migration (6bd12c6), server.py sets
+    the handshake version through the PUBLIC constructor —
+    ``FastMCP("epics-pv-mcp", version=__version__)`` — which standalone FastMCP mirrors onto the
+    PRIVATE low-level attribute ``mcp._mcp_server.version`` (the value that reaches
+    ``serverInfo.version`` on the wire — independently confirmed via an ``initialize`` handshake).
+    This asserts that private mirror still exists and carries ``__version__``, so a FastMCP upgrade
+    that stops mirroring the constructor version turns a silently-unset handshake version into a
+    loud test failure. (The old code reached into ``_mcp_server`` directly to SET the version; that
+    private-write path is gone — the constructor arg replaced it.)"""
     from epics_pv_mcp import __version__
     from epics_pv_mcp.server import mcp
 
