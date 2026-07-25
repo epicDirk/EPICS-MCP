@@ -154,10 +154,10 @@ async def _discover_by_channelfinder(pattern: str, timeout: float | None) -> Dis
         "pvs": pvs,
         "total": len(pvs),
         # bool()-coerce, and NOT because the seam is untyped -- it is typed now
-        # (``ChannelQueryResult.capped`` is ``bool | None``). The coercion stays for two reasons the
-        # annotation cannot cover: the seam is REPLACED by a test double that deliberately injects a
-        # truthy STRING here (pinned by the conformance test's fake), and ``None`` from a
-        # count_only-shaped payload must land as ``False``, not as a null in a non-nullable field.
+        # (``ChannelQueryResult.capped`` is ``bool | None``). The coercion stays for the one reason
+        # the annotation cannot cover: the seam is REPLACED wholesale by a test double that
+        # deliberately injects a truthy STRING here (pinned by the conformance test's fake), and a
+        # raw copy would then emit that string into this ``boolean | null`` field.
         "capped": bool(result.get("capped")),
         "source": "channelfinder",
         "note": _WILDCARD_REGISTRY_NOTE,

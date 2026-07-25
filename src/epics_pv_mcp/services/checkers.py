@@ -579,7 +579,9 @@ async def query_alarm_history(
 #
 # ``total=False`` over the union of FOUR return literals, and the two MODES are DISJOINT: a
 # ``count_only`` path carries ``match_count`` and never ``channels``/``total``/``capped``; a list
-# path carries those and never ``match_count``. Only ``enabled`` is on all four -> non-nullable;
+# path carries ``channels``/``total`` and never ``match_count``. ``capped`` is narrower still --
+# it exists ONLY on the configured list path, not on the unconfigured one, which adds ``note``
+# instead. Only ``enabled`` is on all four -> non-nullable;
 # every other field is ``X | None``. The nullability rationale is the canonical one in
 # ``services/checkers_olog.py``'s "Tool result shapes" header; the closest precedent for a
 # PARAMETER deciding which keys exist at all is ``OlogDownloadResult`` (as_base64 vs output_path).

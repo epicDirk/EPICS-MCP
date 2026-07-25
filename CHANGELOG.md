@@ -13,9 +13,11 @@ carry breaking changes).
   DISJUNKTE Felder, was das Schema als Erstes sagt (S29, 11. Ziel).** Das Ergebnis entsteht in
   `query_channels`, also wohnt das TypedDict `ChannelQueryResult` dort und nicht am Tool-Adapter;
   die Consumer erben es.
-  - **Sechs beworbene Felder**, und nur **eines** liegt auf jedem Rückgabepfad: `enabled`. Die
-    Liste liefert `{enabled, channels, total, capped}`, der Zähler `{enabled, match_count}`, dazu
-    `note` auf beiden, wenn ChannelFinder unkonfiguriert ist. Wer bisher `total` annahm, weil er
+  - **Sechs beworbene Felder**, und nur **eines** liegt auf jedem Rückgabepfad: `enabled`. Vier
+    Pfade, nicht zwei: konfigurierte Liste `{enabled, channels, total, capped}`, konfigurierter
+    Zähler `{enabled, match_count}`; **un**konfiguriert `{enabled, channels, total, note}` bzw.
+    `{enabled, match_count, note}` — dort kommt `note` hinzu und `capped` fällt weg. Wer bisher
+    `total` annahm, weil er
     ein Ergebnis in der Hand hatte, sieht das jetzt am Vertrag statt im Feldfehler.
   - ⚠️ **Der Preis, damit ihn niemand später entdeckt:** `total` und `match_count` sind
     `int | None`. Ein künftiger Consumer muss None prüfen, bevor er rechnet — heute rechnet keiner.
@@ -28,7 +30,8 @@ carry breaking changes).
     (`{type: object, additionalProperties: true}`) wie alle Objekt-Arrays hier, obwohl ein Kanal
     immer ein `ChannelInfo` mit 6 Feldern ist. Ein verschachteltes TypedDict wäre das erste im
     Server, brächte `$defs` auf den Draht und berührt drei generische Schema-Wächter — eigener
-    Arbeitsgang. Und: **17 Test-Doppelgänger von `query_channels` setzen den neuen Typ nicht
+    Arbeitsgang. Und: **18 Test-Doppelgänger von `query_channels` (15 davon mit Nutzlast) setzen
+    den neuen Typ nicht
     durch** (`monkeypatch`-Wert ist `object`); die Durchsetzung kommt aus mypy auf `src/` und den
     Draht-Tests.
   - **Der Wächter, der die nächste Typisierung erzwingt** (`539fc16`):
@@ -48,9 +51,11 @@ carry breaking changes).
     berief sich darauf, dass die Naht untypisiert sei; die Coercion bleibt, weil die Naht in Tests
     ersetzt wird, nicht weil sie untypisiert ist).
   - **Ein Zähler war schon vorher falsch, jetzt gemessen statt geschätzt:** die Notiz zur
-    `EPICS_MCP_READ_RATE_LIMIT`-Exposition nannte 15 betroffene Tests; gemessen unter Limit 1 sind
-    es **19 fremde** (20 mit dem neuen). Der Limit-Wert gehört in die Aussage — ein Test, der zwei
-    Token zieht, fällt erst bei 1 durch.
+    `EPICS_MCP_READ_RATE_LIMIT`-Exposition nannte 15 betroffene Tests. Gemessen unter
+    `EPICS_MCP_READ_RATE_LIMIT=1`: **20 Tests fallen insgesamt**, davon einer der hier neue — also
+    **19 fremde** danach und **18 fremde** davor. Die genannte 15 war damit schon vor diesem Bau
+    um drei veraltet. Der Limit-Wert gehört in die Aussage — ein Test, der zwei Token zieht,
+    fällt erst bei 1 durch.
 - **Der Scheinwächter-Audit ist gefahren, und drei gemessene Lücken sind geschlossen (S31).** Ein
   Test, der die Client-**Klasse** durch eine Attrappe ersetzt, entfernt still jede Prüfung, die der
   echte Client an seinem Rand fährt — er *sieht aus* wie ein Wächter. Was daraus wurde:
@@ -61,10 +66,13 @@ carry breaking changes).
   - **Element-Schemata der Listen relational gepinnt** (`7b234fb`): `list[str]` und `list[Any]` sind
     beide „array". Live gemessen sind es **15 Paare über 14 Tools**, nicht die 8/9 der Notiz, und
     **vier** sind `anyOf[array,null]` — ein Helfer, der nur `prop["items"]` liest, fände 11.
+    (Stand dieses Eintrags; mit `find_channels.channels` sind es seit dem S29-Eintrag oben
+    **16 Paare über 15 Tools**, davon fünf `anyOf[array,null]`.)
     ⚠️ `list[Any]` rendert als `{"type":"array","items":{}}`: der Schlüssel **bleibt** und wird leer,
     ein Wächter mit der Frage „hat es `items`?" sähe nichts. Deshalb hängt die Entdeckung an
     `_base_type == "array"` — einer Eigenschaft, die die Mutation nicht anfassen kann.
-    Ehrlich: 7 der 15 tragen eine scharfe Bedingung, 8 sind bewusst opake Objekte.
+    Ehrlich: 7 der 15 tragen eine scharfe Bedingung, 8 sind bewusst opake Objekte (seit dem
+    S29-Eintrag oben: 7 von 16, neun opak).
   - **Jede Listenroute fragt ihren eigenen Endpunkt an** (`bb5bb8f`, `ad9cd82`): `list_tags` auf die
     properties-URL umzubiegen ließ alle 1439 Tests grün. Beide Vokabular-Routen liefern dieselbe
     Form durch denselben Helfer, also kann dort **kein** Typ-Wächter feuern. Gepinnt für
@@ -155,7 +163,8 @@ carry breaking changes).
   das **sieben** Felder: `is_archived.archived` · `is_alarm_configured.configured` ·
   `lookup_device_name.registered` · `get_archive_info.found` · `get_log_entry.found` ·
   `list_log_attachments.found` · `list_log_levels.default_level`.
-  **Gegenprobe:** alle 21 getypten Tools auf ihren disabled-Pfaden über einen echten Client
+  **Gegenprobe:** alle 21 getypten Tools (Stand dieses Eintrags; heute 22) auf ihren
+  disabled-Pfaden über einen echten Client
   gefahren → 0 Verstöße. Die enabled-Pfade brauchen laufende Dienste und sind ungeprüft.
   Die Kommentare in `services/checkers_olog.py`, `services/checkers.py` und `tools/archiver.py`
   tragen jetzt diesen Stand; die kanonische Fassung steht **einmal** im Kopf von
@@ -182,7 +191,9 @@ carry breaking changes).
   `pattern`/`pvs`/`total` (auf allen vier Rückgabepfaden), plus `capped`/`source` (nur Wildcard mit
   ChannelFinder) und `note` (beide Wildcard-Pfade). `pvs` bleibt eine Liste offener Einträge — sie sind
   in drei Formen heterogen (konkreter Treffer mit Wert · Fehlschlag · Registry-Treffer mit IOC/Host).
-  **Damit sind 21 der 32 Tools getypt** (Voll-Lane; Kern-Lane 28). Untypisiert bleiben 11: die
+  **Damit sind 21 der 32 Tools getypt** (Voll-Lane; Kern-Lane 28) — **abgelöst vom S29-Eintrag
+  oben: heute 22 von 32, und `find_channels` ist erledigt.** Untypisiert waren zu diesem
+  Zeitpunkt 11: die
   S29-Kandidaten `find_channels` und `diagnose_connection` · die fünf PV-Wert-Tools `get_pv_value`,
   `get_pvs`, `get_pv_info`, `monitor_pv`, `set_pv_value` · die vier Display-Lane-Tools `validate_pvs`,
   `crossplane_check`, `coverage_audit`, `find_device`. **Das löst die „19 von 25"-Zählung des
@@ -226,7 +237,8 @@ carry breaking changes).
   typisiertes `outputSchema` — damit **19 von 25** Tool-Schemas getypt. Muster: TypedDict-Return,
   `total=False`, sometimes-absent-Feld → `X | None`, roh kopiertes Feld → `object | None` (gemischte
   Wire-Typen); der `**`-Spread wurde durch expliziten Feld-für-Feld-Aufbau mit Präsenz-Wächtern
-  ersetzt (mypy `--strict`). Offen bleiben aus strukturellen Gründen (nicht Budget): `find_channels`
+  ersetzt (mypy `--strict`). Offen blieben aus strukturellen Gründen (nicht Budget) — Stand
+  dieses Eintrags, `find_channels` und `discover_pvs` sind inzwischen getypt: `find_channels`
   (query_channels-Fan-out), `discover_pvs` (kein eigener get_config-Seam), `diagnose_connection`
   (verschachteltes Pydantic-Modell); die 7 freien PV-Wert-Tools bleiben dauerhaft untypisiert.
   - **tools/list-Budget-Deckel `_TOOLS_LIST_WIRE_CEILING` 70000 → 200000** (bewusste Betreiber-

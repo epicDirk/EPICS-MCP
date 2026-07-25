@@ -1758,10 +1758,11 @@ async def test_discover_pvs_structured_output_conforms_to_its_schema(
     async def _fake_query_channels(name_pattern: str, **kwargs: object) -> dict[str, object]:
         """An ENABLED ChannelFinder payload — the only path that emits capped/source.
 
-        ``capped`` is deliberately a truthy STRING, not a bool: the seam into this function is typed
-        ``dict[str, object]``, so the caller must not trust the wire type. That pins the ``bool()``
-        coercion in ``_discover_by_channelfinder`` — raw-copying the value instead would emit a
-        string into a ``boolean | null`` field and the client call below would go red.
+        ``capped`` is deliberately a truthy STRING, not a bool. The seam into this function IS typed
+        (``ChannelQueryResult``, S29) -- and that is exactly why this double matters: an annotation
+        is not a runtime guarantee when the seam itself is monkeypatched away. That pins the
+        ``bool()`` coercion in ``_discover_by_channelfinder``: raw-copying the value instead
+        would emit a string into a ``boolean | null`` field and the client call below would go red.
         """
         return {
             "enabled": True,
@@ -1845,9 +1846,11 @@ _FIND_CHANNELS_BASE_TYPE: dict[str, str | None] = {
 }
 
 # The keys find_channels emits on EVERY one of its four return paths. It is a SINGLE key, and that
-# is the tool's shape rather than a gap in the table: the two MODES are disjoint — a count_only path
-# carries ``match_count`` and no ``channels``/``total``/``capped``, a list path the reverse — so
-# ``enabled`` is the only field every path has.
+# is the tool's shape rather than a gap in the table: the two MODES are disjoint (count_only carries
+# ``match_count`` and no ``channels``/``total``, a list path the reverse) AND the configuration
+# splits them again (``note`` only unconfigured, ``capped`` only on the configured list path) — so
+# ``enabled`` is the only field every path has. The exact per-path sets are asserted in the
+# conformance test; this constant is only their intersection.
 _FIND_CHANNELS_ALWAYS_PRESENT = frozenset({"enabled"})
 
 
@@ -1958,15 +1961,47 @@ async def test_find_channels_structured_output_conforms_to_its_schema(
             "tags": [{"name": "archived"}],
         }
     ]
-    paths: list[tuple[str, EpicsConfig, dict[str, Any], object]] = [
-        ("disabled-list", disabled, {"name_pattern": "SIM:*"}, None),
-        ("disabled-count", disabled, {"name_pattern": "SIM:*", "count_only": True}, None),
-        ("enabled-list", enabled, {"name_pattern": "SIM:*"}, one_channel),
-        ("enabled-count", enabled, {"name_pattern": "SIM:*", "count_only": True}, 7),
+    # The EXACT key set each path must emit — the assertion that carries the mode disjointness, and
+    # the reason all four paths are load-bearing. Without it the loop below only ever checked
+    # "⊆ advertised" plus the one always-present key, which all four literals satisfy:
+    # a path could silently take the WRONG branch (measured: deleting the disabled-path count
+    # special-case makes disabled-count emit the LIST literal) and nothing would notice, while
+    # ``seen`` stays complete because it is a UNION — it is in fact satisfiable by two of the four.
+    # Nor could the schema catch it: ``total=False`` without ``oneOf`` permits all six keys at once,
+    # so disjointness is not expressible there. Four directions, one per row.
+    paths: list[tuple[str, EpicsConfig, dict[str, Any], object, set[str]]] = [
+        (
+            "disabled-list",
+            disabled,
+            {"name_pattern": "SIM:*"},
+            None,
+            {"enabled", "channels", "total", "note"},
+        ),
+        (
+            "disabled-count",
+            disabled,
+            {"name_pattern": "SIM:*", "count_only": True},
+            None,
+            {"enabled", "match_count", "note"},
+        ),
+        (
+            "enabled-list",
+            enabled,
+            {"name_pattern": "SIM:*"},
+            one_channel,
+            {"enabled", "channels", "total", "capped"},
+        ),
+        (
+            "enabled-count",
+            enabled,
+            {"name_pattern": "SIM:*", "count_only": True},
+            7,
+            {"enabled", "match_count"},
+        ),
     ]
 
     seen: set[str] = set()
-    for label, cfg, args, response in paths:
+    for label, cfg, args, response, expected_keys in paths:
         holder["cfg"] = cfg
         session.get.return_value = _fake_json_response(response)
         async with Client(mcp) as client:
@@ -1974,9 +2009,10 @@ async def test_find_channels_structured_output_conforms_to_its_schema(
             result = await client.call_tool("find_channels", args)
         structured = cast(dict[str, Any], result.structured_content)
         seen |= set(structured)
-        assert set(structured) <= set(properties), (
-            f"find_channels[{label}]: emitted {sorted(set(structured) - set(properties))}, "
-            "which the outputSchema does not advertise"
+        assert set(structured) == expected_keys, (
+            f"find_channels[{label}]: emitted {sorted(structured)}, expected exactly "
+            f"{sorted(expected_keys)} — either the path taken is not the one this row drives, or "
+            "the two modes are no longer disjoint"
         )
         for key, value in structured.items():
             if value is None:
@@ -1989,8 +2025,9 @@ async def test_find_channels_structured_output_conforms_to_its_schema(
                 f"find_channels[{label}]: {always!r} is declared always-present (non-nullable) "
                 f"but is absent from the emitted payload {sorted(structured)}"
             )
-    # The count mode is verified as a MODE, not just as a schema: it must carry the count and none
-    # of the list fields, which is the disjointness the single always-present key encodes.
+    # Every advertised field is reached by at least one path. Weaker than the per-path equality
+    # above (a union cannot identify a path) and kept because it is the direction that goes red when
+    # a NEW field is advertised and no row drives it.
     assert seen == set(properties), (
         f"find_channels: the four driven paths emitted {sorted(seen)}, "
         f"which does not cover the advertised {sorted(properties)}"
@@ -2461,7 +2498,7 @@ def test_array_items_reads_both_array_shapes() -> None:
     Five of the 16 declared arrays are ``anyOf[array, null]``, so a helper that only read
     ``prop["items"]`` would silently cover 11 of them. Nothing else can prove that branch runs:
     tests/ is outside ``--cov=src``, so no coverage number ever shows it, and the schema test
-    above passes either way as long as the four rows happen to match.
+    above passes either way as long as the five rows happen to match.
 
     Red-proofs, both executed: drop the ``anyOf``/``oneOf`` loop and the second assertion fails;
     return ``prop.get("items")`` unchecked and the LAST assertion fails. ⚠️ The last one is not

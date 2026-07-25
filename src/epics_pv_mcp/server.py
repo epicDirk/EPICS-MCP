@@ -486,10 +486,12 @@ async def find_channels(
 
     Read-only. Disabled by default (set EPICS_MCP_CHANNELFINDER_URL to enable).
 
-    The two modes return DISJOINT fields: the channel list is {enabled, channels, total, capped},
-    the count is {enabled, match_count} — plus a `note` on either when ChannelFinder is
-    unconfigured. Only `enabled` is present on every path; read the advertised outputSchema rather
-    than assuming a field is there.
+    The two modes return DISJOINT fields, and the four paths differ further: configured list =
+    {enabled, channels, total, capped}, configured count = {enabled, match_count}; with
+    ChannelFinder UNCONFIGURED it is {enabled, channels, total, note} and
+    {enabled, match_count, note} -- i.e. `note` is added and `capped` is NOT emitted. Only
+    `enabled` is present on every path; read the advertised outputSchema rather than assuming a
+    field is there.
 
     The glob is matched by the SERVER, and both of its properties bite silently (measured live
     2026-07-15). It is ANCHORED: 'Ctrl-EVR-01' matches 0 channels while '*Ctrl-EVR-01*' matches
