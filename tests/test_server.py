@@ -612,6 +612,29 @@ def _base_type(prop: dict[str, Any]) -> str | None:
     return None
 
 
+def _array_items(prop: dict[str, Any]) -> dict[str, object] | None:
+    """The declared ``items`` schema of an array property, VERBATIM, or ``None`` if absent.
+
+    The complement of :func:`_base_type` one level down: that one reads "array" from both
+    ``list[str]`` and ``list[Any]``, so it cannot see the element condition at all. Returned
+    unprojected on purpose — reducing the element schema to its base type would re-introduce the
+    exact collapse :func:`_enum_members` was just repaired for, and would read
+    ``{"type": "object"}`` and ``{"type": "object", "additionalProperties": true}`` as equal.
+
+    Handles the ``anyOf``/``oneOf`` pydantic emits for an ``X | None`` field with the same idiom
+    as its two neighbours, but selects the branch by ``type == "array"`` rather than taking the
+    first non-null one — so a hypothetical ``list[str] | str | None`` still resolves to the array
+    branch instead of whichever happens to be written first."""
+    if prop.get("type") == "array":
+        items = prop.get("items")
+        return items if isinstance(items, dict) else None
+    for branch in prop.get("anyOf", []) + prop.get("oneOf", []):
+        if isinstance(branch, dict) and branch.get("type") == "array":
+            items = branch.get("items")
+            return items if isinstance(items, dict) else None
+    return None
+
+
 # The JSON base type every Olog outputSchema property must advertise (the non-null type for an
 # X | None field, the bare type otherwise). An INDEPENDENT source of truth — hardcoded, NOT
 # reflected from the TypedDicts — so a base-type WIDENING of an annotation is caught even when
@@ -745,9 +768,9 @@ async def test_olog_structured_output_conforms_to_its_schema(
 # Literal["ok","empty","withheld"] | None, which pydantic renders as anyOf[{enum:[...], type:
 # string}, {type: null}] — and a bare ``str | None`` renders as anyOf[{type: string}, {type: null}].
 # _base_type reads "string" from BOTH, so widening the Literal away leaves this table green. Same
-# blindness one level down for arrays: list[str] and list[object] are both "array". Enum membership
-# is guarded separately by _OUTPUT_ENUM_MEMBERS; the array element type is only reachable over the
-# wire with a NON-EMPTY list (see the payload-carrying conformance tests).
+# blindness one level down for arrays: list[str] and list[Any] are both "array". Neither gap is
+# this table's job: enum membership is guarded by _OUTPUT_ENUM_MEMBERS, array element schemas by
+# _OUTPUT_ARRAY_ITEMS (S31 — both relational, both auto-discovering).
 _ARCHIVER_HISTORY_BASE_TYPE: dict[str, str] = {
     "enabled": "boolean",
     "pv": "string",
@@ -2154,6 +2177,111 @@ def test_enum_members_keeps_the_value_type() -> None:
     assert _enum_members({"enum": [1, 2]}) != frozenset({"1", "2"})
     assert _enum_members({"anyOf": [{"enum": [1, 2]}, {"type": "null"}]}) == frozenset({1, 2})
     assert _enum_members({"type": "string"}) is None
+
+
+# The two element schemas the estate actually advertises, shared by the rows below. Read-only by
+# convention: they are module dicts, so assigning into one would silently move 7 (resp. 8) rows.
+_STRING_ITEMS: dict[str, object] = {"type": "string"}
+_OPAQUE_OBJECT_ITEMS: dict[str, object] = {"type": "object", "additionalProperties": True}
+
+# Every (tool, field) whose outputSchema advertises an ARRAY, with the element schema it must
+# declare. Four of these are anyOf[array, null] (an ``X | None`` field): update_log_entry.warnings
+# and attachments_uploaded on create_log_entry / reply_to_log / add_log_attachment — a helper that
+# only read prop["items"] would find 11 of 15 and drop those four in silence. Note ("list_tags",
+# "tags") is the OLOG tool; the ChannelFinder tag names live under list_channel_vocabulary.
+# No entry may be None: an array without an element condition is not declarable here, so an
+# annotation that loses one stays red instead of being papered over with a row.
+_OUTPUT_ARRAY_ITEMS: dict[tuple[str, str], dict[str, object]] = {
+    ("list_logbooks", "logbooks"): _STRING_ITEMS,
+    ("list_tags", "tags"): _STRING_ITEMS,
+    ("list_log_levels", "levels"): _STRING_ITEMS,
+    ("list_archived_pvs", "pvs"): _STRING_ITEMS,
+    ("list_channel_vocabulary", "properties"): _STRING_ITEMS,
+    ("list_channel_vocabulary", "tags"): _STRING_ITEMS,
+    ("update_log_entry", "warnings"): _STRING_ITEMS,
+    ("search_logbook", "entries"): _OPAQUE_OBJECT_ITEMS,
+    ("get_pv_history", "samples"): _OPAQUE_OBJECT_ITEMS,
+    ("get_alarm_history", "events"): _OPAQUE_OBJECT_ITEMS,
+    ("list_log_attachments", "attachments"): _OPAQUE_OBJECT_ITEMS,
+    ("discover_pvs", "pvs"): _OPAQUE_OBJECT_ITEMS,
+    ("create_log_entry", "attachments_uploaded"): _OPAQUE_OBJECT_ITEMS,
+    ("reply_to_log", "attachments_uploaded"): _OPAQUE_OBJECT_ITEMS,
+    ("add_log_attachment", "attachments_uploaded"): _OPAQUE_OBJECT_ITEMS,
+}
+
+
+@pytest.mark.asyncio
+async def test_typed_output_schema_arrays_declare_their_element_schema() -> None:
+    """S31: an array in a typed output schema keeps its ``items`` condition — the constraint the
+    base-type tables cannot see, one level below the enum they also cannot see.
+
+    Those tables compare the COARSE JSON type, so ``list[str]`` and ``list[Any]`` are both
+    "array" and widening one leaves them green. Measured: pydantic renders ``list[Any]`` as
+    ``{"type": "array", "items": {}}`` — the ``items`` KEY survives and turns empty. A guard that
+    only asked "does it have items?" would therefore not notice at all; what has to be compared
+    is the element schema itself.
+
+    That matters most for the 7 rows carrying ``{"type": "string"}``: over the wire the validator
+    rejects ``["a", 42]`` against them, and accepts it once the condition is gone. Stated
+    honestly, the other 8 rows are ``{"type": "object", "additionalProperties": true}`` — a
+    deliberately opaque element (no output shape in this server nests a TypedDict). There the
+    guard pins only that the schema still promises "some object" rather than "anything at all";
+    it cannot catch a wrong object.
+
+    RELATIONAL in both directions, so it does not rot. The discovery is anchored on
+    ``_base_type(prop) == "array"`` — a property the mutation cannot touch — rather than on
+    "carries items", which the mutation could have emptied. Two consequences: the key set stays
+    stable under a widening, so the precise VALUE assertion fires instead of an indirect "gone",
+    and an array field that was NEVER constrained still appears and goes red without a row.
+
+    SCOPE, measured rather than implied: top-level properties of the 21 tools in
+    _TYPED_OUTPUT_TOOLS. No recursion into ``items``, no ``$defs``, no ``prefixItems`` (a scan of
+    all 21 schemas finds zero of either). Deliberately outside: fields typed ``object | None``
+    that hold a list at runtime — get_archive_info's ``archive_fields``/``data_stores`` are the
+    live example — since _base_type returns None for them; this pins DECLARED arrays, not every
+    field that can carry one. Also outside: the list fields of the 11 tools that are not typed
+    yet, which have no advertised schema to pin.
+
+    Red-proof: widen services/checkers.py's ``ChannelVocabularyResult.tags`` to ``list[Any]``."""
+    from epics_pv_mcp.server import mcp
+
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    discovered: dict[tuple[str, str], dict[str, object] | None] = {}
+    for name in sorted(_TYPED_OUTPUT_TOOLS):
+        properties = (tools[name].outputSchema or {}).get("properties", {})
+        assert properties, f"{name}: outputSchema carries no typed properties"
+        for field, prop in properties.items():
+            if _base_type(prop) == "array":
+                discovered[name, field] = _array_items(prop)
+
+    assert set(discovered) == set(_OUTPUT_ARRAY_ITEMS), (
+        "the arrays advertised by the typed output schemas no longer match the declared ones — "
+        f"undeclared: {sorted(set(discovered) - set(_OUTPUT_ARRAY_ITEMS))}, gone (a list field "
+        f"was retyped or dropped?): {sorted(set(_OUTPUT_ARRAY_ITEMS) - set(discovered))}"
+    )
+    for key, expected in _OUTPUT_ARRAY_ITEMS.items():
+        assert discovered[key] == expected, (
+            f"{key[0]}.{key[1]}: advertised element schema {discovered[key]!r} != {expected!r}"
+        )
+
+
+def test_array_items_reads_both_array_shapes() -> None:
+    """S31: :func:`_array_items` finds the element schema in BOTH shapes an array is emitted in.
+
+    Four of the 15 declared arrays are ``anyOf[array, null]``, so a helper that only read
+    ``prop["items"]`` would silently cover 11 of them. Nothing else can prove that branch runs:
+    tests/ is outside ``--cov=src``, so no coverage number ever shows it, and the schema test
+    above passes either way as long as the four rows happen to match.
+
+    Red-proof: drop the ``anyOf``/``oneOf`` loop and the second assertion fails; return
+    ``prop.get("items")`` unchecked and the ``{"type": "array"}``-without-items case returns
+    ``None`` from a different path than intended — pinned by the third assertion."""
+    assert _array_items({"type": "array", "items": {"type": "string"}}) == {"type": "string"}
+    nullable = {"anyOf": [{"type": "array", "items": {"type": "string"}}, {"type": "null"}]}
+    assert _array_items(nullable) == {"type": "string"}
+    assert _array_items({"type": "array"}) is None
+    assert _array_items({"type": "array", "items": {}}) == {}
+    assert _array_items({"type": "string"}) is None
 
 
 def _fake_json_response(payload: object) -> Mock:
