@@ -30,7 +30,7 @@ carry breaking changes).
     (`{type: object, additionalProperties: true}`) wie alle Objekt-Arrays hier, obwohl ein Kanal
     immer ein `ChannelInfo` mit 6 Feldern ist. Ein verschachteltes TypedDict wäre das erste im
     Server, brächte `$defs` auf den Draht und berührt drei generische Schema-Wächter — eigener
-    Arbeitsgang. Und: **18 Test-Doppelgänger von `query_channels` (15 davon mit Nutzlast) setzen
+    Arbeitsgang. Und: **18 Test-Doppelgänger von `query_channels` (14 mit Nutzlast, vier werfen) setzen
     den neuen Typ nicht
     durch** (`monkeypatch`-Wert ist `object`); die Durchsetzung kommt aus mypy auf `src/` und den
     Draht-Tests.
@@ -41,9 +41,10 @@ carry breaking changes).
     tatsächlich rot geworden und daraufhin auf `get_pv_value` umgehängt. ⚠️ Damit wechselt er die
     Art: die drei Vorgänger hatten einen config-gegateten echten Pfad, `get_pv_value` braucht eine
     gefakte `pv_get`-Naht.
-  - **Draht-Budget neu gemessen: Kern-Lane 63879 / Voll-Lane 72177** (Deckel 200000). ⚠️ **+775 pro
-    Lane, nicht die aus dem Vorgänger-Schritt extrapolierten ~410** — dieselbe Änderung hat die
-    Tool-BESCHREIBUNG erweitert, und Beschreibungs-Bytes fahren auf demselben Draht wie
+  - **Draht-Budget neu gemessen: Kern-Lane 63879 / Voll-Lane 72177** (Deckel 200000; vorher
+    62967 / 71265). ⚠️ **+912 pro Lane in ZWEI Schritten: +775 für die Typisierung, +137 für
+    die anschließende Beschreibungs-Korrektur** — und nicht die extrapolierten ~410, weil dieselbe
+    Änderung die Tool-BESCHREIBUNG erweitert hat und Beschreibungs-Bytes auf demselben Draht fahren wie
     Schema-Bytes. Genau deshalb steht dort „nachmessen, nicht hochrechnen".
   - **Sechs lebende Begründungen mitgezogen**, die dieser Bau falsch gemacht hätte — darunter der
     als kanonisch deklarierte Nullbarkeits-Block in `services/checkers_olog.py`, auf den alle

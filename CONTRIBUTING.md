@@ -56,8 +56,9 @@ Conventional-style prefixes (`fix:`, `feat:`, `refactor:`, `docs:`, `test:`), on
 change per commit.
 
 House style, written down here because it was lived and stated nowhere — an unwritten convention is
-one a newcomer breaks by accident. Measured over the 30 commits before this paragraph existed, with
-the counts kept honest rather than rounded up to "always":
+one a newcomer breaks by accident. Measured over the 30 commits ending at `01c8f87` (the state this
+was written against), with the counts kept honest rather than rounded up to "always" -- and the
+window named explicitly, because the same counts do NOT hold for a window shifted by two commits:
 
 - **A scope** in the prefix where one applies: `feat(channelfinder):`, `test(schemas):`,
   `fix(audit):`, `docs(changelog):`. (29/30; the exception is a scope-less `docs:`.)

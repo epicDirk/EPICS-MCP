@@ -709,12 +709,29 @@ async def test_tool_maps_bad_filter_to_invalid_input(monkeypatch: pytest.MonkeyP
 
 @pytest.mark.asyncio
 async def test_tool_count_disabled_makes_no_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The count mode's disabled path: no client is constructed, and the SHAPE is the count shape.
+
+    Both halves were missing and the name promised the first of them — found by the adversarial
+    review of the S29 typing commit. Without the ``_boom`` double this test asserted nothing about
+    "no call" at all (its list-mode twin above always had one); without the exact key set it also
+    could not tell the count literal from the list literal, which is the disjointness the typed
+    ``ChannelQueryResult`` advertises. Red-proofs: drop the ``count_only`` branch in
+    services/checkers.query_channels and the key-set assertion goes red; make the disabled gate fall
+    through to the client and ``_boom`` fires.
+    """
     monkeypatch.setattr(
         "epics_pv_mcp.services.checkers.get_config",
         lambda: EpicsConfig(channelfinder_url=""),
     )
+
+    def _boom(*args: object, **kwargs: object) -> ChannelFinderClient:
+        raise AssertionError("client must not be constructed when disabled")
+
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _boom)
     result = await _find_channels("X*", count_only=True)
     assert result["enabled"] is False
+    assert result["match_count"] == 0
+    assert set(result) == {"enabled", "match_count", "note"}
 
 
 # --- MA-2 CF-Query-Fläche: list_channel_vocabulary (property + tag NAME discovery) ---

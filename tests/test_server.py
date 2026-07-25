@@ -1886,9 +1886,10 @@ async def test_find_channels_structured_output_conforms_to_its_schema(
 ) -> None:
     """S29 conformance: the EMITTED structuredContent must conform to its own outputSchema on ALL
     FOUR paths — and here the four are two MODES times two configurations, which is the whole risk
-    of this tool. ``count_only`` returns {enabled, match_count} while the list mode returns
-    {enabled, channels, total, capped}: a single-path test would leave one mode's fields unproven,
-    and no other test drives both modes over the wire.
+    of this tool. Configured, ``count_only`` returns {enabled, match_count} while the list mode
+    returns {enabled, channels, total, capped}; UNCONFIGURED both gain a ``note`` and the list
+    loses ``capped``. A single-path test would leave one mode's fields unproven, and no other test
+    drives both modes over the wire.
 
     Driven through a REAL ``fastmcp.Client``, because only the wire validates — the in-process
     shortcut hands a return back UNVALIDATED, pinned by
@@ -1896,9 +1897,11 @@ async def test_find_channels_structured_output_conforms_to_its_schema(
 
     SEAM, chosen deliberately: the two ENABLED paths fake the TRANSPORT
     (``channelfinder_client.get_shared_session``), not the client CLASS. Three consequences, each
-    measured rather than assumed: the real ``_project`` builds the channel elements, so the array's
-    item condition is validated against genuine ChannelInfo dicts instead of against a fake's own
-    invention (a class-level double would make that half nearly circular); the real client-edge
+    measured rather than assumed: the real ``_project`` builds the channel elements, so what the
+    wire validates is a payload this server actually produces rather than a fake's invention
+    (⚠️ honestly, the ITEM CONDITION cannot tell the difference -- it is the opaque
+    ``{type: object}``, so any dict passes it; what the real projection buys is that the four
+    client-edge error paths sit in the way); the real client-edge
     guards stay in the path, which is what CLAUDE.md's evidence discipline point 8 recommends; and
     a class-level double would be COUNTED by scripts/guard_audit.py as a payload-claiming test,
     silently shifting the S31 audit's recorded numbers with nothing going red. The price, named:
@@ -1914,13 +1917,27 @@ async def test_find_channels_structured_output_conforms_to_its_schema(
     ones). ``owner`` is deliberately an allowlisted account: the projection blanks a non-allowlisted
     one, so a payload assertion on it would be about the redactor, not the schema.
 
-    Part B (static) checks nullability in BOTH directions against _FIND_CHANNELS_ALWAYS_PRESENT;
-    ``seen == set(properties)`` pins that the four paths together reach every advertised field.
+    The STRONGEST assertion here is the per-path EXACT key set (see the comment at the ``paths``
+    table): it is what makes all four rows load-bearing and what carries the mode disjointness,
+    which the schema itself cannot express (``total=False`` without ``oneOf`` permits all six keys
+    at once). Part B (static) checks nullability in BOTH directions against
+    _FIND_CHANNELS_ALWAYS_PRESENT; ``seen == set(properties)`` is the weaker union check, kept
+    because it is the direction that reddens when a NEW field is advertised and no row drives it.
 
-    Red-proof: widen ``ChannelQueryResult.channels`` to ``list[Any]`` and the sibling item-condition
-    test goes red; widen _FIND_CHANNELS_ALWAYS_PRESENT by ``capped`` and the always-present loop
-    below goes red (together with the generic wire test — that mutation is not isolating, and it
-    says so here rather than in a claim)."""
+    ⚠️ The runtime null check below is INERT on this tool: no path emits an explicit
+    ``None``, so its body never runs (the same honest note the discover_pvs sibling carries).
+
+    Red-proofs, all EXECUTED: delete the disabled-path ``count_only`` special case in
+    services/checkers.py and the per-path equality goes red at the ``disabled-count`` row. When
+    that was first measured over the FULL suite it reddened ONLY this test (1 failed / 1447
+    passed) -- i.e. NO test guarded that mode's field set. It now reddens two, because the same
+    review added the missing key-set assertion to test_channelfinder.py's
+    test_tool_count_disabled_makes_no_call as well; the '1447' is kept as the dated measurement
+    that justified this row, not as a current count. Widen ``ChannelQueryResult.channels`` to
+    ``list[Any]`` and the sibling item-condition test goes red. Widen
+    _FIND_CHANNELS_ALWAYS_PRESENT by ``capped`` and the always-present loop below goes red
+    (together with the generic wire test — that mutation is not isolating, and it says so here
+    rather than in a claim)."""
     from fastmcp import Client
 
     from epics_pv_mcp.config import EpicsConfig
@@ -2990,12 +3007,14 @@ async def test_stripped_tool_still_returns_structured_content(
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
 # RELATIONAL (a ``<=`` check) so both lanes pass. Measured after typing find_channels (S29): the
-# core lane is 63_879 and the full lane 72_177. Re-MEASURE these two after every change that can
-# they are prose, nothing asserts them, and an estimate written instead of a measurement had to be
+# core lane is 63_879 and the full lane 72_177. Re-MEASURE these two after ANY change that can
+# reach the wire -- a schema OR a description edit; the split below is why the narrower wording
+# was a gap. They are prose, nothing asserts them, and an estimate written instead of a measurement
+# had to be
 # corrected by a follow-up commit once already (`6c0a2ec`). Sizes of the last three steps: +406/+411
 # for discover_pvs, then +775/+775 for find_channels, then +137/+137 for the follow-up that only
-# corrected that tool's DESCRIPTION -- and those two are the reason the instruction above says
-# "every change", not "every schema change": the schema alone would have been ~+410, the rest is
+# corrected that tool's DESCRIPTION -- and that last one is the reason the instruction above says
+# "ANY change that can reach the wire": the schema alone would have been ~+410, the rest is
 # description text, and description bytes ride the same wire as schema bytes. Measured twice here
 # because the follow-up's first commit message claimed "unchanged" without measuring.
 # Raising the ceiling is a conscious, CHANGELOG-documented one-line change, never a silent bump.
