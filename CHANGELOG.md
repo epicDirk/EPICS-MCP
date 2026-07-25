@@ -18,9 +18,11 @@ carry breaking changes).
   ein falsch getyptes Feld und ein `null` in einem nicht-nullbaren Feld fallen beide durch, ein
   **weggelassener** `total=False`-Key nicht (das Schema führt kein `required`). Praktische Folge für
   die Typwahl: bei einem nur **manchmal abwesenden** Feld ist die Nullbarkeit Schema-Ehrlichkeit, die
-  ein Test durchsetzen muss; bei einem **explizit auf `None`** gesetzten Feld (`is_archived.archived`,
-  `is_alarm_configured.configured`, `lookup_device_name.registered`, `get_archive_info.found`) ist
-  sie ein echter Draht-Wächter — ohne sie bekommt ein Client eine Fehlermeldung statt einer Antwort.
+  ein Test durchsetzen muss; bei einem **explizit auf `None`** gesetzten Feld ist sie ein echter
+  Draht-Wächter — ohne sie bekommt ein Client eine Fehlermeldung statt einer Antwort. Gemessen sind
+  das **sieben** Felder: `is_archived.archived` · `is_alarm_configured.configured` ·
+  `lookup_device_name.registered` · `get_archive_info.found` · `get_log_entry.found` ·
+  `list_log_attachments.found` · `list_log_levels.default_level`.
   **Gegenprobe:** alle 21 getypten Tools auf ihren disabled-Pfaden über einen echten Client
   gefahren → 0 Verstöße. Die enabled-Pfade brauchen laufende Dienste und sind ungeprüft.
   Die Kommentare in `services/checkers_olog.py`, `services/checkers.py` und `tools/archiver.py`
@@ -30,8 +32,10 @@ carry breaking changes).
 - **Zwei weitere Falschbehauptungen aus der fastmcp-Migration entfernt.** (a) Der Mechanismus
   „`convert_result` dumpt das Modell ohne `exclude_none`" existiert nicht mehr — es gibt auf diesem
   Pfad kein Modell; die Nullbarkeits-**Folgerung** war richtig, nur ihre Begründung nicht.
-  (b) Sieben Test-Docstrings beschrieben einen Nachbearbeitungs-Durchlauf (`_prune_tool_schemas`,
-  „A2 prunes to None"), der in `6bd12c6` **gelöscht** wurde. Der wirkliche Mechanismus ist das
+  (b) **Zehn** Stellen in `tests/test_server.py` beschrieben Nachbearbeitungs-Durchläufe („A2 prunes
+  to None", „after the post-pass", „the production strip", „A3 strips", „Red pre-strip"), die in
+  `6bd12c6` **gelöscht** wurden — sechs in Test-Docstrings, drei in Helfer-Docstrings, eine im
+  Konstanten-Kommentar. Der wirkliche Mechanismus ist das
   ausdrückliche `@mcp.tool(output_schema=None)` pro Tool. Das war nicht kosmetisch: eine spätere
   Session plante auf Basis dieser Prosa das Typisieren von `discover_pvs` **ohne** die
   kwarg-Löschung — der Bau wäre stumm ohne Wirkung geblieben. Zusätzlich enumerierten zwei Stellen
@@ -92,7 +96,10 @@ carry breaking changes).
     S29) bei ~1 % mehr Kontext pro Turn; der Deckel bleibt ein relationaler `<=`-Katastrophen-Wächter
     (fängt nur noch eine extreme Aufblähung). **Neuer Budget-Stand: core-lane 62561 / all-lane 70854**
     (Deckel 200000) — löst die Migrations-Zeile darunter (`59683` / `67976`, Deckel `70000`) ab.
-  - **Messbefund (standalone FastMCP, Evidence-Discipline):** Tool-Ausgaben werden NICHT gegen das
+  - **Messbefund (standalone FastMCP, Evidence-Discipline).** ⚠️ **Der erste Satz dieses Bullets ist
+    ABGELÖST** — s. den Eintrag „Korrektur: die Ausgabe eines Tools WIRD validiert" oben: die
+    Nicht-Validierung gilt nur für den In-Process-Aufrufweg, am Draht prüft das MCP-SDK. Der Rest des
+    Bullets (weggelassen ≠ null) hat sich bestätigt. Original: Tool-Ausgaben werden NICHT gegen das
     advertised `outputSchema` validiert; ein weggelassener `total=False`-Key wird gedroppt (nicht als
     null emittiert), nur ein explizit auf `None` gesetztes Feld (z. B. `get_archive_info.found`) wird
     als null emittiert. Die Nullbarkeit ist damit test-durchgesetzte Schema-Ehrlichkeit (der

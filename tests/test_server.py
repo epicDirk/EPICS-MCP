@@ -1587,25 +1587,37 @@ async def test_discover_pvs_structured_output_conforms_to_its_schema(
 ) -> None:
     """S29 conformance: the EMITTED structuredContent must conform to its own outputSchema.
 
-    Part A (runtime) drives the wildcard branch with ChannelFinder unconfigured -- a deterministic,
-    network-free path -- through a REAL ``fastmcp.Client`` rather than the in-process
-    ``FastMCP.call_tool`` the sibling conformance tests use. That distinction is the whole point and
-    was measured: in-process, a return is handed back UNVALIDATED, so a payload violating its own
-    advertised schema sails through; over the wire, the MCP SDK's low-level handler validates the
-    structuredContent against ``outputSchema`` and turns a mismatch into an ``Output validation
-    error``. Going through the client therefore asserts what a real caller actually experiences, and
-    it does so with the SDK's own check instead of re-implementing one against an undeclared,
-    transitive jsonschema dependency. On top of that, every None-valued key must permit null.
+    Part A (runtime) drives ALL FOUR return paths through a REAL ``fastmcp.Client`` rather than the
+    in-process ``FastMCP.call_tool`` the sibling conformance tests use. Both halves of that sentence
+    are load-bearing and were measured:
 
-    Part B (static) enforces the S29 convention that every sometimes-absent property permits null.
-    It carries the guarantee whenever Part A has no null to look at, so it gets a non-empty floor:
-    with an empty ``properties`` the loop would pass vacuously -- which is precisely the state the
-    ``output_schema=None`` opt-out produces."""
+    * The CLIENT matters. In-process, a return is handed back UNVALIDATED, so a payload violating
+      its own advertised schema sails through; over the wire the MCP SDK's low-level handler
+      validates the structuredContent against ``outputSchema`` and turns a mismatch into an
+      ``Output validation error``. Going through the client asserts what a real caller experiences,
+      using the SDK's own check rather than re-implementing one against jsonschema (an undeclared,
+      merely transitive dependency here).
+    * ALL FOUR paths matter. Only the wildcard-enabled path emits ``capped``/``source`` and only the
+      concrete-hit path emits an entry carrying ``value``, so a one-path test cannot see a
+      mis-typed field on the other three. Measured on a faithful mutant (``capped`` raw-copied from
+      the ChannelFinder payload instead of ``bool()``-coerced, the exact hazard documented for the
+      archiver's uncoerced fields): a single-path version of this test stayed GREEN while a real
+      client got ``Output validation error``. Hence the fan-out below.
+
+    The explicit null check is a belt on top: no path of this tool emits an explicit ``None`` today,
+    so it is inert here -- it exists to catch a future field that does.
+
+    Part B (static) enforces the nullability convention in BOTH directions: a sometimes-absent
+    property must permit null, and an always-present one must NOT (otherwise the advertised shape
+    invites a caller to expect a null that never comes, and a later widening to ``X | None`` would
+    pass unnoticed). It gets a non-empty floor: with an empty ``properties`` both loops would pass
+    vacuously -- which is precisely the state the ``output_schema=None`` opt-out produces."""
     from fastmcp import Client
 
     from epics_pv_mcp.config import EpicsConfig
     from epics_pv_mcp.server import mcp
     from epics_pv_mcp.services import checkers
+    from epics_pv_mcp.tools import discover as discover_mod
 
     # discover_pvs -> _discover_by_channelfinder -> query_channels, which resolves get_config in
     # the checkers module's OWN namespace -- patch it there (NOT tools.discover).
@@ -1613,19 +1625,81 @@ async def test_discover_pvs_structured_output_conforms_to_its_schema(
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     properties = (tools["discover_pvs"].outputSchema or {}).get("properties", {})
 
-    async with Client(mcp) as client:
-        # Raises ToolError("Output validation error: ...") if the emitted payload does not conform.
-        result = await client.call_tool("discover_pvs", {"pattern": "SIM:PS-*"})
-    structured = cast(dict[str, Any], result.structured_content)
-    for key, value in structured.items():
-        if value is None:
-            assert _schema_permits_null(properties[key]), (
-                f"discover_pvs.{key}: emitted null but its schema forbids null ({properties[key]})"
+    async def _fake_pv_get(pv: str, timeout: float | None = None) -> dict[str, object]:
+        return {"value": 1.25}
+
+    async def _raise_not_found(pv: str, timeout: float | None = None) -> dict[str, object]:
+        raise PVNotFoundError(f"no such PV: {pv}")
+
+    async def _fake_query_channels(name_pattern: str, **kwargs: object) -> dict[str, object]:
+        """An ENABLED ChannelFinder payload — the only path that emits capped/source.
+
+        ``capped`` is deliberately a truthy STRING, not a bool: the seam into this function is typed
+        ``dict[str, object]``, so the caller must not trust the wire type. That pins the ``bool()``
+        coercion in ``_discover_by_channelfinder`` — raw-copying the value instead would emit a
+        string into a ``boolean | null`` field and the client call below would go red.
+        """
+        return {
+            "enabled": True,
+            "channels": [
+                {"name": "SIM:PS-01:Cur-RB", "ioc_name": "ioc-01", "host_name": "host-01"}
+            ],
+            "total": 1,
+            "capped": "true",
+        }
+
+    # (label, patch) per return path. The wildcard-disabled path needs no patch beyond get_config.
+    paths: list[tuple[str, str, Callable[[], None]]] = [
+        ("wildcard-disabled", "SIM:PS-*", lambda: None),
+        (
+            "wildcard-enabled",
+            "SIM:PS-*",
+            lambda: monkeypatch.setattr(discover_mod, "query_channels", _fake_query_channels),
+        ),
+        (
+            "concrete-hit",
+            "SIM:PS-01:Cur-RB",
+            lambda: monkeypatch.setattr(discover_mod, "pv_get", _fake_pv_get),
+        ),
+        (
+            "concrete-miss",
+            "SIM:PS-01:Cur-RB",
+            lambda: monkeypatch.setattr(discover_mod, "pv_get", _raise_not_found),
+        ),
+    ]
+    seen: set[str] = set()
+    for label, pattern, apply_patch in paths:
+        apply_patch()
+        async with Client(mcp) as client:
+            # Raises ToolError("Output validation error: ...") if the payload does not conform.
+            result = await client.call_tool("discover_pvs", {"pattern": pattern})
+        structured = cast(dict[str, Any], result.structured_content)
+        seen |= set(structured)
+        for key, value in structured.items():
+            if value is None:
+                assert _schema_permits_null(properties[key]), (
+                    f"discover_pvs[{label}].{key}: emitted null but its schema forbids null "
+                    f"({properties[key]})"
+                )
+        for always in _DISCOVER_PVS_ALWAYS_PRESENT:
+            assert always in structured, (
+                f"discover_pvs[{label}]: {always!r} is declared always-present (non-nullable) but "
+                f"is absent from the emitted payload {sorted(structured)}"
             )
+    # The four paths together must exercise every advertised field — otherwise a field could be
+    # mis-typed in a corner this test never reaches, which is exactly how the mutant above survived.
+    assert seen == set(properties), (
+        f"discover_pvs: the four driven paths emitted {sorted(seen)}, "
+        f"which does not cover the advertised {sorted(properties)}"
+    )
 
     assert properties, "discover_pvs: outputSchema carries no typed properties"
     for prop_name, prop_schema in properties.items():
         if prop_name in _DISCOVER_PVS_ALWAYS_PRESENT:
+            assert not _schema_permits_null(prop_schema), (
+                f"discover_pvs.{prop_name}: declared always-present, so it must NOT permit null "
+                f"in its outputSchema, got {prop_schema}"
+            )
             continue
         assert _schema_permits_null(prop_schema), (
             f"discover_pvs.{prop_name}: sometimes-absent property must permit null "
@@ -1723,8 +1797,10 @@ _TITLE_PARAMETER_TOOLS = ("create_log_entry", "reply_to_log", "update_log_entry"
 
 def _count_title_keys(node: object) -> int:
     """Naive, traversal-independent count of EVERY ``title`` key in a schema structure — annotation
-    OR real property name. Deliberately NOT schema-aware, so it cross-checks the production strip
-    without sharing its logic."""
+    OR real property name. Deliberately NOT schema-aware, so it cross-checks the schema-aware walk
+    below without sharing its logic. (It once cross-checked a hand-written strip pass; that pass was
+    deleted in `6bd12c6` when standalone fastmcp began omitting the annotations natively. The
+    cross-check stays as the SDK-regression net.)"""
     total = 0
     if isinstance(node, dict):
         for key, value in node.items():
@@ -1761,7 +1837,7 @@ _JSCHEMA_LIST_KW = frozenset({"anyOf", "allOf", "oneOf", "prefixItems"})
 def _schema_nodes_with_title(node: object, path: str = "root") -> list[str]:
     """Schema-aware walk: a label for every SCHEMA NODE that still carries a ``title`` ANNOTATION,
     walking a properties/$defs map by its VALUES so a property NAMED ``title`` is not mistaken for
-    an annotation. An independent re-statement of the spec the production strip enforces."""
+    an annotation. An independent re-statement of the spec the emitted schemas must satisfy."""
     hits: list[str] = []
     if isinstance(node, dict):
         if "title" in node:
@@ -1783,8 +1859,10 @@ def _schema_nodes_with_title(node: object, path: str = "root") -> list[str]:
 
 
 def _schema_nodes_with_null_default(node: object, path: str = "root") -> list[str]:
-    """Schema-aware walk: a label for every SCHEMA NODE carrying a ``default: null`` — the
-    always-null annotation a ``TypedDict total=False`` field emits, wire noise A3 strips. Walks a
+    """Schema-aware walk: a label for every SCHEMA NODE carrying a ``default: null`` — pure wire
+    noise. The SDK-bundled FastMCP 1.0 emitted one per ``TypedDict total=False`` field and a
+    hand-written pass removed them; standalone fastmcp emits none (measured: no ``default`` key
+    anywhere in any typed schema), so this is now purely the regression net. Walks a
     properties/$defs map by its VALUES so a property NAMED ``default`` is never mistaken for it."""
     hits: list[str] = []
     if isinstance(node, dict):
@@ -1858,8 +1936,8 @@ async def test_output_schemas_carry_no_null_default() -> None:
 async def test_only_real_title_parameters_remain() -> None:
     """MA-Q1 A1 (traversal-independent cross-check): the ONLY ``title`` keys left across all
     inputSchemas are the real ``title`` PARAMETER names — one per tool that declares one at the top
-    level. Naive count == count of tools with a top-level ``title`` property. Red pre-strip
-    (annotations inflate the naive count)."""
+    level. Naive count == count of tools with a top-level ``title`` property. Red against the
+    SDK-bundled FastMCP 1.0 code, where the annotations inflated the naive count."""
     from epics_pv_mcp.server import mcp
 
     tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
@@ -1983,7 +2061,8 @@ async def test_stripped_tool_still_returns_structured_content(
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
 # RELATIONAL (a ``<=`` check) so both lanes pass. Measured after typing discover_pvs (S29): the
 # core lane is 62_967 and the full lane 71_265. Re-MEASURE these two after every schema change --
-# they are prose, nothing asserts them, and an estimate has already been wrong here by +105/+686.
+# they are prose, nothing asserts them, and the last two updates moved them by +406/+411 while an
+# estimate written instead of a measurement had to be corrected by a follow-up commit (`6c0a2ec`).
 # Raising the ceiling is a conscious, CHANGELOG-documented one-line change, never a silent bump.
 _TOOLS_LIST_WIRE_CEILING = 200_000
 
@@ -1992,10 +2071,16 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
     FastMCP's native-lean schemas plus the S29 typing keep the core lane 62_967 and the full lane
-    71_265 — a new tool, an SDK change that inflates the wire, or a DROPPED ``output_schema=None``
-    opt-out (which turns an accept-all schema into a full typed one) could still grow it UNNOTICED
-    with a green suite. This is that guard, now a soft catastrophe-ceiling at 200_000 (see the
+    71_265; a new tool or an SDK change that inflates the wire could grow that UNNOTICED with an
+    otherwise green suite. This is that guard, now a soft catastrophe-ceiling at 200_000 (see the
     constant's comment for the raise rationale).
+
+    What this guard does NOT catch, stated so nobody relies on it: a LOST
+    ``@mcp.tool(output_schema=None)`` opt-out. Dropping it on a ``dict[str, object]`` tool restores
+    an information-empty accept-all schema (``{additionalProperties: true, type: object}``) — not a
+    typed one — and doing that to all eleven untyped tools grows the wire by 671 chars, measured:
+    0.3 % of this ceiling. The guard for that is
+    :func:`test_output_schema_typed_only_for_typed_tools`, which asserts the iff in both directions.
 
     RELATIONAL (a ``<=`` ceiling, not an exact count) so both the core-only lane (28 tools) and the
     full lane (32) pass — a count-pinned assert would break core-only CI. Provably red: lower the

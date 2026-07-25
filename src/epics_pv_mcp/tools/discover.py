@@ -144,6 +144,9 @@ async def _discover_by_channelfinder(pattern: str, timeout: float | None) -> Dis
         "pattern": pattern,
         "pvs": pvs,
         "total": len(pvs),
+        # bool()-coerce: the seam into query_channels is typed ``dict[str, object]``, so the wire
+        # type is not guaranteed — a raw copy could emit a string into a ``boolean | null`` field
+        # and fail a real client's output validation (pinned by the conformance test's fake).
         "capped": bool(result.get("capped")),
         "source": "channelfinder",
         "note": _WILDCARD_REGISTRY_NOTE,
