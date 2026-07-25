@@ -5,6 +5,8 @@ its two branches (EpicsError → tagged code, anything else → INTERNAL) are co
 in one place instead of 15× untested.
 """
 
+import logging
+
 import pytest
 from fastmcp.exceptions import ToolError
 
@@ -35,13 +37,35 @@ async def test_bounds_error_renders_its_own_code() -> None:
         await boom()
 
 
-async def test_generic_exception_becomes_internal_tool_error() -> None:
+async def test_generic_exception_is_confined_to_the_class_name_and_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Hardening (2026-07-25): a non-EpicsError is an UNEXPECTED bug whose raw ``str(e)`` can carry
+    an internal detail (a request URL, a live PV name, a filesystem path). The CLIENT-facing
+    ToolError keeps ONLY the exception class name; the FULL detail is logged SERVER-SIDE so
+    debuggability is preserved. Provably RED on the pre-hardening code, which put ``str(e)`` on the
+    wire (``[INTERNAL] ValueError: <raw>``)."""
+    secret = "host.internal.example:8090/ChannelFinder?leaked-detail"
+
     @translate_epics_errors
     async def boom() -> str:
-        raise ValueError("weird")
+        raise ValueError(secret)
 
-    with pytest.raises(ToolError, match=r"\[INTERNAL\] ValueError: weird"):
+    with (
+        caplog.at_level(logging.ERROR, logger="epics_pv_mcp.tool_errors"),
+        pytest.raises(ToolError) as exc_info,
+    ):
         await boom()
+
+    wire = str(exc_info.value)
+    assert wire == "[INTERNAL] ValueError"  # class name only — no raw detail on the wire
+    assert secret not in wire  # the exact leak the hardening closes (RED on the old code)
+    # ...but the full detail survives SERVER-SIDE (message + traceback) for debugging:
+    logged = "\n".join(
+        rec.getMessage() + ("\n" + (rec.exc_text or "") if rec.exc_info else "")
+        for rec in caplog.records
+    )
+    assert secret in logged, "the internal detail must be logged server-side, not dropped"
 
 
 async def test_success_passes_through_and_preserves_signature() -> None:

@@ -71,9 +71,10 @@ async def test_get_pv_value_converts_generic_exception_to_tool_error() -> None:
             new_callable=AsyncMock,
             side_effect=RuntimeError("unexpected"),
         ),
-        # N6: the fallback now preserves the exception class + the original message
-        # ("[INTERNAL] <ClassName>: <message>") instead of a bare str(e).
-        pytest.raises(ToolError, match=r"\[INTERNAL\] RuntimeError: unexpected"),
+        # Hardening (2026-07-25): the INTERNAL fallback confines the wire message to the exception
+        # CLASS name; the raw str(e) ("unexpected") is logged server-side, not sent to the client
+        # (full leak-check in test_tool_errors.py's hardening test).
+        pytest.raises(ToolError, match=r"^\[INTERNAL\] RuntimeError$"),
     ):
         await get_pv_value("ANY:PV")
 
