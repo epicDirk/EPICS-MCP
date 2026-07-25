@@ -5,7 +5,7 @@ import importlib.util
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -489,6 +489,66 @@ async def test_olog_tools_expose_typed_output_schema() -> None:
             assert actual == _OLOG_FIELD_BASE_TYPE[field], (
                 f"{name}.{field}: schema base type {actual!r} != {_OLOG_FIELD_BASE_TYPE[field]!r}"
             )
+
+
+class _ProbeResult(TypedDict):
+    """Return shape of the throwaway probe tool below. Deliberately a bare, non-nullable ``bool`` —
+    the narrowest advertisable constraint, so a violation of it is unambiguous."""
+
+    flag: bool
+
+
+@pytest.mark.asyncio
+async def test_wire_validates_output_schema_while_in_process_does_not() -> None:
+    """The MECHANISM every S29 conformance test rests on — pinned, so it cannot retire silently.
+
+    Those tests are only worth anything because output validation actually happens somewhere. It
+    does, but NOT where one would guess: it is the MCP SDK's low-level handler that runs jsonschema
+    over the emitted structuredContent against the advertised outputSchema, so it fires only for a
+    caller that goes over the wire. The in-process ``FastMCP.call_tool`` shortcut hands a return
+    back UNVALIDATED. That asymmetry is a behaviour of two moving dependencies, and the jsonschema
+    it leans on is not even a declared one here — it arrives transitively. A version bump that
+    moves or drops the check would leave every wire conformance test GREEN AND EMPTY. This test is
+    the canary; without it, nothing in the suite would notice.
+
+    Both halves are load-bearing. Half 1 alone would still pass if the in-process path started
+    validating too — and then an in-process conformance test would be sufficient after all, which
+    is the opposite of what the suite assumes. Half 2 pins that it is not.
+
+    The ASSERTION is the exception TYPE. The message substring is a soft extra on top: an
+    SDK-internal string is precisely the kind of drift this guard exists to survive, so it must not
+    be the thing the guard hangs on.
+
+    Red-proof: return a real ``bool`` from the probe tool and half 1 goes red — which shows the
+    ``pytest.raises`` is not passing for some unrelated reason."""
+    from fastmcp import Client
+
+    probe: FastMCP[None] = FastMCP("output-schema-mechanism-probe")
+
+    @probe.tool
+    async def lying_tool() -> _ProbeResult:
+        """Emits a payload that violates its own advertised outputSchema (a str where the schema
+        says boolean). The ``cast`` is the point: it is how a real mis-typed return slips past
+        mypy, which is why a runtime guard is needed at all."""
+        return cast(_ProbeResult, {"flag": "not-a-bool"})
+
+    # Half 1 — over the wire the violation is caught and surfaces as an error result, which the
+    # client re-raises.
+    with pytest.raises(ToolError) as excinfo:
+        async with Client(probe) as client:
+            await client.call_tool("lying_tool", {})
+    assert "validation" in str(excinfo.value).lower(), (
+        "the wire path still rejects a schema violation, but no longer says so in the words this "
+        f"suite reports to a reader: {excinfo.value!r}"
+    )
+
+    # Half 2 — in-process the SAME return comes back untouched, wrong type and all.
+    structured = (await probe.call_tool("lying_tool", {})).structured_content
+    assert structured == {"flag": "not-a-bool"}, (
+        "the in-process shortcut no longer hands the return back unvalidated (got "
+        f"{structured!r}) — if it validates now, the conformance tests' wire/in-process split and "
+        "the rationale recorded in services/checkers_olog.py both need revisiting"
+    )
 
 
 def _schema_permits_null(prop: dict[str, Any]) -> bool:
