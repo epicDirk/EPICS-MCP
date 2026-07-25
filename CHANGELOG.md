@@ -9,6 +9,22 @@ carry breaking changes).
 
 ### Changed
 
+- **Zwei ausgelieferte Flächen lehrten nach dem Arg-Rename noch den ALTEN Namen — behoben und
+  bewacht (`fix(prompts,guide)` `a3a3465`).** Der Rename `9256977` benannte den CODE um; zwei Flächen,
+  die die Argumente **lehren**, blieben stehen: der MCP-Prompt `compare_machine_state` wies
+  `get_pvs(names=[...])` an (der Server antwortet „Missing required argument `pv_names`" — am Wire
+  verifiziert), und die als `epics-pv://guide` ausgelieferte Wissensbasis nannte für
+  `get_alarm_history` weiterhin `pv`. Beides blieb unbemerkt, weil die Suite nur **5 der 8**
+  umbenannten Tools pinnte: per Mutation gemessen ließen `get_pvs`, `monitor_pv` und `validate_pvs`
+  die GANZE Suite grün, wenn man sie auf den alten Namen zurückdrehte. Neu:
+  `tests/test_tool_arg_contract.py` mit drei Guards — (1) Schema-Pinning gegen den echten
+  `inputSchema` inkl. Abwesenheit der abgelösten Namen, (2) jedes `tool(keyword=...)`-Beispiel in
+  Guide/README/Prompts gegen das echte Schema (generalisiert auf künftige Renames, Tool-Menge aus der
+  Live-Registry), (3) die abgelösten Namen dürfen nicht mehr neben ihrem Tool in Prosa **ohne**
+  Klammer-Syntax stehen. Guards 2+3 wurden vor dem Fix ROT gemessen, Guard 1 per Mutation im
+  Wegwerf-Worktree. Ehrliche Grenzen im Modul-Docstring (Guard 3 pinnt einen BEKANNTEN Rename,
+  handgepflegte Tabelle; Guard 2 sieht nur Keyword-Syntax).
+
 - **Korrektur: die Ausgabe eines Tools WIRD validiert — nur nicht dort, wo unsere Tests hinsehen.**
   Der Messbefund weiter unten („Tool-Ausgaben werden NICHT gegen das advertised `outputSchema`
   validiert") stimmt nur für den **In-Process**-Aufrufweg `FastMCP.call_tool`, den die
@@ -66,8 +82,14 @@ carry breaking changes).
   `is_archived` / `get_pv_history` / `get_archive_info` / `is_alarm_configured` / `get_alarm_history`
   `pv`→; `get_pv_value` / `set_pv_value` / `get_pv_info` / `diagnose_connection` trugen es schon);
   PV-Liste → **`pv_names`** (`get_pvs` `names`→, `validate_pvs` `pvs`→). UNVERÄNDERT: `lookup_device_name.name`
-  (Gerätename, keine PV), die Glob-Parameter `pattern` / `name_pattern` / `query`, und die Ausgabe-Felder
-  (`result["pv_name"]` / `result["pvs"]`). `pv_name` spiegelt zudem das Ausgabe-Feld (Input/Output-Symmetrie).
+  (Gerätename, keine PV), die Glob-Parameter `pattern` / `name_pattern` / `query`, und **alle Ausgabe-Felder**.
+  ⚠️ **Korrektur (QA 2026-07-25):** der ursprüngliche Eintrag behauptete hier eine „Input/Output-Symmetrie" —
+  das ist für die fünf umbenannten REST-Tools **falsch herum**. Gemessen an den `outputSchema`s heißt das
+  Ausgabe-Feld von `is_archived` / `get_archive_info` / `get_pv_history` / `is_alarm_configured` /
+  `get_alarm_history` weiterhin **`pv`** (und bei `discover_pvs` / `list_archived_pvs` **`pvs`**). Der Rename
+  hat dort die vorher bestehende Symmetrie (`pv` rein / `pv` raus) also **aufgehoben**, nicht hergestellt;
+  er betraf ausschließlich INPUTS. Bewusste Entscheidung: die Ausgabe-Felder bleiben, wie sie sind — eine
+  Angleichung wäre ein **zweiter** Breaking Change für jeden, der Ergebnisse liest.
   MCP-Clients, die diese Tools per Argument-NAMEN aufrufen, müssen nachziehen (positionale Aufrufe unberührt);
   verifiziert: neuer Name → OK, alter → sauberer `ToolError`.
 
