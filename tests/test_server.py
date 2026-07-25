@@ -2174,6 +2174,71 @@ async def test_search_logbook_payload_path_is_guarded_below_the_client(
     )
 
 
+@pytest.mark.asyncio
+async def test_channel_vocabulary_payload_path_is_guarded_below_the_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S29: the sibling of the search_logbook payload test, on the other kind of list constraint.
+
+    ``tags`` is a ``list[str]``, so its schema carries ``items: {type: string}`` — the sharpest
+    element constraint anything here advertises, and one that NOTHING exercises today: the disabled
+    path emits an empty list, and an empty array satisfies any item constraint by construction.
+
+    Same seam discipline as its sibling and for the same measured reason: faking
+    ``get_shared_session`` keeps the real ChannelFinderClient — and therefore its ``_named_list``
+    edge guard — in the path, where replacing the client class would remove it unnoticed.
+
+    HONEST DIFFERENCE from the search_logbook sibling, measured rather than assumed: that one is
+    the ONLY guard on its branch (dropping the bool defence in ``_hit_count`` leaves every other
+    test green). ``_named_list`` is NOT in that position — test_channelfinder.py's
+    test_list_vocabulary_strict_on_bad_payload already pins it, and goes red on the same mutant.
+    So this test does not claim to rescue an unguarded branch. What it adds is the part that
+    client-level test structurally cannot reach: that the guard's refusal survives the tool layer
+    and arrives at a REAL caller as a diagnosis rather than being remapped or swallowed, and that
+    the ``items`` constraint is exercised at all.
+
+    Red-proof: drop the ``isinstance(item.get("name"), str)`` half of ``_named_list``'s item check
+    in services/channelfinder_client.py. Half 2 goes red and the failure turns into the wire's
+    ``Output validation error: 42 is not of type 'string'`` — the schema catching what the guard
+    was there to stop. mypy stays green (the narrowed dict yields ``Any``), so again a type checker
+    cannot stand in for this."""
+    from fastmcp import Client
+    from fastmcp.exceptions import ToolError as WireToolError
+
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import mcp
+
+    session = Mock()
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(channelfinder_url="http://channelfinder:8080/ChannelFinder"),
+    )
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.channelfinder_client.get_shared_session",
+        lambda **_kwargs: session,
+    )
+
+    async with Client(mcp) as client:
+        # The owner is deliberately present: it is DS-privacy data the client must drop, so its
+        # absence downstream is part of what a payload-carrying path should show.
+        session.get.return_value = _fake_json_response([{"name": "vacuum", "owner": "someone"}])
+        structured = cast(
+            dict[str, Any],
+            (await client.call_tool("list_channel_vocabulary", {})).structured_content,
+        )
+        assert structured["enabled"] is True, structured
+        assert structured["tags"] == ["vacuum"], structured
+
+        session.get.return_value = _fake_json_response([{"name": 42}])
+        with pytest.raises(WireToolError) as excinfo:
+            await client.call_tool("list_channel_vocabulary", {})
+    assert "unreadable item" in str(excinfo.value), (
+        "a non-string name no longer meets the client-edge guard's own diagnosis — if this now "
+        f"reads as a schema violation, the guard was removed and only the wire caught it: "
+        f"{excinfo.value!r}"
+    )
+
+
 # The four tools that carry a parameter literally NAMED ``title`` (the schema-aware-strip trap).
 _TITLE_PARAMETER_TOOLS = ("create_log_entry", "reply_to_log", "update_log_entry", "search_logbook")
 
