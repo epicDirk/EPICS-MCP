@@ -418,7 +418,7 @@ class ChannelFinderClient:
             conn_exc=ChannelFinderConnectionError,
             resp_exc=ChannelFinderResponseError,
         )
-        names = _named_list(data, "GET /resources/properties")
+        names = _named_list(data, f"GET {self.properties_url}")
         return sorted(name for name in names if name in self._safe_property_names)
 
     def list_tags(self) -> list[str]:
@@ -438,7 +438,7 @@ class ChannelFinderClient:
             conn_exc=ChannelFinderConnectionError,
             resp_exc=ChannelFinderResponseError,
         )
-        return sorted(_named_list(data, "GET /resources/tags"))
+        return sorted(_named_list(data, f"GET {self.tags_url}"))
 
     def _project(self, channel: dict[str, object]) -> ChannelInfo:
         """Project a raw channel JSON into a :class:`ChannelInfo`.

@@ -751,11 +751,16 @@ def test_list_tags_returns_all_names_sorted_owner_dropped(
 
 def test_list_vocabulary_strict_on_bad_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     """S11: a non-list payload or an item without a string 'name' RAISES, never collapses to [] —
-    the listing IS the answer, so 'unreadable' must not read as 'there are none'."""
+    the listing IS the answer, so 'unreadable' must not read as 'there are none'.
+
+    S31: the diagnosis must also name the endpoint that was ACTUALLY requested. The label used to
+    be a hand-written literal, decoupled from ``self.tags_url``/``self.properties_url``, so a
+    swapped route would have produced a correctly-worded error about the wrong address."""
     client = ChannelFinderClient("http://cf")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp({"not": "a list"})))
-    with pytest.raises(ChannelFinderResponseError):
+    with pytest.raises(ChannelFinderResponseError) as excinfo:
         client.list_tags()
+    assert client.tags_url in str(excinfo.value)
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([{"owner": "x"}])))
     with pytest.raises(ChannelFinderResponseError):
         client.list_properties()
