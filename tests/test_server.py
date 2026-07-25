@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict, cast
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from fastmcp import FastMCP
@@ -2083,6 +2083,95 @@ async def test_typed_output_schema_enums_declare_their_members() -> None:
             f"{key[0]}.{key[1]}: advertised enum members {sorted(discovered[key])} != "
             f"{sorted(expected)}"
         )
+
+
+def _fake_json_response(payload: object) -> Mock:
+    """A ``requests``-shaped response double carrying *payload*.
+
+    ``is_redirect`` is set explicitly: on a bare Mock every attribute is truthy, so a plain double
+    trips the clients' redirect refusal before its body is ever read."""
+    resp = Mock(is_redirect=False)
+    resp.json.return_value = payload
+    resp.raise_for_status.return_value = None
+    return resp
+
+
+# A minimal readable Olog entry: _require_entry demands a dict with a non-null ``id`` and nothing
+# else, so this is the smallest payload that reaches the projection instead of being rejected.
+_MINIMAL_OLOG_ENTRY: dict[str, object] = {
+    "id": 1,
+    "createdDate": 1717200000000,
+    "level": "Info",
+    "state": "Active",
+    "logbooks": [{"name": "Ops"}],
+    "tags": [],
+    "attachments": [],
+    "properties": [],
+}
+
+
+@pytest.mark.asyncio
+async def test_search_logbook_payload_path_is_guarded_below_the_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S29: drive search_logbook's ENABLED path with a payload, faking HTTP rather than the client.
+
+    WHERE THE FAKE SITS IS THE POINT, and it is the lesson this test exists to bank. The house
+    style elsewhere replaces a whole client class (``monkeypatch.setattr(..., "OlogClient",
+    _Fake)``). That is convenient and it silently removes every guard the real client runs at its
+    edge — a test written that way can appear to protect ``_hit_count`` while never executing it
+    (measured with a spy: not reached). Faking ``get_shared_session`` instead leaves the real
+    OlogClient in the path and only replaces the socket.
+
+    Two halves, both driven over a real client so the emitted payload is schema-validated:
+
+    * A well-formed response: the enabled path emits entries and a real ``total_matches``. This is
+      the first time a NON-EMPTY entries list is validated at all — an empty array satisfies any
+      item constraint by construction, so the disabled-path coverage cannot reach it.
+    * A ``hitCount`` of ``true``: JSON has no separate boolean-vs-integer question the way Python
+      does not either (``bool`` IS an ``int``), so this value would flow straight into an
+      ``integer | null`` field. The client-edge guard rejects it FIRST, with its own diagnosis
+      rather than a schema error — that is what this half pins.
+
+    Red-proof: drop ``and not isinstance(count, bool)`` from services/olog_client.py's
+    ``_hit_count``. Half 2 then goes red, and instructively so: the failure becomes the wire's
+    ``Output validation error``, because the schema is the backstop that catches exactly what the
+    guard was there to stop. mypy stays green throughout (bool ⊆ int), which is why a type checker
+    cannot stand in for this test."""
+    from fastmcp import Client
+    from fastmcp.exceptions import ToolError as WireToolError
+
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import mcp
+
+    session = Mock()
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.checkers_olog.get_config",
+        lambda: EpicsConfig(olog_url="http://logbook:8080/Olog"),
+    )
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.olog_client.get_shared_session", lambda **_kwargs: session
+    )
+
+    async with Client(mcp) as client:
+        session.get.return_value = _fake_json_response(
+            {"logs": [_MINIMAL_OLOG_ENTRY], "hitCount": 7}
+        )
+        structured = cast(
+            dict[str, Any], (await client.call_tool("search_logbook", {})).structured_content
+        )
+        assert structured["enabled"] is True, structured
+        assert structured["total_matches"] == 7, structured
+        assert len(cast(list[object], structured["entries"])) == 1, structured
+
+        session.get.return_value = _fake_json_response({"logs": [], "hitCount": True})
+        with pytest.raises(WireToolError) as excinfo:
+            await client.call_tool("search_logbook", {})
+    assert "hitCount" in str(excinfo.value), (
+        "a boolean hitCount no longer meets the client-edge guard's own diagnosis — if this now "
+        f"reads as a schema violation, the guard was removed and only the wire caught it: "
+        f"{excinfo.value!r}"
+    )
 
 
 # The four tools that carry a parameter literally NAMED ``title`` (the schema-aware-strip trap).
