@@ -15,6 +15,14 @@ EPICS service landscape behaves. This file is the standing policy that keeps tha
 - `README.md` — what the server is, the planes it sees, safety/network posture, tools, configuration.
 - `ARCHITECTURE.md` — the `server → tools → services → clients` layering contract.
 - `CONTRIBUTING.md` — dev setup, the gate chain, Definition of Done, commit style.
+- `CHANGELOG.md` — **release history for a USER of this server, in English.** It is a top-level file,
+  so it is the first thing a stranger evaluating this repository opens. What belongs in it: a new,
+  changed or removed tool; a breaking change; an error code or field that changed on the wire; a new
+  `EPICS_MCP_*` variable; a bug a user could actually hit. What does NOT: audit runs, test
+  methodology, mutation or red-proof notes, `tools/list` byte budgets, work-item ids, internal
+  refactors with no user-visible effect. Those belong in the three tiers below, and a commit body is
+  where the work itself is narrated. Measured once (2026-07-25) at 763 lines, 66 KB, where roughly
+  half was a work journal: no rule claimed this file, so it drifted into one.
 - `.env.example` — the canonical, commented configuration template (every `EPICS_MCP_*` var).
 - **`src/epics_pv_mcp/operator_guide.md`** — the operational cookbook (service planes, recipes, error
   signatures). Shipped as package data, served as the `epics-pv://guide` MCP resource, mirrored for

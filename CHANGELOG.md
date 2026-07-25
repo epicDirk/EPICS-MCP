@@ -7,757 +7,206 @@ carry breaking changes).
 
 ## [Unreleased]
 
+### Added
+
+#### New tools
+
+- **`list_channel_vocabulary`** lists the ChannelFinder property keys and tag names that
+  `find_channels` can be filtered on, as `{enabled, properties, tags}` (names only). `properties`
+  is reduced to the same safe-property allowlist `find_channels` enforces, so it never advertises
+  a key that would then be refused. An unreadable listing raises rather than reading as "there are
+  none". Reuses `EPICS_MCP_CHANNELFINDER_URL`; no new variable.
+- **`get_appliance_info`** returns the Archiver Appliance's own topology (`identity`, the per-plane
+  root URLs, `cluster_inet_port`, `version`), with no PV argument. It answers "am I pointed at the
+  intended cluster before I trust `list_archived_pvs` or `get_pv_history`", where the wrong cluster
+  silently yields a complete-looking list of the wrong PVs. A 404 means the wrong endpoint (the
+  retrieval webapp serves `/retrieval/bpl`, not `/mgmt/bpl`) and propagates as an error.
+- **`list_log_levels`** returns the Olog level names plus `default_level`, or `null` and a note when
+  the server does not state a default unambiguously. Call it before filtering a search by level: an
+  unknown level returns 0 hits rather than an error.
+- **`update_log_entry`** edits an existing Olog entry's `title`, body, `level`, `logbooks` or `tags`.
+  Whole-mode only. An omitted argument means *unchanged*: the tool round-trips the entry and
+  overlays only what was passed, so attachments, properties and unedited fields survive the
+  server's destructive full replace. The logbook allowlist is keyed on the **union** of current and
+  resulting logbooks, because moving an entry into a logbook and pulling it out of one are both
+  writes to that logbook. An entry whose attachments have duplicate or missing filenames is refused
+  rather than edited, since attachment retention is filename-keyed.
+- **`add_log_attachment`** attaches files to an existing Olog entry. Whole-mode only, and purely
+  additive for content. Note the server re-stamps `owner` to the write service account on every
+  call, because this endpoint is its destructive update.
+- **`list_log_attachments`** and **`download_log_attachment`** list one entry's attachments and
+  fetch raw bytes by (log id + filename) or GridFS id. Bytes bypass the entry redaction, so a
+  download is withheld unless whole-mode **and** `EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD` are both
+  in effect. An `output_path` must be a new file: it refuses to overwrite and refuses a symlink
+  target.
+
+#### New capabilities on existing tools
+
+- **Attachments on write.** `create_log_entry` and `reply_to_log` take `attachments` (workspace file
+  paths, sent as multipart) and `embed_image_base64` for a small inline image. Uploads ride the
+  existing Olog write gate plus a size cap (`EPICS_MCP_OLOG_ATTACH_MAX_BYTES`), which also bounds
+  the download body.
+- **ChannelFinder query filters on `find_channels`:** `has_properties`, `lacks_properties`,
+  `not_property_values`, `has_tags` and `lacks_tags`, plus `count_only` for an exact, window-free
+  match count from the `/count` endpoint. An unknown property name is a filter, not a silently
+  ignored parameter, so a typo narrows the result to roughly zero. Property filtering is gated to
+  the safe-property allowlist: filtering on a redacted property is refused, because it would
+  reconstruct the partition the response projection hides.
+- **`level` and `title` filters on `search_logbook`.** `title` matches whole words, not substrings,
+  and is a separate axis from `text`, which searches the body. A blank filter is refused before any
+  request, because the server's answers to a blank value are misleading and disagree between the two
+  fields. An empty level-filtered result carries a note when the value is not a configured level.
+- **Archiver fields that were already fetched and then discarded** are now surfaced, with no extra
+  HTTP request. `is_archived` adds the getPVStatus connection-history cluster
+  (`connection_loss_regain_count`, `connection_first_established`, `connection_last_restablished`).
+  `get_archive_info` adds the alarm, display and control limits plus `units`, `precision`,
+  `controlling_pv`, `policy_name` and `modification_time`. The nine numeric limits are always
+  present and read `"0.0"` when the PV had no control info, so `"0.0"` does not necessarily mean a
+  literal zero limit.
+- **Write-side `level` validation.** `create_log_entry`, `reply_to_log` and `update_log_entry` refuse
+  a level the server does not list, and refuse a blank one separately, since a blank level would
+  silently clear the entry's level. The check runs before the rate token, so a typo costs no token,
+  and only when a `level` was passed.
+- **`entry_id` in the FAILED write audit.** The server archives and mutates before answering, so a
+  timeout can leave an applied write in front of a client that sees FAILED. The record now names the
+  entry.
+- **Client-side consent hint on `set_pv_value`.** Its `tools/list` entry carries
+  `_meta["anthropic/requiresUserInteraction"]=true`. A client that honours it prompts a human on
+  every call and fails closed when it cannot ask. This is advisory defense-in-depth only: the
+  server-side write gate (env gate, regex allowlist, rate limit, audit) is unchanged and remains the
+  sole client-independent guard.
+
+#### Diagnostics
+
+- **`epics-doctor` checks the alarm logger's Elasticsearch backend.** The transport probe is a blind
+  HEAD and reported the plane healthy even when the backend was dead. The identity probe now reads
+  `elastic.status` from the same response body it already fetches and reports the new `backend_down`
+  status (exit `1`) when the logger says its backend is not `Connected`. This is distinct from
+  `unverified`: identity is proven, and the service reports its own backend broken.
+- **`epics-doctor` reports a failed identity probe** as `identity_probe_failed` (glyph `!`, exit `3`,
+  INCONCLUSIVE) instead of collapsing it into `unverified` and exit `0`. A 2xx that merely could not
+  be named stays `unverified` and exit `0`. New `--json` field `inconclusive_identity_planes`.
+  **Migration:** a script that gated on exit `0` now sees exit `3` for a reachable but
+  unidentifiable plane, and should read `inconclusive_identity_planes` alongside `unverified_planes`.
+- **`python -m epics_pv_mcp.find_moderate_pv`**, a read-only fixture finder that walks the Archiver
+  MGMT event-rate report, filters a rate band, and counter-verifies each examined candidate against
+  the target window with a real history fetch.
+
 ### Changed
 
-- **`find_channels` bewirbt jetzt ein getyptes Ausgabe-Schema — und seine zwei Modi liefern
-  DISJUNKTE Felder, was das Schema als Erstes sagt (S29, 11. Ziel).** Das Ergebnis entsteht in
-  `query_channels`, also wohnt das TypedDict `ChannelQueryResult` dort und nicht am Tool-Adapter;
-  die Consumer erben es.
-  - **Sechs beworbene Felder**, und nur **eines** liegt auf jedem Rückgabepfad: `enabled`. Vier
-    Pfade, nicht zwei: konfigurierte Liste `{enabled, channels, total, capped}`, konfigurierter
-    Zähler `{enabled, match_count}`; **un**konfiguriert `{enabled, channels, total, note}` bzw.
-    `{enabled, match_count, note}` — dort kommt `note` hinzu und `capped` fällt weg. Wer bisher
-    `total` annahm, weil er
-    ein Ergebnis in der Hand hatte, sieht das jetzt am Vertrag statt im Feldfehler.
-  - ⚠️ **Der Preis, damit ihn niemand später entdeckt:** `total` und `match_count` sind
-    `int | None`. Ein künftiger Consumer muss None prüfen, bevor er rechnet — heute rechnet keiner.
-  - **Vier Pfade über einen echten `fastmcp.Client` konform gemessen** (Liste/Zähler × konfiguriert/
-    unkonfiguriert), mit gefakter **Transport**-Naht statt Client-Klasse: so baut der echte
-    `_project` die Kanal-Elemente, die Client-Rand-Wächter bleiben im Pfad, und der S31-Audit zählt
-    den neuen Test nicht als nutzlast-behauptend (eine Klassen-Attrappe hätte dessen Zahlen still
-    verschoben, ohne dass etwas rot wird).
-  - ⚠️ **Ehrliche Grenze:** das Element-Schema von `channels` bleibt opak
-    (`{type: object, additionalProperties: true}`) wie alle Objekt-Arrays hier, obwohl ein Kanal
-    immer ein `ChannelInfo` mit 6 Feldern ist. Ein verschachteltes TypedDict wäre das erste im
-    Server, brächte `$defs` auf den Draht und berührt drei generische Schema-Wächter — eigener
-    Arbeitsgang. Und: **18 Test-Doppelgänger von `query_channels` (14 mit Nutzlast, vier werfen) setzen
-    den neuen Typ nicht
-    durch** (`monkeypatch`-Wert ist `object`); die Durchsetzung kommt aus mypy auf `src/` und den
-    Draht-Tests.
-  - **Der Wächter, der die nächste Typisierung erzwingt** (`539fc16`):
-    `test_stripped_tool_still_returns_structured_content` prüfte seine eigene Prämisse nicht — er
-    lebt davon, ein UNTYPISIERTES Tool zu fahren, wäre bei dieser Typisierung aber **grün und
-    bedeutungslos** geblieben. Er hat jetzt eine Prämissen-Assertion, ist bei der Typisierung
-    tatsächlich rot geworden und daraufhin auf `get_pv_value` umgehängt. ⚠️ Damit wechselt er die
-    Art: die drei Vorgänger hatten einen config-gegateten echten Pfad, `get_pv_value` braucht eine
-    gefakte `pv_get`-Naht.
-  - **Draht-Budget neu gemessen: Kern-Lane 63879 / Voll-Lane 72177** (Deckel 200000; vorher
-    62967 / 71265). ⚠️ **+912 pro Lane in ZWEI Schritten: +775 für die Typisierung, +137 für
-    die anschließende Beschreibungs-Korrektur** — und nicht die extrapolierten ~410, weil dieselbe
-    Änderung die Tool-BESCHREIBUNG erweitert hat und Beschreibungs-Bytes auf demselben Draht fahren wie
-    Schema-Bytes. Genau deshalb steht dort „nachmessen, nicht hochrechnen".
-  - **Sechs lebende Begründungen mitgezogen**, die dieser Bau falsch gemacht hätte — darunter der
-    als kanonisch deklarierte Nullbarkeits-Block in `services/checkers_olog.py`, auf den alle
-    anderen Shapes zeigen, und die Begründung der `bool()`-Coercion in `tools/discover.py` (sie
-    berief sich darauf, dass die Naht untypisiert sei; die Coercion bleibt, weil die Naht in Tests
-    ersetzt wird, nicht weil sie untypisiert ist).
-  - **Ein Zähler war schon vorher falsch, jetzt gemessen statt geschätzt:** die Notiz zur
-    `EPICS_MCP_READ_RATE_LIMIT`-Exposition nannte 15 betroffene Tests. Gemessen unter
-    `EPICS_MCP_READ_RATE_LIMIT=1`: **20 Tests fallen insgesamt**, davon einer der hier neue — also
-    **19 fremde** danach und **18 fremde** davor. Die genannte 15 war damit schon vor diesem Bau
-    um drei veraltet. Der Limit-Wert gehört in die Aussage — ein Test, der zwei Token zieht,
-    fällt erst bei 1 durch.
-- **Der Scheinwächter-Audit ist gefahren, und drei gemessene Lücken sind geschlossen (S31).** Ein
-  Test, der die Client-**Klasse** durch eine Attrappe ersetzt, entfernt still jede Prüfung, die der
-  echte Client an seinem Rand fährt — er *sieht aus* wie ein Wächter. Was daraus wurde:
-  - **Enum-Werte behalten ihren Typ** (`0620a1b`): `_enum_members` stringifizierte an beiden
-    Extraktionsstellen, `Literal[1,2]` und `Literal["1","2"]` waren ununterscheidbar. Testform ist
-    ein Helfer-Unit-Test, weil es **keine** Quell-Mutation gibt, die den Wertetyp-Kollaps isoliert:
-    das einzige Enum des Bestands ist bereits von einer Basistyp-Tabelle als „string" gepinnt.
-  - **Element-Schemata der Listen relational gepinnt** (`7b234fb`): `list[str]` und `list[Any]` sind
-    beide „array". Live gemessen sind es **15 Paare über 14 Tools**, nicht die 8/9 der Notiz, und
-    **vier** sind `anyOf[array,null]` — ein Helfer, der nur `prop["items"]` liest, fände 11.
-    (Stand dieses Eintrags; mit `find_channels.channels` sind es seit dem S29-Eintrag oben
-    **16 Paare über 15 Tools**, davon fünf `anyOf[array,null]`.)
-    ⚠️ `list[Any]` rendert als `{"type":"array","items":{}}`: der Schlüssel **bleibt** und wird leer,
-    ein Wächter mit der Frage „hat es `items`?" sähe nichts. Deshalb hängt die Entdeckung an
-    `_base_type == "array"` — einer Eigenschaft, die die Mutation nicht anfassen kann.
-    Ehrlich: 7 der 15 tragen eine scharfe Bedingung, 8 sind bewusst opake Objekte (seit dem
-    S29-Eintrag oben: 7 von 16, neun opak).
-  - **Jede Listenroute fragt ihren eigenen Endpunkt an** (`bb5bb8f`, `ad9cd82`): `list_tags` auf die
-    properties-URL umzubiegen ließ alle 1439 Tests grün. Beide Vokabular-Routen liefern dieselbe
-    Form durch denselben Helfer, also kann dort **kein** Typ-Wächter feuern. Gepinnt für
-    ChannelFinder (3 Routen, mit dem bestehenden `count_url`-Pin alle vier URL-Properties) **und**
-    für den Olog-Zwilling (`/logbooks`, `/tags`, `/levels`). Das Fehler-Label leitet sich jetzt aus
-    der tatsächlich angefragten URL ab statt aus einem handgeschriebenen Literal.
-  - **Der Audit selbst** (`883827d`): `scripts/guard_audit.py` (beide Richtungen) plus
-    `tests/test_client_edge_guards.py`, das die auditierte Population pinnt. **Ergebnis: kein
-    Scheinwächter gefunden** — 107 Tests setzen eine Klassen-Attrappe, 102 fahren nie eine
-    Wächterzeile (die legitime Verwendung); die gelesenen Kandidaten behaupten Verhalten der
-    **Service**-Schicht, nicht eine Prüfung am Client-Rand. ⚠️ „Keiner gefunden" ist nicht „keiner
-    da": welche Kandidaten überhaupt gelesen werden, entscheidet ein Vokabular-Filter, und eine
-    erste, engere Fassung übersah nachweislich einen Test. Der Sweep über 93 Ziele fand 19 Ziele
-    mit einer unbeobachteten Polarität, eines in keiner, zwei nie ausgeführte — diese 22 haben
-    also sehr wohl keinen Test, der ihr Verschwinden bemerkt.
-    ⚠️ **Der Kern ist Pflicht:** mit dem Default-Coverage-Kern sehen die Werkzeuge 72 statt 291
-    deckende Tests — ein Audit auf dieser Landkarte wäre selbst der Scheinwächter.
-    ⚠️ Gemessen **ohne** die Live-Lane, und ein überlebender Mutant ist kein Defekt: er kann
-    äquivalent oder von seinem Nachbarn maskiert sein (`channelfinder_client.py:91` ist der Beleg).
+- **BREAKING: tool argument names unified.** The tools carried four different argument names for
+  "the PV this tool is about". They are now `pv_name` for a single PV (`monitor_pv` from `name`;
+  `is_archived`, `get_pv_history`, `get_archive_info`, `is_alarm_configured` and `get_alarm_history`
+  from `pv`) and `pv_names` for a list (`get_pvs` from `names`, `validate_pvs` from `pvs`).
+  Unchanged: `lookup_device_name.name` (a device name, not a PV), the glob parameters `pattern`,
+  `name_pattern` and `query`, and **every output field**. This affects INPUTS only; the output field
+  of the five renamed REST tools is still `pv`, and aligning those would be a second breaking change
+  for anyone reading results. MCP clients that call these tools by argument name must follow;
+  positional calls are unaffected. The old name now returns a clean `ToolError`.
+- **BREAKING: the server runtime moved from the SDK-bundled FastMCP 1.0 (`mcp.server.fastmcp`) to
+  standalone `fastmcp`** (`fastmcp>=3,<4`; `mcp>=1,<2` stays for `mcp.types.ToolAnnotations`). This
+  puts both project MCP servers on one stack and removes the two-`ToolError`-class hazard by
+  construction, since only one `fastmcp` is on the path. Anyone embedding this server and catching
+  `mcp.server.fastmcp.exceptions.ToolError` must switch to `fastmcp.exceptions.ToolError`.
+- **Typed output schemas.** 22 of the 32 tools now advertise a typed `outputSchema` instead of an
+  open `dict[str, object]`, so a caller can tell "no such PV" from "the service is not configured
+  and I could not look", and a complete result from a truncated one. Notable field contracts:
+  - `find_channels` returns **disjoint** fields per mode, and the configuration splits them again:
+    a configured list gives `{enabled, channels, total, capped}`, a configured count gives
+    `{enabled, match_count}`; unconfigured they are `{enabled, channels, total, note}` and
+    `{enabled, match_count, note}`. `enabled` is the only field present on every path.
+  - `discover_pvs` returns `DiscoverPvsResult`: `pattern`, `pvs` and `total` on every path, plus
+    `capped` and `source` on the wildcard-with-ChannelFinder path and `note` on both wildcard paths.
+  - `list_archived_pvs`, `get_appliance_info`, `get_archive_info`, `list_channel_vocabulary` and
+    `get_alarm_history` carry typed schemas as well.
+  The remaining untyped tools are the PV-value tools and the display-lane tools.
+- **Three pre-gate refusal codes changed on the wire.** A refusal raised before a write gate is
+  consulted writes no audit line, so it must not wear the gate's error code: otherwise an
+  un-audited refusal is indistinguishable from an audited gate DENY. `OLOG_WRITE_DENIED` became
+  **`OLOG_WHOLE_MODE_REQUIRED`** for the whole-mode preconditions of `add_log_attachment` and
+  `update_log_entry`; `RATE_LIMIT_EXCEEDED` became **`READ_RATE_LIMIT_EXCEEDED`** for the opt-in
+  read throttle; `OLOG_ATTACH_TOO_LARGE` became **`OLOG_ATTACH_TOO_LARGE_AT_READ`** for the
+  post-admission size re-check. Every class stayed a subclass of the one it replaced, so `except`
+  clauses are unaffected; a caller matching on the code *string* sees a different value. None of the
+  three was ever released.
+- **`[INTERNAL]` errors no longer carry the exception's raw text.** An unexpected non-`EpicsError`
+  at the tool boundary could put an internal detail (a request URL, a live PV name, a path) in front
+  of the client. The client now receives `[INTERNAL] <ClassName>`; the full message and traceback are
+  logged server-side at ERROR. The curated `[<code>] message` path is unchanged.
+- **Olog refusals no longer report as `INTERNAL`.** `OlogError` carries `error_code` as a class
+  attribute and each subclass sets its own. `INTERNAL` read as transient and invited retries that
+  each burned a rate token and wrote a FAILED line for a write that never happened.
+- **`epics-doctor` no longer fails a service that answers with a different known service's name.**
+  It is reported `unverified` (exit `0`) with the found name in the detail. A path-based reverse
+  proxy can serve the real API behind a base URL that names another service, so the previous hard
+  failure flagged working configurations.
+- **`EPICS_MCP_DEFAULT_TIMEOUT` is honoured on the whole read and write path.** Tool timeouts default
+  to the configured server timeout instead of a hardcoded `5.0`.
+- **The live probe in `diagnose_connection` runs concurrently with the explanatory planes**,
+  so worst-case latency is about one timeout instead of two.
+- **ChannelFinder property filter semantics are live-verified.** The "unverified until a differential
+  live probe" caveat is dropped for `has_properties`, `lacks_properties`, `not_property_values` and
+  `count_only`. The tag filters (`has_tags`, `lacks_tags`) remain unverified. The "0 results does not
+  distinguish an unknown property from an empty match" note stays, since it is structural.
 
-- **Die Draht-Validierung der Output-Schemas ist jetzt bewacht statt einmal gemessen (S29).** Der
-  vorige Eintrag hielt fest, dass Tool-Ausgaben am Draht sehr wohl geprüft werden, und belegte das
-  mit einer Einmal-Messung (21 Tools, 0 Verstöße). Fünf Tests machen daraus einen Dauerzustand:
-  - **Der Mechanismus selbst** (`3f84171`): ein Wegwerf-Server mit einem Tool, das seine eigene
-    Zusage bricht, pinnt BEIDE Hälften der Asymmetrie — am Draht muss es scheitern, in-process muss
-    derselbe Wert unverändert zurückkommen. Ohne diesen Kanarienvogel würde ein Versionssprung von
-    `fastmcp`/`mcp` (und `jsonschema` ist hier nicht einmal deklariert, es kommt rein transitiv)
-    jeden Draht-Test still **grün und leer** zurücklassen.
-  - **Vollständigkeit** (`d2bc022`): ein generischer Test fährt ALLE getypten Tools über einen
-    echten Client und pinnt seine Tabelle relational gegen `_TYPED_OUTPUT_TOOLS`. ⚠️ **Präzise, weil
-    gemessen:** ein neu getyptes Tool wird **nicht** von diesem Test erkannt, sondern vom
-    **vorbestehenden** `test_output_schema_typed_only_for_typed_tools`, das gegen die *reale* getypte
-    Menge des Servers vergleicht. Der neue Test schließt den **zweiten** Schritt: sobald jenes erste
-    Rot die Konstante nachziehen erzwingt, kann die Draht-Abdeckung nicht mehr vergessen werden.
-    Eine Kette aus zwei Gliedern, kein Detektor. Die drei per-Tool-Behauptungen des
-    Tests (Nicht-Leerlauf-Boden · kein unbeworbenes Feld · Präsenz jedes als immer-da deklarierten
-    Feldes) sind **nicht neu erfunden**, sondern die Prüfungen des `discover_pvs`-Conformance-Tests,
-    von **einem** Tool auf **21** getragen; der Nicht-Leerlauf-Boden existierte ohnehin schon in
-    jedem `exposes`-Test. Ebenso präzisiert: von den elf `_*_ALWAYS_PRESENT`-Konstanten sind **zehn**
-    reine Skip-Filter, `_DISCOVER_PVS_ALWAYS_PRESENT` war bereits laufzeit-gebunden. ⚠️ Die erste
-    Fassung dieses Eintrags behauptete „drei Behauptungen, die es nirgends gab" — von der eigenen
-    Impl-QA widerlegt, obwohl derselbe Test jene Stellen als Vorbild zitiert. Genau die
-    Fehlerklasse, die dieser Strang schon zweimal aufräumen musste.
-  - **Enum-Mitglieder** (`9499d22`): die Basistyp-Tabellen vergleichen nur den GROBEN JSON-Typ —
-    `Literal["ok","empty","withheld"] | None` und ein nacktes `str | None` liefern beide „string",
-    ein aufgeweichtes Literal blieb also überall grün. Zwei lebende Kommentare behaupteten das
-    Gegenteil und sind richtiggestellt; der neue Wächter ist relational in beide Richtungen. Es gibt
-    genau ein solches Enum im Bestand (`get_pv_history.status`), und es war ungewacht.
-  - **Nutzdaten-Pfade unterhalb des Clients** (`ba2e559`, `6f6dbc5`): `search_logbook` und
-    `list_channel_vocabulary` werden mit echten Antworten gefahren, wobei die **HTTP-Sitzung**
-    gefälscht wird statt der Client-Klasse. Erst dadurch läuft der echte Client-Rand mit — und erst
-    dadurch wird eine **nicht-leere** Liste validiert (eine leere erfüllt jede Element-Bedingung von
-    selbst).
-  - **Ehrliche Reichweite:** das ist ein **Abdeckungs**-Gewinn, kein Bug-Fang — die disabled-Pfade
-    waren schon sauber, und `mypy --strict` fängt fast jede falsch getypte Rückgabe beim Commit. Was
-    er strukturell NICHT sieht, ist die eine Naht, auf der die scharfen Rot-Beweise sitzen: in
-    Python ist `bool` ein Sonderfall von `int`. Die enabled-Pfade der übrigen Tools bleiben
-    ungeprüft; die `object | None`-Felder von `is_archived`/`get_archive_info`/`get_appliance_info`
-    sind per Konstruktion unprüfbar (unbeschränktes Schema) — beides benannt, nicht stillschweigend.
+### Fixed
 
-- **Zwei ausgelieferte Flächen lehrten nach dem Arg-Rename noch den ALTEN Namen — behoben und
-  bewacht (`fix(prompts,guide)` `a3a3465`).** Der Rename `9256977` benannte den CODE um; zwei Flächen,
-  die die Argumente **lehren**, blieben stehen: der MCP-Prompt `compare_machine_state` wies
-  `get_pvs(names=[...])` an (der Server antwortet „Missing required argument `pv_names`" — am Wire
-  verifiziert), und die als `epics-pv://guide` ausgelieferte Wissensbasis nannte für
-  `get_alarm_history` weiterhin `pv`. Beides blieb unbemerkt, weil die Suite nur **5 der 8**
-  umbenannten Tools pinnte: per Mutation gemessen ließen `get_pvs`, `monitor_pv` und `validate_pvs`
-  die GANZE Suite grün, wenn man sie auf den alten Namen zurückdrehte. Neu:
-  `tests/test_tool_arg_contract.py` mit drei Guards — (1) Schema-Pinning gegen den echten
-  `inputSchema` inkl. Abwesenheit der abgelösten Namen, (2) jedes `tool(keyword=...)`-Beispiel in
-  Guide/README/Prompts gegen das echte Schema (generalisiert auf künftige Renames, Tool-Menge aus der
-  Live-Registry), (3) die abgelösten Namen dürfen nicht mehr neben ihrem Tool in Prosa **ohne**
-  Klammer-Syntax stehen. Guards 2+3 wurden vor dem Fix ROT gemessen, Guard 1 per Mutation im
-  Wegwerf-Worktree. Ehrliche Grenzen im Modul-Docstring (Guard 3 pinnt einen BEKANNTEN Rename,
-  handgepflegte Tabelle; Guard 2 sieht nur Keyword-Syntax).
-
-- **Korrektur: die Ausgabe eines Tools WIRD validiert — nur nicht dort, wo unsere Tests hinsehen.**
-  Der Messbefund weiter unten („Tool-Ausgaben werden NICHT gegen das advertised `outputSchema`
-  validiert") stimmt nur für den **In-Process**-Aufrufweg `FastMCP.call_tool`, den die
-  Conformance-Tests fahren. Am **Draht** — also für jeden echten MCP-Client — prüft der low-level-
-  Handler des MCP-SDK die `structuredContent` per jsonschema gegen das beworbene Schema und
-  verwandelt eine Abweichung in einen `Output validation error`. Gemessen mit einem echten Client:
-  ein falsch getyptes Feld und ein `null` in einem nicht-nullbaren Feld fallen beide durch, ein
-  **weggelassener** `total=False`-Key nicht (das Schema führt kein `required`). Praktische Folge für
-  die Typwahl: bei einem nur **manchmal abwesenden** Feld ist die Nullbarkeit Schema-Ehrlichkeit, die
-  ein Test durchsetzen muss; bei einem **explizit auf `None`** gesetzten Feld ist sie ein echter
-  Draht-Wächter — ohne sie bekommt ein Client eine Fehlermeldung statt einer Antwort. Gemessen sind
-  das **sieben** Felder: `is_archived.archived` · `is_alarm_configured.configured` ·
-  `lookup_device_name.registered` · `get_archive_info.found` · `get_log_entry.found` ·
-  `list_log_attachments.found` · `list_log_levels.default_level`.
-  **Gegenprobe:** alle 21 getypten Tools (Stand dieses Eintrags; heute 22) auf ihren
-  disabled-Pfaden über einen echten Client
-  gefahren → 0 Verstöße. Die enabled-Pfade brauchen laufende Dienste und sind ungeprüft.
-  Die Kommentare in `services/checkers_olog.py`, `services/checkers.py` und `tools/archiver.py`
-  tragen jetzt diesen Stand; die kanonische Fassung steht **einmal** im Kopf von
-  `services/checkers_olog.py`, die übrigen verweisen darauf statt sie zu wiederholen.
-
-- **Zwei weitere Falschbehauptungen aus der fastmcp-Migration entfernt.** (a) Der Mechanismus
-  „`convert_result` dumpt das Modell ohne `exclude_none`" existiert nicht mehr — es gibt auf diesem
-  Pfad kein Modell; die Nullbarkeits-**Folgerung** war richtig, nur ihre Begründung nicht.
-  (b) **Zehn** Stellen in `tests/test_server.py` beschrieben Nachbearbeitungs-Durchläufe („A2 prunes
-  to None", „after the post-pass", „the production strip", „A3 strips", „Red pre-strip"), die in
-  `6bd12c6` **gelöscht** wurden — sechs in Test-Docstrings, drei in Helfer-Docstrings, eine im
-  Konstanten-Kommentar. Der wirkliche Mechanismus ist das
-  ausdrückliche `@mcp.tool(output_schema=None)` pro Tool. Das war nicht kosmetisch: eine spätere
-  Session plante auf Basis dieser Prosa das Typisieren von `discover_pvs` **ohne** die
-  kwarg-Löschung — der Bau wäre stumm ohne Wirkung geblieben. Zusätzlich enumerierten zwei Stellen
-  die getypten Tools (vier, obwohl es neun waren); sie zeigen jetzt auf `_TYPED_OUTPUT_TOOLS`.
-  Bei `display_tools.py` steht jetzt am Registrierungs-Ort, warum die vier Display-Tools das
-  Opt-out tragen (nicht „ungeeignet", sondern „von S29 noch nicht erreicht").
-
-- **`discover_pvs` trägt ein typisiertes `outputSchema` (S29).** Bisher gab das Tool ein offenes
-  `dict[str, object]` zurück — ein aufrufender Agent konnte „keine solche PV" nicht von „ChannelFinder
-  ist nicht konfiguriert, ich konnte gar nicht suchen" und ein vollständiges Ergebnis nicht von einem
-  abgeschnittenen unterscheiden. Jetzt bewirbt es `DiscoverPvsResult` mit sechs Feldern:
-  `pattern`/`pvs`/`total` (auf allen vier Rückgabepfaden), plus `capped`/`source` (nur Wildcard mit
-  ChannelFinder) und `note` (beide Wildcard-Pfade). `pvs` bleibt eine Liste offener Einträge — sie sind
-  in drei Formen heterogen (konkreter Treffer mit Wert · Fehlschlag · Registry-Treffer mit IOC/Host).
-  **Damit sind 21 der 32 Tools getypt** (Voll-Lane; Kern-Lane 28) — **abgelöst vom S29-Eintrag
-  oben: heute 22 von 32, und `find_channels` ist erledigt.** Untypisiert waren zu diesem
-  Zeitpunkt 11: die
-  S29-Kandidaten `find_channels` und `diagnose_connection` · die fünf PV-Wert-Tools `get_pv_value`,
-  `get_pvs`, `get_pv_info`, `monitor_pv`, `set_pv_value` · die vier Display-Lane-Tools `validate_pvs`,
-  `crossplane_check`, `coverage_audit`, `find_device`. **Das löst die „19 von 25"-Zählung des
-  Eintrags weiter unten ab** — deren Nenner war ein eingefrorener Altstand (damals 25 Tools), und die
-  dort genannte Begründung „`discover_pvs` hat keinen eigenen `get_config`-Seam" hat sich als
-  gegenstandslos erwiesen: das Tool liest die geteilte ChannelFinder-Antwort nur und baut sein
-  Ergebnis selbst, der Test hängt sich an denselben Seam wie die Nachbar-Tools. Neuer Budget-Stand:
-  **Kern-Lane 62967 / Voll-Lane 71265** (Deckel 200000).
-
-- **BREAKING: Tool-Argument-Namen vereinheitlicht (`refactor(tools)!` `9256977`).** Die epics-pv-Tools
-  trugen für „die PV, auf die sich das Tool bezieht" vier verschiedene Argument-Namen entlang der
-  Live/REST-Ebenengrenze. Vereinheitlicht: Ein-PV-Skalar → **`pv_name`** (`monitor_pv` `name`→,
-  `is_archived` / `get_pv_history` / `get_archive_info` / `is_alarm_configured` / `get_alarm_history`
-  `pv`→; `get_pv_value` / `set_pv_value` / `get_pv_info` / `diagnose_connection` trugen es schon);
-  PV-Liste → **`pv_names`** (`get_pvs` `names`→, `validate_pvs` `pvs`→). UNVERÄNDERT: `lookup_device_name.name`
-  (Gerätename, keine PV), die Glob-Parameter `pattern` / `name_pattern` / `query`, und **alle Ausgabe-Felder**.
-  ⚠️ **Korrektur (QA 2026-07-25):** der ursprüngliche Eintrag behauptete hier eine „Input/Output-Symmetrie" —
-  das ist für die fünf umbenannten REST-Tools **falsch herum**. Gemessen an den `outputSchema`s heißt das
-  Ausgabe-Feld von `is_archived` / `get_archive_info` / `get_pv_history` / `is_alarm_configured` /
-  `get_alarm_history` weiterhin **`pv`** (und bei `discover_pvs` / `list_archived_pvs` **`pvs`**). Der Rename
-  hat dort die vorher bestehende Symmetrie (`pv` rein / `pv` raus) also **aufgehoben**, nicht hergestellt;
-  er betraf ausschließlich INPUTS. Bewusste Entscheidung: die Ausgabe-Felder bleiben, wie sie sind — eine
-  Angleichung wäre ein **zweiter** Breaking Change für jeden, der Ergebnisse liest.
-  MCP-Clients, die diese Tools per Argument-NAMEN aufrufen, müssen nachziehen (positionale Aufrufe unberührt);
-  verifiziert: neuer Name → OK, alter → sauberer `ToolError`.
-
-- **`[INTERNAL]`-Fehler auf den Klassennamen begrenzt, Volltext server-seitig geloggt
-  (`feat(errors)` `de26b92`).** Ein nicht-`EpicsError` am Tool-Rand ist ein unerwarteter Bug; sein roher
-  `str(e)` konnte ein internes Detail (Request-URL, Live-PV-Name, Pfad) an den Client tragen. Der Client
-  erhält jetzt nur `[INTERNAL] <Klasse>`; der volle Detail (Message + Traceback) wird SERVER-SEITIG auf
-  ERROR geloggt (Debug-Wert bleibt erhalten). Hält die Redaktions-Posture (CF/Alarm/Olog) auf dem
-  Fehlerpfad konsistent; `mask_error_details` deckt das NICHT ab (eine `ToolError`-Meldung erreicht den
-  Client immer) → die Begrenzung passiert in `tool_errors.py`, wo die Meldung gebaut wird. Rot-beweisbar
-  (neuer Test geht auf dem alten Code ROT). Der kuratierte `[<code>] message`-Pfad (EpicsError) ist unverändert.
-
-- **S29-Cluster: fünf weitere `dict[str, object]`-Ausgabeschemas typisiert + tools/list-Budget-Deckel
-  auf 200000 angehoben (`feat(archiver)` `0346d1e` + `feat(checkers)` `04f3502`).** `list_archived_pvs`
-  (`ArchivedPvsResult`, 5 Felder), `get_appliance_info` (`ApplianceInfoResult`, 10),
-  `get_archive_info` (`ArchiveInfoResult`, 30, `found`-Tri-State), `list_channel_vocabulary`
-  (`ChannelVocabularyResult`, 4) und `get_alarm_history` (`AlarmHistoryResult`, 8) tragen jetzt ein
-  typisiertes `outputSchema` — damit **19 von 25** Tool-Schemas getypt. Muster: TypedDict-Return,
-  `total=False`, sometimes-absent-Feld → `X | None`, roh kopiertes Feld → `object | None` (gemischte
-  Wire-Typen); der `**`-Spread wurde durch expliziten Feld-für-Feld-Aufbau mit Präsenz-Wächtern
-  ersetzt (mypy `--strict`). Offen blieben aus strukturellen Gründen (nicht Budget) — Stand
-  dieses Eintrags, `find_channels` und `discover_pvs` sind inzwischen getypt: `find_channels`
-  (query_channels-Fan-out), `discover_pvs` (kein eigener get_config-Seam), `diagnose_connection`
-  (verschachteltes Pydantic-Modell); die 7 freien PV-Wert-Tools bleiben dauerhaft untypisiert.
-  - **tools/list-Budget-Deckel `_TOOLS_LIST_WIRE_CEILING` 70000 → 200000** (bewusste Betreiber-
-    Entscheidung): getypte Output-Schema-Bytes machen Tool-Ergebnisse maschinenlesbar (Kernnutzen von
-    S29) bei ~1 % mehr Kontext pro Turn; der Deckel bleibt ein relationaler `<=`-Katastrophen-Wächter
-    (fängt nur noch eine extreme Aufblähung). **Neuer Budget-Stand: core-lane 62561 / all-lane 70854**
-    (Deckel 200000) — löst die Migrations-Zeile darunter (`59683` / `67976`, Deckel `70000`) ab.
-  - **Messbefund (standalone FastMCP, Evidence-Discipline).** ⚠️ **Der erste Satz dieses Bullets ist
-    ABGELÖST** — s. den Eintrag „Korrektur: die Ausgabe eines Tools WIRD validiert" oben: die
-    Nicht-Validierung gilt nur für den In-Process-Aufrufweg, am Draht prüft das MCP-SDK. Der Rest des
-    Bullets (weggelassen ≠ null) hat sich bestätigt. Original: Tool-Ausgaben werden NICHT gegen das
-    advertised `outputSchema` validiert; ein weggelassener `total=False`-Key wird gedroppt (nicht als
-    null emittiert), nur ein explizit auf `None` gesetztes Feld (z. B. `get_archive_info.found`) wird
-    als null emittiert. Die Nullbarkeit ist damit test-durchgesetzte Schema-Ehrlichkeit (der
-    Conformance-Test), kein Laufzeit-Trap — die SDK-1.0-„omitted key → null"-Kommentare der 14
-    Alt-Tools (z. B. `NameLookupResult`) sind eine benannte Folge-Aufräumung.
-
-- **Server-Runtime von SDK-gebündeltem FastMCP 1.0 (`mcp.server.fastmcp`) auf standalone `fastmcp`
-  migriert (`feat(deps)!`, Commit `6bd12c6`).** `server.py` / `display_tools.py` / `tool_errors.py`
-  nutzen jetzt `from fastmcp import FastMCP` bzw. `from fastmcp.exceptions import ToolError`
-  (`fastmcp>=3,<4`, resolved 3.4.4; `mcp>=1,<2` bleibt für `mcp.types.ToolAnnotations`). Das vereint
-  beide Projekt-MCPs (phoebus + epics-pv) auf **einen** Stack und löst den Zwei-`ToolError`-Footgun
-  **per Konstruktion** — nur noch genau ein `fastmcp` auf dem Pfad, also nur noch eine `ToolError`-Klasse.
-  - **Konstruktor:** `version=__version__` (ersetzt den früheren privaten `_mcp_server.version`-Reach;
-    der `initialize`-Handshake trägt `serverInfo.version` weiterhin — gemessen) und
-    `mask_error_details=False` (verhaltenserhaltend ggü. SDK-1.0, das kein Masking hatte).
-  - **`@mcp.tool(output_schema=None)`** an den **17** `dict[str, object]`-Tools (13 in `server.py`,
-    4 in `display_tools.py`) droppt das information-leere Accept-all-`outputSchema` **advertise-only** —
-    `structuredContent` bleibt zur Call-Zeit erhalten (gemessen). Die 15 getypten TypedDict-Tools
-    behalten ihr Schema.
-  - **tools/list-Budget:** core-lane **59683** Zeichen / all-lane 67976 (Deckel 70000).
+- **`monitor_pv` reported `truncated` on a complete, exactly-full stream.** The service capped
+  collection before appending, so it could not tell "the cap cut the stream" from "exactly
+  `max_events` arrived, then it went quiet". It now over-collects one canary event, trims it, and
+  reports `truncated` from the real comparison.
+- **`--timeout` accepted `-1`, `0` and `inf`, misdiagnosing a healthy service as unreachable.**
+  `epics-doctor`, `epics-diagnose` and `find_moderate_pv` took a bare `type=float`, so a
+  non-positive or non-finite timeout flowed into a live probe. A shared argparse type now rejects
+  those as a usage error (exit `2`) at parse time, before any probe.
+- **Two shipped surfaces still taught the pre-rename argument names.** The `compare_machine_state`
+  prompt instructed `get_pvs(names=[...])`, to which the server answers "Missing required argument
+  `pv_names`", and the `epics-pv://guide` resource still named `pv` for `get_alarm_history`. Both
+  corrected, and a contract test now pins every documented `tool(keyword=...)` example against the
+  live schema.
+- **The attach documentation said the opposite of the truth.** Five places claimed an attach
+  preserves every field. The endpoint delegates to the server's `updateLog`, which sets the owner
+  unconditionally, so attaching a file rewrites the entry's author. The claim is now narrowed to
+  every *content* field.
+- **The safety prose named 2 of the 4 write tools.** `EPICS_MCP_ALLOW_OLOG_WRITE` gates
+  `create_log_entry`, `reply_to_log`, `add_log_attachment` and `update_log_entry`, but README,
+  ARCHITECTURE and the operator guide described it as the first two. A site admin approving the gate
+  on that basis would unknowingly enable the destructive `update_log_entry`.
+- **The archive was cited as a safety net it cannot be.** Three places pointed at the server-side
+  archived version to soften the owner re-stamp; no tool here can read or restore it. All three now
+  say recovery is manual.
+- **The `level` parameter descriptions disagreed** across the tools that take one. All three now
+  point at `list_log_levels`.
+- **`set_pv_value` audit blind spot on cancellation.** A write cancelled mid-put left no `PV_WRITE`
+  record, even though the p4p put keeps running and may still land at the IOC. It now emits
+  `ATTEMPT` with a correlation id before the I/O and `UNKNOWN_PENDING` on cancel, then re-raises the
+  cancellation unchanged. It is never mislabelled `FAILED` and never blindly retried.
+- **`NamingServiceClient` normalises `base_url`** (trailing-slash strip) like the other REST clients,
+  so a URL configured without a trailing slash no longer 404s.
 
 ### Removed
 
-- **`_prune_tool_schemas` + 3 Helfer (`_strip_schema_title_annotations`,
-  `_strip_output_schema_field_annotations`, `_is_information_empty_output_schema`) und die
-  JSON-Schema-Keyword-Frozensets (~130 Zeilen) entfernt (Commit `6bd12c6`).** Standalone `fastmcp`
-  emittiert die schlanken Schemas **nativ** (keine derived-pydantic-`title`-Annotationen, keine
-  `default: null` der `total=False`-Felder, kein Root-TypedDict-`title`) — der Post-Registration-Prune-
-  Pass ist damit gegenstandslos. Der einzige Restbedarf (Accept-all-`outputSchema` droppen) ist jetzt
-  das public `output_schema=None` an den dict-Tools (s. **Changed**). Die drei zugehörigen
-  `*_exposes_typed_output_schema`-Tests verankern die TypedDict-Identität seither auf den **Feld-Set**
-  (`set(properties) == set(TypedDict.__annotations__)`) statt auf den weggefallenen Root-`title`-String;
-  die 6 Unit-Tests der gelöschten Prune-Funktionen sind mit entfernt.
-
-### Added
-
-- **The first LIVE write-gate deny test (`tests/test_write_gate_live.py`).** Contract point 6 prefers a
-  deny path observed against a real service over an in-memory assertion; until now no write gate had
-  one, and `CLAUDE.md` recorded that as an open gap. Exactly ONE path is covered live, deliberately:
-  **`olog_allowlist_miss` on `add_log_attachment` / `update_log_entry`** — the only deny path whose
-  *decision input* comes from the server (the target entry's logbooks, read back over HTTP), i.e. the
-  only class a mock cannot falsify, because a mock supplies the very payload shape the code assumes.
-  The call passes a log **id** and nothing else, so the refusal naming the target's logbook can only
-  have travelled id → `GET /logs/{id}` → gate. The other eight rows are argued out by name in the
-  module docstring (PV: every deny raises before the first I/O; Olog env-off / URL boundary: shadowed
-  by the whole-mode precondition on these tool paths; empty-logbooks: unreachable there; size cap: no
-  server-side input; rate limit: would need N real mutating writes). Built against the trap that
-  would make it worthless — all four Olog gate branches raise the same class, the same code and a
-  byte-identical audit line, so one missing env var would deny at branch 1 and leave a naive test
-  green: it matches the allowlist branch's OWN message, asserts the server-reported logbook name and
-  the exact code, demands all SIX env vars through `assert_live_available` (never a one-variable
-  gate), routes "no usable logbook" through that same gate rather than a bare `pytest.skip` (which
-  would defeat `EPICS_MCP_REQUIRE_LIVE`), and runs a POSITIVE CONTROL per tool so a deny-all allowlist
-  cannot masquerade as a working gate. Self-sufficient: it creates its own deny target through the RAW
-  client (which bypasses the gate by construction) instead of depending on a pre-existing corpus.
-  Provably red under two targeted mutants: branch 3 denying with branch 1's message, and branch 3
-  disabled. The module is **not idempotent**: a full run leaves four entries (each deny test creates
-  its own target through the raw client before the gate refuses — only the *gated call* mutates
-  nothing — and each positive control creates one and then writes to it). Olog has no delete, so
-  every entry is labelled as a test artifact and **`EPICS_MCP_LIVE_OLOG_DENY_LOGBOOK` is required**:
-  it names the scratch logbook the deny targets go into, and unset is a refusal rather than a guess.
-  `CLAUDE.md`'s "honest limit" is re-scoped accordingly: **PV = not applicable with a reason,
-  Olog = one path live, the rest reasoned** — not "all deny paths proven".
-
-- **Pre-gate refusals no longer wear a write gate's error code — and the rule is now CI-enforced.**
-  The write-gate contract (`CLAUDE.md`, point 4) says *"a refusal raised outside the gate must not
-  carry the gate's error code"*: such a refusal writes **no audit line at all**, so reusing the
-  gate's code makes an un-audited refusal indistinguishable from an audited gate `DENY` and the
-  audit's coverage claim unfalsifiable from outside. Five call sites violated it. Four new codes,
-  each on a class that stays a **subclass** of the one it replaces, so every existing `except`
-  keeps catching it:
-  - `OlogWholeModeRequiredError` → **`OLOG_WHOLE_MODE_REQUIRED`** for the whole-mode preconditions
-    of `add_log_attachment` / `update_log_entry` (`services/checkers_olog.py`, raised *before*
-    `get_olog_safety()`), replacing `OLOG_WRITE_DENIED`.
-  - The client-side backstop `OlogWholeModeRequired` (`services/olog_exceptions.py`) moves to the
-    **same** code via its ClassVar, so one condition reports as one code on both layers.
-  - `ReadRateLimitError` → **`READ_RATE_LIMIT_EXCEEDED`** for the opt-in read throttle
-    (`services/_http.py::ReadThrottle.check`), which shared the write gates' audited
-    `RATE_LIMIT_EXCEEDED` although it guards reads, writes no audit line, and is reached from the
-    reads the Olog write tools perform before their gate. A named scope exception was considered
-    and rejected: a rule filed as "hard" that carries a carve-out from day one is prose again.
-  - **`OLOG_ATTACH_TOO_LARGE_AT_READ`** for the TOCTOU size re-check in
-    `services/olog_attachments.py::read_uploads` — found by the new guard, not by review. It is a
-    *post*-admission refusal (the rate token is already spent) and un-audited, so wearing the gate's
-    audited `OLOG_ATTACH_TOO_LARGE` hid exactly the distinction the contract is about.
-
-  The guard is `tests/test_write_gate_contract.py::test_no_pre_gate_refusal_carries_a_gate_error_code`:
-  an AST sweep of the whole flat `services/` package (~31 modules) for any exception raised with one
-  of the gates' audit codes, resolving class → code through both repo conventions (constructor in
-  `errors.py`, ClassVar in `services/*_exceptions.py`) and honouring a literal `error_code=` keyword.
-  The code set is **derived from** the canonical `DENY_PATHS` table, so a third gate widens the guard
-  in the same edit. Provably red: on the pre-fix tree it reports all five sites by file:line.
-  A companion behavioural test pins that the whole-mode refusal reports the new code **and** leaves
-  no audit record, with a positive control proving the audit logger is genuinely being captured.
-  Deliberately NOT changed: these refusals still emit no audit line — contract point 4 scopes the
-  audit promise to gate verdicts and writes that reach the I/O, and an audit call from `services/`
-  would sit outside the reach of the `_audit_deny` drift guard, buying a new blind spot as a "fix".
-  The reasoning is written at the raise sites, not only here.
-
-- **Annotation consistency / drift guard (test-only).** Four tests pin every tool's client-facing
-  safety hints (`readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint`), which drive real
-  client behaviour since MA-Q2 (K1 keys the consent invariant on `destructiveHint`; a honouring client
-  derives permission prompts from them, so a mislabelled or silently drifted field is security-relevant).
-  A completeness law (every tool sets all four hints explicitly — `ToolAnnotations()` defaults them to
-  `None`, not a bool), a spec-consistency law (`destructiveHint=True ⟹ readOnlyHint=False`), and a
-  golden map of all 32 tools' hints. The golden map is load-bearing: it is the ONLY guard that catches a
-  SILENT change of an existing tool's annotations — e.g. flipping `set_pv_value` to
-  non-destructive/read-only — which the two structural laws AND the MA-Q2 consent guards all pass. Two-lane
-  robust (core-only 28 / full 32) via an AST-scan of the display-extra tools, with a pure set-logic helper
-  unit-tested against both lanes; each guard is provably red. No new tool; `tools/list` unchanged. Honest
-  limit: structure + drift, not semantics (whether a hint matches the tool's true behaviour — a review).
-- **MA-Q2 client-side consent hint on `set_pv_value`.** The `tools/list` entry for the sole
-  PV-mutating tool now carries `_meta["anthropic/requiresUserInteraction"]=true`. A client that honours
-  it — Claude Code from v2.1.199 — prompts a human on every call, even under `bypassPermissions`, and
-  fails closed on a recognising client (`dontAsk` and non-interactive `--permission-prompt-tool` runs
-  deny the call rather than writing silently; the Agent SDK `canUseTool` callback can still approve).
-  An older or non-recognising MCP client ignores the hint. This is advisory **Defense-in-Depth only** —
-  the server-side write gate (env gate + regex allowlist + rate-limit + audit) is unchanged and remains
-  the sole client-independent guard. A fail-closed class-invariant test keyed on `destructiveHint` (with
-  the Olog-write class explicitly deferred) ensures a future PV-write tool cannot ship without the hint,
-  and a drift-guard test ensures a consent tool documents the key in its description. No new tool;
-  `tools/list` stays 32/28 and within the size-gate ceiling.
-- **MA-Q1a tools/list schema-hygiene hardening (nit/low follow-ups to MA-Q1).** *(⚠️ ÜBERHOLT durch
-  die standalone-fastmcp-Migration `6bd12c6` — `_prune_tool_schemas` und seine Helfer sind entfernt,
-  s. Removed oben; die Zahlen 64499/70237 sind historisch, aktuell = 59683 core / 67976 all-lane,
-  nativ schlank.)* Robustness and
-  precision polish on `_prune_tool_schemas`, with NO wire change — `tools/list` stays 64499 characters,
-  `list_tools` 32/28. The title-strip now also descends into the JSON-Schema 2020-12 single-subschema
-  keywords `contains` / `unevaluatedItems` / `unevaluatedProperties` (a `title` under one of them would
-  otherwise survive). A2's empty-outputSchema test is tightened, via a named helper
-  `_is_information_empty_output_schema`, to the exact accept-all object form
-  (`{type: object, additionalProperties: true}` with no `properties`) — so a future array / `RootModel`
-  return, which also lacks a top-level `properties`, is no longer dropped by mistake. The prune loop now
-  isolates each tool in its own `try/except`: one broken tool is logged and skipped, the others still
-  prune, so the pass never leaves a half-pruned state. Each code fix ships a provably-red regression
-  test; plus three doc corrections (A1 contributes ~3.7k, not ~4.7k; a truthful crash-guard raise-source
-  example; the ceiling is a character budget, not a byte budget).
-
-- **MA-Q3 tools/list size-gate (test-only guard).** *(⚠️ Teilweise überholt durch `6bd12c6`: der Guard
-  `test_tools_list_within_budget` besteht weiter (Deckel 70000), misst aber jetzt die nativ-schlanken
-  standalone-Schemas — es gibt keinen Prune-Pass mehr zum „Stoppen"/„Brechen"; aktuelle Zahl = 59683
-  core / 67976 all-lane, nicht 64499/70237.)* A relational `<=` ceiling test
-  (`test_tools_list_within_budget`, ceiling 70000) so the wire `tools/list` payload MA-Q1 shrank cannot
-  silently regrow — a new tool, an SDK change that inflates the wire, or a regression that stops the pruning
-  now turns a green suite RED. This is the guard behind MA-Q1's "precondition for every new tool" framing,
-  which was previously documented intent only (no test asserted the character budget). Relational (not a count) so
-  the core-only [28 tools] and full [32] lanes both pass; provably red below the current 64499 characters; also catches a
-  broken prune (the un-pruned payload is 70237 > 70000). Headroom is deliberate — raising the ceiling is a
-  conscious, reviewed one-line change with a rationale, never a silent bump.
-
-- **New `list_channel_vocabulary` tool — discover what `find_channels` can be filtered on (MA-2 CF-Query-Fläche).**
-  The MA-2 filters (`has_properties`/`lacks_properties`/`not_property_values`/`has_tags`/`lacks_tags`)
-  were ergonomically dead: a caller had no way to learn which property keys and tag names exist. The new
-  read-only, no-`pv` tool lists them as `{enabled, properties, tags}` — NAMES only (the DS-privacy `owner`
-  and `value` on the vendor `PropertyDto`/`TagDto` are dropped). `properties` is fetched from
-  `/resources/properties` and reduced to the SAME safe-property allowlist `find_channels` enforces (and
-  `_project` surfaces), so it lists only the keys that both exist in this instance AND are accepted as a
-  filter — a non-allowlisted, person-bearing property like `ENGINEER` is never advertised (it would be
-  refused with `INVALID_INPUT` anyway); expand `EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES` to surface
-  more. `tags` (from `/resources/tags`) is the full, ungated server tag set (tags are ungated in
-  `find_channels` too). Strict like the Olog `_named_list` (S11): an unreadable/non-list listing RAISES
-  rather than collapsing to `[]` — the listing IS the answer, so "unreadable" must never read as "there
-  are none"; an empty list is valid, and `enabled:false` (CF unconfigured) is distinct from it. Reuses
-  `EPICS_MCP_CHANNELFINDER_URL`/`_AUTH` — no new env var. `list_tools` 31 → 32, no schema change (the
-  tool returns an untyped `dict`). Red-proof-first: client tests (allowlist intersection, ungated tags,
-  strict-raise on bad payload, empty→`[]`) + the tool disabled/enabled pair.
-
-- **New `get_appliance_info` tool — surface the Archiver `getApplianceInfo` body (Fundort 3, decision KK).**
-  The MGMT `getApplianceInfo` body names WHICH appliance this is (`identity`) and where each plane is
-  served (`mgmt_url`/`engine_url`/`etl_url`/`retrieval_url`/`data_retrieval_url`, `cluster_inet_port`)
-  plus a `version` string — but nothing surfaced it: the doctor plane-check fetches the SAME body and
-  keeps only `identity`, discarding the rest. The new read-only, appliance-scoped tool (no `pv` arg)
-  projects the whole body through an `_APPLIANCE_INFO_FIELDS` allowlist so an unexpected field is
-  never surfaced and an absent field (e.g. `version` on a pre-`version.txt` appliance) is OMITTED, not
-  `null`. It answers two questions the per-PV archiver tools cannot: "am I pointed at the intended
-  cluster before I trust `list_archived_pvs`/`get_pv_history` (the wrong cluster silently yields a
-  complete-looking list of the WRONG PVs)?" and "is this a split/proxied deployment — which plane is
-  served where?". Field names + the all-string contract are the vendor `getApplianceInfo` JSON body
-  (`GetApplianceInfo.java`/`ApplianceInfo.java`) — a JSON contract, not a live measurement. Deliberate
-  differences from the sibling `get_archive_info`: **no `found` key** (there is no PV present/absent
-  duality) and **a served 404 PROPAGATES** as an error (it means the wrong endpoint — the retrieval
-  webapp serves `/retrieval/bpl`, not `/mgmt/bpl` — not "not found"). A 2xx whose body carries no
-  non-empty `identity` raises rather than fabricating an empty success (the getPVStatus/getPVTypeInfo
-  S11 anchor discipline). The plane URLs embed internal cluster-member host names, surfaced
-  un-redacted BY DESIGN — pure technical infra (no person data), consistent with the shipped
-  `host_name`/`data_stores` fields of `get_archive_info`. `list_tools` 30 → 31, no schema change (the
-  tool returns an untyped `dict`). Red-proof: `test_get_appliance_info_projects_fields` /
-  `_omits_absent_fields` (exact-equality, also pin that a non-allowlisted extra — incl. a plausible
-  future `serverStartEpochSeconds` — is dropped), `_unreadable_2xx_raises`, `_served_error_propagates`
-  (404 + 500), and the tool disabled/enabled pair.
-
-- **ChannelFinder query filters + exact count on `find_channels` (MA-2 CF-Query-Fläche).** The tool
-  gained additive, server-side filters — `has_properties` (`{name: value-glob}`, `"*"` = present),
-  `lacks_properties` (`prop!=*` — "does NOT have the property"), `not_property_values` (`prop!=value`
-  — has it, value differs), `has_tags`/`lacks_tags` (OR / any-of) — plus `count_only`, which returns
-  `{enabled, match_count}` from the `/resources/channels/count` endpoint (an exact, window-free count
-  without pulling the matches). The wire grammar is taken from the vendor source
-  (`ChannelRepository.getBuiltQuery`): negation is a trailing `!` on the key, and an unknown property
-  name is a property filter, NOT a silently-ignored param, so a typo narrows the result to ~0.
-  **DS-privacy:** the property-filter axis is gated to the same safe-property allowlist as the
-  response projection (`resolve_safe_property_names`) — filtering on a redacted property (e.g.
-  `accessGroup`) is refused, because it would reconstruct the name→value partition the projection
-  hides; an empty allowlist disables property filtering (tags are not redacted, not gated). To filter
-  on more properties, expand `EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES`. **Honest caveats** (as
-  shipped in this entry; the property filters were later live-verified — see the "### Changed" entry;
-  the tag filters remain unverified): the filter semantics are UNVERIFIED until a differential live
-  probe; and 0 results cannot distinguish an unknown property name from a genuinely empty match. Guards raise
-  `INVALID_INPUT` on a redacted/reserved (`~name`/`!`)/contradictory/separator-in-negation filter, so
-  no path can emit the forbidden `~name!`. No new tool (`list_tools` stays 30), no schema change (the
-  tool returns an untyped `dict`). Red-proof: the `_build_query_params` exact-equality tests pin both
-  what is emitted and what is never emitted, plus the conditional-forwarding regression.
-
-- **Surface already-fetched-but-discarded Archiver fields (AR-D).** Two projections harvest fields
-  the appliance already returns in the SAME call and previously threw away — no extra HTTP request.
-  `get_archive_status` (via `is_archived`) now also surfaces the getPVStatus connection-history
-  cluster: `connection_loss_regain_count` (the flapping counter — "did the IOC connection drop, and
-  how often?"), `connection_first_established` and `connection_last_restablished` (first/last
-  reconnect time, `"Never"` if it never dropped). `get_archive_info` (getPVTypeInfo) now also
-  surfaces the alarm/display/control limits + unit/precision (`upper_alarm_limit`=HIHI,
-  `upper_warning_limit`=HIGH, the `lower_*` mirror, `*_display_limit`=HOPR/LOPR, `*_ctrl_limit`=
-  DRVH/DRVL, `precision`, `units`=EGU) plus `controlling_pv`/`policy_name`/`modification_time`.
-  Field names and the all-string value contract are the Archiver Appliance response as serialized by
-  its own source (`EngineChannelStatus.java` for getPVStatus, `PVTypeInfo.java` for getPVTypeInfo) —
-  a JSON contract, not a live measurement; the existing `if key in record` allowlist guard omits any
-  field a given appliance/PV lacks. TWO honest caveats baked into the docstrings: (1) the getPVStatus
-  key `connectionLastRestablished` carries an UPSTREAM TYPO (missing the second "e"), preserved
-  verbatim so the projection matches the wire; (2) the nine numeric getPVTypeInfo limits are always
-  present and read `"0.0"` when the PV had no ctrl info, so `"0.0"` may mean "no limit configured",
-  not a literal zero — the guard cannot omit an always-present key. `lastRotateLogs` is deliberately
-  NOT surfaced (the appliance never sets it → epoch-0 noise). No new tool, no schema change (the
-  Archiver tools return an untyped `dict`). Red-proof: `test_get_pv_type_info_projects_fields` and
-  `test_get_archive_status_surfaces_connection_cluster_and_drops_unknown` (exact-equality, also pin
-  that any non-allowlisted extra is dropped).
-
-- **`epics-doctor` alarm plane now checks its Elasticsearch backend (`backend_down`, MA-2b(e)).**
-  The alarm transport probe is a blind HEAD, so it reported the plane healthy even when the alarm
-  logger's Elasticsearch — which backs its search and history tools — was dead. The identity probe
-  already fetches the logger's `GET /` beacon and parses the body to read its `name`; it now reads
-  `elastic.status` from that SAME body (no second request) and, once the name confirms this IS the
-  alarm logger, reports a new `backend_down` status (exit `1`, glyph `✗`) when the status is present
-  and not `"Connected"`. `backend_down` is distinct from `unverified`: identity IS proven and the
-  service reports its OWN backend broken. A missing or unreadable `elastic.status` falls back to `ok`
-  — no failure is claimed that cannot be proven. The healthy sentinel (`"Connected"`) and the
-  HTTP-200-even-when-down contract are pinned to the Phoebus source `SearchController.info()`; the
-  shared name-classification is factored into `_classify_phoebus_name` so the S14 handling cannot
-  drift between `_identify` and the new `_identify_alarm`.
-
-- **Write-side `level` validation (OQ1).** `create_log_entry`, `reply_to_log` and
-  `update_log_entry` now refuse a `level` the server does not list, and refuse a blank one
-  separately (it would silently CLEAR the entry's level). Matched EXACTLY — no OR-separators, no
-  wildcards, no case-folding; those are search semantics and a written level is a scalar. The
-  check sits BEFORE the rate token on both paths, so a typo costs no token, and it only runs when
-  a `level` was passed — a create that takes the server default still makes exactly one HTTP call.
-
-  The premise is pinned by a **differential live probe**, not read off the Java source
-  (`test_server_does_not_validate_a_written_level`): the server stores `"Urgnet"` verbatim behind
-  HTTP 200, after which no level filter finds the entry, and a blank level clears the field. If a
-  future Olog starts validating, that test goes red before the documentation becomes a lie.
-
-- **`entry_id` in the FAILED write audit (OQ6).** `audit_write_failed` accepts an optional
-  `entry_id`; the two EDIT paths pass it. The server archives and mutates before answering, so a
-  timeout can leave an APPLIED write in front of a client that sees FAILED — the record now names
-  the entry. The create call is byte-identical (a failed create still has no id). Metadata-only,
-  unchanged: no owner, no free text.
-
-### Changed
-
-- **Three pre-gate refusal codes on the wire** (the full rationale, and the CI guard that now holds the
-  rule, are in the "Pre-gate refusals" entry under *Added*): `OLOG_WRITE_DENIED` →
-  **`OLOG_WHOLE_MODE_REQUIRED`** for the whole-mode preconditions of `add_log_attachment` /
-  `update_log_entry` and their client-side backstop; `RATE_LIMIT_EXCEEDED` →
-  **`READ_RATE_LIMIT_EXCEEDED`** for the opt-in read throttle; `OLOG_ATTACH_TOO_LARGE` →
-  **`OLOG_ATTACH_TOO_LARGE_AT_READ`** for the post-admission TOCTOU size re-check. A caller matching on
-  the code *string* sees a different value; every class stayed a subclass of the one it replaces, so
-  `except` clauses are unaffected. Listed here for completeness — none of the three codes was ever
-  released (Olog write, the read throttle and attachments all landed after `0.2.0`).
-
-- **`tools/list` schema hygiene — lossless payload reduction (MA-Q1, precondition for new tools).**
-  *(⚠️ ÜBERHOLT durch die standalone-fastmcp-Migration `6bd12c6`: der hier beschriebene Pass
-  `_prune_tool_schemas(mcp)` samt A1/A2/A3-Helfern ist entfernt — standalone `fastmcp` emittiert die
-  schlanken Schemas nativ; die Reduktion kommt jetzt „by construction", die Zahlen 70237→64499 sind
-  historisch, aktuell = 59683 core / 67976 all-lane. S. Removed/Changed oben.)*
-  A single post-registration pass `_prune_tool_schemas(mcp)` (in `server.py`, run AFTER the display-tool
-  registrar, wrapped in a crash-guarding `try/except` that mirrors `_load_display_registrar` — an optional
-  hygiene pass must never take down the core PV server) shrinks the wire `tools/list` payload with NO loss
-  of capability: **70,237 → 64,499 chars** (compact `model_dump_json(by_alias=True, exclude_none=True)`, the
-  transport form; +`instructions` the budget is 66,172 vs a soft ~60k target). Two passes: **A1** strips the
-  derived pydantic `title` ANNOTATIONS from every inputSchema — SCHEMA-AWARE, so the four Olog tools with a
-  parameter literally named `title` (`create_log_entry`/`reply_to_log` [required], `update_log_entry`,
-  `search_logbook`) keep that parameter (a naive "pop every `title` key" would delete `properties["title"]`
-  and leave it dangling in `required`, silently breaking the write tools). **A2** drops the 21 information-empty
-  outputSchemas (`{additionalProperties: true, …DictOutput}`, which validate nothing) via
-  `Tool.output_schema = None` — an advertise-only drop: `fn_metadata.output_schema` stays intact, so the tools
-  still return `structuredContent` at call time. The 11 typed Olog outputSchemas (they carry `properties`) are
-  KEPT (test-pinned). `list_tools` unchanged (32 with `[displays]`, 28 core-only). New relational regression
-  tests in `tests/test_server.py`, each proven able to go red via a mutant (naive strip, no strip, blanket
-  drop, cleared runtime schema, removed crash-guard). This is a PARTIAL step toward the ~60k soft target:
-  the remaining ~6k would need capacity-sensitive description compression, deliberately left as separate,
-  scoped follow-up work.
-
-- **ChannelFinder PROPERTY filter semantics VERIFIED against a live server (MA-2 Teil C, 2026-07-22).**
-  A differential live probe (positive + negative controls) confirmed the `find_channels` PROPERTY
-  filters (`has_properties`/`lacks_properties`/`not_property_values`) and `count_only` behave as
-  documented, so the "UNVERIFIED until a differential live probe" caveat is dropped for them from the
-  tool description, the `find_channels` docstring, `README.md` and the operator guide (the "0 results
-  ≠ unknown property" honesty rule stays — a structural fact, not a provisional marker). The TAG
-  filters (`has_tags`/`lacks_tags`) remain UNVERIFIED — the sandbox ChannelFinder carries no tags to
-  probe them; their caveat is re-scoped to the tag axis, not dropped. Five new controls in
-  `tests/test_channelfinder_live.py`, all on the surfaced `pvStatus` property: a
-  positive strict-subset (`has_properties` returns a non-empty subset whose members carry the value),
-  an absence-partition (`lacks_properties` + `has_properties={p: "*"}` sum to the unfiltered count), a
-  value-negation (`not_property_values` drops that value only), `count_only`↔list agreement, and an
-  impossible-value collapse (an unknown value → 0 — the very reason "0 ≠ unknown property" holds).
-  They run under `pytest -m live` with `EPICS_MCP_CHANNELFINDER_URL` + `EPICS_MCP_LIVE_CF_GLOB`, and
-  skip silently otherwise.
-
-- **Refusals no longer report as `INTERNAL` (OQ5).** `OlogError` carries `error_code` as a class
-  attribute and each subclass sets its own, mirroring `EpicsError`. `OlogRoundTripUnsafe` →
-  `INVALID_INPUT`, `OlogWholeModeRequired` → `OLOG_WHOLE_MODE_REQUIRED` (it landed on
-  `OLOG_WRITE_DENIED` first; corrected in place below, still unreleased),
-  `OlogAttachmentDownloadDenied` →
-  `OLOG_ATTACHMENT_DOWNLOAD_DENIED`. `INTERNAL` reads as transient and invited retries that each
-  burned a rate token and wrote a FAILED line for a write that never happened. The new branch is
-  LAST in `_olog_error_code` — the connection/response branches are themselves `OlogError`
-  subclasses and would otherwise be swallowed along with the HTTP-status resolution.
-
-- **The `level` parameter descriptions agree again (OQ3)**, all three pointing at
-  `list_log_levels`, guarded by a new AST drift test so they cannot silently diverge.
-
-### Fixed
-
-- **`monitor_pv` reported `truncated` on a complete, exactly-full stream (F27).** The service
-  capped collection at `max_events` *before* appending, so `len(events) >= max_events` could not
-  tell "the cap cut the stream" from "exactly `max_events` arrived, then it went quiet" — and the
-  naive `>=`→`>` swap would have made `truncated` permanently False (a silent drop). `pv_monitor`
-  now over-collects exactly one canary event (`max_events + 1`), trims it, and returns
-  `(events, truncated)` with `truncated = len(collected) > max_events` — the same honest over-fetch
-  as `get_alarm_history`'s `size=max+1`. Proven red on the pre-fix cap via a real multi-event probe.
-
-- **`--timeout` accepted `-1` / `0` / `inf`, misdiagnosing a healthy service as unreachable (F22).**
-  `epics-doctor`, `epics-diagnose` and the `find_moderate_pv` diagnostic took a bare `type=float`,
-  so a non-positive or non-finite timeout flowed into a live probe and made a reachable plane look
-  `unreachable` — the opposite of what a diagnostic owes. A shared `cli_common.positive_timeout`
-  argparse type now rejects `<= 0`, `nan` and `inf` as a usage error (exit 2) at parse time, before
-  any probe.
-
-- **The attach documentation said the opposite of the truth (OQ4).** Five places claimed an
-  attach preserves "every field". `POST /logs/multipart` delegates to the server's `updateLog`,
-  which runs `setOwner(principal.getName())` unconditionally (`LogResource.java:550`) — attaching
-  a file REWRITES the entry's author, and the original survives only in the server-side archived
-  version, which this server cannot read. **Measured live with a second principal**
-  (`test_add_attachment_restamps_the_owner`): owner flips from the creating account to the write
-  service account while the content is untouched. The sibling additive test could never see this —
-  it creates and attaches as the same account — and its "every field is UNCHANGED" comment is now
-  narrowed to "every CONTENT field".
-
-- **The safety prose named 2 of 4 write tools (OQ8).** `EPICS_MCP_ALLOW_OLOG_WRITE` gates
-  `create_log_entry`, `reply_to_log`, `add_log_attachment` and `update_log_entry`; README,
-  ARCHITECTURE and the operator guide described it as "create_log_entry / reply_to_log". A site
-  admin reading that section to approve the gate would conclude that only NEW entries can be
-  created and unknowingly enable the destructive `update_log_entry`.
-
-- **The archive was cited as a safety net it cannot be (OQ7).** Three places pointed at the
-  server-side archived version to soften the owner re-stamp; no tool here can read or restore it.
-  All three now say recovery is manual.
-
-- **Olog log levels + the `level`/`title` search facets (OA2 / part of OA5).** New read tool
-  `list_log_levels` (`GET /levels`, ungated like `list_tags`) returning the level names plus
-  `default_level` — the level a create uses when none is given, reported only when the server states
-  it unambiguously and `null` with an explaining note otherwise (no level flagged, several flagged,
-  or the flag unreadable; the server's own seed data ships two defaults). `search_logbook` gained
-  `level` and `title` filters.
-
-  Both filters were confirmed by a **differential live probe** with a positive control, a negative
-  control, and an ignored-parameter control — Olog silently drops parameters it does not know
-  (`default: // Unsupported search parameters are ignored`), so "the filter returned results" proves
-  nothing on its own. Two measured hazards are handled rather than documented away: an **unknown
-  level returns 0 hits instead of an error**, so an empty level-filtered result now carries a note
-  saying the value is not a configured level (checked only on an empty result, and a failed
-  cross-check says so rather than overturning the search); and a **blank filter is refused before any
-  request**, because the server's two answers to it are both misleading and disagree with each other
-  (a blank `level` matches nothing, a blank `title` is dropped and returns everything).
-  `title` matches whole words, not substrings — deliberately unlike `find_channels`.
-
-  Hardened by an adversarial review of the diff (19 findings confirmed, 8 refuted), all
-  re-measured against the running server before acting:
-
-  - **`level` is trimmed the way Java trims**, i.e. only code points ≤ U+0020. Python's wider
-    `strip()` removed NBSP-class spaces that the server KEEPS, so `level="\xa0Info"` was normalised
-    into the configured `Info`, the cross-check saw a known level, and the empty result went out
-    unannotated (measured: the server returns 0 for it and 19 for `"Info"`).
-  - **The blank guard uses each field's OWN separator class.** `title` also splits on whitespace
-    and on a **literal `+`** (the Java class is `[\|,;\s+]`, where the trailing `+` is a class
-    member, not a quantifier), so `title="+"` produced no search term, Olog dropped the filter, and
-    the UNFILTERED set came back looking filtered. `"+"` remains an ordinary `level`.
-  - **The empty-result note no longer overclaims.** It is a statement about the VALUE, never about
-    the cause: it is skipped for an empty PAGE past the end of a paginated set (which contradicts
-    `total_matches` in the same payload), it does not judge a wildcard level (the server honours
-    `Inf*`), it says an OR-ed filter still ran on its recognised parts, and it admits that another
-    filter in the same search may account for the 0.
-  - Documentation corrected where it was wrong: a separators-only `level` does **not** match
-    nothing, it is dropped and returns the unfiltered set — a different mechanism from `""`.
-  - The free-text withholding now states its honest limit: a search still answers with a hit COUNT,
-    so `title=<word>` reveals whether a word occurs in some withheld title. Pre-existing via
-    `text`/`desc`, not introduced here, but previously unacknowledged.
-
-- **Olog attachments (OA1).** `create_log_entry` / `reply_to_log` now take `attachments` (workspace
-  file paths, any type/size — sent as multipart `PUT /logs/multipart`, mirroring CS-Studio) and
-  `embed_image_base64` (a small inline image embedded via `![](attachment/<id>)`). Two new read
-  tools: `list_log_attachments` (id + metadata; filename **whole-mode only**) and
-  `download_log_attachment` (raw bytes by log+filename or GridFS id, to a workspace `output_path` or
-  `as_base64`). Bytes bypass the entry redaction, so a download is **withheld** unless whole-mode
-  **and** the new `EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD` opt-in; uploads ride the existing Olog
-  write gate, extended with a size cap (`EPICS_MCP_OLOG_ATTACH_MAX_BYTES`) that also bounds the
-  download body (anti-OOM; a base64 download is capped further). A download `output_path` is a NEW
-  file — it refuses to overwrite and refuses a symlink target (no data loss, no boundary escape).
-  Verified against a live loopback Olog with a byte-identical round-trip. The no-attachment create
-  path is unchanged.
-- **Olog entry editing (OA3).** New write tool `update_log_entry(log_id, title?, description?,
-  level?, logbooks?, tags?)` edits an existing entry via `POST /logs/multipart` (the `logEntry` part
-  with no file parts — the same server core, and the same already-probed transport, as OA1b). An
-  omitted argument means **unchanged**: the tool round-trips the target entry's full content and
-  overlays only what was passed, so attachments, properties and unedited fields survive the
-  server's destructive full-replace. **Whole-mode only**; same write gate as create, but the logbook
-  allowlist is keyed on the **UNION** of the entry's current and resulting logbooks — moving an entry
-  *into* a logbook and pulling it *out* of one are both writes to that logbook, so gating on either
-  side alone left a hole. Compensates three server behaviours measured in the Olog source: a body
-  edit is written to the raw `source` (under `markup=commonmark` the server regenerates
-  `description` from it, so a new description beside a stale source would be silently overwritten);
-  logbook/tag names are validated client-side (the update, unlike create, does not validate them and
-  would store phantom references); and an empty title is rejected here because the server accepts it.
-  An entry whose attachments have duplicate or missing filenames is **refused** rather than edited —
-  attachment retention is filename-keyed (`Attachment.compareTo` inside a `TreeSet`), so such an
-  entry cannot round-trip without silently losing a file. Note the server re-sets `owner` to the
-  write service account on every update, and editing a legacy entry without a raw `source` makes it
-  re-render the visible body (returned as a `warnings` entry). 13 guards, each mutant-red-proven.
-- **Olog attach-to-existing (OA1b).** New write tool `add_log_attachment(log_id, attachments,
-  embed_image_base64?)` attaches file(s) to an EXISTING entry via `POST /logs/multipart`. That
-  endpoint is the server's DESTRUCTIVE `updateLog` (it `retainAll`-prunes any attachment not
-  resubmitted and overwrites the entry's fields), so the tool round-trips the target entry's full
-  content and only appends — the attach is purely **additive** (existing attachments and every field
-  survive). **Whole-mode only** (the round-trip source is readable only from a declared local
-  sandbox); against a redacted/remote server it is refused. Same write gate as create, with the
-  logbook allowlist keyed on the TARGET entry's own logbooks. Verified live: create → add → both
-  attachments preserved, title/body/logbooks unchanged, bytes byte-identical.
-- `python -m epics_pv_mcp.find_moderate_pv`: read-only fixture finder — walks the MGMT
-  event-rate report (omitting `limit` returns the whole report — near-complete, measured
-  against `getAllPVs`; `limit` behaves as if applied per cluster member and merged, measured),
-  filters a rate band, and counter-verifies each examined candidate (bounded by
-  `--max-verify`) against the target window with a real history fetch (the report's rate is
-  the appliance's own recent-window figure, never the caller's window). Deliberately a
-  module, not a console script (build-once: no packaging change).
-- `epics-pv://guide` resource + `OPERATING.md`: an operational cookbook (service planes,
-  archiver-enumeration/retrieval-cluster/CA-bundle recipes, error signatures) shipped inside
-  the package, so the server carries its own operational knowledge. Backed by one source file
-  (`src/epics_pv_mcp/operator_guide.md`), drift-guarded against the tool/env surface.
-- Optional `[displays]` extra: the display-aware tools (`validate_pvs`,
-  `crossplane_check`, `coverage_audit`, `find_device`) now live behind an optional
-  dependency on the `opi_navigation` PV engine. The **core** server (live PV access,
-  diagnosis, REST-service planes) installs and starts standalone without it.
-- Packaging metadata (`license`, `readme`, `authors`, `keywords`, project URLs);
-  `ARCHITECTURE.md`, `CONTRIBUTING.md`, and this changelog.
-
-### Changed
-
-- `epics-doctor`: a FAILED identity probe (a served non-2xx like a 401/404, a transport error, or a
-  refused redirect on the identity endpoint) is now reported as the new status
-  `identity_probe_failed` (glyph `!`) and exits **`3`** (INCONCLUSIVE), instead of collapsing into
-  `unverified`/exit `0`. A 2xx that merely could not be named (an anonymous or unreadable body, or a
-  foreign service name) stays `unverified`/exit `0`. New `--json` field `inconclusive_identity_planes`
-  carries the failed-probe planes (distinct from `unverified_planes`); `verification_complete` is now
-  also False when a probe failed. Motivation: a probe that FAILED used to be indistinguishable from a
-  reachable-but-anonymous one — the false all-clear this tool exists to catch (the S4 dead-container
-  case). Migration: a script that gated on exit `0` now sees exit `3` for a reachable-but-unidentifiable
-  plane and must read `inconclusive_identity_planes` alongside `unverified_planes` from `--json`. Also
-  fixes the redirect-refusal message wording (`rest_get_json` / `rest_put_json`): it no longer claims
-  "different host" for a same-origin redirect.
-- `epics-doctor`: a service answering with a *different* known service's name is now reported
-  `unverified` (exit 0) with the found name in the detail, instead of the removed
-  `wrong_service` failure (exit 1). Measured motivation: a path-based reverse proxy served the
-  real ChannelFinder API while the base GET answered as Olog — the old hard failure flagged a
-  working configuration, and its "unambiguous at any site" rationale did not survive that
-  measurement. Migration: a script that relied on exit `1` for a cross-wired URL must now read
-  `unverified_planes` from `--json` (and assert `identified_planes` for positive confirmation).
-- `EPICS_MCP_DEFAULT_TIMEOUT` is now honoured on the whole read/write path. Tool
-  timeouts default to the configured server timeout instead of a hardcoded `5.0`.
-- The 15 tool wrappers now share a single `translate_epics_errors` decorator instead of
-  a copied `try/except` block.
-- The live probe in `diagnose_connection` runs concurrently with the explanatory planes
-  (worst-case latency ~1×timeout instead of ~2×timeout).
-
-### Fixed
-
-- `set_pv_value` audit blind spot on cancellation (N01): a write cancelled mid-`pv_put` (asyncio
-  `CancelledError`) used to leave **no** `PV_WRITE` record even though the `asyncio.to_thread` p4p
-  put keeps running and may still land at the IOC. It now emits `event=ATTEMPT` (with a correlating
-  `op=<id>`) **before** the I/O and `event=UNKNOWN_PENDING` on cancel, then re-raises the cancel
-  unchanged — never mislabelled `FAILED`, never blindly retried. So "every write attempt is
-  audit-logged" now holds even for an interrupted write. `ALLOW`/`FAILED` carry the `op` too.
-- `NamingServiceClient` normalises `base_url` (trailing-slash strip) like the other REST
-  clients, so a URL configured without a trailing slash no longer 404s.
-- README ↔ code drift: resource URIs, the full configuration table (incl. the optional
-  REST-service and EPICS-network variables), and the uv-based development gate chain.
+- **The post-registration schema-pruning pass** (`_prune_tool_schemas` and three helpers, roughly 130
+  lines) is gone. Standalone `fastmcp` emits the lean schemas natively, so the pass had nothing left
+  to do. The one remaining need, dropping an accept-all `outputSchema`, is now the public
+  `output_schema=None` on the tools that return an untyped dict.
 
 ## [0.2.0]
 
-Baseline: an independently developed EPICS PV MCP server on FastMCP + p4p with a
+Baseline: an independently developed EPICS PV MCP server on FastMCP and p4p with a
 write-safety layer, batch operations, PV monitoring, cross-plane provenance
-(ChannelFinder · Archiver · Alarm · Naming), device lookup, and OPI file validation.
+(ChannelFinder, Archiver, Alarm, Naming), device lookup, and OPI file validation.
 Originally seeded from [Jacky1-Jiang/EPICS-MCP-Server](https://github.com/Jacky1-Jiang/EPICS-MCP-Server).
+
+### Added
+
+- `epics-pv://guide` resource and `OPERATING.md`: an operational cookbook (service planes,
+  archiver-enumeration, retrieval-cluster and CA-bundle recipes, error signatures) shipped inside
+  the package, so the server carries its own operational knowledge. Backed by one source file
+  (`src/epics_pv_mcp/operator_guide.md`), drift-guarded against the tool and env surface.
+- Optional `[displays]` extra: the display-aware tools (`validate_pvs`, `crossplane_check`,
+  `coverage_audit`, `find_device`) live behind an optional dependency on the `opi_navigation` PV
+  engine. The core server (live PV access, diagnosis, REST-service planes) installs and starts
+  standalone without it.
+- Packaging metadata (`license`, `readme`, `authors`, `keywords`, project URLs), plus
+  `ARCHITECTURE.md`, `CONTRIBUTING.md` and this changelog.
