@@ -16,7 +16,11 @@ from epics_pv_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_pv_mcp.prompts import diagnose_pv as _diagnose_pv
 from epics_pv_mcp.resources import get_epics_config, get_guide, get_health
 from epics_pv_mcp.safety import get_safety
-from epics_pv_mcp.services.checkers import AlarmConfiguredResult, NameLookupResult
+from epics_pv_mcp.services.checkers import (
+    AlarmConfiguredResult,
+    ArchiveStatusResult,
+    NameLookupResult,
+)
 from epics_pv_mcp.services.checkers_olog import (
     OlogAddAttachmentResult,
     OlogCreateResult,
@@ -751,7 +755,7 @@ async def lookup_device_name(
 async def is_archived(
     pv: Annotated[str, Field(description="EPICS PV name")],
     timeout: Annotated[float, Field(description="Timeout in seconds")] = 5.0,
-) -> dict[str, object]:
+) -> ArchiveStatusResult:
     """Report whether a PV is being archived (EPICS Archiver Appliance MGMT getPVStatus).
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.

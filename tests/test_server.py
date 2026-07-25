@@ -971,6 +971,118 @@ async def test_name_lookup_structured_output_conforms_to_its_schema(
         )
 
 
+# The JSON base type every is_archived (ArchiveStatusResult) property must advertise. Hardcoded as
+# an INDEPENDENT source of truth (not reflected from the TypedDict) so a base-type widening is
+# caught. The 8 DS-4A/AR-D enrichment fields are typed ``object | None`` (their wire value is copied
+# uncoerced from getPVStatus and is genuinely bool OR str across the fixtures), which renders as
+# ``anyOf[{}, {type: null}]`` — a non-null branch with NO ``type`` — so ``_base_type`` returns None
+# for them. Mapping them to None here pins that "unconstrained" intent and still red-flags any
+# accidental narrowing to a wrong scalar. Only ``archived``/``status``/``enabled``/``pv``/``note``
+# are genuine scalars (archived is a computed bool, not str).
+_ARCHIVE_STATUS_BASE_TYPE: dict[str, str | None] = {
+    "enabled": "boolean",
+    "pv": "string",
+    "archived": "boolean",
+    "status": "string",
+    "connection_state": None,
+    "last_event": None,
+    "is_monitored": None,
+    "sampling_period": None,
+    "appliance": None,
+    "connection_loss_regain_count": None,
+    "connection_first_established": None,
+    "connection_last_restablished": None,
+    "note": "string",
+}
+
+# The keys is_archived emits on EVERY return path and never as a spurious null — enabled and pv.
+# archived is present on every path but None on the disabled path, so it too must permit null.
+_ARCHIVE_STATUS_ALWAYS_PRESENT = frozenset({"enabled", "pv"})
+
+
+@pytest.mark.asyncio
+async def test_is_archived_exposes_typed_output_schema() -> None:
+    """S29 (4th target): is_archived advertises a STRUCTURED outputSchema — its ArchiveStatusResult
+    TypedDict's typed ``properties``, not the bare accept-all schema a plain ``dict[str, object]``
+    return yields. Red before the retype (no properties at all).
+
+    Mirrors test_name_lookup_exposes_typed_output_schema: (1) the schema title is
+    ArchiveStatusResult; (2) the advertised properties are EXACTLY the 13 mapped fields —
+    completeness both ways (mypy --strict guards an undeclared key in a literal; this guards a
+    dropped one); (3) every field carries the expected JSON base type via :func:`_base_type`. The 8
+    ``object | None`` enrichment fields must advertise NO base type (``None``) — a widening to a
+    concrete scalar (e.g. one wrongly typed ``str``) would flip _base_type to ``"string"`` and trip
+    the assertion."""
+    from epics_pv_mcp.server import mcp
+
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    schema = tools["is_archived"].outputSchema or {}
+    properties = schema.get("properties", {})
+    assert properties, "is_archived: outputSchema carries no typed properties"
+    assert schema.get("title") == "ArchiveStatusResult", (
+        f"is_archived: wrong TypedDict wired ({schema.get('title')!r})"
+    )
+    assert set(properties) == set(_ARCHIVE_STATUS_BASE_TYPE), (
+        f"is_archived: advertised properties {sorted(properties)} != "
+        f"expected {sorted(_ARCHIVE_STATUS_BASE_TYPE)}"
+    )
+    for field, prop in properties.items():
+        actual = _base_type(prop)
+        assert actual == _ARCHIVE_STATUS_BASE_TYPE[field], (
+            f"is_archived.{field}: schema base type {actual!r} != "
+            f"{_ARCHIVE_STATUS_BASE_TYPE[field]!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_is_archived_structured_output_conforms_to_its_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S29 conformance (the MA-1 null trap for is_archived): the EMITTED structuredContent must
+    conform to its own outputSchema. FastMCP serializes an omitted ``total=False`` key as JSON
+    ``null`` (its ``convert_result`` dumps the model WITHOUT ``exclude_none``), so a field absent on
+    the disabled path — status + the 8 enrichment fields — MUST permit null there. And ``archived``
+    is explicitly None on the disabled path (the tri-state), so a non-nullable ``archived: bool``
+    would make the disabled-path output violate the tool's advertised schema.
+
+    Part A (runtime, real serialization): drive is_archived on the disabled path through
+    ``mcp.call_tool`` and assert every None-valued key in the emitted structuredContent permits null
+    — the direct bug repro. Part B (static): every advertised property outside the always-present
+    envelope must permit null."""
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import mcp
+    from epics_pv_mcp.services import checkers
+
+    # Force the disabled path deterministically (independent of the ambient EPICS_MCP_ARCHIVER_URL).
+    # query_archived resolves get_config in the checkers module's OWN namespace (a plain
+    # ``from ... import get_config``), so patch it THERE — NOT tools.archiver.get_config (the
+    # get_pv_history/get_archive_info seam, a different module) and NOT the thin _is_archived one.
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(archiver_url=""))
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    properties = (tools["is_archived"].outputSchema or {}).get("properties", {})
+
+    # Part A — the emitted structuredContent conforms on the disabled path.
+    _content, structured = cast(
+        tuple[object, dict[str, Any]],
+        await mcp.call_tool("is_archived", {"pv": "SIM:PS-01:Cur-RB"}),
+    )
+    for key, value in structured.items():
+        if value is None:
+            assert _schema_permits_null(properties[key]), (
+                f"is_archived.{key}: emitted null but its schema property forbids null "
+                f"({properties[key]})"
+            )
+
+    # Part B — every sometimes-absent advertised property permits null.
+    for prop_name, prop_schema in properties.items():
+        if prop_name in _ARCHIVE_STATUS_ALWAYS_PRESENT:
+            continue
+        assert _schema_permits_null(prop_schema), (
+            f"is_archived.{prop_name}: sometimes-absent property must permit null in its "
+            f"outputSchema (FastMCP dumps an omitted key as null), got {prop_schema}"
+        )
+
+
 def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1017,8 +1129,9 @@ def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
 # The tools whose TypedDict return yields a TYPED outputSchema (properties present); every OTHER
 # tool returns dict[str, object] -> its information-empty outputSchema is dropped to None by A2.
 # Named here as an INDEPENDENT source of truth (not reflected from the code). The 11 Olog tools were
-# typed first (MA-1 Commit C); get_pv_history followed (S29 — its result-level status ok/empty/
-# withheld is exactly the kind of discriminant S29 surfaces on the wire). These are core tools, so
+# typed first (MA-1 Commit C); the archiver/alarm/naming targets followed (S29 — get_pv_history,
+# is_alarm_configured, lookup_device_name, is_archived; each surfaces a result-level
+# status/tri-state discriminant on the wire, exactly what S29 exposes). These are core tools, so
 # the set is identical on a core-only ([displays] absent, 28 tools) and a full (32) install -> the
 # assertions are RELATIONAL, never a COUNT (which would break the core-only lane).
 _TYPED_OUTPUT_TOOLS = frozenset(
@@ -1037,6 +1150,7 @@ _TYPED_OUTPUT_TOOLS = frozenset(
         "get_pv_history",
         "is_alarm_configured",
         "lookup_device_name",
+        "is_archived",
     }
 )
 
@@ -1300,7 +1414,8 @@ def test_is_information_empty_output_schema_precise() -> None:
 async def test_output_schema_typed_only_for_typed_tools() -> None:
     """MA-Q1 A2 (RELATIONAL — not a count, so core-only [28] and full [32] both pass): a tool
     advertises an outputSchema WITH properties iff it is one of the typed tools (the 11 Olog tools +
-    get_pv_history); every other present tool advertises NONE. Proves the empty schemas were dropped
+    get_pv_history/is_alarm_configured/lookup_device_name/is_archived); every other present tool
+    advertises NONE. Proves the empty schemas were dropped
     AND the typed ones kept. Red on a blanket drop (typed schemas gone) or no drop (empty schemas
     remain). Also the built-in S29 red-proof: put get_pv_history in the set before its TypedDict
     lands and this assertion goes red (its schema is still pruned to None)."""
@@ -1341,16 +1456,20 @@ async def test_stripped_tool_still_returns_structured_content(
 ) -> None:
     """MA-Q1 A2 is ADVERTISE-ONLY: dropping the wire outputSchema leaves the RUNTIME
     ``fn_metadata.output_schema`` intact, so a stripped tool still returns structuredContent at call
-    time. Drive ``is_archived`` (a stripped tool) on its deterministic disabled path (no network)
-    and assert it still yields a structured dict."""
+    time. Drive ``get_archive_info`` (a stripped tool — its dict[str, object] return is pruned to
+    None) on its deterministic disabled path (no network) and assert it still yields a structured
+    dict. (NOT is_archived — that became a TYPED tool in S29, so its schema is no longer stripped
+    and it would no longer exercise this path; get_archive_info stays untyped.)"""
     from epics_pv_mcp.config import EpicsConfig
     from epics_pv_mcp.server import mcp
-    from epics_pv_mcp.services import checkers
+    from epics_pv_mcp.tools import archiver
 
-    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(archiver_url=""))
+    # get_archive_info lives in tools/archiver.py (like get_pv_history), so its get_config resolves
+    # in THAT module's namespace — patch archiver.get_config, not checkers.get_config.
+    monkeypatch.setattr(archiver, "get_config", lambda: EpicsConfig(archiver_url=""))
     _content, structured = cast(
         tuple[object, dict[str, Any]],
-        await mcp.call_tool("is_archived", {"pv": "SIM:PS-01:Cur-RB"}),
+        await mcp.call_tool("get_archive_info", {"pv": "SIM:PS-01:Cur-RB"}),
     )
     # Reached the disabled path AND produced structuredContent despite the dropped wire schema.
     assert structured.get("enabled") is False

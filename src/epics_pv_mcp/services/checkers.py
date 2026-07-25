@@ -319,7 +319,38 @@ def _archiver_error_code(exc: ArchiverError) -> str:
     return f"ARCHIVER_HTTP_{status}" if status is not None else "ARCHIVER_RESPONSE_ERROR"
 
 
-async def query_archived(pv: str, timeout: float = 5.0) -> dict[str, object]:
+# --- Tool result shape (S29): is_archived's archive-status tri-state -----------------------------
+# One total=False TypedDict over every key across query_archived's return paths (disabled /
+# enabled). Same MA-1 nullability rule as AlarmConfiguredResult above: a field ABSENT on some
+# return path -- or present-but-sometimes-None (``archived`` is None on the disabled path) -- is
+# typed ``X | None``, because FastMCP serializes an omitted total=False key (and an explicit None)
+# as JSON ``null`` (convert_result dumps WITHOUT ``exclude_none``); a non-nullable type makes the
+# emitted structuredContent violate the tool's own advertised outputSchema. Only ``enabled`` +
+# ``pv`` are present on EVERY path and never null.
+#
+# The 8 DS-4A/AR-D enrichment fields are copied UNCOERCED from the getPVStatus record
+# (get_archive_status: ``result[out_key] = record[source_key]``), so their wire value is whatever
+# the appliance sent -- measured both bool and str across the fixtures -- hence ``object | None``,
+# NOT ``str | None``: a stricter scalar would make a bool value fail its own outputSchema at call
+# time (FastMCP validates the return via the output_model). ``archived``/``status`` ARE computed
+# (bool / non-empty str), so they stay precisely typed.
+class ArchiveStatusResult(TypedDict, total=False):
+    enabled: bool
+    pv: str
+    archived: bool | None
+    status: str | None
+    connection_state: object | None
+    last_event: object | None
+    is_monitored: object | None
+    sampling_period: object | None
+    appliance: object | None
+    connection_loss_regain_count: object | None
+    connection_first_established: object | None
+    connection_last_restablished: object | None  # upstream typo, verbatim (getPVStatus wire key)
+    note: str | None
+
+
+async def query_archived(pv: str, timeout: float = 5.0) -> ArchiveStatusResult:
     """Report whether *pv* is being archived (Archiver MGMT getPVStatus). Read-only, config-gated.
 
     Default-disabled: with ``EPICS_MCP_ARCHIVER_URL`` unset, returns a structured ``enabled: false``
@@ -332,11 +363,39 @@ async def query_archived(pv: str, timeout: float = 5.0) -> dict[str, object]:
     if not cfg.archiver_url:
         return {"enabled": False, "pv": pv, "archived": None, "note": _ARCHIVER_DISABLED_NOTE}
 
-    def _run() -> dict[str, object]:
+    def _run() -> ArchiveStatusResult:
         client = ArchiverClient(
             cfg.archiver_url, timeout=timeout, auth_header=cfg.archiver_auth or None
         )
-        return {"enabled": True, "pv": pv, **client.get_archive_status(pv)}
+        status = client.get_archive_status(pv)
+        # archived (bool) + status (non-empty str) are always present and computed; bool()/str() are
+        # identities that satisfy the TypedDict from get_archive_status' dict[str, object].
+        result: ArchiveStatusResult = {
+            "enabled": True,
+            "pv": pv,
+            "archived": bool(status["archived"]),
+            "status": str(status["status"]),
+        }
+        # DS-4A/AR-D enrichment: present only when getPVStatus carried the field. A TypedDict needs
+        # LITERAL keys, so each is set explicitly under a presence guard (no loop over a key list);
+        # the value is copied uncoerced (object | None), matching the wire (was a ** splat before).
+        if "connection_state" in status:
+            result["connection_state"] = status["connection_state"]
+        if "last_event" in status:
+            result["last_event"] = status["last_event"]
+        if "is_monitored" in status:
+            result["is_monitored"] = status["is_monitored"]
+        if "sampling_period" in status:
+            result["sampling_period"] = status["sampling_period"]
+        if "appliance" in status:
+            result["appliance"] = status["appliance"]
+        if "connection_loss_regain_count" in status:
+            result["connection_loss_regain_count"] = status["connection_loss_regain_count"]
+        if "connection_first_established" in status:
+            result["connection_first_established"] = status["connection_first_established"]
+        if "connection_last_restablished" in status:
+            result["connection_last_restablished"] = status["connection_last_restablished"]
+        return result
 
     try:
         return await asyncio.to_thread(_run)

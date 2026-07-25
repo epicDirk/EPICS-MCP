@@ -22,7 +22,11 @@ from epics_pv_mcp.services.archiver_client import (
     ArchiverClient,
 )
 from epics_pv_mcp.services.archiver_exceptions import ArchiverConnectionError, ArchiverError
-from epics_pv_mcp.services.checkers import _archiver_error_code, query_archived
+from epics_pv_mcp.services.checkers import (
+    ArchiveStatusResult,
+    _archiver_error_code,
+    query_archived,
+)
 
 #: Used by _get_pv_history below; the sibling _is_archived note lives with query_archived in
 #: services/checkers.py (same string, self-contained per layer — no services ↔ tools coupling).
@@ -63,7 +67,7 @@ ArchiverHistoryResult = TypedDict(
 )
 
 
-async def _is_archived(pv: str, timeout: float = 5.0) -> dict[str, object]:
+async def _is_archived(pv: str, timeout: float = 5.0) -> ArchiveStatusResult:
     """Report whether *pv* is being archived (Archiver MGMT getPVStatus).
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_archived`.
