@@ -791,7 +791,7 @@ class OlogClient:
         ``search_logbook(logbooks=…)``.
         """
         data = self._get(f"{self.base_url}/logbooks", {})
-        return _named_list(data, "GET /logbooks")
+        return _named_list(data, f"GET {self.base_url}/logbooks")
 
     def list_tags(self) -> list[str]:
         """Return the names of all Olog tags (``GET /tags``), name-only.
@@ -800,7 +800,7 @@ class OlogClient:
         are the valid filter values for ``search_logbook(tags=…)``.
         """
         data = self._get(f"{self.base_url}/tags", {})
-        return _named_list(data, "GET /tags")
+        return _named_list(data, f"GET {self.base_url}/tags")
 
     def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
         """``(names, default_level, note)`` for the Olog levels (``GET /levels``), name-only (OA2).
@@ -816,7 +816,7 @@ class OlogClient:
         redaction. An unreadable listing raises rather than collapsing to an empty list: "there are
         no levels" would tell a caller validating a filter value that none of them exist."""
         data = self._get(f"{self.base_url}/levels", {})
-        return _level_list(data, "GET /levels")
+        return _level_list(data, f"GET {self.base_url}/levels")
 
     def create_log_entry(
         self,

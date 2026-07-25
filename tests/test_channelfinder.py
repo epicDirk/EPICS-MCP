@@ -597,9 +597,12 @@ def test_each_route_targets_its_own_endpoint(monkeypatch: pytest.MonkeyPatch) ->
     Together with test_count_channels_targets_the_count_endpoint above, this pins all four URL
     properties the client declares (channels_url, count_url, properties_url, tags_url).
 
-    The assertion follows each call immediately because ``call_args`` holds only the LAST call,
-    and ``call_count`` is the non-vacuity floor: without it a route that stopped requesting
-    altogether would go green on its predecessor's stale ``call_args``.
+    The assertion follows each call immediately because ``call_args`` holds only the LAST call.
+    ``call_count`` pins something narrower than it looks: exactly one request per route. ⚠️ It is
+    NOT a floor against a route that stops requesting — measured, that case is already caught by
+    the URL assertion, since the three routes expect three DIFFERENT urls and a predecessor's
+    stale ``call_args`` can never satisfy the next one. An earlier version of this docstring
+    claimed otherwise; what the line actually catches is a route issuing a SECOND request.
 
     Red-proof: point ``list_tags`` at ``self.properties_url`` (or ``find_channels`` at it) in
     services/channelfinder_client.py. mypy stays green — both are ``str``."""
@@ -762,8 +765,11 @@ def test_list_vocabulary_strict_on_bad_payload(monkeypatch: pytest.MonkeyPatch) 
         client.list_tags()
     assert client.tags_url in str(excinfo.value)
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([{"owner": "x"}])))
-    with pytest.raises(ChannelFinderResponseError):
+    with pytest.raises(ChannelFinderResponseError) as excinfo:
         client.list_properties()
+    # Both halves, not just one: the properties label fell back to its literal without any test
+    # noticing until this line existed, so half the change was itself an unobserved guard.
+    assert client.properties_url in str(excinfo.value)
 
 
 def test_list_vocabulary_empty_is_valid(monkeypatch: pytest.MonkeyPatch) -> None:

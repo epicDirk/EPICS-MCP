@@ -165,14 +165,15 @@ work.
    `tests/test_client_edge_guards.py` rather than written up somewhere. Two directions, because
    a mutation sweep alone answers the wrong question: it asks whether ANY test notices a guard
    disappearing, so a guard covered by a real test AND a sham one reads as "guarded" and the sham
-   is acquitted — exactly the constellation of the one proven case. The sham list comes from the
-   coverage map read BACKWARDS (which tests execute the guard, versus which claim it), and costs
-   no run at all.
+   is acquitted. ⚠️ That double-cover risk is argued, not observed — in the one proven case
+   nothing else covered `_hit_count` (its own commit records every other test staying green), so
+   a sweep WOULD have caught it. The sham list comes from the coverage map read BACKWARDS (which
+   tests execute the guard, versus which claim it), and costs no run at all.
 
    ⚠️ Record the map with `COVERAGE_CORE=ctrace`. On Python 3.12+ coverage defaults to the
    `sys.monitoring` core, which disables a location after its FIRST observation, so every later
    test covering the same line leaves no context row. Measured here: 72 covering tests under the
-   default core versus 289 under ctrace (median 2 versus 11, 56 of 61 lines affected). An audit
+   default core versus 291 under ctrace (median 2 versus 12, 56 of 61 lines affected). An audit
    driven by the default map runs a quarter of the relevant tests and reports false survivors —
    it becomes the sham guard it was built to find.
 

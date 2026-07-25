@@ -17,7 +17,7 @@ Two directions, and they answer different questions:
 ⚠️ The map MUST be recorded with ``COVERAGE_CORE=ctrace``. On Python 3.12+ coverage defaults to
 the ``sys.monitoring`` core, which disables a location after its FIRST observation, so later
 tests covering the same line leave no context row. Measured on this repository: 72 covering tests
-under the default core versus 289 under ctrace, median 2 versus 11. A sweep driven by the default
+under the default core versus 291 under ctrace, median 2 versus 12. A sweep driven by the default
 map would run a quarter of the relevant tests and report false survivors — the audit would itself
 be the sham guard it exists to find. Record it with::
 
@@ -215,7 +215,13 @@ _CLASS_DOUBLE = re.compile(r"setattr\(\s*[^)]*?[\"']?\w*Client[\"']?\s*,")
 
 # Vocabulary that marks a test as being ABOUT a payload the client edge inspects, as opposed to
 # a double used merely to keep a service-layer test off the network.
-_EDGE_CLAIM = re.compile(r"unreadable|payload|malformed|non_dict|without_name|non_string|_raises")
+_EDGE_CLAIM = re.compile(
+    r"unreadable|payload|malformed|non_dict|without_name|non_string|_raises"
+    # Widened after a review found the first list too narrow to carry the "none found" claim:
+    # a test whose docstring says "the service ANSWERED and we could not read it" states the
+    # edge claim exactly, and none of the words above appear in it.
+    r"|answer|respons|reject|refus|invalid|bad_|strict|corrupt|garbage|junk|schema"
+)
 
 
 def claiming_tests() -> dict[str, list[tuple[str, bool]]]:
@@ -333,9 +339,21 @@ def classify(exit_code: int, output: str, expected_passed: int) -> str:
     would read as a dead guard. And a red run is only evidence that the guard is watched when the
     failure carries the guard's own diagnosis — a TypeError from forcing a check on means the
     happy path crashed, not that anyone observed the refusal.
+
+    ⚠️ Honest limit, measured: for a RAISE-GUARD the enabling polarity makes the condition
+    constantly true, so the guard fires on every input and every covering test dies with the
+    module's own exception. ``KILLED-DECLARED`` is therefore TAUTOLOGICAL there — it says "a test
+    executes this line", not "someone observes the refusal". All 21 raise guards in this estate
+    have such a polarity. Only the DISABLING polarity carries information for them.
     """
+    # pytest exit codes: 0 pass · 1 tests failed · 2 interrupted · 3 internal error · 4 usage
+    # error · 5 no tests collected. Only 1 is evidence about the guard. ⚠️ Everything else used to
+    # fall through to the KILLED- buckets, i.e. straight into "the guard is observed" — a renamed
+    # or moved test would have counted AS evidence FOR every guard it used to cover.
+    if exit_code not in (0, 1):
+        return "INVALID-SELECTION"
     if exit_code == 0:
-        if f"{expected_passed} passed" not in output:
+        if f"\n{expected_passed} passed" not in f"\n{output}":
             return "INVALID-SELECTION"
         return "SURVIVED"
     if _DECLARED_EXC.search(output):
@@ -355,10 +373,27 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     originals = {path: path.read_bytes() for path in client_modules()}
     baseline = {path: hashlib.sha256(data).hexdigest() for path, data in originals.items()}
 
+    # What THIS sweep last wrote into each file. Restoring is only safe while the bytes on disk
+    # are still ours: anything else is a foreign write, and stamping the original over it destroys
+    # a parallel window's work. Measured before this existed: a foreign write during the mutant
+    # run was overwritten silently and the sweep still reported success.
+    written: dict[Path, bytes] = {}
+
     def restore_all() -> None:
         for path, data in originals.items():
-            if hashlib.sha256(path.read_bytes()).hexdigest() != baseline[path]:
-                path.write_bytes(data)
+            current = path.read_bytes()
+            if hashlib.sha256(current).hexdigest() == baseline[path]:
+                continue
+            if current != written.get(path):
+                sys.stderr.write(
+                    f"REFUSING to restore {path.name}: on-disk bytes are neither the baseline nor "
+                    f"what this sweep wrote — a foreign write. Left untouched ON PURPOSE; the "
+                    f"pristine copy is in this process's memory only, so save the file elsewhere "
+                    f"before re-running.\n"
+                )
+                continue
+            path.write_bytes(data)
+            written.pop(path, None)
 
     atexit.register(restore_all)
     sys.stderr.write(
@@ -387,9 +422,13 @@ def cmd_sweep(args: argparse.Namespace) -> int:
                     return 4
                 try:
                     path.write_bytes(mutated)
+                    written[path] = mutated
                     code, output = _run_selection(tests, args.timeout)
                 finally:
-                    path.write_bytes(originals[path])
+                    # NOT an unconditional write-back: the mutant run is where nearly all of the
+                    # sweep's wall time sits, so it is also where a foreign write is most likely
+                    # to land. restore_all() checks whose bytes are on disk first.
+                    restore_all()
                 verdict = classify(code, output, len(tests))
                 results.append((target, polarity.decode(), verdict))
                 if verdict == "INVALID-SELECTION":

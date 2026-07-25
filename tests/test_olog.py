@@ -813,9 +813,11 @@ def test_each_listing_route_targets_its_own_endpoint(monkeypatch: pytest.MonkeyP
     swap was measured to leave the whole suite green — this client has three swappable routes
     rather than two.
 
-    Assertions follow each call immediately because ``call_args`` holds only the LAST call, and
-    ``call_count`` is the non-vacuity floor: without it a route that stopped requesting at all
-    would go green on its predecessor's stale ``call_args``.
+    Assertions follow each call immediately because ``call_args`` holds only the LAST call.
+    ``call_count`` pins exactly one request per route — ⚠️ NOT, as an earlier version of this
+    docstring claimed, a floor against a route that stops requesting: the three routes expect
+    three different urls, so that case already fails the URL assertion. Measured: it goes red on
+    a route issuing a SECOND request.
 
     Red-proof: point ``list_tags`` at ``f"{self.base_url}/logbooks"`` in
     services/olog_client.py. mypy stays green — every one of these is an f-string of ``str``."""
@@ -907,11 +909,16 @@ def test_list_logbooks_unreadable_2xx_raises(
 ) -> None:
     """S11: the top-level /logbooks listing IS the answer — an unreadable payload or item must
     RAISE. It used to collapse to ``[]`` ("there are no logbooks") or silently drop items (a
-    fabricated "this logbook does not exist" for anyone validating a name against the list)."""
+    fabricated "this logbook does not exist" for anyone validating a name against the list).
+
+    S31: the diagnosis must also name the endpoint that was ACTUALLY requested. All three listing
+    labels were hand-written literals, decoupled from the URL the route builds — a swapped route
+    would have produced a correctly-worded error about the wrong address."""
     client = OlogClient("http://olog")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
-    with pytest.raises(OlogResponseError):
+    with pytest.raises(OlogResponseError) as excinfo:
         client.list_logbooks()
+    assert f"{client.base_url}/logbooks" in str(excinfo.value)
 
 
 @pytest.mark.parametrize(

@@ -30,11 +30,15 @@ carry breaking changes).
     für den Olog-Zwilling (`/logbooks`, `/tags`, `/levels`). Das Fehler-Label leitet sich jetzt aus
     der tatsächlich angefragten URL ab statt aus einem handgeschriebenen Literal.
   - **Der Audit selbst** (`883827d`): `scripts/guard_audit.py` (beide Richtungen) plus
-    `tests/test_client_edge_guards.py`, das die auditierte Population pinnt. **Ergebnis: null
-    Scheinwächter** — 107 Tests setzen eine Klassen-Attrappe, aber die Client-Wächter haben ihre
-    eigenen Tests an der richtigen Naht. Der Sweep über 93 Ziele fand 19 Ziele mit einer
-    unbeobachteten Polarität, eines in keiner, zwei nie ausgeführte.
-    ⚠️ **Der Kern ist Pflicht:** mit dem Default-Coverage-Kern sehen die Werkzeuge 72 statt 289
+    `tests/test_client_edge_guards.py`, das die auditierte Population pinnt. **Ergebnis: kein
+    Scheinwächter gefunden** — 107 Tests setzen eine Klassen-Attrappe, 102 fahren nie eine
+    Wächterzeile (die legitime Verwendung); die gelesenen Kandidaten behaupten Verhalten der
+    **Service**-Schicht, nicht eine Prüfung am Client-Rand. ⚠️ „Keiner gefunden" ist nicht „keiner
+    da": welche Kandidaten überhaupt gelesen werden, entscheidet ein Vokabular-Filter, und eine
+    erste, engere Fassung übersah nachweislich einen Test. Der Sweep über 93 Ziele fand 19 Ziele
+    mit einer unbeobachteten Polarität, eines in keiner, zwei nie ausgeführte — diese 22 haben
+    also sehr wohl keinen Test, der ihr Verschwinden bemerkt.
+    ⚠️ **Der Kern ist Pflicht:** mit dem Default-Coverage-Kern sehen die Werkzeuge 72 statt 291
     deckende Tests — ein Audit auf dieser Landkarte wäre selbst der Scheinwächter.
     ⚠️ Gemessen **ohne** die Live-Lane, und ein überlebender Mutant ist kein Defekt: er kann
     äquivalent oder von seinem Nachbarn maskiert sein (`channelfinder_client.py:91` ist der Beleg).

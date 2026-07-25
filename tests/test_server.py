@@ -2174,9 +2174,12 @@ def test_enum_members_keeps_the_value_type() -> None:
     green under both mutations (frozenset is covariant, so ``frozenset[str]`` is a legal
     ``frozenset[object]``), which is why a type checker cannot stand in for this test."""
     assert _enum_members({"enum": [1, 2]}) == frozenset({1, 2})
-    assert _enum_members({"enum": [1, 2]}) != frozenset({"1", "2"})
     assert _enum_members({"anyOf": [{"enum": [1, 2]}, {"type": "null"}]}) == frozenset({1, 2})
     assert _enum_members({"type": "string"}) is None
+    # A bare enum wins over an anyOf branch, and the branches are never merged — the same
+    # precedence _base_type and _schema_permits_null use, pinned here because nothing else does.
+    mixed = {"enum": [1], "anyOf": [{"enum": [2]}]}
+    assert _enum_members(mixed) == frozenset({1})
 
 
 # The two element schemas the estate actually advertises, shared by the rows below. Read-only by
@@ -2273,15 +2276,19 @@ def test_array_items_reads_both_array_shapes() -> None:
     tests/ is outside ``--cov=src``, so no coverage number ever shows it, and the schema test
     above passes either way as long as the four rows happen to match.
 
-    Red-proof: drop the ``anyOf``/``oneOf`` loop and the second assertion fails; return
-    ``prop.get("items")`` unchecked and the ``{"type": "array"}``-without-items case returns
-    ``None`` from a different path than intended — pinned by the third assertion."""
+    Red-proofs, both executed: drop the ``anyOf``/``oneOf`` loop and the second assertion fails;
+    return ``prop.get("items")`` unchecked and the LAST assertion fails. ⚠️ The last one is not
+    decoration — an earlier version of this docstring claimed the ``{"type": "array"}``-without-
+    items case pinned that narrowing, and it does not: the unchecked version returns ``None``
+    there too, so all five assertions stayed green. A non-dict ``items`` is the only input that
+    tells the two paths apart."""
     assert _array_items({"type": "array", "items": {"type": "string"}}) == {"type": "string"}
     nullable = {"anyOf": [{"type": "array", "items": {"type": "string"}}, {"type": "null"}]}
     assert _array_items(nullable) == {"type": "string"}
     assert _array_items({"type": "array"}) is None
     assert _array_items({"type": "array", "items": {}}) == {}
     assert _array_items({"type": "string"}) is None
+    assert _array_items({"type": "array", "items": "junk"}) is None
 
 
 def _fake_json_response(payload: object) -> Mock:

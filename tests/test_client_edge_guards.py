@@ -13,15 +13,25 @@ map recorded with ``COVERAGE_CORE=ctrace`` and some ten minutes, which is not a 
 
 Findings of the 2026-07-25 run, kept here rather than in a document nobody reads again:
 
-* Sham guards (direction B): ZERO. 107 tests install a client class double in their own body and
-  102 of those never execute a guard line — but that is the double used legitimately, to keep a
-  service-layer test off the network. Only two also claimed something about the answered payload,
-  and reading both showed they claim service-layer behaviour, not a client-edge check. The
-  client-edge guards have their own tests at the transport seam.
+* Sham guards (direction B): **none found — which is not the same as none there.** 107 tests
+  install a client class double in their own body and 102 never execute a guard line; that is the
+  double used legitimately, to keep a service-layer test off the network. 20 of those also carry
+  payload vocabulary, and the ones read claim SERVICE-layer behaviour (an already-constructed
+  exception must not be relabelled "unreachable"), not a client-edge check. ⚠️ Not all 20 were
+  read, and the vocabulary filter itself decides who gets read — a first, narrower filter surfaced
+  only 2 and a review showed it missed a test whose docstring states the edge claim in words the
+  regex did not know. Treat this as "no sham guard found by this filter", and widen the filter
+  before treating it as a stronger statement.
 * Unobserved polarities (direction A): 19 of 93 targets, plus one where neither polarity is
   noticed and two that no test executes at all. They are declared below.
+  ⚠️ Two caveats on the counterpart number. First, "observed in both polarities" is weaker than it
+  sounds for the 21 RAISE guards: their enabling polarity fires the guard on every input, so every
+  covering test dies by construction and only the disabling half carries information. Second,
+  three entries below (`alarm_client.py:250`, `epics_client.py:490`, `olog_client.py:211`) sit in
+  comprehension filters, where the tool builds no whole-condition target — for those "unobserved"
+  means "this CONJUNCT is unobserved", the rest of the condition still stood during the mutant.
 
-Honest scope, because the numbers invite over-reading: measured WITHOUT the live lane (the eight
+Honest scope, because the numbers invite over-reading: measured WITHOUT the live lane (the nine
 ``*_live`` modules, 65 skipped), which is exactly where a guard meets a real payload. And a
 surviving mutant is not by itself a defect — it can equally be an equivalent mutant or a guard
 masked by its neighbour. ``channelfinder_client.py:91`` is the measured example of the latter:
@@ -37,7 +47,7 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "scripts"))
 
-from guard_audit import enumerate_targets  # noqa: E402 - needs the sys.path line above
+from guard_audit import client_modules, enumerate_targets  # noqa: E402 - needs sys.path above
 
 # (isinstance calls, whole-condition targets) per client module, as the AST sees them. Two
 # separate numbers on purpose: a composite condition needs its own mutant, because splicing one
@@ -52,7 +62,7 @@ _GUARD_POPULATION: dict[str, tuple[int, int]] = {
 }
 
 # Targets whose removal no test noticed, from the 2026-07-25 sweep (COVERAGE_CORE=ctrace map,
-# 1444 passed / 65 skipped). Key is ``module:line`` — the finer offset moves with any edit to the
+# 1446 passed / 65 skipped). Key is ``module:line`` — the finer offset moves with any edit to the
 # line, which would make this table rot for a reason that is not a change in the finding.
 _UNOBSERVED: dict[str, str] = {
     "alarm_client.py:247": "empty-list fallback; disabling it is not noticed",
@@ -92,7 +102,11 @@ def test_client_edge_guard_population_is_pinned() -> None:
     Relational in both directions: a new client module, a new ``isinstance`` check, or a
     condition that gains a conjunct all change these counts, and the verdicts below were reached
     about the old shape. Going red here is the signal to re-measure, not to edit the numbers."""
-    actual: dict[str, tuple[int, int]] = {}
+    # Pre-seeded from the module list, not built up from the targets: a NEW client module whose
+    # checks are written without ``isinstance`` produces no target at all, so building the dict
+    # from targets alone would leave it out of the comparison entirely — the test would stay green
+    # while the audited population grew. Measured on a scratch copy before this line existed.
+    actual: dict[str, tuple[int, int]] = {path.name: (0, 0) for path in client_modules()}
     for target in enumerate_targets():
         calls, whole = actual.get(target.module, (0, 0))
         if target.form == "WHOLE-CONDITION":
