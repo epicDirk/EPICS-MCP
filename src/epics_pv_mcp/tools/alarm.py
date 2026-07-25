@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from epics_pv_mcp.services.checkers import (
     AlarmConfiguredResult,
+    AlarmHistoryResult,
     query_alarm_configured,
     query_alarm_history,
 )
@@ -38,7 +39,7 @@ async def _get_alarm_history(
     command: str | None = None,
     severity: str | None = None,
     current_severity: str | None = None,
-) -> dict[str, object]:
+) -> AlarmHistoryResult:
     """Report the alarm state/history of *pv* over ``[start, end]`` (Alarm Logger /search/alarm).
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_alarm_history`. The optional

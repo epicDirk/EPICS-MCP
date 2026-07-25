@@ -482,6 +482,22 @@ async def query_alarm_configured(
         raise EpicsError(f"Alarm Logger: {exc}", error_code=_alarm_error_code(exc)) from exc
 
 
+# get_alarm_history's tool result shape (S29 — typed MCP outputSchema). ``total=False``: the
+# disabled path carries {enabled, pv, events, note}; the enabled path adds start/end/total/capped.
+# ``enabled``/``pv``/``events`` are on EVERY path (events is [] when disabled, never null) →
+# non-nullable; ``start``/``end``/``total``/``capped`` (enabled-only) and ``note`` (disabled-only)
+# are ``X | None``. ``events`` is a list of projected alarm docs (opaque dict items). class-syntax.
+class AlarmHistoryResult(TypedDict, total=False):
+    enabled: bool
+    pv: str
+    events: list[dict[str, object]]
+    start: str | None
+    end: str | None
+    total: int | None
+    capped: bool | None
+    note: str | None
+
+
 async def query_alarm_history(
     pv: str,
     start: str,
@@ -493,7 +509,7 @@ async def query_alarm_history(
     command: str | None = None,
     severity: str | None = None,
     current_severity: str | None = None,
-) -> dict[str, object]:
+) -> AlarmHistoryResult:
     """Report the alarm history of *pv* over ``[start, end]`` (Alarm Logger ``/search/alarm``).
 
     Default-disabled: with ``EPICS_MCP_ALARM_URL`` unset, returns ``enabled: false`` and makes no
@@ -506,7 +522,7 @@ async def query_alarm_history(
     if not cfg.alarm_url:
         return {"enabled": False, "pv": pv, "events": [], "note": _ALARM_DISABLED_NOTE}
 
-    def _run() -> dict[str, object]:
+    def _run() -> AlarmHistoryResult:
         client = AlarmClient(cfg.alarm_url, timeout=timeout, auth_header=cfg.alarm_auth or None)
         events, capped = client.get_alarm_history(
             pv,
@@ -620,7 +636,18 @@ async def query_channels(
         ) from exc
 
 
-async def query_channel_vocabulary(timeout: float = 5.0) -> dict[str, object]:
+# list_channel_vocabulary's tool result shape (S29 — typed MCP outputSchema). ``total=False``: the
+# disabled path adds ``note`` and the enabled path omits it. ``enabled``/``properties``/``tags`` are
+# on EVERY path (both list the same keys; disabled returns empty lists, never null) → non-nullable;
+# only ``note`` (disabled-only) is ``str | None``. ``properties``/``tags`` are lists of NAMES.
+class ChannelVocabularyResult(TypedDict, total=False):
+    enabled: bool
+    properties: list[str]
+    tags: list[str]
+    note: str | None
+
+
+async def query_channel_vocabulary(timeout: float = 5.0) -> ChannelVocabularyResult:
     """List the ChannelFinder property + tag NAMES a caller can filter ``find_channels`` on.
 
     Default-disabled: with ``EPICS_MCP_CHANNELFINDER_URL`` unset, returns ``enabled: false`` and
@@ -634,7 +661,7 @@ async def query_channel_vocabulary(timeout: float = 5.0) -> dict[str, object]:
     if not cfg.channelfinder_url:
         return {"enabled": False, "properties": [], "tags": [], "note": _CF_DISABLED_NOTE}
 
-    def _run() -> dict[str, object]:
+    def _run() -> ChannelVocabularyResult:
         client = ChannelFinderClient(
             cfg.channelfinder_url,
             timeout=timeout,

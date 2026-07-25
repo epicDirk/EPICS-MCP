@@ -1367,6 +1367,166 @@ async def test_get_archive_info_structured_output_conforms_to_its_schema(
         )
 
 
+# The JSON base type every list_channel_vocabulary (ChannelVocabularyResult) property must
+# advertise. An INDEPENDENT source of truth (not reflected from the TypedDict). All four are
+# concrete scalars/containers; only ``note`` is nullable (its non-null branch is still a string).
+_LIST_CHANNEL_VOCABULARY_BASE_TYPE: dict[str, str | None] = {
+    "enabled": "boolean",
+    "properties": "array",
+    "tags": "array",
+    "note": "string",
+}
+
+# The keys list_channel_vocabulary emits on EVERY return path and never as a spurious null.
+_LIST_CHANNEL_VOCABULARY_ALWAYS_PRESENT = frozenset({"enabled", "properties", "tags"})
+
+
+@pytest.mark.asyncio
+async def test_list_channel_vocabulary_exposes_typed_output_schema() -> None:
+    """S29: list_channel_vocabulary advertises a STRUCTURED outputSchema (ChannelVocabularyResult),
+    not the accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype.
+    Checks properties non-empty, EXACTLY the 4 mapped fields (completeness both ways), and each
+    field's :func:`_base_type`."""
+    from epics_pv_mcp.server import mcp
+
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    schema = tools["list_channel_vocabulary"].outputSchema or {}
+    properties = schema.get("properties", {})
+    assert properties, "list_channel_vocabulary: outputSchema carries no typed properties"
+    assert set(properties) == set(_LIST_CHANNEL_VOCABULARY_BASE_TYPE), (
+        f"list_channel_vocabulary: advertised properties {sorted(properties)} != "
+        f"expected {sorted(_LIST_CHANNEL_VOCABULARY_BASE_TYPE)}"
+    )
+    for field, prop in properties.items():
+        actual = _base_type(prop)
+        assert actual == _LIST_CHANNEL_VOCABULARY_BASE_TYPE[field], (
+            f"list_channel_vocabulary.{field}: schema base type {actual!r} != "
+            f"{_LIST_CHANNEL_VOCABULARY_BASE_TYPE[field]!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_list_channel_vocabulary_structured_output_conforms_to_its_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S29 conformance: the EMITTED structuredContent must conform to its own outputSchema. Part A
+    (runtime): drive list_channel_vocabulary on the disabled path via ``mcp.call_tool`` and assert
+    every None-valued key permits null. Part B (static): every advertised property outside the
+    always-present envelope must permit null (the S29 convention for a sometimes-absent field)."""
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import mcp
+    from epics_pv_mcp.services import checkers
+
+    # shared query_*: resolves get_config in the checkers module's OWN namespace — patch it there.
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(channelfinder_url=""))
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    properties = (tools["list_channel_vocabulary"].outputSchema or {}).get("properties", {})
+
+    structured = cast(
+        dict[str, Any],
+        (await mcp.call_tool("list_channel_vocabulary", {})).structured_content,
+    )
+    for key, value in structured.items():
+        if value is None:
+            assert _schema_permits_null(properties[key]), (
+                f"list_channel_vocabulary.{key}: emitted null but its schema forbids null "
+                f"({properties[key]})"
+            )
+
+    for prop_name, prop_schema in properties.items():
+        if prop_name in _LIST_CHANNEL_VOCABULARY_ALWAYS_PRESENT:
+            continue
+        assert _schema_permits_null(prop_schema), (
+            f"list_channel_vocabulary.{prop_name}: sometimes-absent property must permit null "
+            f"(the S29 convention), got {prop_schema}"
+        )
+
+
+# The JSON base type every get_alarm_history (AlarmHistoryResult) property must advertise. An
+# INDEPENDENT source of truth (not reflected from the TypedDict). ``events`` is an array of opaque
+# alarm docs; the enabled-only start/end/total/capped and disabled-only note are X | None but their
+# non-null branch carries a concrete type.
+_GET_ALARM_HISTORY_BASE_TYPE: dict[str, str | None] = {
+    "enabled": "boolean",
+    "pv": "string",
+    "events": "array",
+    "start": "string",
+    "end": "string",
+    "total": "integer",
+    "capped": "boolean",
+    "note": "string",
+}
+
+# The keys get_alarm_history emits on EVERY return path and never as a spurious null.
+_GET_ALARM_HISTORY_ALWAYS_PRESENT = frozenset({"enabled", "pv", "events"})
+
+
+@pytest.mark.asyncio
+async def test_get_alarm_history_exposes_typed_output_schema() -> None:
+    """S29: get_alarm_history advertises a STRUCTURED outputSchema (AlarmHistoryResult), not the
+    accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype. Checks
+    properties non-empty, EXACTLY the 8 mapped fields (completeness both ways), and each field's
+    :func:`_base_type`."""
+    from epics_pv_mcp.server import mcp
+
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    schema = tools["get_alarm_history"].outputSchema or {}
+    properties = schema.get("properties", {})
+    assert properties, "get_alarm_history: outputSchema carries no typed properties"
+    assert set(properties) == set(_GET_ALARM_HISTORY_BASE_TYPE), (
+        f"get_alarm_history: advertised properties {sorted(properties)} != "
+        f"expected {sorted(_GET_ALARM_HISTORY_BASE_TYPE)}"
+    )
+    for field, prop in properties.items():
+        actual = _base_type(prop)
+        assert actual == _GET_ALARM_HISTORY_BASE_TYPE[field], (
+            f"get_alarm_history.{field}: schema base type {actual!r} != "
+            f"{_GET_ALARM_HISTORY_BASE_TYPE[field]!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_alarm_history_structured_output_conforms_to_its_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S29 conformance: the EMITTED structuredContent must conform to its own outputSchema. Part A
+    (runtime): drive get_alarm_history on the disabled path via ``mcp.call_tool`` and assert every
+    None-valued key permits null. Part B (static): every advertised property outside the
+    always-present envelope must permit null (the S29 convention for a sometimes-absent field)."""
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import mcp
+    from epics_pv_mcp.services import checkers
+
+    # shared query_*: resolves get_config in the checkers module's OWN namespace — patch it there.
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(alarm_url=""))
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    properties = (tools["get_alarm_history"].outputSchema or {}).get("properties", {})
+
+    args = {
+        "pv": "SIM:PS-01:Cur-RB",
+        "start": "2026-01-01T00:00:00Z",
+        "end": "2026-01-02T00:00:00Z",
+    }
+    structured = cast(
+        dict[str, Any],
+        (await mcp.call_tool("get_alarm_history", args)).structured_content,
+    )
+    for key, value in structured.items():
+        if value is None:
+            assert _schema_permits_null(properties[key]), (
+                f"get_alarm_history.{key}: emitted null but its schema forbids null "
+                f"({properties[key]})"
+            )
+
+    for prop_name, prop_schema in properties.items():
+        if prop_name in _GET_ALARM_HISTORY_ALWAYS_PRESENT:
+            continue
+        assert _schema_permits_null(prop_schema), (
+            f"get_alarm_history.{prop_name}: sometimes-absent property must permit null "
+            f"(the S29 convention), got {prop_schema}"
+        )
+
+
 def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1438,6 +1598,8 @@ _TYPED_OUTPUT_TOOLS = frozenset(
         "list_archived_pvs",
         "get_appliance_info",
         "get_archive_info",
+        "list_channel_vocabulary",
+        "get_alarm_history",
     }
 )
 

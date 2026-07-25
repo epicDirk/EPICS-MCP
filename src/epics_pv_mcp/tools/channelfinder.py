@@ -10,7 +10,11 @@ there.
 from __future__ import annotations
 
 from epics_pv_mcp.services.channelfinder_client import DEFAULT_MAX_RESULTS
-from epics_pv_mcp.services.checkers import query_channel_vocabulary, query_channels
+from epics_pv_mcp.services.checkers import (
+    ChannelVocabularyResult,
+    query_channel_vocabulary,
+    query_channels,
+)
 
 
 async def _find_channels(
@@ -43,7 +47,7 @@ async def _find_channels(
     )
 
 
-async def _list_channel_vocabulary(timeout: float = 5.0) -> dict[str, object]:
+async def _list_channel_vocabulary(timeout: float = 5.0) -> ChannelVocabularyResult:
     """List the ChannelFinder property + tag NAMES ``find_channels`` can be filtered on.
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_channel_vocabulary`;

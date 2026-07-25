@@ -18,7 +18,9 @@ from epics_pv_mcp.resources import get_epics_config, get_guide, get_health
 from epics_pv_mcp.safety import get_safety
 from epics_pv_mcp.services.checkers import (
     AlarmConfiguredResult,
+    AlarmHistoryResult,
     ArchiveStatusResult,
+    ChannelVocabularyResult,
     NameLookupResult,
 )
 from epics_pv_mcp.services.checkers_olog import (
@@ -516,7 +518,6 @@ async def find_channels(
 
 
 @mcp.tool(
-    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
@@ -527,7 +528,7 @@ async def find_channels(
 @translate_epics_errors
 async def list_channel_vocabulary(
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> ChannelVocabularyResult:
     """List which property keys and tag names you can filter find_channels on.
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_CHANNELFINDER_URL is
@@ -833,7 +834,6 @@ _AlarmCommand = Literal["Enabled", "Disabled"]
 
 
 @mcp.tool(
-    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
@@ -913,7 +913,7 @@ async def get_alarm_history(
         ),
     ] = None,
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> AlarmHistoryResult:
     """Fetch the alarm state history of a PV over a window (Phoebus Alarm Logger /search/alarm).
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ALARM_URL is set. start
