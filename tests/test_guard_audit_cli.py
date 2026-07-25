@@ -53,7 +53,7 @@ def test_check_reports_a_deviating_pin_by_name_and_exits_one(
     """Exit 1 means "a pin deviates" — and says WHICH, so the code is never the thing to hunt.
 
     The exit code alone would be ambiguous: 1 is also what an uncaught exception produces. The
-    tool answers that by reserving 3 for a crash; this test pins the other half, that a 1 arrives
+    tool answers that by reserving 9 for a crash; this test pins the other half, that a 1 arrives
     with the deviating pin's name and both figures on stderr."""
     wrong = guard_audit.population()[guard_audit.DOUBLES] + 1
     monkeypatch.setitem(guard_audit.PINNED, guard_audit.DOUBLES, wrong)
@@ -77,10 +77,14 @@ def test_check_with_a_database_compares_all_four_pins(
     """The expensive half is exercised too — and it did not need the expensive input to be.
 
     The first version of this module skipped it, arguing that a coverage map costs a full ctrace
-    suite run. That conflates RECORDING a real map with DRIVING the branch that reads one: the
-    reader takes a plain mapping, so a synthetic one drives the whole path in milliseconds. Left
+    suite run. That conflates RECORDING a real map with driving the code that CONSUMES one. Left
     untested, deleting the comparison would have stopped 102 and 20 from ever being checked while
     the gate stayed green — the exact shape of sham this tool exists to find.
+
+    Honest limit, because the substitution below is easy to over-read: it replaces
+    ``load_coverage_map``, so what is exercised is its CONSUMER. The reader itself — which must
+    query the ``arc`` table, since ``line_bits`` yields a silently empty map — is still covered by
+    no test at all.
     """
     monkeypatch.setattr(
         guard_audit, "load_coverage_map", lambda _path: {("olog_client.py", 211): {"t::a"}}

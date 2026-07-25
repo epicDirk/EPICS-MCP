@@ -32,11 +32,11 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   noticed and two that no test executes at all. They are declared below.
 
   The sweep counted 19 such targets and the table below has 17 rows, which is not a discrepancy:
-  the key is ``module:line``, and one line can carry several targets — eight of the 17 keys do,
-  and ``channelfinder_client.py`` line 473 carries three (two ``isinstance`` calls plus the whole
-  condition, which is what its row means by "both halves"). Measured, those 17 keys sit on 28
-  targets in total. A key is not a target, and reading the table as if it were is how a reader
-  would conclude that two findings had been lost — this reader did, first time round.
+  the key is ``module:line``, and one line can carry several targets — eight of those keys do.
+  ``channelfinder_client.py`` line 473 carries three: the two ``isinstance`` calls its row calls
+  "both halves", plus the whole condition. Measured, those 17 keys sit on 28 targets in total. A
+  key is not a target, and reading the table as if it were is how a reader concludes that two
+  findings have been lost.
   ⚠️ What is DERIVED here is the 28 and the eight, not the 19. 28 counts every target on those
   lines, observed and unobserved alike, so it shows only that a key CAN carry several findings;
   which two of them share a key is a fact about the sweep, and the sweep's per-key breakdown was
@@ -71,7 +71,7 @@ from guard_audit import (  # noqa: E402 - needs sys.path above
     DOUBLES,
     EDGE_VOCABULARY,
     PINNED_AST,
-    RERUN,
+    RERUN_AST,
     client_modules,
     enumerate_targets,
     population,
@@ -182,7 +182,7 @@ _PROSE_FIGURES: tuple[tuple[str, str, Callable[[], int]], ...] = (
     ),
     (
         "keys carrying more than one target",
-        r"(\w+) of the 17 keys do",
+        r"(\w+) of those keys do",
         _keys_with_several_targets,
     ),
     (
@@ -255,7 +255,7 @@ def test_the_ast_derivable_audit_figures_are_pinned() -> None:
     """
     assert population() == PINNED_AST, (
         f"the client-double population changed: measured {population()}, recorded {PINNED_AST}. "
-        f"A test was added or its wording changed. {RERUN}"
+        f"A test was added or its wording changed. {RERUN_AST}"
     )
 
 
@@ -265,11 +265,17 @@ def test_the_recorded_figures_match_the_prose_that_states_them() -> None:
     An audit is a measurement and a measurement rots; a WRITE-UP of a measurement rots faster,
     because nothing runs it. Each figure in ``_PROSE_FIGURES`` is re-derived from what produces it.
 
-    NOT everything in that docstring, and the difference is the honest part: 102, 20, 19 and "only
-    2" are results of the coverage sweep and cannot be recomputed without it — they are pinned in
-    ``guard_audit.PINNED_COVERAGE`` and checked by ``sham --check --coverage-db``. Nor is there a
-    completeness pin here, so a TENTH figure added to that docstring next month ships unwatched.
-    S32's ``test_prose_counters`` has that mechanism; wiring this file into it is separate work.
+    NOT everything in that docstring, and the difference is the honest part. Two kinds of figure
+    are only PINNED, never recomputed: 102, 20, 19 and "only 2" are coverage-sweep results held in
+    ``guard_audit.PINNED_COVERAGE`` and checked by ``sham --check --coverage-db``; the "one" and
+    the "two" below are sweep results too, and comparing them to ``len()`` of the hand-typed table
+    that records them proves the prose matches the TABLE, not that either matches a fresh sweep.
+    Only the AST-derived rows — the population, the target count, the row count, the eight, the
+    RAISE guards, the live modules — are re-measured from the code.
+
+    Nor is there a completeness pin here, so a tenth figure added to that docstring next month
+    ships unwatched. S32's ``test_prose_counters`` has that mechanism; wiring this file into it is
+    separate work.
     """
     prose = " ".join((__doc__ or "").split())
     wrong: list[str] = []

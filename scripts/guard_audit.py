@@ -248,13 +248,15 @@ PINNED: dict[str, int] = {**PINNED_AST, **PINNED_COVERAGE}
 # Two recipes, because the whole point of the split above is that they cost different amounts. A
 # deviation in the AST pair is re-measured in under a second; telling its author to run a full
 # ctrace suite would invert the very distinction this file is organised around.
-RERUN_AST = "re-measure with: uv run python scripts/guard_audit.py sham --check"
+RERUN_AST = (
+    "re-read the candidate list (sham --coverage-db <db> prints it), re-judge the verdict, then "
+    "re-record PINNED_AST here. Re-measure with: uv run python scripts/guard_audit.py sham --check"
+)
 RERUN_COVERAGE = (
     "re-record with: COVERAGE_CORE=ctrace COVERAGE_FILE=<scratch>/cov uv run pytest --cov=src "
     "--cov-branch --cov-context=test, then uv run python scripts/guard_audit.py sham --check "
     "--coverage-db <scratch>/cov"
 )
-RERUN = RERUN_COVERAGE  # kept for callers that mean the full audit
 
 # What the audit CANNOT pin, said here rather than left to be noticed: the verdict "no sham guard
 # found" was reached by a human READING the candidate list, and only its SIZE is recorded. A list
