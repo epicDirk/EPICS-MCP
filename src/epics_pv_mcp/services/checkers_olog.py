@@ -62,10 +62,28 @@ from epics_pv_mcp.services.olog_exceptions import (
 #     structuredContent against the advertised ``outputSchema``, so a non-nullable annotation on a
 #     field that can be an explicit None earns a real client an ``Output validation error``
 #     instead of an answer.
-#   * The in-process ``FastMCP.call_tool`` shortcut — which most conformance tests here use —
-#     does NOT validate. A test driving it therefore cannot see a violation a real client would
-#     hit; only a test driving a real ``fastmcp.Client`` can (see the discover_pvs conformance
-#     test). That asymmetry is why the static Part B carries the guarantee.
+#   * The in-process ``FastMCP.call_tool`` shortcut — which the per-tool conformance tests here
+#     use — does NOT validate. A test driving it therefore cannot see a violation a real client
+#     would hit; only a test driving a real ``fastmcp.Client`` can. That asymmetry is why the
+#     static Part B carries the guarantee, and it is itself pinned rather than assumed:
+#     ``test_wire_validates_output_schema_while_in_process_does_not`` asserts BOTH halves against
+#     a throwaway server, so a dependency bump that moves or drops the check cannot leave the
+#     wire tests silently green-and-empty. What drives the wire today:
+#     ``test_every_typed_tool_conforms_to_its_schema_over_the_wire`` (all typed tools, disabled
+#     paths, pinned relationally to the typed set) plus the per-tool payload tests and the
+#     discover_pvs conformance test.
+#
+#   * TWO validators exist, not one, and they differ. The server-side handler above turns a
+#     mismatch into an error result (surfacing as ``ToolError("Output validation error: …")``).
+#     The client session validates AGAIN on its side, raising a plain ``RuntimeError`` with
+#     different wording. Which one bites matters in one case: a tool whose return is NOT an
+#     object (a bare list, say) is wrapped by fastmcp and SKIPS the server-side check, so only
+#     the client-side one fires. Every typed tool here returns a TypedDict, so today the
+#     server-side handler is always the one that speaks — but an assertion on that exact wording
+#     is an assumption about the shape of the return, not a universal truth.
+#
+#   * Neither validator sees an ERROR result: a raised tool never reaches the schema check at
+#     all. So "the wire validates it" is a statement about SUCCESSFUL returns only.
 #
 # Superseded by the above: the earlier note that fastmcp "serializes an omitted total=False key as
 # null because convert_result dumps the model WITHOUT exclude_none". That described the

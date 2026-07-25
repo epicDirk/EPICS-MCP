@@ -143,6 +143,19 @@ work.
    delete**. An unnamed target is a refusal (through the live gate, so a demanded run goes red), not
    a guess; and where the medium cannot forget, every artifact a probe leaves is labelled as one.
 
+8. **A double placed at the CLIENT-CLASS level cannot test anything that client does at its
+   edge.** The convenient fake here is `monkeypatch.setattr(<module>, "<X>Client", _Fake)` — it
+   is used widely and is right for most purposes. But it removes, silently, every validation the
+   real client runs on a service's answer: the `isinstance` guards that turn an unreadable
+   payload into a loud error instead of a fabricated empty result. A test written that way can
+   *appear* to protect such a guard while never executing it — measured with a spy on
+   `olog_client._hit_count`: **not reached** through the tool path under a class-level double,
+   so mutating the guard away left the test green. Where the assertion is *about* a client-edge
+   guard, fake the **transport** instead (`get_shared_session`, so the real client runs and only
+   the socket is replaced), and prove the guard red-provable through the layer the caller
+   actually uses. Corollary for reviews: "there is a test for that guard" is a claim about which
+   *seam* the test fakes, not about the guard's name appearing in it.
+
 Honest limit: these are prose rules — the category that rots (see above). No CI guard can prove
 they were followed; the guard is the adversarial counter-probe itself.
 

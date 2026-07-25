@@ -9,6 +9,37 @@ carry breaking changes).
 
 ### Changed
 
+- **Die Draht-Validierung der Output-Schemas ist jetzt bewacht statt einmal gemessen (S29).** Der
+  vorige Eintrag hielt fest, dass Tool-Ausgaben am Draht sehr wohl geprüft werden, und belegte das
+  mit einer Einmal-Messung (21 Tools, 0 Verstöße). Fünf Tests machen daraus einen Dauerzustand:
+  - **Der Mechanismus selbst** (`3f84171`): ein Wegwerf-Server mit einem Tool, das seine eigene
+    Zusage bricht, pinnt BEIDE Hälften der Asymmetrie — am Draht muss es scheitern, in-process muss
+    derselbe Wert unverändert zurückkommen. Ohne diesen Kanarienvogel würde ein Versionssprung von
+    `fastmcp`/`mcp` (und `jsonschema` ist hier nicht einmal deklariert, es kommt rein transitiv)
+    jeden Draht-Test still **grün und leer** zurücklassen.
+  - **Vollständigkeit** (`d2bc022`): ein generischer Test fährt ALLE getypten Tools über einen
+    echten Client und pinnt seine Tabelle relational gegen `_TYPED_OUTPUT_TOOLS`. Ein künftig
+    getyptes Tool ohne Draht-Zeile wird damit rot — was elf handgepflegte Einzeltests prinzipiell
+    nicht können. Dazu drei Behauptungen, die es nirgends gab: Nicht-Leerlauf-Boden, kein
+    unbeworbenes Feld, und die Präsenz jedes als immer-da deklarierten Feldes (das macht die
+    `_*_ALWAYS_PRESENT`-Konstanten erstmals laufzeit-tragend statt bloße Skip-Filter).
+  - **Enum-Mitglieder** (`9499d22`): die Basistyp-Tabellen vergleichen nur den GROBEN JSON-Typ —
+    `Literal["ok","empty","withheld"] | None` und ein nacktes `str | None` liefern beide „string",
+    ein aufgeweichtes Literal blieb also überall grün. Zwei lebende Kommentare behaupteten das
+    Gegenteil und sind richtiggestellt; der neue Wächter ist relational in beide Richtungen. Es gibt
+    genau ein solches Enum im Bestand (`get_pv_history.status`), und es war ungewacht.
+  - **Nutzdaten-Pfade unterhalb des Clients** (`ba2e559`, `6f6dbc5`): `search_logbook` und
+    `list_channel_vocabulary` werden mit echten Antworten gefahren, wobei die **HTTP-Sitzung**
+    gefälscht wird statt der Client-Klasse. Erst dadurch läuft der echte Client-Rand mit — und erst
+    dadurch wird eine **nicht-leere** Liste validiert (eine leere erfüllt jede Element-Bedingung von
+    selbst).
+  - **Ehrliche Reichweite:** das ist ein **Abdeckungs**-Gewinn, kein Bug-Fang — die disabled-Pfade
+    waren schon sauber, und `mypy --strict` fängt fast jede falsch getypte Rückgabe beim Commit. Was
+    er strukturell NICHT sieht, ist die eine Naht, auf der die scharfen Rot-Beweise sitzen: in
+    Python ist `bool` ein Sonderfall von `int`. Die enabled-Pfade der übrigen Tools bleiben
+    ungeprüft; die `object | None`-Felder von `is_archived`/`get_archive_info`/`get_appliance_info`
+    sind per Konstruktion unprüfbar (unbeschränktes Schema) — beides benannt, nicht stillschweigend.
+
 - **Zwei ausgelieferte Flächen lehrten nach dem Arg-Rename noch den ALTEN Namen — behoben und
   bewacht (`fix(prompts,guide)` `a3a3465`).** Der Rename `9256977` benannte den CODE um; zwei Flächen,
   die die Argumente **lehren**, blieben stehen: der MCP-Prompt `compare_machine_state` wies

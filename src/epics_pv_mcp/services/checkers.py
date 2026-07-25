@@ -337,8 +337,13 @@ def _archiver_error_code(exc: ArchiverError) -> str:
 # output model and does not validate the return. The check that bites lives one layer out, in the
 # MCP SDK's low-level call_tool handler, which runs jsonschema over the structuredContent against
 # the advertised schema -- so the failure surfaces only on the WIRE, never on the in-process
-# ``FastMCP.call_tool`` this repo's conformance tests mostly drive. Which makes the loose type the
-# safer one here: a mis-typed raw-copy would otherwise pass every test and break a real client.
+# ``FastMCP.call_tool`` this repo's per-tool conformance tests drive (the full statement, including
+# the second validator and what neither of them sees, is in services/checkers_olog.py's header).
+# Which makes the loose type the safer one here: a mis-typed raw-copy would otherwise pass every
+# per-tool test and break a real client. The flip side is that a loose type advertises almost
+# nothing -- ``object | None`` renders as an unconstrained schema, so no validator can ever bite
+# on these 8 fields. That is the accepted trade, not an oversight: it is why the wire tests
+# deliberately do NOT chase payload coverage here.
 # ``archived``/``status`` ARE computed (bool / non-empty str), so they stay precisely typed.
 class ArchiveStatusResult(TypedDict, total=False):
     enabled: bool
