@@ -9,6 +9,36 @@ carry breaking changes).
 
 ### Changed
 
+- **Korrektur: die Ausgabe eines Tools WIRD validiert — nur nicht dort, wo unsere Tests hinsehen.**
+  Der Messbefund weiter unten („Tool-Ausgaben werden NICHT gegen das advertised `outputSchema`
+  validiert") stimmt nur für den **In-Process**-Aufrufweg `FastMCP.call_tool`, den die
+  Conformance-Tests fahren. Am **Draht** — also für jeden echten MCP-Client — prüft der low-level-
+  Handler des MCP-SDK die `structuredContent` per jsonschema gegen das beworbene Schema und
+  verwandelt eine Abweichung in einen `Output validation error`. Gemessen mit einem echten Client:
+  ein falsch getyptes Feld und ein `null` in einem nicht-nullbaren Feld fallen beide durch, ein
+  **weggelassener** `total=False`-Key nicht (das Schema führt kein `required`). Praktische Folge für
+  die Typwahl: bei einem nur **manchmal abwesenden** Feld ist die Nullbarkeit Schema-Ehrlichkeit, die
+  ein Test durchsetzen muss; bei einem **explizit auf `None`** gesetzten Feld (`is_archived.archived`,
+  `is_alarm_configured.configured`, `lookup_device_name.registered`, `get_archive_info.found`) ist
+  sie ein echter Draht-Wächter — ohne sie bekommt ein Client eine Fehlermeldung statt einer Antwort.
+  **Gegenprobe:** alle 21 getypten Tools auf ihren disabled-Pfaden über einen echten Client
+  gefahren → 0 Verstöße. Die enabled-Pfade brauchen laufende Dienste und sind ungeprüft.
+  Die Kommentare in `services/checkers_olog.py`, `services/checkers.py` und `tools/archiver.py`
+  tragen jetzt diesen Stand; die kanonische Fassung steht **einmal** im Kopf von
+  `services/checkers_olog.py`, die übrigen verweisen darauf statt sie zu wiederholen.
+
+- **Zwei weitere Falschbehauptungen aus der fastmcp-Migration entfernt.** (a) Der Mechanismus
+  „`convert_result` dumpt das Modell ohne `exclude_none`" existiert nicht mehr — es gibt auf diesem
+  Pfad kein Modell; die Nullbarkeits-**Folgerung** war richtig, nur ihre Begründung nicht.
+  (b) Sieben Test-Docstrings beschrieben einen Nachbearbeitungs-Durchlauf (`_prune_tool_schemas`,
+  „A2 prunes to None"), der in `6bd12c6` **gelöscht** wurde. Der wirkliche Mechanismus ist das
+  ausdrückliche `@mcp.tool(output_schema=None)` pro Tool. Das war nicht kosmetisch: eine spätere
+  Session plante auf Basis dieser Prosa das Typisieren von `discover_pvs` **ohne** die
+  kwarg-Löschung — der Bau wäre stumm ohne Wirkung geblieben. Zusätzlich enumerierten zwei Stellen
+  die getypten Tools (vier, obwohl es neun waren); sie zeigen jetzt auf `_TYPED_OUTPUT_TOOLS`.
+  Bei `display_tools.py` steht jetzt am Registrierungs-Ort, warum die vier Display-Tools das
+  Opt-out tragen (nicht „ungeeignet", sondern „von S29 noch nicht erreicht").
+
 - **`discover_pvs` trägt ein typisiertes `outputSchema` (S29).** Bisher gab das Tool ein offenes
   `dict[str, object]` zurück — ein aufrufender Agent konnte „keine solche PV" nicht von „ChannelFinder
   ist nicht konfiguriert, ich konnte gar nicht suchen" und ein vollständiges Ergebnis nicht von einem

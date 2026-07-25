@@ -323,17 +323,23 @@ def _archiver_error_code(exc: ArchiverError) -> str:
 # One total=False TypedDict over every key across query_archived's return paths (disabled /
 # enabled). Same MA-1 nullability rule as AlarmConfiguredResult above: a field ABSENT on some
 # return path -- or present-but-sometimes-None (``archived`` is None on the disabled path) -- is
-# typed ``X | None``, because FastMCP serializes an omitted total=False key (and an explicit None)
-# as JSON ``null`` (convert_result dumps WITHOUT ``exclude_none``); a non-nullable type makes the
-# emitted structuredContent violate the tool's own advertised outputSchema. Only ``enabled`` +
-# ``pv`` are present on EVERY path and never null.
+# typed ``X | None``; the measured rationale lives in ``services/checkers_olog.py``'s "Tool result
+# shapes" header. ``archived`` is the load-bearing case: an EXPLICIT None on the disabled path, and
+# the WIRE path validates the emitted null against the advertised schema, so a non-nullable
+# annotation would fail a real client's call. Only ``enabled`` + ``pv`` are present on EVERY path
+# and never null.
 #
 # The 8 DS-4A/AR-D enrichment fields are copied UNCOERCED from the getPVStatus record
 # (get_archive_status: ``result[out_key] = record[source_key]``), so their wire value is whatever
 # the appliance sent -- measured both bool and str across the fixtures -- hence ``object | None``,
 # NOT ``str | None``: a stricter scalar would make a bool value fail its own outputSchema at call
-# time (FastMCP validates the return via the output_model). ``archived``/``status`` ARE computed
-# (bool / non-empty str), so they stay precisely typed.
+# time. That consequence is REAL but the mechanism is not fastmcp's: standalone fastmcp builds no
+# output model and does not validate the return. The check that bites lives one layer out, in the
+# MCP SDK's low-level call_tool handler, which runs jsonschema over the structuredContent against
+# the advertised schema -- so the failure surfaces only on the WIRE, never on the in-process
+# ``FastMCP.call_tool`` this repo's conformance tests mostly drive. Which makes the loose type the
+# safer one here: a mis-typed raw-copy would otherwise pass every test and break a real client.
+# ``archived``/``status`` ARE computed (bool / non-empty str), so they stay precisely typed.
 class ArchiveStatusResult(TypedDict, total=False):
     enabled: bool
     pv: str
@@ -409,13 +415,15 @@ async def query_archived(pv: str, timeout: float = 5.0) -> ArchiveStatusResult:
 
 # --- Tool result shape (S29): is_alarm_configured's tri-state ------------------------------------
 # One total=False TypedDict over every key across query_alarm_configured's return paths (disabled /
-# no-tree-withheld / configured). Same MA-1 nullability rule as the Olog shapes
-# (services/checkers_olog.py:46-58): a field ABSENT on some return path — or present-but-sometimes-
-# None (``configured`` is None on the disabled/withheld/tree-unknown paths) — is typed ``X | None``,
-# because FastMCP serializes an omitted total=False key (and an explicit None) as JSON ``null`` (its
-# convert_result dumps the model WITHOUT ``exclude_none``); a non-nullable type makes the emitted
-# structuredContent violate the tool's own advertised outputSchema. Only ``enabled`` + ``pv`` are
-# present on EVERY path and never null. FastMCP yields a typed outputSchema (``properties``;
+# no-tree-withheld / configured). Same MA-1 nullability rule as the Olog shapes — the measured
+# rationale (absent key is DROPPED, not null; an explicit None IS emitted and the WIRE path
+# validates it) lives once in ``services/checkers_olog.py``'s "Tool result shapes" header; do not
+# restate it here. A field ABSENT on some return path — or present-but-sometimes-None
+# (``configured`` is None on the disabled/withheld/tree-unknown paths) — is typed ``X | None``.
+# ``configured`` is the load-bearing case: it is an EXPLICIT None, so a non-nullable annotation
+# would make a real client's call fail validation, not merely mis-advertise the shape.
+# Only ``enabled`` + ``pv`` are present on EVERY path and never null. fastmcp yields a typed
+# outputSchema (``properties``;
 # ``anyOf[T, null]`` for the nullable fields) instead of the bare ``{additionalProperties: true}`` a
 # plain dict yields; mypy --strict checks every ``return {...}`` literal below against this shape.
 class AlarmConfiguredResult(TypedDict, total=False):
@@ -684,12 +692,13 @@ async def query_channel_vocabulary(timeout: float = 5.0) -> ChannelVocabularyRes
         ) from exc
 
 
-# Nullability mirrors AlarmConfiguredResult (see its comment above): FastMCP serializes an
-# omitted total=False key (and an explicit None) as JSON ``null`` (its convert_result dumps the
-# model WITHOUT ``exclude_none``), so a field ABSENT on some return path — status/message
-# (success-only), withheld (withheld-only), note (disabled/withheld) — or None on some path —
-# ``registered``, the tri-state — is typed ``X | None``. Only ``enabled`` + ``name`` are present
-# on EVERY path and never null. FastMCP then yields a typed outputSchema (``properties``;
+# Nullability mirrors AlarmConfiguredResult (see its comment above; the measured rationale lives
+# in ``services/checkers_olog.py``'s "Tool result shapes" header). A field ABSENT on some return
+# path — status/message (success-only), withheld (withheld-only), note (disabled/withheld) — or
+# None on some path — ``registered``, the tri-state — is typed ``X | None``. ``registered`` is the
+# load-bearing case: an EXPLICIT None, which the wire path validates. Only ``enabled`` + ``name``
+# are present on EVERY path and never null. fastmcp then yields a typed outputSchema
+# (``properties``;
 # ``anyOf[T, null]`` for the nullable fields) instead of the bare ``{additionalProperties: true}``
 # a plain dict yields; mypy --strict checks every ``return {...}`` literal below against this shape.
 class NameLookupResult(TypedDict, total=False):

@@ -46,15 +46,39 @@ from epics_pv_mcp.services.olog_exceptions import (
 # --- Tool result shapes (MA-1 Commit C; nullability hardened in the MA-1 follow-up) ------------
 # One ``total=False`` TypedDict per query function: every key across the function's return paths
 # (disabled / not-found / withheld / success + the conditionally-added note/warnings/attachments/
-# download-sink keys). Every field ABSENT on some return path is typed ``X | None``, because
-# FastMCP serializes an omitted total=False key as JSON ``null`` (its ``convert_result`` dumps the
-# model WITHOUT ``exclude_none``): a non-nullable type would make the emitted structuredContent
-# violate the tool's own advertised outputSchema (measured: 8/11 tools on the disabled path, all 11
-# once ``note`` is absent — MA-1 QA finding). Only fields present on EVERY return path (``enabled``
-# + each tool's core status/payload fields) stay non-nullable. The nested entry/entries/attachments
-# projections keep ``dict[str, object]`` inner shapes (whole-mode vs redacted-mode variance).
-# FastMCP turns these into a typed ``outputSchema`` (``properties``; ``anyOf[T, null]`` for the
-# nullable fields) instead of the bare ``{additionalProperties: true}`` a plain dict yields.
+# download-sink keys). Every field ABSENT on some return path is typed ``X | None``.
+#
+# WHY the nullability — the canonical statement for every typed output shape in this server;
+# the other shapes point here instead of repeating it. Measured under standalone fastmcp, and the
+# two halves genuinely differ:
+#
+#   * An ABSENT ``total=False`` key is DROPPED from the wire — NOT emitted as null — and the
+#     generated schema carries no ``required``, so a missing key is invisible to a caller. For a
+#     merely-sometimes-absent field the nullable type is therefore SCHEMA HONESTY: the advertised
+#     shape must not claim a type the payload never carries. What enforces it is the conformance
+#     test's static half (Part B), not the runtime.
+#   * A field set EXPLICITLY to None IS emitted as null, and there the nullability is a REAL
+#     guard: the wire path validates. The MCP SDK's low-level handler runs jsonschema over the
+#     structuredContent against the advertised ``outputSchema``, so a non-nullable annotation on a
+#     field that can be an explicit None earns a real client an ``Output validation error``
+#     instead of an answer.
+#   * The in-process ``FastMCP.call_tool`` shortcut — which most conformance tests here use —
+#     does NOT validate. A test driving it therefore cannot see a violation a real client would
+#     hit; only a test driving a real ``fastmcp.Client`` can (see the discover_pvs conformance
+#     test). That asymmetry is why the static Part B carries the guarantee.
+#
+# Superseded by the above: the earlier note that fastmcp "serializes an omitted total=False key as
+# null because convert_result dumps the model WITHOUT exclude_none". That described the
+# SDK-bundled FastMCP 1.0; after the standalone-fastmcp migration there is no model and no
+# model_dump on this path — ``convert_result`` hands the raw dict to ``to_jsonable_python``.
+# The nullability CONCLUSION was right and stands; only the mechanism was wrong.
+#
+# Only fields present on EVERY return path (``enabled`` + each tool's core status/payload fields)
+# stay non-nullable. The nested entry/entries/attachments projections keep ``dict[str, object]``
+# inner shapes (whole-mode vs redacted-mode variance). fastmcp turns these into a typed
+# ``outputSchema`` (``properties``; ``anyOf[T, null]`` for the nullable fields) instead of the bare
+# ``{additionalProperties: true}`` a plain dict yields — provided the tool does not opt out with
+# ``@mcp.tool(output_schema=None)``, which overrides the annotation entirely.
 # mypy --strict checks every ``return {...}`` literal against its declared shape here.
 
 

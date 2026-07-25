@@ -581,17 +581,20 @@ async def test_olog_structured_output_conforms_to_its_schema(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """MA-1 follow-up: every Olog tool's EMITTED structuredContent must conform to its own
-    outputSchema. FastMCP serializes an omitted ``total=False`` key as JSON ``null`` (its
-    ``convert_result`` dumps the model WITHOUT ``exclude_none``), so a property that is sometimes
-    absent MUST permit null in the schema — otherwise the server advertises a schema its own output
-    violates. Pre-fix that was 8/11 tools on the disabled path alone and all 11 once ``note`` is
-    absent on a success path. Green once the sometimes-absent fields are typed ``X | None``.
+    outputSchema. A sometimes-absent property is typed ``X | None`` by the S29 convention, so it
+    MUST permit null in the schema — otherwise the server advertises a shape its own output does
+    not honour. The measured rationale (an absent key is DROPPED from the wire; an EXPLICIT None is
+    emitted and the wire path validates it; the in-process shortcut does not validate) lives once
+    in services/checkers_olog.py's "Tool result shapes" header. Pre-fix this tripped on 8/11 tools
+    on the disabled path alone and all 11 once ``note`` is absent on a success path.
 
-    Part A (runtime, real serialization): drive each tool on the disabled path through
-    ``mcp.call_tool`` and assert every None-valued key in the emitted structuredContent permits null
-    in the schema — the direct bug repro. Part B (static, all 11): every advertised property
-    outside the always-present envelope must permit null, extending the check to the
-    note/success-only fields of the write + download tools without mocking the write gate.
+    Part A (runtime): drive each tool on the disabled path through the in-process
+    ``mcp.call_tool`` and assert every None-valued key in the emitted structuredContent permits
+    null in the schema. Note that this shortcut does NOT validate returns, so Part A only ever sees
+    the nulls actually emitted — it is inert for a tool that emits none. Part B (static, all 11)
+    is what carries the guarantee: every advertised property outside the always-present envelope
+    must permit null, which also covers the note/success-only fields of the write + download tools
+    without mocking the write gate.
     """
     from epics_pv_mcp.config import EpicsConfig
     from epics_pv_mcp.server import mcp
@@ -636,7 +639,7 @@ async def test_olog_structured_output_conforms_to_its_schema(
                 continue
             assert _schema_permits_null(prop_schema), (
                 f"{name}.{prop_name}: sometimes-absent property must permit null in its "
-                f"outputSchema (FastMCP dumps an omitted key as null), got {prop_schema}"
+                f"outputSchema (the S29 convention), got {prop_schema}"
             )
 
 
@@ -706,8 +709,9 @@ async def test_archiver_history_structured_output_conforms_to_its_schema(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """S29 conformance (the MA-1 null trap for get_pv_history): the EMITTED structuredContent
-    must conform to its own outputSchema. FastMCP serializes an omitted ``total=False`` key as JSON
-    ``null`` (its ``convert_result`` dumps the model WITHOUT ``exclude_none``), so a field absent on
+    must conform to its own outputSchema. A sometimes-absent field is typed ``X | None`` by the S29
+    convention (rationale: services/checkers_olog.py's "Tool result shapes" header), so a field
+    absent on
     some return path — from/to/capped/meta/status/withheld_reason on the disabled path, plus note on
     a success path with no note — MUST permit null in the schema. A non-nullable ``status:
     Literal[...]`` would make the disabled-path output violate the tool's own advertised schema.
@@ -757,7 +761,7 @@ async def test_archiver_history_structured_output_conforms_to_its_schema(
             continue
         assert _schema_permits_null(prop_schema), (
             f"get_pv_history.{prop_name}: sometimes-absent property must permit null in its "
-            f"outputSchema (FastMCP dumps an omitted key as null), got {prop_schema}"
+            f"outputSchema (the S29 convention), got {prop_schema}"
         )
 
 
@@ -822,8 +826,9 @@ async def test_alarm_configured_structured_output_conforms_to_its_schema(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """S29 conformance (the MA-1 null trap for is_alarm_configured): the EMITTED structuredContent
-    must conform to its own outputSchema. FastMCP serializes an omitted ``total=False`` key as JSON
-    ``null`` (its ``convert_result`` dumps the model WITHOUT ``exclude_none``), so a field absent on
+    must conform to its own outputSchema. A sometimes-absent field is typed ``X | None`` by the S29
+    convention (rationale: services/checkers_olog.py's "Tool result shapes" header), so a field
+    absent on
     some return path — config/withheld/detail on the disabled path, plus note on a success path with
     no note — MUST permit null in the schema. And ``configured`` is explicitly None on the disabled
     path (the tri-state), so a non-nullable ``configured: bool`` would make the disabled-path output
@@ -871,7 +876,7 @@ async def test_alarm_configured_structured_output_conforms_to_its_schema(
             continue
         assert _schema_permits_null(prop_schema), (
             f"is_alarm_configured.{prop_name}: sometimes-absent property must permit null in its "
-            f"outputSchema (FastMCP dumps an omitted key as null), got {prop_schema}"
+            f"outputSchema (the S29 convention), got {prop_schema}"
         )
 
 
@@ -936,8 +941,9 @@ async def test_name_lookup_structured_output_conforms_to_its_schema(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """S29 conformance (the MA-1 null trap for lookup_device_name): the EMITTED structuredContent
-    must conform to its own outputSchema. FastMCP serializes an omitted ``total=False`` key as JSON
-    ``null`` (its ``convert_result`` dumps the model WITHOUT ``exclude_none``), so a field absent on
+    must conform to its own outputSchema. A sometimes-absent field is typed ``X | None`` by the S29
+    convention (rationale: services/checkers_olog.py's "Tool result shapes" header), so a field
+    absent on
     some return path — status/message/withheld on the disabled path — MUST permit null there.
     And ``registered`` is explicitly None on the disabled path (the tri-state), so a non-nullable
     ``registered: bool`` would make the disabled-path output violate the tool's advertised schema.
@@ -982,7 +988,7 @@ async def test_name_lookup_structured_output_conforms_to_its_schema(
             continue
         assert _schema_permits_null(prop_schema), (
             f"lookup_device_name.{prop_name}: sometimes-absent property must permit null in its "
-            f"outputSchema (FastMCP dumps an omitted key as null), got {prop_schema}"
+            f"outputSchema (the S29 convention), got {prop_schema}"
         )
 
 
@@ -1051,9 +1057,10 @@ async def test_is_archived_structured_output_conforms_to_its_schema(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """S29 conformance (the MA-1 null trap for is_archived): the EMITTED structuredContent must
-    conform to its own outputSchema. FastMCP serializes an omitted ``total=False`` key as JSON
-    ``null`` (its ``convert_result`` dumps the model WITHOUT ``exclude_none``), so a field absent on
-    the disabled path — status + the 8 enrichment fields — MUST permit null there. And ``archived``
+    conform to its own outputSchema. A sometimes-absent field is typed ``X | None`` by the S29
+    convention (rationale: services/checkers_olog.py's "Tool result shapes" header), so a field
+    absent on the disabled path — status + the 8 enrichment fields — MUST permit null. And
+    ``archived``
     is explicitly None on the disabled path (the tri-state), so a non-nullable ``archived: bool``
     would make the disabled-path output violate the tool's advertised schema.
 
@@ -1091,7 +1098,7 @@ async def test_is_archived_structured_output_conforms_to_its_schema(
             continue
         assert _schema_permits_null(prop_schema), (
             f"is_archived.{prop_name}: sometimes-absent property must permit null in its "
-            f"outputSchema (FastMCP dumps an omitted key as null), got {prop_schema}"
+            f"outputSchema (the S29 convention), got {prop_schema}"
         )
 
 
@@ -1669,14 +1676,21 @@ def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
 
 # --- tools/list schema hygiene: standalone FastMCP emits lean schemas natively ---
 
-# The tools whose TypedDict return yields a TYPED outputSchema (properties present); every OTHER
-# tool returns dict[str, object] -> its information-empty outputSchema is dropped to None by A2.
-# Named here as an INDEPENDENT source of truth (not reflected from the code). The 11 Olog tools were
-# typed first (MA-1 Commit C); the archiver/alarm/naming targets followed (S29 — get_pv_history,
-# is_alarm_configured, lookup_device_name, is_archived; each surfaces a result-level
-# status/tri-state discriminant on the wire, exactly what S29 exposes). These are core tools, so
-# the set is identical on a core-only ([displays] absent, 28 tools) and a full (32) install -> the
-# assertions are RELATIONAL, never a COUNT (which would break the core-only lane).
+# The tools whose TypedDict return yields a TYPED outputSchema (properties present). Named here as
+# an INDEPENDENT source of truth — deliberately NOT reflected from the code, and deliberately not
+# summarised in prose either: an earlier version of this comment enumerated the members and rotted
+# behind the set below (it still named four when there were nine). The set IS the list; read it.
+#
+# Every OTHER tool returns dict[str, object] and advertises NO outputSchema. The mechanism is an
+# explicit per-tool opt-out — ``@mcp.tool(output_schema=None)`` — NOT a post-pass that strips empty
+# schemas. Such a pass (``_prune_tool_schemas``) did exist and was DELETED in the standalone-fastmcp
+# migration `6bd12c6`, because fastmcp emits lean schemas natively. Believing the deleted pass was
+# still live is not hypothetical: it cost a later session a wrong plan, since it explains the None
+# without pointing at the decorator that actually causes it. To type a tool, DELETE its kwarg —
+# ``None`` is not "unset", it overrides the annotation-derived schema entirely.
+#
+# These are core tools, so the set is identical on a core-only ([displays] absent, 28 tools) and a
+# full (32) install -> the assertions are RELATIONAL, never a COUNT (which would break core-only).
 _TYPED_OUTPUT_TOOLS = frozenset(
     {
         "search_logbook",
@@ -1794,8 +1808,10 @@ def _schema_nodes_with_null_default(node: object, path: str = "root") -> list[st
 
 @pytest.mark.asyncio
 async def test_input_schemas_carry_no_title_annotation() -> None:
-    """MA-Q1 A1: after the post-pass, NO inputSchema node advertises a ``title`` annotation
-    (schema-aware walk). Red on the pre-strip code (pydantic emits titles on every node)."""
+    """MA-Q1 A1: NO inputSchema node advertises a ``title`` annotation (schema-aware walk).
+    Standalone fastmcp omits them natively — the hand-written post-pass this once guarded was
+    deleted in `6bd12c6`. The guard stays: it is what would catch an SDK regression that starts
+    emitting them again. Red on the SDK-bundled FastMCP 1.0 code (titles on every node)."""
     from epics_pv_mcp.server import mcp
 
     for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]:
@@ -1824,8 +1840,10 @@ async def test_output_schema_fields_carry_no_title_annotation() -> None:
 
 @pytest.mark.asyncio
 async def test_output_schemas_carry_no_null_default() -> None:
-    """MA-Q1 A3 (L1): after the post-pass, NO typed-outputSchema node carries a ``default: null``
-    (the always-null ``total=False`` annotation). Red pre-A3 (every field emits default:null)."""
+    """MA-Q1 A3 (L1): NO typed-outputSchema node carries a ``default: null`` (the always-null
+    ``total=False`` annotation). Standalone fastmcp omits them natively; the hand-written pass this
+    once guarded was deleted in `6bd12c6`, and the guard stays as the SDK-regression net. Red
+    against the SDK-bundled FastMCP 1.0 code (every field emitted default:null)."""
     from epics_pv_mcp.server import mcp
 
     for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]:
@@ -1890,12 +1908,16 @@ async def test_every_required_arg_exists_in_properties() -> None:
 @pytest.mark.asyncio
 async def test_output_schema_typed_only_for_typed_tools() -> None:
     """MA-Q1 A2 (RELATIONAL — not a count, so core-only [28] and full [32] both pass): a tool
-    advertises an outputSchema WITH properties iff it is one of the typed tools (the 11 Olog tools +
-    get_pv_history/is_alarm_configured/lookup_device_name/is_archived); every other present tool
-    advertises NONE. Proves the empty schemas were dropped
-    AND the typed ones kept. Red on a blanket drop (typed schemas gone) or no drop (empty schemas
-    remain). Also the built-in S29 red-proof: put get_pv_history in the set before its TypedDict
-    lands and this assertion goes red (its schema is still pruned to None)."""
+    advertises an outputSchema WITH properties iff it is in ``_TYPED_OUTPUT_TOOLS``; every other
+    present tool advertises NONE. (The membership list is that set, not this docstring — see its
+    comment for why enumerating it here is a rotting hazard.) Proves the accept-all schemas stay
+    suppressed AND the typed ones survive. Red on a blanket suppression (typed schemas gone) or on
+    a lost ``output_schema=None`` opt-out (an accept-all schema reappears).
+
+    Also the built-in S29 red-proof: add a tool to the set BEFORE typing it and this goes red,
+    because its ``@mcp.tool(output_schema=None)`` still overrides the annotation. Two sibling tests
+    (title-annotation, null-default) assert ``outputSchema is not None`` for set members too, so
+    that red-proof trips THREE tests, not one — measured, not assumed."""
     from epics_pv_mcp.server import mcp
 
     tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
@@ -1918,8 +1940,8 @@ async def test_output_schema_typed_only_for_typed_tools() -> None:
 
 @pytest.mark.asyncio
 async def test_field_descriptions_survive_the_strip() -> None:
-    """MA-Q1: stripping the ``title`` ANNOTATIONS must not touch field ``description``s — the
-    point-of-need semantics the repo DoD requires. Spot-check a distinctive, anchored one."""
+    """MA-Q1: whatever suppresses the ``title`` ANNOTATIONS must not touch field ``description``s —
+    the point-of-need semantics the repo DoD requires. Spot-check a distinctive, anchored one."""
     from epics_pv_mcp.server import mcp
 
     tools = {t.name: t for t in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
@@ -1931,13 +1953,13 @@ async def test_field_descriptions_survive_the_strip() -> None:
 async def test_stripped_tool_still_returns_structured_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """MA-Q1 A2 is ADVERTISE-ONLY: dropping the wire outputSchema leaves the RUNTIME
-    ``fn_metadata.output_schema`` intact, so a stripped tool still returns structuredContent at call
-    time. Drive ``find_channels`` (a stripped tool — its dict[str, object] return yields an
-    accept-all schema that A2 prunes to None) on its deterministic disabled path (no network) and
-    assert it still yields a structured dict. (NOT get_archive_info — it became a TYPED tool in the
-    S29 cluster, so its schema is no longer stripped; find_channels stays untyped. When it is typed
-    later, re-point this to the next still-untyped tool with a no-network path.)"""
+    """MA-Q1 A2 is ADVERTISE-ONLY: suppressing the wire outputSchema does not stop a tool from
+    returning structuredContent at call time. Drive ``find_channels`` — an untyped tool, i.e. one
+    that still carries ``@mcp.tool(output_schema=None)`` so its accept-all schema is never
+    advertised — on its deterministic disabled path (no network) and assert it still yields a
+    structured dict. (NOT get_archive_info, and no longer discover_pvs: both became TYPED tools, so
+    they advertise a schema. find_channels stays untyped. When it is typed, re-point this at the
+    next still-untyped tool with a no-network path.)"""
     from epics_pv_mcp.config import EpicsConfig
     from epics_pv_mcp.server import mcp
     from epics_pv_mcp.services import checkers

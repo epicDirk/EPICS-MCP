@@ -248,6 +248,13 @@ def register_display_tools(mcp: FastMCP) -> None:
     optional ``[displays]`` extra is installed and imports cleanly (the single capability truth), so
     the core server installs and starts standalone without it.
     """
+    # ``output_schema=None`` is the explicit opt-out that keeps an information-empty accept-all
+    # schema off the wire — these four still return ``dict[str, object]``. It is NOT a claim that
+    # they are unsuitable for typing: they are simply the four S29 has not reached, and they are
+    # absent from the core lane, so a typed shape here would only ever be advertised on a
+    # [displays] install. Typing one means DELETING its kwarg here (``None`` overrides the
+    # annotation-derived schema) and adding it to the conformance whitelist. Whether they get typed
+    # at all is an open product question, deliberately recorded here rather than in a status file.
     mcp.tool(annotations=_READONLY, output_schema=None)(validate_pvs)
     mcp.tool(annotations=_READONLY, output_schema=None)(crossplane_check)
     mcp.tool(annotations=_READONLY, output_schema=None)(coverage_audit)

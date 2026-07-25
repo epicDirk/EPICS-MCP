@@ -38,10 +38,11 @@ _DISABLED_NOTE = (
 
 # get_pv_history's tool result shape (S29 — typed MCP outputSchema; the pattern the Olog cluster set
 # in services/checkers_olog.py). ``total=False`` because the disabled path (below) carries only a
-# subset. Every field ABSENT on some return path is typed ``X | None``, because FastMCP serializes
-# an omitted total=False key as JSON ``null`` (its ``convert_result`` dumps the model WITHOUT
-# ``exclude_none``): a non-nullable type would make the emitted structuredContent violate the tool's
-# own advertised outputSchema (the MA-1 trap). Only ``enabled``/``pv``/``samples``/``total`` are on
+# subset. Every field ABSENT on some return path is typed ``X | None``; the measured rationale lives
+# in ``services/checkers_olog.py``'s "Tool result shapes" header (short version: an absent key is
+# DROPPED from the wire, so nullability there is schema honesty enforced by the conformance test's
+# static half; an EXPLICIT None is emitted and the wire path validates it for real).
+# Only ``enabled``/``pv``/``samples``/``total`` are on
 # EVERY path (disabled + enabled) and stay non-nullable; the disabled path omits
 # ``from``/``to``/``capped``/``meta``/``status``/``withheld_reason``, and a success path with no
 # note omits ``note`` — so all seven are nullable. ``samples`` and ``meta`` keep opaque ``dict``
