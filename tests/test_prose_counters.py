@@ -489,6 +489,13 @@ _CLAIMS: tuple[_Claim, ...] = (
         r"uniform over all (\w+) tools",
         lambda: len(ts._OLOG_ALWAYS_PRESENT),
     ),
+    # "Pre-fix this tripped on 8/11 tools": the numerator is a frozen historical measurement, but
+    # the DENOMINATOR is the live Olog tool count and drifts with every Olog tool added.
+    _claim(
+        "olog tools (historical ratio)",
+        r"tripped on \d+/(\w+) tools",
+        lambda: len(ts._OLOG_ALWAYS_PRESENT),
+    ),
     _claim(
         "archiver-history fields",
         r"ArchiverHistoryResult's (\w+) fields",
@@ -599,19 +606,6 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
         "1``: 19 other tests",
         1,
     ): "the VALUE of EPICS_MCP_READ_RATE_LIMIT=1, not a size",
-    # --- historical anchors: deliberately frozen prose about a state that no longer exists -------
-    (
-        "tests/test_server.py",
-        "test_olog_structured_output_conforms_to_its_schema",
-        "8/11 tools",
-        8,
-    ): ("a pre-fix measurement; the live 11 is derived from the same sentence's sibling claim"),
-    (
-        "tests/test_server.py",
-        "test_olog_structured_output_conforms_to_its_schema",
-        "8/11 tools",
-        11,
-    ): "the denominator of that historical ratio; the live count is claimed at 'all 11 tools'",
     # --- runtime measurements: no constant can settle them --------------------------------------
     (
         "tests/test_server.py",
@@ -680,7 +674,7 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
 }
 
 # The one hand-kept integer in this module. See test_inventory_size_is_pinned for why it exists.
-_INVENTORY_SIZE = 98
+_INVENTORY_SIZE = 96
 
 
 def _watched_blocks() -> tuple[ProseBlock, ...]:

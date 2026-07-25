@@ -15,27 +15,37 @@ Four decisions are load-bearing, and each was forced by a measurement rather tha
   own-line comments are joined the same way as docstring paragraphs.
 * **Paragraph, not whole-block.** Flattening a whole docstring lets a match jump a sentence
   boundary: ``…lives in one module.`` + ``The functions resolve…`` reads as "one module. The
-  functions" and would be counted as a claim about functions.
-* **The collection noun is part of the PATTERN, never a filter applied afterwards.** The first
-  version matched "a number, a gap, then any word" and dropped the hit when the word was not a
-  collection noun. Measured, that lost 7 of the estate's most drift-prone claims: the gap is
-  greedy, so "all 22 schemas finds the same enum" matched through to "the", was rejected, and
-  ``finditer`` then resumed *past* the phrase — the real pairing was never tried. A rejected match
-  is not a neutral event; it consumes the text.
+  functions" and would be counted as a claim about functions. A bare ``#`` is the comment spelling
+  of a blank line and ends a run — without it the rule held for docstrings and quietly not for
+  comments, fusing fifteen author paragraphs into single blocks.
+* **NOTHING is filtered after a match; every condition lives inside the pattern.** This one cost
+  the same defect twice. First the collection noun was a post-filter: the greedy gap matched "all
+  22 schemas finds the same enum" through to "the", the hit was dropped, and ``finditer`` resumed
+  *past* the phrase — seven of the estate's most drift-prone claims were lost. Then the sentence
+  break was a post-filter and did it again: "the 7 rows. Both tools agree" matched from the 7
+  through to "tools", was discarded whole, and the valid "7 rows" inside was never tried.
+  **A rejected match is not a neutral event; it consumes the text.** Both now sit in the pattern.
 * **A site is keyed by its enclosing QUALNAME, never by line number.** Line numbers move with any
   edit above them, so a table keyed on them rots for a reason that is not a change in the finding —
-  the lesson ``tests/test_client_edge_guards.py`` records for its own ``_UNOBSERVED`` table.
+  the lesson ``tests/test_client_edge_guards.py`` records for its own ``_UNOBSERVED`` table. For
+  the same reason the tokenizer is fed through ``io.StringIO``: ``str.splitlines`` also breaks on
+  form feed, which the tokenizer does not, and one page separator would desync every row below it.
 
-Honest scope, because the numbers invite over-reading: this finds a number PAIRED with one of a
-closed list of collection nouns, or the ``N of the M`` shape where the noun is elided. It does not
-find every statement about a size. "Three independent red directions" names a size and is invisible
-here — by design: those are claims about test bodies, which no constant can settle. The consumer
-states the closed list in its own docstring rather than implying coverage.
+Honest scope, in full, because the numbers invite over-reading. This finds a number that is either
+PAIRED with one of the closed ``COLLECTION_NOUNS`` across at most **two** intervening words, or in
+the ``N of the M`` shape where the noun is elided. It therefore does NOT see: a size named with any
+other noun ("modes", "halves", "planes" — measured, about 60 such pairings exist in the watched
+prose); a number above twenty spelled as a word; a hyphenated compound ("twenty-two" reads as 20);
+a gap of three or more words; and numbers inside f-string assertion messages, which are neither
+comments nor docstrings. "Three independent red directions" names a size and is invisible here by
+design — those are claims about test bodies, which no constant can settle. The consumer states the
+same limits in its own docstring rather than implying coverage.
 """
 
 from __future__ import annotations
 
 import ast
+import io
 import re
 import tokenize
 from collections.abc import Iterable, Sequence
@@ -92,31 +102,37 @@ COLLECTION_NOUNS: frozenset[str] = frozenset(
 
 
 def _alternation(words: Iterable[str]) -> str:
-    """Longest-first, so ``ten`` cannot win over ``tenth``-like longer members."""
+    """Longest alternative first, so a prefix cannot shadow a longer member of the same list."""
     return "|".join(sorted(words, key=len, reverse=True))
 
 
-_NUMBER = rf"(?:\d[\d_]*|{_alternation(_WORD_VALUES)})"
+# A number is digits (``200_000``), never a decimal fraction or a hyphenated compound: the
+# lookbehind rejects ``v2.0``, ``ISO-8601`` and ``DS-4A``, which this prose is full of.
+_NUMBER = rf"(?<![-\w.])(?<!\d\.)(?:\d[\d_]*|{_alternation(_WORD_VALUES)})\b"
 
-# A number, at most two intervening words, then one of the closed nouns. The noun alternation is
-# INSIDE the pattern (see the module docstring) so backtracking can find a gap size that works.
-_PAIRED = re.compile(
-    rf"(?<![-\w])(?:{_NUMBER})\b(?:\W+[\w|/\[\]'-]+){{0,2}}\W+(?:{_alternation(COLLECTION_NOUNS)})\b",
-    re.IGNORECASE,
-)
+# A full stop followed by a capital ends a sentence; followed by anything else it is an
+# abbreviation ("7 (resp. 9) rows", where BOTH numbers are real claims).
+_BREAK = r"(?![.;:]\s+[A-Z])"
+
+# A number, at most two intervening words, then one of the closed nouns.
+#
+# Two properties are load-bearing and were each bought with a measured defect:
+#   * The noun alternation is INSIDE the pattern, so backtracking finds a gap size that works. A
+#     post-filter would drop the match AND consume the text (see the module docstring).
+#   * The sentence break is a look-ahead INSIDE the gap, not a filter on the finished match. As a
+#     filter it had the same defect one layer up: "the 7 rows. Both tools agree" matched from the
+#     7 through to "tools", was discarded whole, and the valid "7 rows" inside it was never tried.
+# The gap classes are DISJOINT (separators are whitespace-or-punctuation-then-whitespace, words are
+# non-space): overlapping classes made the partition ambiguous, and a run of dashes — this estate
+# rules its sections with 75 of them — cost minutes of backtracking.
+_GAP = rf"(?:{_BREAK}[^\w\s]*\s+[^\s]+){{0,2}}{_BREAK}[^\w\s]*\s+"
+_PAIRED = re.compile(rf"{_NUMBER}{_GAP}(?:{_alternation(COLLECTION_NOUNS)})\b", re.IGNORECASE)
 
 # "TEN of the twelve", "13 of the 20", "Five of the 16" — the noun is elided, so _PAIRED is blind
 # to these. They are among the most drift-prone claims here, so they get their own shape.
-_OF_THE = re.compile(
-    rf"(?<![-\w])(?:{_NUMBER})\s+of\s+(?:the|those|these)\s+(?:{_NUMBER})\b", re.IGNORECASE
-)
+_OF_THE = re.compile(rf"{_NUMBER}\s+of\s+(?:the|those|these)\s+{_NUMBER}", re.IGNORECASE)
 
-_NUMBER_TOKEN = re.compile(rf"(?<![-\w]){_NUMBER}\b", re.IGNORECASE)
-
-# A full stop followed by a capital is a sentence boundary; a full stop followed by anything else
-# is an abbreviation ("7 (resp. 9) rows", where BOTH numbers are real claims). Measured: without
-# this distinction either the abbreviation is lost or "one module. The functions" is invented.
-_SENTENCE_BREAK = re.compile(r"[.;:]\s+[A-Z]")
+_NUMBER_TOKEN = re.compile(_NUMBER, re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -206,7 +222,13 @@ def _paragraphs(text: str, first_lineno: int) -> list[tuple[int, str]]:
 def _comment_blocks(
     path: str, source: str, spans: Sequence[tuple[int, int, str]]
 ) -> list[ProseBlock]:
-    """Runs of own-line comments at one indentation, joined into one paragraph each."""
+    """Runs of own-line comments at one indentation, joined into one paragraph each.
+
+    A bare ``#`` ends the run: it is the comment spelling of a blank line. Without that the
+    "paragraph, not whole-block" rule would hold for docstrings and quietly not for comments —
+    measured, that fused fifteen author paragraphs into single blocks, one of them 1200 characters
+    long, and produced a pairing that reached across ``) install ->`` into an unrelated noun.
+    """
     out: list[ProseBlock] = []
     run: list[str] = []
     run_start = 0
@@ -217,12 +239,19 @@ def _comment_blocks(
         if run:
             out.append(ProseBlock(path, run_start, _qualname_at(spans, run_start), " ".join(run)))
 
-    lines = iter(source.splitlines(keepends=True))
-    for token in tokenize.generate_tokens(lambda: next(lines, "")):
+    # io.StringIO, not splitlines(): str.splitlines also breaks on form feed and friends, which the
+    # tokenizer does not, so one page separator would desync every row below it — and rows feed the
+    # qualname lookup, i.e. exactly the key this module promises stays stable.
+    for token in tokenize.generate_tokens(io.StringIO(source).readline):
         if token.type != tokenize.COMMENT:
             continue
         row, col = token.start
         text = token.string.lstrip("#").strip()
+        if not text:
+            flush()
+            run = []
+            previous_row, previous_col = row, col
+            continue
         if run and row == previous_row + 1 and col == previous_col:
             run.append(text)
         else:
@@ -261,7 +290,7 @@ def iter_blocks(targets: Iterable[tuple[str, Path]]) -> tuple[ProseBlock, ...]:
     """
     blocks: list[ProseBlock] = []
     for label, path in targets:
-        source = path.read_text(encoding="utf-8")
+        source = path.read_text(encoding="utf-8-sig")
         tree = ast.parse(source)
         spans = _scope_spans(tree)
         blocks.extend(_comment_blocks(label, source, spans))
@@ -270,14 +299,15 @@ def iter_blocks(targets: Iterable[tuple[str, Path]]) -> tuple[ProseBlock, ...]:
 
 
 def _spans_in(block: ProseBlock) -> list[tuple[int, int]]:
-    """Character spans of every size-naming phrase in *block*, sentence breaks excluded."""
-    spans: list[tuple[int, int]] = []
-    for pattern in (_PAIRED, _OF_THE):
-        for match in pattern.finditer(block.text):
-            if _SENTENCE_BREAK.search(match.group(0)):
-                continue
-            spans.append(match.span())
-    return spans
+    """Character spans of every size-naming phrase in *block*.
+
+    Sentence breaks are excluded by the patterns themselves, never here: a filter applied to a
+    finished match discards the text along with the match, so a valid short pairing inside a long
+    invalid one is lost. That is the same defect the noun alternation was moved inline to avoid.
+    """
+    return [
+        match.span() for pattern in (_PAIRED, _OF_THE) for match in pattern.finditer(block.text)
+    ]
 
 
 def sites_of(block: ProseBlock) -> tuple[ProseSite, ...]:
