@@ -1860,7 +1860,7 @@ async def test_stripped_tool_still_returns_structured_content(
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
 # RELATIONAL (a ``<=`` check) so both lanes pass. After the 2026-07-25 S29 cluster the core lane
-# is ~62_666 and the full lane ~70_959. Raising it again is a conscious, CHANGELOG-documented
+# is 62_561 and the full lane 70_854. Raising it again is a conscious, CHANGELOG-documented
 # one-line change, never a silent bump.
 _TOOLS_LIST_WIRE_CEILING = 200_000
 
@@ -1868,8 +1868,8 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the 2026-07-25 S29 typing keep the core lane ~62_666 and
-    the full lane ~70_959 — a new tool, an SDK change that inflates the wire, or a lost
+    FastMCP's native-lean schemas plus the 2026-07-25 S29 typing keep the core lane 62_561 and
+    the full lane 70_854 — a new tool, an SDK change that inflates the wire, or a lost
     output_schema=None could still grow it UNNOTICED with a green suite. This is that guard, now a
     soft catastrophe-ceiling at 200_000 (see the constant's comment for the raise rationale).
 

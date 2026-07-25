@@ -9,6 +9,29 @@ carry breaking changes).
 
 ### Changed
 
+- **S29-Cluster: fünf weitere `dict[str, object]`-Ausgabeschemas typisiert + tools/list-Budget-Deckel
+  auf 200000 angehoben (`feat(archiver)` `0346d1e` + `feat(checkers)` `04f3502`).** `list_archived_pvs`
+  (`ArchivedPvsResult`, 5 Felder), `get_appliance_info` (`ApplianceInfoResult`, 10),
+  `get_archive_info` (`ArchiveInfoResult`, 30, `found`-Tri-State), `list_channel_vocabulary`
+  (`ChannelVocabularyResult`, 4) und `get_alarm_history` (`AlarmHistoryResult`, 8) tragen jetzt ein
+  typisiertes `outputSchema` — damit **19 von 25** Tool-Schemas getypt. Muster: TypedDict-Return,
+  `total=False`, sometimes-absent-Feld → `X | None`, roh kopiertes Feld → `object | None` (gemischte
+  Wire-Typen); der `**`-Spread wurde durch expliziten Feld-für-Feld-Aufbau mit Präsenz-Wächtern
+  ersetzt (mypy `--strict`). Offen bleiben aus strukturellen Gründen (nicht Budget): `find_channels`
+  (query_channels-Fan-out), `discover_pvs` (kein eigener get_config-Seam), `diagnose_connection`
+  (verschachteltes Pydantic-Modell); die 7 freien PV-Wert-Tools bleiben dauerhaft untypisiert.
+  - **tools/list-Budget-Deckel `_TOOLS_LIST_WIRE_CEILING` 70000 → 200000** (bewusste Betreiber-
+    Entscheidung): getypte Output-Schema-Bytes machen Tool-Ergebnisse maschinenlesbar (Kernnutzen von
+    S29) bei ~1 % mehr Kontext pro Turn; der Deckel bleibt ein relationaler `<=`-Katastrophen-Wächter
+    (fängt nur noch eine extreme Aufblähung). **Neuer Budget-Stand: core-lane 62561 / all-lane 70854**
+    (Deckel 200000) — löst die Migrations-Zeile darunter (`59683` / `67976`, Deckel `70000`) ab.
+  - **Messbefund (standalone FastMCP, Evidence-Discipline):** Tool-Ausgaben werden NICHT gegen das
+    advertised `outputSchema` validiert; ein weggelassener `total=False`-Key wird gedroppt (nicht als
+    null emittiert), nur ein explizit auf `None` gesetztes Feld (z. B. `get_archive_info.found`) wird
+    als null emittiert. Die Nullbarkeit ist damit test-durchgesetzte Schema-Ehrlichkeit (der
+    Conformance-Test), kein Laufzeit-Trap — die SDK-1.0-„omitted key → null"-Kommentare der 14
+    Alt-Tools (z. B. `NameLookupResult`) sind eine benannte Folge-Aufräumung.
+
 - **Server-Runtime von SDK-gebündeltem FastMCP 1.0 (`mcp.server.fastmcp`) auf standalone `fastmcp`
   migriert (`feat(deps)!`, Commit `6bd12c6`).** `server.py` / `display_tools.py` / `tool_errors.py`
   nutzen jetzt `from fastmcp import FastMCP` bzw. `from fastmcp.exceptions import ToolError`
