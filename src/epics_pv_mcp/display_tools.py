@@ -40,7 +40,7 @@ _READONLY = ToolAnnotations(
 
 @translate_epics_errors
 async def validate_pvs(
-    pvs: Annotated[
+    pv_names: Annotated[
         list[str] | None,
         Field(description="List of PV names to validate"),
     ] = None,
@@ -68,7 +68,7 @@ async def validate_pvs(
 ) -> dict[str, object]:
     """Check PV connectivity. Provide a PV list or a .bob file path (+ displays_dir ROOT)."""
     return await _validate_pvs(
-        pvs=pvs, file_path=file_path, displays_dir=displays_dir, timeout=timeout
+        pvs=pv_names, file_path=file_path, displays_dir=displays_dir, timeout=timeout
     )
 
 

@@ -592,7 +592,7 @@ async def test_is_alarm_configured_tool_requires_config_name() -> None:
     tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
     tool = next(t for t in tools if t.name == "is_alarm_configured")
     required = tool.inputSchema.get("required", [])
-    assert "pv" in required
+    assert "pv_name" in required
     assert "config_name" in required
 
 

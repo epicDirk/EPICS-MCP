@@ -736,7 +736,7 @@ async def test_archiver_history_structured_output_conforms_to_its_schema(
             await mcp.call_tool(
                 "get_pv_history",
                 {
-                    "pv": "SIM:PS-01:Cur-RB",
+                    "pv_name": "SIM:PS-01:Cur-RB",
                     "start": "2026-01-01T00:00:00.000Z",
                     "end": "2026-01-02T00:00:00.000Z",
                 },
@@ -853,7 +853,7 @@ async def test_alarm_configured_structured_output_conforms_to_its_schema(
         (
             await mcp.call_tool(
                 "is_alarm_configured",
-                {"pv": "SIM:PS-01:Cur-RB", "config_name": "SomeTree"},
+                {"pv_name": "SIM:PS-01:Cur-RB", "config_name": "SomeTree"},
             )
         ).structured_content,
     )
@@ -1075,7 +1075,7 @@ async def test_is_archived_structured_output_conforms_to_its_schema(
     # Part A — the emitted structuredContent conforms on the disabled path.
     structured = cast(
         dict[str, Any],
-        (await mcp.call_tool("is_archived", {"pv": "SIM:PS-01:Cur-RB"})).structured_content,
+        (await mcp.call_tool("is_archived", {"pv_name": "SIM:PS-01:Cur-RB"})).structured_content,
     )
     for key, value in structured.items():
         if value is None:
@@ -1348,7 +1348,9 @@ async def test_get_archive_info_structured_output_conforms_to_its_schema(
     # Part A — emitted structuredContent conforms on the disabled path (found is emitted as null).
     structured = cast(
         dict[str, Any],
-        (await mcp.call_tool("get_archive_info", {"pv": "SIM:PS-01:Cur-RB"})).structured_content,
+        (
+            await mcp.call_tool("get_archive_info", {"pv_name": "SIM:PS-01:Cur-RB"})
+        ).structured_content,
     )
     for key, value in structured.items():
         if value is None:
@@ -1503,7 +1505,7 @@ async def test_get_alarm_history_structured_output_conforms_to_its_schema(
     properties = (tools["get_alarm_history"].outputSchema or {}).get("properties", {})
 
     args = {
-        "pv": "SIM:PS-01:Cur-RB",
+        "pv_name": "SIM:PS-01:Cur-RB",
         "start": "2026-01-01T00:00:00Z",
         "end": "2026-01-02T00:00:00Z",
     }

@@ -224,7 +224,7 @@ async def get_pv_value(
 )
 @translate_epics_errors
 async def get_pvs(
-    names: Annotated[
+    pv_names: Annotated[
         list[str],
         Field(
             description="List of PV names to read (capped at the server's max_batch_size, "
@@ -242,7 +242,7 @@ async def get_pvs(
     (alarm/timestamp/display/control/value_alarm/enum). A per-PV read failure lands in the errors
     list; a structural provider fault — the native batch returning a different number of values than
     requested — surfaces loudly as [UPSTREAM_CONTRACT_ERROR] rather than silently dropping PVs."""
-    return await _get_pvs(names, timeout)
+    return await _get_pvs(pv_names, timeout)
 
 
 @mcp.tool(
@@ -341,7 +341,7 @@ async def get_pv_info(
 )
 @translate_epics_errors
 async def monitor_pv(
-    name: Annotated[str, Field(description="EPICS PV name to monitor")],
+    pv_name: Annotated[str, Field(description="EPICS PV name to monitor")],
     duration: Annotated[
         float,
         Field(
@@ -361,7 +361,7 @@ async def monitor_pv(
 
     Each event carries the same best-effort metadata as get_pv_info
     (alarm/timestamp/display/control/value_alarm/enum)."""
-    return await _monitor_pv(name, duration, max_events)
+    return await _monitor_pv(pv_name, duration, max_events)
 
 
 @mcp.tool(
@@ -594,7 +594,7 @@ async def lookup_device_name(
 )
 @translate_epics_errors
 async def is_archived(
-    pv: Annotated[str, Field(description="EPICS PV name")],
+    pv_name: Annotated[str, Field(description="EPICS PV name")],
     timeout: Annotated[float, Field(description="Timeout in seconds")] = 5.0,
 ) -> ArchiveStatusResult:
     """Report whether a PV is being archived (EPICS Archiver Appliance MGMT getPVStatus).
@@ -612,7 +612,7 @@ async def is_archived(
     is_archived answers only for a NAMED PV. To ENUMERATE the archived PVs use list_archived_pvs.
     See the epics-pv://guide resource.
     """
-    return await _is_archived(pv, timeout)
+    return await _is_archived(pv_name, timeout)
 
 
 @mcp.tool(
@@ -625,7 +625,7 @@ async def is_archived(
 )
 @translate_epics_errors
 async def get_pv_history(
-    pv: Annotated[str, Field(description="EPICS PV name")],
+    pv_name: Annotated[str, Field(description="EPICS PV name")],
     start: Annotated[
         str, Field(description="Window start, ISO-8601 (e.g. 2026-06-01T00:00:00.000Z)")
     ],
@@ -653,7 +653,7 @@ async def get_pv_history(
     in the data array withholds the WHOLE result (it is never silently skipped or zero-filled
     into a plausible sample).
     """
-    return await _get_pv_history(pv, start, end, max_points, timeout)
+    return await _get_pv_history(pv_name, start, end, max_points, timeout)
 
 
 @mcp.tool(
@@ -666,7 +666,7 @@ async def get_pv_history(
 )
 @translate_epics_errors
 async def get_archive_info(
-    pv: Annotated[str, Field(description="EPICS PV name")],
+    pv_name: Annotated[str, Field(description="EPICS PV name")],
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
 ) -> ArchiveInfoResult:
     """Report HOW a PV is archived — its archive configuration (Archiver MGMT getPVTypeInfo).
@@ -688,7 +688,7 @@ async def get_archive_info(
     get_archive_info answers only for a NAMED PV; list_archived_pvs enumerates them.
     See epics-pv://guide.
     """
-    return await _get_archive_info(pv, timeout)
+    return await _get_archive_info(pv_name, timeout)
 
 
 @mcp.tool(
@@ -783,7 +783,7 @@ async def list_archived_pvs(
 )
 @translate_epics_errors
 async def is_alarm_configured(
-    pv: Annotated[str, Field(description="EPICS PV name")],
+    pv_name: Annotated[str, Field(description="EPICS PV name")],
     config_name: Annotated[
         str,
         Field(
@@ -811,7 +811,7 @@ async def is_alarm_configured(
     index and matches nothing, exactly like an unconfigured PV). The returned
     config field echoes your input — it is NOT the server confirming the tree exists.
     """
-    return await _is_alarm_configured(pv, config_name, timeout)
+    return await _is_alarm_configured(pv_name, config_name, timeout)
 
 
 # MA-2b(c): the 9 EPICS alarm severities (Phoebus SeverityLevel) — the definitional value set of the
@@ -843,7 +843,7 @@ _AlarmCommand = Literal["Enabled", "Disabled"]
 )
 @translate_epics_errors
 async def get_alarm_history(
-    pv: Annotated[
+    pv_name: Annotated[
         str,
         Field(
             description="EPICS PV / device name (matched as a wildcard substring on the alarm "
@@ -940,7 +940,7 @@ async def get_alarm_history(
     Literal-enforced at this boundary.
     """
     return await _get_alarm_history(
-        pv,
+        pv_name,
         start,
         end,
         max_events,
