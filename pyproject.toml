@@ -12,11 +12,14 @@ authors = [{ name = "epicDirk" }]
 keywords = ["epics", "mcp", "pvaccess", "channel-access", "p4p", "controls"]
 requires-python = ">=3.12"
 dependencies = [
-    # mcp liefert den kompletten FastMCP-Runtime (server.py: mcp.server.fastmcp.FastMCP +
-    # mcp.server.fastmcp.exceptions.ToolError + mcp.types.ToolAnnotations). Das STANDALONE-Paket
-    # `fastmcp` ist ein ANDERES Projekt mit einer distinkten, gleichnamigen ToolError-Klasse, das die
-    # Laufzeit NICHT verwendet — es wurde als Dependency entfernt, damit niemand versehentlich die
-    # falsche (vom Runtime nicht erkannte) ToolError-Klasse importiert.
+    # Standalone FastMCP (gofastmcp.com) ist der Server-Runtime: server.py nutzt
+    # `from fastmcp import FastMCP` und `from fastmcp.exceptions import ToolError`.
+    # (Früher lief der Server auf dem SDK-gebündelten FastMCP 1.0 aus `mcp`; der Umzug
+    # vereint beide Projekt-MCPs auf EINEN Stack und löst den Zwei-ToolError-Footgun
+    # per Konstruktion — es ist jetzt nur noch genau ein fastmcp auf dem Pfad.)
+    "fastmcp>=3,<4",
+    # mcp bleibt explizit deklariert: wir importieren `mcp.types.ToolAnnotations` direkt
+    # (fastmcp re-exponiert die Low-Level-Typen und zieht mcp ohnehin transitiv).
     "mcp>=1.0,<2",
     # pydantic>=2.11: Floor der Kern-Deps (mcp/pydantic-settings) und des optionalen
     # opi_navigation (s. [displays]); hier explizit zur Intent-Klarheit.

@@ -10,7 +10,7 @@ display ``<macros>`` the PV would stay ``dynamic``.
 from pathlib import Path
 
 import pytest
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 
 from epics_pv_mcp.cli_crossplane import main
 from epics_pv_mcp.errors import EpicsError

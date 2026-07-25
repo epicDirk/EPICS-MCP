@@ -6,7 +6,7 @@ in one place instead of 15× untested.
 """
 
 import pytest
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 
 from epics_pv_mcp.errors import EpicsError, PVNotFoundError
 from epics_pv_mcp.tool_errors import translate_epics_errors
@@ -70,11 +70,13 @@ async def test_base_error_code_default() -> None:
 
 
 async def test_decorator_raises_the_mcp_runtime_tool_error() -> None:
-    """Q1: pin that the decorator raises ``mcp.server.fastmcp``'s ToolError — the class the runtime
-    (server.py builds on ``mcp.server.fastmcp.FastMCP``) actually knows — NOT the identically-named
-    but DISTINCT class from the standalone ``fastmcp`` package. Raising the wrong class defeats the
-    tool-boundary translation; the module is pinned so an import can't silently regress."""
-    from mcp.server.fastmcp.exceptions import ToolError as RuntimeToolError
+    """Q1: pin that the decorator raises the RUNTIME's ToolError — the class the server runs on.
+    Since the standalone-fastmcp migration that is ``fastmcp.exceptions.ToolError`` (server.py
+    builds on ``from fastmcp import FastMCP``). The SDK-bundled, identically-named
+    ``mcp.server.fastmcp.exceptions.ToolError`` is now the FOREIGN class the runtime no longer
+    knows — raising it would defeat the tool-boundary translation. The module is pinned so an
+    import can't silently regress back to it."""
+    from fastmcp.exceptions import ToolError as RuntimeToolError
 
     @translate_epics_errors
     async def boom() -> str:
@@ -82,4 +84,4 @@ async def test_decorator_raises_the_mcp_runtime_tool_error() -> None:
 
     with pytest.raises(RuntimeToolError) as exc_info:
         await boom()
-    assert type(exc_info.value).__module__ == "mcp.server.fastmcp.exceptions"
+    assert type(exc_info.value).__module__ == "fastmcp.exceptions"

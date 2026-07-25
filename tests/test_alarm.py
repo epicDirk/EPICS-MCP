@@ -589,7 +589,7 @@ async def test_is_alarm_configured_tool_requires_config_name() -> None:
     (a default restored) -> config_name drops out of the schema's 'required' -> this fails."""
     from epics_pv_mcp.server import mcp
 
-    tools = await mcp.list_tools()
+    tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
     tool = next(t for t in tools if t.name == "is_alarm_configured")
     required = tool.inputSchema.get("required", [])
     assert "pv" in required
@@ -676,7 +676,7 @@ async def test_get_alarm_history_tool_severity_and_command_are_enums() -> None:
 
     from epics_pv_mcp.server import mcp
 
-    tools = await mcp.list_tools()
+    tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
     tool = next(t for t in tools if t.name == "get_alarm_history")
     props = tool.inputSchema["properties"]
     command_schema = json.dumps(props["command"])

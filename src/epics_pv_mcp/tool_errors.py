@@ -9,7 +9,7 @@ becomes a single ``return await _impl(...)``.
 import functools
 from collections.abc import Awaitable, Callable
 
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 
 from epics_pv_mcp.errors import EpicsError
 

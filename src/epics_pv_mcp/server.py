@@ -5,7 +5,7 @@ import logging
 from collections.abc import Callable
 from typing import Annotated, Literal
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
@@ -167,201 +167,26 @@ _DISPLAY_TOOLS_AVAILABLE = _display_registrar is not None
 # Keep in sync with the epics-pv posture in SKILL.md
 mcp = FastMCP(
     "epics-pv-mcp",
+    version=__version__,
     instructions=build_instructions(_DISPLAY_TOOLS_AVAILABLE),
+    # Standalone FastMCP lässt mask_error_details standardmäßig auf None; explizit False,
+    # damit der kuratierte ``[<code>] message`` / ``[INTERNAL] …``-ToolError-Text weiterhin
+    # den Client erreicht (SDK-1.0 hatte kein Masking — das erhält das Verhalten).
+    mask_error_details=False,
 )
-# S1-2: FastMCP exposes no public API to set the server version, so we reach the low-level MCP
-# server defensively — a FastMCP upgrade that renames/removes ``_mcp_server`` then degrades to
-# "version unset" instead of crashing the whole server at import with an AttributeError.
-_low_level_server = getattr(mcp, "_mcp_server", None)
-if _low_level_server is not None:
-    _low_level_server.version = __version__
-
-
-# JSON-Schema keywords by the shape of their value, so _strip_schema_title_annotations walks the
-# structure correctly: a name->schema MAP (recurse the VALUES, keep the property-name KEYS), a
-# single subschema, or a LIST of subschemas. A ``title`` key anywhere else is an annotation.
-_SCHEMA_MAP_KEYWORDS = frozenset(
-    {"properties", "$defs", "definitions", "patternProperties", "dependentSchemas"}
-)
-_SCHEMA_SUBSCHEMA_KEYWORDS = frozenset(
-    {
-        "items",
-        "additionalProperties",
-        "not",
-        "if",
-        "then",
-        "else",
-        "propertyNames",
-        # JSON-Schema 2020-12 single-subschema keywords — a ``title`` under any of these is an
-        # annotation on that subschema, so the strip must descend here too.
-        "contains",
-        "unevaluatedItems",
-        "unevaluatedProperties",
-    }
-)
-_SCHEMA_LIST_KEYWORDS = frozenset({"anyOf", "allOf", "oneOf", "prefixItems"})
-
-
-def _strip_schema_title_annotations(node: object) -> None:
-    """Remove the JSON-Schema ``title`` ANNOTATION from every schema node IN PLACE, but NEVER a
-    property NAMED ``title`` out of a ``properties``/``$defs``/… map.
-
-    The distinction is the whole point (MA-Q1). pydantic emits a ``title`` on the top-level schema
-    AND on every property — a Title-Case derivation of the key ("Pv Name"), worth nothing to a host
-    that reads the schema as text, so dropping it is lossless (~3.7k WIRE). But four Olog tools
-    (``create_log_entry``/``reply_to_log`` [required], ``update_log_entry``, ``search_logbook``)
-    have a PARAMETER named ``title``. A naive "pop every ``title`` key" would delete
-    ``properties["title"]`` and leave it dangling in ``required`` — a required argument hidden from
-    the wire schema while pydantic still enforces it, silently breaking the write tools. So a
-    name->schema map is walked by its VALUES only (property names kept); a ``title`` annotation is
-    popped only where it annotates the CURRENT schema node.
-    """
-    if isinstance(node, dict):
-        node.pop("title", None)  # the title annotation OF THIS schema node
-        for key, value in node.items():
-            if key in _SCHEMA_MAP_KEYWORDS:
-                # name->schema MAP: keep the KEYS (property names!), clean the VALUES only
-                if isinstance(value, dict):
-                    for subschema in value.values():
-                        _strip_schema_title_annotations(subschema)
-            elif key in _SCHEMA_SUBSCHEMA_KEYWORDS:
-                _strip_schema_title_annotations(value)  # a single subschema (or a bool — no-op)
-            elif key in _SCHEMA_LIST_KEYWORDS and isinstance(value, list):
-                for subschema in value:
-                    _strip_schema_title_annotations(subschema)
-    elif isinstance(node, list):
-        # defensive: draft-04 tuple-form ``items`` is a list of schemas
-        for item in node:
-            _strip_schema_title_annotations(item)
-
-
-def _strip_output_schema_field_annotations(node: object, *, is_root: bool = True) -> None:
-    """Shrink a TYPED outputSchema's wire payload IN PLACE (MA-Q1 A3, L1): drop the pydantic
-    ``title`` annotation from every FIELD-level node, and the ``default: null`` that every
-    ``total=False`` field carries. Both are wire noise — the model reads a field's name, type
-    and nullability, never these.
-
-    The ROOT ``title`` is KEPT: it is the TypedDict class name (e.g. ``AlarmConfiguredResult``).
-    The four ``*_exposes_typed_output_schema`` tests read it as the "which TypedDict got wired"
-    identity anchor. Schema-aware like :func:`_strip_schema_title_annotations`: a name->schema
-    map is walked by its VALUES, so a field NAMED ``title``/``default`` survives as a property
-    key (none exist in today's typed outputs; the guard is free and future-proof). Only a
-    ``default`` whose value is ``None`` is dropped, never a non-null default.
-    """
-    if isinstance(node, dict):
-        if not is_root:
-            node.pop("title", None)  # a FIELD-level title annotation (the root title is kept)
-        if "default" in node and node["default"] is None:
-            node.pop("default", None)  # the always-null total=False default — pure wire noise
-        for key, value in node.items():
-            if key in _SCHEMA_MAP_KEYWORDS:
-                # name->schema MAP: keep the KEYS (property names!), clean the VALUES only
-                if isinstance(value, dict):
-                    for subschema in value.values():
-                        _strip_output_schema_field_annotations(subschema, is_root=False)
-            elif key in _SCHEMA_SUBSCHEMA_KEYWORDS:
-                _strip_output_schema_field_annotations(value, is_root=False)
-            elif key in _SCHEMA_LIST_KEYWORDS and isinstance(value, list):
-                for subschema in value:
-                    _strip_output_schema_field_annotations(subschema, is_root=False)
-    elif isinstance(node, list):
-        for item in node:
-            _strip_output_schema_field_annotations(item, is_root=False)
-
-
-def _is_information_empty_output_schema(schema: dict[str, object]) -> bool:
-    """True ONLY for the accept-all object form pydantic emits for a ``dict[str, object]`` return
-    (``{type: object, additionalProperties: true}`` with no ``properties``) — the information-empty
-    shape A2 drops. A typed schema (``properties`` present), an array / ``RootModel`` return, or a
-    ``$ref`` is NOT this form and stays kept on the wire.
-
-    Precise on purpose (MA-Q1a): the earlier ``not output_schema.get("properties")`` predicate keyed
-    only on the absence of ``properties``. A future non-object return (an array / RootModel) also
-    lacks a top-level ``properties`` and would have been dropped by mistake; keying on the full
-    accept-all shape drops exactly the ``dict[str, object]`` schemas and nothing else.
-    """
-    return (
-        schema.get("type") == "object"
-        and not schema.get("properties")
-        and schema.get("additionalProperties") is True
-    )
-
-
-def _prune_tool_schemas(mcp: FastMCP) -> None:
-    """Post-registration ``tools/list`` schema hygiene (MA-Q1) — three LOSSLESS passes over every
-    registered tool, shrinking the wire payload with no loss of capability:
-
-    - **A1** — strip the derived pydantic ``title`` annotations from each inputSchema
-      (:func:`_strip_schema_title_annotations`, schema-aware so real ``title`` parameters survive).
-    - **A2** — drop the INFORMATION-EMPTY outputSchemas. A ``dict[str, object]`` return yields
-      ``{additionalProperties: true, title: …DictOutput, type: object}``, which validates nothing.
-      Setting ``Tool.output_schema = None`` (a ``@cached_property`` whose assignment shadows the
-      instance cache) removes it from the wire, while ``fn_metadata.output_schema`` stays intact →
-      the tool still returns ``structuredContent`` at call time (an advertise-only drop). The typed
-      outputSchemas (they carry ``properties``) are KEPT — test-pinned — and A3 then strips them.
-    - **A3 (L1)** — for a KEPT typed outputSchema, strip the pydantic ``title`` annotation from
-      every FIELD-level node and the always-null ``total=False`` ``default`` from every field
-      (:func:`_strip_output_schema_field_annotations`). Both are wire noise; the model reads a
-      field's name + type + nullability. The ROOT ``title`` (the TypedDict class name) is KEPT —
-      the four ``*_exposes_typed_output_schema`` tests read it as the wired-TypedDict identity.
-      Unlike A2, A3 mutates the schema dict IN PLACE, and ``tool.output_schema`` IS
-      ``fn_metadata.output_schema`` (an alias, not a copy), so A3 also mutates the validation
-      schema. That is safe: ``convert_result`` validates ``structuredContent`` via the pydantic
-      ``output_model``, not this dict (only an ``is not None`` gate A3 leaves set) — so dropping
-      title/null-default changes the advertised wire only, never validation.
-
-    Runs at MODULE IMPORT and mutates a ``@cached_property``. Each tool is pruned inside its OWN
-    ``try/except`` — a single broken tool is logged and skipped while the others still prune, so the
-    pass never leaves a half-pruned, inconsistent state — and the whole loop sits inside a broad
-    ``try/except`` too, so this optional hygiene pass can NEVER crash the core PV server (mirroring
-    :func:`_load_display_registrar`). The demonstrable in-guard raise source is the strip,
-    :func:`_strip_schema_title_annotations`, hitting a pathological / deeply-nested schema — a
-    future SDK where assigning the ``@cached_property`` becomes validating or immutable is another.
-    Call AFTER ``_display_registrar(mcp)`` so the four display-registrar tools are in the manager
-    and get pruned too.
-    """
-    try:
-        manager = getattr(mcp, "_tool_manager", None)
-        if manager is None:
-            logger.error(
-                "FastMCP exposes no _tool_manager; tools/list schema hygiene skipped "
-                "(core tools remain, their schemas just stay un-pruned)."
-            )
-            return
-        for tool in manager.list_tools():
-            try:
-                _strip_schema_title_annotations(tool.parameters)  # A1
-                output_schema = tool.output_schema  # A2/A3 — read the cached_property once
-                if output_schema is not None:
-                    if _is_information_empty_output_schema(output_schema):
-                        tool.output_schema = None  # A2: drop the accept-all outputSchema
-                    else:
-                        _strip_output_schema_field_annotations(output_schema)  # A3 (L1)
-            except Exception:  # one broken tool must not abort the pass — log it, keep pruning
-                logger.error(
-                    "tools/list schema hygiene (_prune_tool_schemas) failed for tool %r; "
-                    "skipping it, other tools still pruned.",
-                    getattr(tool, "name", "<unknown>"),
-                    exc_info=True,
-                )
-    except Exception:  # an optional hygiene pass must never crash core — logged loud
-        logger.error(
-            "tools/list schema hygiene (_prune_tool_schemas) failed; core PV tools remain "
-            "available with un-pruned schemas.",
-            exc_info=True,
-        )
 
 
 # === Tools ===
 
 
 @mcp.tool(
+    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=True,
-    )
+    ),
 )
 @translate_epics_errors
 async def get_pv_value(
@@ -379,12 +204,13 @@ async def get_pv_value(
 
 
 @mcp.tool(
+    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=True,
-    )
+    ),
 )
 @translate_epics_errors
 async def get_pvs(
@@ -410,6 +236,7 @@ async def get_pvs(
 
 
 @mcp.tool(
+    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=False,
         destructiveHint=True,
@@ -463,12 +290,13 @@ async def set_pv_value(
 
 
 @mcp.tool(
+    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=True,
-    )
+    ),
 )
 @translate_epics_errors
 async def get_pv_info(
@@ -493,12 +321,13 @@ async def get_pv_info(
 
 
 @mcp.tool(
+    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=False,
         openWorldHint=True,
-    )
+    ),
 )
 @translate_epics_errors
 async def monitor_pv(
@@ -526,12 +355,13 @@ async def monitor_pv(
 
 
 @mcp.tool(
+    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=True,
-    )
+    ),
 )
 @translate_epics_errors
 async def discover_pvs(
@@ -566,12 +396,13 @@ async def discover_pvs(
 
 
 @mcp.tool(
+    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=True,
-    )
+    ),
 )
 @translate_epics_errors
 async def find_channels(
@@ -677,12 +508,13 @@ async def find_channels(
 
 
 @mcp.tool(
+    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=True,
-    )
+    ),
 )
 @translate_epics_errors
 async def list_channel_vocabulary(
@@ -816,12 +648,13 @@ async def get_pv_history(
 
 
 @mcp.tool(
+    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=True,
-    )
+    ),
 )
 @translate_epics_errors
 async def get_archive_info(
@@ -851,12 +684,13 @@ async def get_archive_info(
 
 
 @mcp.tool(
+    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=True,
-    )
+    ),
 )
 @translate_epics_errors
 async def get_appliance_info(
@@ -879,12 +713,13 @@ async def get_appliance_info(
 
 
 @mcp.tool(
+    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=True,
-    )
+    ),
 )
 @translate_epics_errors
 async def list_archived_pvs(
@@ -993,12 +828,13 @@ _AlarmCommand = Literal["Enabled", "Disabled"]
 
 
 @mcp.tool(
+    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=True,
-    )
+    ),
 )
 @translate_epics_errors
 async def get_alarm_history(
@@ -1708,12 +1544,13 @@ async def list_log_attachments(
 
 
 @mcp.tool(
+    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=True,
-    )
+    ),
 )
 @translate_epics_errors
 async def diagnose_connection(
@@ -1774,17 +1611,6 @@ async def diagnose_connection(
 # server runs standalone and no surface over-claims the display tools.
 if _display_registrar is not None:
     _display_registrar(mcp)
-
-
-# tools/list schema hygiene (MA-Q1): strip derived inputSchema titles + drop empty outputSchemas.
-# MUST run AFTER _display_registrar so the four registrar tools (validate_pvs / crossplane_check /
-# coverage_audit / find_device) are in the manager and get pruned too. Crash-guarded internally —
-# an optional hygiene pass must never take down the core PV server.
-# A ONE-SHOT positional pass at module import: safe because no tool is registered after this line.
-# Re-pruning dynamically from a list_tools wrapper is deliberately deferred — a regression that
-# regrows the wire is caught by the size-gate (test_tools_list_within_budget) and the relational
-# tests.
-_prune_tool_schemas(mcp)
 
 
 # === Resources ===

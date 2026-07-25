@@ -17,7 +17,7 @@ A dedicated CS-Studio / Phoebus MCP that complements these tools is in the works
 
 from typing import Annotated
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from opi_navigation.pv_analysis.lookup import MatchMode
 from pydantic import Field
@@ -248,7 +248,7 @@ def register_display_tools(mcp: FastMCP) -> None:
     optional ``[displays]`` extra is installed and imports cleanly (the single capability truth), so
     the core server installs and starts standalone without it.
     """
-    mcp.tool(annotations=_READONLY)(validate_pvs)
-    mcp.tool(annotations=_READONLY)(crossplane_check)
-    mcp.tool(annotations=_READONLY)(coverage_audit)
-    mcp.tool(annotations=_READONLY)(find_device)
+    mcp.tool(annotations=_READONLY, output_schema=None)(validate_pvs)
+    mcp.tool(annotations=_READONLY, output_schema=None)(crossplane_check)
+    mcp.tool(annotations=_READONLY, output_schema=None)(coverage_audit)
+    mcp.tool(annotations=_READONLY, output_schema=None)(find_device)
