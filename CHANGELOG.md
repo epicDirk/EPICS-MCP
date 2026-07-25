@@ -9,6 +9,36 @@ carry breaking changes).
 
 ### Changed
 
+- **Der Scheinwächter-Audit ist gefahren, und drei gemessene Lücken sind geschlossen (S31).** Ein
+  Test, der die Client-**Klasse** durch eine Attrappe ersetzt, entfernt still jede Prüfung, die der
+  echte Client an seinem Rand fährt — er *sieht aus* wie ein Wächter. Was daraus wurde:
+  - **Enum-Werte behalten ihren Typ** (`0620a1b`): `_enum_members` stringifizierte an beiden
+    Extraktionsstellen, `Literal[1,2]` und `Literal["1","2"]` waren ununterscheidbar. Testform ist
+    ein Helfer-Unit-Test, weil es **keine** Quell-Mutation gibt, die den Wertetyp-Kollaps isoliert:
+    das einzige Enum des Bestands ist bereits von einer Basistyp-Tabelle als „string" gepinnt.
+  - **Element-Schemata der Listen relational gepinnt** (`7b234fb`): `list[str]` und `list[Any]` sind
+    beide „array". Live gemessen sind es **15 Paare über 14 Tools**, nicht die 8/9 der Notiz, und
+    **vier** sind `anyOf[array,null]` — ein Helfer, der nur `prop["items"]` liest, fände 11.
+    ⚠️ `list[Any]` rendert als `{"type":"array","items":{}}`: der Schlüssel **bleibt** und wird leer,
+    ein Wächter mit der Frage „hat es `items`?" sähe nichts. Deshalb hängt die Entdeckung an
+    `_base_type == "array"` — einer Eigenschaft, die die Mutation nicht anfassen kann.
+    Ehrlich: 7 der 15 tragen eine scharfe Bedingung, 8 sind bewusst opake Objekte.
+  - **Jede Listenroute fragt ihren eigenen Endpunkt an** (`bb5bb8f`, `ad9cd82`): `list_tags` auf die
+    properties-URL umzubiegen ließ alle 1439 Tests grün. Beide Vokabular-Routen liefern dieselbe
+    Form durch denselben Helfer, also kann dort **kein** Typ-Wächter feuern. Gepinnt für
+    ChannelFinder (3 Routen, mit dem bestehenden `count_url`-Pin alle vier URL-Properties) **und**
+    für den Olog-Zwilling (`/logbooks`, `/tags`, `/levels`). Das Fehler-Label leitet sich jetzt aus
+    der tatsächlich angefragten URL ab statt aus einem handgeschriebenen Literal.
+  - **Der Audit selbst** (`883827d`): `scripts/guard_audit.py` (beide Richtungen) plus
+    `tests/test_client_edge_guards.py`, das die auditierte Population pinnt. **Ergebnis: null
+    Scheinwächter** — 107 Tests setzen eine Klassen-Attrappe, aber die Client-Wächter haben ihre
+    eigenen Tests an der richtigen Naht. Der Sweep über 93 Ziele fand 19 Ziele mit einer
+    unbeobachteten Polarität, eines in keiner, zwei nie ausgeführte.
+    ⚠️ **Der Kern ist Pflicht:** mit dem Default-Coverage-Kern sehen die Werkzeuge 72 statt 289
+    deckende Tests — ein Audit auf dieser Landkarte wäre selbst der Scheinwächter.
+    ⚠️ Gemessen **ohne** die Live-Lane, und ein überlebender Mutant ist kein Defekt: er kann
+    äquivalent oder von seinem Nachbarn maskiert sein (`channelfinder_client.py:91` ist der Beleg).
+
 - **Die Draht-Validierung der Output-Schemas ist jetzt bewacht statt einmal gemessen (S29).** Der
   vorige Eintrag hielt fest, dass Tool-Ausgaben am Draht sehr wohl geprüft werden, und belegte das
   mit einer Einmal-Messung (21 Tools, 0 Verstöße). Fünf Tests machen daraus einen Dauerzustand:

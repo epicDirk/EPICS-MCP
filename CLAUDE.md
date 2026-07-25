@@ -154,7 +154,27 @@ work.
    guard, fake the **transport** instead (`get_shared_session`, so the real client runs and only
    the socket is replaced), and prove the guard red-provable through the layer the caller
    actually uses. Corollary for reviews: "there is a test for that guard" is a claim about which
-   *seam* the test fakes, not about the guard's name appearing in it.
+   *seam* the test fakes, not about the guard's name appearing in it — and, one step further,
+   faking at the right seam still does not say the right ADDRESS was requested. One faked
+   response serves every endpoint, so where two routes return the same shape the result slot is
+   no evidence: the requested URL has to be asserted on its own (measured: pointing `list_tags`
+   at the properties URL left the whole suite green, with the payload-path test already faking
+   at the transport seam).
+
+   Auditing this is `scripts/guard_audit.py`, and its findings are pinned in
+   `tests/test_client_edge_guards.py` rather than written up somewhere. Two directions, because
+   a mutation sweep alone answers the wrong question: it asks whether ANY test notices a guard
+   disappearing, so a guard covered by a real test AND a sham one reads as "guarded" and the sham
+   is acquitted — exactly the constellation of the one proven case. The sham list comes from the
+   coverage map read BACKWARDS (which tests execute the guard, versus which claim it), and costs
+   no run at all.
+
+   ⚠️ Record the map with `COVERAGE_CORE=ctrace`. On Python 3.12+ coverage defaults to the
+   `sys.monitoring` core, which disables a location after its FIRST observation, so every later
+   test covering the same line leaves no context row. Measured here: 72 covering tests under the
+   default core versus 289 under ctrace (median 2 versus 11, 56 of 61 lines affected). An audit
+   driven by the default map runs a quarter of the relevant tests and reports false survivors —
+   it becomes the sham guard it was built to find.
 
 Honest limit: these are prose rules — the category that rots (see above). No CI guard can prove
 they were followed; the guard is the adversarial counter-probe itself.
