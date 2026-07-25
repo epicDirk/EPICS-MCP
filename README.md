@@ -9,7 +9,7 @@ diagnose your EPICS control system — live PV values, connection diagnosis, and
 cross-plane provenance (ChannelFinder · Archiver · Alarm) — over
 [p4p](https://mdavidsaver.github.io/p4p/) (PVAccess **and** Channel Access).
 
-> **Project status: work in progress (pre-1.0, `0.2.0`).** Under active development;
+> **Project status: work in progress (pre-1.0, `0.3.0.dev0`).** Under active development;
 > the tool surface and APIs may still change. Semantic-versioning pre-1.0 caveats apply
 > — pin a version if you depend on it.
 
@@ -148,17 +148,20 @@ This is a controls tool, so the trust questions come first:
 
 ## Installation
 
-Using [uv](https://docs.astral.sh/uv/) (recommended):
+Not on PyPI yet (planned). Install straight from the repository with
+[uv](https://docs.astral.sh/uv/) (recommended):
 
 ```bash
-uv tool install epics-pv-mcp        # from a checkout: uv tool install .
+uv tool install git+https://github.com/epicDirk/EPICS-MCP-Server
 ```
 
 or with pip:
 
 ```bash
-pip install .
+pip install git+https://github.com/epicDirk/EPICS-MCP-Server
 ```
+
+From a local checkout, `uv tool install .` and `pip install .` do the same thing.
 
 This installs the **core** server (live PV access, diagnosis, and the REST-service planes).
 The display-aware tools (`validate_pvs`, `crossplane_check`, `coverage_audit`,
@@ -372,11 +375,18 @@ All settings are read from environment variables with the `EPICS_MCP_` prefix.
 
 **EPICS network** (standard EPICS env; controls what the server can reach)
 
+⚠️ **This server sets no default here.** Every variable below is unset unless the launcher sets
+it, and an unset `*_AUTO_ADDR_LIST` means EPICS broadcasts PV searches into the local subnets.
+A genuinely localhost-isolated instance needs every address list unset **and** both auto-address
+searches explicitly disabled. Run `epics-doctor` to see what your instance actually reaches.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `EPICS_PVA_ADDR_LIST` | `127.0.0.1` | PVAccess address list — widen to reach real IOCs |
-| `EPICS_CA_ADDR_LIST` | `127.0.0.1` | Channel Access address list |
-| `EPICS_CA_AUTO_ADDR_LIST` | `YES` | Auto-augment the CA address list |
+| `EPICS_PVA_ADDR_LIST` | _(unset)_ | PVAccess address list; set it to reach real IOCs |
+| `EPICS_PVA_AUTO_ADDR_LIST` | `YES` (EPICS default when unset) | Subnet broadcast for PVAccess. Set `NO` to disable |
+| `EPICS_PVA_NAME_SERVERS` | _(unset)_ | PVAccess name servers (TCP unicast, **not** subnet-bound) |
+| `EPICS_CA_ADDR_LIST` | _(unset)_ | Channel Access address list |
+| `EPICS_CA_AUTO_ADDR_LIST` | `YES` (EPICS default when unset) | Subnet broadcast for Channel Access. Set `NO` to disable |
 
 ## MCP client integration
 

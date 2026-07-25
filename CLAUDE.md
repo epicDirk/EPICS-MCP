@@ -19,7 +19,9 @@ EPICS service landscape behaves. This file is the standing policy that keeps tha
 - **`src/epics_pv_mcp/operator_guide.md`** — the operational cookbook (service planes, recipes, error
   signatures). Shipped as package data, served as the `epics-pv://guide` MCP resource, mirrored for
   humans by `OPERATING.md`. **One source file, three consumers — never copy it, link it.**
-- `sandbox/README.md` — the local EPICS test stack (IOC + REST services) the tests exercise against.
+- `sandbox/` — a LOCAL EPICS test stack (IOC + REST services) for the opt-in live tests. It is
+  git-ignored, so it is **absent from every clone**; the live tests are pointed at it through
+  `EPICS_MCP_*` env vars and skip when those are unset.
 
 ## Knowledge Persistence Policy
 

@@ -55,21 +55,12 @@ dependencies pointing downward.
 Conventional-style prefixes (`fix:`, `feat:`, `refactor:`, `docs:`, `test:`), one logical
 change per commit.
 
-House style, written down here because it was lived and stated nowhere — an unwritten convention is
-one a newcomer breaks by accident. Measured over the 30 commits ending at `01c8f87` (the state this
-was written against), with the counts kept honest rather than rounded up to "always" -- and the
-window named explicitly, because the same counts do NOT hold for a window shifted by two commits:
+House style, written down so a newcomer does not break it by accident:
 
+- **English**, both subject and body.
 - **A scope** in the prefix where one applies: `feat(channelfinder):`, `test(schemas):`,
-  `fix(audit):`, `docs(changelog):`. (29/30; the exception is a scope-less `docs:`.)
-- **German subject and body.**
-- **The SUBJECT line ASCII-transliterated** — `Waechter`, `geprueft`, `--` instead of an em dash —
-  so it survives any terminal encoding. 28/30 follow this; the two exceptions (`6bd12c6`,
-  `35a3543`) carry real umlauts, and one an em dash and typographic quotes as well. The rule is the
-  intended style, not a description of a perfect record.
-- **Bodies are transliterated the same way in practice** (22/30 carry no umlaut at all), so do not
-  read the subject rule as "bodies must differ". Either is accepted in a body; the subject is the
-  one that matters.
+  `fix(audit):`, `docs(changelog):`.
+- **Plain ASCII in the subject line**, so it survives any terminal encoding.
 - The **work-item id** in parentheses at the end of the subject when there is one: `(S29)`.
-- A body that carries the **measured** facts — gate counts, red-proof node ids, what was *not*
-  done and why — rather than a restatement of the diff.
+- A body that carries the **measured** facts (gate counts, red-proof node ids, what was *not*
+  done and why) rather than a restatement of the diff.
