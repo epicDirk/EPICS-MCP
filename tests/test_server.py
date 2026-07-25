@@ -2713,19 +2713,35 @@ async def test_stripped_tool_still_returns_structured_content(
     returning structuredContent at call time. Drive ``find_channels`` — an untyped tool, i.e. one
     that still carries ``@mcp.tool(output_schema=None)`` so its accept-all schema is never
     advertised — on its deterministic disabled path (no network) and assert it still yields a
-    structured dict. (NOT get_archive_info, and no longer discover_pvs: both became TYPED tools, so
-    they advertise a schema. find_channels stays untyped. When it is typed, re-point this at the
-    next still-untyped tool with a no-network path.)"""
+    structured dict.
+
+    S29: the FIRST assertion guards this test's own PREMISE, and that is the point of it.
+    Without it, typing the driven tool leaves this test GREEN and silently VACUOUS: the
+    disabled payload keeps arriving, so the second assertion still passes while "an untyped
+    tool" has quietly stopped being true. This file's own history is the evidence —
+    get_archive_info and then discover_pvs both aged out of this slot, and each time what was
+    left behind was a prose instruction to re-point the test, which nothing enforced.
+
+    Red-proof: point ``driven`` at a member of _TYPED_OUTPUT_TOOLS (discover_pvs, args
+    ``{"pattern": "SIM:*"}``) — the premise assertion fails first, by test node id."""
     from epics_pv_mcp.config import EpicsConfig
     from epics_pv_mcp.server import mcp
     from epics_pv_mcp.services import checkers
 
+    driven = "find_channels"
+    args: dict[str, Any] = {"name_pattern": "SIM:*"}
+    tools = {t.name: t for t in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    assert tools[driven].outputSchema is None, (
+        f"{driven} now advertises an outputSchema, so driving it no longer demonstrates the "
+        "ADVERTISE-ONLY property this test exists for — re-point it at a still-untyped tool "
+        "with a no-network path (_TYPED_OUTPUT_TOOLS lists the ones already taken)"
+    )
     # find_channels -> _find_channels -> query_channels, which resolves get_config in the checkers
     # module's OWN namespace — patch checkers.get_config (NOT tools.channelfinder, a pass-through).
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(channelfinder_url=""))
     structured = cast(
         dict[str, Any],
-        (await mcp.call_tool("find_channels", {"name_pattern": "SIM:*"})).structured_content,
+        (await mcp.call_tool(driven, args)).structured_content,
     )
     # Reached the disabled path AND produced structuredContent despite the dropped wire schema.
     assert structured.get("enabled") is False
