@@ -2414,9 +2414,12 @@ async def test_channel_vocabulary_payload_path_is_guarded_below_the_client(
       it is not a statement about the tags endpoint specifically.
     * One faked response serves BOTH endpoints, so ``structured["tags"] == ["vacuum"]`` pins the
       result SLOT, not the URL behind it. Measured: making ``list_tags`` read the properties URL
-      leaves the whole suite green. That gap is real and belongs to the ChannelFinder client's own
-      tests, not here — it is on the roadmap rather than papered over with a stronger-sounding
-      claim.
+      leaves the whole suite green. That gap belonged to the ChannelFinder client's own tests, not
+      here, and is now CLOSED there by
+      test_channelfinder.py::test_each_route_targets_its_own_endpoint (S31), which asserts the
+      requested URL of each route; the sibling gap in the Olog client is closed by
+      test_olog.py::test_each_listing_route_targets_its_own_endpoint. The scope limit on THIS test
+      stands unchanged — it still pins the slot, not the address.
 
     Red-proof: drop the ``isinstance(item.get("name"), str)`` half of ``_named_list``'s item check
     in services/channelfinder_client.py. Half 2 goes red and the failure turns into the wire's

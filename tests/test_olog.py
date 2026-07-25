@@ -802,6 +802,37 @@ def test_list_tags_names_only(monkeypatch: pytest.MonkeyPatch) -> None:
     assert client.list_tags() == ["vacuum", "rf"]
 
 
+def test_each_listing_route_targets_its_own_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S31: the requested URL is the only observable difference between the three listing routes.
+
+    ``/logbooks``, ``/tags`` and ``/levels`` all return ``[{name, …}]`` and the first two share
+    ``_named_list`` outright, so no type or shape guard can fire on a swap between them: one
+    faked response serves every one of them, and asserting on the RESULT pins the slot, not the
+    address behind it. The ChannelFinder client carries the same gap between its own two
+    vocabulary routes (its ``_named_list`` docstring calls itself that helper's sibling), where a
+    swap was measured to leave the whole suite green — this client has three swappable routes
+    rather than two.
+
+    Assertions follow each call immediately because ``call_args`` holds only the LAST call, and
+    ``call_count`` is the non-vacuity floor: without it a route that stopped requesting at all
+    would go green on its predecessor's stale ``call_args``.
+
+    Red-proof: point ``list_tags`` at ``f"{self.base_url}/logbooks"`` in
+    services/olog_client.py. mypy stays green — every one of these is an f-string of ``str``."""
+    base = "http://logbook:8080/Olog"
+    client = OlogClient(base)
+    getter = Mock(return_value=_resp([{"name": "Info", "defaultLevel": True}]))
+    monkeypatch.setattr(client.session, "get", getter)
+
+    client.list_logbooks()
+    assert getter.call_args.args[0] == f"{base}/logbooks"
+    client.list_tags()
+    assert getter.call_args.args[0] == f"{base}/tags"
+    client.list_log_levels()
+    assert getter.call_args.args[0] == f"{base}/levels"
+    assert getter.call_count == 3
+
+
 # --- client: strict response schema (S11) — unreadable 2xx is NEVER a definitive answer ---
 #
 # Auditor probes (QA 2026-07-16 §8.2/B1): syntactically valid 2xx JSON of the wrong shape used to

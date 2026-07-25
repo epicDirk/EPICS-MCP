@@ -579,6 +579,44 @@ def test_count_channels_targets_the_count_endpoint(monkeypatch: pytest.MonkeyPat
     assert getter.call_args.kwargs["params"] == {"~name": "*", "pvStatus": "Inactive"}
 
 
+# --- route identity: every method must request its OWN endpoint ---
+
+
+def test_each_route_targets_its_own_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S31: the requested URL is the only observable difference between the sibling routes.
+
+    ``list_properties`` and ``list_tags`` return the SAME shape and both go through the same
+    ``_named_list`` helper, so no type or shape guard can ever fire on a swap between them —
+    measured: pointing ``list_tags`` at the properties URL left the whole suite green, and
+    against a real ChannelFinder it would have returned property names as tags. The one
+    asymmetric step, the allowlist filter in ``list_properties``, works the wrong way round for
+    detection: it makes the properties answer SMALLER, so a swapped ``list_tags`` would not stand
+    out by being too large. ``find_channels`` carries the same gap and worse — against the
+    properties URL, ``_project`` turns ``{name, owner}`` dicts into plausible invented channels.
+
+    Together with test_count_channels_targets_the_count_endpoint above, this pins all four URL
+    properties the client declares (channels_url, count_url, properties_url, tags_url).
+
+    The assertion follows each call immediately because ``call_args`` holds only the LAST call,
+    and ``call_count`` is the non-vacuity floor: without it a route that stopped requesting
+    altogether would go green on its predecessor's stale ``call_args``.
+
+    Red-proof: point ``list_tags`` at ``self.properties_url`` (or ``find_channels`` at it) in
+    services/channelfinder_client.py. mypy stays green — both are ``str``."""
+    base = "http://cf:8080/ChannelFinder"
+    client = ChannelFinderClient(base)
+    getter = Mock(return_value=_resp([{"name": "SIM:PV1", "owner": "someone"}]))
+    monkeypatch.setattr(client.session, "get", getter)
+
+    client.find_channels("SIM:*")
+    assert getter.call_args.args[0] == f"{base}/resources/channels"
+    client.list_properties()
+    assert getter.call_args.args[0] == f"{base}/resources/properties"
+    client.list_tags()
+    assert getter.call_args.args[0] == f"{base}/resources/tags"
+    assert getter.call_count == 3
+
+
 @pytest.mark.parametrize("payload", [True, "notanumber", {"count": 1}])
 def test_count_channels_rejects_non_numeric(
     payload: object, monkeypatch: pytest.MonkeyPatch
