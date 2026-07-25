@@ -79,8 +79,12 @@ _SCAN_SUFFIXES = {
     ".rst",
     ".example",
     ".toml",  # pyproject.toml ships to the fork and carries the author line — scan it too
+    ".cff",  # CITATION.cff ships to the fork; in scope by TYPE, exempt by NAME below
 }
-_EXCLUDED_NAMES = {"LICENSE"}
+# Attribution files: a personal name in them is the POINT, not a leak. Both are named explicitly
+# rather than left out of _SCAN_SUFFIXES, so the exemption is a decision a reader can see and
+# revisit. Anything else with these suffixes is still scanned.
+_EXCLUDED_NAMES = {"LICENSE", "CITATION.cff"}
 # Site/host identifiers + a filesystem path carrying a username (BOTH Windows \Users\ and Unix
 # /home/<user>/ or /Users/<user>/ — the combined-CA path the guide teaches is the top leak vector).
 # The username arms accept '.' and '-' in the name (jane.doe, first-last would otherwise slip \w),

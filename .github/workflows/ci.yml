@@ -3,26 +3,36 @@ name: CI
 on: [push, pull_request]
 
 jobs:
-  # Tests auf ubuntu-latest: p4p-Linux-Wheels sind battle-tested (war auch der OS der
-  # bisherigen EPICS-CI). Die `live`-Tests (IOC-Sandbox) self-skippen, weil ihre
-  # `EPICS_MCP_*`-URL-/`EPICS_MCP_LIVE_*`-Vars in CI ungesetzt sind → in CI läuft die
-  # Offline-Suite, die live-Tests werden geskippt. Coverage report-only (kein
-  # --cov-fail-under-Gate, wie phoebus-display-mcp).
+  # Tests on ubuntu-latest: the p4p Linux wheels are the battle-tested ones, and Linux was the OS
+  # of the previous EPICS CI too. The `live` tests (IOC sandbox) self-skip because their
+  # EPICS_MCP_* URL and EPICS_MCP_LIVE_* variables are unset here, so CI runs the offline suite.
+  # Coverage is report-only (no --cov-fail-under gate), matching phoebus-display-mcp.
+  #
+  # The matrix exists to test the claim rather than decorate it: pyproject declares
+  # requires-python = ">=3.12", and a single unpinned runner never exercised the upper end.
+  # fail-fast is off so one version failing still reports the other.
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    name: test (Python ${{ matrix.python-version }})
     steps:
       - uses: actions/checkout@v5
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - name: Install dependencies (exakt nach uv.lock)
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies (exactly as uv.lock pins them)
         run: uv sync --extra dev --frozen
-      - name: Run tests mit Coverage (report-only)
+      - name: Run tests with coverage (report only)
         run: uv run pytest tests/ --tb=short --cov=src --cov-branch --cov-report=term
 
-  # Lint + Format + Typen über die pre-commit-Kette — exakt dieselben uv-gepinnten
-  # Tools und Configs wie lokal (single source of truth).
+  # Lint, format and types through the pre-commit chain: the same uv-pinned tools and the same
+  # configuration as locally, so there is a single source of truth. Deliberately one version,
+  # because mypy resolves against the python_version pinned in pyproject, not the runner's.
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -31,7 +41,7 @@ jobs:
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - name: Install dependencies (exakt nach uv.lock)
+      - name: Install dependencies (exactly as uv.lock pins them)
         run: uv sync --extra dev --frozen
       - name: pre-commit (ruff check + format + mypy)
         run: uv run pre-commit run --all-files --show-diff-on-failure

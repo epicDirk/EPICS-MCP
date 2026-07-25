@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # Python dependencies through uv, so an update arrives as a uv.lock change that the CI gate
+  # (`uv sync --frozen`) actually exercises rather than a loose version bump nothing resolves.
+  # p4p and requests are the two that carry real exposure: p4p bundles the EPICS Base libraries,
+  # requests reaches every REST plane.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      # One PR per week for the toolchain instead of four. A ruff or mypy bump is reviewed as a
+      # gate change, not as a dependency change.
+      dev-tooling:
+        patterns:
+          - "ruff"
+          - "mypy"
+          - "pytest*"
+          - "pre-commit"
+          - "coverage*"
+
+  # The workflow actions themselves. A stale pinned action is its own supply-chain exposure, and
+  # nothing else in this repository watches them.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
