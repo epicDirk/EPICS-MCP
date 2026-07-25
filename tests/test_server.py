@@ -1851,6 +1851,159 @@ _TYPED_OUTPUT_TOOLS = frozenset(
     }
 )
 
+# Minimal args that reach each typed tool's DISABLED return over the wire. ONE ROW PER MEMBER of
+# _TYPED_OUTPUT_TOOLS — the completeness assertion in the wire test below is what keeps it that way,
+# and is the reason this table exists at all rather than another hand-maintained per-tool test.
+#
+# download_log_attachment needs a fully-specified identity/sink pair: it validates those BEFORE the
+# config gate, so a "simpler" arg set raises there and the call never reaches a conformance check
+# (over the wire that is an error result, which carries no structuredContent to validate at all).
+#
+# The Olog rows duplicate the local table in the Olog conformance test. That is safe by
+# construction, not by luck: both tables are DRIVEN, so a drift in either one goes red in its own
+# test. What a duplicate cannot hide is a MISSING tool — that is what the completeness check below
+# covers, and no per-test table can.
+_DISABLED_WIRE_ARGS: dict[str, dict[str, Any]] = {
+    "search_logbook": {},
+    "get_log_entry": {"log_id": "1"},
+    "list_logbooks": {},
+    "list_tags": {},
+    "list_log_levels": {},
+    "create_log_entry": {"title": "t", "logbooks": "Ops"},
+    "reply_to_log": {"log_id": "1", "title": "t", "logbooks": "Ops"},
+    "add_log_attachment": {"log_id": "1"},
+    "update_log_entry": {"log_id": "1"},
+    "download_log_attachment": {"attachment_id": "1", "as_base64": True},
+    "list_log_attachments": {"log_id": "1"},
+    "get_pv_history": {
+        "pv_name": "SIM:PS-01:Cur-RB",
+        "start": "2026-01-01T00:00:00.000Z",
+        "end": "2026-01-02T00:00:00.000Z",
+    },
+    "is_alarm_configured": {"pv_name": "SIM:PS-01:Cur-RB", "config_name": "SomeTree"},
+    "lookup_device_name": {"name": "DEV-TEST01:Ctrl-EVR-01"},
+    "is_archived": {"pv_name": "SIM:PS-01:Cur-RB"},
+    "list_archived_pvs": {},
+    "get_appliance_info": {},
+    "get_archive_info": {"pv_name": "SIM:PS-01:Cur-RB"},
+    "list_channel_vocabulary": {},
+    "get_alarm_history": {
+        "pv_name": "SIM:PS-01:Cur-RB",
+        "start": "2026-01-01T00:00:00Z",
+        "end": "2026-01-02T00:00:00Z",
+    },
+    "discover_pvs": {"pattern": "SIM:PS-*"},
+}
+
+# A JOIN, not a copy: every entry POINTS at the constant its sibling conformance test already
+# declares, so the two can never disagree. Its purpose is to make those constants carry weight at
+# RUNTIME — today each is only consulted to SKIP a field in a static check, so an over-broad entry
+# weakens its test in silence instead of failing it.
+_ALWAYS_PRESENT_BY_TOOL: dict[str, frozenset[str]] = {
+    **{name: frozenset(fields) for name, fields in _OLOG_ALWAYS_PRESENT.items()},
+    "get_pv_history": _ARCHIVER_HISTORY_ALWAYS_PRESENT,
+    "is_alarm_configured": _ALARM_CONFIGURED_ALWAYS_PRESENT,
+    "lookup_device_name": _NAME_LOOKUP_ALWAYS_PRESENT,
+    "is_archived": _ARCHIVE_STATUS_ALWAYS_PRESENT,
+    "list_archived_pvs": _LIST_ARCHIVED_PVS_ALWAYS_PRESENT,
+    "get_appliance_info": _GET_APPLIANCE_INFO_ALWAYS_PRESENT,
+    "get_archive_info": _GET_ARCHIVE_INFO_ALWAYS_PRESENT,
+    "list_channel_vocabulary": _LIST_CHANNEL_VOCABULARY_ALWAYS_PRESENT,
+    "get_alarm_history": _GET_ALARM_HISTORY_ALWAYS_PRESENT,
+    "discover_pvs": _DISCOVER_PVS_ALWAYS_PRESENT,
+}
+
+
+@pytest.mark.asyncio
+async def test_every_typed_tool_conforms_to_its_schema_over_the_wire(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S29: EVERY typed tool's disabled-path payload is validated by a REAL client — and the set of
+    tools driven here is pinned to _TYPED_OUTPUT_TOOLS, so the coverage cannot silently fall behind.
+
+    Why this exists next to the per-tool conformance tests rather than instead of them. Those tests
+    each carry a hand-written nullability contract for ONE tool and are the right home for it. But
+    they share two blind spots that no amount of care inside them can close:
+
+    * They cannot notice a tool that has NO wire coverage. A twelfth typed tool ships, nobody adds a
+      test, and every existing test stays green — the failure mode of every hand-maintained list.
+      The completeness assertions below turn exactly that into a red test.
+    * They drive ``FastMCP.call_tool``, which hands a return back UNVALIDATED (pinned by
+      test_wire_validates_output_schema_while_in_process_does_not). Their runtime half therefore
+      only ever checked the ONE thing it asserts explicitly — that an emitted null is permitted —
+      and 13 of the 20 tools they cover emit no null at all on the driven path, so for those the
+      runtime half asserts nothing beyond "the call did not raise".
+
+    HONEST SCOPE — this is a coverage guard, not a bug hunt. The same population was measured
+    once over a real client with 0 violations (CHANGELOG, S29/LO), and mypy --strict already
+    rejects almost every mis-typed return literal at commit time. What is bought here is that
+    the measurement keeps holding, for every future tool, without anyone remembering to re-run
+    it. Payload-carrying paths are a different and sharper question; they are driven per-tool,
+    and only where a guard actually depends on one.
+
+    Red-proof (both measured): drop a row from _DISABLED_WIRE_ARGS without dropping the tool from
+    _TYPED_OUTPUT_TOOLS -> the completeness half goes red; emit a mis-typed value from any disabled
+    return -> the wire half goes red while the in-process sibling test stays green."""
+    from fastmcp import Client
+
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import mcp
+
+    assert set(_DISABLED_WIRE_ARGS) == _TYPED_OUTPUT_TOOLS, (
+        "_DISABLED_WIRE_ARGS is out of step with _TYPED_OUTPUT_TOOLS — missing rows: "
+        f"{sorted(_TYPED_OUTPUT_TOOLS - set(_DISABLED_WIRE_ARGS))}, stale rows: "
+        f"{sorted(set(_DISABLED_WIRE_ARGS) - _TYPED_OUTPUT_TOOLS)}"
+    )
+    assert set(_ALWAYS_PRESENT_BY_TOOL) == _TYPED_OUTPUT_TOOLS, (
+        "_ALWAYS_PRESENT_BY_TOOL is out of step with _TYPED_OUTPUT_TOOLS — missing rows: "
+        f"{sorted(_TYPED_OUTPUT_TOOLS - set(_ALWAYS_PRESENT_BY_TOOL))}, stale rows: "
+        f"{sorted(set(_ALWAYS_PRESENT_BY_TOOL) - _TYPED_OUTPUT_TOOLS)}"
+    )
+
+    # EVERY plane empty in ONE config, so no tool's disabled path depends on what the environment
+    # happens to carry. conftest isolates the EPICS_* search vars but deliberately NOT the
+    # EPICS_MCP_* URLs — which is why the per-tool tests patch get_config instead of unsetting env.
+    # Each plane resolves get_config in its OWN module namespace, hence three patch targets.
+    disabled = EpicsConfig(
+        channelfinder_url="", archiver_url="", alarm_url="", naming_url="", olog_url=""
+    )
+    for module_path in (
+        "epics_pv_mcp.services.checkers",
+        "epics_pv_mcp.services.checkers_olog",
+        "epics_pv_mcp.tools.archiver",
+    ):
+        monkeypatch.setattr(f"{module_path}.get_config", lambda: disabled)
+
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    async with Client(mcp) as client:
+        for name in sorted(_DISABLED_WIRE_ARGS):
+            # Raises ToolError("Output validation error: ...") if the payload does not conform.
+            result = await client.call_tool(name, _DISABLED_WIRE_ARGS[name])
+            structured = cast(dict[str, Any], result.structured_content)
+            properties = (tools[name].outputSchema or {}).get("properties", {})
+
+            # Non-vacuity floor: with no advertised properties the wire validates NOTHING and every
+            # check below passes over an empty schema — the exact state an output_schema=None
+            # opt-out produces.
+            assert properties, f"{name}: outputSchema carries no typed properties"
+            assert set(structured) <= set(properties), (
+                f"{name}: emitted {sorted(set(structured) - set(properties))}, which the "
+                "outputSchema does not advertise (the wire permits extra keys — nothing else "
+                "catches this)"
+            )
+            for always in _ALWAYS_PRESENT_BY_TOOL[name]:
+                assert always in structured, (
+                    f"{name}: {always!r} is declared always-present (and therefore non-nullable) "
+                    f"but is absent from the emitted payload {sorted(structured)}"
+                )
+            for key, value in structured.items():
+                if value is None:
+                    assert _schema_permits_null(properties[key]), (
+                        f"{name}.{key}: emitted null but its schema forbids null "
+                        f"({properties[key]})"
+                    )
+
+
 # The four tools that carry a parameter literally NAMED ``title`` (the schema-aware-strip trap).
 _TITLE_PARAMETER_TOOLS = ("create_log_entry", "reply_to_log", "update_log_entry", "search_logbook")
 
