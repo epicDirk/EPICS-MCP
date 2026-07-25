@@ -44,7 +44,8 @@ import re
 import sqlite3
 import subprocess
 import sys
-from collections.abc import Iterator
+import traceback
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -224,6 +225,33 @@ _EDGE_CLAIM = re.compile(
 )
 
 
+# --- the recorded findings, as data ------------------------------------------------------------
+#
+# S33. The 2026-07-25 audit's figures used to live only in a docstring, where nothing compared them
+# to the code they describe. They are pinned here, in the tool that produces them, so the tool can
+# check itself; ``tests/test_client_edge_guards.py`` imports these rather than restating them.
+#
+# Split by what checking them COSTS. The first two follow from this repository's own AST and are
+# therefore cheap enough for the ordinary test gate. The other two are decided by which tests
+# EXECUTED a guard line, which needs a coverage map recorded with COVERAGE_CORE=ctrace — minutes,
+# not milliseconds. ``--check`` without a database verifies the cheap pair and says so; it never
+# reports "OK" for a figure it could not reach.
+DOUBLES = "tests installing a client class double in their own body"
+EDGE_VOCABULARY = "of those, carrying payload vocabulary"
+NOT_EXECUTING = "of those, never executing a client-edge line"
+SHAM_CANDIDATES = "and claiming something about the ANSWERED payload"
+
+PINNED_AST: dict[str, int] = {DOUBLES: 107, EDGE_VOCABULARY: 23}
+PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 102, SHAM_CANDIDATES: 20}
+PINNED: dict[str, int] = {**PINNED_AST, **PINNED_COVERAGE}
+
+RERUN = (
+    "COVERAGE_CORE=ctrace COVERAGE_FILE=<scratch>/cov uv run pytest --cov=src --cov-branch "
+    "--cov-context=test, then uv run python scripts/guard_audit.py sham --check "
+    "--coverage-db <scratch>/cov"
+)
+
+
 def claiming_tests() -> dict[str, list[tuple[str, bool]]]:
     """``{test file: [(test name, edge-claim)]}`` for tests that install a client CLASS double.
 
@@ -276,8 +304,50 @@ def cmd_targets(_args: argparse.Namespace) -> int:
     return 0
 
 
+def population() -> dict[str, int]:
+    """The two figures direction B can state WITHOUT a coverage map, from this file's AST alone."""
+    claiming = claiming_tests()
+    return {
+        DOUBLES: sum(len(entries) for entries in claiming.values()),
+        EDGE_VOCABULARY: sum(1 for entries in claiming.values() for _n, edge in entries if edge),
+    }
+
+
+def _compare(measured: dict[str, int], unchecked: Iterable[str]) -> int:
+    """Report ``--check``: 1 for a deviation, 0 for agreement, and never silence about the rest.
+
+    A checker that says "OK" while several pins were out of its reach is the sham guard this tool
+    exists to find, so what was NOT compared is printed on every run, including the clean one.
+    """
+    deviating = [
+        f"  {name}: pinned {PINNED[name]}, measured {value}"
+        for name, value in sorted(measured.items())
+        if PINNED[name] != value
+    ]
+    skipped = sorted(unchecked)
+    if skipped:
+        sys.stderr.write("NOT checked (needs --coverage-db):\n")
+        for name in skipped:
+            sys.stderr.write(f"  {name} (pinned {PINNED[name]})\n")
+    if deviating:
+        sys.stderr.write("PIN DEVIATION — the recorded audit describes different code now:\n")
+        sys.stderr.write("\n".join(deviating) + "\n")
+        sys.stderr.write(f"Re-run the audit and re-record the findings. {RERUN}\n")
+        return 1
+    sys.stderr.write(f"checked {len(measured)} pin(s): all agree with the recorded audit\n")
+    return 0
+
+
 def cmd_sham(args: argparse.Namespace) -> int:
     """Direction B: tests that claim a client-edge guard but never execute one."""
+    # The AST half runs FIRST and unconditionally. It needs no coverage map, and putting it after
+    # the map would make ``--check`` without a database dereference a missing path and die with a
+    # TypeError — exit 1, indistinguishable from "a pin deviates", which is the one thing exit 1
+    # is now contracted to mean.
+    measured = population()
+    if args.coverage_db is None:
+        return _compare(measured, unchecked=PINNED_COVERAGE)
+
     covering = load_coverage_map(Path(args.coverage_db))
     if not covering:
         sys.stderr.write(
@@ -291,11 +361,9 @@ def cmd_sham(args: argparse.Namespace) -> int:
         test for key, tests in covering.items() if key in guard_lines for test in tests
     }
     sys.stderr.write(f"map: {len(executing)} tests execute at least one client-edge GUARD line\n")
-    doubles = 0
     sham_edge: list[str] = []
     sham_other = 0
     for filename, entries in sorted(claiming_tests().items()):
-        doubles += len(entries)
         for name, is_edge_claim in entries:
             if any(test.endswith(f"::{name}") for test in executing):
                 continue
@@ -303,10 +371,14 @@ def cmd_sham(args: argparse.Namespace) -> int:
                 sham_edge.append(f"{filename}::{name}")
             else:
                 sham_other += 1
+    measured[NOT_EXECUTING] = len(sham_edge) + sham_other
+    measured[SHAM_CANDIDATES] = len(sham_edge)
+    if args.check:
+        return _compare(measured, unchecked=())
     sys.stderr.write(
-        f"tests installing a client CLASS double in their own body: {doubles}\n"
-        f"  of those, never executing a client-edge line: {len(sham_edge) + sham_other}\n"
-        f"  and claiming something about the ANSWERED payload: {len(sham_edge)}\n\n"
+        f"tests installing a client CLASS double in their own body: {measured[DOUBLES]}\n"
+        f"  of those, never executing a client-edge line: {measured[NOT_EXECUTING]}\n"
+        f"  and claiming something about the ANSWERED payload: {measured[SHAM_CANDIDATES]}\n\n"
     )
     for entry in sham_edge:
         sys.stderr.write(f"  {entry}\n")
@@ -448,13 +520,37 @@ def main(argv: list[str]) -> int:
     )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("targets", help="print the guard inventory").set_defaults(func=cmd_targets)
-    for name, func in (("sham", cmd_sham), ("sweep", cmd_sweep)):
-        child = sub.add_parser(name, help=func.__doc__ or "")
-        child.add_argument("--coverage-db", required=True, help="a ctrace --cov-context=test db")
-        child.add_argument("--timeout", type=int, default=120, help="seconds per mutant run")
-        child.set_defaults(func=func)
+    # ``sweep`` keeps the shared requirement; ``sham`` gets its own parser because ``--check``
+    # gives it a mode that needs no database. Relaxing the requirement in the shared loop would
+    # have relaxed it for ``sweep`` too, which dereferences the path unconditionally.
+    sweep_parser = sub.add_parser("sweep", help=cmd_sweep.__doc__ or "")
+    sweep_parser.add_argument("--coverage-db", required=True, help="a ctrace --cov-context=test db")
+    sweep_parser.add_argument("--timeout", type=int, default=120, help="seconds per mutant run")
+    sweep_parser.set_defaults(func=cmd_sweep)
+
+    sham_parser = sub.add_parser("sham", help=cmd_sham.__doc__ or "")
+    sham_parser.add_argument("--coverage-db", help="a ctrace --cov-context=test db")
+    sham_parser.add_argument("--timeout", type=int, default=120, help="seconds per mutant run")
+    sham_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="compare against the recorded findings; exit 1 on a deviation. Without "
+        "--coverage-db only the AST-derivable pins are checked, and the rest is named as unchecked",
+    )
+    sham_parser.set_defaults(func=cmd_sham)
+
     args = parser.parse_args(argv[1:])
-    result: int = args.func(args)
+    if args.command == "sham" and args.coverage_db is None and not args.check:
+        # Reporting mode still needs a map. Spelled out rather than left to ``required=True`` so
+        # that the message a caller has always seen does not change under them.
+        sham_parser.error("the following arguments are required: --coverage-db")
+    try:
+        result: int = args.func(args)
+    except Exception:  # noqa: BLE001 - the point is that a crash must not look like a verdict
+        # Exit 1 is contracted to mean "a pin deviates". An unexpected failure gets its own code,
+        # so a caller cannot read a traceback as a finding.
+        traceback.print_exc()
+        return 3
     return result
 
 

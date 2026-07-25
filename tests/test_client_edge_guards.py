@@ -22,8 +22,20 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   only 2 and a review showed it missed a test whose docstring states the edge claim in words the
   regex did not know. Treat this as "no sham guard found by this filter", and widen the filter
   before treating it as a stronger statement.
+
+  S33, and the distinction matters for what can be checked cheaply: 23 of those 107 carry payload
+  vocabulary before any coverage map is consulted, and 20 remain once the tests that DO execute a
+  guard line are removed. The 23 follows from this repository's AST alone and is therefore pinned
+  by a test in the ordinary gate; the 102 and the 20 are decided by the coverage map and are
+  checked only by ``scripts/guard_audit.py sham --check --coverage-db …``.
 * Unobserved polarities (direction A): 19 of 93 targets, plus one where neither polarity is
   noticed and two that no test executes at all. They are declared below.
+
+  The sweep counted 19 such targets and the table below has 17 rows, which is not a discrepancy:
+  the key is ``module:line``, and one line can carry several targets — ``channelfinder_client.py``
+  line 473 carries three (two ``isinstance`` calls plus the whole condition). Measured, those 17
+  keys sit on 28 targets in total. A key is not a target, and reading the table as if it were is
+  how a reader would conclude that two findings had been lost.
   ⚠️ Two caveats on the counterpart number. First, "observed in both polarities" is weaker than it
   sounds for the 21 RAISE guards: their enabling polarity fires the guard on every input, so every
   covering test dies by construction and only the disabling half carries information. Second,
@@ -41,13 +53,39 @@ anyway, so the whole suite stays green.
 
 from __future__ import annotations
 
+import re
 import sys
+from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "scripts"))
 
-from guard_audit import client_modules, enumerate_targets  # noqa: E402 - needs sys.path above
+from guard_audit import (  # noqa: E402 - needs sys.path above
+    DOUBLES,
+    EDGE_VOCABULARY,
+    PINNED_AST,
+    RERUN,
+    client_modules,
+    enumerate_targets,
+    population,
+)
+
+from tests.prose_numbers import parse_count  # noqa: E402 - after the sys.path splice above
+
+_TESTS_DIR = Path(__file__).resolve().parent
+
+
+def _targets_behind_recorded_keys() -> int:
+    """How many AST targets the recorded ``module:line`` keys actually cover.
+
+    The number the docstring uses to explain why 19 findings occupy 17 rows. Derived, so the
+    explanation cannot become a story: if a line stops carrying several targets, this moves.
+    """
+    per_key = Counter(f"{target.module}:{target.lineno}" for target in enumerate_targets())
+    return sum(per_key[key] for key in _UNOBSERVED)
+
 
 # (isinstance calls, whole-condition targets) per client module, as the AST sees them. Two
 # separate numbers on purpose: a composite condition needs its own mutant, because splicing one
@@ -95,6 +133,42 @@ _RERUN = (
     "sweep --coverage-db <scratch>/cov"
 )
 
+# S33: the figures the docstring above states, each next to the thing that decides it. Only the
+# figures a SOURCE-LEVEL measurement can settle are here; 102 and 20 are decided by the coverage
+# map and live in ``guard_audit.PINNED_COVERAGE``, checked by ``sham --check`` instead.
+_PROSE_FIGURES: tuple[tuple[str, str, Callable[[], int]], ...] = (
+    (
+        "tests with a client class double",
+        r"(\w+) tests\s+install a client class double",
+        lambda: population()[DOUBLES],
+    ),
+    (
+        "of those, carrying payload vocabulary",
+        r"(\w+) of those 107 carry payload\s+vocabulary",
+        lambda: population()[EDGE_VOCABULARY],
+    ),
+    (
+        "audited targets",
+        r"of (\w+) targets",
+        lambda: len(enumerate_targets()),
+    ),
+    (
+        "rows in the unobserved table",
+        r"the table below has (\w+) rows",
+        lambda: len(_UNOBSERVED),
+    ),
+    (
+        "targets those rows sit on",
+        r"keys sit on (\w+) targets",
+        _targets_behind_recorded_keys,
+    ),
+    (
+        "live-lane modules",
+        r"the (\w+) ``\*_live`` modules",
+        lambda: len(list(_TESTS_DIR.glob("*_live.py"))),
+    ),
+)
+
 
 def test_client_edge_guard_population_is_pinned() -> None:
     """The audited population must still be the population that exists.
@@ -130,4 +204,46 @@ def test_recorded_audit_findings_still_point_at_a_guard() -> None:
     assert recorded <= live, (
         f"recorded audit findings no longer sit on a guard line: {sorted(recorded - live)}. "
         f"They were measured on an older revision — {_RERUN}"
+    )
+
+
+def test_the_ast_derivable_audit_figures_are_pinned() -> None:
+    """S33: the half of direction B that costs no coverage run is watched by the ordinary gate.
+
+    This closes the trigger the roadmap names: a NEW test that installs a client class double and
+    carries payload vocabulary in its name or docstring moves both figures, and until now moved
+    them silently. Going red here is the signal to re-read the audit's verdict, not to edit the
+    number — the verdict "no sham guard found" was reached by a human reading a specific list, and
+    a longer list has not been read.
+
+    The other two figures (102, 20) are decided by which tests EXECUTED a guard line. That needs a
+    coverage map, so they are pinned in the tool and checked deliberately, not here.
+    """
+    assert population() == PINNED_AST, (
+        f"the client-double population changed: measured {population()}, recorded {PINNED_AST}. "
+        f"A test was added or its wording changed. {RERUN}"
+    )
+
+
+def test_the_recorded_figures_match_the_prose_that_states_them() -> None:
+    """The numbers in this module's own docstring are compared to what produces them.
+
+    An audit is a measurement and a measurement rots; a WRITE-UP of a measurement rots faster,
+    because nothing runs it. Every figure below is re-derived here, so the paragraph a future
+    reader trusts cannot drift away from the code it describes while every test stays green.
+    """
+    prose = " ".join((__doc__ or "").split())
+    wrong: list[str] = []
+    for label, pattern, measure in _PROSE_FIGURES:
+        match = re.search(pattern, prose, re.IGNORECASE)
+        if match is None:
+            wrong.append(
+                f"{label}: the sentence stating it is gone; reword the pattern or restore it"
+            )
+            continue
+        stated = parse_count(match.group(1))
+        if stated != measure():
+            wrong.append(f"{label}: the docstring says {stated}, the code says {measure()}")
+    assert not wrong, "this module's own docstring no longer describes the code:\n  " + "\n  ".join(
+        wrong
     )

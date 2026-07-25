@@ -174,8 +174,16 @@ work.
    at the properties URL left the whole suite green, with the payload-path test already faking
    at the transport seam).
 
-   Auditing this is `scripts/guard_audit.py`, and its findings are pinned in
-   `tests/test_client_edge_guards.py` rather than written up somewhere. Two directions, because
+   Auditing this is `scripts/guard_audit.py`, and its findings are pinned in code rather than
+   written up somewhere — split by what checking them costs. The figures that follow from the
+   test suite's own AST live in `guard_audit.PINNED_AST` and are checked by the ordinary gate
+   (`tests/test_client_edge_guards.py`), together with the population and every recorded finding's
+   line. The figures that depend on which tests EXECUTED a guard line live in
+   `guard_audit.PINNED_COVERAGE` and are checked only by `guard_audit.py sham --check
+   --coverage-db <db>`, deliberately: reaching them costs a full ctrace run, and a check that
+   claimed to have verified them without one would be the sham guard this audit exists to find.
+   Run without a database it verifies the cheap pair and NAMES the pins it could not reach, on the
+   clean run as well as the failing one. Two directions, because
    a mutation sweep alone answers the wrong question: it asks whether ANY test notices a guard
    disappearing, so a guard covered by a real test AND a sham one reads as "guarded" and the sham
    is acquitted. ⚠️ That double-cover risk is argued, not observed — in the one proven case
