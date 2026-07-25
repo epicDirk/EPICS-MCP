@@ -2990,13 +2990,14 @@ async def test_stripped_tool_still_returns_structured_content(
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
 # RELATIONAL (a ``<=`` check) so both lanes pass. Measured after typing find_channels (S29): the
-# core lane is 63_742 and the full lane 72_040. Re-MEASURE these two after every schema change --
+# core lane is 63_879 and the full lane 72_177. Re-MEASURE these two after every change that can
 # they are prose, nothing asserts them, and an estimate written instead of a measurement had to be
 # corrected by a follow-up commit once already (`6c0a2ec`). Sizes of the last three steps: +406/+411
-# for discover_pvs, then +775/+775 for find_channels -- and that jump is the reason to measure
-# rather than extrapolate: the schema alone would have been ~+410, but the same commit widened the
-# tool DESCRIPTION (the count_only field text and a mode-disjointness sentence), and description
-# bytes ride the same wire as schema bytes.
+# for discover_pvs, then +775/+775 for find_channels, then +137/+137 for the follow-up that only
+# corrected that tool's DESCRIPTION -- and those two are the reason the instruction above says
+# "every change", not "every schema change": the schema alone would have been ~+410, the rest is
+# description text, and description bytes ride the same wire as schema bytes. Measured twice here
+# because the follow-up's first commit message claimed "unchanged" without measuring.
 # Raising the ceiling is a conscious, CHANGELOG-documented one-line change, never a silent bump.
 _TOOLS_LIST_WIRE_CEILING = 200_000
 
@@ -3004,8 +3005,8 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 63_742 and the full lane
-    72_040; a new tool or an SDK change that inflates the wire could grow that UNNOTICED with an
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 63_879 and the full lane
+    72_177; a new tool or an SDK change that inflates the wire could grow that UNNOTICED with an
     otherwise green suite. This is that guard, now a soft catastrophe-ceiling at 200_000 (see the
     constant's comment for the raise rationale).
 

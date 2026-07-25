@@ -41,7 +41,7 @@ carry breaking changes).
     tatsächlich rot geworden und daraufhin auf `get_pv_value` umgehängt. ⚠️ Damit wechselt er die
     Art: die drei Vorgänger hatten einen config-gegateten echten Pfad, `get_pv_value` braucht eine
     gefakte `pv_get`-Naht.
-  - **Draht-Budget neu gemessen: Kern-Lane 63742 / Voll-Lane 72040** (Deckel 200000). ⚠️ **+775 pro
+  - **Draht-Budget neu gemessen: Kern-Lane 63879 / Voll-Lane 72177** (Deckel 200000). ⚠️ **+775 pro
     Lane, nicht die aus dem Vorgänger-Schritt extrapolierten ~410** — dieselbe Änderung hat die
     Tool-BESCHREIBUNG erweitert, und Beschreibungs-Bytes fahren auf demselben Draht wie
     Schema-Bytes. Genau deshalb steht dort „nachmessen, nicht hochrechnen".
