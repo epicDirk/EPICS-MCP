@@ -12,18 +12,25 @@ EPICS service landscape behaves. This file is the standing policy that keeps tha
 
 ## Orientation — where things live
 
-- `README.md` — what the server is, the planes it sees, safety/network posture, tools, configuration.
-- `ARCHITECTURE.md` — the `server → tools → services → clients` layering contract.
+- `README.md` — the landing page: what the server is, the planes, install, and an index of
+  everything below. Keep it short; reference depth belongs in `docs/`.
+- `docs/` — the reference pages the README indexes: `tools.md`, `configuration.md`, `safety.md`,
+  `mcp-clients.md`, **`deployment.md`** (bringing the server up in a new facility, the first thing
+  an outside adopter needs) and **`write-gate-contract.md`** (the specification every in-server
+  write gate must meet).
+- `ARCHITECTURE.md` — the `server → tools → services → clients` layering and the plane model.
 - `CONTRIBUTING.md` — dev setup, the gate chain, Definition of Done, commit style.
-- `CHANGELOG.md` — **release history for a USER of this server, in English.** It is a top-level file,
-  so it is the first thing a stranger evaluating this repository opens. What belongs in it: a new,
-  changed or removed tool; a breaking change; an error code or field that changed on the wire; a new
-  `EPICS_MCP_*` variable; a bug a user could actually hit. What does NOT: audit runs, test
-  methodology, mutation or red-proof notes, `tools/list` byte budgets, work-item ids, internal
-  refactors with no user-visible effect. Those belong in the three tiers below, and a commit body is
-  where the work itself is narrated. Measured once (2026-07-25) at 763 lines, 66 KB, where roughly
-  half was a work journal: no rule claimed this file, so it drifted into one.
+- `SECURITY.md` — reporting channel, security posture, and an explicit statement of what the write
+  gates are **not**.
+- `CHANGELOG.md` — **release history for a USER, in English.** A new, changed or removed tool; a
+  breaking change; an error code or field that changed on the wire; a new `EPICS_MCP_*` var; a bug a
+  user could hit. **Not** audit runs, test methodology, red-proof notes, `tools/list` byte budgets,
+  work-item ids, or internal refactors with no user-visible effect: those go to the tiers below, and
+  the work itself is narrated in the commit body. It drifted into a 763-line work journal once,
+  because no rule claimed it.
 - `.env.example` — the canonical, commented configuration template (every `EPICS_MCP_*` var).
+- `examples/` — a runnable `test.db`, a sample `.bob` and an `mcp.json`: the path for someone with
+  no facility at all.
 - **`src/epics_pv_mcp/operator_guide.md`** — the operational cookbook (service planes, recipes, error
   signatures). Shipped as package data, served as the `epics-pv://guide` MCP resource, mirrored for
   humans by `OPERATING.md`. **One source file, three consumers — never copy it, link it.**
@@ -71,18 +78,14 @@ come from a git-ignored file and are **absent on a fresh CI / public-fork checko
 test is the CI-effective check — best-effort, not a proof, so the hand-transcription rule above is what
 actually keeps it out.
 
-**Accepted carve-out — the bare facility acronym.** "Facility-agnostic" here means *no specific
-infrastructure or identity leaks* — it does **not** mean the facility's short name never appears. The bare
-acronym and its product proper-nouns (the naming service, the site gateway, and similar named services)
-are the actual names of the software this server talks to and collide with generic technical vocabulary,
-so `_SITE_RE` **deliberately does not scrub them** (see its inline comment: *no generic facility
-abbreviations — they collide with real system names*). What the guard *does* keep out is unchanged and
-load-bearing: facility domains, cluster / host names, live device/PV names, person names, and username
-filesystem paths. So a reviewer who sees the bare facility name in a tool description or the guide should
-read it as an accepted product name, **not** a leak; a reviewer who sees a domain, host, live PV or person
-name must still reject it. A genuinely site-neutral public fork would additionally template even the bare
-acronym / product names out — that is a separate, larger job (tracked on the roadmap), not a silent hole
-in this guard.
+**Accepted carve-out: the bare facility acronym.** "Facility-agnostic" means *no specific
+infrastructure or identity leaks*, not that the facility's short name never appears. The bare acronym
+and its product proper-nouns are the actual names of the software this server talks to, and they
+collide with generic technical vocabulary, so `_SITE_RE` **deliberately does not scrub them**. What
+the guard keeps out is unchanged and load-bearing: facility domains, cluster and host names, live
+device/PV names, person names, and username filesystem paths. A reviewer seeing the bare name in a
+tool description reads it as a product name; a domain, host, live PV or person name is still a
+reject. Templating the acronym out as well is a separate, larger job, not a hole in this guard.
 
 ## Server-decided parameters: no promise before a differential live probe (hard)
 
@@ -190,157 +193,24 @@ work.
 Honest limit: these are prose rules — the category that rots (see above). No CI guard can prove
 they were followed; the guard is the adversarial counter-probe itself.
 
-## Write-gate contract: what any in-server write gate must provide (hard)
+## Write-gate contract (hard)
 
-This server exposes tools that **mutate** state on a downstream service — a PV setpoint, a logbook entry, an
-archive/config record. Every such tool sits behind an **in-server write gate**. Today there are two (the PV
-gate and the logbook gate); a third — an archiver, an alarm-acknowledge, or a channel-registry mutator —
-repeats every question below. So the requirements are written once, here, as the standing contract. A new
-gate that does not meet all six points is not done.
+Every tool that **mutates** a downstream service sits behind an in-server write gate. Two exist
+today (PV and logbook); a third repeats every question, so the requirements are written once, as a
+specification, in **[docs/write-gate-contract.md](docs/write-gate-contract.md)**. A gate that does
+not meet all six points is not done.
 
-Read the scope statement (point 6) **first**: it fixes what a gate is *for*, and the other five points only
-make sense under it.
+The six in one line each: **(1)** an env on/off gate, default OFF, independent per surface;
+**(2)** an allowlist whose empty case is fail-closed, in a shape decided and justified per surface,
+never copied from a sibling; **(3)** a rate limit, where a denied write consumes no token;
+**(4)** a mandatory metadata-only audit, one terminal line per gate verdict, and a pre-gate refusal
+must not wear the gate's error code; **(5)** a fail-closed reach/URL boundary parsed by the
+connecting library's own parser; **(6)** an honest scope statement, because the gate is a
+**guardrail on the sanctioned path, not a security boundary**.
 
-**1. An environment on/off gate, default OFF.** Writes for the surface are disabled unless an explicit
-`EPICS_MCP_ALLOW_<SURFACE>_WRITE=true` is set. Off is the shipping default and the safe state; a fresh
-checkout, a missing env file, or a typo in the var name all resolve to *no writes*. Each surface's env gate
-is **independent** — enabling one never enables another.
-
-**2. An allowlist with explicitly-defined empty-semantics — empty is fail-closed, and *which* fail-closed
-shape is a deliberate, documented per-surface choice.** The env gate only says *whether* the surface may be
-written; an allowlist says *what* target is permitted — a regex over target names (`^SIM:PS-01:.*-SP$`), an
-exact set of logbook names, a URL allowlist.
-
-- **An empty allowlist is NEVER a silent allow-all.** On every surface it fails closed. An operator who
-  genuinely wants every target writable must say so **explicitly** (a regex allowlist: `.*`; an exact-set
-  allowlist has no "all", so an empty set can only mean deny). A silent allow-all on empty is a footgun — a
-  forgotten env var reading as "permit everything" — and is a defect, not a valid configuration.
-- **The *shape* of the fail-closed is a per-surface decision, made deliberately and documented at the config
-  field itself.** Two sanctioned shapes exist:
-  - **Refuse-to-start** — writes enabled with an empty allowlist raises a config error at gate construction,
-    so the process will not run write-enabled-but-unscoped. Use this where an empty allowlist can *only* be a
-    misconfiguration (a forgotten pattern) **and** there is a way to spell "all" explicitly.
-  - **Deny-all at runtime** — the gate constructs, logs a loud warning that writes are enabled but nothing is
-    allowlisted, and denies every write. Use this where deny-all-with-a-visible-error is the better operator
-    experience (a wrong or missing target surfaces as a denied write, not a dead process).
-- **Never copy a sibling gate's empty-semantics blindly, and never describe one gate in terms of another's.**
-  The choice is load-bearing and must be re-decided for each surface, with its rationale written **at that
-  surface's config field**, not inferred from whichever sibling the author read first. In particular: do
-  **not** propagate any cross-gate comment of the form *"the inverse of the other gate, where an empty
-  allowlist allows all."* Such a description is **inaccurate** — a name-pattern gate that refuses to start on
-  an empty pattern does **not** allow all — and copying it forward is exactly how a third gate inherits a
-  *fail-open* reading of "empty". Both existing gates are fail-closed on empty; they differ only in shape, and
-  each states its own shape and reason at its own field.
-
-**3. A rate limit.** At most N writes per fixed window, enforced in-server. This bounds the blast radius of a
-runaway loop — the failure mode where the caller is wrong and issues the same mistaken write repeatedly.
-Acquisition of a rate token (purge-expired → count → append) must be **atomic** under a lock if the gate can
-run on more than one thread, and a write **denied by the gate** must never consume a token (audit-then-raise
-happens before the token is appended). A refusal that happens *after* the gate has admitted the write — a
-value-bounds check that runs on data fetched post-admission, say — legitimately *has* consumed one; that is a
-different event, and it says so where it is implemented.
-
-**4. A mandatory, metadata-only audit.** Every gate verdict, and every write that reaches the I/O, leaves a
-**durable** record, and the record carries **metadata only — never free text**.
-
-- **Mandatory core (every gate):** exactly one **terminal** line per **gate verdict** — **ALLOW** (the write
-  completed), **DENY** (a gate precondition rejected it — record the reason code, emitted before the raise),
-  or **FAILED** (it passed the gate and failed downstream). A surface may define **further terminal events**
-  where its semantics genuinely differ (the PV gate's post-admission bounds refusal is its own event, not a
-  DENY, precisely because it already consumed a token) — enumerate those where the gate is described instead
-  of filing them under one of the three.
-- **Scope this claim honestly.** The promise is *one terminal line per **gate verdict***, **not** "no write
-  request is ever un-recorded". A refusal raised **before** the gate is consulted — a precondition in the
-  tool or service layer above it — writes **no audit line at all**, and such refusals exist in this server
-  today. Which forces the next rule:
-- **A refusal raised outside the gate must not carry the gate's error code.** If a caller cannot distinguish
-  an un-audited pre-gate refusal from a real, audited gate DENY, the audit's coverage claim becomes
-  unfalsifiable from the outside — the exact silent gap the audit exists to close. Give pre-gate refusals
-  their own code.
-- **Stronger shape, REQUIRED where the mutation can be interrupted mid-flight** — where the code that issues
-  the I/O can be abandoned by its caller while the I/O itself proceeds (an async put handed to a worker that
-  a cancellation does not stop, so the value may still land). Then: an **ATTEMPT** line emitted **before** the
-  I/O carrying a **correlation id**, plus an **UNKNOWN** terminal outcome (cancelled or timed out; may or may
-  not have landed — verify by read-back, never blindly retry). Where the gate, the I/O and its terminal audit
-  all run to completion inside one unit that a caller's cancellation cannot split, ATTEMPT/UNKNOWN are
-  **optional**. **Do not hard-code one surface's audit shape as universal** — decide it per gate, like point
-  2, and write down the reason. *(Known limit: "a caller cannot split it" is not "it cannot be interrupted".
-  A transport-level timeout inside such a unit can still leave an applied write reported as FAILED. Where
-  that is so, say it at the gate.)*
-- **Metadata only.** The record may carry identifiers (target name, entry/operation id), the **principal** the
-  server records as the writing account, any correlation id, and bounded scalars appropriate to the surface (a
-  numeric setpoint's old/new value, a title *length*, an attachment *count* and *byte total*). It must
-  **never** carry free text the read path redacts (a title/description body, a filename) — routing write
-  content around the read-side redaction is itself the defect the audit exists to prevent.
-- **The audit sink is validated at gate construction and fails closed** — a broken or unwritable sink is a
-  config error, never a raw exception at the first write. *When* that validation runs follows the gate's own
-  construction: at startup for an eagerly-built gate, at first write for a lazily-built one. An audit
-  emission must never turn a denial or failure into a crash.
-- **Know where the audit goes — and it is not optional.** A default sink (e.g. stderr) is ephemeral and
-  un-persisted; an audit nobody can read after the process exits is a promise, not a record. So, separately
-  from the per-gate validation above and unconditionally at startup: a write-enabled process **refuses to
-  start** unless a durable sink is configured. Document the effective sink.
-
-**5. Where the surface has network reach: a reach / URL boundary, enforced fail-closed.** A gate whose target
-can be an arbitrary host must confine *where* a write can physically go, in addition to *what* may be written
-(points 1–2):
-
-- **When the target is fixed at construction** (a client search reach): confine it at construction — writes
-  enabled while the search reach extends beyond loopback is a config error; refuse to start a write-enabled
-  process that could reach a real facility network. The check must be **parser-faithful** (it reads the reach
-  exactly as the underlying client will) and **resolution-free** (a hostname is never trusted as loopback).
-- **When the target is per-write** (an HTTP URL like `http://logbook:8080`): confine it at each write — permit
-  a loopback host, or an **exactly-allowlisted** URL over a confidential scheme with remote writes explicitly
-  enabled — and take the host from **the same parser the client will actually connect with**, never a second
-  parser and never a substring of the authority (`http://127.0.0.1@logbook-remote/…` has host
-  `logbook-remote` and is refused). **Two URL parsers do not agree on hostile input:** a URL that one library
-  reads as a loopback host, another reads as a remote one. A boundary validated with a *different* parser
-  than the one that opens the connection is a bypass waiting to be found — so parse with the connecting
-  library's own parser, not with whatever the standard library offers.
-- **Fail-closed on the boundary itself:** an unparseable or unresolvable target is **denied first**, before
-  any allowlist check — a bad target is a clean, audited DENY, and the allowlist can never override a target
-  that fails to parse.
-
-**6. An honest scope statement — the gate is a guardrail on the sanctioned path, not a security boundary.**
-State this plainly where the gate is described, because the word "gate" invites a category error:
-
-- The gate guards writes **through this server**. A caller with a shell, or with the write library the server
-  itself depends on to run, can reach the same target **without passing the gate**. That path is **out of the
-  gate's reach by construction** — it is the gate's *shape*, not a hole to be patched inside the server. The
-  real boundary, if one is wanted, lives outside this process (network reach, account privileges, an external
-  reconciliation watchdog); the gate does not claim to be it, and no future reader should mistake it for one.
-- Therefore the audit's promise is **"every gate verdict, and every write through the server that reaches the
-  I/O,"** not "every write". Scope every completeness claim that way; a claim of total coverage would be the
-  very silent gap the audit exists to close.
-- **Every deny-path must be verifiable — a guard that cannot be driven red is the defect.** Each denial the
-  gate can raise (env off, allowlist miss, boundary reject, rate limit) must be exercised by a test that can
-  be shown to **fail on the un-gated code or on a mutant** — the evidence-discipline rule applied to the
-  gate. Note that the mutant must actually target the assertion: for a rate-limit denial, deleting the deny
-  branch does not exercise "a denial consumes no token"; appending the token anyway does. Prefer a *live*
-  deny-path test (one that goes red against a real target when the env points at a service) over an
-  in-memory assertion alone: an in-memory-only deny test proves the branch, not that the gate fires against
-  the wire. A gate whose refusals are only asserted in prose, never observed going red, has a documented
-  promise, not a verified one.
-
-**Honest limit:** points 1–5 are enforceable in code and are drift-guarded per gate by
-`tests/test_write_gate_contract.py`; point 6 and the empty-semantics *rationale* of point 2 are **prose**,
-the category that rots. No CI check proves a future gate author re-decided the empty-shape deliberately or
-scoped the audit claim honestly — the guard there is the review plus the red-provable deny tests of point 6.
-
-Point 6's own *live* preference, stated per surface rather than as one number:
-
-- **PV gate — not applicable, and that is a reason, not an excuse.** Every one of its deny paths raises
-  *before* the first network I/O. A live deny test would execute byte-identical code beside an unused
-  socket; the in-memory rows are the honest coverage there, not a lesser substitute.
-- **Olog gate — one path proven against the wire, the rest reasoned away.** `olog_allowlist_miss` on
-  `add_log_attachment` / `update_log_entry` is live-covered by `tests/test_write_gate_live.py`. It is the
-  only deny path whose *decision input* comes from the server (the target entry's logbooks, read back over
-  HTTP), i.e. the only one a mock cannot falsify — the mock supplies the very payload shape the code
-  assumes. The other Olog paths are argued out one by one in that module's docstring (env-off and the URL
-  boundary are shadowed by the whole-mode precondition on those tool paths; empty-logbooks is unreachable
-  there; the size cap has no server-side input; a rate-limit probe would need N real mutating writes).
-- **Not claimed:** that every gate refusal has been observed against a real service. It has not, and the
-  list above says which ones and why — recorded rather than papered over.
+Read point 6 first: it fixes what a gate is *for*, and the other five only make sense under it.
+Points 1 to 5 are drift-guarded per gate by `tests/test_write_gate_contract.py`; point 6 and the
+empty-semantics *rationale* of point 2 are prose, the category that rots.
 
 ## Definition of Done (doc-sync)
 

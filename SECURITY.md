@@ -65,7 +65,7 @@ plainly because the word "gate" invites a category error:
 
 If you are deciding whether to deploy this in a facility, that distinction is the one to carry into
 the review. The full contract every in-server write gate must satisfy, including the deny paths and
-their evidence, is in [CLAUDE.md](CLAUDE.md).
+their evidence, is in [docs/write-gate-contract.md](docs/write-gate-contract.md).
 
 ## Dependencies
 
