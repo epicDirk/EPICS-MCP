@@ -156,10 +156,22 @@ in the [deployment guide](docs/deployment.md).
 
 ## Compatibility
 
-Exercised against a local EPICS stack: an **e3** test IOC (PVAccess), an **EPICS Archiver
-Appliance** (single- or multi-instance), **ChannelFinder**, and the **Phoebus Alarm** server and
-logger. Archiver topology note: in a single-JVM appliance the MGMT and retrieval webapps share a
-port, so leave `ARCHIVER_RETRIEVAL_URL` empty; in a split or clustered deployment MGMT
+**Platforms.** Installation is only as portable as `p4p`, which ships the EPICS libraries as
+prebuilt wheels. Where a wheel exists, `pip install` just works; where it does not, pip falls back
+to building from source, which needs a compiler and is not something this project tests.
+
+| Platform | `p4p` wheel for Python 3.12+ | Install verified |
+|----------|------------------------------|------------------|
+| Linux x86_64 | yes | **yes**, in a clean container |
+| Windows x86_64 | yes | **yes**, in a clean venv |
+| macOS Apple Silicon | yes | not tested here |
+| macOS Intel (x86_64) | **no**, source build | not tested here |
+| Linux aarch64 | **no**, source build | not tested here |
+
+**Services.** Exercised against a local EPICS stack: an **e3** test IOC (PVAccess), an **EPICS
+Archiver Appliance** (single- or multi-instance), **ChannelFinder**, and the **Phoebus Alarm**
+server and logger. Archiver topology note: in a single-JVM appliance the MGMT and retrieval webapps
+share a port, so leave `ARCHIVER_RETRIEVAL_URL` empty; in a split or clustered deployment MGMT
 (`:17665`) and retrieval (`:17668`) are separate ports.
 
 ## Development
