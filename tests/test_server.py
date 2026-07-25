@@ -574,19 +574,27 @@ def _schema_permits_null(prop: dict[str, Any]) -> bool:
     )
 
 
-def _enum_members(prop: dict[str, Any]) -> frozenset[str] | None:
+def _enum_members(prop: dict[str, Any]) -> frozenset[object] | None:
     """The declared ``enum`` members of a property, or ``None`` if it constrains no membership.
 
     Reads the bare ``enum`` of a non-nullable field, or the enum-carrying branch of the
     ``anyOf``/``oneOf`` pydantic emits for an ``X | None`` field. Deliberately separate from
     :func:`_base_type`, which sees only the coarse JSON type and therefore cannot tell a
-    ``Literal[...]`` from the bare ``str`` it collapses to."""
+    ``Literal[...]`` from the bare ``str`` it collapses to.
+
+    S31: the members are returned as the RAW JSON values, not stringified. An earlier version
+    applied ``str()`` at both extraction sites, which made ``Literal[1, 2]`` and
+    ``Literal["1", "2"]`` indistinguishable — a second collapse one level below the one this
+    helper exists to undo. Residual collapse, named rather than hidden: ``frozenset`` dedupes by
+    ``==``/``hash``, so ``1`` and ``1.0``, and ``True`` and ``1``, stay indistinguishable here.
+    That pair is covered elsewhere — :func:`_base_type` separates them into "integer"/"number"/
+    "boolean", and the per-tool base-type tables pin that by set equality."""
     declared = prop.get("enum")
     if isinstance(declared, list):
-        return frozenset(str(member) for member in declared)
+        return frozenset(declared)
     for branch in prop.get("anyOf", []) + prop.get("oneOf", []):
         if isinstance(branch, dict) and isinstance(branch.get("enum"), list):
-            return frozenset(str(member) for member in branch["enum"])
+            return frozenset(branch["enum"])
     return None
 
 
@@ -2062,7 +2070,7 @@ async def test_every_typed_tool_conforms_to_its_schema_over_the_wire(
 # Every (tool, field) whose outputSchema constrains MEMBERSHIP, with the members it must advertise.
 # One row per enum that exists; the test below pins the mapping in BOTH directions, so this is not
 # a list someone has to remember to extend.
-_OUTPUT_ENUM_MEMBERS: dict[tuple[str, str], frozenset[str]] = {
+_OUTPUT_ENUM_MEMBERS: dict[tuple[str, str], frozenset[object]] = {
     ("get_pv_history", "status"): frozenset({"ok", "empty", "withheld"}),
 }
 
@@ -2099,7 +2107,7 @@ async def test_typed_output_schema_enums_declare_their_members() -> None:
     from epics_pv_mcp.server import mcp
 
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
-    discovered: dict[tuple[str, str], frozenset[str]] = {}
+    discovered: dict[tuple[str, str], frozenset[object]] = {}
     for name in sorted(_TYPED_OUTPUT_TOOLS):
         properties = (tools[name].outputSchema or {}).get("properties", {})
         assert properties, f"{name}: outputSchema carries no typed properties"
@@ -2115,9 +2123,37 @@ async def test_typed_output_schema_enums_declare_their_members() -> None:
     )
     for key, expected in _OUTPUT_ENUM_MEMBERS.items():
         assert discovered[key] == expected, (
-            f"{key[0]}.{key[1]}: advertised enum members {sorted(discovered[key])} != "
-            f"{sorted(expected)}"
+            f"{key[0]}.{key[1]}: advertised enum members {sorted(map(repr, discovered[key]))} != "
+            f"{sorted(map(repr, expected))}"
         )
+
+
+def test_enum_members_keeps_the_value_type() -> None:
+    """S31: :func:`_enum_members` must not collapse an enum's VALUE TYPE.
+
+    It used to apply ``str()`` at both of its extraction sites, so ``Literal[1, 2]`` and
+    ``Literal["1", "2"]`` produced the identical frozenset. That is the same blindness as the one
+    the helper exists to remove, one level further down: the base-type tables cannot tell a
+    Literal from a bare str, and a stringifying _enum_members cannot tell an int-enum from a
+    str-enum. Today it is inert — the single enum in the estate is all-string — but it would
+    silently accept a future widening from numbers to their spellings.
+
+    Why a HELPER unit test and not a source mutation, measured rather than assumed: a recursive
+    walk of all 21 typed schemas finds exactly one ``enum`` and no ``const``
+    (``get_pv_history.status``), and _ARCHIVER_HISTORY_BASE_TYPE already pins it as "string" by
+    set equality. Retyping it to ``Literal[1, 2]`` therefore reddens that table too, and the red
+    would not be attributable to this guard. There is no source mutation that isolates the VALUE
+    TYPE collapse, so the guard sits where the defect sits.
+
+    Red-proof: restore ``frozenset(str(member) for member in declared)`` at the bare-``enum`` site
+    and the first assertion fails; restore it at the ``anyOf`` site and the third fails. Both
+    sites need their own assertion — one covers the other's line not at all. mypy --strict stays
+    green under both mutations (frozenset is covariant, so ``frozenset[str]`` is a legal
+    ``frozenset[object]``), which is why a type checker cannot stand in for this test."""
+    assert _enum_members({"enum": [1, 2]}) == frozenset({1, 2})
+    assert _enum_members({"enum": [1, 2]}) != frozenset({"1", "2"})
+    assert _enum_members({"anyOf": [{"enum": [1, 2]}, {"type": "null"}]}) == frozenset({1, 2})
+    assert _enum_members({"type": "string"}) is None
 
 
 def _fake_json_response(payload: object) -> Mock:
