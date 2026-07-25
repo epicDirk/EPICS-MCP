@@ -28,9 +28,11 @@ typing step adds a new one of. Lane counts and the "four paths" family have not 
 recorded history of the file.
 
 Every measurement here reads a module constant or AST-scans a source file. None of them takes a
-length from ``mcp.list_tools()``: that returns 28 tools in the core-only lane and 32 in the full
-one, so a count taken there would pass locally and break the core-only CI — the trap
-``tests/test_server.py`` warns about at its own ``_TYPED_OUTPUT_TOOLS``.
+length from ``mcp.list_tools()``: that answers with FEWER tools in the core-only lane than in the
+full one, so a count taken there would pass locally and break the core-only CI — the trap
+``tests/test_server.py`` warns about at its own ``_TYPED_OUTPUT_TOOLS``. (This paragraph
+deliberately names no figure. A module that derives the lane counts for five other files must not
+hand-type them in its own docstring, where nothing would ever check them.)
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ import ast
 import inspect
 import re
 import textwrap
+from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import cache
@@ -52,9 +55,17 @@ from tests.prose_numbers import ProseBlock, ProseSite, iter_blocks, iter_sites, 
 _TESTS = Path(__file__).resolve().parent
 _SRC = _TESTS.parent / "src" / "epics_pv_mcp"
 
-# The files whose prose is watched. `checkers_olog.py` is named by the roadmap entry; the other
-# three carry sentences that DUPLICATE a number watched in test_server.py, and a duplicate that
-# nobody compares is how the canonical side drifts while the test side is corrected.
+# The files whose prose is watched. `checkers_olog.py` is named by the roadmap entry; the next
+# three carry sentences that DUPLICATE a number watched in test_server.py, and a duplicate nobody
+# compares is how the canonical side drifts while the test side is dutifully corrected.
+#
+# This guard's own two files are NOT watched, and the reason is measured rather than convenient.
+# Watching them surfaces 41 phrases, of which roughly four fifths are QUOTATIONS of the estate's
+# prose used to explain the design ("all 22 schemas", "TEN of the twelve"). Inventorying those
+# would add dozens of rows saying "this is an example, not a claim" — a blanket exemption wearing
+# a table's clothes. The genuine risk in them was a handful of sentences that hand-typed a number
+# this module itself derives; those sentences were rewritten to stop naming the number at all, so
+# there is nothing left to rot. Watching them properly is a separate, named piece of work.
 _WATCHED: tuple[tuple[str, Path], ...] = (
     ("tests/test_server.py", _TESTS / "test_server.py"),
     ("services/checkers_olog.py", _SRC / "services" / "checkers_olog.py"),
@@ -254,7 +265,7 @@ def _nullable_array_fields() -> frozenset[str]:
     core-only CI. Matched by field name, which is what ``_OUTPUT_ARRAY_ITEMS`` is keyed on.
 
     Two scoping mistakes were possible and both are closed. Reading only the two ``checkers``
-    modules missed three of the sixteen rows — they are declared in ``tools/discover.py``,
+    modules missed three of the array rows — they are declared in ``tools/discover.py``,
     ``tools/archiver.py`` and ``services/archiver_client.py`` — so the count was right only by the
     accident of those three being non-nullable. And accepting any annotated assignment let a
     function LOCAL stand in for a field (``warnings: list[str] = []`` already exists inside a
@@ -486,7 +497,7 @@ _CLAIMS: tuple[_Claim, ...] = (
     _claim(
         "shared element schemas", r"The (\w+) element schemas the estate", _distinct_element_schemas
     ),
-    # --- the return-path tables the two real-client conformance tests drive -----------------------
+    # --- the return-path tables the real-client conformance tests drive ---------------------------
     _claim(
         "discover_pvs return paths",
         r"discover_pvs emits on EVERY one of its (\w+) return paths",
@@ -782,8 +793,17 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
     ),
 }
 
-# The one hand-kept integer in this module. See test_inventory_size_is_pinned for why it exists.
-_INVENTORY_SIZE = 96
+# Per FILE, not one total. A single number lets an addition cancel a deletion out: measured, a real
+# size-naming sentence could be removed and every test stayed green because an unrelated one
+# appeared elsewhere. Per file narrows that to "added and removed in the SAME file in the same
+# commit". These are the only hand-kept numbers outside ``_FROZEN``'s keys.
+_INVENTORY_SIZES: dict[str, int] = {
+    "tests/test_server.py": 79,
+    "services/checkers_olog.py": 5,
+    "services/checkers.py": 5,
+    "tools/archiver.py": 5,
+    "server.py": 2,
+}
 
 
 @cache
@@ -878,12 +898,22 @@ def test_every_frozen_entry_still_exists() -> None:
 def test_inventory_size_is_pinned() -> None:
     """The one hand-kept number in this module, and it is deliberate.
 
-    It catches the case the partition cannot see: a phrase silently DELETED. Everything else here
-    is derived, so this single integer is the whole maintenance cost of the guard."""
-    sites = iter_sites(_watched_blocks())
-    assert len(sites) == _INVENTORY_SIZE, (
-        f"the watched prose now names {len(sites)} sizes, not {_INVENTORY_SIZE}. A phrase was "
-        "added or removed; update this pin together with _CLAIMS/_FROZEN."
+    Narrow on purpose, because the honest residual is narrow: a deleted DERIVED phrase is normally
+    caught by ``test_every_claim_still_matches_prose`` and a deleted INVENTORIED one by
+    ``test_every_frozen_entry_still_exists``. What escapes both is ONE occurrence of a phrase whose
+    claim or frozen row still matches somewhere else — and several claims do match twice."""
+    actual = Counter(site.block.path for site in iter_sites(_watched_blocks()))
+    drift = {
+        path: (actual.get(path, 0), _INVENTORY_SIZES.get(path))
+        for path in {*_INVENTORY_SIZES, *actual}
+        if actual.get(path, 0) != _INVENTORY_SIZES.get(path)
+    }
+    assert not drift, (
+        "the number of size-naming phrases changed (file: found vs pinned): "
+        + ", ".join(
+            f"{path} {found} vs {pinned}" for path, (found, pinned) in sorted(drift.items())
+        )
+        + ". A phrase was added or removed — update the pin together with _CLAIMS/_FROZEN."
     )
 
 
@@ -891,10 +921,10 @@ def test_no_claim_hard_codes_its_expectation() -> None:
     """No claim may spell out the answer it is supposed to derive — in EITHER half.
 
     Checking only the pattern is not enough, and that was settled by execution rather than by
-    argument: replacing one claim's derivation with ``lambda: 16`` left all six tests green. A
-    typed-in integer in the MEASURE is the same defect as one in the PATTERN, so the derivation's
-    source is inspected too, in digits and in words — this prose spells its numbers as words far
-    more often than as digits, so a digits-only check would guard the rarer half.
+    argument: replacing one claim's derivation with a typed-in answer left every test in this
+    module green. A typed-in integer in the MEASURE is the same defect as one in the PATTERN, so
+    the derivation's source is inspected too, in digits AND in words — this prose spells its
+    numbers as words far more often than as digits, so a digits-only check guards the rarer half.
 
     Doubles as the precondition for the rest of the module: a pattern that captures nothing would
     raise ``IndexError`` deep in the coverage scan, naming neither ``_CLAIMS`` nor the row.
