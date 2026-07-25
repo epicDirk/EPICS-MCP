@@ -9,6 +9,26 @@ carry breaking changes).
 
 ### Changed
 
+- **BREAKING: Tool-Argument-Namen vereinheitlicht (`refactor(tools)!` `9256977`).** Die epics-pv-Tools
+  trugen für „die PV, auf die sich das Tool bezieht" vier verschiedene Argument-Namen entlang der
+  Live/REST-Ebenengrenze. Vereinheitlicht: Ein-PV-Skalar → **`pv_name`** (`monitor_pv` `name`→,
+  `is_archived` / `get_pv_history` / `get_archive_info` / `is_alarm_configured` / `get_alarm_history`
+  `pv`→; `get_pv_value` / `set_pv_value` / `get_pv_info` / `diagnose_connection` trugen es schon);
+  PV-Liste → **`pv_names`** (`get_pvs` `names`→, `validate_pvs` `pvs`→). UNVERÄNDERT: `lookup_device_name.name`
+  (Gerätename, keine PV), die Glob-Parameter `pattern` / `name_pattern` / `query`, und die Ausgabe-Felder
+  (`result["pv_name"]` / `result["pvs"]`). `pv_name` spiegelt zudem das Ausgabe-Feld (Input/Output-Symmetrie).
+  MCP-Clients, die diese Tools per Argument-NAMEN aufrufen, müssen nachziehen (positionale Aufrufe unberührt);
+  verifiziert: neuer Name → OK, alter → sauberer `ToolError`.
+
+- **`[INTERNAL]`-Fehler auf den Klassennamen begrenzt, Volltext server-seitig geloggt
+  (`feat(errors)` `de26b92`).** Ein nicht-`EpicsError` am Tool-Rand ist ein unerwarteter Bug; sein roher
+  `str(e)` konnte ein internes Detail (Request-URL, Live-PV-Name, Pfad) an den Client tragen. Der Client
+  erhält jetzt nur `[INTERNAL] <Klasse>`; der volle Detail (Message + Traceback) wird SERVER-SEITIG auf
+  ERROR geloggt (Debug-Wert bleibt erhalten). Hält die Redaktions-Posture (CF/Alarm/Olog) auf dem
+  Fehlerpfad konsistent; `mask_error_details` deckt das NICHT ab (eine `ToolError`-Meldung erreicht den
+  Client immer) → die Begrenzung passiert in `tool_errors.py`, wo die Meldung gebaut wird. Rot-beweisbar
+  (neuer Test geht auf dem alten Code ROT). Der kuratierte `[<code>] message`-Pfad (EpicsError) ist unverändert.
+
 - **S29-Cluster: fünf weitere `dict[str, object]`-Ausgabeschemas typisiert + tools/list-Budget-Deckel
   auf 200000 angehoben (`feat(archiver)` `0346d1e` + `feat(checkers)` `04f3502`).** `list_archived_pvs`
   (`ArchivedPvsResult`, 5 Felder), `get_appliance_info` (`ApplianceInfoResult`, 10),
