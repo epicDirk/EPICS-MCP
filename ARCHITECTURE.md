@@ -19,7 +19,12 @@ graph TD
     B --> D
     D -. "injected as checker callables" .-> C
 
-    style C fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+    %% EPICS palette: #18334B is the single colour of the official EPICS logo, the greens and
+    %% grey-blues are taken from epics-controls.org (link, button and secondary-text colours).
+    classDef layer fill:#E7ECF1,stroke:#18334B,stroke-width:1px,color:#18334B
+    classDef core fill:#EDF3DF,stroke:#61A229,stroke-width:2px,color:#33500F
+    class A,B,D layer
+    class C core
 ```
 
 The dotted edge is the load-bearing one. The analysis cores never import a client; they receive
@@ -69,9 +74,28 @@ graph LR
     ioc --> xp
     olog -.-> logtools["11 logbook tools<br/>(no cross-plane join yet)"]
 
-    style olog stroke-dasharray: 5 5
-    style logtools stroke-dasharray: 5 5
+    %% Same EPICS palette. Navy marks the one authoritative plane, green the analyses that
+    %% consume the planes, grey the explanatory ones, dashed grey the join that does not exist.
+    classDef authority fill:#DCE4EC,stroke:#18334B,stroke-width:2px,color:#18334B
+    classDef plane fill:#F6F9FC,stroke:#808F98,stroke-width:1px,color:#3A3A3A
+    classDef analysis fill:#EDF3DF,stroke:#61A229,stroke-width:1.5px,color:#33500F
+    %% The "muted" signal lives in the dashed stroke, NOT in washed-out text: #808F98 on this fill
+    %% measures 3.15:1, below WCAG AA. #5C6B75 is the same blue-grey, darkened to 5.21:1.
+    classDef gap fill:#F6F9FC,stroke:#ACB8C1,stroke-width:1px,color:#5C6B75,stroke-dasharray: 5 5
+
+    class live authority
+    class cf,arch,alarm,naming,disp,ioc plane
+    class diag,cov,xp,fd,val analysis
+    class olog,logtools gap
+
+    style liveplane fill:#FFFFFF,stroke:#18334B,stroke-width:1px,color:#18334B
+    style rest fill:#FFFFFF,stroke:#808F98,stroke-width:1px,color:#3A3A3A
+    style files fill:#FFFFFF,stroke:#808F98,stroke-width:1px,color:#3A3A3A
 ```
+
+Colour carries meaning here, in the EPICS palette (`#18334B` is the single colour of the official
+EPICS logo): **navy** is the one authoritative plane, **green** the analyses that consume the
+planes, **grey** the explanatory planes, and **dashed grey** a join that does not exist yet.
 
 **The Logbook plane stands alone, on purpose and for now.** Its eleven tools read and write Olog
 directly; no analysis correlates a log entry with an archive sample or an alarm transition. It is
