@@ -511,13 +511,19 @@ async def test_wire_validates_output_schema_while_in_process_does_not() -> None:
     moves or drops the check would leave every wire conformance test GREEN AND EMPTY. This test is
     the canary; without it, nothing in the suite would notice.
 
-    Both halves are load-bearing. Half 1 alone would still pass if the in-process path started
-    validating too — and then an in-process conformance test would be sufficient after all, which
-    is the opposite of what the suite assumes. Half 2 pins that it is not.
+    Both halves matter, but NOT as independent seams — measured, and the earlier wording here was
+    wrong about it. fastmcp's in-memory transport routes the wire call THROUGH
+    ``FastMCP.call_tool``, so the wire path strictly contains the in-process one: if the in-process
+    path ever started validating, half 1 would go red too (with the in-process validator's wording).
+    What half 2 actually pins is the shortcut's CURRENT behaviour, which is what makes an
+    in-process-only conformance test insufficient — the premise the rest of the suite rests on.
 
-    The ASSERTION is the exception TYPE. The message substring is a soft extra on top: an
-    SDK-internal string is precisely the kind of drift this guard exists to survive, so it must not
-    be the thing the guard hangs on.
+    Type and message are BOTH load-bearing, which is likewise measured rather than assumed: when
+    the probe tool fails to register at all, the call still raises ``ToolError`` — the type
+    assertion passes, and only the ``"validation"`` substring keeps the test from going vacuously
+    green. So the substring is not decoration. It is still the more brittle half (an SDK-internal
+    string is exactly the drift this guard exists to survive), which is why it carries its own
+    failure message saying so rather than being asserted silently.
 
     Red-proof: return a real ``bool`` from the probe tool and half 1 goes red — which shows the
     ``pytest.raises`` is not passing for some unrelated reason."""
@@ -1958,10 +1964,16 @@ async def test_every_typed_tool_conforms_to_its_schema_over_the_wire(
     each carry a hand-written nullability contract for ONE tool and are the right home for it. But
     they share two blind spots that no amount of care inside them can close:
 
-    * They cannot notice a tool that has NO wire coverage. A twelfth typed tool ships, nobody adds a
-      test, and every existing test stays green — the failure mode of every hand-maintained list.
-      The completeness assertions below turn exactly that into a red test, and that is the ONE
-      genuinely new guarantee here.
+    * They cannot notice a tool that has NO wire coverage. The completeness assertions below close
+      that, but ONLY as the second link of a chain, and the distinction is measured, not assumed:
+      a newly typed tool is DETECTED by the pre-existing
+      test_output_schema_typed_only_for_typed_tools, which compares the server's REAL typed set
+      against ``_TYPED_OUTPUT_TOOLS``. The assertions here compare two TABLES against that same
+      constant, so a tool nobody has added to it is invisible to them (measured: registering a
+      22nd typed tool leaves this test green and turns the relational one red). What they DO
+      guarantee is the step after: once the first red forces the constant to be updated, wire
+      coverage can no longer be forgotten — both tables must equal it. Neither link alone suffices;
+      claiming this one detects new tools would be false.
     * TEN of the eleven drive ``FastMCP.call_tool``, which hands a return back UNVALIDATED (pinned
       by test_wire_validates_output_schema_while_in_process_does_not). Their runtime half therefore
       only ever checked the ONE thing it asserts explicitly — that an emitted null is permitted —
@@ -2201,9 +2213,10 @@ async def test_search_logbook_payload_path_is_guarded_below_the_client(
         with pytest.raises(ToolError) as excinfo:
             await client.call_tool("search_logbook", {})
     assert "hitCount" in str(excinfo.value), (
-        "a boolean hitCount no longer meets the client-edge guard's own diagnosis — if this now "
-        f"reads as a schema violation, the guard was removed and only the wire caught it: "
-        f"{excinfo.value!r}"
+        "a boolean hitCount no longer produces the client-edge guard's own diagnosis. Two very "
+        "different causes look identical here, so check which one it is: an 'Output validation "
+        "error' means the GUARD IS GONE and only the schema caught the value; any other wording "
+        f"means the guard still fired and merely says it differently. Got: {excinfo.value!r}"
     )
 
 
@@ -2229,6 +2242,17 @@ async def test_channel_vocabulary_payload_path_is_guarded_below_the_client(
     client-level test structurally cannot reach: that the guard's refusal survives the tool layer
     and arrives at a REAL caller as a diagnosis rather than being remapped or swallowed, and that
     the ``items`` constraint is exercised at all.
+
+    Two scope limits, both measured with a spy rather than reasoned about:
+
+    * Half 2's bad payload is rejected inside ``list_properties``, which runs FIRST — ``list_tags``
+      is never reached on that call. The guard being pinned is ``_named_list``, which both share;
+      it is not a statement about the tags endpoint specifically.
+    * One faked response serves BOTH endpoints, so ``structured["tags"] == ["vacuum"]`` pins the
+      result SLOT, not the URL behind it. Measured: making ``list_tags`` read the properties URL
+      leaves the whole suite green. That gap is real and belongs to the ChannelFinder client's own
+      tests, not here — it is on the roadmap rather than papered over with a stronger-sounding
+      claim.
 
     Red-proof: drop the ``isinstance(item.get("name"), str)`` half of ``_named_list``'s item check
     in services/channelfinder_client.py. Half 2 goes red and the failure turns into the wire's

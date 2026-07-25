@@ -18,9 +18,12 @@ carry breaking changes).
     `fastmcp`/`mcp` (und `jsonschema` ist hier nicht einmal deklariert, es kommt rein transitiv)
     jeden Draht-Test still **grün und leer** zurücklassen.
   - **Vollständigkeit** (`d2bc022`): ein generischer Test fährt ALLE getypten Tools über einen
-    echten Client und pinnt seine Tabelle relational gegen `_TYPED_OUTPUT_TOOLS`. Ein künftig
-    getyptes Tool ohne Draht-Zeile wird damit rot — was elf handgepflegte Einzeltests prinzipiell
-    nicht können. **Das ist die einzige wirklich neue Zusage.** Die drei per-Tool-Behauptungen des
+    echten Client und pinnt seine Tabelle relational gegen `_TYPED_OUTPUT_TOOLS`. ⚠️ **Präzise, weil
+    gemessen:** ein neu getyptes Tool wird **nicht** von diesem Test erkannt, sondern vom
+    **vorbestehenden** `test_output_schema_typed_only_for_typed_tools`, das gegen die *reale* getypte
+    Menge des Servers vergleicht. Der neue Test schließt den **zweiten** Schritt: sobald jenes erste
+    Rot die Konstante nachziehen erzwingt, kann die Draht-Abdeckung nicht mehr vergessen werden.
+    Eine Kette aus zwei Gliedern, kein Detektor. Die drei per-Tool-Behauptungen des
     Tests (Nicht-Leerlauf-Boden · kein unbeworbenes Feld · Präsenz jedes als immer-da deklarierten
     Feldes) sind **nicht neu erfunden**, sondern die Prüfungen des `discover_pvs`-Conformance-Tests,
     von **einem** Tool auf **21** getragen; der Nicht-Leerlauf-Boden existierte ohnehin schon in
