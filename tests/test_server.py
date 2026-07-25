@@ -1094,6 +1094,279 @@ async def test_is_archived_structured_output_conforms_to_its_schema(
         )
 
 
+# The JSON base type every list_archived_pvs (ArchivedPvsResult) property must advertise. An
+# INDEPENDENT source of truth (not reflected from the TypedDict) so a base-type widening is caught.
+# No object|None field here — all five are concrete scalars/containers; ``capped``/``note`` are
+# ``X | None`` but their non-null branch still carries a type (boolean/string).
+_LIST_ARCHIVED_PVS_BASE_TYPE: dict[str, str | None] = {
+    "enabled": "boolean",
+    "pvs": "array",
+    "total": "integer",
+    "capped": "boolean",
+    "note": "string",
+}
+
+# The keys list_archived_pvs emits on EVERY return path and never as a spurious null.
+_LIST_ARCHIVED_PVS_ALWAYS_PRESENT = frozenset({"enabled", "pvs", "total"})
+
+
+@pytest.mark.asyncio
+async def test_list_archived_pvs_exposes_typed_output_schema() -> None:
+    """S29: list_archived_pvs advertises a STRUCTURED outputSchema — its ArchivedPvsResult
+    TypedDict's typed ``properties``, not the accept-all schema a plain ``dict[str, object]`` return
+    yields. Red before the retype (no properties). Mirrors the is_archived exposes test:
+    (1) properties are non-empty; (2) they are EXACTLY the 5 mapped fields — completeness both ways
+    (mypy --strict guards an undeclared key in a literal; this guards a dropped one); (3) each field
+    carries the expected JSON base type via :func:`_base_type`."""
+    from epics_pv_mcp.server import mcp
+
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    schema = tools["list_archived_pvs"].outputSchema or {}
+    properties = schema.get("properties", {})
+    assert properties, "list_archived_pvs: outputSchema carries no typed properties"
+    assert set(properties) == set(_LIST_ARCHIVED_PVS_BASE_TYPE), (
+        f"list_archived_pvs: advertised properties {sorted(properties)} != "
+        f"expected {sorted(_LIST_ARCHIVED_PVS_BASE_TYPE)}"
+    )
+    for field, prop in properties.items():
+        actual = _base_type(prop)
+        assert actual == _LIST_ARCHIVED_PVS_BASE_TYPE[field], (
+            f"list_archived_pvs.{field}: schema base type {actual!r} != "
+            f"{_LIST_ARCHIVED_PVS_BASE_TYPE[field]!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_list_archived_pvs_structured_output_conforms_to_its_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S29 conformance: the EMITTED structuredContent must conform to its own outputSchema. Part A
+    (runtime): drive list_archived_pvs on the disabled path via ``mcp.call_tool`` and assert every
+    None-valued key permits null. Part B (static): every advertised property outside the
+    always-present envelope must permit null (the S29 convention for a sometimes-absent field)."""
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import mcp
+    from epics_pv_mcp.tools import archiver
+
+    # list_archived_pvs is tool-only: it resolves get_config in tools/archiver's OWN namespace, so
+    # patch archiver.get_config — NOT checkers.get_config (that seam is for the shared query_*).
+    monkeypatch.setattr(archiver, "get_config", lambda: EpicsConfig(archiver_url=""))
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    properties = (tools["list_archived_pvs"].outputSchema or {}).get("properties", {})
+
+    # Part A — the emitted structuredContent conforms on the disabled path.
+    structured = cast(
+        dict[str, Any],
+        (await mcp.call_tool("list_archived_pvs", {})).structured_content,
+    )
+    for key, value in structured.items():
+        if value is None:
+            assert _schema_permits_null(properties[key]), (
+                f"list_archived_pvs.{key}: emitted null but its schema property forbids null "
+                f"({properties[key]})"
+            )
+
+    # Part B — every sometimes-absent advertised property permits null.
+    for prop_name, prop_schema in properties.items():
+        if prop_name in _LIST_ARCHIVED_PVS_ALWAYS_PRESENT:
+            continue
+        assert _schema_permits_null(prop_schema), (
+            f"list_archived_pvs.{prop_name}: sometimes-absent property must permit null in its "
+            f"outputSchema (the S29 convention), got {prop_schema}"
+        )
+
+
+# The JSON base type every get_appliance_info (ApplianceInfoResult) property must advertise. An
+# INDEPENDENT source of truth (not reflected from the TypedDict). The 8 object|None topology fields
+# render as ``anyOf[{}, {type: null}]`` (non-null branch has no ``type``) so _base_type returns None
+# for them; a widening to a concrete scalar would flip that and trip the assertion.
+_GET_APPLIANCE_INFO_BASE_TYPE: dict[str, str | None] = {
+    "enabled": "boolean",
+    "note": "string",
+    "identity": None,
+    "mgmt_url": None,
+    "engine_url": None,
+    "retrieval_url": None,
+    "etl_url": None,
+    "data_retrieval_url": None,
+    "cluster_inet_port": None,
+    "version": None,
+}
+
+# The only key get_appliance_info emits on EVERY return path and never as a spurious null.
+_GET_APPLIANCE_INFO_ALWAYS_PRESENT = frozenset({"enabled"})
+
+
+@pytest.mark.asyncio
+async def test_get_appliance_info_exposes_typed_output_schema() -> None:
+    """S29: get_appliance_info advertises a STRUCTURED outputSchema (ApplianceInfoResult), not the
+    accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype. Checks
+    properties non-empty, EXACTLY the 10 mapped fields (completeness both ways), and each field's
+    :func:`_base_type` — the 8 object|None topology fields advertise NO base type (None)."""
+    from epics_pv_mcp.server import mcp
+
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    schema = tools["get_appliance_info"].outputSchema or {}
+    properties = schema.get("properties", {})
+    assert properties, "get_appliance_info: outputSchema carries no typed properties"
+    assert set(properties) == set(_GET_APPLIANCE_INFO_BASE_TYPE), (
+        f"get_appliance_info: advertised properties {sorted(properties)} != "
+        f"expected {sorted(_GET_APPLIANCE_INFO_BASE_TYPE)}"
+    )
+    for field, prop in properties.items():
+        actual = _base_type(prop)
+        assert actual == _GET_APPLIANCE_INFO_BASE_TYPE[field], (
+            f"get_appliance_info.{field}: schema base type {actual!r} != "
+            f"{_GET_APPLIANCE_INFO_BASE_TYPE[field]!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_appliance_info_structured_output_conforms_to_its_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S29 conformance: the EMITTED structuredContent must conform to its own outputSchema. Part A
+    (runtime): drive get_appliance_info on the disabled path through ``mcp.call_tool`` and assert
+    every None-valued key permits null. Part B (static): every advertised property outside the
+    always-present envelope must permit null (the S29 convention for a sometimes-absent field)."""
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import mcp
+    from epics_pv_mcp.tools import archiver
+
+    # tool-only: resolves get_config in tools/archiver's OWN namespace — patch archiver.get_config.
+    monkeypatch.setattr(archiver, "get_config", lambda: EpicsConfig(archiver_url=""))
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    properties = (tools["get_appliance_info"].outputSchema or {}).get("properties", {})
+
+    # Part A — the emitted structuredContent conforms on the disabled path.
+    structured = cast(
+        dict[str, Any],
+        (await mcp.call_tool("get_appliance_info", {})).structured_content,
+    )
+    for key, value in structured.items():
+        if value is None:
+            assert _schema_permits_null(properties[key]), (
+                f"get_appliance_info.{key}: emitted null but its schema property forbids null "
+                f"({properties[key]})"
+            )
+
+    # Part B — every sometimes-absent advertised property permits null.
+    for prop_name, prop_schema in properties.items():
+        if prop_name in _GET_APPLIANCE_INFO_ALWAYS_PRESENT:
+            continue
+        assert _schema_permits_null(prop_schema), (
+            f"get_appliance_info.{prop_name}: sometimes-absent property must permit null in its "
+            f"outputSchema (the S29 convention), got {prop_schema}"
+        )
+
+
+# The JSON base type every get_archive_info (ArchiveInfoResult) property must advertise. An
+# INDEPENDENT source of truth (not reflected from the TypedDict). ``found`` is tri-state bool | None
+# (non-null branch boolean). The 26 getPVTypeInfo projection fields are object|None → None here (a
+# widening to a concrete scalar, e.g. one wrongly typed str, would flip _base_type and trip this).
+_GET_ARCHIVE_INFO_BASE_TYPE: dict[str, str | None] = {
+    "enabled": "boolean",
+    "pv": "string",
+    "found": "boolean",
+    "note": "string",
+    "dbr_type": None,
+    "sampling_method": None,
+    "sampling_period": None,
+    "event_rate": None,
+    "storage_rate": None,
+    "bytes_per_event": None,
+    "element_count": None,
+    "archive_fields": None,
+    "data_stores": None,
+    "host_name": None,
+    "creation_time": None,
+    "appliance": None,
+    "paused": None,
+    "upper_alarm_limit": None,
+    "upper_warning_limit": None,
+    "lower_warning_limit": None,
+    "lower_alarm_limit": None,
+    "upper_display_limit": None,
+    "lower_display_limit": None,
+    "upper_ctrl_limit": None,
+    "lower_ctrl_limit": None,
+    "precision": None,
+    "units": None,
+    "controlling_pv": None,
+    "policy_name": None,
+    "modification_time": None,
+}
+
+# The keys get_archive_info emits on EVERY path and never as a spurious null — enabled and pv.
+# found is present on every path but None on the disabled path (tri-state), so it too permits null.
+_GET_ARCHIVE_INFO_ALWAYS_PRESENT = frozenset({"enabled", "pv"})
+
+
+@pytest.mark.asyncio
+async def test_get_archive_info_exposes_typed_output_schema() -> None:
+    """S29: get_archive_info advertises a STRUCTURED outputSchema (ArchiveInfoResult), not the
+    accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype. Checks
+    properties non-empty, EXACTLY the 30 mapped fields (completeness both ways), and each field's
+    :func:`_base_type` — the 26 object|None type-info fields advertise NO base type (None)."""
+    from epics_pv_mcp.server import mcp
+
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    schema = tools["get_archive_info"].outputSchema or {}
+    properties = schema.get("properties", {})
+    assert properties, "get_archive_info: outputSchema carries no typed properties"
+    assert set(properties) == set(_GET_ARCHIVE_INFO_BASE_TYPE), (
+        f"get_archive_info: advertised properties {sorted(properties)} != "
+        f"expected {sorted(_GET_ARCHIVE_INFO_BASE_TYPE)}"
+    )
+    for field, prop in properties.items():
+        actual = _base_type(prop)
+        assert actual == _GET_ARCHIVE_INFO_BASE_TYPE[field], (
+            f"get_archive_info.{field}: schema base type {actual!r} != "
+            f"{_GET_ARCHIVE_INFO_BASE_TYPE[field]!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_archive_info_structured_output_conforms_to_its_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S29 conformance: the EMITTED structuredContent must be representable by its own outputSchema.
+    The disabled path sets ``found`` EXPLICITLY to None (emitted as null), so a non-nullable
+    ``found: bool`` would make the schema misrepresent it. Part A (runtime): drive get_archive_info
+    on the disabled path and assert every None-valued key (found!) permits null. Part B (static):
+    every advertised property outside the always-present envelope must permit null. (Measured:
+    standalone FastMCP does not reject the mismatch itself, so this test is the guard.)"""
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import mcp
+    from epics_pv_mcp.tools import archiver
+
+    # tool-only: resolves get_config in tools/archiver's OWN namespace — patch archiver.get_config.
+    monkeypatch.setattr(archiver, "get_config", lambda: EpicsConfig(archiver_url=""))
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    properties = (tools["get_archive_info"].outputSchema or {}).get("properties", {})
+
+    # Part A — emitted structuredContent conforms on the disabled path (found is emitted as null).
+    structured = cast(
+        dict[str, Any],
+        (await mcp.call_tool("get_archive_info", {"pv": "SIM:PS-01:Cur-RB"})).structured_content,
+    )
+    for key, value in structured.items():
+        if value is None:
+            assert _schema_permits_null(properties[key]), (
+                f"get_archive_info.{key}: emitted null but its schema property forbids null "
+                f"({properties[key]})"
+            )
+
+    # Part B — every sometimes-absent advertised property permits null.
+    for prop_name, prop_schema in properties.items():
+        if prop_name in _GET_ARCHIVE_INFO_ALWAYS_PRESENT:
+            continue
+        assert _schema_permits_null(prop_schema), (
+            f"get_archive_info.{prop_name}: sometimes-absent property must permit null in its "
+            f"outputSchema (FastMCP emits an explicit None as null), got {prop_schema}"
+        )
+
+
 def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1162,6 +1435,9 @@ _TYPED_OUTPUT_TOOLS = frozenset(
         "is_alarm_configured",
         "lookup_device_name",
         "is_archived",
+        "list_archived_pvs",
+        "get_appliance_info",
+        "get_archive_info",
     }
 )
 
@@ -1395,43 +1671,49 @@ async def test_stripped_tool_still_returns_structured_content(
 ) -> None:
     """MA-Q1 A2 is ADVERTISE-ONLY: dropping the wire outputSchema leaves the RUNTIME
     ``fn_metadata.output_schema`` intact, so a stripped tool still returns structuredContent at call
-    time. Drive ``get_archive_info`` (a stripped tool — its dict[str, object] return is pruned to
-    None) on its deterministic disabled path (no network) and assert it still yields a structured
-    dict. (NOT is_archived — that became a TYPED tool in S29, so its schema is no longer stripped
-    and it would no longer exercise this path; get_archive_info stays untyped.)"""
+    time. Drive ``find_channels`` (a stripped tool — its dict[str, object] return yields an
+    accept-all schema that A2 prunes to None) on its deterministic disabled path (no network) and
+    assert it still yields a structured dict. (NOT get_archive_info — it became a TYPED tool in the
+    S29 cluster, so its schema is no longer stripped; find_channels stays untyped. When it is typed
+    later, re-point this to the next still-untyped tool with a no-network path.)"""
     from epics_pv_mcp.config import EpicsConfig
     from epics_pv_mcp.server import mcp
-    from epics_pv_mcp.tools import archiver
+    from epics_pv_mcp.services import checkers
 
-    # get_archive_info lives in tools/archiver.py (like get_pv_history), so its get_config resolves
-    # in THAT module's namespace — patch archiver.get_config, not checkers.get_config.
-    monkeypatch.setattr(archiver, "get_config", lambda: EpicsConfig(archiver_url=""))
+    # find_channels -> _find_channels -> query_channels, which resolves get_config in the checkers
+    # module's OWN namespace — patch checkers.get_config (NOT tools.channelfinder, a pass-through).
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(channelfinder_url=""))
     structured = cast(
         dict[str, Any],
-        (await mcp.call_tool("get_archive_info", {"pv": "SIM:PS-01:Cur-RB"})).structured_content,
+        (await mcp.call_tool("find_channels", {"name_pattern": "SIM:*"})).structured_content,
     )
     # Reached the disabled path AND produced structuredContent despite the dropped wire schema.
     assert structured.get("enabled") is False
 
 
-# tools/list size-gate ceiling (chars of the compact ListToolsResult wire payload). Standalone
-# FastMCP emits lean schemas natively (no pydantic title/null noise) and the dict[str, object]
-# tools carry output_schema=None, so the current core-lane payload is 59683. The 70_000 ceiling
-# keeps headroom for new tools while still tripping on a large regression. Raising it is a
-# conscious, reviewed one-line change with a rationale — never a silent bump.
-_TOOLS_LIST_WIRE_CEILING = 70_000
+# tools/list size-gate ceiling (chars of the compact ListToolsResult wire payload). Until
+# 2026-07-25 this was a TIGHT budget guard at 70_000 that forced S29 output-schema typing to land
+# one tool per session. It was raised to 200_000: typed output-schema bytes make tool RESULTS
+# machine-readable (the core value of S29) and cost only ~1% more context per agent turn, so the
+# tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
+# longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
+# RELATIONAL (a ``<=`` check) so both lanes pass. After the 2026-07-25 S29 cluster the core lane
+# is ~62_666 and the full lane ~70_959. Raising it again is a conscious, CHANGELOG-documented
+# one-line change, never a silent bump.
+_TOOLS_LIST_WIRE_CEILING = 200_000
 
 
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas keep it at 59683 (core lane), but nothing else guards the
-    character budget — a new tool, an SDK change that inflates the wire, or a lost
-    output_schema=None could grow it back UNNOTICED with a green suite. This is that guard.
+    FastMCP's native-lean schemas plus the 2026-07-25 S29 typing keep the core lane ~62_666 and
+    the full lane ~70_959 — a new tool, an SDK change that inflates the wire, or a lost
+    output_schema=None could still grow it UNNOTICED with a green suite. This is that guard, now a
+    soft catastrophe-ceiling at 200_000 (see the constant's comment for the raise rationale).
 
     RELATIONAL (a ``<=`` ceiling, not an exact count) so both the core-only lane (28 tools) and the
     full lane (32) pass — a count-pinned assert would break core-only CI. Provably red: lower the
-    ceiling below the current 59683."""
+    ceiling below the current full-lane payload."""
     from mcp.types import ListToolsResult
 
     from epics_pv_mcp.server import mcp

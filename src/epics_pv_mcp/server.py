@@ -42,6 +42,9 @@ from epics_pv_mcp.services.diagnose import (
 from epics_pv_mcp.tool_errors import translate_epics_errors
 from epics_pv_mcp.tools.alarm import _get_alarm_history, _is_alarm_configured
 from epics_pv_mcp.tools.archiver import (
+    ApplianceInfoResult,
+    ArchivedPvsResult,
+    ArchiveInfoResult,
     ArchiverHistoryResult,
     _get_appliance_info,
     _get_archive_info,
@@ -175,7 +178,7 @@ mcp = FastMCP(
     # Text erreicht den Client OHNEHIN unter allen Einstellungen (ToolError ist die absichtliche
     # Client-Grenze — gemessen None/False/True). Explizit False = das ungemaskte SDK-1.0-Verhalten
     # (verhaltenserhaltend), hier deckungsgleich mit dem standalone-Default None. Härtungs-Option
-    # (Dirk-Entscheidung, bewusst NICHT eigenmächtig geändert): True würde interne Exception-Strings
+    # (bewusste Betreiber-Wahl, NICHT eigenmächtig geändert): True würde interne Exception-Strings
     # maskieren — konsistenter mit der Redaktions-Posture, dafür ohne Detail bei einem Bug.
     mask_error_details=False,
 )
@@ -653,7 +656,6 @@ async def get_pv_history(
 
 
 @mcp.tool(
-    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
@@ -665,7 +667,7 @@ async def get_pv_history(
 async def get_archive_info(
     pv: Annotated[str, Field(description="EPICS PV name")],
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> ArchiveInfoResult:
     """Report HOW a PV is archived — its archive configuration (Archiver MGMT getPVTypeInfo).
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.
@@ -689,7 +691,6 @@ async def get_archive_info(
 
 
 @mcp.tool(
-    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
@@ -700,7 +701,7 @@ async def get_archive_info(
 @translate_epics_errors
 async def get_appliance_info(
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> ApplianceInfoResult:
     """Report the Archiver Appliance's own topology (Archiver MGMT getApplianceInfo).
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.
@@ -718,7 +719,6 @@ async def get_appliance_info(
 
 
 @mcp.tool(
-    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
@@ -753,7 +753,7 @@ async def list_archived_pvs(
         ),
     ] = 5000,
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
-) -> dict[str, object]:
+) -> ArchivedPvsResult:
     """List the PV names the Archiver Appliance archives (Archiver MGMT getAllPVs).
 
     Read-only. Disabled by default — returns enabled=false unless EPICS_MCP_ARCHIVER_URL is set.
