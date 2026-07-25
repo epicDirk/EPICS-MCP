@@ -1530,6 +1530,102 @@ async def test_get_alarm_history_structured_output_conforms_to_its_schema(
         )
 
 
+# The JSON base type every discover_pvs (DiscoverPvsResult) property must advertise. An INDEPENDENT
+# source of truth (hand-written, NOT reflected from the TypedDict), so a base-type WIDENING is
+# caught even where nullability hides it from a bare-``type`` check. ``pvs`` is an array of
+# heterogeneous entry dicts (concrete hit / miss / registry match), hence "array" over opaque items.
+_DISCOVER_PVS_BASE_TYPE: dict[str, str | None] = {
+    "pattern": "string",
+    "pvs": "array",
+    "total": "integer",
+    "capped": "boolean",
+    "source": "string",
+    "note": "string",
+}
+
+# The keys discover_pvs emits on EVERY one of its four return paths (concrete hit, concrete miss,
+# wildcard with ChannelFinder disabled, wildcard enabled) and never as a spurious null.
+_DISCOVER_PVS_ALWAYS_PRESENT = frozenset({"pattern", "pvs", "total"})
+
+
+@pytest.mark.asyncio
+async def test_discover_pvs_exposes_typed_output_schema() -> None:
+    """S29: discover_pvs advertises a STRUCTURED outputSchema (DiscoverPvsResult), not the
+    accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype -- and red
+    while the tool still carries the explicit ``@mcp.tool(output_schema=None)`` opt-out, which
+    OVERRIDES the annotation-derived schema (that kwarg, not any post-pass, is what keeps the
+    untyped tools schema-less). Checks properties non-empty, EXACTLY the 6 mapped fields
+    (completeness both ways), and each field's :func:`_base_type`."""
+    from epics_pv_mcp.server import mcp
+
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    schema = tools["discover_pvs"].outputSchema or {}
+    properties = schema.get("properties", {})
+    assert properties, "discover_pvs: outputSchema carries no typed properties"
+    assert set(properties) == set(_DISCOVER_PVS_BASE_TYPE), (
+        f"discover_pvs: advertised properties {sorted(properties)} != "
+        f"expected {sorted(_DISCOVER_PVS_BASE_TYPE)}"
+    )
+    for field, prop in properties.items():
+        actual = _base_type(prop)
+        assert actual == _DISCOVER_PVS_BASE_TYPE[field], (
+            f"discover_pvs.{field}: schema base type {actual!r} != "
+            f"{_DISCOVER_PVS_BASE_TYPE[field]!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_discover_pvs_structured_output_conforms_to_its_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S29 conformance: the EMITTED structuredContent must conform to its own outputSchema.
+
+    Part A (runtime) drives the wildcard branch with ChannelFinder unconfigured -- a deterministic,
+    network-free path -- through a REAL ``fastmcp.Client`` rather than the in-process
+    ``FastMCP.call_tool`` the sibling conformance tests use. That distinction is the whole point and
+    was measured: in-process, a return is handed back UNVALIDATED, so a payload violating its own
+    advertised schema sails through; over the wire, the MCP SDK's low-level handler validates the
+    structuredContent against ``outputSchema`` and turns a mismatch into an ``Output validation
+    error``. Going through the client therefore asserts what a real caller actually experiences, and
+    it does so with the SDK's own check instead of re-implementing one against an undeclared,
+    transitive jsonschema dependency. On top of that, every None-valued key must permit null.
+
+    Part B (static) enforces the S29 convention that every sometimes-absent property permits null.
+    It carries the guarantee whenever Part A has no null to look at, so it gets a non-empty floor:
+    with an empty ``properties`` the loop would pass vacuously -- which is precisely the state the
+    ``output_schema=None`` opt-out produces."""
+    from fastmcp import Client
+
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import mcp
+    from epics_pv_mcp.services import checkers
+
+    # discover_pvs -> _discover_by_channelfinder -> query_channels, which resolves get_config in
+    # the checkers module's OWN namespace -- patch it there (NOT tools.discover).
+    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(channelfinder_url=""))
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    properties = (tools["discover_pvs"].outputSchema or {}).get("properties", {})
+
+    async with Client(mcp) as client:
+        # Raises ToolError("Output validation error: ...") if the emitted payload does not conform.
+        result = await client.call_tool("discover_pvs", {"pattern": "SIM:PS-*"})
+    structured = cast(dict[str, Any], result.structured_content)
+    for key, value in structured.items():
+        if value is None:
+            assert _schema_permits_null(properties[key]), (
+                f"discover_pvs.{key}: emitted null but its schema forbids null ({properties[key]})"
+            )
+
+    assert properties, "discover_pvs: outputSchema carries no typed properties"
+    for prop_name, prop_schema in properties.items():
+        if prop_name in _DISCOVER_PVS_ALWAYS_PRESENT:
+            continue
+        assert _schema_permits_null(prop_schema), (
+            f"discover_pvs.{prop_name}: sometimes-absent property must permit null "
+            f"(the S29 convention), got {prop_schema}"
+        )
+
+
 def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1603,6 +1699,7 @@ _TYPED_OUTPUT_TOOLS = frozenset(
         "get_archive_info",
         "list_channel_vocabulary",
         "get_alarm_history",
+        "discover_pvs",
     }
 )
 
@@ -1862,19 +1959,21 @@ async def test_stripped_tool_still_returns_structured_content(
 # machine-readable (the core value of S29) and cost only ~1% more context per agent turn, so the
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
-# RELATIONAL (a ``<=`` check) so both lanes pass. After the 2026-07-25 S29 cluster the core lane
-# is 62_561 and the full lane 70_854. Raising it again is a conscious, CHANGELOG-documented
-# one-line change, never a silent bump.
+# RELATIONAL (a ``<=`` check) so both lanes pass. Measured after typing discover_pvs (S29): the
+# core lane is 62_967 and the full lane 71_265. Re-MEASURE these two after every schema change --
+# they are prose, nothing asserts them, and an estimate has already been wrong here by +105/+686.
+# Raising the ceiling is a conscious, CHANGELOG-documented one-line change, never a silent bump.
 _TOOLS_LIST_WIRE_CEILING = 200_000
 
 
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the 2026-07-25 S29 typing keep the core lane 62_561 and
-    the full lane 70_854 — a new tool, an SDK change that inflates the wire, or a lost
-    output_schema=None could still grow it UNNOTICED with a green suite. This is that guard, now a
-    soft catastrophe-ceiling at 200_000 (see the constant's comment for the raise rationale).
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 62_967 and the full lane
+    71_265 — a new tool, an SDK change that inflates the wire, or a DROPPED ``output_schema=None``
+    opt-out (which turns an accept-all schema into a full typed one) could still grow it UNNOTICED
+    with a green suite. This is that guard, now a soft catastrophe-ceiling at 200_000 (see the
+    constant's comment for the raise rationale).
 
     RELATIONAL (a ``<=`` ceiling, not an exact count) so both the core-only lane (28 tools) and the
     full lane (32) pass — a count-pinned assert would break core-only CI. Provably red: lower the

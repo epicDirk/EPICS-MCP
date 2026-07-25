@@ -56,7 +56,7 @@ from epics_pv_mcp.tools.archiver import (
 )
 from epics_pv_mcp.tools.channelfinder import _find_channels, _list_channel_vocabulary
 from epics_pv_mcp.tools.diagnose_connection import _diagnose_connection
-from epics_pv_mcp.tools.discover import _discover_pvs
+from epics_pv_mcp.tools.discover import DiscoverPvsResult, _discover_pvs
 from epics_pv_mcp.tools.info import _get_pv_info
 from epics_pv_mcp.tools.monitor import _monitor_pv
 from epics_pv_mcp.tools.naming import _lookup_device_name
@@ -365,7 +365,6 @@ async def monitor_pv(
 
 
 @mcp.tool(
-    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
@@ -389,7 +388,7 @@ async def discover_pvs(
         float | None,
         Field(description="Timeout in seconds (default: EPICS_MCP_DEFAULT_TIMEOUT)"),
     ] = None,
-) -> dict[str, object]:
+) -> DiscoverPvsResult:
     """Discover PVs by name.
 
     A CONCRETE name is connected via p4p (status found/not_found/timeout/error, plus the value on a

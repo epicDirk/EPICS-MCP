@@ -1,5 +1,7 @@
 """Tool functions for discovering EPICS PVs by name or pattern."""
 
+from typing import TypedDict
+
 from epics_pv_mcp.errors import EpicsConnectionError, PVNotFoundError, PVTimeoutError
 from epics_pv_mcp.services.channelfinder_client import DEFAULT_MAX_RESULTS
 from epics_pv_mcp.services.checkers import query_channels
@@ -28,7 +30,44 @@ _WILDCARD_REGISTRY_NOTE = (
 )
 
 
-async def _discover_pvs(pattern: str, timeout: float | None = None) -> dict[str, object]:
+# discover_pvs' tool result shape (S29 -- typed MCP outputSchema). Lives here, not at
+# ``query_channels``: the wildcard branch only READS that shared payload and builds its own
+# literal, so the shared service signature stays untouched (its four consumers with it).
+#
+# ``total=False`` over the union of FOUR return literals: concrete-hit, concrete-miss, wildcard
+# with ChannelFinder disabled, wildcard enabled. ``pattern``/``pvs``/``total`` are on all four ->
+# non-nullable. ``capped``/``source`` are wildcard-enabled-only; ``note`` is on BOTH wildcard
+# paths (the 'requires ChannelFinder' stub AND the registry-provenance note) and absent only on
+# the two concrete-name paths -> all three are ``X | None``.
+#
+# Why the nullability, measured under standalone fastmcp (the two halves differ, and the
+# difference is the point):
+#   * An ABSENT total=False key is DROPPED from the wire, not emitted as null, and the schema
+#     carries no ``required`` -- so an absent key is invisible to a real client. For a
+#     merely-sometimes-absent field the nullable type is therefore SCHEMA HONESTY, enforced by
+#     the conformance test's Part B, not by the runtime.
+#   * A field set EXPLICITLY to None IS emitted as null, and the wire path DOES validate: the
+#     MCP SDK's low-level handler runs jsonschema against the advertised outputSchema, so a
+#     non-nullable annotation there earns a real client an ``Output validation error``. No such
+#     field exists here today; the rule is written down so the next field does not have to
+#     rediscover it. (The in-process ``FastMCP.call_tool`` shortcut does NOT validate -- which is
+#     why this tool's Part A drives a real ``fastmcp.Client`` instead of that shortcut.)
+#
+# ``pvs`` stays ``list[dict[str, object]]`` rather than a nested TypedDict: the entries are
+# heterogeneous in THREE shapes -- {pv_name, status, value} on a concrete hit, {pv_name, status}
+# on a miss, {pv_name, status, ioc_name, host_name} for a registry match -- and ``value`` carries
+# whatever PVA type the channel holds. Same convention as AlarmHistoryResult.events; no output
+# shape in this server uses a nested TypedDict. class-syntax: all names are valid identifiers.
+class DiscoverPvsResult(TypedDict, total=False):
+    pattern: str
+    pvs: list[dict[str, object]]
+    total: int
+    capped: bool | None
+    source: str | None
+    note: str | None
+
+
+async def _discover_pvs(pattern: str, timeout: float | None = None) -> DiscoverPvsResult:
     """Discover PVs by name.
 
     - **Concrete PV names**: connect via p4p and return a live status
@@ -70,7 +109,7 @@ async def _discover_pvs(pattern: str, timeout: float | None = None) -> dict[str,
     }
 
 
-async def _discover_by_channelfinder(pattern: str, timeout: float | None) -> dict[str, object]:
+async def _discover_by_channelfinder(pattern: str, timeout: float | None) -> DiscoverPvsResult:
     """Route a wildcard *pattern* to the ChannelFinder glob search, mapped into the discover shape.
 
     Returns the honest 'requires ChannelFinder' stub when CF is not configured (``enabled: False``)

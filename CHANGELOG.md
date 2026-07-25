@@ -9,6 +9,23 @@ carry breaking changes).
 
 ### Changed
 
+- **`discover_pvs` trägt ein typisiertes `outputSchema` (S29).** Bisher gab das Tool ein offenes
+  `dict[str, object]` zurück — ein aufrufender Agent konnte „keine solche PV" nicht von „ChannelFinder
+  ist nicht konfiguriert, ich konnte gar nicht suchen" und ein vollständiges Ergebnis nicht von einem
+  abgeschnittenen unterscheiden. Jetzt bewirbt es `DiscoverPvsResult` mit sechs Feldern:
+  `pattern`/`pvs`/`total` (auf allen vier Rückgabepfaden), plus `capped`/`source` (nur Wildcard mit
+  ChannelFinder) und `note` (beide Wildcard-Pfade). `pvs` bleibt eine Liste offener Einträge — sie sind
+  in drei Formen heterogen (konkreter Treffer mit Wert · Fehlschlag · Registry-Treffer mit IOC/Host).
+  **Damit sind 21 der 32 Tools getypt** (Voll-Lane; Kern-Lane 28). Untypisiert bleiben 11: die
+  S29-Kandidaten `find_channels` und `diagnose_connection` · die fünf PV-Wert-Tools `get_pv_value`,
+  `get_pvs`, `get_pv_info`, `monitor_pv`, `set_pv_value` · die vier Display-Lane-Tools `validate_pvs`,
+  `crossplane_check`, `coverage_audit`, `find_device`. **Das löst die „19 von 25"-Zählung des
+  Eintrags weiter unten ab** — deren Nenner war ein eingefrorener Altstand (damals 25 Tools), und die
+  dort genannte Begründung „`discover_pvs` hat keinen eigenen `get_config`-Seam" hat sich als
+  gegenstandslos erwiesen: das Tool liest die geteilte ChannelFinder-Antwort nur und baut sein
+  Ergebnis selbst, der Test hängt sich an denselben Seam wie die Nachbar-Tools. Neuer Budget-Stand:
+  **Kern-Lane 62967 / Voll-Lane 71265** (Deckel 200000).
+
 - **BREAKING: Tool-Argument-Namen vereinheitlicht (`refactor(tools)!` `9256977`).** Die epics-pv-Tools
   trugen für „die PV, auf die sich das Tool bezieht" vier verschiedene Argument-Namen entlang der
   Live/REST-Ebenengrenze. Vereinheitlicht: Ein-PV-Skalar → **`pv_name`** (`monitor_pv` `name`→,
