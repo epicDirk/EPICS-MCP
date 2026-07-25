@@ -10,8 +10,12 @@ cross-plane provenance (ChannelFinder · Archiver · Alarm) — over
 [p4p](https://mdavidsaver.github.io/p4p/) (PVAccess **and** Channel Access).
 
 > **Project status: work in progress (pre-1.0, `0.3.0.dev0`).** Under active development;
-> the tool surface and APIs may still change. Semantic-versioning pre-1.0 caveats apply
-> — pin a version if you depend on it.
+> the tool surface and APIs may still change. Semantic-versioning pre-1.0 caveats apply, so
+> pin a version if you depend on it.
+
+**Maturity.** 1454 tests pass with no infrastructure at all; 65 further tests exercise a live
+EPICS stack and skip without one. `mypy --strict` covers `src`, `tests` and `scripts`, and the
+package ships `py.typed`. Both gates run in CI on every push.
 
 ## What is this (for EPICS people)?
 
