@@ -36,12 +36,16 @@ one, so a count taken there would pass locally and break the core-only CI — th
 from __future__ import annotations
 
 import ast
+import inspect
 import re
+import textwrap
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Any
 
+from tests import prose_numbers as pn
 from tests import test_server as ts
 from tests.prose_numbers import ProseBlock, ProseSite, iter_blocks, iter_sites, parse_count
 
@@ -77,74 +81,147 @@ def _claim(label: str, pattern: str, measure: Callable[[], int], scope: str = ""
     return _Claim(label, re.compile(pattern, re.IGNORECASE), measure, scope)
 
 
+def _derivation_source(measure: Callable[[], int]) -> str:
+    """A claim's derivation as source text, so a typed-in answer THERE is visible too.
+
+    Two things are deliberately NOT inspected, because both are legitimate places for a number to
+    appear as prose rather than as an answer. A lambda's source is its whole enclosing statement,
+    so everything before the ``lambda`` keyword — the claim's own pattern — is dropped. And a named
+    function's DOCSTRING is dropped: these docstrings explain which set they count ("the twelve
+    constants", "the TWO real-client tests"), and accusing them would punish the explanation the
+    rest of this module asks for. Only executable code is searched.
+
+    Unreadable source yields the empty string — no accusation, which is the honest answer when
+    nothing was inspected.
+    """
+    try:
+        source = textwrap.dedent(inspect.getsource(measure))
+    except (OSError, TypeError):  # pragma: no cover - no measure here is unreadable
+        return ""
+    _, separator, tail = source.partition("lambda")
+    if separator:
+        return tail
+    node = ast.parse(source).body[0]
+    if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):  # pragma: no cover
+        return source
+    body = node.body[1:] if ast.get_docstring(node) else node.body
+    return "\n".join(ast.unparse(statement) for statement in body)
+
+
 # --- the measurements -------------------------------------------------------------------------
 
 
 def _none_valued(mapping: Mapping[str, str | None]) -> int:
-    """How many fields the map declares as advertising NO base type (an ``X | None`` field)."""
+    """Fields the map declares with NO advertised base type.
+
+    ``None`` means specifically ``object | None``. An ``X | None`` with a concrete ``X`` still
+    carries its non-null type (``archived: bool | None`` maps to ``"boolean"``), so "the 8
+    enrichment fields" is not "the nullable fields". Every 8 and 26 below rests on that.
+    """
     return sum(1 for value in mapping.values() if value is None)
 
 
+@cache
+def _parsed(path: Path) -> ast.Module:
+    """Parse once per process. Nothing here mutates a source file, so caching is safe — and the
+    uncached version re-read and re-parsed the 177 KB test module up to 44 times per run."""
+    return ast.parse(path.read_text(encoding="utf-8-sig"))
+
+
 def _module_ast(module: Any) -> ast.Module:
-    return ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    return _parsed(Path(module.__file__))
 
 
+@cache
 def _always_present_constants() -> int:
     """The ``*_ALWAYS_PRESENT`` constants — the "twelve" the prose counts."""
     return sum(1 for name in vars(ts) if name.endswith("_ALWAYS_PRESENT"))
 
 
+def _named_tests(suffix: str) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    return [
+        node
+        for node in _module_ast(ts).body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name.endswith(suffix)
+    ]
+
+
+@cache
 def _conformance_tests() -> int:
     """The per-tool ``*_conforms_to_its_schema`` tests — the other "twelve"."""
-    return sum(
-        1
-        for node in _module_ast(ts).body
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-        and node.name.endswith("_conforms_to_its_schema")
-    )
+    return len(_named_tests("_conforms_to_its_schema"))
 
 
+@cache
 def _real_client_conformance_tests() -> int:
-    """Those conformance tests that drive a real client over a ``paths`` table — the "TWO"."""
-    return sum(
-        1
-        for node in _module_ast(ts).body
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-        and node.name.endswith("_conforms_to_its_schema")
-        and any(
+    """Conformance tests that drive a REAL client over a ``paths`` table — the "TWO".
+
+    BOTH halves are checked. Testing only for a local ``paths`` table makes the measure a proxy
+    for the claim rather than the claim: converting such a test to the in-process ``call_tool``
+    while keeping its table would falsify three separate sentences and redden nothing.
+    """
+    found = 0
+    for node in _named_tests("_conforms_to_its_schema"):
+        has_table = any(
             isinstance(inner, ast.AnnAssign)
             and isinstance(inner.target, ast.Name)
             and inner.target.id == "paths"
             for inner in ast.walk(node)
         )
-    )
-
-
-def _core_lane_tools() -> int:
-    """``@mcp.tool``-decorated coroutines in server.py — the core lane, AST-scanned, never live."""
-    source = (_SRC / "server.py").read_text(encoding="utf-8")
-    found = 0
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.AsyncFunctionDef):
-            continue
-        for decorator in node.decorator_list:
-            target = decorator.func if isinstance(decorator, ast.Call) else decorator
-            if (
-                isinstance(target, ast.Attribute)
-                and target.attr == "tool"
-                and isinstance(target.value, ast.Name)
-                and target.value.id == "mcp"
-            ):
-                found += 1
+        drives_client = any(
+            isinstance(inner, ast.Call)
+            and isinstance(inner.func, ast.Name)
+            and inner.func.id == "Client"
+            for inner in ast.walk(node)
+        )
+        found += has_table and drives_client
     return found
 
 
+def _is_mcp_tool(node: ast.expr) -> bool:
+    """``mcp.tool`` or ``mcp.tool(...)``, in decorator or call position."""
+    target = node.func if isinstance(node, ast.Call) else node
+    return (
+        isinstance(target, ast.Attribute)
+        and target.attr == "tool"
+        and isinstance(target.value, ast.Name)
+        and target.value.id == "mcp"
+    )
+
+
+def _registered_tools(path: Path) -> int:
+    """Tools a module REGISTERS, in either house form.
+
+    Counting ``async def`` instead would miss the difference that matters: dropping one
+    ``mcp.tool(...)(fn)`` line takes a tool off the wire while leaving the coroutine defined, so
+    every count stays green and a tool disappears silently. Both forms are counted.
+    """
+    found = 0
+    for node in ast.walk(_parsed(path)):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            found += sum(1 for decorator in node.decorator_list if _is_mcp_tool(decorator))
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Call):
+            # ``mcp.tool(...)(fn)`` — the call-position form. Requiring the OUTER call's func to
+            # be a call is what keeps a decorator, which ``ast.walk`` also visits on its own, from
+            # being counted a second time.
+            found += _is_mcp_tool(node.func)
+    return found
+
+
+@cache
+def _core_lane_tools() -> int:
+    """Tools ``server.py`` registers — the core lane, AST-scanned, never taken from the wire."""
+    return _registered_tools(_SRC / "server.py")
+
+
+@cache
 def _display_tools() -> int:
-    """The display-extra tools, AST-scanned like ``test_server`` does — importing them would
-    pull ``opi_navigation``, which the core-only lane does not have."""
-    return len(ts._display_tool_names())
+    """The display-extra tools. AST-scanned, never imported: importing ``display_tools.py`` pulls
+    ``opi_navigation``, which the core-only lane does not have."""
+    return _registered_tools(_SRC / "display_tools.py")
 
 
+@cache
 def _full_lane_tools() -> int:
     return _core_lane_tools() + _display_tools()
 
@@ -154,49 +231,77 @@ def _items_valued(element_schema: dict[str, object]) -> int:
     return sum(1 for value in ts._OUTPUT_ARRAY_ITEMS.values() if value is element_schema)
 
 
+@cache
 def _distinct_element_schemas() -> int:
     """How many element schemas the array rows share between them."""
     return len({id(value) for value in ts._OUTPUT_ARRAY_ITEMS.values()})
 
 
+def _is_typed_dict(node: ast.ClassDef) -> bool:
+    return any(
+        (isinstance(base, ast.Name) and base.id == "TypedDict")
+        or (isinstance(base, ast.Attribute) and base.attr == "TypedDict")
+        for base in node.bases
+    )
+
+
+@cache
 def _nullable_array_fields() -> frozenset[str]:
-    """TypedDict fields the service layer annotates ``list[...] | None``.
+    """``TypedDict`` FIELDS annotated ``list[...] | None``, across the whole package.
 
     Read from the ANNOTATIONS rather than from a live schema on purpose: ``mcp.list_tools()``
     answers differently in the two lanes, and a count taken there would pass locally and break
     core-only CI. Matched by field name, which is what ``_OUTPUT_ARRAY_ITEMS`` is keyed on.
+
+    Two scoping mistakes were possible and both are closed. Reading only the two ``checkers``
+    modules missed three of the sixteen rows — they are declared in ``tools/discover.py``,
+    ``tools/archiver.py`` and ``services/archiver_client.py`` — so the count was right only by the
+    accident of those three being non-nullable. And accepting any annotated assignment let a
+    function LOCAL stand in for a field (``warnings: list[str] = []`` already exists inside a
+    function body), so only class-body annotations of a ``TypedDict`` subclass count.
     """
     names: set[str] = set()
-    for path in (_SRC / "services" / "checkers.py", _SRC / "services" / "checkers_olog.py"):
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
+    for path in sorted(_SRC.rglob("*.py")):
+        for node in ast.walk(_parsed(path)):
+            if not isinstance(node, ast.ClassDef) or not _is_typed_dict(node):
                 continue
-            annotation = ast.unparse(node.annotation).replace(" ", "")
-            if annotation.startswith("list[") and annotation.endswith("|None"):
-                names.add(node.target.id)
+            for item in node.body:
+                if not isinstance(item, ast.AnnAssign) or not isinstance(item.target, ast.Name):
+                    continue
+                annotation = ast.unparse(item.annotation).replace(" ", "")
+                if annotation.startswith("list[") and annotation.endswith("|None"):
+                    names.add(item.target.id)
     return frozenset(names)
 
 
+@cache
 def _nullable_array_rows() -> int:
     """Array rows whose field is an ``X | None`` — the ``anyOf[array, null]`` subset."""
     nullable = _nullable_array_fields()
     return sum(1 for _tool, field in ts._OUTPUT_ARRAY_ITEMS if field in nullable)
 
 
+@cache
 def _channel_info_fields() -> int:
     """Fields of ``ChannelInfo`` — a NAMESAKE of the find_channels key count, not the same set."""
-    source = (_SRC / "services" / "channelfinder_client.py").read_text(encoding="utf-8")
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(_parsed(_SRC / "services" / "channelfinder_client.py")):
         if isinstance(node, ast.ClassDef) and node.name == "ChannelInfo":
             return sum(1 for item in node.body if isinstance(item, ast.AnnAssign))
     raise AssertionError("ChannelInfo is gone from channelfinder_client.py")
 
 
+@cache
 def _destructive_golden_rows() -> int:
-    """Golden-map rows whose ``destructiveHint`` is True."""
-    return sum(1 for hints in ts._ANNOTATION_GOLDEN.values() if hints[1] is True)
+    """Golden-map rows whose ``destructiveHint`` is True.
+
+    The index comes from ``_ANNOTATION_HINTS``, not from a literal: the hint ORDER is a convention
+    that a comment records, and a comment is the thing this module distrusts.
+    """
+    index = list(ts._ANNOTATION_HINTS).index("destructiveHint")
+    return sum(1 for hints in ts._ANNOTATION_GOLDEN.values() if hints[index] is True)
 
 
+@cache
 def _paths_rows(test_name: str) -> int:
     """Rows of the ``paths`` table inside *test_name* — the return paths it drives."""
     for node in _module_ast(ts).body:
@@ -217,6 +322,18 @@ _DISCOVER_CONFORMANCE = "test_discover_pvs_structured_output_conforms_to_its_sch
 _FIND_CHANNELS_CONFORMANCE = "test_find_channels_structured_output_conforms_to_its_schema"
 
 
+@cache
+def _olog_query_functions() -> int:
+    """``query_olog_*`` coroutines in checkers_olog.py — the "ten" its own header claims."""
+    return sum(
+        1
+        for node in _parsed(_SRC / "services" / "checkers_olog.py").body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.name.startswith("query_olog_")
+    )
+
+
+@cache
 def _return_path_rows() -> int:
     """The return-path count both real-client conformance tests drive.
 
@@ -372,8 +489,17 @@ _CLAIMS: tuple[_Claim, ...] = (
     # --- the return-path tables the two real-client conformance tests drive -----------------------
     _claim(
         "discover_pvs return paths",
-        r"EVERY one of its (\w+) return paths",
+        r"discover_pvs emits on EVERY one of its (\w+) return paths",
         lambda: _paths_rows(_DISCOVER_CONFORMANCE),
+        scope="<module>",
+    ),
+    # Anchored on the TOOL NAME. One pattern matched BOTH module-level sentences, so the
+    # find_channels claim was verified against discover_pvs' table. Equal today — which means the
+    # day either tool gains a path, the guard would demand the CORRECT sentence be changed back.
+    _claim(
+        "find_channels return paths",
+        r"find_channels emits on EVERY one of its (\w+) return paths",
+        lambda: _paths_rows(_FIND_CHANNELS_CONFORMANCE),
         scope="<module>",
     ),
     _claim(
@@ -557,28 +683,11 @@ _CLAIMS: tuple[_Claim, ...] = (
         "display tools (registrar)", r"registers exactly the (\w+) display tools", _display_tools
     ),
     # --- the canonical Olog block ----------------------------------------------------------------
+    _claim("olog query functions", r"The (\w+) ``query_olog_\*`` functions", _olog_query_functions),
     _claim(
-        "olog query functions",
-        r"The (\w+) ``query_olog_\*`` functions",
-        lambda: _olog_query_functions(),
-    ),
-    _claim(
-        "olog query functions (re-export)",
-        r"re-exports the (\w+) functions",
-        lambda: _olog_query_functions(),
+        "olog query functions (re-export)", r"re-exports the (\w+) functions", _olog_query_functions
     ),
 )
-
-
-def _olog_query_functions() -> int:
-    """``query_olog_*`` coroutines in checkers_olog.py — the "ten" its own header claims."""
-    source = (_SRC / "services" / "checkers_olog.py").read_text(encoding="utf-8")
-    return sum(
-        1
-        for node in ast.parse(source).body
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-        and node.name.startswith("query_olog_")
-    )
 
 
 # --- the inventory ------------------------------------------------------------------------------
@@ -677,6 +786,7 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
 _INVENTORY_SIZE = 96
 
 
+@cache
 def _watched_blocks() -> tuple[ProseBlock, ...]:
     return iter_blocks(_WATCHED)
 
@@ -778,13 +888,36 @@ def test_inventory_size_is_pinned() -> None:
 
 
 def test_no_claim_hard_codes_its_expectation() -> None:
-    """No claim may spell out the answer it is supposed to derive.
+    """No claim may spell out the answer it is supposed to derive — in EITHER half.
 
-    A pattern containing the expected digits would pass by construction and silently stop being a
-    measurement — the failure mode this whole module exists to remove, one layer up."""
+    Checking only the pattern is not enough, and that was settled by execution rather than by
+    argument: replacing one claim's derivation with ``lambda: 16`` left all six tests green. A
+    typed-in integer in the MEASURE is the same defect as one in the PATTERN, so the derivation's
+    source is inspected too, in digits and in words — this prose spells its numbers as words far
+    more often than as digits, so a digits-only check would guard the rarer half.
+
+    Doubles as the precondition for the rest of the module: a pattern that captures nothing would
+    raise ``IndexError`` deep in the coverage scan, naming neither ``_CLAIMS`` nor the row.
+    """
+    groupless = [claim.label for claim in _CLAIMS if claim.phrase.groups < 1]
+    assert not groupless, (
+        f"a claim pattern must CAPTURE the number it checks; these capture nothing: {groupless}"
+    )
+
     offenders: list[str] = []
     for claim in _CLAIMS:
-        skeleton = re.sub(r"\\[dws]|\{\d+(?:,\d+)?\}", "", claim.phrase.pattern)
-        if re.search(rf"(?<!\w){claim.measure()}(?!\w)", skeleton):
-            offenders.append(claim.label)
-    assert not offenders, f"these claims hard-code their expected value: {sorted(offenders)}"
+        expected = claim.measure()
+        forms = {str(expected)} | {
+            word for word, value in pn._WORD_VALUES.items() if value == expected
+        }
+        skeleton = re.sub(r"\\[dwsSWbAZ]|\{\d+(?:,\d+)?\}", "", claim.phrase.pattern)
+        derivation = _derivation_source(claim.measure)
+        for form in forms:
+            if re.search(rf"(?<!\w){re.escape(form)}(?!\w)", skeleton, re.IGNORECASE):
+                offenders.append(f"{claim.label}: the pattern spells {form!r}")
+            if re.search(rf"(?<!\w){re.escape(form)}(?!\w)", derivation, re.IGNORECASE):
+                offenders.append(f"{claim.label}: the derivation spells {form!r}")
+    assert not offenders, (
+        "these claims state the answer instead of deriving it, so they would pass by "
+        f"construction: {sorted(offenders)}"
+    )
