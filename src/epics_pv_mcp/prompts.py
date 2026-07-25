@@ -58,7 +58,7 @@ def compare_machine_state(
         f"Compare machine state for: {pv_prefix}\n\n"
         "Follow these steps:"
         f"{file_note}"
-        "2. Read all current values with get_pvs(names=[...])\n"
+        "2. Read all current values with get_pvs(pv_names=[...])\n"
         "3. Compare to expected/nominal values\n"
         "4. Report deviations with severity:\n"
         "   - CRITICAL: Alarm severity > 0 or value out of range\n"

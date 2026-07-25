@@ -592,7 +592,7 @@ messages embed the full request URL — an internal host would leak into this fi
   `/retrieval/bpl`, not `/mgmt/bpl` — and propagates as an error, never a false empty answer.
 - **Alarm configured / history?** `is_alarm_configured` (`configured` is `true`/`false`/`null`;
   `null` = withheld, see the config-tree recipe below) / `get_alarm_history` (`start` + `end`
-  required; `pv` is matched as a wildcard SUBSTRING of the config path — `Value` matches both
+  required; `pv_name` is matched as a wildcard SUBSTRING of the config path — `Value` matches both
   `...:Temp1Value` and `...:12VValue`). A `false` is a true negative only if the Alarm Logger was
   running at config-import time — otherwise treat it as unreliable; the tool cannot flag this.
 - **Narrow an alarm-history query.** `get_alarm_history` has optional SERVER-SIDE filters:
