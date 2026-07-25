@@ -39,6 +39,22 @@ absent, so the core suite stays green. A checkout with `--extra all` runs everyt
   and registers every one of its deny paths in `tests/test_write_gate_contract.py::DENY_PATHS` — each
   one red-provable on a mutant. The drift guard there discovers gate modules by scanning, so a new gate
   fails that test until it is registered; registering it is the work, not a formality.
+- **Two guards can fail on a change that looks unrelated. Both are deliberate, and neither is
+  satisfied by editing the number they report.**
+  - *A number written next to a collection noun* ("the 26 projection fields", "all 22 schemas",
+    "four paths") in `tests/test_server.py`, `server.py`, `services/checkers.py`,
+    `services/checkers_olog.py` or `tools/archiver.py` must be DERIVED in
+    `tests/test_prose_counters.py::_CLAIMS` or listed in `_FROZEN` with a written reason, and that
+    file's phrase count re-pinned. Rewording a sentence means updating its pattern, not its figure.
+  - *A new test that installs a client class double in its own body* moves the audited population
+    and reddens `tests/test_client_edge_guards.py::test_the_ast_derivable_audit_figures_are_pinned`.
+    Re-measure with `uv run python scripts/guard_audit.py sham --check`. That verdict was reached
+    by a person reading a list, so a longer list has not been read: re-read it, then re-record.
+- **Periodically, and after any change to a client module or a client-double test:** re-record the
+  coverage-dependent half of the sham audit. It is not in the gate because it costs a full
+  `COVERAGE_CORE=ctrace` suite run, so it only happens if someone does it deliberately —
+  `uv run python scripts/guard_audit.py sham --check --coverage-db <db>`, recipe in
+  `scripts/guard_audit.py`. Without it, two of that audit's four figures are recorded and unverified.
 
 ## Live / sandbox tests
 

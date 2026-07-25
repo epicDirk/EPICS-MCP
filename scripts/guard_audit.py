@@ -45,7 +45,7 @@ import sqlite3
 import subprocess
 import sys
 import traceback
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -245,11 +245,23 @@ PINNED_AST: dict[str, int] = {DOUBLES: 107, EDGE_VOCABULARY: 23}
 PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 102, SHAM_CANDIDATES: 20}
 PINNED: dict[str, int] = {**PINNED_AST, **PINNED_COVERAGE}
 
-RERUN = (
-    "COVERAGE_CORE=ctrace COVERAGE_FILE=<scratch>/cov uv run pytest --cov=src --cov-branch "
-    "--cov-context=test, then uv run python scripts/guard_audit.py sham --check "
+# Two recipes, because the whole point of the split above is that they cost different amounts. A
+# deviation in the AST pair is re-measured in under a second; telling its author to run a full
+# ctrace suite would invert the very distinction this file is organised around.
+RERUN_AST = "re-measure with: uv run python scripts/guard_audit.py sham --check"
+RERUN_COVERAGE = (
+    "re-record with: COVERAGE_CORE=ctrace COVERAGE_FILE=<scratch>/cov uv run pytest --cov=src "
+    "--cov-branch --cov-context=test, then uv run python scripts/guard_audit.py sham --check "
     "--coverage-db <scratch>/cov"
 )
+RERUN = RERUN_COVERAGE  # kept for callers that mean the full audit
+
+# What the audit CANNOT pin, said here rather than left to be noticed: the verdict "no sham guard
+# found" was reached by a human READING the candidate list, and only its SIZE is recorded. A list
+# of the same length with different members satisfies every pin below. Widening _EDGE_CLAIM —
+# which this file's own docstring invites — reddens EDGE_VOCABULARY but leaves the verdict, and
+# the coverage-dependent 20, to be re-judged by a person.
+UNPINNED_VERDICT = "no sham guard found BY THIS FILTER — a judgement about a list, not a count"
 
 
 def claiming_tests() -> dict[str, list[tuple[str, bool]]]:
@@ -313,28 +325,37 @@ def population() -> dict[str, int]:
     }
 
 
-def _compare(measured: dict[str, int], unchecked: Iterable[str]) -> int:
+def _compare(measured: dict[str, int]) -> int:
     """Report ``--check``: 1 for a deviation, 0 for agreement, and never silence about the rest.
 
-    A checker that says "OK" while several pins were out of its reach is the sham guard this tool
-    exists to find, so what was NOT compared is printed on every run, including the clean one.
+    What was NOT compared is DERIVED from the pins minus the measurements, never hand-passed. The
+    first version took the skipped list as an argument, so a pin belonging to neither list simply
+    vanished while the verdict line still read "all agree with the recorded audit" — the sham this
+    function exists to make impossible, inside the function itself.
     """
+    unknown = sorted(measured.keys() - PINNED.keys())
+    if unknown:
+        sys.stderr.write(f"measured but not pinned, so nothing to compare against: {unknown}\n")
     deviating = [
-        f"  {name}: pinned {PINNED[name]}, measured {value}"
+        (name, f"  {name}: pinned {PINNED[name]}, measured {value}")
         for name, value in sorted(measured.items())
-        if PINNED[name] != value
+        if name in PINNED and PINNED[name] != value
     ]
-    skipped = sorted(unchecked)
+    skipped = sorted(PINNED.keys() - measured.keys())
     if skipped:
-        sys.stderr.write("NOT checked (needs --coverage-db):\n")
+        sys.stderr.write("NOT checked here:\n")
         for name in skipped:
-            sys.stderr.write(f"  {name} (pinned {PINNED[name]})\n")
+            reason = "needs --coverage-db" if name in PINNED_COVERAGE else "nothing measured it"
+            sys.stderr.write(f"  {name} (pinned {PINNED[name]}) — {reason}\n")
+    sys.stderr.write(f"NOT pinnable at all: {UNPINNED_VERDICT}\n")
     if deviating:
         sys.stderr.write("PIN DEVIATION — the recorded audit describes different code now:\n")
-        sys.stderr.write("\n".join(deviating) + "\n")
-        sys.stderr.write(f"Re-run the audit and re-record the findings. {RERUN}\n")
+        sys.stderr.write("\n".join(line for _name, line in deviating) + "\n")
+        cheap = all(name in PINNED_AST for name, _line in deviating)
+        sys.stderr.write(f"{RERUN_AST if cheap else RERUN_COVERAGE}\n")
         return 1
-    sys.stderr.write(f"checked {len(measured)} pin(s): all agree with the recorded audit\n")
+    compared = len(measured.keys() & PINNED.keys())
+    sys.stderr.write(f"checked {compared} pin(s): all agree with the recorded audit\n")
     return 0
 
 
@@ -346,7 +367,7 @@ def cmd_sham(args: argparse.Namespace) -> int:
     # is now contracted to mean.
     measured = population()
     if args.coverage_db is None:
-        return _compare(measured, unchecked=PINNED_COVERAGE)
+        return _compare(measured)
 
     covering = load_coverage_map(Path(args.coverage_db))
     if not covering:
@@ -374,7 +395,7 @@ def cmd_sham(args: argparse.Namespace) -> int:
     measured[NOT_EXECUTING] = len(sham_edge) + sham_other
     measured[SHAM_CANDIDATES] = len(sham_edge)
     if args.check:
-        return _compare(measured, unchecked=())
+        return _compare(measured)
     sys.stderr.write(
         f"tests installing a client CLASS double in their own body: {measured[DOUBLES]}\n"
         f"  of those, never executing a client-edge line: {measured[NOT_EXECUTING]}\n"
@@ -530,7 +551,6 @@ def main(argv: list[str]) -> int:
 
     sham_parser = sub.add_parser("sham", help=cmd_sham.__doc__ or "")
     sham_parser.add_argument("--coverage-db", help="a ctrace --cov-context=test db")
-    sham_parser.add_argument("--timeout", type=int, default=120, help="seconds per mutant run")
     sham_parser.add_argument(
         "--check",
         action="store_true",
@@ -547,10 +567,12 @@ def main(argv: list[str]) -> int:
     try:
         result: int = args.func(args)
     except Exception:  # noqa: BLE001 - the point is that a crash must not look like a verdict
-        # Exit 1 is contracted to mean "a pin deviates". An unexpected failure gets its own code,
-        # so a caller cannot read a traceback as a finding.
+        # Exit 1 is contracted to mean "a pin deviates", so a crash needs its own code. NOT 3:
+        # cmd_sweep already returns 3 for a detected foreign write, which is this tool's most
+        # safety-critical finding — colliding with it would let a wrapper read "check your
+        # working tree now" as "the tool crashed, retry".
         traceback.print_exc()
-        return 3
+        return 9
     return result
 
 

@@ -15,8 +15,8 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
 
 * Sham guards (direction B): **none found — which is not the same as none there.** 107 tests
   install a client class double in their own body and 102 never execute a guard line; that is the
-  double used legitimately, to keep a service-layer test off the network. 20 of those also carry
-  payload vocabulary, and the ones read claim SERVICE-layer behaviour (an already-constructed
+  double used legitimately, to keep a service-layer test off the network. 20 of those 102 also
+  carry payload vocabulary, and the ones read claim SERVICE-layer behaviour (an already-constructed
   exception must not be relabelled "unreachable"), not a client-edge check. ⚠️ Not all 20 were
   read, and the vocabulary filter itself decides who gets read — a first, narrower filter surfaced
   only 2 and a review showed it missed a test whose docstring states the edge claim in words the
@@ -32,10 +32,15 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   noticed and two that no test executes at all. They are declared below.
 
   The sweep counted 19 such targets and the table below has 17 rows, which is not a discrepancy:
-  the key is ``module:line``, and one line can carry several targets — ``channelfinder_client.py``
-  line 473 carries three (two ``isinstance`` calls plus the whole condition). Measured, those 17
-  keys sit on 28 targets in total. A key is not a target, and reading the table as if it were is
-  how a reader would conclude that two findings had been lost.
+  the key is ``module:line``, and one line can carry several targets — eight of the 17 keys do,
+  and ``channelfinder_client.py`` line 473 carries three (two ``isinstance`` calls plus the whole
+  condition, which is what its row means by "both halves"). Measured, those 17 keys sit on 28
+  targets in total. A key is not a target, and reading the table as if it were is how a reader
+  would conclude that two findings had been lost — this reader did, first time round.
+  ⚠️ What is DERIVED here is the 28 and the eight, not the 19. 28 counts every target on those
+  lines, observed and unobserved alike, so it shows only that a key CAN carry several findings;
+  which two of them share a key is a fact about the sweep, and the sweep's per-key breakdown was
+  not recorded. Re-deriving the 19 needs the coverage run.
   ⚠️ Two caveats on the counterpart number. First, "observed in both polarities" is weaker than it
   sounds for the 21 RAISE guards: their enabling polarity fires the guard on every input, so every
   covering test dies by construction and only the disabling half carries information. Second,
@@ -83,8 +88,21 @@ def _targets_behind_recorded_keys() -> int:
     The number the docstring uses to explain why 19 findings occupy 17 rows. Derived, so the
     explanation cannot become a story: if a line stops carrying several targets, this moves.
     """
+    return sum(_targets_per_recorded_key().values())
+
+
+def _targets_per_recorded_key() -> dict[str, int]:
     per_key = Counter(f"{target.module}:{target.lineno}" for target in enumerate_targets())
-    return sum(per_key[key] for key in _UNOBSERVED)
+    return {key: per_key[key] for key in _UNOBSERVED}
+
+
+def _keys_with_several_targets() -> int:
+    """How many recorded keys carry more than one target — the reason 19 findings fit in 17 rows.
+
+    A sum alone would be invariant: split one line into two and merge another, and the total holds
+    while the named example goes false. This counts the keys, so the shape of the explanation is
+    watched and not only its arithmetic."""
+    return sum(1 for count in _targets_per_recorded_key().values() if count > 1)
 
 
 # (isinstance calls, whole-condition targets) per client module, as the AST sees them. Two
@@ -163,6 +181,22 @@ _PROSE_FIGURES: tuple[tuple[str, str, Callable[[], int]], ...] = (
         _targets_behind_recorded_keys,
     ),
     (
+        "keys carrying more than one target",
+        r"(\w+) of the 17 keys do",
+        _keys_with_several_targets,
+    ),
+    (
+        "either-way findings",
+        r"plus (\w+) where neither polarity",
+        lambda: len(_UNOBSERVED_EITHER_WAY),
+    ),
+    ("never-executed findings", r"and (\w+) that no test executes", lambda: len(_NEVER_EXECUTED)),
+    (
+        "raise guards",
+        r"the (\w+) RAISE guards",
+        lambda: sum(1 for t in enumerate_targets() if t.form == "RAISE-GUARD"),
+    ),
+    (
         "live-lane modules",
         r"the (\w+) ``\*_live`` modules",
         lambda: len(list(_TESTS_DIR.glob("*_live.py"))),
@@ -229,8 +263,13 @@ def test_the_recorded_figures_match_the_prose_that_states_them() -> None:
     """The numbers in this module's own docstring are compared to what produces them.
 
     An audit is a measurement and a measurement rots; a WRITE-UP of a measurement rots faster,
-    because nothing runs it. Every figure below is re-derived here, so the paragraph a future
-    reader trusts cannot drift away from the code it describes while every test stays green.
+    because nothing runs it. Each figure in ``_PROSE_FIGURES`` is re-derived from what produces it.
+
+    NOT everything in that docstring, and the difference is the honest part: 102, 20, 19 and "only
+    2" are results of the coverage sweep and cannot be recomputed without it — they are pinned in
+    ``guard_audit.PINNED_COVERAGE`` and checked by ``sham --check --coverage-db``. Nor is there a
+    completeness pin here, so a TENTH figure added to that docstring next month ships unwatched.
+    S32's ``test_prose_counters`` has that mechanism; wiring this file into it is separate work.
     """
     prose = " ".join((__doc__ or "").split())
     wrong: list[str] = []
