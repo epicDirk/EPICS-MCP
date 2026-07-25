@@ -54,3 +54,15 @@ dependencies pointing downward.
 
 Conventional-style prefixes (`fix:`, `feat:`, `refactor:`, `docs:`, `test:`), one logical
 change per commit.
+
+House style, written down here because it was lived in every commit and stated in none — an
+unwritten convention is one a newcomer breaks by accident:
+
+- **A scope** in the prefix where one applies: `feat(channelfinder):`, `test(schemas):`,
+  `fix(audit):`, `docs(changelog):`.
+- **German subject and body**, and the SUBJECT line **ASCII-transliterated** (`Waechter`,
+  `geprueft`, `--` instead of an em dash) so it survives any terminal encoding. Bodies use real
+  umlauts; only the subject is transliterated.
+- The **work-item id** in parentheses at the end of the subject when there is one: `(S29)`.
+- A body that carries the **measured** facts — gate counts, red-proof node ids, what was *not*
+  done and why — rather than a restatement of the diff.

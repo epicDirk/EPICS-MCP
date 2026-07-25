@@ -63,7 +63,8 @@ from epics_pv_mcp.services.olog_exceptions import (
 #     field that can be an explicit None earns a real client an ``Output validation error``
 #     instead of an answer.
 #   * The in-process ``FastMCP.call_tool`` shortcut — which MOST conformance tests here use (all
-#     but the discover_pvs one, which drives a real client) — does NOT validate. A test driving it
+#     but the discover_pvs and find_channels ones, which drive a real client) — does NOT validate.
+#     A test driving it
 #     therefore cannot see a violation a real client would hit; only a test driving a real
 #     ``fastmcp.Client`` can. That asymmetry is why the static Part B carries the guarantee for the
 #     rest of them, and the asymmetry itself is pinned rather than assumed:
@@ -72,7 +73,7 @@ from epics_pv_mcp.services.olog_exceptions import (
 #     wire tests silently green-and-empty. What drives the wire today:
 #     ``test_every_typed_tool_conforms_to_its_schema_over_the_wire`` (all typed tools, disabled
 #     paths, pinned relationally to the typed set) plus the per-tool payload tests and the
-#     discover_pvs conformance test.
+#     discover_pvs and find_channels conformance tests.
 #
 #   * TWO validators exist, not one, and they differ. The server-side handler above turns a
 #     mismatch into an error result (surfacing as ``ToolError("Output validation error: …")``).

@@ -20,6 +20,7 @@ from epics_pv_mcp.services.checkers import (
     AlarmConfiguredResult,
     AlarmHistoryResult,
     ArchiveStatusResult,
+    ChannelQueryResult,
     ChannelVocabularyResult,
     NameLookupResult,
 )
@@ -405,7 +406,6 @@ async def discover_pvs(
 
 
 @mcp.tool(
-    output_schema=None,
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
@@ -475,15 +475,21 @@ async def find_channels(
         bool,
         Field(
             description=(
-                "Return only the exact match count as {enabled, match_count} (the /count endpoint) "
-                "instead of the channel list — for 'how many match' without pulling them."
+                "Return only the exact match count — {enabled, match_count} (plus a note when "
+                "ChannelFinder is unconfigured), via the /count endpoint — instead of the channel "
+                "list, for 'how many match' without pulling them."
             )
         ),
     ] = False,
-) -> dict[str, object]:
+) -> ChannelQueryResult:
     """Query ChannelFinder: which IOC/host serves a PV, plus its tags/properties.
 
     Read-only. Disabled by default (set EPICS_MCP_CHANNELFINDER_URL to enable).
+
+    The two modes return DISJOINT fields: the channel list is {enabled, channels, total, capped},
+    the count is {enabled, match_count} — plus a `note` on either when ChannelFinder is
+    unconfigured. Only `enabled` is present on every path; read the advertised outputSchema rather
+    than assuming a field is there.
 
     The glob is matched by the SERVER, and both of its properties bite silently (measured live
     2026-07-15). It is ANCHORED: 'Ctrl-EVR-01' matches 0 channels while '*Ctrl-EVR-01*' matches

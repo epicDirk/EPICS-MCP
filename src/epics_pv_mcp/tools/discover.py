@@ -31,8 +31,11 @@ _WILDCARD_REGISTRY_NOTE = (
 
 
 # discover_pvs' tool result shape (S29 -- typed MCP outputSchema). Lives here, not at
-# ``query_channels``: the wildcard branch only READS that shared payload and builds its own
-# literal, so the shared service signature stays untouched (its four consumers with it).
+# ``query_channels``: the wildcard branch only READS that shared payload and builds its OWN
+# literal, so this type describes the discover shape, not the ChannelFinder one.
+# (``query_channels`` has since been typed in its own right -- ``ChannelQueryResult`` -- so the
+# point is no longer that the shared signature stays untouched; it is that the two shapes are
+# genuinely different literals.)
 #
 # ``total=False`` over the union of FOUR return literals: concrete-hit, concrete-miss, wildcard
 # with ChannelFinder disabled, wildcard enabled. ``pattern``/``pvs``/``total`` are on all four ->
@@ -126,27 +129,35 @@ async def _discover_by_channelfinder(pattern: str, timeout: float | None) -> Dis
     if not result.get("enabled"):
         return {"pattern": pattern, "pvs": [], "total": 0, "note": _WILDCARD_STUB_NOTE}
 
-    pvs: list[dict[str, object]] = []
+    # Both shape checks are KEPT although ``query_channels`` is now typed: the seam is replaced
+    # wholesale by test doubles (see the ``capped`` note below), so its wire type is not a runtime
+    # guarantee. The element check is a comprehension FILTER rather than an ``if not …: continue``
+    # because the latter's body is provably dead under the typed seam and mypy's warn_unreachable
+    # rejects it -- the filter form says the same thing and is what diagnose.py:386-387 and
+    # checkers_olog.py:751-753 already use on this kind of payload. Honest scope: neither check is
+    # OBSERVED -- no double injects a non-list or a non-dict element today, and the pair is mutually
+    # masking (tests/test_client_edge_guards.py records that class). They stay because a typing
+    # change must not alter runtime behaviour, not because they are guarded.
     raw_channels = result.get("channels")
-    if isinstance(raw_channels, list):
-        for channel in raw_channels:
-            if not isinstance(channel, dict):
-                continue
-            pvs.append(
-                {
-                    "pv_name": channel.get("name"),
-                    "status": "registered",
-                    "ioc_name": channel.get("ioc_name"),
-                    "host_name": channel.get("host_name"),
-                }
-            )
+    pvs: list[dict[str, object]] = [
+        {
+            "pv_name": channel.get("name"),
+            "status": "registered",
+            "ioc_name": channel.get("ioc_name"),
+            "host_name": channel.get("host_name"),
+        }
+        for channel in (raw_channels if isinstance(raw_channels, list) else [])
+        if isinstance(channel, dict)
+    ]
     return {
         "pattern": pattern,
         "pvs": pvs,
         "total": len(pvs),
-        # bool()-coerce: the seam into query_channels is typed ``dict[str, object]``, so the wire
-        # type is not guaranteed — a raw copy could emit a string into a ``boolean | null`` field
-        # and fail a real client's output validation (pinned by the conformance test's fake).
+        # bool()-coerce, and NOT because the seam is untyped -- it is typed now
+        # (``ChannelQueryResult.capped`` is ``bool | None``). The coercion stays for two reasons the
+        # annotation cannot cover: the seam is REPLACED by a test double that deliberately injects a
+        # truthy STRING here (pinned by the conformance test's fake), and ``None`` from a
+        # count_only-shaped payload must land as ``False``, not as a null in a non-nullable field.
         "capped": bool(result.get("capped")),
         "source": "channelfinder",
         "note": _WILDCARD_REGISTRY_NOTE,

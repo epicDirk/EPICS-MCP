@@ -30,7 +30,7 @@ from opi_navigation.pv_analysis.lookup import MatchMode, PvLookupResult
 from epics_pv_mcp.config import get_config
 from epics_pv_mcp.errors import EpicsError
 from epics_pv_mcp.paths import resolve_user_path
-from epics_pv_mcp.services.checkers import query_channels
+from epics_pv_mcp.services.checkers import ChannelQueryResult, query_channels
 from epics_pv_mcp.services.device_lookup import (
     build_device_report,
     collect_channels,
@@ -121,7 +121,9 @@ async def _find_device(
     stem = channel_name(cleaned).rstrip(":")
     glob = f"*{stem}*" if match == "substring" else f"{stem}*"
     try:
-        iocs: Mapping[str, object] = await query_channels(glob)
+        # Typed as the shared service's own result (S29), not as a bare Mapping: that makes the
+        # DEGRADATION literal below type-checked, where a misspelled key used to be invisible.
+        iocs: ChannelQueryResult = await query_channels(glob)
     except Exception:  # noqa: BLE001 — CF is best-effort: ANY failure degrades, never sinks the tool
         # S7-6: broaden beyond EpicsError. query_channels maps ChannelFinder errors to
         # EpicsConnectionError, but an unexpected client/projection bug (a non-EpicsError) must also

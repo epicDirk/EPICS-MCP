@@ -1831,6 +1831,184 @@ async def test_discover_pvs_structured_output_conforms_to_its_schema(
         )
 
 
+# The JSON base type every find_channels (ChannelQueryResult) property must advertise. An
+# INDEPENDENT source of truth (hand-written, NOT reflected from the TypedDict), so a base-type
+# WIDENING is caught even where nullability hides it from a bare-``type`` check. ``channels`` is an
+# array of opaque channel objects; the item condition itself is pinned by _OUTPUT_ARRAY_ITEMS.
+_FIND_CHANNELS_BASE_TYPE: dict[str, str | None] = {
+    "enabled": "boolean",
+    "channels": "array",
+    "total": "integer",
+    "capped": "boolean",
+    "match_count": "integer",
+    "note": "string",
+}
+
+# The keys find_channels emits on EVERY one of its four return paths. It is a SINGLE key, and that
+# is the tool's shape rather than a gap in the table: the two MODES are disjoint — a count_only path
+# carries ``match_count`` and no ``channels``/``total``/``capped``, a list path the reverse — so
+# ``enabled`` is the only field every path has.
+_FIND_CHANNELS_ALWAYS_PRESENT = frozenset({"enabled"})
+
+
+@pytest.mark.asyncio
+async def test_find_channels_exposes_typed_output_schema() -> None:
+    """S29: find_channels advertises a STRUCTURED outputSchema (ChannelQueryResult), not the
+    accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype — and red
+    while the tool still carries ``@mcp.tool(output_schema=None)``, which OVERRIDES the
+    annotation-derived schema (that kwarg, not any post-pass, is what keeps the untyped tools
+    schema-less). Checks properties non-empty, EXACTLY the 6 mapped fields (completeness both
+    ways), and each field's :func:`_base_type`."""
+    from epics_pv_mcp.server import mcp
+
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    schema = tools["find_channels"].outputSchema or {}
+    properties = schema.get("properties", {})
+    assert properties, "find_channels: outputSchema carries no typed properties"
+    assert set(properties) == set(_FIND_CHANNELS_BASE_TYPE), (
+        f"find_channels: advertised properties {sorted(properties)} != "
+        f"expected {sorted(_FIND_CHANNELS_BASE_TYPE)}"
+    )
+    for field, prop in properties.items():
+        actual = _base_type(prop)
+        assert actual == _FIND_CHANNELS_BASE_TYPE[field], (
+            f"find_channels.{field}: schema base type {actual!r} != "
+            f"{_FIND_CHANNELS_BASE_TYPE[field]!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_find_channels_structured_output_conforms_to_its_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S29 conformance: the EMITTED structuredContent must conform to its own outputSchema on ALL
+    FOUR paths — and here the four are two MODES times two configurations, which is the whole risk
+    of this tool. ``count_only`` returns {enabled, match_count} while the list mode returns
+    {enabled, channels, total, capped}: a single-path test would leave one mode's fields unproven,
+    and no other test drives both modes over the wire.
+
+    Driven through a REAL ``fastmcp.Client``, because only the wire validates — the in-process
+    shortcut hands a return back UNVALIDATED, pinned by
+    test_wire_validates_output_schema_while_in_process_does_not.
+
+    SEAM, chosen deliberately: the two ENABLED paths fake the TRANSPORT
+    (``channelfinder_client.get_shared_session``), not the client CLASS. Three consequences, each
+    measured rather than assumed: the real ``_project`` builds the channel elements, so the array's
+    item condition is validated against genuine ChannelInfo dicts instead of against a fake's own
+    invention (a class-level double would make that half nearly circular); the real client-edge
+    guards stay in the path, which is what CLAUDE.md's evidence discipline point 8 recommends; and
+    a class-level double would be COUNTED by scripts/guard_audit.py as a payload-claiming test,
+    silently shifting the S31 audit's recorded numbers with nothing going red. The price, named:
+    one faked response cannot serve both enabled paths — the list route rejects a number and the
+    count route rejects a list — so the response is swapped between calls, and because this fakes
+    the transport the call runs the real read throttle (the pre-existing repo-wide
+    ``EPICS_MCP_READ_RATE_LIMIT`` exposure the search_logbook payload test already documents).
+
+    Both CF allowlists are passed EXPLICITLY rather than left to their defaults: the client
+    resolves them from the REAL config in its OWN module namespace, so an
+    ``EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES`` exported on the machine would otherwise decide
+    what this test sees (conftest isolates the ``EPICS_*`` search vars, NOT the ``EPICS_MCP_*``
+    ones). ``owner`` is deliberately an allowlisted account: the projection blanks a non-allowlisted
+    one, so a payload assertion on it would be about the redactor, not the schema.
+
+    Part B (static) checks nullability in BOTH directions against _FIND_CHANNELS_ALWAYS_PRESENT;
+    ``seen == set(properties)`` pins that the four paths together reach every advertised field.
+
+    Red-proof: widen ``ChannelQueryResult.channels`` to ``list[Any]`` and the sibling item-condition
+    test goes red; widen _FIND_CHANNELS_ALWAYS_PRESENT by ``capped`` and the always-present loop
+    below goes red (together with the generic wire test — that mutation is not isolating, and it
+    says so here rather than in a claim)."""
+    from fastmcp import Client
+
+    from epics_pv_mcp.config import EpicsConfig
+    from epics_pv_mcp.server import mcp
+
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    properties = (tools["find_channels"].outputSchema or {}).get("properties", {})
+    assert properties, "find_channels: outputSchema carries no typed properties"
+
+    disabled = EpicsConfig(channelfinder_url="")
+    enabled = EpicsConfig(
+        channelfinder_url="http://channelfinder:8080/ChannelFinder",
+        channelfinder_safe_property_names="iocName,hostName,pvStatus",
+        channelfinder_safe_owner_accounts="recceiver",
+    )
+    # ONE patch per namespace, re-aimed through a holder: the config is read at call time in both
+    # places (checkers gates on the URL, the client resolves the allowlists), and re-patching inside
+    # the loop would bind the loop variable.
+    holder: dict[str, EpicsConfig] = {"cfg": disabled}
+    monkeypatch.setattr("epics_pv_mcp.services.checkers.get_config", lambda: holder["cfg"])
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.channelfinder_client.get_config", lambda: holder["cfg"]
+    )
+    session = Mock()
+    monkeypatch.setattr(
+        "epics_pv_mcp.services.channelfinder_client.get_shared_session",
+        lambda **_kwargs: session,
+    )
+    one_channel: object = [
+        {
+            "name": "SIM:PS-01:Cur-RB",
+            "owner": "recceiver",
+            "properties": [
+                {"name": "iocName", "value": "ioc-01"},
+                {"name": "hostName", "value": "host-01"},
+                {"name": "pvStatus", "value": "Active"},
+            ],
+            "tags": [{"name": "archived"}],
+        }
+    ]
+    paths: list[tuple[str, EpicsConfig, dict[str, Any], object]] = [
+        ("disabled-list", disabled, {"name_pattern": "SIM:*"}, None),
+        ("disabled-count", disabled, {"name_pattern": "SIM:*", "count_only": True}, None),
+        ("enabled-list", enabled, {"name_pattern": "SIM:*"}, one_channel),
+        ("enabled-count", enabled, {"name_pattern": "SIM:*", "count_only": True}, 7),
+    ]
+
+    seen: set[str] = set()
+    for label, cfg, args, response in paths:
+        holder["cfg"] = cfg
+        session.get.return_value = _fake_json_response(response)
+        async with Client(mcp) as client:
+            # Raises ToolError("Output validation error: ...") if the payload does not conform.
+            result = await client.call_tool("find_channels", args)
+        structured = cast(dict[str, Any], result.structured_content)
+        seen |= set(structured)
+        assert set(structured) <= set(properties), (
+            f"find_channels[{label}]: emitted {sorted(set(structured) - set(properties))}, "
+            "which the outputSchema does not advertise"
+        )
+        for key, value in structured.items():
+            if value is None:
+                assert _schema_permits_null(properties[key]), (
+                    f"find_channels[{label}].{key}: emitted null but its schema forbids null "
+                    f"({properties[key]})"
+                )
+        for always in _FIND_CHANNELS_ALWAYS_PRESENT:
+            assert always in structured, (
+                f"find_channels[{label}]: {always!r} is declared always-present (non-nullable) "
+                f"but is absent from the emitted payload {sorted(structured)}"
+            )
+    # The count mode is verified as a MODE, not just as a schema: it must carry the count and none
+    # of the list fields, which is the disjointness the single always-present key encodes.
+    assert seen == set(properties), (
+        f"find_channels: the four driven paths emitted {sorted(seen)}, "
+        f"which does not cover the advertised {sorted(properties)}"
+    )
+
+    for prop_name, prop_schema in properties.items():
+        if prop_name in _FIND_CHANNELS_ALWAYS_PRESENT:
+            assert not _schema_permits_null(prop_schema), (
+                f"find_channels.{prop_name}: declared always-present, so it must NOT permit null "
+                f"in its outputSchema, got {prop_schema}"
+            )
+            continue
+        assert _schema_permits_null(prop_schema), (
+            f"find_channels.{prop_name}: sometimes-absent property must permit null "
+            f"(the S29 convention), got {prop_schema}"
+        )
+
+
 def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1912,6 +2090,7 @@ _TYPED_OUTPUT_TOOLS = frozenset(
         "list_channel_vocabulary",
         "get_alarm_history",
         "discover_pvs",
+        "find_channels",
     }
 )
 
@@ -1957,18 +2136,22 @@ _DISABLED_WIRE_ARGS: dict[str, dict[str, Any]] = {
         "end": "2026-01-02T00:00:00Z",
     },
     "discover_pvs": {"pattern": "SIM:PS-*"},
+    # No count_only: the LIST mode's disabled return is the wider of the two (channels/total/note),
+    # so it is the one worth driving generically. The count mode is covered per-tool, over the wire,
+    # by test_find_channels_structured_output_conforms_to_its_schema.
+    "find_channels": {"name_pattern": "SIM:PS-*"},
 }
 
-# DERIVED from the per-tool constants, never re-typed: the ten explicit rows point straight at the
-# constant its sibling conformance test declares; the Olog rows are import-time ``frozenset``
+# DERIVED from the per-tool constants, never re-typed: the eleven explicit rows point straight at
+# the constant its sibling conformance test declares; the Olog rows are import-time ``frozenset``
 # conversions of _OLOG_ALWAYS_PRESENT's values (a copy in memory, but with no second place to edit,
 # so it cannot drift either). Its purpose is to make those constants carry weight at
-# RUNTIME. Measured, so the claim stays the right size: TEN of the eleven are consulted only to
+# RUNTIME. Measured, so the claim stays the right size: TEN of the twelve are consulted only to
 # SKIP a field in a static check, so an over-broad entry weakens that test in silence instead of
 # failing it (mutation-checked: widening _ARCHIVER_HISTORY_ALWAYS_PRESENT or
-# _LIST_CHANNEL_VOCABULARY_ALWAYS_PRESENT leaves their tests green). The eleventh,
-# _DISCOVER_PVS_ALWAYS_PRESENT, is ALREADY runtime-bound by its own conformance test and goes red
-# on the same mutation.
+# _LIST_CHANNEL_VOCABULARY_ALWAYS_PRESENT leaves their tests green). The remaining TWO,
+# _DISCOVER_PVS_ALWAYS_PRESENT and _FIND_CHANNELS_ALWAYS_PRESENT, are ALREADY runtime-bound by
+# their own conformance tests and go red on the same mutation.
 _ALWAYS_PRESENT_BY_TOOL: dict[str, frozenset[str]] = {
     **{name: frozenset(fields) for name, fields in _OLOG_ALWAYS_PRESENT.items()},
     "get_pv_history": _ARCHIVER_HISTORY_ALWAYS_PRESENT,
@@ -1981,6 +2164,7 @@ _ALWAYS_PRESENT_BY_TOOL: dict[str, frozenset[str]] = {
     "list_channel_vocabulary": _LIST_CHANNEL_VOCABULARY_ALWAYS_PRESENT,
     "get_alarm_history": _GET_ALARM_HISTORY_ALWAYS_PRESENT,
     "discover_pvs": _DISCOVER_PVS_ALWAYS_PRESENT,
+    "find_channels": _FIND_CHANNELS_ALWAYS_PRESENT,
 }
 
 
@@ -2001,22 +2185,23 @@ async def test_every_typed_tool_conforms_to_its_schema_over_the_wire(
       test_output_schema_typed_only_for_typed_tools, which compares the server's REAL typed set
       against ``_TYPED_OUTPUT_TOOLS``. The assertions here compare two TABLES against that same
       constant, so a tool nobody has added to it is invisible to them (measured: registering a
-      22nd typed tool leaves this test green and turns the relational one red). What they DO
+      23rd typed tool leaves this test green and turns the relational one red). What they DO
       guarantee is the step after: once the first red forces the constant to be updated, wire
       coverage can no longer be forgotten — both tables must equal it. Neither link alone suffices;
       claiming this one detects new tools would be false.
-    * TEN of the eleven drive ``FastMCP.call_tool``, which hands a return back UNVALIDATED (pinned
+    * TEN of the twelve drive ``FastMCP.call_tool``, which hands a return back UNVALIDATED (pinned
       by test_wire_validates_output_schema_while_in_process_does_not). Their runtime half therefore
       only ever checked the ONE thing it asserts explicitly — that an emitted null is permitted —
       and 13 of the 20 tools THOSE TEN cover emit no null at all on the driven path, so for those
-      the runtime half asserts nothing beyond "the call did not raise". The eleventh,
-      test_discover_pvs_structured_output_conforms_to_its_schema, is the exception on every count:
-      it already drives a real client over four paths, checks always-present fields at runtime, and
-      pins field coverage with ``seen == set(properties)``.
+      the runtime half asserts nothing beyond "the call did not raise". The other TWO,
+      test_discover_pvs_structured_output_conforms_to_its_schema and its find_channels sibling,
+      are the exceptions on every count: they already drive a real client over four paths, check
+      always-present fields at runtime, and pin field coverage with ``seen == set(properties)``.
+      (find_channels needs all four for a second reason: its two MODES return disjoint fields.)
 
     So the three per-tool assertions below are NOT new inventions — they are that one test's checks
     (its ``seen`` equality relaxed to a subset, since one disabled path cannot cover every field)
-    carried from ONE tool to all 21. The non-vacuity floor is older still: every ``exposes`` test
+    carried from ONE tool to all 22. The non-vacuity floor is older still: every ``exposes`` test
     already carries it. Claiming otherwise would be the very defect this file keeps having to
     remove.
 
@@ -2120,7 +2305,7 @@ async def test_typed_output_schema_enums_declare_their_members() -> None:
 
     SCOPE, measured rather than implied: the walk covers TOP-LEVEL properties only. It does not
     descend into ``items``, ``$defs`` or nested ``anyOf`` branches — today that costs nothing (a
-    full recursive traversal of all 21 schemas finds the same single enum, no ``const``, and no
+    full recursive traversal of all 22 schemas finds the same single enum, no ``const``, and no
     ``$defs`` at all, because every array element is an unconstrained object), but a ``Literal``
     inside a future list-element MODEL would go unnoticed. The auto-discovery promise above is
     therefore about scalar top-level fields, not about every enum a schema could ever carry.
@@ -2162,7 +2347,7 @@ def test_enum_members_keeps_the_value_type() -> None:
     silently accept a future widening from numbers to their spellings.
 
     Why a HELPER unit test and not a source mutation, measured rather than assumed: a recursive
-    walk of all 21 typed schemas finds exactly one ``enum`` and no ``const``
+    walk of all 22 typed schemas finds exactly one ``enum`` and no ``const``
     (``get_pv_history.status``), and _ARCHIVER_HISTORY_BASE_TYPE already pins it as "string" by
     set equality. Retyping it to ``Literal[1, 2]`` therefore reddens that table too, and the red
     would not be attributable to this guard. There is no source mutation that isolates the VALUE
@@ -2183,14 +2368,15 @@ def test_enum_members_keeps_the_value_type() -> None:
 
 
 # The two element schemas the estate actually advertises, shared by the rows below. Read-only by
-# convention: they are module dicts, so assigning into one would silently move 7 (resp. 8) rows.
+# convention: they are module dicts, so assigning into one would silently move 7 (resp. 9) rows.
 _STRING_ITEMS: dict[str, object] = {"type": "string"}
 _OPAQUE_OBJECT_ITEMS: dict[str, object] = {"type": "object", "additionalProperties": True}
 
 # Every (tool, field) whose outputSchema advertises an ARRAY, with the element schema it must
-# declare. Four of these are anyOf[array, null] (an ``X | None`` field): update_log_entry.warnings
-# and attachments_uploaded on create_log_entry / reply_to_log / add_log_attachment — a helper that
-# only read prop["items"] would find 11 of 15 and drop those four in silence. Note ("list_tags",
+# declare. FIVE of these are anyOf[array, null] (an ``X | None`` field): find_channels.channels,
+# update_log_entry.warnings, and attachments_uploaded on create_log_entry / reply_to_log /
+# add_log_attachment — a helper that only read prop["items"] would find 11 of 16 and drop those
+# five in silence. Note ("list_tags",
 # "tags") is the OLOG tool; the ChannelFinder tag names live under list_channel_vocabulary.
 # No entry may be None: an array without an element condition is not declarable here, so an
 # annotation that loses one stays red instead of being papered over with a row.
@@ -2207,6 +2393,7 @@ _OUTPUT_ARRAY_ITEMS: dict[tuple[str, str], dict[str, object]] = {
     ("get_alarm_history", "events"): _OPAQUE_OBJECT_ITEMS,
     ("list_log_attachments", "attachments"): _OPAQUE_OBJECT_ITEMS,
     ("discover_pvs", "pvs"): _OPAQUE_OBJECT_ITEMS,
+    ("find_channels", "channels"): _OPAQUE_OBJECT_ITEMS,
     ("create_log_entry", "attachments_uploaded"): _OPAQUE_OBJECT_ITEMS,
     ("reply_to_log", "attachments_uploaded"): _OPAQUE_OBJECT_ITEMS,
     ("add_log_attachment", "attachments_uploaded"): _OPAQUE_OBJECT_ITEMS,
@@ -2226,7 +2413,7 @@ async def test_typed_output_schema_arrays_declare_their_element_schema() -> None
 
     That matters most for the 7 rows carrying ``{"type": "string"}``: over the wire the validator
     rejects ``["a", 42]`` against them, and accepts it once the condition is gone. Stated
-    honestly, the other 8 rows are ``{"type": "object", "additionalProperties": true}`` — a
+    honestly, the other 9 rows are ``{"type": "object", "additionalProperties": true}`` — a
     deliberately opaque element (no output shape in this server nests a TypedDict). There the
     guard pins only that the schema still promises "some object" rather than "anything at all";
     it cannot catch a wrong object.
@@ -2237,12 +2424,12 @@ async def test_typed_output_schema_arrays_declare_their_element_schema() -> None
     stable under a widening, so the precise VALUE assertion fires instead of an indirect "gone",
     and an array field that was NEVER constrained still appears and goes red without a row.
 
-    SCOPE, measured rather than implied: top-level properties of the 21 tools in
+    SCOPE, measured rather than implied: top-level properties of the 22 tools in
     _TYPED_OUTPUT_TOOLS. No recursion into ``items``, no ``$defs``, no ``prefixItems`` (a scan of
-    all 21 schemas finds zero of either). Deliberately outside: fields typed ``object | None``
+    all 22 schemas finds zero of either). Deliberately outside: fields typed ``object | None``
     that hold a list at runtime — get_archive_info's ``archive_fields``/``data_stores`` are the
     live example — since _base_type returns None for them; this pins DECLARED arrays, not every
-    field that can carry one. Also outside: the list fields of the 11 tools that are not typed
+    field that can carry one. Also outside: the list fields of the 10 tools that are not typed
     yet, which have no advertised schema to pin.
 
     Red-proof: widen services/checkers.py's ``ChannelVocabularyResult.tags`` to ``list[Any]``."""
@@ -2271,7 +2458,7 @@ async def test_typed_output_schema_arrays_declare_their_element_schema() -> None
 def test_array_items_reads_both_array_shapes() -> None:
     """S31: :func:`_array_items` finds the element schema in BOTH shapes an array is emitted in.
 
-    Four of the 15 declared arrays are ``anyOf[array, null]``, so a helper that only read
+    Five of the 16 declared arrays are ``anyOf[array, null]``, so a helper that only read
     ``prop["items"]`` would silently cover 11 of them. Nothing else can prove that branch runs:
     tests/ is outside ``--cov=src``, so no coverage number ever shows it, and the schema test
     above passes either way as long as the four rows happen to match.
@@ -2341,8 +2528,11 @@ async def test_search_logbook_payload_path_is_guarded_below_the_client(
     ENV NOTE, measured: because this fakes the TRANSPORT, the call runs the real read throttle
     (services/_http.py). conftest resets that throttle but rebuilds it from the REAL config, and
     ``EPICS_MCP_*`` is deliberately not isolated there — so a machine exporting
-    ``EPICS_MCP_READ_RATE_LIMIT`` fails this test. It is a pre-existing, repo-wide exposure (15
-    other tests fail the same way under that env), not something this test introduced; CI runs
+    ``EPICS_MCP_READ_RATE_LIMIT`` fails this test. It is a pre-existing, repo-wide exposure —
+    measured 2026-07-25 under ``EPICS_MCP_READ_RATE_LIMIT=1``: 19 other tests fail the same way
+    (the figure named here was 15 and had already drifted by three before that measurement, which
+    is what an unasserted count does). The limit VALUE belongs in the claim: a test drawing two
+    tokens only trips at 1. Not something this test introduced; CI runs
     with a clean env. Named here rather than worked around locally, because the fix belongs in
     conftest, for all of them at once.
     * A ``hitCount`` of ``true``: JSON has no separate boolean-vs-integer question the way Python
@@ -2710,41 +2900,50 @@ async def test_stripped_tool_still_returns_structured_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """MA-Q1 A2 is ADVERTISE-ONLY: suppressing the wire outputSchema does not stop a tool from
-    returning structuredContent at call time. Drive ``find_channels`` — an untyped tool, i.e. one
+    returning structuredContent at call time. Drive ``get_pv_value`` — an untyped tool, i.e. one
     that still carries ``@mcp.tool(output_schema=None)`` so its accept-all schema is never
-    advertised — on its deterministic disabled path (no network) and assert it still yields a
-    structured dict.
+    advertised — over a faked ``pv_get`` (no network) and assert it still yields a structured dict.
 
-    S29: the FIRST assertion guards this test's own PREMISE, and that is the point of it.
-    Without it, typing the driven tool leaves this test GREEN and silently VACUOUS: the
-    disabled payload keeps arriving, so the second assertion still passes while "an untyped
-    tool" has quietly stopped being true. This file's own history is the evidence —
-    get_archive_info and then discover_pvs both aged out of this slot, and each time what was
-    left behind was a prose instruction to re-point the test, which nothing enforced.
+    S29: the FIRST assertion guards this test's own PREMISE, and that is the point of it. Without
+    it, typing the driven tool leaves this test GREEN and silently VACUOUS: a payload keeps
+    arriving, so the second assertion still passes while "an untyped tool" has quietly stopped
+    being true. This file's own history is the evidence — get_archive_info, then discover_pvs, then
+    find_channels all aged out of this slot, and each time what was left behind was a prose
+    instruction to re-point the test, which nothing enforced. The guard was added while
+    find_channels still sat here and then, when find_channels was typed, it went red and forced
+    this move — which is what it is for.
+
+    HONEST CHANGE OF KIND with that move, so nobody reads more into it than it shows: the three
+    predecessors each had a CONFIG-GATED real path (no ``*_URL`` set → an ``enabled: false``
+    literal, no network by construction). ``get_pv_value`` has no such path — it is a bare
+    ``await pv_get(...)`` — so determinism comes from faking that one seam instead. The claim under
+    test is unaffected: it is about the SERVER's schema-advertising versus its structuredContent
+    plumbing, and where the payload came from does not enter it. The seam is the same
+    module-namespace patch tests/test_read.py and this file's own get_pv_value tests already use.
 
     Red-proof: point ``driven`` at a member of _TYPED_OUTPUT_TOOLS (discover_pvs, args
     ``{"pattern": "SIM:*"}``) — the premise assertion fails first, by test node id."""
-    from epics_pv_mcp.config import EpicsConfig
     from epics_pv_mcp.server import mcp
-    from epics_pv_mcp.services import checkers
 
-    driven = "find_channels"
-    args: dict[str, Any] = {"name_pattern": "SIM:*"}
+    async def _fake_pv_get(pv_name: str, timeout: float | None = None) -> dict[str, object]:
+        return {"pv_name": pv_name, "value": 42, "connected": True}
+
+    driven = "get_pv_value"
+    args: dict[str, Any] = {"pv_name": "SIM:PS-01:Cur-RB"}
     tools = {t.name: t for t in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     assert tools[driven].outputSchema is None, (
         f"{driven} now advertises an outputSchema, so driving it no longer demonstrates the "
         "ADVERTISE-ONLY property this test exists for — re-point it at a still-untyped tool "
         "with a no-network path (_TYPED_OUTPUT_TOOLS lists the ones already taken)"
     )
-    # find_channels -> _find_channels -> query_channels, which resolves get_config in the checkers
-    # module's OWN namespace — patch checkers.get_config (NOT tools.channelfinder, a pass-through).
-    monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(channelfinder_url=""))
+    # get_pv_value -> _get_pv_value -> pv_get, resolved in the tools.read module's OWN namespace.
+    monkeypatch.setattr("epics_pv_mcp.tools.read.pv_get", _fake_pv_get)
     structured = cast(
         dict[str, Any],
         (await mcp.call_tool(driven, args)).structured_content,
     )
-    # Reached the disabled path AND produced structuredContent despite the dropped wire schema.
-    assert structured.get("enabled") is False
+    # Produced structuredContent despite the dropped wire schema.
+    assert structured.get("value") == 42
 
 
 # tools/list size-gate ceiling (chars of the compact ListToolsResult wire payload). Until
@@ -2753,10 +2952,14 @@ async def test_stripped_tool_still_returns_structured_content(
 # machine-readable (the core value of S29) and cost only ~1% more context per agent turn, so the
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
-# RELATIONAL (a ``<=`` check) so both lanes pass. Measured after typing discover_pvs (S29): the
-# core lane is 62_967 and the full lane 71_265. Re-MEASURE these two after every schema change --
-# they are prose, nothing asserts them, and the last two updates moved them by +406/+411 while an
-# estimate written instead of a measurement had to be corrected by a follow-up commit (`6c0a2ec`).
+# RELATIONAL (a ``<=`` check) so both lanes pass. Measured after typing find_channels (S29): the
+# core lane is 63_742 and the full lane 72_040. Re-MEASURE these two after every schema change --
+# they are prose, nothing asserts them, and an estimate written instead of a measurement had to be
+# corrected by a follow-up commit once already (`6c0a2ec`). Sizes of the last three steps: +406/+411
+# for discover_pvs, then +775/+775 for find_channels -- and that jump is the reason to measure
+# rather than extrapolate: the schema alone would have been ~+410, but the same commit widened the
+# tool DESCRIPTION (the count_only field text and a mode-disjointness sentence), and description
+# bytes ride the same wire as schema bytes.
 # Raising the ceiling is a conscious, CHANGELOG-documented one-line change, never a silent bump.
 _TOOLS_LIST_WIRE_CEILING = 200_000
 
@@ -2764,15 +2967,16 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 62_967 and the full lane
-    71_265; a new tool or an SDK change that inflates the wire could grow that UNNOTICED with an
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 63_742 and the full lane
+    72_040; a new tool or an SDK change that inflates the wire could grow that UNNOTICED with an
     otherwise green suite. This is that guard, now a soft catastrophe-ceiling at 200_000 (see the
     constant's comment for the raise rationale).
 
     What this guard does NOT catch, stated so nobody relies on it: a LOST
     ``@mcp.tool(output_schema=None)`` opt-out. Dropping it on a ``dict[str, object]`` tool restores
     an information-empty accept-all schema (``{additionalProperties: true, type: object}``) — not a
-    typed one — and doing that to all eleven untyped tools grows the wire by 671 chars, measured:
+    typed one — and doing that to all untyped tools grows the wire by 671 chars, measured over the
+    ELEVEN that existed on 2026-07-25 (ten today, the figure deliberately not re-scaled by hand):
     0.3 % of this ceiling. The guard for that is
     :func:`test_output_schema_typed_only_for_typed_tools`, which asserts the iff in both directions.
 

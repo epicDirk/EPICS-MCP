@@ -153,7 +153,10 @@ def build_device_report(
 
     *lookup* is the ``find_displays`` result; *live_results* is the ``pv_get_batch`` dict
     (``{"results": [...], "errors": [...]}``) of the LIVE-QUERIED (capped) channel subset;
-    *ioc_channels* is the ``_find_channels`` dict (``{"enabled": ..., "channels": [...]}``). The
+    *ioc_channels* is the ``_find_channels`` dict, typed at its source as
+    :class:`~epics_pv_mcp.services.checkers.ChannelQueryResult` (``{"enabled": …, "channels": […]}``
+    on the list path); it is taken as a plain ``Mapping`` here so this pure merge stays independent
+    of that shape. The
     per-channel ``channels`` list is derived from the read set (results and errors), joined to its
     serving IOC by exact channel name.
     """

@@ -9,6 +9,48 @@ carry breaking changes).
 
 ### Changed
 
+- **`find_channels` bewirbt jetzt ein getyptes Ausgabe-Schema — und seine zwei Modi liefern
+  DISJUNKTE Felder, was das Schema als Erstes sagt (S29, 11. Ziel).** Das Ergebnis entsteht in
+  `query_channels`, also wohnt das TypedDict `ChannelQueryResult` dort und nicht am Tool-Adapter;
+  die Consumer erben es.
+  - **Sechs beworbene Felder**, und nur **eines** liegt auf jedem Rückgabepfad: `enabled`. Die
+    Liste liefert `{enabled, channels, total, capped}`, der Zähler `{enabled, match_count}`, dazu
+    `note` auf beiden, wenn ChannelFinder unkonfiguriert ist. Wer bisher `total` annahm, weil er
+    ein Ergebnis in der Hand hatte, sieht das jetzt am Vertrag statt im Feldfehler.
+  - ⚠️ **Der Preis, damit ihn niemand später entdeckt:** `total` und `match_count` sind
+    `int | None`. Ein künftiger Consumer muss None prüfen, bevor er rechnet — heute rechnet keiner.
+  - **Vier Pfade über einen echten `fastmcp.Client` konform gemessen** (Liste/Zähler × konfiguriert/
+    unkonfiguriert), mit gefakter **Transport**-Naht statt Client-Klasse: so baut der echte
+    `_project` die Kanal-Elemente, die Client-Rand-Wächter bleiben im Pfad, und der S31-Audit zählt
+    den neuen Test nicht als nutzlast-behauptend (eine Klassen-Attrappe hätte dessen Zahlen still
+    verschoben, ohne dass etwas rot wird).
+  - ⚠️ **Ehrliche Grenze:** das Element-Schema von `channels` bleibt opak
+    (`{type: object, additionalProperties: true}`) wie alle Objekt-Arrays hier, obwohl ein Kanal
+    immer ein `ChannelInfo` mit 6 Feldern ist. Ein verschachteltes TypedDict wäre das erste im
+    Server, brächte `$defs` auf den Draht und berührt drei generische Schema-Wächter — eigener
+    Arbeitsgang. Und: **17 Test-Doppelgänger von `query_channels` setzen den neuen Typ nicht
+    durch** (`monkeypatch`-Wert ist `object`); die Durchsetzung kommt aus mypy auf `src/` und den
+    Draht-Tests.
+  - **Der Wächter, der die nächste Typisierung erzwingt** (`539fc16`):
+    `test_stripped_tool_still_returns_structured_content` prüfte seine eigene Prämisse nicht — er
+    lebt davon, ein UNTYPISIERTES Tool zu fahren, wäre bei dieser Typisierung aber **grün und
+    bedeutungslos** geblieben. Er hat jetzt eine Prämissen-Assertion, ist bei der Typisierung
+    tatsächlich rot geworden und daraufhin auf `get_pv_value` umgehängt. ⚠️ Damit wechselt er die
+    Art: die drei Vorgänger hatten einen config-gegateten echten Pfad, `get_pv_value` braucht eine
+    gefakte `pv_get`-Naht.
+  - **Draht-Budget neu gemessen: Kern-Lane 63742 / Voll-Lane 72040** (Deckel 200000). ⚠️ **+775 pro
+    Lane, nicht die aus dem Vorgänger-Schritt extrapolierten ~410** — dieselbe Änderung hat die
+    Tool-BESCHREIBUNG erweitert, und Beschreibungs-Bytes fahren auf demselben Draht wie
+    Schema-Bytes. Genau deshalb steht dort „nachmessen, nicht hochrechnen".
+  - **Sechs lebende Begründungen mitgezogen**, die dieser Bau falsch gemacht hätte — darunter der
+    als kanonisch deklarierte Nullbarkeits-Block in `services/checkers_olog.py`, auf den alle
+    anderen Shapes zeigen, und die Begründung der `bool()`-Coercion in `tools/discover.py` (sie
+    berief sich darauf, dass die Naht untypisiert sei; die Coercion bleibt, weil die Naht in Tests
+    ersetzt wird, nicht weil sie untypisiert ist).
+  - **Ein Zähler war schon vorher falsch, jetzt gemessen statt geschätzt:** die Notiz zur
+    `EPICS_MCP_READ_RATE_LIMIT`-Exposition nannte 15 betroffene Tests; gemessen unter Limit 1 sind
+    es **19 fremde** (20 mit dem neuen). Der Limit-Wert gehört in die Aussage — ein Test, der zwei
+    Token zieht, fällt erst bei 1 durch.
 - **Der Scheinwächter-Audit ist gefahren, und drei gemessene Lücken sind geschlossen (S31).** Ein
   Test, der die Client-**Klasse** durch eine Attrappe ersetzt, entfernt still jede Prüfung, die der
   echte Client an seinem Rand fährt — er *sieht aus* wie ein Wächter. Was daraus wurde:

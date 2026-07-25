@@ -337,8 +337,9 @@ def _archiver_error_code(exc: ArchiverError) -> str:
 # output model and does not validate the return. The check that bites lives one layer out, in the
 # MCP SDK's low-level call_tool handler, which runs jsonschema over the structuredContent against
 # the advertised schema -- so the failure surfaces only on the WIRE, never on the in-process
-# ``FastMCP.call_tool`` this repo's conformance tests MOSTLY drive (the discover_pvs one is the
-# exception, and there is now a generic wire test over every typed tool; the full statement,
+# ``FastMCP.call_tool`` this repo's conformance tests MOSTLY drive (the discover_pvs and
+# find_channels ones are the exceptions -- both drive a real client -- and there is now a generic
+# wire test over every typed tool; the full statement,
 # including the second validator and what neither of them sees, is in checkers_olog.py's header).
 # Which makes the loose type the safer one here: a mis-typed raw-copy would otherwise pass every
 # per-tool test and break a real client. The flip side is that a loose type advertises almost
@@ -571,6 +572,34 @@ async def query_alarm_history(
         raise EpicsError(f"Alarm Logger: {exc}", error_code=_alarm_error_code(exc)) from exc
 
 
+# find_channels' tool result shape (S29 -- typed MCP outputSchema). It lives HERE, at the shared
+# service, and not at the tool adapter the way ``DiscoverPvsResult`` does: this literal IS the
+# tool's result (``tools/channelfinder.py`` only forwards it), so the type belongs where the dict
+# is built, and the other consumers of the shared payload inherit it.
+#
+# ``total=False`` over the union of FOUR return literals, and the two MODES are DISJOINT: a
+# ``count_only`` path carries ``match_count`` and never ``channels``/``total``/``capped``; a list
+# path carries those and never ``match_count``. Only ``enabled`` is on all four -> non-nullable;
+# every other field is ``X | None``. The nullability rationale is the canonical one in
+# ``services/checkers_olog.py``'s "Tool result shapes" header; the closest precedent for a
+# PARAMETER deciding which keys exist at all is ``OlogDownloadResult`` (as_base64 vs output_path).
+#
+# ``channels`` stays ``list[dict[str, object]]`` instead of a nested TypedDict -- the same
+# convention as ``DiscoverPvsResult.pvs`` and ``ArchiverHistoryResult.samples``; no output shape in
+# this server nests one. Here that is a CHOICE with a price, named rather than hidden: a channel
+# element really is always a ``ChannelInfo`` (6 fields, all required), so the opaque
+# ``{type: object}`` item schema advertises less than is known. Tightening it would put the first
+# ``$defs`` on the wire and touches three generic schema guards, so it is its own job, not a side
+# effect of this one.
+class ChannelQueryResult(TypedDict, total=False):
+    enabled: bool
+    channels: list[dict[str, object]] | None
+    total: int | None
+    capped: bool | None
+    match_count: int | None
+    note: str | None
+
+
 async def query_channels(
     name_pattern: str,
     max_results: int = DEFAULT_MAX_RESULTS,
@@ -582,7 +611,7 @@ async def query_channels(
     has_tags: list[str] | None = None,
     lacks_tags: list[str] | None = None,
     count_only: bool = False,
-) -> dict[str, object]:
+) -> ChannelQueryResult:
     """Query ChannelFinder for channels whose name matches *name_pattern* (glob ``*``/``?``).
 
     Default-disabled: with ``EPICS_MCP_CHANNELFINDER_URL`` unset, returns ``enabled: false`` and
@@ -614,7 +643,7 @@ async def query_channels(
     if lacks_tags:
         filters["lacks_tags"] = lacks_tags
 
-    def _run() -> dict[str, object]:
+    def _run() -> ChannelQueryResult:
         client = ChannelFinderClient(
             cfg.channelfinder_url,
             timeout=timeout,

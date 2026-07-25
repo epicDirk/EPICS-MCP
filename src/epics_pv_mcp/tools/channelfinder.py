@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from epics_pv_mcp.services.channelfinder_client import DEFAULT_MAX_RESULTS
 from epics_pv_mcp.services.checkers import (
+    ChannelQueryResult,
     ChannelVocabularyResult,
     query_channel_vocabulary,
     query_channels,
@@ -28,11 +29,13 @@ async def _find_channels(
     has_tags: list[str] | None = None,
     lacks_tags: list[str] | None = None,
     count_only: bool = False,
-) -> dict[str, object]:
+) -> ChannelQueryResult:
     """Query ChannelFinder for channels whose name matches *name_pattern* (glob ``*``/``?``).
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_channels`; forwards the MA-2
-    property/tag filters and ``count_only``.
+    property/tag filters and ``count_only``. The result shape is typed at the service, not here
+    (S29): this adapter forwards the literal unchanged, so re-declaring it would be a second place
+    to edit.
     """
     return await query_channels(
         name_pattern,
