@@ -568,6 +568,22 @@ def _schema_permits_null(prop: dict[str, Any]) -> bool:
     )
 
 
+def _enum_members(prop: dict[str, Any]) -> frozenset[str] | None:
+    """The declared ``enum`` members of a property, or ``None`` if it constrains no membership.
+
+    Reads the bare ``enum`` of a non-nullable field, or the enum-carrying branch of the
+    ``anyOf``/``oneOf`` pydantic emits for an ``X | None`` field. Deliberately separate from
+    :func:`_base_type`, which sees only the coarse JSON type and therefore cannot tell a
+    ``Literal[...]`` from the bare ``str`` it collapses to."""
+    declared = prop.get("enum")
+    if isinstance(declared, list):
+        return frozenset(str(member) for member in declared)
+    for branch in prop.get("anyOf", []) + prop.get("oneOf", []):
+        if isinstance(branch, dict) and isinstance(branch.get("enum"), list):
+            return frozenset(str(member) for member in branch["enum"])
+    return None
+
+
 def _base_type(prop: dict[str, Any]) -> str | None:
     """The non-null JSON base type of a property — the bare ``type`` of a non-nullable field, or the
     non-null branch of the ``anyOf`` FastMCP emits for an ``X | None`` field. ``None`` if absent."""
@@ -709,9 +725,15 @@ async def test_olog_structured_output_conforms_to_its_schema(
 # fields (the non-null type for an X | None field, the bare type otherwise). Independent source of
 # truth — hardcoded, NOT reflected from the TypedDict — so a base-type WIDENING of an annotation is
 # caught even where nullability hides it from a bare-``type`` check (the _OLOG_FIELD_BASE_TYPE
-# rationale, applied to the archiver result). status is a Literal["ok","empty","withheld"] | None,
-# which pydantic renders as anyOf[{enum:[...], type: string}, {type: null}] — the non-null branch
-# carries type "string", so a Literal that lost its members (widened to str) still trips this.
+# rationale, applied to the archiver result).
+#
+# What this table does NOT catch, measured: it compares the COARSE JSON type only. status is a
+# Literal["ok","empty","withheld"] | None, which pydantic renders as anyOf[{enum:[...], type:
+# string}, {type: null}] — and a bare ``str | None`` renders as anyOf[{type: string}, {type: null}].
+# _base_type reads "string" from BOTH, so widening the Literal away leaves this table green. Same
+# blindness one level down for arrays: list[str] and list[object] are both "array". Enum membership
+# is guarded separately by _OUTPUT_ENUM_MEMBERS; the array element type is only reachable over the
+# wire with a NON-EMPTY list (see the payload-carrying conformance tests).
 _ARCHIVER_HISTORY_BASE_TYPE: dict[str, str] = {
     "enabled": "boolean",
     "pv": "string",
@@ -744,8 +766,13 @@ async def test_archiver_history_exposes_typed_output_schema() -> None:
     literal; this guards a dropped one); (3) every field carries the right JSON BASE type, read via
     :func:`_base_type` from the bare ``type`` (non-nullable) OR the non-null ``anyOf`` branch
     (``X | None``). Checking the NULLABLE fields' base type too closes a widening that hides behind
-    nullability (e.g. status's Literal collapsing to a bare string, or capped: bool | None widened
-    to int | None — mypy-legal since bool ⊆ int, anyOf-shaped so a presence check skips it)."""
+    nullability — e.g. capped: bool | None widened to int | None, mypy-legal since bool ⊆ int, and
+    anyOf-shaped so a presence check skips it.
+
+    NOT covered here, and measured rather than assumed: a widening WITHIN one JSON base type. Both
+    ``Literal["ok","empty","withheld"] | None`` and a bare ``str | None`` yield base type "string",
+    so dropping the Literal's members leaves this test green. That belongs to
+    test_typed_output_schema_enums_declare_their_members, which pins the members themselves."""
     from epics_pv_mcp.server import mcp
 
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
@@ -2002,6 +2029,60 @@ async def test_every_typed_tool_conforms_to_its_schema_over_the_wire(
                         f"{name}.{key}: emitted null but its schema forbids null "
                         f"({properties[key]})"
                     )
+
+
+# Every (tool, field) whose outputSchema constrains MEMBERSHIP, with the members it must advertise.
+# One row per enum that exists; the test below pins the mapping in BOTH directions, so this is not
+# a list someone has to remember to extend.
+_OUTPUT_ENUM_MEMBERS: dict[tuple[str, str], frozenset[str]] = {
+    ("get_pv_history", "status"): frozenset({"ok", "empty", "withheld"}),
+}
+
+
+@pytest.mark.asyncio
+async def test_typed_output_schema_enums_declare_their_members() -> None:
+    """S29: a ``Literal[...]`` in a typed output schema keeps its members — the one constraint the
+    base-type tables structurally cannot see.
+
+    Those tables (_OLOG_FIELD_BASE_TYPE, _ARCHIVER_HISTORY_BASE_TYPE and their siblings) compare
+    the COARSE JSON type. Measured: ``Literal["ok","empty","withheld"] | None`` and a bare
+    ``str | None`` both render a non-null branch of type "string", so :func:`_base_type` returns
+    "string" for either and widening the Literal away leaves every existing test green. Two live
+    comments claimed the opposite; they are corrected where they stand.
+
+    That matters because an enum is the SHARPEST constraint anything here advertises — the wire
+    validator rejects an out-of-vocabulary value, whereas "string" accepts every string there is.
+    Losing the members is a real narrowing of the contract that no caller can detect afterwards.
+
+    The check is RELATIONAL in both directions, so it does not rot: the enums DISCOVERED across all
+    typed schemas must be exactly the declared rows. A new Literal without a row goes red (nobody
+    has to remember this test exists), and a Literal that loses its members goes red because its
+    (tool, field) disappears from the discovered set.
+
+    Red-proof: widen tools/archiver.py's ``status`` annotation from ``Literal[...] | None`` to
+    ``str | None``."""
+    from epics_pv_mcp.server import mcp
+
+    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    discovered: dict[tuple[str, str], frozenset[str]] = {}
+    for name in sorted(_TYPED_OUTPUT_TOOLS):
+        properties = (tools[name].outputSchema or {}).get("properties", {})
+        assert properties, f"{name}: outputSchema carries no typed properties"
+        for field, prop in properties.items():
+            members = _enum_members(prop)
+            if members is not None:
+                discovered[name, field] = members
+
+    assert set(discovered) == set(_OUTPUT_ENUM_MEMBERS), (
+        "the enums advertised by the typed output schemas no longer match the declared ones — "
+        f"undeclared: {sorted(set(discovered) - set(_OUTPUT_ENUM_MEMBERS))}, gone (a Literal was "
+        f"widened away?): {sorted(set(_OUTPUT_ENUM_MEMBERS) - set(discovered))}"
+    )
+    for key, expected in _OUTPUT_ENUM_MEMBERS.items():
+        assert discovered[key] == expected, (
+            f"{key[0]}.{key[1]}: advertised enum members {sorted(discovered[key])} != "
+            f"{sorted(expected)}"
+        )
 
 
 # The four tools that carry a parameter literally NAMED ``title`` (the schema-aware-strip trap).
