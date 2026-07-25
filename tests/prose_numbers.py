@@ -122,10 +122,14 @@ _BREAK = r"(?![.;:]\s+[A-Z])"
 #   * The sentence break is a look-ahead INSIDE the gap, not a filter on the finished match. As a
 #     filter it had the same defect one layer up: "the 7 rows. Both tools agree" matched from the
 #     7 through to "tools", was discarded whole, and the valid "7 rows" inside it was never tried.
+#     The look-ahead alone was not enough either: a gap word ending in "." swallowed the very
+#     terminator the look-ahead tests for, so the break never fired and the cross-sentence pairing
+#     was ACCEPTED where the old filter had at least rejected it. The gap word therefore may not
+#     end in a terminator, which is what makes backtracking try the shorter, correct pairing.
 # The gap classes are DISJOINT (separators are whitespace-or-punctuation-then-whitespace, words are
 # non-space): overlapping classes made the partition ambiguous, and a run of dashes — this estate
 # rules its sections with 75 of them — cost minutes of backtracking.
-_GAP = rf"(?:{_BREAK}[^\w\s]*\s+[^\s]+){{0,2}}{_BREAK}[^\w\s]*\s+"
+_GAP = rf"(?:{_BREAK}[^\w\s]*\s+[^\s]*[^\s.;:]){{0,2}}{_BREAK}[^\w\s]*\s+"
 _PAIRED = re.compile(rf"{_NUMBER}{_GAP}(?:{_alternation(COLLECTION_NOUNS)})\b", re.IGNORECASE)
 
 # "TEN of the twelve", "13 of the 20", "Five of the 16" — the noun is elided, so _PAIRED is blind

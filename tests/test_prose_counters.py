@@ -59,13 +59,17 @@ _SRC = _TESTS.parent / "src" / "epics_pv_mcp"
 # three carry sentences that DUPLICATE a number watched in test_server.py, and a duplicate nobody
 # compares is how the canonical side drifts while the test side is dutifully corrected.
 #
-# This guard's own two files are NOT watched, and the reason is measured rather than convenient.
-# Watching them surfaces 41 phrases, of which roughly four fifths are QUOTATIONS of the estate's
-# prose used to explain the design ("all 22 schemas", "TEN of the twelve"). Inventorying those
-# would add dozens of rows saying "this is an example, not a claim" — a blanket exemption wearing
-# a table's clothes. The genuine risk in them was a handful of sentences that hand-typed a number
-# this module itself derives; those sentences were rewritten to stop naming the number at all, so
-# there is nothing left to rot. Watching them properly is a separate, named piece of work.
+# This guard's own two files are NOT watched, and the honest reason is a trade-off, not a triumph.
+# Watching them surfaces dozens of phrases, the overwhelming majority QUOTATIONS of the estate's
+# prose used to explain the design ("all 22 schemas", "TEN of the twelve"); inventorying those
+# would add rows saying "this is an example, not a claim" — a blanket exemption wearing a table's
+# clothes. The worst offender, a core-lane tool count in the docstring of the module that computes
+# it, was removed rather than inventoried.
+#
+# What is NOT claimed: that nothing here can rot. These files still name derived values in prose,
+# and several of them use nouns the detector does not know ("constants", "words", "pairings"), so
+# watching the files would not catch those anyway. Closing that properly is its own piece of work
+# and is recorded as such — it is not silently finished.
 _WATCHED: tuple[tuple[str, Path], ...] = (
     ("tests/test_server.py", _TESTS / "test_server.py"),
     ("services/checkers_olog.py", _SRC / "services" / "checkers_olog.py"),
@@ -95,12 +99,10 @@ def _claim(label: str, pattern: str, measure: Callable[[], int], scope: str = ""
 def _derivation_source(measure: Callable[[], int]) -> str:
     """A claim's derivation as source text, so a typed-in answer THERE is visible too.
 
-    Two things are deliberately NOT inspected, because both are legitimate places for a number to
-    appear as prose rather than as an answer. A lambda's source is its whole enclosing statement,
-    so everything before the ``lambda`` keyword — the claim's own pattern — is dropped. And a named
-    function's DOCSTRING is dropped: these docstrings explain which set they count ("the twelve
-    constants", "the TWO real-client tests"), and accusing them would punish the explanation the
-    rest of this module asks for. Only executable code is searched.
+    Parsed, never split on text. A lambda yields its BODY — its enclosing statement carries the
+    claim's own pattern, which legitimately contains digits. A named function yields its body
+    WITHOUT the docstring: those docstrings explain which set they count, and accusing them would
+    punish the explanation the rest of this module asks for. Only executable code is searched.
 
     Unreadable source yields the empty string — no accusation, which is the honest answer when
     nothing was inspected.
@@ -109,14 +111,23 @@ def _derivation_source(measure: Callable[[], int]) -> str:
         source = textwrap.dedent(inspect.getsource(measure))
     except (OSError, TypeError):  # pragma: no cover - no measure here is unreadable
         return ""
-    _, separator, tail = source.partition("lambda")
-    if separator:
-        return tail
-    node = ast.parse(source).body[0]
-    if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):  # pragma: no cover
-        return source
-    body = node.body[1:] if ast.get_docstring(node) else node.body
-    return "\n".join(ast.unparse(statement) for statement in body)
+    try:
+        node: ast.AST = ast.parse(source).body[0]
+    except SyntaxError:
+        # ``inspect.getsource`` on a lambda hands back its enclosing STATEMENT, which is a
+        # fragment (``_claim(..., lambda: x),``) and does not parse. Wrapping it in a call makes
+        # it parse; splitting on the word "lambda" instead — the first attempt — truncated a
+        # ruff-wrapped lambda to its first line and would have let a typed-in answer back in.
+        node = ast.parse(f"_({source.strip().rstrip(',')})").body[0]
+    for inner in ast.walk(node):
+        if isinstance(inner, ast.Lambda):
+            return ast.unparse(inner.body)
+    if isinstance(node, ast.Expr | ast.FunctionDef | ast.AsyncFunctionDef):
+        target = node if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) else None
+        if target is not None:
+            body = target.body[1:] if ast.get_docstring(target) else target.body
+            return "\n".join(ast.unparse(statement) for statement in body)
+    return source
 
 
 # --- the measurements -------------------------------------------------------------------------
@@ -126,8 +137,9 @@ def _none_valued(mapping: Mapping[str, str | None]) -> int:
     """Fields the map declares with NO advertised base type.
 
     ``None`` means specifically ``object | None``. An ``X | None`` with a concrete ``X`` still
-    carries its non-null type (``archived: bool | None`` maps to ``"boolean"``), so "the 8
-    enrichment fields" is not "the nullable fields". Every 8 and 26 below rests on that.
+    carries its non-null type (``archived: bool | None`` maps to ``"boolean"``), so the estate's
+    "enrichment fields" are not simply its nullable fields. Every claim below that counts an
+    enrichment, topology or type-info subset rests on that distinction.
     """
     return sum(1 for value in mapping.values() if value is None)
 
@@ -558,10 +570,13 @@ _CLAIMS: tuple[_Claim, ...] = (
     _claim(
         "real-client paths (wire note)", r"drive a real client over (\w+) paths", _return_path_rows
     ),
+    # find_channels' OWN table, not the union: _return_path_rows raises when the two conformance
+    # tables disagree, so binding this find_channels sentence to it would turn a discover_pvs
+    # change into an error across all six tests, naming neither the file nor the prose.
     _claim(
         "find_channels return paths (tool description)",
         r"the (\w+) paths differ further",
-        _return_path_rows,
+        lambda: _paths_rows(_FIND_CHANNELS_CONFORMANCE),
     ),
     _claim(
         "find_channels keys", r"permits all (\w+) keys", lambda: len(ts._FIND_CHANNELS_BASE_TYPE)
@@ -573,6 +588,16 @@ _CLAIMS: tuple[_Claim, ...] = (
         "archive-status enrichment fields",
         r"The (\w+) DS-4A/AR-D enrichment fields",
         lambda: _none_valued(ts._ARCHIVE_STATUS_BASE_TYPE),
+    ),
+    # The detector cannot see this one: four words sit between the number and its noun and the gap
+    # allows two. A claim is matched against the block text directly, so it guards the sentence
+    # anyway — and it must, because its twin thirty lines away IS derived. Which of two sentences
+    # about the same set is watched may not depend on how the author spelled the type.
+    _claim(
+        "archive-status enrichment fields (exposes note)",
+        r"The (\w+) ``object \| None`` enrichment fields",
+        lambda: _none_valued(ts._ARCHIVE_STATUS_BASE_TYPE),
+        scope="test_is_archived_exposes_typed_output_schema",
     ),
     _claim(
         "archive-status enrichment fields (runtime note)",

@@ -17,7 +17,7 @@ ChannelFinder by hand.
 > the tool surface and APIs may still change. Semantic-versioning pre-1.0 caveats apply, so
 > pin a version if you depend on it.
 
-**Maturity.** 1382 tests pass on a standalone install with no EPICS infrastructure at all (1454
+**Maturity.** 1383 tests pass on a standalone install with no EPICS infrastructure at all (1455
 with every extra installed); a further 65 exercise a live stack and skip without one.
 `mypy --strict` covers `src`, `tests` and `scripts`, and the package ships `py.typed`. Both gates
 run in CI on every push, against Python 3.12 and 3.13.
