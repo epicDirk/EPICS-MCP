@@ -145,15 +145,14 @@ To reach a real control system, set the address list in the launcher's environme
 
 ## Built at a facility, designed to be facility-agnostic
 
-This server was written and validated against a real installation at ESS: an e3 IOC over
-PVAccess, an Archiver Appliance, ChannelFinder, the Phoebus Alarm server and logger, and an Olog
-logbook. That is why ESS names appear in the sources, and why the measured quirks it compensates
-for are real ones rather than guesses from a specification.
+Written and validated against a real installation at ESS: an e3 IOC over PVAccess, an Archiver
+Appliance, ChannelFinder, the Phoebus Alarm server and logger, and an Olog logbook. The quirks it
+compensates for were measured against those services, not read off a specification.
 
 No site is hard-coded. Every service URL and network setting is an `EPICS_MCP_*` environment
 variable, so deploying elsewhere means setting those variables, not changing code. Two defaults
-carry a site-specific value (the ChannelFinder privacy allowlists) and both are documented as
-overridable in the [deployment guide](docs/deployment.md).
+carry a site-specific value (the ChannelFinder privacy allowlists), both documented as overridable
+in the [deployment guide](docs/deployment.md).
 
 ## Compatibility
 

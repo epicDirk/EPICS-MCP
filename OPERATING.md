@@ -12,5 +12,6 @@ That single source is shipped inside the package and served to an AI assistant v
 project folder required. Read it there; this file is only the human-facing signpost (kept a pointer,
 not a copy, so the two can never drift).
 
-A deployment / site-adaptation guide (network configuration, CA bundles, per-facility settings) will
-join it here as the server matures.
+The deployment and site-adaptation guide (network configuration, CA bundles, per-facility
+settings) is a separate document: **[docs/deployment.md](docs/deployment.md)**. Start there when
+bringing the server up in a new facility, and run `epics-doctor` to confirm the result.
