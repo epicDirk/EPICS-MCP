@@ -1922,10 +1922,16 @@ _DISABLED_WIRE_ARGS: dict[str, dict[str, Any]] = {
     "discover_pvs": {"pattern": "SIM:PS-*"},
 }
 
-# A JOIN, not a copy: every entry POINTS at the constant its sibling conformance test already
-# declares, so the two can never disagree. Its purpose is to make those constants carry weight at
-# RUNTIME — today each is only consulted to SKIP a field in a static check, so an over-broad entry
-# weakens its test in silence instead of failing it.
+# DERIVED from the per-tool constants, never re-typed: the ten explicit rows point straight at the
+# constant its sibling conformance test declares; the Olog rows are import-time ``frozenset``
+# conversions of _OLOG_ALWAYS_PRESENT's values (a copy in memory, but with no second place to edit,
+# so it cannot drift either). Its purpose is to make those constants carry weight at
+# RUNTIME. Measured, so the claim stays the right size: TEN of the eleven are consulted only to
+# SKIP a field in a static check, so an over-broad entry weakens that test in silence instead of
+# failing it (mutation-checked: widening _ARCHIVER_HISTORY_ALWAYS_PRESENT or
+# _LIST_CHANNEL_VOCABULARY_ALWAYS_PRESENT leaves their tests green). The eleventh,
+# _DISCOVER_PVS_ALWAYS_PRESENT, is ALREADY runtime-bound by its own conformance test and goes red
+# on the same mutation.
 _ALWAYS_PRESENT_BY_TOOL: dict[str, frozenset[str]] = {
     **{name: frozenset(fields) for name, fields in _OLOG_ALWAYS_PRESENT.items()},
     "get_pv_history": _ARCHIVER_HISTORY_ALWAYS_PRESENT,
@@ -1954,12 +1960,22 @@ async def test_every_typed_tool_conforms_to_its_schema_over_the_wire(
 
     * They cannot notice a tool that has NO wire coverage. A twelfth typed tool ships, nobody adds a
       test, and every existing test stays green — the failure mode of every hand-maintained list.
-      The completeness assertions below turn exactly that into a red test.
-    * They drive ``FastMCP.call_tool``, which hands a return back UNVALIDATED (pinned by
-      test_wire_validates_output_schema_while_in_process_does_not). Their runtime half therefore
+      The completeness assertions below turn exactly that into a red test, and that is the ONE
+      genuinely new guarantee here.
+    * TEN of the eleven drive ``FastMCP.call_tool``, which hands a return back UNVALIDATED (pinned
+      by test_wire_validates_output_schema_while_in_process_does_not). Their runtime half therefore
       only ever checked the ONE thing it asserts explicitly — that an emitted null is permitted —
-      and 13 of the 20 tools they cover emit no null at all on the driven path, so for those the
-      runtime half asserts nothing beyond "the call did not raise".
+      and 13 of the 20 tools THOSE TEN cover emit no null at all on the driven path, so for those
+      the runtime half asserts nothing beyond "the call did not raise". The eleventh,
+      test_discover_pvs_structured_output_conforms_to_its_schema, is the exception on every count:
+      it already drives a real client over four paths, checks always-present fields at runtime, and
+      pins field coverage with ``seen == set(properties)``.
+
+    So the three per-tool assertions below are NOT new inventions — they are that one test's checks
+    (its ``seen`` equality relaxed to a subset, since one disabled path cannot cover every field)
+    carried from ONE tool to all 21. The non-vacuity floor is older still: every ``exposes`` test
+    already carries it. Claiming otherwise would be the very defect this file keeps having to
+    remove.
 
     HONEST SCOPE — this is a coverage guard, not a bug hunt. The same population was measured
     once over a real client with 0 violations (CHANGELOG, S29/LO), and mypy --strict already
@@ -2015,8 +2031,8 @@ async def test_every_typed_tool_conforms_to_its_schema_over_the_wire(
             assert properties, f"{name}: outputSchema carries no typed properties"
             assert set(structured) <= set(properties), (
                 f"{name}: emitted {sorted(set(structured) - set(properties))}, which the "
-                "outputSchema does not advertise (the wire permits extra keys — nothing else "
-                "catches this)"
+                "outputSchema does not advertise (the wire permits extra keys, and mypy only "
+                "catches an undeclared key in a return LITERAL — not one merged in at runtime)"
             )
             for always in _ALWAYS_PRESENT_BY_TOOL[name]:
                 assert always in structured, (
@@ -2058,6 +2074,13 @@ async def test_typed_output_schema_enums_declare_their_members() -> None:
     typed schemas must be exactly the declared rows. A new Literal without a row goes red (nobody
     has to remember this test exists), and a Literal that loses its members goes red because its
     (tool, field) disappears from the discovered set.
+
+    SCOPE, measured rather than implied: the walk covers TOP-LEVEL properties only. It does not
+    descend into ``items``, ``$defs`` or nested ``anyOf`` branches — today that costs nothing (a
+    full recursive traversal of all 21 schemas finds the same single enum, no ``const``, and no
+    ``$defs`` at all, because every array element is an unconstrained object), but a ``Literal``
+    inside a future list-element MODEL would go unnoticed. The auto-discovery promise above is
+    therefore about scalar top-level fields, not about every enum a schema could ever carry.
 
     Red-proof: widen tools/archiver.py's ``status`` annotation from ``Literal[...] | None`` to
     ``str | None``."""
@@ -2127,7 +2150,18 @@ async def test_search_logbook_payload_path_is_guarded_below_the_client(
 
     * A well-formed response: the enabled path emits entries and a real ``total_matches``. This is
       the first time a NON-EMPTY entries list is validated at all — an empty array satisfies any
-      item constraint by construction, so the disabled-path coverage cannot reach it.
+      item constraint by construction, so the disabled-path coverage cannot reach it. Worth the
+      right size, though: ``entries`` is ``list[dict[str, object]]``, so its item constraint is
+      only "is an object". The sharp one (``items: {type: string}``) lives on the sibling test's
+      ``tags``; what this half really pins is ``total_matches``, below.
+
+    ENV NOTE, measured: because this fakes the TRANSPORT, the call runs the real read throttle
+    (services/_http.py). conftest resets that throttle but rebuilds it from the REAL config, and
+    ``EPICS_MCP_*`` is deliberately not isolated there — so a machine exporting
+    ``EPICS_MCP_READ_RATE_LIMIT`` fails this test. It is a pre-existing, repo-wide exposure (15
+    other tests fail the same way under that env), not something this test introduced; CI runs
+    with a clean env. Named here rather than worked around locally, because the fix belongs in
+    conftest, for all of them at once.
     * A ``hitCount`` of ``true``: JSON has no separate boolean-vs-integer question the way Python
       does not either (``bool`` IS an ``int``), so this value would flow straight into an
       ``integer | null`` field. The client-edge guard rejects it FIRST, with its own diagnosis
@@ -2139,7 +2173,6 @@ async def test_search_logbook_payload_path_is_guarded_below_the_client(
     guard was there to stop. mypy stays green throughout (bool ⊆ int), which is why a type checker
     cannot stand in for this test."""
     from fastmcp import Client
-    from fastmcp.exceptions import ToolError as WireToolError
 
     from epics_pv_mcp.config import EpicsConfig
     from epics_pv_mcp.server import mcp
@@ -2165,7 +2198,7 @@ async def test_search_logbook_payload_path_is_guarded_below_the_client(
         assert len(cast(list[object], structured["entries"])) == 1, structured
 
         session.get.return_value = _fake_json_response({"logs": [], "hitCount": True})
-        with pytest.raises(WireToolError) as excinfo:
+        with pytest.raises(ToolError) as excinfo:
             await client.call_tool("search_logbook", {})
     assert "hitCount" in str(excinfo.value), (
         "a boolean hitCount no longer meets the client-edge guard's own diagnosis — if this now "
@@ -2203,7 +2236,6 @@ async def test_channel_vocabulary_payload_path_is_guarded_below_the_client(
     was there to stop. mypy stays green (the narrowed dict yields ``Any``), so again a type checker
     cannot stand in for this."""
     from fastmcp import Client
-    from fastmcp.exceptions import ToolError as WireToolError
 
     from epics_pv_mcp.config import EpicsConfig
     from epics_pv_mcp.server import mcp
@@ -2230,7 +2262,7 @@ async def test_channel_vocabulary_payload_path_is_guarded_below_the_client(
         assert structured["tags"] == ["vacuum"], structured
 
         session.get.return_value = _fake_json_response([{"name": 42}])
-        with pytest.raises(WireToolError) as excinfo:
+        with pytest.raises(ToolError) as excinfo:
             await client.call_tool("list_channel_vocabulary", {})
     assert "unreadable item" in str(excinfo.value), (
         "a non-string name no longer meets the client-edge guard's own diagnosis — if this now "

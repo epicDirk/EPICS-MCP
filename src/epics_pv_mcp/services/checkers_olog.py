@@ -62,10 +62,11 @@ from epics_pv_mcp.services.olog_exceptions import (
 #     structuredContent against the advertised ``outputSchema``, so a non-nullable annotation on a
 #     field that can be an explicit None earns a real client an ``Output validation error``
 #     instead of an answer.
-#   * The in-process ``FastMCP.call_tool`` shortcut — which the per-tool conformance tests here
-#     use — does NOT validate. A test driving it therefore cannot see a violation a real client
-#     would hit; only a test driving a real ``fastmcp.Client`` can. That asymmetry is why the
-#     static Part B carries the guarantee, and it is itself pinned rather than assumed:
+#   * The in-process ``FastMCP.call_tool`` shortcut — which MOST conformance tests here use (all
+#     but the discover_pvs one, which drives a real client) — does NOT validate. A test driving it
+#     therefore cannot see a violation a real client would hit; only a test driving a real
+#     ``fastmcp.Client`` can. That asymmetry is why the static Part B carries the guarantee for the
+#     rest of them, and the asymmetry itself is pinned rather than assumed:
 #     ``test_wire_validates_output_schema_while_in_process_does_not`` asserts BOTH halves against
 #     a throwaway server, so a dependency bump that moves or drops the check cannot leave the
 #     wire tests silently green-and-empty. What drives the wire today:

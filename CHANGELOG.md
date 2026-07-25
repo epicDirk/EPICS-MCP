@@ -20,9 +20,15 @@ carry breaking changes).
   - **Vollständigkeit** (`d2bc022`): ein generischer Test fährt ALLE getypten Tools über einen
     echten Client und pinnt seine Tabelle relational gegen `_TYPED_OUTPUT_TOOLS`. Ein künftig
     getyptes Tool ohne Draht-Zeile wird damit rot — was elf handgepflegte Einzeltests prinzipiell
-    nicht können. Dazu drei Behauptungen, die es nirgends gab: Nicht-Leerlauf-Boden, kein
-    unbeworbenes Feld, und die Präsenz jedes als immer-da deklarierten Feldes (das macht die
-    `_*_ALWAYS_PRESENT`-Konstanten erstmals laufzeit-tragend statt bloße Skip-Filter).
+    nicht können. **Das ist die einzige wirklich neue Zusage.** Die drei per-Tool-Behauptungen des
+    Tests (Nicht-Leerlauf-Boden · kein unbeworbenes Feld · Präsenz jedes als immer-da deklarierten
+    Feldes) sind **nicht neu erfunden**, sondern die Prüfungen des `discover_pvs`-Conformance-Tests,
+    von **einem** Tool auf **21** getragen; der Nicht-Leerlauf-Boden existierte ohnehin schon in
+    jedem `exposes`-Test. Ebenso präzisiert: von den elf `_*_ALWAYS_PRESENT`-Konstanten sind **zehn**
+    reine Skip-Filter, `_DISCOVER_PVS_ALWAYS_PRESENT` war bereits laufzeit-gebunden. ⚠️ Die erste
+    Fassung dieses Eintrags behauptete „drei Behauptungen, die es nirgends gab" — von der eigenen
+    Impl-QA widerlegt, obwohl derselbe Test jene Stellen als Vorbild zitiert. Genau die
+    Fehlerklasse, die dieser Strang schon zweimal aufräumen musste.
   - **Enum-Mitglieder** (`9499d22`): die Basistyp-Tabellen vergleichen nur den GROBEN JSON-Typ —
     `Literal["ok","empty","withheld"] | None` und ein nacktes `str | None` liefern beide „string",
     ein aufgeweichtes Literal blieb also überall grün. Zwei lebende Kommentare behaupteten das
