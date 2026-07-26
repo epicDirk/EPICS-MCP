@@ -24,11 +24,11 @@ What you expected instead.
 - `epics-pv-mcp` version (or commit):
 - Python version:
 - OS:
-- Which REST planes are enabled (ChannelFinder / Archiver / Alarm / Naming — via their `*_URL`)?
+- Which REST planes are enabled (ChannelFinder / Archiver / Alarm / Naming, via their `*_URL`)?
 - Relevant EPICS network config (`EPICS_PVA_ADDR_LIST` / name server), if a live read is involved:
 
 ## Logs / output
 
 Paste the error, the tool output, or a relevant `logger` line (redact any hostnames/PVs you
-consider sensitive). Note: this is a read-only server — please do not paste secrets or
+consider sensitive). Note: this is a read-only server, so please do not paste secrets or
 `Authorization` header values.

@@ -20,4 +20,4 @@ A short summary of the change and the motivation.
 
 ## Notes for reviewers
 
-Anything worth calling out — a deferred follow-up, a known limitation, a design trade-off.
+Anything worth calling out: a deferred follow-up, a known limitation, a design trade-off.

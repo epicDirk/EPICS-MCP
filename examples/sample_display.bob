@@ -2,7 +2,7 @@
 <!-- Minimal Phoebus/CS-Studio display for the display-aware tools (validate_pvs,
      find_device, crossplane_check). References the quick-start PV from test.db. -->
 <display version="2.0.0">
-  <name>EPICS PV MCP — example</name>
+  <name>EPICS PV MCP example</name>
   <width>320</width>
   <height>120</height>
   <widget type="label" version="2.0.0">

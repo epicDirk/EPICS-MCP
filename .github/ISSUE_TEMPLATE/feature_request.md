@@ -11,7 +11,7 @@ What are you trying to do with the control system that the server does not suppo
 
 ## Proposed capability
 
-What tool, CLI flag, resource, or plane would help — and roughly what it should return.
+What tool, CLI flag, resource, or plane would help, and roughly what it should return.
 
 ## Read-only / safety note
 

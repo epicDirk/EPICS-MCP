@@ -17,7 +17,7 @@ ChannelFinder by hand.
 > the tool surface and APIs may still change. Semantic-versioning pre-1.0 caveats apply, so
 > pin a version if you depend on it.
 
-**Maturity.** 1401 tests pass on a standalone install with no EPICS infrastructure at all — that is
+**Maturity.** 1401 tests pass on a standalone install with no EPICS infrastructure at all, and that is
 the figure CI reports, on Linux, and a Windows run shows one more because a single path test is
 Windows-only. With every extra installed it is 1474 (measured on Windows; CI does not install the
 extras, so no CI log states this one). A further 65 exercise a live stack and skip without one.
@@ -143,7 +143,7 @@ To reach a real control system, set the address list in the launcher's environme
 | [Architecture](ARCHITECTURE.md) | The `server → tools → services → clients` layering and the plane model |
 | [Security policy](SECURITY.md) | Reporting a vulnerability, and an honest statement of what the write gates are **not** |
 | [Contributing](CONTRIBUTING.md) | Dev setup, the gate chain, Definition of Done |
-| [Known limits](docs/known-limits.md) | What is deliberately **not** guarded, dated and measured — including the tempting repairs that were probed and rejected |
+| [Known limits](docs/known-limits.md) | What is deliberately **not** guarded, dated and measured, including the tempting repairs that were probed and rejected |
 | [Changelog](CHANGELOG.md) | Release history |
 
 ## Built at a facility, designed to be facility-agnostic
