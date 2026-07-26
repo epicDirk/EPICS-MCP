@@ -81,20 +81,52 @@ def test_check_with_a_database_compares_all_four_pins(
     untested, deleting the comparison would have stopped 102 and 20 from ever being checked while
     the gate stayed green — the exact shape of sham this tool exists to find.
 
+    THE MAP MUST DISCRIMINATE, and the first version's did not. It carried the context ``"t::a"``,
+    which ends with ``::a`` and therefore matches no test name in the estate, so ``executing`` never
+    intersected the claiming tests and both figures came out exactly as they do for an EMPTY map.
+    Measured: the whole guard-line intersection in ``cmd_sham`` could be deleted, or its ``in``
+    inverted to ``not in``, and this test stayed green — a sham guard inside the tool that exists to
+    find sham guards. The context below names a test that really is in the population, so the two
+    coverage figures must come out one lower than the AST pair, and the assertions say so.
+
+    Asserting the VALUES rather than the pin names is the other half. "Both names appear on stderr"
+    is satisfied by a computation that returns constants; "measured 106" is not.
+
     Honest limit, because the substitution below is easy to over-read: it replaces
     ``load_coverage_map``, so what is exercised is its CONSUMER. The reader itself — which must
     query the ``arc`` table, since ``line_bits`` yields a silently empty map — is still covered by
     no test at all.
     """
-    monkeypatch.setattr(
-        guard_audit, "load_coverage_map", lambda _path: {("olog_client.py", 211): {"t::a"}}
+    # A real member of the claiming population, and one that carries payload vocabulary, so
+    # excluding it must move BOTH coverage figures by exactly one. If it ever leaves the population
+    # the arithmetic below is wrong, so that is checked rather than assumed.
+    covering = "tests/test_olog.py::test_search_bad_time_is_not_a_connection_error"
+    claimed = {
+        name: edge for entries in guard_audit.claiming_tests().values() for name, edge in entries
+    }
+    assert claimed.get(covering.rsplit("::", 1)[1]) is True, (
+        f"{covering} is no longer a claiming test with payload vocabulary; this test's -1 "
+        "arithmetic assumes it is. Pick another member of the population."
     )
+
+    monkeypatch.setattr(
+        guard_audit, "load_coverage_map", lambda _path: {("olog_client.py", 211): {covering}}
+    )
+    counted = guard_audit.population()
     assert guard_audit.main([*_ARGV, "--coverage-db", "synthetic"]) == 1
     reported = capsys.readouterr().err
     assert "NOT checked here" not in reported, "with a map, nothing should be deferred"
     for pin in guard_audit.PINNED_COVERAGE:
         assert pin in reported, f"a coverage-dependent pin was not compared: {pin}"
     assert "PIN DEVIATION" in reported
+    for name, measured in (
+        (guard_audit.NOT_EXECUTING, counted[guard_audit.DOUBLES] - 1),
+        (guard_audit.SHAM_CANDIDATES, counted[guard_audit.EDGE_VOCABULARY] - 1),
+    ):
+        expected = f"{name}: pinned {guard_audit.PINNED[name]}, measured {measured}"
+        assert expected in reported, (
+            f"the map excludes exactly one claiming test, so this line must appear: {expected!r}"
+        )
 
 
 def test_reporting_mode_still_demands_a_database(capsys: pytest.CaptureFixture[str]) -> None:
