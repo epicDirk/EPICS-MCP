@@ -80,7 +80,9 @@ from guard_audit import (  # noqa: E402 - needs sys.path above
     DOUBLES,
     EDGE_VOCABULARY,
     PINNED_AST,
+    PINNED_COVERAGE,
     RERUN_AST,
+    SHAM_CANDIDATES,
     client_modules,
     enumerate_targets,
     population,
@@ -230,10 +232,23 @@ _PROSE_FIGURES: tuple[tuple[str, str, Callable[[], int]], ...] = (
         r"(\w+) counts every target on those lines",
         _targets_behind_recorded_keys,
     ),
+    # Anchored on "DERIVED here is", not on the bare ``and the X, not the`` fragment it started as.
+    # That fragment is five common tokens with no domain word in it, so any earlier sentence of the
+    # same shape — and this docstring is dense in them — would capture the row and leave the caveat
+    # watched by nothing. A pattern per WORDING only works if the wording identifies its sentence.
     (
         "keys with several targets (restated in the caveat)",
-        r"and the (\w+), not the",
+        r"DERIVED here is the \w+ and the (\w+)",
         _keys_with_several_targets,
+    ),
+    # The FIFTH restatement, and it is a coverage-decided figure stated in the present tense — the
+    # class that put a superseded pair in this file for a day. Compared to the PIN rather than to a
+    # fresh sweep, which is all that can be done without a ctrace run, and is what the docstring
+    # below says it does.
+    (
+        "sham candidates (restated in the sham bullet)",
+        r"and (\w+) remain once the tests",
+        lambda: PINNED_COVERAGE[SHAM_CANDIDATES],
     ),
     (
         "payload vocabulary (restated in the sham bullet)",
@@ -322,19 +337,23 @@ def test_the_recorded_figures_match_the_prose_that_states_them() -> None:
     An audit is a measurement and a measurement rots; a WRITE-UP of a measurement rots faster,
     because nothing runs it. Each figure in ``_PROSE_FIGURES`` is re-derived from what produces it.
 
-    NOT everything in that docstring, and the difference is the honest part. Two kinds of figure
-    are only PINNED, never recomputed. The coverage-decided PAIR is held in
-    ``guard_audit.PINNED_COVERAGE`` and checked by ``sham --check --coverage-db`` — deliberately not
-    restated here, since restating a pinned figure is how this file came to assert a superseded one.
-    The sweep-decided figures (the 19, the "only 2", the "one" and the "two") are held NOWHERE but
-    in this docstring and the tables below it; comparing them to ``len()`` of the hand-typed table
-    that records them proves the prose matches the TABLE, not that either matches a fresh sweep.
-    Only the AST-derived rows — the population, the target count, the row count, the eight, the
-    RAISE guards, the live modules — are re-measured from the code.
+    NOT everything in that docstring, and the difference is the honest part — stated in three tiers
+    because merging them is how this docstring came to claim coverage it did not have:
 
-    Nor is there a completeness pin here, so a tenth figure added to that docstring next month
-    ships unwatched. S32's ``test_prose_counters`` has that mechanism; wiring this file into it is
-    separate work.
+    * RE-MEASURED from the code: the population, the target count, the row count, the eight, the
+      RAISE guards, the live modules — and each of their restatements, one row per wording.
+    * COMPARED TO A PIN, which proves the prose matches the recorded audit and NOT a fresh sweep:
+      the two coverage-decided figures in ``guard_audit.PINNED_COVERAGE``. Reaching them for real
+      costs a ``COVERAGE_CORE=ctrace`` run and is ``sham --check --coverage-db``'s job.
+    * COMPARED TO A HAND-TYPED TABLE, which proves only that the prose matches the table: the "one"
+      and the "two", against ``len(_UNOBSERVED_EITHER_WAY)`` and ``len(_NEVER_EXECUTED)``.
+    * COMPARED TO NOTHING AT ALL: the 19 and the "only 2". They are sweep results with no table and
+      no pin — written here and nowhere else. Saying otherwise is the failure this tier list exists
+      to prevent, and an earlier version of this paragraph did say otherwise.
+
+    Nor is there a completeness pin here: a figure added to that docstring next month ships
+    unwatched, exactly as five restatements already did until each got its own row. S32's
+    ``test_prose_counters`` has that mechanism; wiring this file into it is separate work.
     """
     prose = " ".join((__doc__ or "").split())
     wrong: list[str] = []

@@ -17,10 +17,10 @@ ChannelFinder by hand.
 > the tool surface and APIs may still change. Semantic-versioning pre-1.0 caveats apply, so
 > pin a version if you depend on it.
 
-**Maturity.** 1400 tests pass on a standalone install with no EPICS infrastructure at all (1472
-with every extra installed); a further 65 exercise a live stack and skip without one. Those are the
-figures CI reports, on Linux — a Windows run shows one more in each, from a single path test that is
-Windows-only.
+**Maturity.** 1401 tests pass on a standalone install with no EPICS infrastructure at all — that is
+the figure CI reports, on Linux, and a Windows run shows one more because a single path test is
+Windows-only. With every extra installed it is 1474 (measured on Windows; CI does not install the
+extras, so no CI log states this one). A further 65 exercise a live stack and skip without one.
 `mypy --strict` covers `src`, `tests` and `scripts`, and the package ships `py.typed`. Both gates
 run in CI on every push, against Python 3.12 and 3.13.
 

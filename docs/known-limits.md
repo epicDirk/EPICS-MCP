@@ -19,9 +19,16 @@ The prose-counter guard reads Python comments and docstrings. It does not read `
 
 Measured: **38** size-naming phrases across **10** tracked markdown files (the detector's own
 vocabulary — a number paired with one of `prose_numbers.COLLECTION_NOUNS`, or the `N of the M`
-shape). **12 of those sit in `CHANGELOG.md` and `CLAUDE.md` and are deliberately historical** —
-a changelog entry that said "22 schemas" in a past release must keep saying it. This page is in its
-own census, and is one of the ten files.
+shape). **12 of those sit in `CHANGELOG.md` and `CLAUDE.md`**, and that is where the exemptions
+would live: a changelog entry that said "22 schemas" in a past release must keep saying it. This page
+is in its own census, and is one of the ten files.
+
+Read the twelve rather than trusting the label, because they are not uniform: the `CHANGELOG.md`
+release lines and `CLAUDE.md`'s dated coverage measurement are deliberately historical, but at least
+two are neither historical nor claims — a numbered-list ordinal the detector paired with a following
+noun, and a live epistemic maxim in the evidence-discipline section. Two of the twelve are therefore
+detector reach rather than exemption candidates, which nudges the "roughly twenty" estimate below
+DOWN and is itself an argument for the release-checklist route.
 
 ⚠️ Those three figures were first written as 32 / 9 / 11: the count of the tree BEFORE the last two
 commits of the batch that added this page, and before the page itself existed. Corrected. They are

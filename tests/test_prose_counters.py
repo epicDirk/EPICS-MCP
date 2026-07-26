@@ -670,54 +670,82 @@ def _tools_declaring_parameter(parameter: str) -> frozenset[str]:
     )
 
 
-def _union_members(annotation: str) -> frozenset[str]:
-    """The top-level members of a union annotation, in any order and either spelling.
+#: Spellings of a union that are the SAME TYPE as ``X | None`` and must therefore read alike.
+#: ``Annotated[X, ...]`` is unwrapped rather than treated as a member: the wrapper carries metadata,
+#: never a type, and it is already house style on the input side of this package.
+_UNION_ALIASES: frozenset[str] = frozenset({"Union", "Optional"})
 
-    ``X | Y`` is parsed, not split on the ``|`` character: a nested union inside a subscript
-    (``dict[str, int | None]``) is one member, and a text split would read it as two.
-    ``Optional[X]`` is normalized to ``{X, None}`` because it is the same type; anything else comes
-    back as a single member, so a non-union annotation answers as a one-element set.
+
+def _union_members(annotation: str) -> frozenset[str]:
+    """The top-level members of a union annotation, in every spelling of the same type.
+
+    PARSED, never split on the ``|`` character: a union nested inside a subscript
+    (``dict[str, int | None]``) is ONE member, and a text split would read it as two.
+
+    Normalized, because these are all one type and a guard that answers differently for them is
+    testing the author's habit rather than the type: ``X | None`` and ``None | X`` (order),
+    ``Optional[X]`` and ``Union[X, None]`` (alias), the same two written ``typing.Optional[X]`` /
+    ``t.Union[...]`` (dotted), ``Annotated[X, Field(...)]`` (wrapper), and a quoted forward
+    reference ``"X | None"`` (string). Measured: reading only ``X | None`` and ``Optional[X]``
+    left five of those seven spellings answering wrongly, in both directions.
+
+    Anything the walk does not recognize comes back as a single unparsed member, so a non-union
+    annotation answers as a one-element set.
     """
 
     def members(node: ast.expr) -> Iterator[str]:
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
             yield from members(node.left)
             yield from members(node.right)
-        elif (
-            isinstance(node, ast.Subscript)
-            and isinstance(node.value, ast.Name)
-            and node.value.id == "Optional"
-        ):
-            yield from members(node.slice)
-            yield "None"
-        else:
-            yield ast.unparse(node).replace(" ", "")
+            return
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            # A quoted forward reference is a type written as text; read the text.
+            yield from members(ast.parse(node.value, mode="eval").body)
+            return
+        if isinstance(node, ast.Subscript):
+            head = node.value
+            name = head.attr if isinstance(head, ast.Attribute) else getattr(head, "id", "")
+            if name == "Annotated":
+                inner = node.slice
+                first = inner.elts[0] if isinstance(inner, ast.Tuple) and inner.elts else inner
+                yield from members(first)
+                return
+            if name in _UNION_ALIASES:
+                inner = node.slice
+                for element in inner.elts if isinstance(inner, ast.Tuple) else [inner]:
+                    yield from members(element)
+                if name == "Optional":
+                    yield "None"
+                return
+        yield ast.unparse(node).replace(" ", "")
 
     return frozenset(members(ast.parse(annotation, mode="eval").body))
 
 
-def _is_nullable_list(annotation: str) -> bool:
-    """A field annotation that renders as ``anyOf[array, null]`` on the wire.
+def _row_admits_null(annotation: str) -> bool:
+    """Whether an ARRAY row's field admits ``None`` — i.e. renders as ``anyOf[array, null]``.
 
-    Read as a UNION, not as a string, and that distinction is the difference between testing the
-    wire shape and testing the author's typing habit. The previous version asked
-    ``startswith("list[") and endswith("|None")``, which is a question about SPELLING: measured,
-    ``None | list[str]`` is the identical type object and the identical wire schema, and it answered
-    False -- so a genuinely nullable new array row would have left every test green with the prose
-    false, and reversing an existing field's spelling would have reddened a still-true sentence.
-    Both directions were reproduced before this was changed.
+    THE QUESTION IS ONLY NULLABILITY, and getting that wrong is what two rounds of QA found here.
+    Whether the field is an array is already settled elsewhere and better: ``_OUTPUT_ARRAY_ITEMS``
+    is pinned EQUAL to the set of array-typed properties the live schemas advertise
+    (``test_typed_output_schema_arrays_declare_their_element_schema``), so every row is an array on
+    the wire by construction. A predicate that also asked "does the annotation start with
+    ``list[``" was therefore re-deciding a settled question, and deciding it from the spelling:
 
-    The escape had no precedent in the package -- measured on the tree that shipped it: 515
-    ``| None``, 0 ``None |``, 0 ``Optional[``, and ruff's UP045 pushes towards the matched spelling.
-    That is exactly why it is fixed rather than inventoried: a docstring asserting a WIRE property
-    while the code consults a spelling is the stand-in class this module exists to remove, and "no
-    one writes it that way today" is a statement about habits, not about the guard.
+    * first it asked ``startswith("list[") and endswith("|None")``. ``None | list[str]`` — the
+      identical type, the identical wire schema — answered False, so a genuinely nullable new row
+      shipped green with the prose false, and re-spelling an existing field reddened a true
+      sentence. Both directions measured.
+    * then it asked the same question of the union members, which fixed the ORDER and left
+      ``Sequence[str] | None``, ``tuple[str, ...] | None``, ``Union[list[str], None]``,
+      ``typing.Optional[list[str]]``, ``Annotated[list[str] | None, Field(...)]`` and the quoted
+      forward reference each answering wrongly — five of them false-RED on correct prose. A fix
+      that moves the boundary of a wrong question is still the wrong question.
+
+    Asking only about ``None`` removes the container from the criterion altogether, which is why
+    that whole family of spellings stops mattering.
     """
-    members = _union_members(annotation)
-    if "None" not in members:
-        return False
-    non_null = members - {"None"}
-    return bool(non_null) and all(member.startswith("list[") for member in non_null)
+    return "None" in _union_members(annotation)
 
 
 @cache
@@ -744,7 +772,7 @@ def _nullable_array_rows() -> int:
                 f"(the tool's return annotation reads {results.get(tool)!r}) — the row, the "
                 "return annotation or the result shape moved"
             )
-        found += _is_nullable_list(fields[field])
+        found += _row_admits_null(fields[field])
     return found
 
 
@@ -1683,30 +1711,60 @@ def test_the_tracer_reports_a_declared_but_unread_source() -> None:
     )
 
 
-def test_a_nullable_array_is_recognised_in_every_spelling() -> None:
-    """The WIRE SHAPE decides which array rows are nullable, not the author's typing habit.
+def test_the_union_walk_reads_a_type_and_not_a_spelling() -> None:
+    """``_union_members`` is asserted directly, because its own contract is what the guard rests on.
 
-    ``X | None``, ``None | X`` and ``Optional[X]`` are one type and one wire schema. The predicate
-    answered differently for them, and an outside QA measured both consequences: a genuinely
-    nullable new row spelled ``None | list[str]`` left the whole suite green with
-    "Five of the 16 declared arrays are ``anyOf[array, null]``" false, and reversing an existing
-    field's spelling reddened that same still-true sentence. Neither is a hypothetical shape — they
-    are the same field, typed by two authors.
+    Every spelling below is the SAME TYPE and the same wire schema, so all must yield the same
+    members. Two rounds of QA found this predicate answering by spelling: first the order
+    (``None | X``), then the alias, the dotted alias, the ``Annotated`` wrapper, the non-``list``
+    container and the quoted forward reference — five of the seven false-RED on correct prose.
 
-    The last two assertions guard the other direction: a union whose non-null member is not a list,
-    and a nested union inside a subscript, which is not a top-level union at all and must not be
-    read as one.
+    The nested-union assertion carries the PARSE-not-split property, and it is asserted on
+    ``_union_members`` rather than through the nullability predicate on purpose: routed through the
+    predicate it was UNFALSIFIABLE, because a member unparsed from a sub-node of
+    ``dict[str, int | None]`` can never satisfy the predicate whatever the walk does. An assertion
+    that cannot go red is the defect this module exists to remove, so it was moved to where it can.
 
-    Red proof, executed: restore ``startswith("list[") and endswith("|None")`` and the second and
-    third assertions fail — that is exactly what shipped.
+    Red proof, executed: replace the final ``yield`` with ``.split("|")`` — the strawman the
+    ``_union_members`` docstring names — and this test reddens naming ``dict[str,int|None]``, while
+    ``test_every_claimed_counter_matches_its_set`` stays GREEN under the same mutation. That green
+    is the measurement that this property has no other guard in the module.
     """
-    assert _is_nullable_list("list[str]|None")
-    assert _is_nullable_list("None|list[str]")
-    assert _is_nullable_list("Optional[list[str]]")
-    assert _is_nullable_list("list[dict[str,object]]|None")
-    assert not _is_nullable_list("list[str]")
-    assert not _is_nullable_list("str|None")
-    assert not _is_nullable_list("dict[str,int|None]")
+    for spelling in (
+        "list[str]|None",
+        "None|list[str]",
+        "Optional[list[str]]",
+        "Union[list[str],None]",
+        "typing.Optional[list[str]]",
+        "Annotated[list[str]|None,Field(description='x')]",
+        "'list[str] | None'",
+    ):
+        assert _union_members(spelling) == frozenset({"list[str]", "None"}), spelling
+
+    # PARSED, not split: a nested union is one member, and "None" must NOT surface at top level.
+    assert _union_members("dict[str,int|None]") == frozenset({"dict[str,int|None]"})
+    assert _union_members("list[str]") == frozenset({"list[str]"})
+
+
+def test_an_array_row_is_nullable_by_its_type_not_by_its_container() -> None:
+    """An array row admits null or it does not; which array container it uses is not the question.
+
+    The row set is pinned equal to the wire's array-typed properties elsewhere, so asking about the
+    container here re-decided a settled question from the spelling — and got it wrong for
+    ``Sequence[str] | None`` and ``tuple[str, ...] | None``, both of which render as
+    ``anyOf[array, null]`` exactly like ``list[str] | None``.
+
+    Red proof, executed: restore the ``list[``-prefix requirement and the THIRD assertion fails —
+    named precisely, because pytest stops at the first failing assert, so "the third and fourth
+    fail" would be a claim about a run nobody has seen. The fourth reddens the same way once the
+    third is removed.
+    """
+    assert _row_admits_null("list[str]|None")
+    assert _row_admits_null("None|list[str]")
+    assert _row_admits_null("Sequence[str]|None")
+    assert _row_admits_null("tuple[str,...]|None")
+    assert not _row_admits_null("list[str]")
+    assert not _row_admits_null("dict[str,int|None]")
 
 
 def test_the_conformance_tests_partition_into_two_kinds() -> None:
