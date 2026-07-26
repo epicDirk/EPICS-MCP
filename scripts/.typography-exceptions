@@ -1,0 +1,14 @@
+# Exceptions for scripts/check_typography.py. One per line:
+#
+#     <path suffix>::<literal fragment of the offending line>
+#
+# BOTH halves must match, and the key is the line's CONTENT, never its number: a number moves with
+# any edit above it and would rot for a reason that is not a change in the finding (the same
+# lesson tests/test_client_edge_guards.py records for its own table). An entry frees the whole
+# line. Blank lines and lines starting with # are ignored.
+#
+# Keep this list short. A character that needs exempting twice is a character the rule got wrong.
+
+# Not a dash: git's pathspec separator inside a command this script prints for the operator to run.
+# Replacing it would emit a broken command.
+scripts/guard_audit.py::status --porcelain

@@ -89,9 +89,19 @@ target-version = "py312"
 # phoebus-display-mcp. The intermediate copy had lost that attribution; whoever inherits or
 # changes the set should inherit the reasoning with it, not just a list to copy.
 select = ["E", "F", "I", "W", "UP", "B", "SIM", "RUF", "PERF", "ANN", "BLE", "T20"]
-# Typographic punctuation is still tolerated in comments and docstrings, so ruff reports no
-# "ambiguous unicode" findings for the dash forms, the curly quotes and the apostrophe.
-allowed-confusables = ["–", "—", "„", "“", "”", "’", "‚", "‘", "×"]
+# Two characters stay tolerated: the typographic apostrophe, legitimate in English prose, and
+# the multiplication sign, which no ASCII substitute replaces. Everything else was REMOVED
+# from this list, which turns ruff into a second, independent guard for the one character it
+# actually knows here.
+#
+# Measured, because the list invites the opposite assumption: probed one character at a time
+# through `ruff --isolated --select RUF001,RUF002,RUF003`, ruff recognises only the en dash,
+# the apostrophe and the multiplication sign. The em dash, the ellipsis and all four curly
+# quotes produce NO finding, in a string, a docstring or a comment alike, so four of the nine
+# entries this list used to carry were no-ops. Removing them buys nothing but honesty; removing
+# the en dash is the one that buys a guard. The characters ruff cannot see are covered by
+# scripts/check_typography.py, which reads every text file, not just Python.
+allowed-confusables = ["’", "×"]
 
 [tool.ruff.lint.per-file-ignores]
 # Annotations are mandatory in src/; in tests mypy --strict enforces them and ruff stays out of

@@ -32,3 +32,12 @@ repos:
         language: system
         pass_filenames: true
         require_serial: true
+      # Typography: em/en dashes, ellipses, curly quotes and the doubled hyphen. Ruff cannot do
+      # this job (it recognises only the en dash of that set, measured; see pyproject's
+      # allowed-confusables comment), and it would only ever see .py anyway.
+      - id: typography
+        name: no typographic punctuation
+        entry: uv run python scripts/check_typography.py
+        language: system
+        pass_filenames: true
+        require_serial: true
