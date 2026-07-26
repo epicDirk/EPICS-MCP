@@ -180,6 +180,32 @@ def splice(data: bytes, target: Target, replacement: bytes) -> bytes:
     return b"".join([*lines[: target.lineno - 1], merged, *lines[target.end_lineno :]])
 
 
+# coverage stores a context as ``<node id>|<phase>``. The phase is the LAST segment, and a node id
+# may itself contain a pipe — six do here, e.g. a parametrised case whose id ends in
+# ``[level-'|']``. Splitting on the FIRST pipe truncated those to a prefix that matches no test.
+_COVERAGE_PHASES = frozenset({"setup", "run", "teardown"})
+
+
+def _node_id_of(context: str) -> str:
+    """The test node id inside a coverage context, with the trailing phase removed."""
+    head, _sep, tail = context.rpartition("|")
+    return head if tail in _COVERAGE_PHASES and head else context
+
+
+def test_identity(node_id: str) -> tuple[str, str]:
+    """``(test file name, function name)`` — the pair a claiming test is keyed by.
+
+    A node id is ``<path>::[<class>::]<function>[<param case>]``, and BOTH tails matter. Comparing
+    with ``endswith("::" + name)`` ignored the file and could never match a parametrised id;
+    measured on a real ctrace map, that credited ``test_olog_write.py::test_unknown_level_refused``
+    — a candidate carrying payload vocabulary — with the guard-line execution of a SAME-NAMED test
+    in another file, and so hid it from the sham-candidate list this audit exists to produce.
+    """
+    path, _sep, rest = node_id.partition("::")
+    function = rest.rpartition("::")[2] if "::" in rest else rest
+    return Path(path).name, function.split("[")[0]
+
+
 def load_coverage_map(db_path: Path) -> dict[tuple[str, int], set[str]]:
     """``{(module, lineno): {test node id}}`` from a ``--cov-context=test`` database.
 
@@ -199,7 +225,7 @@ def load_coverage_map(db_path: Path) -> dict[tuple[str, int], set[str]]:
             module = Path(str(files[int(file_id)])).name
             if module not in names:
                 continue
-            context = contexts[int(context_id)].split("|")[0]
+            context = _node_id_of(contexts[int(context_id)])
             if not context:
                 continue
             for lineno in (abs(int(fromno)), abs(int(tono))):
@@ -308,7 +334,7 @@ NOT_EXECUTING = "of those, never executing a client-edge line"
 SHAM_CANDIDATES = "and claiming something about the ANSWERED payload"
 
 PINNED_AST: dict[str, int] = {DOUBLES: 103, EDGE_VOCABULARY: 21}
-PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 102, SHAM_CANDIDATES: 20}
+PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 103, SHAM_CANDIDATES: 21}
 PINNED: dict[str, int] = {**PINNED_AST, **PINNED_COVERAGE}
 
 # Two recipes, because the whole point of the split above is that they cost different amounts. A
@@ -450,15 +476,23 @@ def cmd_sham(args: argparse.Namespace) -> int:
     # "executes a client edge" means a GUARD line, not merely any line of a client module: a test
     # can drive the client all day without ever reaching the check it claims to protect.
     guard_lines = {(target.module, target.lineno) for target in enumerate_targets()}
-    executing: set[str] = {
-        test for key, tests in covering.items() if key in guard_lines for test in tests
+    executing: set[tuple[str, str]] = {
+        test_identity(test)
+        for key, tests in covering.items()
+        if key in guard_lines
+        for test in tests
     }
-    sys.stderr.write(f"map: {len(executing)} tests execute at least one client-edge GUARD line\n")
+    # Test FUNCTIONS, not node ids: parametrised cases collapse onto their function, which is the
+    # granularity a claiming test is recorded at. The figure is therefore lower than the number of
+    # ids in the map and must not be compared with one.
+    sys.stderr.write(
+        f"map: {len(executing)} test functions execute at least one client-edge GUARD line\n"
+    )
     sham_edge: list[str] = []
     sham_other = 0
     for filename, entries in sorted(claiming_tests().items()):
         for name, is_edge_claim in entries:
-            if any(test.endswith(f"::{name}") for test in executing):
+            if (filename, name) in executing:
                 continue
             if is_edge_claim:
                 sham_edge.append(f"{filename}::{name}")

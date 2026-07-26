@@ -14,24 +14,29 @@ map recorded with ``COVERAGE_CORE=ctrace`` and some ten minutes, which is not a 
 Findings of the 2026-07-25 run, kept here rather than in a document nobody reads again:
 
 * Sham guards (direction B): **none found — which is not the same as none there.** 103 tests
-  install a client class double in their own body and 102 never execute a guard line — all but one
-  of them; that is the double used legitimately, to keep a service-layer test off the network. 20
-  of those 102 also carry payload vocabulary, and the ones read claim SERVICE-layer behaviour (an
-  already-constructed exception must not be relabelled "unreachable"), not a client-edge check.
-  ⚠️ Not all 20 were read, and the vocabulary filter itself decides who gets read — a first,
-  narrower filter surfaced only 2 and a review showed it missed a test whose docstring states the
-  edge claim in words the regex did not know. Treat this as "no sham guard found by this filter",
-  and widen the filter before treating it as a stronger statement.
+  install a client class double in their own body and NOT ONE of them executes a client-edge guard
+  line, which is what a class-level double is FOR: it takes the real client off the path. That is
+  the double used legitimately, to keep a service-layer test off the network. 21 of those also
+  carry payload vocabulary, and every one of them was read: they claim SERVICE-layer behaviour (an
+  already-constructed exception must not be relabelled "unreachable"; an unknown level is refused
+  before any request is built), not a client-edge check. ⚠️ The vocabulary filter itself decides
+  who gets read — a first, narrower filter surfaced only 2 and a review showed it missed a test
+  whose docstring states the edge claim in words the regex did not know. Treat this as "no sham
+  guard found by this filter", and widen the filter before treating it as a stronger statement.
 
   S33, and the distinction matters for what can be checked cheaply: 21 of those carry payload
-  vocabulary before any coverage map is consulted, and 20 remain once the tests that DO execute a
+  vocabulary before any coverage map is consulted, and 21 remain once the tests that DO execute a
   guard line are removed. The vocabulary figure follows from this repository's AST alone and is
-  therefore pinned by a test in the ordinary gate; the 102 and the 20 are decided by the coverage
-  map and are checked only by ``scripts/guard_audit.py sham --check --coverage-db …``.
-  ⚠️ The population dropped from 107 on 2026-07-26: the detector read the function's SOURCE TEXT,
-  so a docstring QUOTING the class-double idiom counted, and a method patch on a double installed
-  by a helper counted too. Both pins were one and four too high; the coverage pair did not move,
-  because all four of those tests do execute a guard line.
+  therefore pinned by a test in the ordinary gate; the two coverage figures are decided by the
+  coverage map and are checked only by ``scripts/guard_audit.py sham --check --coverage-db …``.
+  ⚠️ Every figure in this bullet moved on 2026-07-26, and the uniformity above is the RESULT of
+  three separate measurement defects being removed, not a change in the code under audit: the
+  population read the function's SOURCE TEXT (a docstring quoting the idiom counted, and so did a
+  method patch on a helper-installed double), and the coverage matcher compared node ids with
+  ``endswith("::" + name)`` — file-blind, and unable to match a parametrised id at all. The old
+  107 / 102 / 20 said five of the population reached a guard line; four of those five were
+  miscounted into the population, and the fifth was credited with a SAME-NAMED test's execution in
+  another file.
 * Unobserved polarities (direction A): 19 of 93 targets, plus one where neither polarity is
   noticed and two that no test executes at all. They are declared below.
 

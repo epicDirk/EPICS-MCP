@@ -136,6 +136,48 @@ def test_check_with_a_database_compares_all_four_pins(
         )
 
 
+def test_a_coverage_context_is_matched_by_file_and_function(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A test is identified by the file it lives in and the function it is — not by a suffix.
+
+    Both halves were wrong and both were measured on a real ctrace map. The phase was stripped by
+    splitting on the FIRST pipe, which truncates a node id that contains one (six do here, e.g. a
+    parametrised case whose id ends in ``[level-'|']``). And the claiming test was looked up with
+    ``endswith("::" + name)``, which ignores the file and cannot match a parametrised id at all:
+    that credited ``test_olog_write.py::test_unknown_level_refused`` — a candidate carrying payload
+    vocabulary — with a SAME-NAMED test's guard-line execution in another file, and so kept it out
+    of the sham-candidate list this audit exists to produce.
+
+    Three properties, each driven through ``cmd_sham`` rather than asserted on a helper alone: the
+    phase suffix is removed and the embedded pipe survives; a parametrised id still identifies its
+    function; and the same function name in a DIFFERENT file is a different test.
+    """
+    mine = "tests/test_olog.py::test_search_bad_time_is_not_a_connection_error[level-'|']"
+    impostor = "tests/test_olog_update.py::TestServiceUpdate::" + mine.rpartition("::")[2]
+    assert guard_audit._node_id_of(f"{mine}|run") == mine, "the phase is the LAST segment"
+    assert guard_audit.test_identity(mine) == (
+        "test_olog.py",
+        "test_search_bad_time_is_not_a_connection_error",
+    )
+    assert guard_audit.test_identity(impostor)[0] == "test_olog_update.py"
+
+    counted = guard_audit.population()[guard_audit.DOUBLES]
+    for context, expected in ((mine, counted - 1), (impostor, counted)):
+        monkeypatch.setattr(
+            guard_audit,
+            "load_coverage_map",
+            lambda _path, hit=context: {("olog_client.py", 211): {hit}},
+        )
+        monkeypatch.setitem(guard_audit.PINNED, guard_audit.NOT_EXECUTING, expected + 7)
+        assert guard_audit.main([*_ARGV, "--coverage-db", "synthetic"]) == 1
+        line = f"{guard_audit.NOT_EXECUTING}: pinned {expected + 7}, measured {expected}"
+        assert line in capsys.readouterr().err, (
+            f"the context {context!r} must {'' if expected < counted else 'NOT '}exclude its "
+            f"same-named claiming test, so this line is required: {line!r}"
+        )
+
+
 def test_reporting_mode_still_demands_a_database(capsys: pytest.CaptureFixture[str]) -> None:
     """Without ``--check`` the old contract is untouched, message and exit code included.
 
