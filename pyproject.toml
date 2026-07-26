@@ -12,11 +12,11 @@ authors = [{ name = "epicDirk" }]
 keywords = ["epics", "mcp", "pvaccess", "channel-access", "p4p", "controls"]
 requires-python = ">=3.12"
 dependencies = [
-    # Standalone FastMCP (gofastmcp.com) ist der Server-Runtime: server.py nutzt
-    # `from fastmcp import FastMCP` und `from fastmcp.exceptions import ToolError`.
-    # (Früher lief der Server auf dem SDK-gebündelten FastMCP 1.0 aus `mcp`; der Umzug
-    # vereint beide Projekt-MCPs auf EINEN Stack und löst den Zwei-ToolError-Footgun
-    # per Konstruktion — es ist jetzt nur noch genau ein fastmcp auf dem Pfad.)
+    # Standalone FastMCP (gofastmcp.com) is the server runtime: server.py uses
+    # `from fastmcp import FastMCP` and `from fastmcp.exceptions import ToolError`.
+    # (The server used to run on the SDK-bundled FastMCP 1.0 from `mcp`; the move puts
+    # both project MCPs on ONE stack and removes the two-ToolError footgun by
+    # construction: there is now exactly one fastmcp on the path.)
     "fastmcp>=3,<4",
     # mcp bleibt explizit deklariert: wir importieren `mcp.types.ToolAnnotations` direkt
     # (fastmcp re-exponiert die Low-Level-Typen und zieht mcp ohnehin transitiv).
@@ -32,12 +32,12 @@ dependencies = [
 
 [project.optional-dependencies]
 # Display-aware tools (validate_pvs / crossplane_check / coverage_audit / find_device) join live PVs
-# with the macro-expanded per-instance PV-inventory (Wedge 1) from the opi_navigation build-once PV
-# engine (EINE PV-Engine, Build-once EX/EY) — NICHT makro-blind nachgebaut. SHA-gepinnt wie der
-# phoebus-MCP (cs-studio-phoebus-mcp); Bump = Pin + `uv lock` (CI fährt `uv sync --frozen`).
-# OPTIONAL, damit der Kern-Server (PV-Read/Write/Monitor/Diagnose + REST-Planes) OHNE dieses
-# (privat gehostete) Paket standalone installiert; die vier Tools registrieren sich nur, wenn es da
-# ist (server.py: try/except ImportError um register_display_tools).
+# with the macro-expanded per-instance PV inventory from the opi_navigation PV engine: ONE engine,
+# never a macro-blind reimplementation. SHA-pinned like the sibling phoebus MCP
+# (cs-studio-phoebus-mcp); a bump moves the pin and `uv lock` together (CI runs `uv sync --frozen`).
+# OPTIONAL, so the core server (PV read/write/monitor/diagnose plus the REST planes) installs
+# standalone WITHOUT this privately hosted package; the four tools register only when it is present
+# (server.py: try/except ImportError around register_display_tools).
 displays = [
     "opi-navigation @ git+https://github.com/epicDirk/opi-foundry.git@8fad86766891aeac177050449f73a3a4fbf554cc",
 ]
@@ -72,8 +72,8 @@ epics-coverage = "epics_pv_mcp.cli_coverage:main"
 epics-diagnose = "epics_pv_mcp.cli_diagnose:main"
 epics-doctor = "epics_pv_mcp.cli_doctor:main"
 
-# Git-Direct-Reference (opi-navigation) erfordert dieses Flag bei hatchling — sonst
-# bricht der Metadaten-Build ("Dependency ... cannot be a direct reference"). Spiegelt
+# The opi-navigation git direct reference needs this flag under hatchling; without it the
+# metadata build fails with "Dependency ... cannot be a direct reference". Mirrors
 # cs-studio-phoebus-mcp.
 [tool.hatch.metadata]
 allow-direct-references = true
@@ -83,19 +83,19 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-# Regelsatz nach MCP-Parität (phoebus-display-mcp): BLE = blinde except Exception,
-# T20 = kein print() (stdout ist der JSON-RPC-Kanal des stdio-Servers).
-# Ur-Quelle des Regelsatzes ist QUALITY-STANDARD.md §2 des opi-foundry-Workspace; er kam über
-# phoebus-display-mcp hierher. Die Zwischenstufe hatte das Zitat verloren — wer den Satz erbt oder
-# ändert, erbt damit auch die Begründung, statt nur eine kopierbare Liste (2026-07-19).
+# Rule set mirrored from the sibling MCP (phoebus-display-mcp): BLE catches a blind
+# `except Exception`, T20 forbids print() (stdout is the stdio server's JSON-RPC channel).
+# The set originates in the workspace quality standard and reached this repository through
+# phoebus-display-mcp. The intermediate copy had lost that attribution; whoever inherits or
+# changes the set should inherit the reasoning with it, not just a list to copy.
 select = ["E", "F", "I", "W", "UP", "B", "SIM", "RUF", "PERF", "ANN", "BLE", "T20"]
-# Deutsche Typografie in Kommentaren/Docstrings ist Projekt-Konvention — keine
-# "ambiguous unicode"-Funde für Gedankenstrich, typografische Anführungszeichen, Apostroph.
+# Typographic punctuation is still tolerated in comments and docstrings, so ruff reports no
+# "ambiguous unicode" findings for the dash forms, the curly quotes and the apostrophe.
 allowed-confusables = ["–", "—", "„", "“", "”", "’", "‚", "‘", "×"]
 
 [tool.ruff.lint.per-file-ignores]
-# Annotations-Pflicht gilt für src/; in Tests erzwingt mypy --strict die Annotationen,
-# ruff lässt sie aus (MCP-Parität).
+# Annotations are mandatory in src/; in tests mypy --strict enforces them and ruff stays out of
+# the way (same split as the sibling MCP).
 "tests/**" = ["ANN"]
 
 [tool.mypy]
@@ -110,10 +110,11 @@ init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
 
-# p4p ist untypisiert (keine Stubs). opi_navigation IST getypt (py.typed), aber optional
-# ([displays]) und auf dem PUBLIC-Fork-CI abwesend (private git-Dep) — der Override lässt mypy dort
-# `import-not-found` schlucken (Symbole werden Any). LOKAL ist es ein No-Op: bei installiertem
-# opi_navigation nutzt mypy weiter dessen echte Typen, die Display-Fläche bleibt voll geprüft.
+# p4p ships no type stubs. opi_navigation IS typed (py.typed) but optional ([displays]) and absent
+# on the public-fork CI (private git dependency), so the override lets mypy swallow
+# `import-not-found` there and its symbols become Any. LOCALLY this is a no-op: with
+# opi_navigation installed mypy keeps using its real types and the display surface stays fully
+# checked.
 [[tool.mypy.overrides]]
 module = [
     "p4p.*",

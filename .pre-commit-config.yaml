@@ -1,7 +1,7 @@
-# Single source of truth für lint/format/type (Parität mit phoebus-display-mcp).
-# Hooks delegieren an die uv-verwalteten, in uv.lock exakt gepinnten Tools — identische
-# Versionen/Config wie im Dev-/CI-Lauf. CI ruft `pre-commit run --all-files`. Scope kommt
-# aus pyproject.toml ([tool.ruff] select/per-file-ignores, [tool.mypy] files).
+# Single source of truth for lint, format and type checks (same split as phoebus-display-mcp).
+# The hooks delegate to the uv-managed tools pinned exactly in uv.lock, so versions and config
+# are identical to the dev and CI runs. CI calls `pre-commit run --all-files`. The scope comes
+# from pyproject.toml ([tool.ruff] select / per-file-ignores, [tool.mypy] files).
 repos:
   - repo: local
     hooks:
