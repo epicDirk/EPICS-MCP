@@ -178,6 +178,95 @@ def test_a_coverage_context_is_matched_by_file_and_function(
         )
 
 
+def test_a_crash_exits_nine_and_prints_its_traceback(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exit 9 is the whole reason exit 1 can mean "a pin deviates" — and nothing asserted it.
+
+    273c1c5 moved the crash code off 3 (which ``sweep`` uses for a detected foreign write, this
+    tool's most safety-critical finding) and announced the contract as delivered. Measured by an
+    outside QA: changing ``return 9`` back to ``return 1`` left the whole lane green, so the
+    contract was prose. A wrapper reading exit 1 would have reported a fabricated pin deviation
+    from a traceback.
+    """
+    monkeypatch.setattr(
+        guard_audit, "population", lambda: (_ for _ in ()).throw(RuntimeError("deliberate crash"))
+    )
+    assert guard_audit.main(_ARGV) == 9, (
+        "a crash must not wear the code that means 'a pin deviates'"
+    )
+    reported = capsys.readouterr().err
+    assert "RuntimeError: deliberate crash" in reported, "and it must say what crashed"
+    assert "PIN DEVIATION" not in reported
+
+
+def test_a_blind_map_still_compares_the_pins_it_already_measured(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unusable map must not silently take the CHEAP pins down with it.
+
+    ``cmd_sham`` computes the AST pair before it opens the database, then used to return 2 without
+    comparing anything — so a caller could not tell "your map is unusable" from "your map is
+    unusable AND the population moved", and the two figures already in hand were thrown away.
+    Exit 2 is still what the map problem decides; what changed is that the cheap half is reported.
+    """
+    monkeypatch.setattr(guard_audit, "load_coverage_map", lambda _path: {})
+    wrong = guard_audit.population()[guard_audit.DOUBLES] + 3
+    monkeypatch.setitem(guard_audit.PINNED, guard_audit.DOUBLES, wrong)
+
+    assert guard_audit.main([*_ARGV, "--coverage-db", "unusable"]) == 2
+    reported = capsys.readouterr().err
+    assert "empty coverage map" in reported
+    assert "PIN DEVIATION" in reported, "the pins it had already measured must still be compared"
+    assert f"pinned {wrong}" in reported
+    for pin in guard_audit.PINNED_COVERAGE:
+        assert pin in reported, f"and the pins it could not reach must be named: {pin}"
+
+
+def test_the_candidate_list_is_pinned_by_its_members_not_only_its_length(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A verdict about a LIST is not guarded by a count of it.
+
+    ``UNPINNED_VERDICT`` has said since S33 that "a list of the same length with different members
+    satisfies every pin below", and nothing acted on it. Now a name that was never read is named,
+    and the exit code says so — swapping one member for another keeps every figure identical and
+    must still stop the run.
+    """
+    swapped_out = guard_audit.PINNED_CANDIDATES[-1]
+    replaced = (*guard_audit.PINNED_CANDIDATES[:-1], "test_zz.py::test_never_read_by_anyone")
+    monkeypatch.setattr(guard_audit, "PINNED_CANDIDATES", replaced)
+    # An empty covering set: no claiming test executes a guard line, so sham_edge is the whole
+    # real candidate list and the COUNTS are unchanged. Only the membership differs.
+    monkeypatch.setattr(
+        guard_audit, "load_coverage_map", lambda _path: {("olog_client.py", 211): set()}
+    )
+
+    assert guard_audit.main([*_ARGV, "--coverage-db", "synthetic"]) == 1
+    reported = capsys.readouterr().err
+    assert "CANDIDATE LIST CHANGED" in reported
+    assert f"+ {swapped_out}" in reported, "the name that was never read must be named"
+    assert "- test_zz.py::test_never_read_by_anyone" in reported
+    assert "PIN DEVIATION" not in reported, "the counts agree; it is the membership that does not"
+
+
+def test_the_candidate_list_is_printable_without_a_database(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``RERUN_AST``'s first instruction has to be executable at AST cost, or it is not cheap.
+
+    It says "re-read the candidate list". That list used to be printed only on the --coverage-db
+    path, so the recipe for a one-second deviation demanded a full COVERAGE_CORE=ctrace suite run
+    — the exact inversion the cheap/expensive split exists to prevent.
+    """
+    assert guard_audit.main(["guard_audit.py", "sham", "--list-candidates"]) == 0
+    reported = capsys.readouterr().err
+    assert "COVERAGE_CORE=ctrace" not in reported, "the cheap path must not demand the map"
+    listed = [line.strip() for line in reported.splitlines() if "::" in line]
+    assert len(listed) == guard_audit.population()[guard_audit.EDGE_VOCABULARY]
+    assert guard_audit.RERUN_AST.startswith("re-read the candidate list (sham --list-candidates")
+
+
 def test_reporting_mode_still_demands_a_database(capsys: pytest.CaptureFixture[str]) -> None:
     """Without ``--check`` the old contract is untouched, message and exit code included.
 

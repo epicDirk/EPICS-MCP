@@ -337,12 +337,41 @@ PINNED_AST: dict[str, int] = {DOUBLES: 103, EDGE_VOCABULARY: 21}
 PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 103, SHAM_CANDIDATES: 21}
 PINNED: dict[str, int] = {**PINNED_AST, **PINNED_COVERAGE}
 
+# The candidate list, by NAME. A count is not a finding: the verdict "no sham guard found" was
+# reached by a person reading THESE tests, and a list of the same length with different members
+# satisfies every numeric pin. Recording the members turns "re-judge the verdict" from an
+# instruction nobody can check into a diff — added names are what has not been read.
+PINNED_CANDIDATES: tuple[str, ...] = (
+    "test_archiver.py::test_get_pv_history_bad_time_is_not_a_connection_error",
+    "test_archiver.py::test_list_archived_pvs_empty_pattern_with_this_appliance_is_fine",
+    "test_archiver.py::test_list_archived_pvs_refuses_pattern_with_this_appliance",
+    "test_checkers.py::test_query_alarm_configured_response_error_is_not_a_connection_error",
+    "test_checkers.py::test_query_alarm_history_response_error_is_not_a_connection_error",
+    "test_checkers.py::test_query_channels_response_error_is_not_a_connection_error",
+    "test_checkers.py::test_query_naming_lookup_404_is_definitive_not_registered",
+    "test_checkers.py::test_query_naming_lookup_obsolete_preserves_status",
+    "test_checkers.py::test_query_olog_response_error_is_not_a_connection_error",
+    "test_doctor.py::test_unverified_plane_does_not_fail_but_is_reported",
+    "test_olog.py::test_empty_page_past_the_end_is_not_annotated",
+    "test_olog.py::test_list_log_levels_splits_outage_from_bad_answer",
+    "test_olog.py::test_note_on_a_mixed_or_list_does_not_generalise",
+    "test_olog.py::test_search_bad_time_is_not_a_connection_error",
+    "test_olog.py::test_unreadable_levels_lookup_says_so_and_keeps_the_result",
+    "test_olog_attachments.py::test_refuses_when_not_whole_mode",
+    "test_olog_write.py::test_bad_level_does_not_burn_a_rate_token",
+    "test_olog_write.py::test_blank_level_refused",
+    "test_olog_write.py::test_reply_tool_threads_and_bad_id_is_400",
+    "test_olog_write.py::test_unknown_level_refused",
+    "test_write_gate_contract.py::test_pre_gate_refusal_is_coded_apart_and_writes_no_audit_line",
+)
+
 # Two recipes, because the whole point of the split above is that they cost different amounts. A
 # deviation in the AST pair is re-measured in under a second; telling its author to run a full
 # ctrace suite would invert the very distinction this file is organised around.
 RERUN_AST = (
-    "re-read the candidate list (sham --coverage-db <db> prints it), re-judge the verdict, then "
-    "re-record PINNED_AST here. Re-measure with: uv run python scripts/guard_audit.py sham --check"
+    "re-read the candidate list (sham --list-candidates prints it, no database needed), re-judge "
+    "the verdict, then re-record PINNED_AST here. Re-measure with: uv run python "
+    "scripts/guard_audit.py sham --check"
 )
 RERUN_COVERAGE = (
     "re-record with: COVERAGE_CORE=ctrace COVERAGE_FILE=<scratch>/cov uv run pytest --cov=src "
@@ -387,7 +416,11 @@ def claiming_tests() -> dict[str, list[tuple[str, bool]]]:
     ``class_double_calls``.
     """
     found: dict[str, list[tuple[str, bool]]] = {}
-    for path in sorted(_TESTS.glob("test_*.py")):
+    # pytest's own default is ``test_*.py *_test.py``, and pyproject sets no ``python_files``. A
+    # narrower glob here would let a contributor add doubles under a name pytest RUNS and the
+    # audited population does not see. Latent today — no such file exists — so this closes a hole
+    # rather than fixing a wrong figure.
+    for path in sorted(set(_TESTS.glob("test_*.py")) | set(_TESTS.glob("*_test.py"))):
         for node in ast.walk(ast.parse(path.read_bytes())):
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue
@@ -447,9 +480,21 @@ def _compare(measured: dict[str, int]) -> int:
             sys.stderr.write(f"  {name} (pinned {PINNED[name]}) — {reason}\n")
     sys.stderr.write(f"NOT pinnable at all: {UNPINNED_VERDICT}\n")
     if deviating:
-        sys.stderr.write("PIN DEVIATION — the recorded audit describes different code now:\n")
-        sys.stderr.write("\n".join(line for _name, line in deviating) + "\n")
         cheap = all(name in PINNED_AST for name, _line in deviating)
+        # A DISJUNCTION when a coverage figure moved, not a diagnosis. Those figures depend on the
+        # map as much as on the code, and the loudest hazard this file knows about — a map recorded
+        # without COVERAGE_CORE=ctrace — produces exactly this deviation on a byte-identical tree.
+        # The tool cannot tell the two apart: measured, the sqlite ``tracer`` table is empty even
+        # for a map that WAS recorded with ctrace, so there is no marker to read. Naming only the
+        # code would send a reader to re-record pins from a map that ran a quarter of the tests.
+        sys.stderr.write(
+            "PIN DEVIATION — the recorded audit describes different code now:\n"
+            if cheap
+            else "PIN DEVIATION — either the code changed, or this map is BLIND. A map recorded "
+            "without COVERAGE_CORE=ctrace sees a fraction of the covering tests and deviates the "
+            "same way. Check the core BEFORE re-recording anything:\n"
+        )
+        sys.stderr.write("\n".join(line for _name, line in deviating) + "\n")
         sys.stderr.write(f"{RERUN_AST if cheap else RERUN_COVERAGE}\n")
         return 1
     compared = len(measured.keys() & PINNED.keys())
@@ -464,6 +509,21 @@ def cmd_sham(args: argparse.Namespace) -> int:
     # TypeError — exit 1, indistinguishable from "a pin deviates", which is the one thing exit 1
     # is now contracted to mean.
     measured = population()
+    if getattr(args, "list_candidates", False):
+        # The list RERUN_AST sends a reader to, at AST cost. It used to be printed only on the
+        # --coverage-db path, so the CHEAP recipe's first instruction demanded the expensive
+        # artifact — the inversion the whole cost split exists to prevent.
+        claiming = claiming_tests()
+        sys.stderr.write(
+            f"{measured[DOUBLES]} tests install a client class double in their own body; "
+            f"{measured[EDGE_VOCABULARY]} of them carry payload vocabulary and are the list the "
+            "verdict was reached by READING:\n"
+        )
+        for filename, entries in sorted(claiming.items()):
+            for name, is_edge_claim in entries:
+                if is_edge_claim:
+                    sys.stderr.write(f"  {filename}::{name}\n")
+        return 0
     if args.coverage_db is None:
         return _compare(measured)
 
@@ -472,6 +532,12 @@ def cmd_sham(args: argparse.Namespace) -> int:
         sys.stderr.write(
             "empty coverage map — was it recorded with --cov-branch --cov-context=test?\n"
         )
+        # The cheap pins were computed BEFORE the map was opened, so refusing to compare them here
+        # would throw away work already in hand and leave the caller unable to tell "your map is
+        # unusable" from "your map is unusable AND the AST pins moved". They are compared, the
+        # coverage pair is named as unreached, and only then does the map problem decide the code.
+        if args.check:
+            _compare(measured)
         return 2
     # "executes a client edge" means a GUARD line, not merely any line of a client module: a test
     # can drive the client all day without ever reaching the check it claims to protect.
@@ -501,7 +567,23 @@ def cmd_sham(args: argparse.Namespace) -> int:
     measured[NOT_EXECUTING] = len(sham_edge) + sham_other
     measured[SHAM_CANDIDATES] = len(sham_edge)
     if args.check:
-        return _compare(measured)
+        # MEMBERS as well as counts, and BOTH are reported before anything returns. The verdict is
+        # a judgement about these tests, so a list of the same length with different members must
+        # not read as agreement — this file's own UNPINNED_VERDICT has said so since S33 and
+        # nothing acted on it. Stopping at the first of the two findings would make a run's silence
+        # about the other unreadable, which is the shape of defect this whole file is against.
+        appeared = sorted(set(sham_edge) - set(PINNED_CANDIDATES))
+        vanished = sorted(set(PINNED_CANDIDATES) - set(sham_edge))
+        if appeared or vanished:
+            sys.stderr.write(
+                "CANDIDATE LIST CHANGED — the verdict was reached by reading the old one:\n"
+            )
+            for entry in appeared:
+                sys.stderr.write(f"  + {entry}  (never read; read it before re-recording)\n")
+            for entry in vanished:
+                sys.stderr.write(f"  - {entry}\n")
+            sys.stderr.write(f"{RERUN_AST}\n")
+        return _compare(measured) or (1 if appeared or vanished else 0)
     sys.stderr.write(
         f"tests installing a client CLASS double in their own body: {measured[DOUBLES]}\n"
         f"  of those, never executing a client-edge line: {measured[NOT_EXECUTING]}\n"
@@ -663,10 +745,21 @@ def main(argv: list[str]) -> int:
         help="compare against the recorded findings; exit 1 on a deviation. Without "
         "--coverage-db only the AST-derivable pins are checked, and the rest is named as unchecked",
     )
+    sham_parser.add_argument(
+        "--list-candidates",
+        action="store_true",
+        help="print the payload-vocabulary candidate list from the AST alone, no database needed "
+        "— the list RERUN_AST asks a developer to re-read",
+    )
     sham_parser.set_defaults(func=cmd_sham)
 
     args = parser.parse_args(argv[1:])
-    if args.command == "sham" and args.coverage_db is None and not args.check:
+    if (
+        args.command == "sham"
+        and args.coverage_db is None
+        and not args.check
+        and not args.list_candidates
+    ):
         # Reporting mode still needs a map. Spelled out rather than left to ``required=True`` so
         # that the message a caller has always seen does not change under them.
         sham_parser.error("the following arguments are required: --coverage-db")
