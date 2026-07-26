@@ -192,30 +192,95 @@ def _conformance_tests() -> int:
     return len(_named_tests("_conforms_to_its_schema"))
 
 
+def _drives_real_client(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """The test constructs a ``Client`` — i.e. it goes over the wire."""
+    return any(
+        isinstance(inner, ast.Call)
+        and isinstance(inner.func, ast.Name)
+        and inner.func.id == "Client"
+        for inner in ast.walk(node)
+    )
+
+
+def _drives_in_process(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """The test calls ``mcp.call_tool`` — the in-process path, receiver included.
+
+    THE RECEIVER IS THE WHOLE DISCRIMINATOR, not decoration. Measured: all twelve conformance
+    tests contain some ``.call_tool``, because the two wire tests call it on their ``Client``.
+    Matching the attribute name alone would answer twelve where the sentence says ten.
+    """
+    return any(
+        isinstance(inner, ast.Call)
+        and isinstance(inner.func, ast.Attribute)
+        and inner.func.attr == "call_tool"
+        and isinstance(inner.func.value, ast.Name)
+        and inner.func.value.id == "mcp"
+        for inner in ast.walk(node)
+    )
+
+
 @cache
 def _real_client_conformance_tests() -> int:
-    """Conformance tests that drive a REAL client over a ``paths`` table — the "TWO".
+    """Conformance tests that drive a REAL client.
 
-    BOTH halves are checked. Testing only for a local ``paths`` table makes the measure a proxy
-    for the claim rather than the claim: converting such a test to the in-process ``call_tool``
-    while keeping its table would falsify three separate sentences and redden nothing.
+    The ``paths``-table half of the old conjunction is gone. It carried no information — every
+    test with a table also builds a ``Client`` — and it was the half that made this a proxy: a
+    conformance test converted to ``async with Client(mcp)`` WITHOUT a table (the direction this
+    estate's own docstrings advocate) stayed uncounted, so "TEN of the twelve drive
+    FastMCP.call_tool" would have gone on reading ten while the truth was nine.
     """
-    found = 0
-    for node in _named_tests("_conforms_to_its_schema"):
-        has_table = any(
-            isinstance(inner, ast.AnnAssign)
-            and isinstance(inner.target, ast.Name)
-            and inner.target.id == "paths"
+    return sum(1 for node in _named_tests("_conforms_to_its_schema") if _drives_real_client(node))
+
+
+@cache
+def _in_process_conformance_tests() -> int:
+    """Conformance tests that call ``mcp.call_tool`` — measured, not "the twelve minus the two".
+
+    Deriving this by subtraction guaranteed the two figures summed to twelve, which is what the
+    sentence asserts, but it could not notice a test that drives NEITHER path. The guarantee is
+    restored explicitly by ``test_the_conformance_tests_partition_into_two_kinds``.
+    """
+    return sum(1 for node in _named_tests("_conforms_to_its_schema") if _drives_in_process(node))
+
+
+@cache
+def _runtime_bound_constants() -> int:
+    """``*_ALWAYS_PRESENT`` constants a REAL-CLIENT conformance test reads.
+
+    ⚠️ Honest scope, because this is the one measure in the family that remains a stand-in. The
+    sentence it guards says those constants are "ALREADY runtime-bound … and go red on the same
+    mutation" — a MUTATION property, which no constant can settle. What is measured instead is
+    which constants the wire-driving tests read, and that is nameable, derivable and moves with
+    the thing the sentence is about. It is not the same claim, and pretending otherwise is what
+    the previous version did by counting TESTS and calling the answer a count of constants.
+    """
+    return len(
+        {
+            inner.id
+            for node in _named_tests("_conforms_to_its_schema")
+            if _drives_real_client(node)
             for inner in ast.walk(node)
-        )
-        drives_client = any(
-            isinstance(inner, ast.Call)
-            and isinstance(inner.func, ast.Name)
-            and inner.func.id == "Client"
-            for inner in ast.walk(node)
-        )
-        found += has_table and drives_client
-    return found
+            if isinstance(inner, ast.Name) and inner.id.endswith("_ALWAYS_PRESENT")
+        }
+    )
+
+
+@cache
+def _tools_named_by_in_process_tests() -> frozenset[str]:
+    """The typed tools the in-process conformance tests actually drive, by name.
+
+    Replaces ``len(_TYPED_OUTPUT_TOOLS) - <a count of tests>``, which subtracted a number of TESTS
+    from a number of TOOLS and was right only because the olog test happens to drive eleven tools
+    from its own table. Deleting a row from that table left the arithmetic untouched and the
+    sentence false.
+    """
+    return frozenset(
+        inner.value
+        for node in _named_tests("_conforms_to_its_schema")
+        if _drives_in_process(node)
+        for inner in ast.walk(node)
+        if isinstance(inner, ast.Constant) and inner.value in ts._TYPED_OUTPUT_TOOLS
+    )
 
 
 def _is_mcp_tool(node: ast.expr) -> bool:
@@ -464,7 +529,7 @@ _CLAIMS: tuple[_Claim, ...] = (
     _claim(
         "static-check constants",
         r"(\w+) of the \w+ are consulted only to",
-        lambda: _always_present_constants() - _real_client_conformance_tests(),
+        lambda: _always_present_constants() - _runtime_bound_constants(),
     ),
     _claim(
         "always-present constants",
@@ -474,12 +539,12 @@ _CLAIMS: tuple[_Claim, ...] = (
     _claim(
         "runtime-bound constants",
         r"The remaining (\w+), _DISCOVER_PVS_ALWAYS_PRESENT",
-        _real_client_conformance_tests,
+        _runtime_bound_constants,
     ),
     _claim(
         "in-process conformance tests",
         r"(\w+) of the \w+ drive ``FastMCP.call_tool``",
-        lambda: _conformance_tests() - _real_client_conformance_tests(),
+        _in_process_conformance_tests,
     ),
     _claim(
         "conformance tests", r"\w+ of the (\w+) drive ``FastMCP.call_tool``", _conformance_tests
@@ -492,7 +557,7 @@ _CLAIMS: tuple[_Claim, ...] = (
     _claim(
         "tools those ten cover",
         r"of the (\w+) tools THOSE TEN cover",
-        lambda: len(ts._TYPED_OUTPUT_TOOLS) - _real_client_conformance_tests(),
+        lambda: len(_tools_named_by_in_process_tests()),
     ),
     # --- family 4: the element-schema split ------------------------------------------------------
     _claim(
@@ -966,6 +1031,46 @@ def _named_measure_containing_a_lambda() -> int:
 
 
 _FRAGMENT_PROBE = _claim("fragment probe", r"(\w+) probes", lambda: 22, scope="nowhere")
+
+
+def test_the_conformance_tests_partition_into_two_kinds() -> None:
+    """The guarantee that the old subtraction gave away for free, restored as an assertion.
+
+    "TEN of the twelve drive ``FastMCP.call_tool``. The other TWO drive a real client" is only
+    meaningful while the two kinds are disjoint and together are all of them. Measuring each side
+    independently — which is what stops them being proxies — drops that guarantee: a thirteenth
+    conformance test driving NEITHER, or one converted to drive BOTH, would leave both figures
+    describing a set that is no longer a partition, and every claim above would stay green.
+
+    The tools half is the same shape: the union of what the two kinds drive must be exactly
+    ``_TYPED_OUTPUT_TOOLS``, or "the 20 tools THOSE TEN cover" is a fragment of a bigger set and
+    the sentence quietly stops being about the estate.
+    """
+    conformance = _named_tests("_conforms_to_its_schema")
+    in_process = {node.name for node in conformance if _drives_in_process(node)}
+    real_client = {node.name for node in conformance if _drives_real_client(node)}
+
+    assert not in_process & real_client, (
+        f"these conformance tests drive BOTH paths, so the two figures double-count them: "
+        f"{sorted(in_process & real_client)}"
+    )
+    neither = {node.name for node in conformance} - in_process - real_client
+    assert not neither, (
+        f"these conformance tests drive neither ``mcp.call_tool`` nor a real ``Client``, so they "
+        f"are in the twelve and in neither figure: {sorted(neither)}"
+    )
+
+    named_by_wire = {
+        inner.value
+        for node in conformance
+        if _drives_real_client(node)
+        for inner in ast.walk(node)
+        if isinstance(inner, ast.Constant) and inner.value in ts._TYPED_OUTPUT_TOOLS
+    }
+    assert _tools_named_by_in_process_tests() | named_by_wire == set(ts._TYPED_OUTPUT_TOOLS), (
+        "the conformance tests together must name every typed tool; otherwise 'the tools THOSE "
+        "TEN cover' is measured against an incomplete reading of the test bodies"
+    )
 
 
 def test_the_derivation_reader_reads_the_body_it_claims_to() -> None:
