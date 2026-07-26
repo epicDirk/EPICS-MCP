@@ -371,9 +371,9 @@ class SafetyLayer:
                 ) from exc
         else:
             handler = logging.StreamHandler(sys.stderr)
-        # UTC-Zeitstempel: der Formatter bleibt bei Framework-Zeit (kein datetime.now() in der
-        # Logik) — nur der converter wird auf gmtime gedreht. Das literale 'Z' im datefmt markiert
-        # UTC; %z bliebe unter gmtime leer, deshalb wird es hart geschrieben.
+        # UTC timestamps: the formatter stays on framework time (no datetime.now() in the
+        # logic); only the converter is switched to gmtime. The literal 'Z' in datefmt marks
+        # UTC, because %z would be empty under gmtime, so it is written out instead.
         formatter = logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%dT%H:%M:%SZ")
         formatter.converter = time.gmtime
         handler.setFormatter(formatter)

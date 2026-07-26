@@ -460,7 +460,7 @@ class TestOlogAuditSink:
             audit.handlers.extend(saved)
 
     def test_audit_formatter_stamps_utc(self, tmp_path: Path) -> None:
-        # K2: Formatter konvertiert auf UTC (time.gmtime) und endet mit literalem 'Z'.
+        # K2: the formatter converts to UTC (time.gmtime) and ends with a literal 'Z'.
         audit = logging.getLogger(_AUDIT_LOGGER)
         saved = audit.handlers[:]
         audit.handlers.clear()

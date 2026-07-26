@@ -95,7 +95,7 @@ class TestWriteReachAssert:
             SafetyLayer(self._writes_on())
 
     def test_auto_addr_list_yes_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Subnet broadcast back ON — the exact combination the hard weiche forbids.
+        # Subnet broadcast back ON: the exact combination the hard gate forbids.
         monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", "YES")
         with pytest.raises(SafetyConfigError):
             SafetyLayer(self._writes_on())
@@ -376,11 +376,11 @@ class TestAuditBoundsDeny:
 
 
 class TestSafetyConfig:
-    """Fail-closed Konfig-Validierung + thread-sicherer Singleton."""
+    """Fail-closed config validation plus a thread-safe singleton."""
 
     def test_invalid_pattern_raises_safety_config_error(self) -> None:
-        # Ein kaputtes Allowlist-Regex darf die Schreib-Sperre nicht still
-        # aushebeln, sondern klar scheitern.
+        # A broken allowlist regex must not quietly disable the write lock;
+        # it has to fail loudly instead.
         cfg = EpicsConfig(allow_pv_write=True, pv_write_pattern="[unclosed")
         with pytest.raises(SafetyConfigError):
             SafetyLayer(cfg)
@@ -496,8 +496,8 @@ class TestAuditSink:
             audit.handlers.extend(saved)
 
     def test_audit_formatter_stamps_utc(self, tmp_path: Path) -> None:
-        # K2: der Formatter muss auf time.gmtime (UTC) konvertieren und mit literalem 'Z' enden.
-        # Framework-Zeit bleibt Framework-Zeit — kein datetime.now() in der Logik.
+        # K2: the formatter must convert to time.gmtime (UTC) and end with a literal 'Z'.
+        # Framework time stays framework time: no datetime.now() in the logic.
         audit = logging.getLogger("epics_pv_mcp.audit")
         saved = audit.handlers[:]
         audit.handlers.clear()

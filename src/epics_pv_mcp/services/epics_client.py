@@ -155,7 +155,7 @@ async def pv_get_batch(names: list[str], timeout: float | None = None) -> dict[s
             try:
                 results.append(_format_value(name, value))
             except Exception as exc:  # noqa: BLE001
-                # ein kaputter Einzelwert darf den Batch nicht abbrechen
+                # a broken single value must not abort the batch
                 errors.append({"pv_name": name, "error": str(exc)})
 
     return {"results": results, "errors": errors}
@@ -274,9 +274,9 @@ async def pv_monitor(
 # Value formatting
 # ---------------------------------------------------------------------------
 
-# EPICS-Normative-Type Alarm-Enums (pvData-Standard) — Integer -> menschenlesbar.
-# Severity = Schweregrad des Alarms; Status = NT-Kategorie der Quelle (NICHT die
-# CA-STAT-Detail-Liste wie HIHI/HIGH — der Klartext dazu steht in alarm.message).
+# EPICS normative-type alarm enums (pvData standard): integer -> human-readable.
+# Severity is the severity of the alarm; status is the NT category of the source (NOT the
+# CA STAT detail list such as HIHI/HIGH; that plain text lives in alarm.message).
 _SEVERITY_TEXT: dict[int, str] = {
     0: "NO_ALARM",
     1: "MINOR",

@@ -137,10 +137,11 @@ def test_cli_crossplane_channelfinder_without_url_notes_skip(
 
 @pytest.mark.asyncio
 async def test_crossplane_tool_fragment_not_double_attributed(tmp_path: Path) -> None:
-    """QA-High wired regression (operator-facing-Filter end-to-end): die PV eines reinen Embed-only-
-    Fragments lifted GENAU EINMAL auf das Operator-Eltern-Display; der Standalone-Seed des Fragments
-    (operator_facing=False) wird im Adapter gefiltert → frag.bob erscheint NICHT als eigenes
-    linked-Display, keine Doppel-Attribution. Echt durch analyze_pv_inventory → Adapter → Join.
+    """Wired regression for the operator-facing filter, end to end: the PV of a purely embed-only
+    fragment is lifted EXACTLY ONCE onto the operator parent display; the fragment's standalone
+    seed (operator_facing=False) is filtered in the adapter → frag.bob does NOT appear as a
+    linked display of its own, so there is no double attribution. Driven for real through
+    analyze_pv_inventory → adapter → join.
     """
     displays = tmp_path / "displays"
     displays.mkdir()

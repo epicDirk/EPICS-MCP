@@ -253,9 +253,9 @@ _config_lock = threading.Lock()
 def get_config() -> EpicsConfig:
     """Return the singleton config, creating it on first call (thread-safe).
 
-    Der Lock verhindert eine Doppel-Initialisierung bei gleichzeitigem
-    Erst-Zugriff aus mehreren Threads (analog zum bereits gelockten
-    ``get_context()`` des p4p-Clients).
+    The lock prevents a double initialisation when several threads reach
+    the first access at the same time (mirroring the already locked
+    ``get_context()`` of the p4p client).
     """
     global _config
     with _config_lock:

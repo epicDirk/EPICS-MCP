@@ -18,11 +18,11 @@ dependencies = [
     # both project MCPs on ONE stack and removes the two-ToolError footgun by
     # construction: there is now exactly one fastmcp on the path.)
     "fastmcp>=3,<4",
-    # mcp bleibt explizit deklariert: wir importieren `mcp.types.ToolAnnotations` direkt
-    # (fastmcp re-exponiert die Low-Level-Typen und zieht mcp ohnehin transitiv).
+    # mcp stays declared explicitly: we import `mcp.types.ToolAnnotations` directly
+    # (fastmcp re-exports the low-level types and pulls mcp transitively anyway).
     "mcp>=1.0,<2",
-    # pydantic>=2.11: Floor der Kern-Deps (mcp/pydantic-settings) und des optionalen
-    # opi_navigation (s. [displays]); hier explizit zur Intent-Klarheit.
+    # pydantic>=2.11: the floor of the core deps (mcp/pydantic-settings) and of the optional
+    # opi_navigation (see [displays]); stated explicitly here so the intent is visible.
     "pydantic>=2.11,<3",
     "pydantic-settings>=2.0,<3",
     "p4p>=4.2.0,<5",
@@ -50,7 +50,7 @@ dev = [
     "pre-commit>=4.0",
     # NB: `dev` does NOT pull `[displays]`. CI runs `uv sync --extra dev` on the PUBLIC fork, where
     # the private `opi-navigation` git dependency cannot be cloned (the default GITHUB_TOKEN is
-    # repo-local) — so CI tests exactly the standalone core a public user gets (conftest.py skips the
+    # repo-local), so CI tests exactly the standalone core a public user gets (conftest.py skips the
     # 6 display test modules when opi_navigation is absent). For the FULL local suite incl. the
     # display-aware tools, use the `all` extra below (`uv sync --extra all`).
 ]
@@ -151,9 +151,9 @@ asyncio_mode = "auto"
 # `live` = tests that need a running local EPICS test stack. Opt-in: set the target plane's
 # `EPICS_MCP_*` vars, then `uv run pytest -m live`. Each live module gates itself at SETUP time
 # via tests/live_gate.py (assert_live_available): with the plane vars unset it SKIPS, so the
-# default run and CI stay green — but a DEMANDED live run (EPICS_MCP_REQUIRE_LIVE=1) turns a
+# default run and CI stay green, but a DEMANDED live run (EPICS_MCP_REQUIRE_LIVE=1) turns a
 # missing prerequisite into a LOUD failure instead of a silent skip (S30; previously
-# `pytest -m live` in an empty env exited 0 with everything skipped — indistinguishable from a
+# `pytest -m live` in an empty env exited 0 with everything skipped, indistinguishable from a
 # fulfilled live run). The demand applies to the SELECTED set: scope a partial live run with
 # `-m live -k <plane>`; data-dependent skips INSIDE a running probe stay skips. Deliberately NO
 # `addopts = -m "not live"` (would change default pytest for everyone and is brittle).
