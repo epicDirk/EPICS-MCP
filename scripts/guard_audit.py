@@ -4,14 +4,14 @@
 The clients in ``services/*_client.py`` validate what a foreign service answered, so an
 unreadable payload becomes a loud error instead of a fabricated empty result. A test that
 replaces the client CLASS with a double (``monkeypatch.setattr(<mod>, "<X>Client", _Fake)``)
-removes every one of those guards from the path while still looking like it protects them — a
+removes every one of those guards from the path while still looking like it protects them: a
 SHAM GUARD. See CLAUDE.md, evidence discipline point 8.
 
 Two directions, and they answer different questions:
 
-* ``sham`` (direction B, the roadmap's actual assignment) — which tests CLAIM a guard they never
+* ``sham`` (direction B, the roadmap's actual assignment): which tests CLAIM a guard they never
   execute. Pure analysis over the coverage map; runs no test at all.
-* ``sweep`` (direction A) — which guards no test observes, by mutating each one and seeing
+* ``sweep`` (direction A): which guards no test observes, by mutating each one and seeing
   whether anything goes red.
 
 ⚠️ The map MUST be recorded with ``COVERAGE_CORE=ctrace``. On Python 3.12+ coverage defaults to
@@ -20,7 +20,7 @@ tests covering the same line leave no context row. Measured on this repository, 
 on the same 1472-test tree (2026-07-26): 72 tests touch a guard line under the default core versus
 292 under ctrace, median 2 versus 13 per covered line, and the default map reports fewer covering
 tests on 58 of the 61 covered guard lines. A sweep driven by the default map would run a quarter of
-the relevant tests and report false survivors — the audit would itself be the sham guard it exists
+the relevant tests and report false survivors, so the audit would itself be the sham guard it exists
 to find. Record it with::
 
     COVERAGE_CORE=ctrace COVERAGE_FILE=<scratch>/cov uv run pytest \\
@@ -28,7 +28,7 @@ to find. Record it with::
 
 Keep COVERAGE_FILE outside the repo so the checked-in ``.coverage`` is untouched.
 
-Mutation safety, because a mutation writes into the source tree: bytes only (never text mode —
+Mutation safety, because a mutation writes into the source tree: bytes only (never text mode,
 the tree has mixed LF/CRLF), sha256 checked BEFORE each mutation against the run's baseline (a
 check afterwards is tautological: it compares bytes the sweep wrote to a snapshot the sweep
 took), restore in ``finally`` plus an ``atexit`` hook, and every mutant compiled before it is
@@ -78,7 +78,7 @@ class Target:
     def key(self) -> str:
         """A unique id. The END offset is part of it, NOT decoration: a composite condition and
         its first conjunct start at the same line and column, so a start-only key collides for
-        every such pair — measured, 9 of them here — and silently merges two different mutants
+        every such pair (measured, 9 of them here) and silently merges two different mutants
         into one row."""
         return f"{self.module}:{self.lineno}:{self.col}-{self.end_lineno}:{self.end_col}"
 
@@ -89,7 +89,7 @@ def client_modules() -> list[Path]:
 
 
 def _form_of(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> str:
-    """Classify a call by the construct that consumes it — a raise guard is not a coercion."""
+    """Classify a call by the construct that consumes it: a raise guard is not a coercion."""
     current = node
     while current in parents:
         parent = parents[current]
@@ -125,8 +125,8 @@ def enumerate_targets() -> list[Target]:
     scaffolding into a SyntaxError.
 
     Composite conditions get an extra WHOLE-CONDITION target. Splicing one conjunct of
-    ``not isinstance(x, dict) or "secs" not in x`` leaves the rest of the condition standing — the
-    guard does not disappear, so a green result would mean "this conjunct is unobserved", not
+    ``not isinstance(x, dict) or "secs" not in x`` leaves the rest of the condition standing, so the
+    guard does not disappear and a green result would mean "this conjunct is unobserved", not
     "this guard is unguarded".
     """
     targets: list[Target] = []
@@ -183,7 +183,7 @@ def splice(data: bytes, target: Target, replacement: bytes) -> bytes:
 
 
 # coverage stores a context as ``<node id>|<phase>``. The phase is the LAST segment, and a node id
-# may itself contain a pipe — six do here, e.g. a parametrised case whose id ends in
+# may itself contain a pipe, and six do here, e.g. a parametrised case whose id ends in
 # ``[level-'|']``. Splitting on the FIRST pipe truncated those to a prefix that matches no test.
 _COVERAGE_PHASES = frozenset({"setup", "run", "teardown"})
 
@@ -195,12 +195,12 @@ def _node_id_of(context: str) -> str:
 
 
 def test_identity(node_id: str) -> tuple[str, str]:
-    """``(test file name, function name)`` — the pair a claiming test is keyed by.
+    """``(test file name, function name)``: the pair a claiming test is keyed by.
 
     A node id is ``<path>::[<class>::]<function>[<param case>]``, and BOTH tails matter. Comparing
     with ``endswith("::" + name)`` ignored the file and could never match a parametrised id;
     measured on a real ctrace map, that credited ``test_olog_write.py::test_unknown_level_refused``
-    — a candidate carrying payload vocabulary — with the guard-line execution of a SAME-NAMED test
+    (a candidate carrying payload vocabulary) with the guard-line execution of a SAME-NAMED test
     in another file, and so hid it from the sham-candidate list this audit exists to produce.
     """
     path, _sep, rest = node_id.partition("::")
@@ -211,7 +211,7 @@ def test_identity(node_id: str) -> tuple[str, str]:
 def load_coverage_map(db_path: Path) -> dict[tuple[str, int], set[str]]:
     """``{(module, lineno): {test node id}}`` from a ``--cov-context=test`` database.
 
-    Reads the ``arc`` table: with branch coverage on, that is where the data lives — ``line_bits``
+    Reads the ``arc`` table: with branch coverage on, that is where the data lives: ``line_bits``
     stays empty, and querying it instead yields a silent, uniformly empty map.
     """
     names = {path.name for path in client_modules()}
@@ -244,7 +244,7 @@ _CLIENT_CLASS = re.compile(r"\w*Client")
 
 
 def _is_setattr(call: ast.Call) -> bool:
-    """``setattr(...)`` or ``<anything>.setattr(...)`` — the fixture may be renamed."""
+    """``setattr(...)`` or ``<anything>.setattr(...)``: the fixture may be renamed."""
     func = call.func
     return (isinstance(func, ast.Name) and func.id == "setattr") or (
         isinstance(func, ast.Attribute) and func.attr == "setattr"
@@ -264,7 +264,7 @@ def class_double_calls(node: ast.AST) -> list[ast.Call]:
     stylistic: a regex over the function's source segment also searches its DOCSTRING, and this
     estate's own exemplar of the CORRECT seam quotes the wrong idiom there to explain what it is
     avoiding. It was counted as a class double for eleven months of nothing noticing, which put
-    both AST pins one too high while ``sham --check`` reported "all agree" — the sham this file
+    both AST pins one too high while ``sham --check`` reported "all agree": the sham this file
     exists to find, inside the file.
 
     ⚠️ The obvious repair is the wrong one, and it was measured before it was rejected: blanking
@@ -274,7 +274,7 @@ def class_double_calls(node: ast.AST) -> list[ast.Call]:
 
     ``monkeypatch.setattr`` has two signatures and they disagree about what the second slot means:
     ``(target, "Name", value)`` and ``("dotted.path.Name", value)``. Requiring three arguments for
-    the first is not decoration — in the two-argument form the second slot is the REPLACEMENT, so
+    the first is not decoration: in the two-argument form the second slot is the REPLACEMENT, so
     ``setattr("mod.SOME_SETTING", "OlogClient")`` would otherwise be read as installing a double.
     """
     found: list[ast.Call] = []
@@ -293,7 +293,7 @@ def class_double_calls(node: ast.AST) -> list[ast.Call]:
 
 
 def _is_boom_double(call: ast.Call) -> bool:
-    """The replacement handed to this call is a ``_boom`` double — a negative control.
+    """The replacement handed to this call is a ``_boom`` double, a negative control.
 
     Judged per CALL rather than over the whole function text: the rule is about what this double
     IS, and a test that installs a real double AND mentions a ``_boom`` one elsewhere is not a
@@ -327,7 +327,7 @@ _EDGE_CLAIM = re.compile(
 #
 # Split by what checking them COSTS. The first two follow from this repository's own AST and are
 # therefore cheap enough for the ordinary test gate. The other two are decided by which tests
-# EXECUTED a guard line, which needs a coverage map recorded with COVERAGE_CORE=ctrace — minutes,
+# EXECUTED a guard line, which needs a coverage map recorded with COVERAGE_CORE=ctrace, so minutes,
 # not milliseconds. ``--check`` without a database verifies the cheap pair and says so; it never
 # reports "OK" for a figure it could not reach.
 DOUBLES = "tests installing a client class double in their own body"
@@ -342,7 +342,7 @@ PINNED: dict[str, int] = {**PINNED_AST, **PINNED_COVERAGE}
 # The candidate list, by NAME. A count is not a finding: the verdict "no sham guard found" was
 # reached by a person reading THESE tests, and a list of the same length with different members
 # satisfies every numeric pin. Recording the members turns "re-judge the verdict" from an
-# instruction nobody can check into a diff — added names are what has not been read.
+# instruction nobody can check into a diff: added names are what has not been read.
 PINNED_CANDIDATES: tuple[str, ...] = (
     "test_archiver.py::test_get_pv_history_bad_time_is_not_a_connection_error",
     "test_archiver.py::test_list_archived_pvs_empty_pattern_with_this_appliance_is_fine",
@@ -383,10 +383,10 @@ RERUN_COVERAGE = (
 
 # What the audit CANNOT pin, said here rather than left to be noticed: the verdict "no sham guard
 # found" was reached by a human READING the candidate list, and only its SIZE is recorded. A list
-# of the same length with different members satisfies every pin below. Widening _EDGE_CLAIM —
-# which this file's own docstring invites — reddens EDGE_VOCABULARY but leaves the verdict, and
+# of the same length with different members satisfies every pin below. Widening _EDGE_CLAIM,
+# which this file's own docstring invites, reddens EDGE_VOCABULARY but leaves the verdict, and
 # the coverage-dependent 20, to be re-judged by a person.
-UNPINNED_VERDICT = "no sham guard found BY THIS FILTER — a judgement about a list, not a count"
+UNPINNED_VERDICT = "no sham guard found BY THIS FILTER: a judgement about a list, not a count"
 
 
 def claiming_tests() -> dict[str, list[tuple[str, bool]]]:
@@ -394,12 +394,12 @@ def claiming_tests() -> dict[str, list[tuple[str, bool]]]:
 
     The primary signal is mechanical and per-FUNCTION: the test's own body replaces a client
     class, so the real client edge is out of the path for that test. A per-file signal was tried
-    first and is useless — it marks every test in a file that doubles a client anywhere, which
+    first and is useless: it marks every test in a file that doubles a client anywhere, which
     swept in schema and CLI tests that never touch a client.
 
     The second element flags payload vocabulary (``unreadable``, ``malformed``, ``_raises`` …).
-    That distinguishes "claims something about what the service ANSWERED" — the sham-guard
-    candidates — from a double used merely to keep a service-layer test off the network, which is
+    That distinguishes "claims something about what the service ANSWERED" (the sham-guard
+    candidates) from a double used merely to keep a service-layer test off the network, which is
     a legitimate use of the same tool. It is a filter for reading order, not a verdict.
 
     ``_boom`` doubles are excluded by construction: their point is that nothing runs (they assert
@@ -407,20 +407,20 @@ def claiming_tests() -> dict[str, list[tuple[str, bool]]]:
 
     Known blind spot, stated rather than implied: a double installed OUTSIDE the test body is not
     seen here. That covers a pytest fixture and, measured on this tree, a plain module-level helper
-    — ``tests/test_olog_update.py`` installs one in ``_install_fake`` and 21 tests call it. Until
+    and ``tests/test_olog_update.py`` installs one in ``_install_fake`` and 21 tests call it. Until
     the criterion was read from the syntax tree, three of those 21 were counted, by accident: the
     regex matched their METHOD patch onto the double. Consistently blind beats arbitrarily
     half-sighted; widening the signal to helper-installed doubles is its own piece of work.
 
     The docstring IS read, deliberately, but only for ``_EDGE_CLAIM``: a test whose prose says "the
     service answered and we could not read it" states the edge claim in words its name does not
-    carry. What must never come from prose is whether a double was INSTALLED — see
+    carry. What must never come from prose is whether a double was INSTALLED: see
     ``class_double_calls``.
     """
     found: dict[str, list[tuple[str, bool]]] = {}
     # pytest's own default is ``test_*.py *_test.py``, and pyproject sets no ``python_files``. A
     # narrower glob here would let a contributor add doubles under a name pytest RUNS and the
-    # audited population does not see. Latent today — no such file exists — so this closes a hole
+    # audited population does not see. Latent today: no such file exists, so this closes a hole
     # rather than fixing a wrong figure.
     for path in sorted(set(_TESTS.glob("test_*.py")) | set(_TESTS.glob("*_test.py"))):
         for node in ast.walk(ast.parse(path.read_bytes())):
@@ -436,7 +436,7 @@ def claiming_tests() -> dict[str, list[tuple[str, bool]]]:
 
 
 def cmd_targets(_args: argparse.Namespace) -> int:
-    """Print the target inventory grouped by form — the population, before any mutation."""
+    """Print the target inventory grouped by form: the population, before any mutation."""
     targets = enumerate_targets()
     by_form: dict[str, int] = {}
     for target in targets:
@@ -463,7 +463,7 @@ def _compare(measured: dict[str, int]) -> int:
 
     What was NOT compared is DERIVED from the pins minus the measurements, never hand-passed. The
     first version took the skipped list as an argument, so a pin belonging to neither list simply
-    vanished while the verdict line still read "all agree with the recorded audit" — the sham this
+    vanished while the verdict line still read "all agree with the recorded audit": the sham this
     function exists to make impossible, inside the function itself.
     """
     unknown = sorted(measured.keys() - PINNED.keys())
@@ -479,20 +479,20 @@ def _compare(measured: dict[str, int]) -> int:
         sys.stderr.write("NOT checked here:\n")
         for name in skipped:
             reason = "needs --coverage-db" if name in PINNED_COVERAGE else "nothing measured it"
-            sys.stderr.write(f"  {name} (pinned {PINNED[name]}) — {reason}\n")
+            sys.stderr.write(f"  {name} (pinned {PINNED[name]}): {reason}\n")
     sys.stderr.write(f"NOT pinnable at all: {UNPINNED_VERDICT}\n")
     if deviating:
         cheap = all(name in PINNED_AST for name, _line in deviating)
         # A DISJUNCTION when a coverage figure moved, not a diagnosis. Those figures depend on the
-        # map as much as on the code, and the loudest hazard this file knows about — a map recorded
-        # without COVERAGE_CORE=ctrace — produces exactly this deviation on a byte-identical tree.
+        # map as much as on the code, and the loudest hazard this file knows about (a map recorded
+        # without COVERAGE_CORE=ctrace) produces exactly this deviation on a byte-identical tree.
         # The tool cannot tell the two apart: measured, the sqlite ``tracer`` table is empty even
         # for a map that WAS recorded with ctrace, so there is no marker to read. Naming only the
         # code would send a reader to re-record pins from a map that ran a quarter of the tests.
         sys.stderr.write(
-            "PIN DEVIATION — the recorded audit describes different code now:\n"
+            "PIN DEVIATION: the recorded audit describes different code now:\n"
             if cheap
-            else "PIN DEVIATION — either the code changed, or this map is BLIND. A map recorded "
+            else "PIN DEVIATION: either the code changed, or this map is BLIND. A map recorded "
             "without COVERAGE_CORE=ctrace sees a fraction of the covering tests and deviates the "
             "same way. Check the core BEFORE re-recording anything:\n"
         )
@@ -508,13 +508,13 @@ def cmd_sham(args: argparse.Namespace) -> int:
     """Direction B: tests that claim a client-edge guard but never execute one."""
     # The AST half runs FIRST and unconditionally. It needs no coverage map, and putting it after
     # the map would make ``--check`` without a database dereference a missing path and die with a
-    # TypeError — exit 1, indistinguishable from "a pin deviates", which is the one thing exit 1
+    # TypeError, i.e. exit 1, indistinguishable from "a pin deviates", which is the one thing exit 1
     # is now contracted to mean.
     measured = population()
     if getattr(args, "list_candidates", False):
         # The list RERUN_AST sends a reader to, at AST cost. It used to be printed only on the
         # --coverage-db path, so the CHEAP recipe's first instruction demanded the expensive
-        # artifact — the inversion the whole cost split exists to prevent.
+        # artifact: the inversion the whole cost split exists to prevent.
         claiming = claiming_tests()
         sys.stderr.write(
             f"{measured[DOUBLES]} tests install a client class double in their own body; "
@@ -532,7 +532,7 @@ def cmd_sham(args: argparse.Namespace) -> int:
     covering = load_coverage_map(Path(args.coverage_db))
     if not covering:
         sys.stderr.write(
-            "empty coverage map — was it recorded with --cov-branch --cov-context=test?\n"
+            "empty coverage map: was it recorded with --cov-branch --cov-context=test?\n"
         )
         # The cheap pins were computed BEFORE the map was opened, so refusing to compare them here
         # would throw away work already in hand and leave the caller unable to tell "your map is
@@ -571,14 +571,14 @@ def cmd_sham(args: argparse.Namespace) -> int:
     if args.check:
         # MEMBERS as well as counts, and BOTH are reported before anything returns. The verdict is
         # a judgement about these tests, so a list of the same length with different members must
-        # not read as agreement — this file's own UNPINNED_VERDICT has said so since S33 and
+        # not read as agreement: this file's own UNPINNED_VERDICT has said so since S33 and
         # nothing acted on it. Stopping at the first of the two findings would make a run's silence
         # about the other unreadable, which is the shape of defect this whole file is against.
         appeared = sorted(set(sham_edge) - set(PINNED_CANDIDATES))
         vanished = sorted(set(PINNED_CANDIDATES) - set(sham_edge))
         if appeared or vanished:
             sys.stderr.write(
-                "CANDIDATE LIST CHANGED — the verdict was reached by reading the old one:\n"
+                "CANDIDATE LIST CHANGED: the verdict was reached by reading the old one:\n"
             )
             for entry in appeared:
                 sys.stderr.write(f"  + {entry}  (never read; read it before re-recording)\n")
@@ -620,18 +620,18 @@ def classify(exit_code: int, output: str, expected_passed: int) -> str:
 
     ``exit code 0`` alone is not "survived": an invalid node id exits 4/5 with nothing run, which
     would read as a dead guard. And a red run is only evidence that the guard is watched when the
-    failure carries the guard's own diagnosis — a TypeError from forcing a check on means the
+    failure carries the guard's own diagnosis: a TypeError from forcing a check on means the
     happy path crashed, not that anyone observed the refusal.
 
     ⚠️ Honest limit, measured: for a RAISE-GUARD the enabling polarity makes the condition
     constantly true, so the guard fires on every input and every covering test dies with the
-    module's own exception. ``KILLED-DECLARED`` is therefore TAUTOLOGICAL there — it says "a test
+    module's own exception. ``KILLED-DECLARED`` is therefore TAUTOLOGICAL there: it says "a test
     executes this line", not "someone observes the refusal". All 21 raise guards in this estate
     have such a polarity. Only the DISABLING polarity carries information for them.
     """
     # pytest exit codes: 0 pass · 1 tests failed · 2 interrupted · 3 internal error · 4 usage
     # error · 5 no tests collected. Only 1 is evidence about the guard. ⚠️ Everything else used to
-    # fall through to the KILLED- buckets, i.e. straight into "the guard is observed" — a renamed
+    # fall through to the KILLED- buckets, i.e. straight into "the guard is observed": a renamed
     # or moved test would have counted AS evidence FOR every guard it used to cover.
     if exit_code not in (0, 1):
         return "INVALID-SELECTION"
@@ -650,7 +650,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     """Direction A: mutate each guard in both polarities and record what, if anything, notices."""
     covering = load_coverage_map(Path(args.coverage_db))
     if not covering:
-        sys.stderr.write("empty coverage map — refusing to sweep against a blind map\n")
+        sys.stderr.write("empty coverage map: refusing to sweep against a blind map\n")
         return 2
 
     originals = {path: path.read_bytes() for path in client_modules()}
@@ -670,7 +670,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
             if current != written.get(path):
                 sys.stderr.write(
                     f"REFUSING to restore {path.name}: on-disk bytes are neither the baseline nor "
-                    f"what this sweep wrote — a foreign write. Left untouched ON PURPOSE; the "
+                    f"what this sweep wrote, a foreign write. Left untouched ON PURPOSE; the "
                     f"pristine copy is in this process's memory only, so save the file elsewhere "
                     f"before re-running.\n"
                 )
@@ -750,8 +750,8 @@ def main(argv: list[str]) -> int:
     sham_parser.add_argument(
         "--list-candidates",
         action="store_true",
-        help="print the payload-vocabulary candidate list from the AST alone, no database needed "
-        "— the list RERUN_AST asks a developer to re-read",
+        help="print the payload-vocabulary candidate list from the AST alone, no database needed: "
+        "the list RERUN_AST asks a developer to re-read",
     )
     sham_parser.set_defaults(func=cmd_sham)
 
@@ -770,7 +770,7 @@ def main(argv: list[str]) -> int:
     except Exception:  # noqa: BLE001 - the point is that a crash must not look like a verdict
         # Exit 1 is contracted to mean "a pin deviates", so a crash needs its own code. NOT 3:
         # cmd_sweep already returns 3 for a detected foreign write, which is this tool's most
-        # safety-critical finding — colliding with it would let a wrapper read "check your
+        # safety-critical finding: colliding with it would let a wrapper read "check your
         # working tree now" as "the tool crashed, retry".
         traceback.print_exc()
         return 9
