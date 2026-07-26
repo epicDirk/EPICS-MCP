@@ -70,8 +70,10 @@ async def _set_pv_value(
     # Write new value.
     #  - except CancelledError (a BaseException, so the broad ``except Exception`` below does NOT
     #    catch it): a cancel does NOT stop the ``asyncio.to_thread`` worker running the p4p put, so
-    #    the value may still land at the IOC AFTER the caller sees the cancel (S24/N01, "der stille
-    #    Irrtum"). Record UNKNOWN_PENDING so the ATTEMPT is not left dangling, then ALWAYS re-raise
+    #    the value may still land at the IOC AFTER the caller sees the cancel (S24/N01, the
+    #    "silent mistake": the caller believes nothing happened and is wrong, with no signal
+    #    anywhere that says so). Record UNKNOWN_PENDING so the ATTEMPT is not left dangling,
+    #    then ALWAYS re-raise
     #    the cancel unchanged, never a FAILED (that implies no write), never a blind retry (that
     #    could double-write). The emit is guarded so a broken audit sink can never swallow or
     #    replace the CancelledError. (Non-cancel BaseExceptions = process shutdown, propagate.)

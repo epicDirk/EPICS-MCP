@@ -318,7 +318,7 @@ def test_render_markdown_broken_db_and_unregistered_naming() -> None:
 
 
 def test_notes_glob_capped_and_needs_msi() -> None:
-    # Die ehrlichen Untergrenzen-Notes: glob-cap (Adapter) und needs-msi (.db-Substitution).
+    # The two honest lower-bound notes: glob cap (adapter) and needs-msi (.db substitution).
     glob = crossplane_check([_jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:x")], _st(), glob_capped_count=2)
     assert any("glob cap" in note for note in glob.notes)
     msi = crossplane_check([], _st(), ioc_db=(set[str](), {"DEV-TEST01:Ctrl-EVR-01:$(R)"}))
