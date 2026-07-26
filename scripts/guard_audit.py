@@ -209,10 +209,76 @@ def load_coverage_map(db_path: Path) -> dict[tuple[str, int], set[str]]:
         connection.close()
 
 
-# A class-level double, in either house form: the dotted string path
+# The name a client class carries, in either house form: the dotted string path
 # (``monkeypatch.setattr("…services.olog_client.OlogClient", _Fake)``) or the module object
 # (``monkeypatch.setattr(checkers, "OlogClient", _Fake)``).
-_CLASS_DOUBLE = re.compile(r"setattr\(\s*[^)]*?[\"']?\w*Client[\"']?\s*,")
+_CLIENT_CLASS = re.compile(r"\w*Client")
+
+
+def _is_setattr(call: ast.Call) -> bool:
+    """``setattr(...)`` or ``<anything>.setattr(...)`` — the fixture may be renamed."""
+    func = call.func
+    return (isinstance(func, ast.Name) and func.id == "setattr") or (
+        isinstance(func, ast.Attribute) and func.attr == "setattr"
+    )
+
+
+def _string_constant(node: ast.expr | None) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def class_double_calls(node: ast.AST) -> list[ast.Call]:
+    """Every call inside *node* that replaces a client CLASS, read from the syntax tree.
+
+    Read from the TREE, never from the source text, and the reason is measured rather than
+    stylistic: a regex over the function's source segment also searches its DOCSTRING, and this
+    estate's own exemplar of the CORRECT seam quotes the wrong idiom there to explain what it is
+    avoiding. It was counted as a class double for eleven months of nothing noticing, which put
+    both AST pins one too high while ``sham --check`` reported "all agree" — the sham this file
+    exists to find, inside the file.
+
+    ⚠️ The obvious repair is the wrong one, and it was measured before it was rejected: blanking
+    string literals before matching collapses the population from 107 to FOUR, because the client
+    class NAME IS a string literal in both house idioms. "Do not match inside strings" is exactly
+    backwards here; what has to change is reading text at all.
+
+    ``monkeypatch.setattr`` has two signatures and they disagree about what the second slot means:
+    ``(target, "Name", value)`` and ``("dotted.path.Name", value)``. Requiring three arguments for
+    the first is not decoration — in the two-argument form the second slot is the REPLACEMENT, so
+    ``setattr("mod.SOME_SETTING", "OlogClient")`` would otherwise be read as installing a double.
+    """
+    found: list[ast.Call] = []
+    for inner in ast.walk(node):
+        if not isinstance(inner, ast.Call) or not _is_setattr(inner):
+            continue
+        if len(inner.args) >= 3:
+            attribute = _string_constant(inner.args[1])
+            if attribute and _CLIENT_CLASS.fullmatch(attribute):
+                found.append(inner)
+                continue
+        dotted = _string_constant(inner.args[0]) if inner.args else None
+        if dotted and "." in dotted and _CLIENT_CLASS.fullmatch(dotted.rsplit(".", 1)[1]):
+            found.append(inner)
+    return found
+
+
+def _is_boom_double(call: ast.Call) -> bool:
+    """The replacement handed to this call is a ``_boom`` double — a negative control.
+
+    Judged per CALL rather than over the whole function text: the rule is about what this double
+    IS, and a test that installs a real double AND mentions a ``_boom`` one elsewhere is not a
+    negative control. Measured: on the delivered tree both readings exclude the same 19 tests.
+    """
+    if len(call.args) >= 3:
+        replacement: ast.expr | None = call.args[2]
+    elif len(call.args) == 2:
+        replacement = call.args[1]
+    else:
+        replacement = None
+    return replacement is not None and "_boom" in ast.dump(replacement)
+
 
 # Vocabulary that marks a test as being ABOUT a payload the client edge inspects, as opposed to
 # a double used merely to keep a service-layer test off the network.
@@ -241,7 +307,7 @@ EDGE_VOCABULARY = "of those, carrying payload vocabulary"
 NOT_EXECUTING = "of those, never executing a client-edge line"
 SHAM_CANDIDATES = "and claiming something about the ANSWERED payload"
 
-PINNED_AST: dict[str, int] = {DOUBLES: 107, EDGE_VOCABULARY: 23}
+PINNED_AST: dict[str, int] = {DOUBLES: 103, EDGE_VOCABULARY: 21}
 PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 102, SHAM_CANDIDATES: 20}
 PINNED: dict[str, int] = {**PINNED_AST, **PINNED_COVERAGE}
 
@@ -282,25 +348,29 @@ def claiming_tests() -> dict[str, list[tuple[str, bool]]]:
     ``_boom`` doubles are excluded by construction: their point is that nothing runs (they assert
     no client is ever built), so they are negative controls rather than sham guards.
 
-    Known blind spot, stated rather than implied: a double installed by a FIXTURE rather than in
-    the test body is not seen here.
+    Known blind spot, stated rather than implied: a double installed OUTSIDE the test body is not
+    seen here. That covers a pytest fixture and, measured on this tree, a plain module-level helper
+    — ``tests/test_olog_update.py`` installs one in ``_install_fake`` and 21 tests call it. Until
+    the criterion was read from the syntax tree, three of those 21 were counted, by accident: the
+    regex matched their METHOD patch onto the double. Consistently blind beats arbitrarily
+    half-sighted; widening the signal to helper-installed doubles is its own piece of work.
+
+    The docstring IS read, deliberately, but only for ``_EDGE_CLAIM``: a test whose prose says "the
+    service answered and we could not read it" states the edge claim in words its name does not
+    carry. What must never come from prose is whether a double was INSTALLED — see
+    ``class_double_calls``.
     """
     found: dict[str, list[tuple[str, bool]]] = {}
     for path in sorted(_TESTS.glob("test_*.py")):
-        text = path.read_text(encoding="utf-8")
-        entries: list[tuple[str, bool]] = []
-        for node in ast.walk(ast.parse(text)):
+        for node in ast.walk(ast.parse(path.read_bytes())):
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue
             if not node.name.startswith("test_"):
                 continue
-            body = ast.get_source_segment(text, node) or ""
-            if not _CLASS_DOUBLE.search(body) or "_boom" in body:
+            if not [call for call in class_double_calls(node) if not _is_boom_double(call)]:
                 continue
             claim = bool(_EDGE_CLAIM.search(node.name + (ast.get_docstring(node) or "")))
-            entries.append((node.name, claim))
-        if entries:
-            found[path.name] = entries
+            found.setdefault(path.name, []).append((node.name, claim))
     return found
 
 

@@ -13,21 +13,25 @@ map recorded with ``COVERAGE_CORE=ctrace`` and some ten minutes, which is not a 
 
 Findings of the 2026-07-25 run, kept here rather than in a document nobody reads again:
 
-* Sham guards (direction B): **none found — which is not the same as none there.** 107 tests
-  install a client class double in their own body and 102 never execute a guard line; that is the
-  double used legitimately, to keep a service-layer test off the network. 20 of those 102 also
-  carry payload vocabulary, and the ones read claim SERVICE-layer behaviour (an already-constructed
-  exception must not be relabelled "unreachable"), not a client-edge check. ⚠️ Not all 20 were
-  read, and the vocabulary filter itself decides who gets read — a first, narrower filter surfaced
-  only 2 and a review showed it missed a test whose docstring states the edge claim in words the
-  regex did not know. Treat this as "no sham guard found by this filter", and widen the filter
-  before treating it as a stronger statement.
+* Sham guards (direction B): **none found — which is not the same as none there.** 103 tests
+  install a client class double in their own body and 102 never execute a guard line — all but one
+  of them; that is the double used legitimately, to keep a service-layer test off the network. 20
+  of those 102 also carry payload vocabulary, and the ones read claim SERVICE-layer behaviour (an
+  already-constructed exception must not be relabelled "unreachable"), not a client-edge check.
+  ⚠️ Not all 20 were read, and the vocabulary filter itself decides who gets read — a first,
+  narrower filter surfaced only 2 and a review showed it missed a test whose docstring states the
+  edge claim in words the regex did not know. Treat this as "no sham guard found by this filter",
+  and widen the filter before treating it as a stronger statement.
 
-  S33, and the distinction matters for what can be checked cheaply: 23 of those 107 carry payload
+  S33, and the distinction matters for what can be checked cheaply: 21 of those carry payload
   vocabulary before any coverage map is consulted, and 20 remain once the tests that DO execute a
-  guard line are removed. The 23 follows from this repository's AST alone and is therefore pinned
-  by a test in the ordinary gate; the 102 and the 20 are decided by the coverage map and are
-  checked only by ``scripts/guard_audit.py sham --check --coverage-db …``.
+  guard line are removed. The vocabulary figure follows from this repository's AST alone and is
+  therefore pinned by a test in the ordinary gate; the 102 and the 20 are decided by the coverage
+  map and are checked only by ``scripts/guard_audit.py sham --check --coverage-db …``.
+  ⚠️ The population dropped from 107 on 2026-07-26: the detector read the function's SOURCE TEXT,
+  so a docstring QUOTING the class-double idiom counted, and a method patch on a double installed
+  by a helper counted too. Both pins were one and four too high; the coverage pair did not move,
+  because all four of those tests do execute a guard line.
 * Unobserved polarities (direction A): 19 of 93 targets, plus one where neither polarity is
   noticed and two that no test executes at all. They are declared below.
 
@@ -160,9 +164,14 @@ _PROSE_FIGURES: tuple[tuple[str, str, Callable[[], int]], ...] = (
         r"(\w+) tests\s+install a client class double",
         lambda: population()[DOUBLES],
     ),
+    # The pattern must NOT name the population figure. It used to say "of those 107", which is a
+    # figure the row above derives: correcting the docstring after the population moved made this
+    # pattern MISS and reddened with "the sentence stating it is gone", while leaving the stale
+    # number in place kept the file green. The guard rewarded the false prose. Same defect 72e3250
+    # removed from "(\w+) of the 17 keys do", two rows down, and left standing here.
     (
         "of those, carrying payload vocabulary",
-        r"(\w+) of those 107 carry payload\s+vocabulary",
+        r"(\w+) of those carry payload\s+vocabulary",
         lambda: population()[EDGE_VOCABULARY],
     ),
     (
