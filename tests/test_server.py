@@ -3032,7 +3032,7 @@ async def test_stripped_tool_still_returns_structured_content(
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
 # RELATIONAL (a ``<=`` check) so both lanes pass. Measured after typing find_channels (S29): the
-# core lane is 63_879 and the full lane 72_177. Re-MEASURE these two after ANY change that can
+# core lane is 63_879 and the full lane 72_167. Re-MEASURE these two after ANY change that can
 # reach the wire -- a schema OR a description edit; the split below is why the narrower wording
 # was a gap. They are prose, nothing asserts them, and an estimate written instead of a measurement
 # had to be
@@ -3050,7 +3050,7 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
     FastMCP's native-lean schemas plus the S29 typing keep the core lane 63_879 and the full lane
-    72_177; a new tool or an SDK change that inflates the wire could grow that UNNOTICED with an
+    72_167; a new tool or an SDK change that inflates the wire could grow that UNNOTICED with an
     otherwise green suite. This is that guard, now a soft catastrophe-ceiling at 200_000 (see the
     constant's comment for the raise rationale).
 

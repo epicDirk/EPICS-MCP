@@ -2,14 +2,14 @@
 
 The live-plane counterpart of the offline ``find_screen`` (phoebus-display MCP). It REUSES the
 build-once reverse-lookup ``opi_navigation.pv_analysis.find_displays`` (never rebuilt) and enriches
-each matched channel with a p4p live read and a ChannelFinder source-IOC join — keeping the surface
+each matched channel with a p4p live read and a ChannelFinder source-IOC join, keeping the surface
 split: the offline ``find_screen`` stays EPICS-free, the live enrichment lives here. Mirrors the
 ``crossplane`` trio (pure :mod:`~.services.device_lookup` assembly next to this thin async wrapper).
 
 The blocking offline part (macro-aware inventory + reverse-lookup) runs off the event loop in a
 thread; the p4p batch read and the ChannelFinder GET are awaited in the wrapper. The live read is
 capped to ``max_batch_size`` channels (a device prefix matches hundreds-to-thousands; one batch
-over that cap raises ``BATCH_TOO_LARGE``) — the screen list stays complete, only the live is capped.
+over that cap raises ``BATCH_TOO_LARGE``), the screen list stays complete, only the live is capped.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ def _run_lookup(
     """Blocking offline part (run in a thread): macro-aware inventory → reverse-lookup → channels.
 
     *displays_dir* must be the project/dataset ROOT (the inventory binds display macros via the
-    operator top-levels there — a narrow per-IOC subdirectory under-resolves, like ``crossplane``).
+    operator top-levels there, a narrow per-IOC subdirectory under-resolves, like ``crossplane``).
     """
     inventory = analyze_pv_inventory(
         Path(displays_dir), context_cap=context_cap, windows_paths=windows_paths
@@ -73,7 +73,7 @@ async def _find_device(
     Read-only. *query* is a device / PV channel (protocol prefix optional); *match* is
     ``exact``/``prefix``/``substring`` (matched against the protocol-stripped channel).
     *displays_dir* is the project/dataset ROOT. Live values come from p4p; reach follows the
-    launcher's EPICS search env (address lists / name servers / auto-addr search — run
+    launcher's EPICS search env (address lists / name servers / auto-addr search, run
     ``epics-doctor`` for the effective posture); the live read is capped to ``max_batch_size``
     channels with an honest note (the screen list stays complete). Source IOC comes from
     ChannelFinder, disabled by default (empty ``EPICS_MCP_CHANNELFINDER_URL`` → no source IOC,
@@ -101,21 +101,21 @@ async def _find_device(
         live = await pv_get_batch(list(read), timeout) if read else {"results": [], "errors": []}
     except EpicsError as exc:
         # S27: the provider broke its batch length contract (UPSTREAM_CONTRACT_ERROR). The offline
-        # screens are already computed and must survive — degrade the LIVE part rather than sink the
+        # screens are already computed and must survive, degrade the LIVE part rather than sink the
         # whole tool (mirrors the ChannelFinder best-effort handling below; both carry a report
         # note). Not silent: logged AND surfaced as a report note (build_device_report reads live's
-        # "note"). BATCH_TOO_LARGE cannot fire here (read is capped above) — catches the breach.
+        # "note"). BATCH_TOO_LARGE cannot fire here (read is capped above), catches the breach.
         logger.warning("Live read degraded for query %r (provider contract): %s", cleaned, exc)
         live = {
             "results": [],
             "errors": [],
-            "note": "Live values unavailable — the EPICS provider returned a malformed batch. "
+            "note": "Live values unavailable, the EPICS provider returned a malformed batch. "
             "The screen list is complete; live values could not be read.",
         }
 
     # ChannelFinder source-IOC join with a match-aware glob: a substring match need not start with
     # the query, so broaden to ``*stem*``; prefix/exact stay anchored at ``stem*``. The exact-name
-    # join in build_device_report filters the (over-broad) fetch. Best-effort — a CF outage must not
+    # join in build_device_report filters the (over-broad) fetch. Best-effort, a CF outage must not
     # sink the screens+live result (mirrors the live-read handling above: a provider-contract breach
     # degrades the live part, screens stay complete).
     stem = channel_name(cleaned).rstrip(":")
@@ -124,14 +124,14 @@ async def _find_device(
         # Typed as the shared service's own result (S29), not as a bare Mapping: that makes the
         # DEGRADATION literal below type-checked, where a misspelled key used to be invisible.
         iocs: ChannelQueryResult = await query_channels(glob)
-    except Exception:  # noqa: BLE001 — CF is best-effort: ANY failure degrades, never sinks the tool
+    except Exception:  # noqa: BLE001 (CF is best-effort: ANY failure degrades, never sinks the tool)
         # S7-6: broaden beyond EpicsError. query_channels maps ChannelFinder errors to
         # EpicsConnectionError, but an unexpected client/projection bug (a non-EpicsError) must also
         # degrade to "unreachable" rather than propagate and sink the screens+live result.
         iocs = {
             "enabled": True,
             "channels": [],
-            "note": "ChannelFinder unreachable — source IOC not resolved.",
+            "note": "ChannelFinder unreachable, source IOC not resolved.",
         }
 
     report = build_device_report(

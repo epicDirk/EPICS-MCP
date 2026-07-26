@@ -7,7 +7,7 @@ Alarm / Naming clients. A retry-policy or logging change is now ONE edit here in
 
 Read is the default; the ONE write path (Olog logbook posts) reuses this substrate via
 :func:`rest_put_json` and :func:`basic_auth_header`. Every write is gated separately
-(:mod:`epics_pv_mcp.olog_safety`) — this module only carries the transport.
+(:mod:`epics_pv_mcp.olog_safety`), this module only carries the transport.
 
 The single ``logger.debug`` line in :func:`rest_get_json`/:func:`rest_put_json` also wakes the
 previously-dead per-client loggers: a swallowed REST failure (translated to a client exception, then
@@ -43,19 +43,19 @@ def url_host(url: str) -> str | None:
     """The normalised host of *url*, or None if it has none / cannot be parsed (fail closed).
 
     The hardened host extraction behind every "which server am I talking to?" decision. It answers
-    with the host the connection would ACTUALLY reach, which is why it parses with urllib3 — the
-    parser ``requests`` itself connects through — rather than ``urllib.parse``. The two disagree on
+    with the host the connection would ACTUALLY reach, which is why it parses with urllib3, the
+    parser ``requests`` itself connects through, rather than ``urllib.parse``. The two disagree on
     a backslash in the authority (``http://evil.example.org:8080\\@127.0.0.1/Olog``: urlparse splits
     at the last ``@`` and answers ``127.0.0.1``, urllib3 connects to ``evil.example.org``), and a
     decision that names a different server than the socket does is worse than no decision at all.
 
     Either parser strips userinfo, so ``http://127.0.0.1@evil.example.org/Olog`` yields
     ``evil.example.org``, NOT loopback; IPv6 brackets are stripped. Normalised: lowercase, trailing
-    FQDN dot removed — and emptiness is judged AFTER that (``http://./Olog`` has host ``.`` which
+    FQDN dot removed, and emptiness is judged AFTER that (``http://./Olog`` has host ``.`` which
     normalises to nothing, so it is None, not ``""``).
 
     Returns None for every unparseable form: hostless/garbage URLs and malformed authorities (both
-    parsers raise ``LocationParseError``/``ValueError``). Callers treat None as a hard veto — see
+    parsers raise ``LocationParseError``/``ValueError``). Callers treat None as a hard veto, see
     :meth:`~epics_pv_mcp.olog_safety.OlogWriteGate._url_write_allowed`, where "unparseable" must
     lose even against an explicit allowlist, which :func:`is_loopback_url` alone cannot express
     (it collapses "parsed, not loopback" and "did not parse" into the same False).
@@ -66,11 +66,11 @@ def url_host(url: str) -> str | None:
         return None  # malformed URL (e.g. bad bracketed IPv6) → fail closed
     if not parsed.scheme:
         # urllib3 is lenient where urlparse is not: it reads a bare "garbage" as a hostname. A base
-        # URL without a scheme is not one, and nothing could connect to it — treat it as unparseable
+        # URL without a scheme is not one, and nothing could connect to it, treat it as unparseable
         # so the veto fires rather than letting such a value reach an allowlist comparison.
         return None
     host = parsed.host
-    if not host:  # None or "" — hostless URL ("http:///Olog")
+    if not host:  # None or "", hostless URL ("http:///Olog")
         return None
     # urllib3 keeps IPv6 brackets ("[::1]"); ipaddress needs them off. Then normalise, and judge
     # emptiness AFTER: "http://./Olog" has host "." which normalises to nothing → still a veto.
@@ -78,22 +78,22 @@ def url_host(url: str) -> str | None:
 
 
 def is_loopback_url(url: str) -> bool:
-    """True iff *url*'s host is a loopback address — i.e. a LOCAL test server, not a real facility.
+    """True iff *url*'s host is a loopback address, i.e. a LOCAL test server, not a real facility.
 
     The shared "am I talking to a local sandbox?" primitive, used by two callers with DIFFERENT
     policies on top:
 
-    * the Olog write gate (:mod:`epics_pv_mcp.olog_safety`) — loopback is one of two ways to pass;
+    * the Olog write gate (:mod:`epics_pv_mcp.olog_safety`), loopback is one of two ways to pass;
       an explicitly allowlisted remote is the other.
-    * the Olog read redaction (:mod:`epics_pv_mcp.services.olog_client`) — loopback is the ONLY way
+    * the Olog read redaction (:mod:`epics_pv_mcp.services.olog_client`), loopback is the ONLY way
       to see un-redacted entries.
 
     Only the PRIMITIVE is shared, never the policy: the write gate's ``_url_write_allowed`` also
     returns True for an allowlisted REMOTE host, so reusing IT as the read predicate would read a
-    production logbook in the clear. Both policies do agree on the boolean direction, though —
-    False means "restrict" (deny the write / redact the read) — so no inversion is needed here.
+    production logbook in the clear. Both policies do agree on the boolean direction, though:
+    False means "restrict" (deny the write / redact the read), so no inversion is needed here.
 
-    Fails closed via :func:`url_host` (see there). RFC1918 private is deliberately NOT loopback — a
+    Fails closed via :func:`url_host` (see there). RFC1918 private is deliberately NOT loopback, a
     production service lives on a private network, so "private = local" would defeat the point.
     """
     host = url_host(url)
@@ -108,12 +108,12 @@ def is_loopback_url(url: str) -> bool:
 
 
 def is_https_url(url: str) -> bool:
-    """True iff *url*'s scheme is ``https`` — parsed with urllib3 (the parser requests connects
+    """True iff *url*'s scheme is ``https``, parsed with urllib3 (the parser requests connects
     with), fail-closed on anything unparseable.
 
     The Olog write gate uses this to refuse a plain-``http`` write to an allowlisted REMOTE host: a
     Basic-auth PUT over http exposes the service-account credentials on the wire (and to any proxy).
-    Loopback stays http-OK (a local sandbox), so this gates only the remote lane — see
+    Loopback stays http-OK (a local sandbox), so this gates only the remote lane, see
     :meth:`~epics_pv_mcp.olog_safety.OlogWriteGate._url_write_allowed`.
     """
     try:
@@ -127,7 +127,7 @@ def basic_auth_header(user: str, password: str) -> str | None:
     """Return an HTTP ``Basic <base64(user:pass)>`` header value, or ``None`` if either is empty.
 
     ``None`` (empty user OR password) means NO authorization header is sent, so a server that
-    requires auth answers 401 — a clear failure, never a silent unauthenticated write. The single
+    requires auth answers 401, a clear failure, never a silent unauthenticated write. The single
     tested place a Basic header is minted (DoD-F1: no ad-hoc base64 scattered across callers)."""
     if not user or not password:
         return None
@@ -147,11 +147,11 @@ def build_retrying_session(
     """Return a :class:`requests.Session` with the accept header, optional auth, and a retry policy.
 
     The single source of the retry policy (default 3 retries, backoff 0.5, ``status_forcelist``
-    502/503/504) shared by every REST client — change the defaults here and all planes inherit them.
+    502/503/504) shared by every REST client, change the defaults here and all planes inherit them.
     urllib3 ships with requests, but the ``Retry`` import stays guarded so a stripped environment
     degrades to no-retry rather than failing at construction.
 
-    ``retries`` and ``backoff_factor`` are parametrized (Q2) so a caller can request ``retries=0`` —
+    ``retries`` and ``backoff_factor`` are parametrized (Q2) so a caller can request ``retries=0``:
     a SINGLE attempt with no retry-multiplied timeout, the „one attempt, long timeout" shape this
     factory could not express before (urllib3 applies the per-request ``timeout`` PER attempt, so a
     3-retry session's worst case is ≈ 4×T plus backoff, with no wall-clock deadline). The default
@@ -165,7 +165,7 @@ def build_retrying_session(
     threading a ``verify`` argument through nine construction sites. ``verify`` defaults to the
     config (``ca_bundle`` path > ``tls_verify=False`` > ``True``); pass it explicitly only in tests.
     When the effective ``verify`` is anything other than plain ``True`` (a CA-bundle path, or
-    verification disabled) the session also pins ``trust_env=False`` — otherwise a
+    verification disabled) the session also pins ``trust_env=False``, otherwise a
     ``REQUESTS_CA_BUNDLE`` in the environment would win over ``session.verify`` via requests'
     per-request environment merge. On the plain default (``verify is True``) ``trust_env`` stays on,
     keeping the zero-code
@@ -190,7 +190,7 @@ def build_retrying_session(
         session.trust_env = False
     if retries <= 0:
         # Single attempt (Q2 „one attempt, long timeout"): reuse build_write_session's no-retry
-        # adapter shape. No Retry import needed — requests builds Retry(total=0) from the int, so
+        # adapter shape. No Retry import needed, requests builds Retry(total=0) from the int, so
         # even a stripped environment gets a deterministic no-retry adapter here. pool_maxsize is
         # passed only when set, so the default path keeps requests' own default (10).
         no_retry = (
@@ -215,14 +215,14 @@ def build_retrying_session(
             session.mount("http://", adapter)
             session.mount("https://", adapter)
         except ImportError:
-            pass  # urllib3 retry unavailable — proceed without
+            pass  # urllib3 retry unavailable, proceed without
     return session
 
 
 _SHARED_POOL_MAXSIZE = 32
 """Connection-pool size for the cached read sessions (K5). Matches the default asyncio executor
 width (``min(32, cpu+4)``) so that up to ~32 concurrent REST reads on one host reuse the pool
-instead of each opening — and requests then discarding — its own connection (requests' default
+instead of each opening, and requests then discarding, its own connection (requests' default
 ``pool_maxsize`` is 10, which serialises and logs 'Connection pool is full' under our fan-out)."""
 
 
@@ -236,8 +236,8 @@ def get_shared_session(
 ) -> requests.Session:
     """Return a PROCESS-CACHED :class:`requests.Session` for one read configuration (K5).
 
-    The five REST clients are re-instantiated on every tool-call — each inside its own ``_run()``
-    closure dispatched via :func:`asyncio.to_thread` — so building a fresh session per ``__init__``
+    The five REST clients are re-instantiated on every tool-call, each inside its own ``_run()``
+    closure dispatched via :func:`asyncio.to_thread`, so building a fresh session per ``__init__``
     paid a new TCP/TLS handshake on every call (no leak, pure waste). This memoises ONE session per
     distinct ``(accept, auth_header, verify, retries, backoff_factor)``. The session is NOT bound to
     a URL, so ``base_url`` is deliberately absent from the key: two same-auth clients (even for
@@ -247,10 +247,10 @@ def get_shared_session(
 
     ``verify`` is resolved from config HERE, before the cache key, so a config change (a reload, or
     a test's monkeypatched ``get_config``) selects a DIFFERENT cache entry rather than serving a
-    session built under the old TLS trust — the one correctness trap of caching a config-derived
+    session built under the old TLS trust, the one correctness trap of caching a config-derived
     object. Sharing is safe across worker threads: the clients only READ their session
     (``.get``/``.head``/``.verify``), the urllib3 pools are thread-safe, and the one piece of
-    per-request-MUTABLE state — the cookie jar — is DISABLED on these sessions (see
+    per-request-MUTABLE state, the cookie jar, is DISABLED on these sessions (see
     :func:`_shared_session_cached`), so no unsynchronised state travels between the several hosts a
     no-auth session may reach. Per-request ``timeout`` stays per call. Reset via
     :func:`clear_shared_sessions` (test isolation / a reload wanting fresh pools).
@@ -309,16 +309,16 @@ def build_write_session(
 
     Two deliberate divergences from the read factory:
 
-    * **No retry policy** (``max_retries=0`` — no adapter carrying a ``Retry``). Olog ``PUT /logs``
+    * **No retry policy** (``max_retries=0``, no adapter carrying a ``Retry``). Olog ``PUT /logs``
       is NOT idempotent: every PUT mints a new entry. Under the read session's 3-retry policy a
       request the server PROCESSED but whose response was lost would be replayed into a DUPLICATE
       entry (urllib3's default ``allowed_methods`` retries PUT). A lost PUT thus surfaces as an
-      error — an ``unknown`` outcome the caller must resolve by SEARCHING, never a blind retry —
+      error, an ``unknown`` outcome the caller must resolve by SEARCHING, never a blind retry,
       not a silent second entry.
     * **``trust_env=False`` always** (the read factory keeps it on at the plain default to preserve
       the zero-code ``REQUESTS_CA_BUNDLE`` path). The write session inherits NO ambient environment:
-      no proxy / ``NO_PROXY`` / netrc, and no ``REQUESTS_CA_BUNDLE`` env. This closes N03 — an
-      inherited proxy can never carry the Basic ``Authorization`` header outward — and keeps the
+      no proxy / ``NO_PROXY`` / netrc, and no ``REQUESTS_CA_BUNDLE`` env. This closes N03, an
+      inherited proxy can never carry the Basic ``Authorization`` header outward, and keeps the
       write deterministic. The cost falls only on a REMOTE https Olog (loopback needs neither): its
       internal CA must come from the ``EPICS_MCP_CA_BUNDLE`` config (the DS-1 chokepoint), not the
       env, and it is not reachable through an env proxy.
@@ -355,12 +355,12 @@ class ReadThrottle:
     ``time.monotonic`` timestamps under a lock), kept SEPARATE so the tested write gates are never
     touched. Unlike them it guards READS: the ~24 read tools all reach ``rest_get_json`` /
     ``rest_get_bytes`` from worker threads (``asyncio.to_thread``), so the bucket is thread-safe,
-    and over the limit it RAISES (never blocks) — a blocking wait at this sync chokepoint would hold
+    and over the limit it RAISES (never blocks), a blocking wait at this sync chokepoint would hold
     one of the shared worker threads and reintroduce exactly the K4 starvation the monitor bulkhead
     removes.
 
     Disabled by default (``limit <= 0``): :meth:`check` returns immediately with no lock and no
-    allocation, so the posture stays opt-in — existing read behaviour is unchanged until
+    allocation, so the posture stays opt-in, existing read behaviour is unchanged until
     an operator sets ``EPICS_MCP_READ_RATE_LIMIT``.
     """
 
@@ -377,16 +377,16 @@ class ReadThrottle:
 
         Purge → len-check → append is ONE atomic step under the lock (symmetric with the write
         gates), so two concurrent reads can never both pass and exceed the limit; ``now`` is sampled
-        inside the lock, and the raise runs OUTSIDE it — the deny path never appends a token.
+        inside the lock, and the raise runs OUTSIDE it, the deny path never appends a token.
 
         The refusal carries ``READ_RATE_LIMIT_EXCEEDED``, NOT the write gates' own
         ``RATE_LIMIT_EXCEEDED``: this throttle is not a write gate, it writes no audit line, and it
         is reached from the reads the Olog write tools perform *before* their gate is consulted.
         Write-gate contract point 4 (CLAUDE.md) forbids a refusal raised outside a gate from
-        carrying that gate's code — otherwise a throttled read would be reported to the caller
+        carrying that gate's code, otherwise a throttled read would be reported to the caller
         exactly like an audited write DENY it never was."""
         if self._limit <= 0:
-            return  # disabled — opt-in posture, no throttling, no lock taken
+            return  # disabled, opt-in posture, no throttling, no lock taken
         with self._lock:
             now = time.monotonic()
             self._purge_old(now)
@@ -443,7 +443,7 @@ def rest_get_json(
     """GET *url* and return parsed JSON, translating failures to the caller's REST exceptions.
 
     A connection failure raises *conn_exc*; any other request/HTTP failure (including a bad-JSON
-    body, which modern requests surfaces as a ``RequestException``) raises *resp_exc* — the
+    body, which modern requests surfaces as a ``RequestException``) raises *resp_exc*, the
     per-service subclasses of :class:`RestConnectionError` / :class:`RestResponseError`. The one
     debug log here is the single place a swallowed REST failure is recorded before the caller maps
     the exception to a withheld verdict or an ``EpicsError``.
@@ -451,9 +451,9 @@ def rest_get_json(
     ``allow_redirects=False`` makes a redirect a *resp_exc* instead of a followed hop. It matters
     wherever the RESPONDING host, not the requested one, is what a security decision rests on: a
     redirect moves the data's true origin without changing the configured URL. A 3xx is not an HTTP
-    error, so ``raise_for_status`` would wave it through — hence the explicit check.
+    error, so ``raise_for_status`` would wave it through, hence the explicit check.
     """
-    get_read_throttle().check()  # S3 read throttle — no-op unless read_rate_limit > 0
+    get_read_throttle().check()  # S3 read throttle, no-op unless read_rate_limit > 0
     try:
         resp = session.get(url, params=params, timeout=timeout, allow_redirects=allow_redirects)
         if not allow_redirects and resp.is_redirect:
@@ -492,7 +492,7 @@ def rest_put_json(
 
     ``allow_redirects=False`` refuses a redirect rather than follow it (see
     :func:`rest_get_json`).
-    It matters even more on a write: a followed hop would post the body — and the auth header — to a
+    It matters even more on a write: a followed hop would post the body, and the auth header, to a
     host the gate never approved."""
     try:
         resp = session.put(
@@ -518,7 +518,7 @@ def rest_put_json(
 
 
 #: A ``requests`` multipart ``files=`` payload as a LIST of ``(part_name, (filename, content,
-#: content_type))`` tuples — deliberately a list, never a dict: the Olog multipart carries several
+#: content_type))`` tuples, deliberately a list, never a dict: the Olog multipart carries several
 #: parts all named ``files``, and a dict would silently keep only the last (requests collapses
 #: duplicate keys). ``filename`` is ``None`` for a text part (the ``logEntry`` JSON) and the unique
 #: filename for a file part; ``content`` is a JSON ``str`` or the raw file ``bytes``.
@@ -538,21 +538,21 @@ def _request_multipart(
     resp_exc: type[RestResponseError],
     allow_redirects: bool = False,
 ) -> object:
-    """Send a ``multipart/form-data`` body via *method* to *url* and return JSON — the shared core
+    """Send a ``multipart/form-data`` body via *method* to *url* and return JSON, the shared core
     of :func:`rest_put_multipart` (create) and :func:`rest_post_multipart` (attach-to-existing).
 
     *files* is a LIST of ``(name, (filename, content, content_type))`` tuples (see
     :data:`MultipartFiles`). ``requests`` builds the multipart body from it AND sets the
-    ``Content-Type: multipart/form-data; boundary=…`` header itself — so this passes **no** manual
+    ``Content-Type: multipart/form-data; boundary=…`` header itself, so this passes **no** manual
     ``Content-Type`` (one would clobber the boundary and the server could not parse the body). This
     mirrors CS-Studio's own client, which builds the same body by hand
     (``HttpRequestMultipartBody``): a ``logEntry`` JSON part plus one ``files`` part per attachment.
 
     *headers* carries per-request headers (a static client-info header); it MUST NOT include
-    ``Content-Type`` — ``requests`` sets that (with the boundary) from *files*. Auth rides on the
+    ``Content-Type``: ``requests`` sets that (with the boundary) from *files*. Auth rides on the
     session. ``allow_redirects=False`` refuses a redirect rather than follow it (see
-    :func:`rest_put_json`): on a write a followed hop would post the body — and the Basic auth
-    header — to a host the gate never approved. Defaults to False because every Olog attachment
+    :func:`rest_put_json`): on a write a followed hop would post the body, and the Basic auth
+    header, to a host the gate never approved. Defaults to False because every Olog attachment
     write is gated to a specific host."""
     try:
         resp = session.request(
@@ -591,7 +591,7 @@ def rest_put_multipart(
     allow_redirects: bool = False,
 ) -> object:
     """PUT a ``multipart/form-data`` body to *url* (Olog create-with-attachments, ``PUT
-    /logs/multipart``) — a thin :func:`_request_multipart` wrapper. See there for the contract."""
+    /logs/multipart``), a thin :func:`_request_multipart` wrapper. See there for the contract."""
     return _request_multipart(
         session,
         "PUT",
@@ -619,7 +619,7 @@ def rest_post_multipart(
     allow_redirects: bool = False,
 ) -> object:
     """POST a ``multipart/form-data`` body to *url* (Olog attach-to-existing, ``POST
-    /logs/multipart`` = the server's ``updateLog``) — the POST sibling of
+    /logs/multipart`` = the server's ``updateLog``), the POST sibling of
     :func:`rest_put_multipart`. Same contract; the verb differs because the server routes create
     (PUT) and update (POST) separately."""
     return _request_multipart(
@@ -696,8 +696,8 @@ def rest_get_bytes(
     The byte mirror of :func:`rest_get_json` for an attachment download (Olog's response body is a
     file, not JSON). Streams (``stream=True``) and **explicitly closes the response** via the
     context
-    manager — there is no other streaming caller in this module, so a leaked connection would be a
-    silent regression. *max_bytes* caps the body (:func:`_read_body_capped` — a Content-Length over
+    manager, there is no other streaming caller in this module, so a leaked connection would be a
+    silent regression. *max_bytes* caps the body (:func:`_read_body_capped`, a Content-Length over
     it
     is refused before any read, and the stream is accumulated only up to the cap); ``None`` = no
     cap,
@@ -711,7 +711,7 @@ def rest_get_bytes(
     is
     decided from the CONFIGURED host, so a followed hop would let a loopback URL serve bytes from a
     real server. Defaults to False here because the whole attachment surface is host-gated."""
-    get_read_throttle().check()  # S3 read throttle — no-op unless read_rate_limit > 0
+    get_read_throttle().check()  # S3 read throttle, no-op unless read_rate_limit > 0
     try:
         with session.get(
             url,
@@ -744,7 +744,7 @@ def http_status(exc: BaseException) -> int | None:
     the chained cause of a *served* HTTP failure is the requests ``HTTPError`` with ``.response``
     with ``.status_code``. A transport failure (unreachable host / TLS) has no ``.response`` →
     ``None``. Duck-typed (no direct ``requests`` dependency at the call site) and null-safe. Tells
-    "reachable but the API answered with an error status" (a served 4xx/5xx — e.g. an Archiver URL
+    "reachable but the API answered with an error status" (a served 4xx/5xx, e.g. an Archiver URL
     pointing at the wrong webapp) from "the host is unreachable" (no response at all).
     """
     response = getattr(exc.__cause__, "response", None)
@@ -766,7 +766,7 @@ def is_http_400(exc: BaseException) -> bool:
     """True iff *exc* wraps an HTTP 400 response.
 
     Olog ``PUT /logs`` answers a bad request (a non-existent logbook/tag, an empty title, or an
-    ``inReplyTo`` that identifies no entry) with 400 — distinct from "not found". Thin wrapper over
+    ``inReplyTo`` that identifies no entry) with 400, distinct from "not found". Thin wrapper over
     :func:`http_status`.
     """
     return http_status(exc) == 400
@@ -778,7 +778,7 @@ def is_ssl_error(exc: BaseException) -> bool:
     :func:`rest_get_json` and the clients' ``check_connectivity`` chain the original requests error
     via ``from exc``. ``requests.exceptions.SSLError`` (a subclass of ``ConnectionError``, hence
     otherwise indistinguishable from a plain unreachable host) signals a certificate / CA-bundle
-    problem — the signal a config ``doctor`` needs to say "fix your CA bundle" rather than
+    problem, the signal a config ``doctor`` needs to say "fix your CA bundle" rather than
     "host unreachable". Null-safe.
     """
     return isinstance(getattr(exc, "__cause__", None), requests.exceptions.SSLError)
@@ -788,7 +788,7 @@ def is_retry_error(exc: BaseException) -> bool:
     """True iff *exc* wraps a retry-exhausted 5xx response.
 
     :func:`build_retrying_session` force-lists 502/503/504, so a served-but-retryable 5xx that
-    exhausts the retry budget surfaces as ``requests.exceptions.RetryError`` — a RequestException
+    exhausts the retry budget surfaces as ``requests.exceptions.RetryError``, a RequestException
     that is NOT a ConnectionError and whose ``.response`` is ``None`` (so :func:`http_status` cannot
     read a code). It means the host DID answer (repeatedly, with a 5xx), so a config ``doctor``
     should report it as reachable-but-erroring, NOT "unreachable". Null-safe.

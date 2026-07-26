@@ -1,6 +1,6 @@
 """Shared low-level plumbing for the ``epics-*`` command-line entry points.
 
-Currently just console-encoding setup — the home for any future cross-CLI helper that must not live
+Currently just console-encoding setup, the home for any future cross-CLI helper that must not live
 inside a single command module (and be copy-pasted into the others).
 """
 
@@ -35,7 +35,7 @@ def positive_timeout(value: str) -> float:
 def configure_stdout() -> None:
     """Force UTF-8 on ``sys.stdout`` so a report's Unicode does not crash a legacy console.
 
-    WHY: the CLI reports carry Unicode — emoji (``✓``/``✗``), en-dashes, the ``⇒`` arrow. A Windows
+    WHY: the CLI reports carry Unicode, emoji (``✓``/``✗``), en-dashes, the ``⇒`` arrow. A Windows
     console defaults to cp1252, on which a bare ``print`` of those characters raises
     ``UnicodeEncodeError`` and aborts the command. Reconfiguring the stream to UTF-8 fixes it at the
     source; it is a no-op on a stream already UTF-8 (a POSIX terminal), so it is safe to call

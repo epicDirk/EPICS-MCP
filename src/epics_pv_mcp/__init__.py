@@ -1,4 +1,4 @@
-"""EPICS PV MCP Server — PV access via p4p (PVAccess + Channel Access)."""
+"""EPICS PV MCP Server: PV access via p4p (PVAccess + Channel Access)."""
 
 try:
     from importlib.metadata import PackageNotFoundError, version

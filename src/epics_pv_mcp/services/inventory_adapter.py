@@ -1,6 +1,6 @@
 """Adapter: ``opi_navigation`` PV-inventory → cross-plane :class:`JoinPv` rows.
 
-The macro-aware display-PV source for the cross-plane join — replaces the macro-blind ``bob_pvs``
+The macro-aware display-PV source for the cross-plane join, replaces the macro-blind ``bob_pvs``
 extractor. Runs the SHA-pinned Wedge-0 inventory (:func:`analyze_pv_inventory`) over the project
 ROOT and translates each **operator-facing** display's ``ExpandedPv`` instances into the narrow
 :class:`JoinPv` seam. Embed-only fragment standalone seeds (``operator_facing=False``) are filtered
@@ -37,12 +37,12 @@ def inventory_join_pvs(inventory: PvInventory) -> list[JoinPv]:
     the embedding operator display, so counting the fragment as its own "display" would inflate the
     provenance and the indeterminate-occurrence count.
 
-    The PV is normalized to its **channel name** for the real-channel protocols (ca/pva) — the join
+    The PV is normalized to its **channel name** for the real-channel protocols (ca/pva), the join
     compares ``jp.pv`` against the protocol-free IOC prefix and ``.db`` records (``crossplane.py``
     startswith/broken), so an explicit ``pva://``/``ca://`` prefix would otherwise mis-bucket a
     prefix-sharing PV as ``other_prefix`` (and dodge ``broken``). This is the edge that keeps the
     join protocol-agnostic ("translation happens at the edge"); the protocol survives in
-    ``JoinPv.protocol``. ``loc``/``sim``/``sys``/``other`` references are left RAW — they are only
+    ``JoinPv.protocol``. ``loc``/``sim``/``sys``/``other`` references are left RAW, they are only
     displayed in ``non_channel`` (never prefix-compared), so stripping would drop their tag and risk
     colliding with a real channel of the same bare name.
     """
@@ -68,7 +68,7 @@ def _analyze[T](
     windows_paths: bool,
 ) -> tuple[list[T], tuple[str, ...], int]:
     """Run the Wedge-0 inventory ONCE and pair *project*'s rows with the shared incompleteness
-    signals — the common body of :func:`analyze_display_pvs` / :func:`analyze_display_index` that
+    signals, the common body of :func:`analyze_display_pvs` / :func:`analyze_display_index` that
     used to be copied verbatim (same inventory call + same diagnostics tail; S4-5)."""
     inventory = analyze_pv_inventory(
         repo_root, context_cap=context_cap, windows_paths=windows_paths
@@ -105,7 +105,7 @@ def analyze_display_pvs(
 
     *repo_root* must be the project/dataset ROOT (the operator top-levels there bind the display
     macros); a too-narrow per-IOC subdirectory leaves PVs ``dynamic`` and the join under-resolves.
-    Returns ``(join_pvs, context_capped, glob_capped_count)`` — the latter two carry the inventory's
+    Returns ``(join_pvs, context_capped, glob_capped_count)``, the latter two carry the inventory's
     honest lower-bound signals into the report. ``windows_paths`` resolves paths case-insensitively
     (Windows hosts); default Linux (= the ESS-console / CI truth, deterministic).
     """
@@ -123,8 +123,8 @@ def analyze_display_index(
     """Run the Wedge-0 inventory over *repo_root*; return the ``PV → [displays]`` index as rows.
 
     Symmetric to :func:`analyze_display_pvs`, but reads the inventory's ``index`` field (the global
-    operator-facing, resolved, real-protocol PV→[screens] index) instead of the per-display PV lists
-    — the input the coverage audit's display set ``D`` needs. *repo_root* must be the dataset
+    operator-facing, resolved, real-protocol PV→[screens] index) instead of the per-display PV
+    lists, the input the coverage audit's display set ``D`` needs. *repo_root* must be the dataset
     ROOT (the operator top-levels there bind the display macros). Returns ``(index_rows,
     context_capped, glob_capped_count)``; the latter two carry the inventory's lower-bound signals.
     """

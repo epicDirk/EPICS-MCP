@@ -10,7 +10,7 @@ async def _get_pv_info(pv_name: str, timeout: float | None = None) -> dict[str, 
     and message), timestamp, display (units, limits, precision OR format,
     description), control (drive limits), value_alarm (active flag + the configured
     HIHI/HIGH/LOW/LOLO limits; NaN/unset limits and the per-PVA-unmapped per-level
-    severities are omitted) and — for enum PVs — the enum index/label/choices. Unset
+    severities are omitted) and, for enum PVs, the enum index/label/choices. Unset
     (zero-width) limit pairs are omitted.
     """
     result = await pv_get(pv_name, timeout)

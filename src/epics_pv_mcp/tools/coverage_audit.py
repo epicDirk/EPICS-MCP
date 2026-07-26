@@ -12,7 +12,7 @@ thread, and serializes the report + its Markdown rendering.
 
 ``displays_dir`` is the project/dataset ROOT (the inventory binds display macros via the operator
 top-levels there). *scope* narrows both the ChannelFinder query and the display set; the runtime
-checkers (CF/Archiver/Alarm) are built ONLY when their plane is requested AND its ``*_URL`` is set —
+checkers (CF/Archiver/Alarm) are built ONLY when their plane is requested AND its ``*_URL`` is set,
 otherwise that plane is withheld with an honest note. See :mod:`epics_pv_mcp.services.coverage`.
 """
 
@@ -35,15 +35,15 @@ async def _coverage_audit(
     context_cap: int = DEFAULT_PV_CONTEXT_CAP,
     windows_paths: bool = False,
 ) -> dict[str, object]:
-    """Cross-plane coverage audit: which delivered PV has no display/archive/alarm — and back.
+    """Cross-plane coverage audit: which delivered PV has no display/archive/alarm, and back.
 
     Read-only. *displays_dir* is the project/dataset ROOT (the inventory binds macros via the
     operator top-levels there). *scope* is a record-name prefix narrowing both the CF query and the
-    display set; ``""`` audits the whole site (the CF query then hits the cap — sandbox/small-scope
+    display set; ``""`` audits the whole site (the CF query then hits the cap, sandbox/small-scope
     only). *query_channelfinder* is the anchor (needs its URL); without it no
     coverage verdict is possible, only the raw display set. *query_archiver*/*query_alarm* add the
     archive/alarm planes (need their ``*_URL``); each missing URL withholds that plane with a note.
-    *alarm_config* is the alarm tree name — REQUIRED when the alarm plane is active (requested AND
+    *alarm_config* is the alarm tree name, REQUIRED when the alarm plane is active (requested AND
     its URL set); there is no default (the trees are site-specific), so opting into the alarm plane
     without naming a tree is a loud INVALID_INPUT rather than a silent scan of a guessed tree.
     *context_cap*/*windows_paths* tune the PV-inventory (higher cap = more complete, slower).

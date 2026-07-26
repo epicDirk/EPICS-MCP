@@ -1,14 +1,14 @@
-r"""Coverage audit: which delivered PV has no display / no archive / no alarm — and the reverse.
+r"""Coverage audit: which delivered PV has no display / no archive / no alarm, and the reverse.
 
 The second System-Owner thread (Wedge 3, part 2). A **cross-plane coverage matrix** joining the
 Wedge-0 display-PV index (PV → [operator screens]) with the runtime planes opi-foundry can read:
 the **ChannelFinder** registry (what the IOCs actually serve), the **Archiver Appliance**, and the
 **Phoebus Alarm** config. It answers the owner's question: *which PV do my IOCs deliver (CF) that
-nobody put on a screen / that isn't archived / that has no alarm — and which shown PV isn't even
+nobody put on a screen / that isn't archived / that has no alarm, and which shown PV isn't even
 registered?*
 
 Pure + deterministic; every runtime signal is **injected** as a Protocol so the join is
-offline-testable (mirrors :mod:`~.crossplane`). Stays **free of ``opi_navigation`` imports** — the
+offline-testable (mirrors :mod:`~.crossplane`). Stays **free of ``opi_navigation`` imports**, the
 ``PvIndexEntry`` → :class:`IndexRow` translation happens at the tool/CLI edge.
 
 **The matrix (both universes, normalized to the bare record name):**
@@ -21,7 +21,7 @@ offline-testable (mirrors :mod:`~.crossplane`). Stays **free of ``opi_navigation
 
 **Per-PV verdict** over the audited universe ``A`` (``C | D`` when CF is live, else ``D``):
 ``{has_display, registered_cf, archived, alarmed} ∈ {yes, no, withheld}``. ``withheld`` is NEVER
-``no`` — a plane that could not answer (disabled, capped, per-PV timeout, or an incomplete display
+``no``: a plane that could not answer (disabled, capped, per-PV timeout, or an incomplete display
 inventory) withholds rather than false-flag a gap. ``critical_uncovered`` = CF-registered (provably
 delivered) AND ≥1 **proven** gap (``no``); a PV with a ``withheld`` gap is excluded (the gap is not
 provable) and named once in a note.
@@ -59,7 +59,8 @@ class IndexRow(NamedTuple):
 
     The narrow seam the audit needs from the ``opi_navigation`` PV-inventory: the tool/CLI edge
     translates each :class:`opi_navigation.pv_analysis.models.PvIndexEntry` into one of these (the
-    ``pv`` already normalized to its protocol-free channel name). Vorbild: ``crossplane.JoinPv``.
+    ``pv`` already normalized to its protocol-free channel name). Modelled on
+    ``crossplane.JoinPv``.
     """
 
     pv: str
@@ -71,7 +72,7 @@ class ArchivedChecker(Protocol):
     """Minimal read-only Archiver contract (injected so the join is offline-testable).
 
     ``is_archived(pv)`` returns whether *pv* is being archived, OR raises ``RuntimeError`` on a
-    query failure/timeout — never another type. That lets the core withhold the per-PV cell (never
+    query failure/timeout, never another type. That lets the core withhold the per-PV cell (never
     ``no``); the edge translates Archiver errors into ``RuntimeError`` before they reach here.
     """
 
@@ -82,7 +83,7 @@ class AlarmChecker(Protocol):
     """Minimal read-only Alarm-Logger contract (injected so the join is offline-testable).
 
     ``is_alarm_configured(pv)`` returns whether *pv* has an alarm configuration, OR raises
-    ``RuntimeError`` on a query failure — never another type (the edge translates Alarm errors).
+    ``RuntimeError`` on a query failure, never another type (the edge translates Alarm errors).
     """
 
     def is_alarm_configured(self, pv: str) -> bool: ...
@@ -112,15 +113,15 @@ class CoverageReport(BaseModel):
     #: only when wired). A plane absent here contributes only ``withheld`` cells.
     planes_live: tuple[str, ...] = ()
     rows: tuple[PvCoverageRow, ...] = ()
-    #: C ∩ D — registered AND on a screen (the healthy core).
+    #: C ∩ D, registered AND on a screen (the healthy core).
     cf_and_display: tuple[str, ...] = ()
-    #: C \ D — registered but on NO screen (operator blind-spot). Lower bound when displays capped.
+    #: C \ D, registered but on NO screen (operator blind-spot). Lower bound when displays capped.
     cf_only: tuple[str, ...] = ()
-    #: D \ C — shown but NOT registered in ChannelFinder.
+    #: D \ C, shown but NOT registered in ChannelFinder.
     display_only: tuple[str, ...] = ()
     #: Headline: CF-registered AND ≥1 PROVEN gap (``no``; withheld gaps excluded).
     critical_uncovered: tuple[str, ...] = ()
-    #: Triage splits — CF-registered PVs with a proven gap on each plane.
+    #: Triage splits: CF-registered PVs with a proven gap on each plane.
     blind_spots: tuple[str, ...] = ()
     unarchived: tuple[str, ...] = ()
     unalarmed: tuple[str, ...] = ()
@@ -128,7 +129,7 @@ class CoverageReport(BaseModel):
     cf_registered: int = 0
     #: True when the ChannelFinder query hit the result cap → all cf verdicts withheld.
     cf_capped: bool = False
-    #: Operator displays whose per-instance PVs are incomplete (inventory context cap) — a
+    #: Operator displays whose per-instance PVs are incomplete (inventory context cap), a
     #: not-in-D PV may sit on a capped one → ``has_display`` withheld, never a false ``no``.
     displays_incomplete: tuple[str, ...] = ()
     #: Honest caveats (lower bounds, withholds, skipped planes).
@@ -140,7 +141,7 @@ def _plane_verdict(checker_call: Callable[[str], bool] | None, pv: str) -> Cover
 
     *checker_call* is the bound method (``is_archived`` / ``is_alarm_configured``) or ``None`` when
     the plane is disabled → ``withheld`` for every PV. A ``RuntimeError`` (the edge's translation of
-    a query failure/timeout) withholds THIS cell only — the rest of the plane keeps answering.
+    a query failure/timeout) withholds THIS cell only, the rest of the plane keeps answering.
 
     (S5-5: typed as ``Callable[[str], bool] | None`` so mypy checks the call instead of the former
     ``# type: ignore[operator]`` masking every real type violation at the call site.)
@@ -171,9 +172,9 @@ def audit_coverage(
     *index_rows* are the operator-facing, resolved, real-protocol PVs (translated from the
     ``opi_navigation`` index at the edge). *scope* is a record-name prefix that narrows BOTH the CF
     query (``registered_under(scope)``) and the display set ``D`` (post-filter); ``""`` audits the
-    whole site (the CF query then hits ``*`` and almost certainly the cap — sandbox/small-scope use
+    whole site (the CF query then hits ``*`` and almost certainly the cap, sandbox/small-scope use
     only). *channelfinder*/*archived*/*alarmed* are the injected runtime checkers (``None`` = that
-    plane disabled → withheld); *_requested* drive the honest "skipped — URL unset" notes. CF is the
+    plane disabled → withheld); *_requested* drive the honest "skipped, URL unset" notes. CF is the
     anchor: when disabled/capped/failed, no cf-relative cell or set-diff is computable and only
     ``D`` (with its display verdicts) is reported. *context_capped*/*glob_capped_count* carry the
     inventory's lower-bound signals.
@@ -186,7 +187,7 @@ def audit_coverage(
             continue  # scope post-filter on D
         if rec in display_rows:
             # Field-suffix normalization can collapse record + record.EGU into one record: merge.
-            # (S5-6: IndexRow no longer carries an unused ``protocol`` — the channel is already
+            # (S5-6: IndexRow no longer carries an unused ``protocol``, the channel is already
             # protocol-free via _record_name, so the merge has no arbitrary first-seen choice.)
             prev = display_rows[rec]
             display_rows[rec] = IndexRow(
@@ -279,7 +280,7 @@ def audit_coverage(
             if gaps:
                 critical.append(pv)
             elif "withheld" in (has_display, archived_v, alarmed_v):
-                # Delivered PV with a withheld (unprovable) gap and no proven gap — excluded from
+                # Delivered PV with a withheld (unprovable) gap and no proven gap, excluded from
                 # critical_uncovered (the gap cannot be proven), surfaced once in a note.
                 withheld_gap_excluded.append(pv)
 
@@ -351,71 +352,71 @@ def _coverage_notes(
     notes: list[str] = []
     if not scope:
         notes.append(
-            "Unscoped audit (scope='') — the ChannelFinder query hits '*' and almost certainly the "
+            "Unscoped audit (scope=''), the ChannelFinder query hits '*' and almost certainly the "
             "result cap on a real site, withholding the whole matrix. Pass a device/prefix scope "
             "for a usable site result (the default is for the sandbox / small scopes only)."
         )
-    # ChannelFinder is the anchor — without it no cf verdict or set-diff is computable.
+    # ChannelFinder is the anchor: without it no cf verdict or set-diff is computable.
     if not channelfinder_present:
         if cf_requested:
             notes.append(
-                "ChannelFinder check requested but EPICS_MCP_CHANNELFINDER_URL is unset — no "
+                "ChannelFinder check requested but EPICS_MCP_CHANNELFINDER_URL is unset, no "
                 "delivered-PV anchor; cf_only/display_only/cf_and_display/critical_uncovered are "
                 "not computable (only the raw display set D is reported)."
             )
         else:
             notes.append(
-                "ChannelFinder disabled — no delivered-PV anchor; only the raw display set D is "
+                "ChannelFinder disabled, no delivered-PV anchor; only the raw display set D is "
                 "reported (no coverage verdict). Enable a ChannelFinder checker for the matrix."
             )
     elif cf_capped:
         notes.append(
-            "ChannelFinder returned a capped (truncated) result — every cf verdict is withheld "
+            "ChannelFinder returned a capped (truncated) result, every cf verdict is withheld "
             "(diffing against a partial registry would false-flag). Narrow the scope or raise "
             "EPICS_MCP_CHANNELFINDER_MAX_RESULTS."
         )
     elif cf_withheld:
         notes.append(
-            "ChannelFinder query failed — every cf verdict is withheld (a delivered PV cannot be "
+            "ChannelFinder query failed, every cf verdict is withheld (a delivered PV cannot be "
             "established against an unavailable registry)."
         )
     if archive_requested and not archived_present:
         notes.append(
-            "Archiver check requested but EPICS_MCP_ARCHIVER_URL is unset — 'archived' is withheld "
+            "Archiver check requested but EPICS_MCP_ARCHIVER_URL is unset, 'archived' is withheld "
             "for every PV (no network call)."
         )
     if alarm_requested and not alarmed_present:
         notes.append(
-            "Alarm check requested but EPICS_MCP_ALARM_URL is unset — 'alarmed' is withheld for "
+            "Alarm check requested but EPICS_MCP_ALARM_URL is unset, 'alarmed' is withheld for "
             "every PV (no network call)."
         )
     if archive_withheld:
         notes.append(
-            f"'archived' withheld for {len(archive_withheld)} PV(s) — the per-PV Archiver query "
+            f"'archived' withheld for {len(archive_withheld)} PV(s), the per-PV Archiver query "
             "failed/timed out for them (a partial-plane lower bound; never counted as a gap)."
         )
     if alarm_withheld:
         notes.append(
-            f"'alarmed' withheld for {len(alarm_withheld)} PV(s) — the per-PV Alarm query "
+            f"'alarmed' withheld for {len(alarm_withheld)} PV(s), the per-PV Alarm query "
             "failed/timed out for them (a partial-plane lower bound; never counted as a gap). "
             "NOTE: a clean miss on /search/alarm/config is a real negative only if the Logger "
             "was running at config-import time (the config index is a change-log)."
         )
     if context_capped:
         notes.append(
-            f"{len(context_capped)} display(s) hit the context cap — a not-shown PV could "
+            f"{len(context_capped)} display(s) hit the context cap, a not-shown PV could "
             "sit on a not-fully-expanded display, so 'has_display=no'/blind_spots are WITHHELD for "
             "those (a lower bound; re-run with a higher context cap)."
         )
     if glob_capped_count:
         notes.append(
-            f"{glob_capped_count} template <file> reference(s) hit the glob cap — some embedded "
+            f"{glob_capped_count} template <file> reference(s) hit the glob cap, some embedded "
             "screens were dropped; the display set D is a lower bound."
         )
     if withheld_gap_excluded:
         notes.append(
             f"{len(withheld_gap_excluded)} delivered PV(s) have a withheld gap and no proven gap "
-            "— excluded from critical_uncovered (a withheld cell is never a gap)."
+            ", excluded from critical_uncovered (a withheld cell is never a gap)."
         )
     if (
         display_only
@@ -424,7 +425,7 @@ def _coverage_notes(
     ):
         notes.append(
             f"{len(display_only)}/{display_total} shown PV(s) are NOT registered in ChannelFinder "
-            "(>= 50%) — this almost certainly means an INCOMPLETE ChannelFinder (e.g. a partial "
+            "(>= 50%), this almost certainly means an INCOMPLETE ChannelFinder (e.g. a partial "
             "test registry or too-narrow scope), not real defects; treat display_only as a "
             "coverage signal, not a defect list."
         )

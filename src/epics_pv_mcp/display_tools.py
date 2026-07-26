@@ -1,4 +1,4 @@
-"""Display-aware MCP tools — the optional ``[displays]`` tool group.
+"""Display-aware MCP tools, the optional ``[displays]`` tool group.
 
 These four tools (``validate_pvs``, ``crossplane_check``, ``coverage_audit``,
 ``find_device``) join live EPICS PVs with the *display* plane: the macro-expanded,
@@ -8,8 +8,8 @@ dependency: ``pip install epics-pv-mcp[displays]``.
 
 Keeping them in their own module lets :mod:`epics_pv_mcp.server` load them lazily via one
 capability probe (``_load_display_registrar``): it skips them silently when the extra is absent
-(``find_spec`` gate) — so the core PV server (read/write/monitor/discover/diagnose + the REST
-planes) installs and starts standalone, for any EPICS user who does not have the display layer —
+(``find_spec`` gate), so the core PV server (read/write/monitor/discover/diagnose + the REST
+planes) installs and starts standalone, for any EPICS user who does not have the display layer,
 and it degrades loud (an ERROR log, core tools kept) if an *installed* extra fails to import.
 
 A dedicated CS-Studio / Phoebus MCP that complements these tools is in the works.
@@ -55,7 +55,7 @@ async def validate_pvs(
     displays_dir: Annotated[
         str | None,
         Field(
-            description="Dataset ROOT for file_path mode — needed to resolve display "
+            description="Dataset ROOT for file_path mode, needed to resolve display "
             "macros (esp. for embedded fragments). Without it the file's own directory "
             "is used, which under-resolves fragments. NOTE: a full inventory walk is "
             "~60 s for a large dataset; do not call per-file in a loop."
@@ -97,7 +97,7 @@ async def crossplane_check(
         bool,
         Field(
             description="Check each concrete linked PV against ChannelFinder (the runtime PV "
-            "directory) and report those NOT registered as 'cf_unregistered' — a separate plane "
+            "directory) and report those NOT registered as 'cf_unregistered', a separate plane "
             "from 'broken' (CF runtime registry vs. static .db). Needs "
             "EPICS_MCP_CHANNELFINDER_URL; unset → an honest 'skipped' note (no network call). "
             "Default False stays offline. Withheld (never false-flagged) on a truncated registry."
@@ -124,7 +124,7 @@ async def crossplane_check(
         Field(
             description="Opt-in: local directory holding the IOC's e3 module .db files. When set, "
             "concrete linked PVs are checked against the loaded IOC .db set and a 'broken' verdict "
-            "is emitted ONLY if that set is provably complete + fully resolved (else withheld — no "
+            "is emitted ONLY if that set is provably complete + fully resolved (else withheld, no "
             "false alarm; e3 IOCs that load records via iocshLoad/dbLoadTemplate withhold). "
             "Empty (default) keeps the check at prefix/Naming level (no 'broken' verdict)."
         ),
@@ -158,7 +158,7 @@ async def coverage_audit(
         str,
         Field(
             description="record-name prefix narrowing the ChannelFinder query AND the display set "
-            "(e.g. DEV-TEST01:Ctrl-EVR-01:); '' = whole site (CF cap risk — small-scope only)"
+            "(e.g. DEV-TEST01:Ctrl-EVR-01:); '' = whole site (CF cap risk, small-scope only)"
         ),
     ] = "",
     query_channelfinder: Annotated[
@@ -174,7 +174,7 @@ async def coverage_audit(
         str | None,
         Field(
             description=(
-                "alarm config-tree name — REQUIRED when the alarm plane is active (query_alarm AND "
+                "alarm config-tree name, REQUIRED when the alarm plane is active (query_alarm AND "
                 "its URL set); no default (site-specific trees), so opting into the alarm plane "
                 "without naming a tree is a loud INVALID_INPUT, not a silent wrong scan"
             )
@@ -187,7 +187,7 @@ async def coverage_audit(
         bool, Field(description="resolve embedded <file> refs case-insensitively (Windows host)")
     ] = False,
 ) -> dict[str, object]:
-    """Cross-plane coverage audit: which delivered PV has no display/archive/alarm — and back.
+    """Cross-plane coverage audit: which delivered PV has no display/archive/alarm, and back.
 
     Read-only. Joins the Wedge-0 display-PV index (PV→[screens]) with ChannelFinder (delivered PVs,
     the anchor), the Archiver and the Phoebus Alarm config. Each runtime plane is queried only when
@@ -226,14 +226,14 @@ async def find_device(
 ) -> dict[str, object]:
     """Find which operator screens show device X, read its channels live, and join the serving IOC.
 
-    Read-only (Wedge-2 live counterpart of the offline find_screen). The reverse-lookup — which
-    operator screens reference the device — is offline + macro-aware. Live values come from p4p;
-    reach follows the launcher's EPICS search env (address lists / name servers / auto-addr search
-    — run epics-doctor for the effective posture); the live read is capped to max_batch_size
+    Read-only (Wedge-2 live counterpart of the offline find_screen). The reverse-lookup, which
+    operator screens reference the device, is offline + macro-aware. Live values come from p4p;
+    reach follows the launcher's EPICS search env (address lists / name servers / auto-addr search,
+    run epics-doctor for the effective posture); the live read is capped to max_batch_size
     channels (honest note; screens stay complete). Source IOC comes from ChannelFinder, disabled
     by default (empty EPICS_MCP_CHANNELFINDER_URL → no source IOC, honest note); a CAPPED
     ChannelFinder fetch adds a
-    note that the source-IOC join may be incomplete — a channel without source_ioc may simply have
+    note that the source-IOC join may be incomplete, a channel without source_ioc may simply have
     fallen past the cap, not be unregistered (F16). ca-only PVs are not read under the
     single pva provider. Returns
     {"report": <DeviceLookupReport JSON>, "markdown": <rendered report>}.
@@ -249,7 +249,7 @@ def register_display_tools(mcp: FastMCP) -> None:
     the core server installs and starts standalone without it.
     """
     # ``output_schema=None`` is the explicit opt-out that keeps an information-empty accept-all
-    # schema off the wire — these four still return ``dict[str, object]``. It is NOT a claim that
+    # schema off the wire, these four still return ``dict[str, object]``. It is NOT a claim that
     # they are unsuitable for typing: they are simply the four S29 has not reached, and they are
     # absent from the core lane, so a typed shape here would only ever be advertised on a
     # [displays] install. Typing one means DELETING its kwarg here (``None`` overrides the

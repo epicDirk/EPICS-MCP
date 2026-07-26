@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
         "--displays",
         required=True,
         type=Path,
-        help="project/dataset ROOT of .bob displays (not a narrow per-IOC subdirectory — "
+        help="project/dataset ROOT of .bob displays (not a narrow per-IOC subdirectory, "
         "macros are bound by the operator top-levels there)",
     )
     parser.add_argument("--st-cmd", required=True, type=Path, help="e3 IOC st.cmd file")
@@ -72,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # One request → the SAME orchestrator the MCP tool calls (no duplicated join). Path validation
     # (canonicalize + existence + allowed_roots) happens inside run_crossplane via
-    # resolve_user_path, so the CLI now honours the same boundary the tool had (S4-4) — a bad path
+    # resolve_user_path, so the CLI now honours the same boundary the tool had (S4-4), a bad path
     # raises EpicsError, which we map to the CLI's exit-2 contract.
     request = CrossPlaneRequest(
         displays_dir=str(args.displays),

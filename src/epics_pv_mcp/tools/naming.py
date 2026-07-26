@@ -2,7 +2,7 @@
 
 Thin wrapper: the config-gated, off-loop query lives in the services layer
 (:func:`epics_pv_mcp.services.checkers.query_naming_lookup`), the same place ``diagnose_connection``
-and ``crossplane_check`` reach the Naming Service — so this tool adds a standalone surface without
+and ``crossplane_check`` reach the Naming Service, so this tool adds a standalone surface without
 duplicating the gate or a ``services -> tools`` upward import (M9). Default-disabled behaviour
 (no ``EPICS_MCP_NAMING_URL`` -> no network call, no ESS egress) is enforced there.
 """

@@ -36,23 +36,23 @@ async def _set_pv_value(
     safety.check_write_allowed(pv_name)  # raises PVWriteDeniedError or RateLimitError
 
     # Read old value for the audit trail. A failure HERE (the pre-read) surfaces as
-    # the tool error but is intentionally NOT a PV_WRITE audit event — no write was
+    # the tool error but is intentionally NOT a PV_WRITE audit event, no write was
     # attempted yet. Only the put below yields ATTEMPT/ALLOW/FAILED/UNKNOWN_PENDING records.
     old = await pv_get(pv_name, timeout)
     old_value = old.get("value")
 
-    # O2 value bounds (always-on, pre-put). The name/rate gate above allowlists only the PV NAME —
+    # O2 value bounds (always-on, pre-put). The name/rate gate above allowlists only the PV NAME,
     # never the value. Verify the written value against the record's OWN drive limits (control_t
     # DRVL/DRVH, already on the pre-read `old`), and REFUSE an out-of-range value HERE, before the
     # ATTEMPT/put, so it never reaches the IOC. A record that declares no drive limits (no control
     # block, dropped DRVL==DRVH, or a non-numeric value) is not bounds-checkable → the write
-    # proceeds (fail-open) with an honest note in the result. No extra pv_get — this reuses `old`.
+    # proceeds (fail-open) with an honest note in the result. No extra pv_get, this reuses `old`.
     bounds = check_value_in_bounds(value, old)
     if bounds.in_bounds is False:
         safety.audit_bounds_deny(pv_name, value, bounds.limit_low, bounds.limit_high)
         raise PVWriteBoundsError(
             f"Value {value!r} is outside the drive limits "
-            f"[{bounds.limit_low}, {bounds.limit_high}] of PV '{pv_name}' — write refused.",
+            f"[{bounds.limit_low}, {bounds.limit_high}] of PV '{pv_name}', write refused.",
             details={
                 "pv_name": pv_name,
                 "value": value,
@@ -72,7 +72,7 @@ async def _set_pv_value(
     #    catch it): a cancel does NOT stop the ``asyncio.to_thread`` worker running the p4p put, so
     #    the value may still land at the IOC AFTER the caller sees the cancel (S24/N01, "der stille
     #    Irrtum"). Record UNKNOWN_PENDING so the ATTEMPT is not left dangling, then ALWAYS re-raise
-    #    the cancel unchanged — never a FAILED (that implies no write), never a blind retry (that
+    #    the cancel unchanged, never a FAILED (that implies no write), never a blind retry (that
     #    could double-write). The emit is guarded so a broken audit sink can never swallow or
     #    replace the CancelledError. (Non-cancel BaseExceptions = process shutdown, propagate.)
     #  - except Exception (broad, deliberate): any non-EpicsError below the tool layer still leaves
@@ -91,22 +91,22 @@ async def _set_pv_value(
         raise
 
     # Audit the successful write. There is NO await between pv_put returning and this line, so a
-    # pending cancel is delivered AT the put await (→ UNKNOWN_PENDING) or not at all — the ALLOW
+    # pending cancel is delivered AT the put await (→ UNKNOWN_PENDING) or not at all, the ALLOW
     # record can never be lost to a late cancel. Keep this tail await-free.
     safety.audit_write(pv_name, old_value, value, operation_id=operation_id)
 
     # O3 readback verification (always-on). The write already SUCCEEDED and is ALLOW-audited above;
     # read the just-written value back and compare it to what was written, so a wrong / not-landed
-    # value becomes LOUD — a structured verdict plus a READBACK audit event — instead of a bare
+    # value becomes LOUD, a structured verdict plus a READBACK audit event, instead of a bare
     # "success" (the "stiller Irrtum" countermeasure). A NEW await is legal ONLY here, after the
     # await-free ALLOW tail: moving it above the audit_write line would break the UNKNOWN_PENDING
     # vs ALLOW ordering. A readback that fails (timeout / unreadable) or yields no live value is
-    # "not verifiable" — never a tool error, never a mismatch (the write happened regardless); only
+    # "not verifiable", never a tool error, never a mismatch (the write happened regardless); only
     # a genuine value difference is a mismatch. A cancel of the readback await is a BaseException,
     # so it propagates unchanged (never swallowed here, never mislabelled FAILED).
     try:
         readback_raw = await pv_get(pv_name, timeout)
-    except Exception:  # noqa: BLE001 — a failed readback is "not verifiable", not a write failure
+    except Exception:  # noqa: BLE001 (a failed readback is "not verifiable", not a write failure)
         logger.warning("readback failed for %s; write not verifiable", pv_name, exc_info=True)
         verification = ReadbackVerification(
             verified=None, note="not verifiable: readback pv_get failed (timeout/unreadable)"

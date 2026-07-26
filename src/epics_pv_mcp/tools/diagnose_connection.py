@@ -2,7 +2,7 @@
 
 All logic lives in :mod:`epics_pv_mcp.services.diagnose`; this only runs the diagnosis and returns
 the frozen report as a plain JSON-able dict (the MCP surface). A disconnected PV is a NORMAL result
-here — the service catches the p4p exceptions internally, so this wrapper does not translate a
+here, the service catches the p4p exceptions internally, so this wrapper does not translate a
 disconnect into an error (only genuine internal errors reach the ``EpicsError -> ToolError`` shell).
 """
 

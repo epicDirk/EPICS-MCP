@@ -9,8 +9,8 @@ emission.
 
 Design notes (the "why"):
 
-* **Tri-state ``verified``.** A readback that could NOT be obtained — a timeout, or the p4p
-  value-extraction fallback that yields ``value=None`` plus a ``note`` — is not a measurement, so
+* **Tri-state ``verified``.** A readback that could NOT be obtained, a timeout, or the p4p
+  value-extraction fallback that yields ``value=None`` plus a ``note``, is not a measurement, so
   it is NEVER a mismatch: it is *not verifiable* (``None``). Collapsing "could not verify" into
   "verified wrong" (``False``) would manufacture false alarms.
 * **``math.isclose`` for the numeric compare.** It combines a relative and an absolute tolerance
@@ -42,14 +42,14 @@ class ReadbackVerification(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     #: True = readback matches within tolerance; False = a genuine mismatch; None = not verifiable
-    #: (readback missing/None — not a measurement, so never a mismatch).
+    #: (readback missing/None, not a measurement, so never a mismatch).
     verified: bool | None
     #: The value read back after the write; None when it could not be obtained.
     readback: object | None = None
     #: The absolute tolerance actually applied to a numeric compare; None for an exact
     #: (non-numeric) compare or when not verifiable.
     tolerance: float | None = None
-    #: Human/agent-facing reason — why a compare was not verifiable, or how it mismatched.
+    #: Human/agent-facing reason, why a compare was not verifiable, or how it mismatched.
     note: str | None = None
 
 
@@ -58,7 +58,7 @@ class WriteResult(BaseModel):
 
     Keeps the pre-O3 keys (``status`` / ``pv_name`` / ``old_value`` / ``new_value``) so existing
     callers are unaffected, and adds the readback verdict. ``status`` stays ``"success"`` whenever
-    the put itself executed and was ALLOW-audited — even on a readback mismatch: the write DID
+    the put itself executed and was ALLOW-audited, even on a readback mismatch: the write DID
     happen (a wrong value may now sit at the IOC), which is a fact distinct from "verified". The
     loud signal for a mismatch is ``verified=false`` plus the ``READBACK_MISMATCH`` audit event,
     NOT an exception (which would discard this structured old→new→readback triple).
@@ -80,7 +80,7 @@ class WriteResult(BaseModel):
     #: Reason for a not-verifiable or mismatched readback.
     note: str | None = None
     #: O2 value-bounds note: None when the value was checked in-range, else the honest reason it
-    #: was not bounds-checked (the record declares no drive limits — a deliberate fail-open).
+    #: was not bounds-checked (the record declares no drive limits, a deliberate fail-open).
     bounds_note: str | None = None
 
 
@@ -93,7 +93,7 @@ def _control_min_step(readback: Mapping[str, object]) -> float | None:
     control = readback.get("control")
     if isinstance(control, dict):
         min_step = control.get("min_step")
-        # bool is an int subclass; a boolean min_step is meaningless — exclude it explicitly.
+        # bool is an int subclass; a boolean min_step is meaningless, exclude it explicitly.
         if isinstance(min_step, (int, float)) and not isinstance(min_step, bool):
             return float(min_step)
     return None
@@ -107,7 +107,7 @@ def verify_readback(
     Args:
         written: the raw string the write tool received (``set_pv_value(value: str)``).
         readback: what a readback ``pv_get`` returned (``services.epics_client._format_value``
-            shape — always a ``value`` key, an optional ``control.min_step``, and on extraction
+            shape, always a ``value`` key, an optional ``control.min_step``, and on extraction
             failure a ``note`` with ``value=None``).
         tolerance: the configured epsilon fallback; feeds BOTH ``isclose`` axes when the record
             carries no usable ``min_step`` (> 0).

@@ -1,8 +1,8 @@
 """CLI for the cross-plane coverage audit (Display ↔ ChannelFinder ↔ Archiver ↔ Alarm).
 
 Reads a project/dataset ROOT of ``.bob`` displays, joins the macro-expanded display-PV index
-(``opi_navigation`` Wedge-0) with the runtime planes — ChannelFinder (delivered PVs), Archiver,
-Phoebus Alarm — and writes a Markdown coverage report to stdout. Each runtime plane is queried only
+(``opi_navigation`` Wedge-0) with the runtime planes: ChannelFinder (delivered PVs), Archiver,
+Phoebus Alarm, and writes a Markdown coverage report to stdout. Each runtime plane is queried only
 with its flag AND its ``*_URL`` set; without any, only the raw display set is shown.
 
 Usage::
@@ -33,14 +33,14 @@ def main(argv: list[str] | None = None) -> int:
         "--displays",
         required=True,
         type=Path,
-        help="project/dataset ROOT of .bob displays (not a narrow per-IOC subdirectory — "
+        help="project/dataset ROOT of .bob displays (not a narrow per-IOC subdirectory, "
         "macros are bound by the operator top-levels there)",
     )
     parser.add_argument(
         "--scope",
         default="",
         help="record-name prefix narrowing the ChannelFinder query AND the display set "
-        "(e.g. DEV-TEST01:Ctrl-EVR-01:); '' = whole site (the CF query then hits the cap — "
+        "(e.g. DEV-TEST01:Ctrl-EVR-01:); '' = whole site (the CF query then hits the cap, "
         "sandbox/small-scope only)",
     )
     parser.add_argument(
@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--alarm-config",
         default=None,
-        help="alarm config-tree name; REQUIRED with --alarm (URL set) — no default (site-specific "
+        help="alarm config-tree name; REQUIRED with --alarm (URL set), no default (site-specific "
         "trees), so --alarm without it is a loud INVALID_INPUT, not a silent scan",
     )
     parser.add_argument(
@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # One request → the SAME orchestrator the MCP tool calls (no duplicated join). Path validation
     # (canonicalize + existence + allowed_roots) happens inside build_coverage_report via
-    # resolve_user_path, so the CLI honours the same boundary the tool had (S4-4) — a bad path
+    # resolve_user_path, so the CLI honours the same boundary the tool had (S4-4), a bad path
     # raises EpicsError, which we map to the CLI's exit-2 contract.
     request = CoverageRequest(
         displays_dir=str(args.displays),

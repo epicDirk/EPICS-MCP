@@ -10,14 +10,14 @@ Two layers, in order:
 2. **Opt-in ``allowed_roots`` boundary** (off by default). When the env var
    ``EPICS_MCP_ALLOWED_ROOTS`` is set, the resolved path must live under one of
    those roots, else ``EpicsError(PATH_OUTSIDE_WORKSPACE)``. **Default empty = NO
-   boundary** — this is future-posture optionality, NOT a "secured" deployment.
+   boundary**, this is future-posture optionality, NOT a "secured" deployment.
    It stays dormant because the caller is trusted, and for no other reason: do
    NOT justify it with "the server is read-only and localhost-isolated". Neither
-   half is unconditional any more — the server has a gated write surface (the
+   half is unconditional any more, the server has a gated write surface (the
    Olog logbook), and its network reach depends entirely on the launcher, which
    can widen the EPICS address lists onto a real facility network. A deployment
    that opens either should consider enabling this boundary deliberately. The
-   separator is OS-dependent (``os.pathsep`` — ``;`` on Windows, ``:`` on Linux),
+   separator is OS-dependent (``os.pathsep``, ``;`` on Windows, ``:`` on Linux),
    so an ``EPICS_MCP_ALLOWED_ROOTS`` value is not 1:1 portable between the two.
 """
 
@@ -34,7 +34,7 @@ from epics_pv_mcp.errors import EpicsError
 
 @functools.lru_cache(maxsize=8)
 def _resolve_roots(raw: str) -> tuple[Path, ...]:
-    """Resolve an ``EPICS_MCP_ALLOWED_ROOTS`` string into roots — cached on the raw string (S2-7).
+    """Resolve an ``EPICS_MCP_ALLOWED_ROOTS`` string into roots, cached on the raw string (S2-7).
 
     ``Path.resolve()`` is a filesystem stat (symlink resolution); the config is an immutable
     singleton, so the roots never change within its lifetime and re-resolving them on every
@@ -81,7 +81,7 @@ def resolve_user_path(raw: str, *, kind: Literal["dir", "file"], label: str) -> 
         raise EpicsError(f"{label} is not a {noun}: {raw}", error_code="INVALID_INPUT")
 
     roots = _allowed_roots()
-    # is_relative_to folds case on Windows (WindowsPath flavour) — do NOT swap it
+    # is_relative_to folds case on Windows (WindowsPath flavour), do NOT swap it
     # for startswith/commonpath, which would lose that folding.
     if roots and not any(resolved.is_relative_to(root) for root in roots):
         raise EpicsError(
@@ -95,15 +95,15 @@ def resolve_new_file_path(raw: str, *, label: str) -> Path:
     """Canonicalize a NOT-yet-existing output-file path, enforcing the boundary via its PARENT.
 
     :func:`resolve_user_path` with ``kind="file"`` stat-checks ``is_file`` and therefore REJECTS a
-    path that does not exist yet — which is exactly a download TARGET the caller is about to create.
+    path that does not exist yet, which is exactly a download TARGET the caller is about to create.
     This resolves the PARENT directory (which must exist) through :func:`resolve_user_path`, so the
     opt-in ``EPICS_MCP_ALLOWED_ROOTS`` boundary is enforced identically, then rejoins the basename.
-    The basename is taken via ``Path(raw).name`` (a single component — never a separator) and
+    The basename is taken via ``Path(raw).name`` (a single component, never a separator) and
     rejected
     if it is ``""`` / ``"."`` / ``".."``, so the result cannot traverse out of the validated parent.
     An EXISTING SYMLINK at the target is rejected too (``is_symlink`` = ``lstat``, does not
     follow), so
-    a symlink cannot redirect the write OUT of the validated parent — this is the cross-platform
+    a symlink cannot redirect the write OUT of the validated parent, this is the cross-platform
     guard
     the caller's ``O_EXCL`` open cannot give alone (on Windows ``O_EXCL`` follows a DANGLING
     symlink and

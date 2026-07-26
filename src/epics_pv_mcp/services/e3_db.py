@@ -1,19 +1,19 @@
 """Static, Windows-safe parsing of ESS e3 IOC startup scripts and EPICS databases.
 
-Pure-Python, read-only — no running IOC, no EPICS base, no SWIG. Two jobs:
+Pure-Python, read-only, no running IOC, no EPICS base, no SWIG. Two jobs:
 
-1. :func:`parse_st_cmd` — read an e3 ``st.cmd`` (the IOC's startup script) into a
+1. :func:`parse_st_cmd`, read an e3 ``st.cmd`` (the IOC's startup script) into a
    :class:`StCmdInfo`: the ``require``d modules, ``epicsEnvSet`` variables, the
    ``dbLoadRecords``/``iocshLoad`` calls with their macro strings, and the dominant
    device prefix (the ``P=`` macro, e.g. ``DEV-TEST01:Ctrl-EVR-01:``).
-2. :func:`ioc_db_pvs` — regex-extract record (PV) names from an EPICS ``.db`` text and
+2. :func:`ioc_db_pvs`, regex-extract record (PV) names from an EPICS ``.db`` text and
    substitute simple ``$(MACRO)`` references.
 
 **Known limitation (documented, not a bug):** full ``.substitutions``/template
 multi-instance expansion needs the EPICS ``msi`` tool (C++ / Linux/Docker) and is NOT
 done here. Records whose names still contain ``$(...)`` after substitution are returned
 as *unresolved* ("needs-msi") and must never be reported as "broken". The real ``.db``
-of an e3 module also live in the module package (conda), not in the IOC repo — so an IOC
+of an e3 module also live in the module package (conda), not in the IOC repo, so an IOC
 repo's ``st.cmd`` gives the prefix/macros/modules, while full PV enumeration needs the
 module repos (deferred).
 """
@@ -47,7 +47,7 @@ _LOAD_RE = re.compile(
     re.MULTILINE,
 )
 
-# record(type, "NAME")  — the record/PV name is the quoted 2nd argument.
+# record(type, "NAME"), the record/PV name is the quoted 2nd argument.
 _RECORD_RE = re.compile(r'record\s*\(\s*[A-Za-z0-9_]+\s*,\s*"([^"]+)"\s*\)')
 
 # alias("record", "aliasName")  (standalone)  /  alias("aliasName")  (inside a record body).
@@ -61,14 +61,14 @@ _ALIAS_RE = re.compile(r'(?<![A-Za-z0-9_])alias\s*\(\s*"([^"]+)"\s*(?:,\s*"([^"]
 # a reference and NESTED references in both the name and the default ("$(P=$(Q))",
 # "$($(SEL)_PV)"), which no single pattern can match (epics-base macCore.c scans too).
 # The old regex here required the char class to touch the closing bracket, so ANY reference
-# carrying a default did not match at all — even with the macro defined (BG2).
+# carrying a default did not match at all, even with the macro defined (BG2).
 
 
 def _strip_line_comment(line: str) -> str:
     """Cut a ``#`` comment to end-of-line, but ONLY when the ``#`` is outside a quoted string.
 
     EPICS iocsh and ``.db`` both treat ``#`` as a comment. A leading-``#`` line becomes empty; a
-    trailing ``# ...`` (e.g. ``alias("X") # note``) is cut — so a commented-out, still-templated
+    trailing ``# ...`` (e.g. ``alias("X") # note``) is cut, so a commented-out, still-templated
     ``record``/``alias`` no longer pollutes the PV set. A ``#`` INSIDE quotes (a record/field/value)
     is preserved, so real names are never corrupted.
     """
@@ -77,8 +77,8 @@ def _strip_line_comment(line: str) -> str:
         if char == '"':
             # A quote is a real boundary only if the run of backslashes right before it is EVEN
             # (each ``\\`` is a literal backslash; an odd count means the last ``\`` escapes THIS
-            # quote). A single-char lookback (S7-4) mishandles ``\\"`` — a literal backslash then a
-            # real closing quote — so count the parity of the whole preceding backslash run.
+            # quote). A single-char lookback (S7-4) mishandles ``\\"``, a literal backslash then a
+            # real closing quote, so count the parity of the whole preceding backslash run.
             backslashes = 0
             probe = index - 1
             while probe >= 0 and line[probe] == "\\":
@@ -99,7 +99,7 @@ def _strip_comment_lines(text: str) -> str:
 def _nested_ref_opens(text: str, index: int) -> str | None:
     """The expected CLOSER when ``text[index:]`` opens a nested reference, else ``None``.
 
-    Only a ``$``-introduced bracket opens a reference (macLib scans raw characters — a
+    Only a ``$``-introduced bracket opens a reference (macLib scans raw characters, a
     bare bracket is an ordinary character), and each reference closes with ITS bracket
     type only (macCore.c:793: macEnd is ``"=,)"`` for ``$(`` and ``"=,}"`` for ``${``).
     """
@@ -112,7 +112,7 @@ def _find_closing_bracket(text: str, start: int) -> int:
     """Index of the bracket closing the reference opened at ``start+1``, or ``-1``.
 
     Bracket-TYPE-faithful (see :func:`_nested_ref_opens`): for a ``$(`` reference a
-    ``}`` is a NAME character, never a terminator — a cross-matching scanner would
+    ``}`` is a NAME character, never a terminator, a cross-matching scanner would
     RESOLVE the typo ``$(P}`` and mint a PV name the IOC never serves. Nested
     references (``$(P=$(Q))``, ``${FOO=${BAZ}}``) close at their own bracket.
     """
@@ -137,7 +137,7 @@ def _split_body(body: str) -> tuple[str, str]:
 
     Per macLib the name ends there (macCore.c:794); ``raw_rest`` keeps its leading ``=``
     (a default follows) or ``,`` (scoped-macro arguments follow), or is ``""``. Top-level
-    means outside any NESTED reference (bare brackets do not nest — raw-character scan).
+    means outside any NESTED reference (bare brackets do not nest, raw-character scan).
     """
     expected: list[str] = []
     index = 0
@@ -162,7 +162,7 @@ def _default_from_rest(rest: str) -> str | None:
     Only a rest starting with ``=`` carries a default. It ends at a top-level ``,``
     (scoped-macro arguments); further ``=`` inside are legal (macCore.c:812), and an
     empty default is a real ``""`` (macLibTest.c:94). Nesting rule as in
-    :func:`_split_body` — only ``$``-introduced references nest.
+    :func:`_split_body`, only ``$``-introduced references nest.
     """
     if not rest.startswith("="):
         return None
@@ -188,12 +188,12 @@ def _default_from_rest(rest: str) -> str | None:
 
 
 def _has_macro_ref(text: str) -> bool:
-    """True when *text* still carries a reference — a bare ``$`` is an ordinary char."""
+    """True when *text* still carries a reference, a bare ``$`` is an ordinary char."""
     return "$(" in text or "${" in text
 
 
 #: Bound for the name-expansion recursion. macLib bounds its own recursion too; without a
-#: bound, hostile nesting depth (measured: 2000) blows the Python stack — and both
+#: bound, hostile nesting depth (measured: 2000) blows the Python stack, and both
 #: ``ioc_db_pvs`` and ``load_ioc_db`` promise "never raises". Real e3 names nest 1-2 deep.
 _MAX_NAME_EXPANSION_DEPTH = 32
 
@@ -204,10 +204,10 @@ def _expand_once(text: str, macros: dict[str, str], *, name_depth: int = 0) -> t
     Semantics anchored to epics-base macLib (modules/libcom/src/macLib/macCore.c):
     a DEFINED macro beats its default (:860-880) · an undefined macro WITH a default
     expands to the default · the NAME may itself contain references (:798), is resolved
-    first and looked up VERBATIM — a ``=``/``,`` arriving from a macro VALUE never
+    first and looked up VERBATIM, a ``=``/``,`` arriving from a macro VALUE never
     becomes a separator (macLib copies the expansion into the lookup buffer; re-parsing
     it would fabricate resolutions) · scoped arguments after a top-level ``,`` are
-    recognised, not evaluated. An undefined macro WITHOUT a default stays literal —
+    recognised, not evaluated. An undefined macro WITHOUT a default stays literal:
     the project's needs-msi convention (callers detect "still unresolved"), deliberately
     narrower than macLib's warning path; a name whose INNER references stay unresolved
     keeps the whole reference literal rather than emitting a half-expanded hybrid.
@@ -350,7 +350,7 @@ def parse_st_cmd(text: str) -> StCmdInfo:
         # that stays templated after env substitution (points at a name NOT in epicsEnvSet, e.g. a
         # require/iocsh argument) is unresolved and must NOT vote for a concrete prefix either
         # (S7-2), consistent with the "never a still-templated name" discipline. Truthiness (not
-        # ``is not None``) also excludes an EMPTY ``P=`` — an empty prefix carries no device
+        # ``is not None``) also excludes an EMPTY ``P=``, an empty prefix carries no device
         # information and must never outvote a real prefix in a mixed st.cmd (S7-2).
         if (
             p_value
@@ -377,7 +377,7 @@ def ioc_db_pvs(db_text: str, macros: dict[str, str]) -> tuple[set[str], set[str]
 
     Returns ``(resolved, unresolved)``: *resolved* = names fully expanded; *unresolved* =
     names that still contain ``$(...)``/``${...}`` after substitution (e.g. substitution-
-    file driven — "needs-msi"). Aliases are included because a display PV may legitimately
+    file driven, "needs-msi"). Aliases are included because a display PV may legitimately
     reference an alias rather than the record name; omitting them would make a real PV look
     "broken". Never raises.
     """
@@ -401,7 +401,7 @@ class IocDbResult:
     """The concrete IOC PV set loaded from a local module/db root (opt-in, read-only).
 
     ``complete`` is the load-bearing flag: it is True ONLY when the static load is provably
-    complete — every referenced ``.db`` found unambiguously, every name fully resolved (no
+    complete, every referenced ``.db`` found unambiguously, every name fully resolved (no
     needs-msi), and NO record-loading mechanism we cannot statically follow (``dbLoadTemplate`` or
     ``iocshLoad``) present. It gates the cross-plane ``broken`` verdict; conservative by design
     (in doubt → False → the verdict is withheld, never a false alarm).
@@ -411,7 +411,7 @@ class IocDbResult:
     unresolved: frozenset[str]
     complete: bool
     missing: tuple[str, ...]  # .db targets referenced but not found under the root
-    ambiguous: tuple[str, ...]  # .db basenames matching >1 file (not loaded — wrong-module risk)
+    ambiguous: tuple[str, ...]  # .db basenames matching >1 file (not loaded, wrong-module risk)
     unsupported_load: (
         bool  # dbLoadTemplate / iocshLoad present → records we cannot statically follow
     )
@@ -445,7 +445,7 @@ def _lazy_basename_index(root: Path) -> Callable[[str], list[Path]]:
 
     Loads that all resolve via the direct ``$(<module>_DIR)/...`` path never query this, so the
     common case does ZERO filesystem walks; the (bounded) walk happens once, lazily, only if some
-    load actually falls back to a basename search — and is cached for the remaining loads.
+    load actually falls back to a basename search, and is cached for the remaining loads.
     """
     cache: dict[str, list[Path]] | None = None
 
@@ -461,9 +461,9 @@ def _lazy_basename_index(root: Path) -> Callable[[str], list[Path]]:
 def _locate_db(target: str, root: Path, basename_lookup: Callable[[str], list[Path]]) -> list[Path]:
     """Resolve a (macro-substituted) ``.db`` *target* to file(s) under *root* (deterministic).
 
-    Primary: the target as a direct path (absolute, or relative to *root* — this resolves the
+    Primary: the target as a direct path (absolute, or relative to *root*, this resolves the
     synthesised ``$(<module>_DIR)/...`` form). Secondary: *basename_lookup* (a lazy per-
-    :func:`load_ioc_db` index — S7-3). Returns ALL matches sorted; the caller treats 0 = missing and
+    :func:`load_ioc_db` index, S7-3). Returns ALL matches sorted; the caller treats 0 = missing and
     >1 = ambiguous (a same-named ``.db`` in several modules must not silently pick a wrong set).
     """
     path = Path(target)
@@ -476,7 +476,7 @@ def _locate_db(target: str, root: Path, basename_lookup: Callable[[str], list[Pa
 def load_ioc_db(st_info: StCmdInfo, module_db_root: Path) -> IocDbResult:
     """Load the IOC's concrete ``.db`` PV set from a local module/db *root* (opt-in, read-only).
 
-    Iterates ``st_info.loads`` (NOT ``db_files`` — the per-load ``P=`` macro lives on the ``Load``
+    Iterates ``st_info.loads`` (NOT ``db_files``, the per-load ``P=`` macro lives on the ``Load``
     and is what makes ``$(P)Foo`` concrete). For each ``dbLoadRecords`` ``.db``: synthesise
     ``<module>_DIR`` from the ``require``d modules + *root*, resolve the path, read it, and extract
     record/alias PVs substituting ``st_info.env`` + the synthesised dirs + the per-load macros.
@@ -486,7 +486,7 @@ def load_ioc_db(st_info: StCmdInfo, module_db_root: Path) -> IocDbResult:
     dir_env = {f"{module}_DIR": str(module_db_root / module) for module in st_info.requires}
     base_env = {**st_info.env, **dir_env}
     # Lazy: walk the module/db root at most ONCE, and only if some load actually falls back to a
-    # basename search — loads that all resolve via the direct $(<module>_DIR)/... path walk 0×
+    # basename search, loads that all resolve via the direct $(<module>_DIR)/... path walk 0×
     # (S7-3).
     basename_lookup = _lazy_basename_index(module_db_root)
     resolved: set[str] = set()
@@ -500,7 +500,7 @@ def load_ioc_db(st_info: StCmdInfo, module_db_root: Path) -> IocDbResult:
         target = substitute(load.target, base_env)
         if "$(" in target or "${" in target:
             # Path macro stayed unresolved (e.g. an unsynthesised/versioned module dir). Do NOT fall
-            # back to a basename search — it could load a same-named .db from the WRONG module and
+            # back to a basename search, it could load a same-named .db from the WRONG module and
             # report it as the IOC's authoritative PV set. Force missing → complete=False.
             missing.append(load.target)
             continue
@@ -524,7 +524,7 @@ def load_ioc_db(st_info: StCmdInfo, module_db_root: Path) -> IocDbResult:
     # IOC's PV set is complete (the bulk of an e3 EVR's records come in via iocshLoad'ed .iocsh).
     unsupported = any(load.command in {"iocshLoad", "dbLoadTemplate"} for load in st_info.loads)
     # ``bool(resolved)`` is load-bearing: a degenerate st.cmd (no dbLoadRecords, or a comment-/
-    # record-less .db) enumerates ZERO PVs — without this term it would report complete=True over an
+    # record-less .db) enumerates ZERO PVs, without this term it would report complete=True over an
     # EMPTY set and crossplane would flag EVERY linked PV as broken (the exact trap we close).
     complete = (
         bool(resolved) and not missing and not ambiguous and not unresolved and not unsupported

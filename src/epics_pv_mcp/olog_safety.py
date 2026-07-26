@@ -1,18 +1,18 @@
-"""Write gate for Phoebus Olog logbook posts — env gate, test-server URL boundary, logbook
+"""Write gate for Phoebus Olog logbook posts, env gate, test-server URL boundary, logbook
 allowlist, rate-limit, privacy-clean audit.
 
 A SEPARATE gate from :class:`~epics_pv_mcp.safety.SafetyLayer` (the PV write gate): Olog write is a
 deliberately-authorized, separate logbook surface, so ``EPICS_MCP_ALLOW_PV_WRITE`` stays false and
 untouched. This is a schwester class rather than a generalisation of ``SafetyLayer`` so the tested
-PV write path is never touched — three things diverge deliberately:
+PV write path is never touched: three things diverge deliberately:
 
 * **Test-server URL boundary** (the one new building block vs. PV). PV write is implicitly test-safe
   through the EPICS address-list localhost isolation; Olog speaks HTTP to an arbitrary URL, where
   that isolation does NOT apply. So a write is refused unless ``olog_url`` resolves to a loopback
   host (the local Docker sandbox) OR is an allowlisted https URL with remote writes enabled (a
-  plain-http remote is refused — Basic creds are cleartext) — a production write is a deliberate,
+  plain-http remote is refused, Basic creds are cleartext), a production write is a deliberate,
   auditable double action. The host comes ONLY from :func:`~epics_pv_mcp.services._http.url_host`,
-  which parses with **urllib3 — the parser ``requests`` actually connects through** — never with a
+  which parses with **urllib3, the parser ``requests`` actually connects through**, never with a
   second parser and never a substring of the authority: ``http://127.0.0.1@olog-prod/Olog`` has host
   ``olog-prod`` and is refused. Naming ``urlparse`` here would be wrong AND dangerous: the two
   parsers disagree on a hostile authority (see ``url_host``'s docstring for the measured case), and
@@ -21,7 +21,7 @@ PV write path is never touched — three things diverge deliberately:
   logbook is a visible error. BOTH write gates are fail-closed on empty, in DIFFERENT shapes:
   the PV name-pattern (``SafetyLayer``) *refuses to start* when writes are on and the pattern is
   empty (``SafetyConfigError``; only an explicit ``.*`` deliberately allows all), while this gate
-  constructs and denies at runtime. NOT an inverse (neither is fail-open) — the shape is a
+  constructs and denies at runtime. NOT an inverse (neither is fail-open), the shape is a
   deliberate per-surface choice; never describe either gate as "allow all on empty".
 * **Metadata-only audit.** The PV audit logs old/new VALUES; the Olog audit must NEVER log the
   ``title``/``description`` free text (that would route write around the READ redaction). Only
@@ -58,14 +58,14 @@ def get_olog_safety() -> OlogWriteGate:
 class OlogWriteGate:
     """Guards every Olog logbook write with five checks in fixed, fail-closed order.
 
-    0. Non-empty logbooks  — an empty set slips through the ``⊆`` allowlist check, so guard first.
-    1. Environment gate    — ``allow_olog_write`` must be True.
-    2. Test-server URL boundary — loopback ``olog_url``, else an allowlisted remote https URL.
-    3. Logbook allowlist   — every target logbook ∈ ``olog_write_logbooks`` (empty = deny-all).
-    3b. Attachment size cap — ``attachment_bytes`` ≤ ``olog_attach_max_bytes`` (OA1 anti-DoS; a
+    0. Non-empty logbooks: an empty set slips through the ``⊆`` allowlist check, so guard first.
+    1. Environment gate: ``allow_olog_write`` must be True.
+    2. Test-server URL boundary: loopback ``olog_url``, else an allowlisted remote https URL.
+    3. Logbook allowlist: every target logbook ∈ ``olog_write_logbooks`` (empty = deny-all).
+    3b. Attachment size cap: ``attachment_bytes`` ≤ ``olog_attach_max_bytes`` (OA1 anti-DoS; a
         no-op at the default ``attachment_bytes=0``). BEFORE the rate limit so it never burns a
         token.
-    4. Rate limit          — at most ``olog_write_rate_limit`` writes per 60 s window.
+    4. Rate limit: at most ``olog_write_rate_limit`` writes per 60 s window.
 
     Every rejection is audited as DENY *before* the raise, i.e. before the rate token is appended,
     so a denial never consumes a token.
@@ -78,7 +78,7 @@ class OlogWriteGate:
         self._allowed_logbooks = self._split_csv(config.olog_write_logbooks)
         self._allowed_urls = self._split_csv(config.olog_write_url_allowlist)
         # Fail-closed: a config bypassing validation (EpicsConfig.model_construct) must not let a
-        # bare ValueError from deque(maxlen<0) escape the fail-closed contract — mirror SafetyLayer.
+        # bare ValueError from deque(maxlen<0) escape the fail-closed contract, mirror SafetyLayer.
         try:
             self._timestamps: deque[float] = deque(maxlen=config.olog_write_rate_limit)
         except ValueError as exc:
@@ -95,10 +95,10 @@ class OlogWriteGate:
         # the module-level _olog_safety_lock guards the singleton getter, a separate concern.
         self._rate_lock = threading.Lock()
         # Defense-in-depth: writes ENABLED with an EMPTY allowlist is deny-all (fail-closed), so
-        # warn loudly — an operator who set ALLOW_OLOG_WRITE but forgot the allowlist gets no write.
+        # warn loudly, an operator who set ALLOW_OLOG_WRITE but forgot the allowlist gets no write.
         if config.allow_olog_write and not self._allowed_logbooks:
             logging.getLogger(__name__).warning(
-                "Olog writes are ENABLED but EPICS_MCP_OLOG_WRITE_LOGBOOKS is empty — every write "
+                "Olog writes are ENABLED but EPICS_MCP_OLOG_WRITE_LOGBOOKS is empty, every write "
                 "is denied (deny-all). Set the allowed logbook names to enable writes."
             )
 
@@ -114,14 +114,14 @@ class OlogWriteGate:
     def check_write_preconditions(
         self, logbooks: list[str], caller: str = "create_log_entry"
     ) -> None:
-        """The CHEAP, deterministic write checks — non-empty logbooks, env gate, URL boundary,
-        logbook allowlist — with NO rate token and NO filesystem work. Split out so an upload caller
+        """The CHEAP, deterministic write checks, non-empty logbooks, env gate, URL boundary,
+        logbook allowlist, with NO rate token and NO filesystem work. Split out so an upload caller
         can run them BEFORE it stats attachment sizes: a denied write then touches no filesystem
-        (restoring the "deny before any I/O" posture — a denied caller must not get a file-existence
+        (restoring the "deny before any I/O" posture, a denied caller must not get a file-existence
         stat oracle). The size cap + rate limit stay in :meth:`check_write_allowed`, which calls
         this first. Each failing check audits DENY before the raise; none appends a rate token.
         """
-        # 0. Non-empty logbooks — SEC-3: set() <= frozenset() is True, so an empty list would slip
+        # 0. Non-empty logbooks, SEC-3: set() <= frozenset() is True, so an empty list would slip
         #    through the allowlist check, burn a rate token, and 400 at the server. Guard here.
         if not logbooks:
             self._audit_deny("OLOG_WRITE_DENIED", caller)
@@ -139,19 +139,19 @@ class OlogWriteGate:
                 details={"logbooks": logbooks},
             )
 
-        # 2. Test-server URL boundary (the critical check — prevents an accidental production write)
+        # 2. Test-server URL boundary (the critical check, prevents an accidental production write)
         if not self._url_write_allowed():
             self._audit_deny("OLOG_WRITE_DENIED", caller)
             raise OlogWriteDeniedError(
                 f"Olog write refused: target {self._config.olog_url!r} is not a permitted write "
                 "target. Only a loopback host, or an https URL that is in "
                 "EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true, "
-                "may be written to (a plain-http remote is refused — Basic creds are cleartext).",
+                "may be written to (a plain-http remote is refused, Basic creds are cleartext).",
                 details={"olog_url": self._config.olog_url},
             )
 
         # 3. Logbook allowlist (empty allowlist = deny-all at runtime; the PV pattern is also
-        #    fail-closed on empty but in a DIFFERENT shape — refuse-to-start, not allow-all;
+        #    fail-closed on empty but in a DIFFERENT shape, refuse-to-start, not allow-all;
         #    see this module's docstring / safety.py:61-67)
         if not set(logbooks) <= self._allowed_logbooks:
             self._audit_deny("OLOG_WRITE_DENIED", caller)
@@ -178,12 +178,12 @@ class OlogWriteGate:
                 allowlist, or the attachment upload exceeds ``olog_attach_max_bytes``.
             RateLimitError: write rate limit exceeded.
         """
-        # Checks 0-3 (the cheap, deterministic denials) run FIRST and touch no filesystem — so an
+        # Checks 0-3 (the cheap, deterministic denials) run FIRST and touch no filesystem, so an
         # upload caller can run them BEFORE it stats attachment sizes (see
         # check_write_preconditions).
         self.check_write_preconditions(logbooks, caller)
 
-        # 3b. Attachment size cap (OA1 anti-DoS) — BEFORE the rate limit, so an over-limit upload
+        # 3b. Attachment size cap (OA1 anti-DoS), BEFORE the rate limit, so an over-limit upload
         #     never consumes a rate token, and matched by the caller reading file SIZES (stat)
         # before
         #     bytes, so a huge file is refused without being loaded. attachment_bytes defaults to 0
@@ -200,11 +200,11 @@ class OlogWriteGate:
                 },
             )
 
-        # 4. Rate limit (sliding window) — LAST, so a denial above never consumes a token.
+        # 4. Rate limit (sliding window): LAST, so a denial above never consumes a token.
         # S28: purge + len-check + append are ONE atomic step under _rate_lock, so two concurrent
         # writes (this gate runs under asyncio.to_thread = real threads) can never both pass the
         # check and exceed the limit. `now` is sampled inside the lock too. The audit + raise for a
-        # rate denial run OUTSIDE the lock (I/O; never appends a token — the invariant holds).
+        # rate denial run OUTSIDE the lock (I/O; never appends a token, the invariant holds).
         with self._rate_lock:
             now = time.monotonic()
             self._purge_old(now)
@@ -234,11 +234,11 @@ class OlogWriteGate:
         attachment_count: int = 0,
         attachment_bytes: int = 0,
     ) -> None:
-        """Log a completed (ALLOW) Olog write. Metadata only — NEVER title/description free text.
+        """Log a completed (ALLOW) Olog write. Metadata only, NEVER title/description free text.
 
         ``owner`` is the write service-account name from config (the Principal the SERVER records
         as owner, not the redacted response, which drops owner). ``attachment_count``/
-        ``attachment_bytes`` (OA1) are COUNTS/SIZES only — never a filename, which is author free
+        ``attachment_bytes`` (OA1) are COUNTS/SIZES only, never a filename, which is author free
         text
         (a person can be named in it); they are appended only for an upload, so a plain write's
         audit
@@ -266,7 +266,7 @@ class OlogWriteGate:
 
         SEC-5: still NO ``owner``; metadata only.
 
-        ``entry_id`` is optional because a failed CREATE has none — but that is a statement about
+        ``entry_id`` is optional because a failed CREATE has none, but that is a statement about
         create, and it was wrongly generalised to every write. An EDIT (update_log_entry,
         add_log_attachment) targets an entry that already exists, and the server archives and
         mutates it BEFORE the response goes out: a timeout leaves an APPLIED write in front of a
@@ -288,23 +288,23 @@ class OlogWriteGate:
     def _url_write_allowed(self) -> bool:
         """True iff ``olog_url`` is a permitted write target (loopback, or allowlisted + remote).
 
-        Three steps, in this order — the ORDER is load-bearing:
+        Three steps, in this order, the ORDER is load-bearing:
 
         1. **Unparseable → deny, before anything else** (SEC-2). ``url_host`` returns None for a
            hostless/garbage URL, for a scheme-less base URL, and for a MALFORMED authority (a bad
-           bracketed IPv6 raises ``LocationParseError``/``ValueError`` in the urllib3 parser it uses
-           — the same parser ``requests`` connects with). This veto runs FIRST, so an
-           unparseable URL is denied even if it is exactly allowlisted — a bad URL is a clean,
+           bracketed IPv6 raises ``LocationParseError``/``ValueError`` in the urllib3 parser
+           it uses, the same parser ``requests`` connects with). This veto runs FIRST, so an
+           unparseable URL is denied even if it is exactly allowlisted; a bad URL is a clean,
            audited DENY, never an uncaught crash and never a lucky pass.
         2. **Loopback → allow** (the local Docker sandbox).
-        3. **Anything else** (INCLUDING RFC1918 private — the production Olog lives on a private
+        3. **Anything else** (INCLUDING RFC1918 private, the production Olog lives on a private
            network, so "private = allowed" would defeat the prod NO-GO): permit only an EXACTLY
            allowlisted base URL with remote writes explicitly enabled AND an ``https`` scheme (a
-           plain-http Basic-auth write to a real server would expose the credentials — see
+           plain-http Basic-auth write to a real server would expose the credentials, see
            :func:`~epics_pv_mcp.services._http.is_https_url`).
 
         The hardened host extraction lives in :func:`~epics_pv_mcp.services._http.url_host` and is
-        shared with the Olog READ redaction — the PRIMITIVE is shared, this POLICY is not. Note the
+        shared with the Olog READ redaction, the PRIMITIVE is shared, this POLICY is not. Note the
         read side must NOT reuse this method: it returns True for an allowlisted REMOTE host too
         (step 3), which as a read predicate would surface a production logbook un-redacted.
         """
@@ -343,7 +343,7 @@ class OlogWriteGate:
     @staticmethod
     def _attach_suffix(attachment_count: int, attachment_bytes: int) -> str:
         """Metadata-only audit fragment for an upload; empty for a no-attachment write (so its audit
-        line is byte-identical to before). NEVER a filename — counts and total bytes only."""
+        line is byte-identical to before). NEVER a filename, counts and total bytes only."""
         if attachment_count <= 0:
             return ""
         return f" attachments={attachment_count} attach_bytes={attachment_bytes}"
@@ -364,7 +364,7 @@ class OlogWriteGate:
     def _setup_audit_logger(self) -> logging.Logger:
         """Create the dedicated Olog audit logger (its OWN name, distinct from the PV audit).
 
-        The audit sink is VALIDATED on every construction — not only the first — mirroring
+        The audit sink is VALIDATED on every construction, not only the first, mirroring
         SafetyLayer._setup_audit_logger (QA 2026-07-17): a broken audit path fails closed as
         SafetyConfigError even when an earlier gate already attached a handler to the process-global
         ``epics_pv_mcp.olog_audit`` logger. Gating the whole block on ``if not audit.handlers`` used

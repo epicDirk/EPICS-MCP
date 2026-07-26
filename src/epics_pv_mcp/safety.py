@@ -1,4 +1,4 @@
-"""Safety layer for PV write operations — gate, allowlist, rate-limit, audit."""
+"""Safety layer for PV write operations, gate, allowlist, rate-limit, audit."""
 
 import logging
 import os
@@ -31,11 +31,11 @@ def get_safety() -> "SafetyLayer":
 class SafetyLayer:
     """Guards all PV write operations with three checks:
 
-    1. Environment gate  — ``allow_pv_write`` must be True.
-    2. Pattern allowlist  — PV name must match ``pv_write_pattern`` regex. REQUIRED when writes are
+    1. Environment gate: ``allow_pv_write`` must be True.
+    2. Pattern allowlist: PV name must match ``pv_write_pattern`` regex. REQUIRED when writes are
        enabled: an empty pattern with ``allow_pv_write`` on raises ``SafetyConfigError`` at
        construction (fail-closed), never a silent allow-all.
-    3. Rate limit         — at most ``write_rate_limit`` writes per 60 s window.
+    3. Rate limit: at most ``write_rate_limit`` writes per 60 s window.
     """
 
     _WINDOW_SECONDS = 60.0
@@ -54,21 +54,21 @@ class SafetyLayer:
                 details={"pattern": config.pv_write_pattern},
             ) from exc
         # Fail-closed: writes ENABLED without a PV-name allowlist would leave only the on/off env
-        # gate — every PV becomes writable. Refuse at construction rather than warn-and-allow: an
+        # gate, every PV becomes writable. Refuse at construction rather than warn-and-allow: an
         # empty pattern with writes on is a misconfiguration (a forgotten pattern env var), not a
         # valid "allow all". An operator who genuinely wants every PV writable must say so
-        # explicitly (e.g. '.*') — this turns the silent footgun into a loud SafetyConfigError.
+        # explicitly (e.g. '.*'), this turns the silent footgun into a loud SafetyConfigError.
         if config.allow_pv_write and self._pattern is None:
             raise SafetyConfigError(
                 "PV writes are ENABLED (EPICS_MCP_ALLOW_PV_WRITE=true) but "
-                "EPICS_MCP_PV_WRITE_PATTERN is empty — refusing to start with every PV writable. "
+                "EPICS_MCP_PV_WRITE_PATTERN is empty, refusing to start with every PV writable. "
                 "Set a pattern (e.g. '^MPS:.*$', or '.*' to deliberately allow all).",
                 details={"allow_pv_write": True, "pv_write_pattern": ""},
             )
         # Fail-closed (E8): writes ENABLED while the EPICS client search env can reach beyond
         # loopback means a mis-scoped allowlist could hit a production IOC. The name-pattern
         # gate above scopes WHAT may be written; this gate scopes WHERE a write can physically
-        # go — both must hold. The check is parser-faithful (an *_AUTO_ADDR_LIST spelling the
+        # go, both must hold. The check is parser-faithful (an *_AUTO_ADDR_LIST spelling the
         # real client rejects keeps broadcasting) and resolution-free (a hostname is never
         # trusted as loopback). ``environ`` is injectable for determinism; the singleton path
         # reads the process env, which is exactly what p4p/libca will read. Server-side
@@ -79,7 +79,7 @@ class SafetyLayer:
             if violations:
                 raise SafetyConfigError(
                     "PV writes are ENABLED (EPICS_MCP_ALLOW_PV_WRITE=true) but the EPICS client "
-                    "search reach is not loopback-only — refusing to start a write-enabled "
+                    "search reach is not loopback-only, refusing to start a write-enabled "
                     "process that could reach a real facility network. Violations: "
                     + "; ".join(violations)
                     + ". Fix: set EPICS_PVA/CA_ADDR_LIST and *_NAME_SERVERS to loopback hosts "
@@ -101,7 +101,7 @@ class SafetyLayer:
             ) from exc
         self._audit_handler: logging.Handler | None = None
         self._audit_logger = self._setup_audit_logger()
-        # S28: the rate-limit token acquisition (purge -> len-check -> append) must be ATOMIC —
+        # S28: the rate-limit token acquisition (purge -> len-check -> append) must be ATOMIC:
         # symmetric with OlogWriteGate. The PV write path runs the gate inline on the event loop
         # today (tools/write.py, before the first await), so it is not racy YET; the lock is
         # defensive symmetry that also holds if PV write ever moves to a thread (O5). Per-instance
@@ -139,7 +139,7 @@ class SafetyLayer:
         # 3. Rate limit (sliding window). S28: purge + len-check + append are ONE atomic step under
         # _rate_lock (symmetric with OlogWriteGate), so concurrent writes can never both pass the
         # check and exceed the limit. `now` is sampled inside the lock; the audit + raise for a rate
-        # denial run OUTSIDE the lock (I/O; the deny path never appends a token — invariant holds).
+        # denial run OUTSIDE the lock (I/O; the deny path never appends a token, invariant holds).
         with self._rate_lock:
             now = time.monotonic()
             self._purge_old(now)
@@ -163,7 +163,7 @@ class SafetyLayer:
     ) -> None:
         """Log a write ATTEMPT (``event=ATTEMPT``) emitted BEFORE the I/O.
 
-        Durable evidence that a write was dispatched — so a put that lands at the IOC after a
+        Durable evidence that a write was dispatched, so a put that lands at the IOC after a
         mid-flight cancellation (see :meth:`audit_write_unknown`) is never wholly un-recorded. The
         ``operation_id`` correlates this line with the terminal ALLOW/FAILED/UNKNOWN_PENDING record.
         """
@@ -235,7 +235,7 @@ class SafetyLayer:
         The write coroutine was cancelled mid-``pv_put``; the ``asyncio.to_thread`` worker running
         the p4p put is NOT stopped by that cancellation, so the value may still reach the IOC. This
         is never a FAILED write (which would imply nothing was written) and must never be blindly
-        retried (which could double-write) — the operator verifies by read-back.
+        retried (which could double-write), the operator verifies by read-back.
         """
         self._emit(
             "PV_WRITE event=UNKNOWN_PENDING pv=%s old=%r new=%r op=%s caller=%s",
@@ -260,10 +260,10 @@ class SafetyLayer:
         Emitted AFTER the ALLOW record (:meth:`audit_write`): the write already succeeded, and this
         is the independent verdict on whether the value read back matches what was written.
 
-        * ``READBACK_OK`` — the readback is within tolerance of the written value.
-        * ``READBACK_MISMATCH`` — a genuine mismatch. The loud, forensic signal for a wrong write;
+        * ``READBACK_OK``: the readback is within tolerance of the written value.
+        * ``READBACK_MISMATCH``: a genuine mismatch. The loud, forensic signal for a wrong write;
           the write is NOT reverted (a wrong value may now sit at the IOC).
-        * ``READBACK_UNVERIFIED`` — the readback could not be obtained (timeout / value withheld).
+        * ``READBACK_UNVERIFIED``: the readback could not be obtained (timeout / value withheld).
           An absence of evidence, never a mismatch.
 
         ``operation_id`` ties this line to the ATTEMPT/ALLOW records of the same write.
@@ -294,10 +294,10 @@ class SafetyLayer:
     ) -> None:
         """Log a write REFUSED because its value is outside the record's drive limits (O2).
 
-        ``event=BOUNDS_DENY`` — the PV passed the name/rate gate but the written value lies outside
+        ``event=BOUNDS_DENY``: the PV passed the name/rate gate but the written value lies outside
         ``[limit_low, limit_high]`` (control_t DRVL/DRVH), so the put is refused BEFORE the I/O and
         nothing reaches the IOC. Deliberately NOT reusing :meth:`_audit_deny`: this refusal happens
-        AFTER the pre-read, so it consumed its rate token (like a FAILED put) — unlike the gate
+        AFTER the pre-read, so it consumed its rate token (like a FAILED put), unlike the gate
         denies, whose docstring pins that a denial never consumes a token. Values/limits are numeric
         metadata, never free text.
         """
@@ -318,7 +318,7 @@ class SafetyLayer:
         """Log a REJECTED write (gate off / pattern mismatch / rate limit).
 
         Called *before* the ``raise`` in :meth:`check_write_allowed`, i.e. before
-        the rate-limit token is appended — so a denial never consumes a token.
+        the rate-limit token is appended, so a denial never consumes a token.
         """
         self._emit(
             "PV_WRITE event=DENY pv=%s error_code=%s caller=%s",
@@ -331,7 +331,7 @@ class SafetyLayer:
         """Single audit sink. Total function: the stdlib ``logging`` layer absorbs
         handler I/O/formatting errors via ``Handler.handleError``, so an audit
         emission never turns a denial/failure into a crash nor hides the original
-        raise — hence no ``try/except`` guard is needed here.
+        raise, hence no ``try/except`` guard is needed here.
         """
         self._audit_logger.info(message, *args)
 
@@ -344,7 +344,7 @@ class SafetyLayer:
     def _setup_audit_logger(self) -> logging.Logger:
         """Create a dedicated logger for audit records.
 
-        The audit sink is VALIDATED on every construction — not only the first — so a broken
+        The audit sink is VALIDATED on every construction, not only the first, so a broken
         audit path fails closed even when an earlier SafetyLayer already attached a handler to
         the process-global ``epics_pv_mcp.audit`` logger (QA 2026-07-17: gating the whole block
         on ``if not audit.handlers`` used to skip the path check on repeat construction). At most
@@ -379,7 +379,7 @@ class SafetyLayer:
         handler.setFormatter(formatter)
         # Attach at most one handler (dedup on repeated init). The handler above was built
         # unconditionally, so its path validation already ran; if the logger is already
-        # configured, close the extra one (frees the duplicate file descriptor — a
+        # configured, close the extra one (frees the duplicate file descriptor, a
         # StreamHandler over sys.stderr does not own the stream, so close() won't close stderr).
         if not audit.handlers:
             audit.addHandler(handler)

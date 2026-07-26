@@ -1,6 +1,6 @@
 """Pure assembly for the Wedge-2 device lookup: reverse-lookup screens + live values + source IOC.
 
-Composes three ALREADY-FETCHED inputs into one deterministic :class:`DeviceLookupReport` — there is
+Composes three ALREADY-FETCHED inputs into one deterministic :class:`DeviceLookupReport`, there is
 **no I/O here**, so the merge is fully offline-testable (the tool wrapper :mod:`~.tools.find_device`
 runs the macro-aware inventory, the p4p batch read and the ChannelFinder GET, then hands the raw
 results to :func:`build_device_report`). Mirrors the pure :func:`crossplane_check` next to its thin
@@ -10,7 +10,7 @@ wrapper, and the build-once discipline: the reverse-lookup itself is ``opi_navig
 The reused models expose RAW fields only, so two report fields are **derived** here (kept explicit):
 ``matched_channels`` = ``channel_name`` of each ``DisplayMatch.matched_pvs`` (the protocol-stripped
 channel the p4p read uses), and ``connected`` = membership in the ``pv_get_batch`` ``results``
-(else the ``errors`` entry) — ``pv_get_batch`` carries no ``connected`` field.
+(else the ``errors`` entry), ``pv_get_batch`` carries no ``connected`` field.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ class ChannelStatus(_Model):
     severity: str | None = None
     #: The read error (timeout / not-found / connection) when ``connected`` is False.
     error: str | None = None
-    #: ChannelFinder source IOC / host — ``None`` when ChannelFinder is disabled or has no entry.
+    #: ChannelFinder source IOC / host, ``None`` when ChannelFinder is disabled or has no entry.
     source_ioc: str | None = None
     source_host: str | None = None
 
@@ -88,7 +88,7 @@ def collect_channels(lookup: PvLookupResult) -> tuple[str, ...]:
 
     ``DisplayMatch.matched_pvs`` are raw (carry the ``pva://``/``ca://`` prefix as stored); the live
     p4p read needs the bare channel, so each is normalized via the shared ``channel_name`` (the same
-    strip used by the cross-plane adapter — one source, no drift).
+    strip used by the cross-plane adapter, one source, no drift).
     """
     channels: set[str] = set()
     for display in lookup.displays:
@@ -149,7 +149,7 @@ def build_device_report(
     live_capped: bool,
     channelfinder_enabled: bool,
 ) -> DeviceLookupReport:
-    """Merge reverse-lookup + p4p batch read + ChannelFinder result — pure, deterministic.
+    """Merge reverse-lookup + p4p batch read + ChannelFinder result, pure, deterministic.
 
     *lookup* is the ``find_displays`` result; *live_results* is the ``pv_get_batch`` dict
     (``{"results": [...], "errors": [...]}``) of the LIVE-QUERIED (capped) channel subset;
@@ -197,11 +197,11 @@ def build_device_report(
         notes.append("No operator-facing screen references this device/query.")
     if live_capped:
         # S7-5: report the number of channels the live read ATTEMPTED (live_read, known in
-        # find_device as len(read)), not len(channels) — the latter counts p4p RESPONSES and
+        # find_device as len(read)), not len(channels), the latter counts p4p RESPONSES and
         # undercounts when fewer come back than were attempted (e.g. a degraded live read).
         notes.append(
             f"Live status shown for {live_read} of {total_matched} matched channels "
-            "(read capped) — refine the query for full live coverage. The screen list is complete."
+            "(read capped), refine the query for full live coverage. The screen list is complete."
         )
     # A degraded live read (best-effort at the find_device edge) carries a "note" on the live
     # envelope. Surface it so an empty channel list is explained (mirrors the ChannelFinder note).
@@ -210,7 +210,7 @@ def build_device_report(
         notes.append(live_note)
     if not channelfinder_enabled:
         notes.append(
-            "ChannelFinder disabled — source IOC not resolved (set EPICS_MCP_CHANNELFINDER_URL)."
+            "ChannelFinder disabled, source IOC not resolved (set EPICS_MCP_CHANNELFINDER_URL)."
         )
     else:
         # An enabled-but-failing CF carries a "note" (set best-effort at the edge); a successful
@@ -218,12 +218,12 @@ def build_device_report(
         cf_note = ioc_channels.get("note")
         if isinstance(cf_note, str) and cf_note:
             notes.append(cf_note)
-        # F16 (S11): query_channels computes an honest `capped` — discarding it here meant a
+        # F16 (S11): query_channels computes an honest `capped`, discarding it here meant a
         # >max_results device silently joined against a TRUNCATED registry, and a channel whose
         # entry fell past the cap showed source_ioc=None indistinguishably from "no CF entry".
         if ioc_channels.get("capped"):
             notes.append(
-                "ChannelFinder result capped — the source-IOC join may be incomplete: a channel "
+                "ChannelFinder result capped, the source-IOC join may be incomplete: a channel "
                 "without source_ioc may simply have fallen past the cap, not be unregistered."
             )
 
@@ -241,7 +241,7 @@ def build_device_report(
 
 
 def _format_channel_value(value: object) -> str:
-    """Render a live value compactly — a waveform/array is summarised, not dumped (S7-1).
+    """Render a live value compactly, a waveform/array is summarised, not dumped (S7-1).
 
     A p4p waveform value arrives here as a (potentially multi-thousand-element) list; rendering it
     raw would produce an unreadable line. Summarise an array as ``[N values: a, b, …]`` and cap a
@@ -264,8 +264,8 @@ def render_markdown(report: DeviceLookupReport) -> str:
     lines.append(f"- **Operator screens showing it:** {len(report.screens)}")
     for screen in report.screens:
         roles = "/".join(report_roles(screen.roles))
-        lines.append(f"  - `{screen.display_path}` — {screen.count} channel(s) [{roles}]")
-    # Use live_read (channels ATTEMPTED), not len(channels) (channels that returned) — so this
+        lines.append(f"  - `{screen.display_path}`, {screen.count} channel(s) [{roles}]")
+    # Use live_read (channels ATTEMPTED), not len(channels) (channels that returned), so this
     # header agrees with the capped note, which S7-5 anchored to live_read. They diverge only on a
     # degraded live read (an empty envelope); the per-channel rows below still list what returned.
     lines.append(
@@ -277,8 +277,8 @@ def render_markdown(report: DeviceLookupReport) -> str:
             status = f"connected (value: {_format_channel_value(channel.value)}{alarm})"
         else:
             status = f"disconnected ({channel.error or 'no value'})"
-        ioc = f" — IOC `{channel.source_ioc}`" if channel.source_ioc else ""
-        lines.append(f"  - `{channel.channel}` — {status}{ioc}")
+        ioc = f", IOC `{channel.source_ioc}`" if channel.source_ioc else ""
+        lines.append(f"  - `{channel.channel}`, {status}{ioc}")
     if report.notes:
         lines.append("")
         lines.append("## Notes")
@@ -287,5 +287,5 @@ def render_markdown(report: DeviceLookupReport) -> str:
 
 
 def report_roles(roles: tuple[PvRole, ...]) -> tuple[str, ...]:
-    """Stable role labels for the Markdown (empty roles render as ``read``-implied ``—``)."""
-    return roles if roles else ("—",)
+    """Stable role labels for the Markdown (empty roles render as ``read``-implied ``, ``)."""
+    return roles if roles else (", ",)

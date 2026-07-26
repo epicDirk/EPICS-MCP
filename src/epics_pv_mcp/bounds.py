@@ -1,6 +1,6 @@
 """Value-bounds checking for PV writes (O2): before a sanctioned write, verify the written value is
 within the record's OWN drive limits (control_t DRVL/DRVH), and refuse an out-of-range value BEFORE
-the put — the second line of defence after the name/rate gate, which never checks the value.
+the put, the second line of defence after the name/rate gate, which never checks the value.
 
 Pure, deterministic, I/O-free. :func:`check_value_in_bounds` takes the value that is about to be
 written (the raw string the write tool received) and the dict the write's pre-read ``pv_get``
@@ -12,19 +12,19 @@ Design notes (the "why"):
 
 * **Fail-OPEN when the record declares no drive limits.** A record without a control block, or
   whose ``DRVL == DRVH`` pair was dropped upstream (``epics_client._drop_degenerate_limits``), or
-  a non-numeric written value, is *not bounds-checkable* — the write PROCEEDS (``in_bounds=None``).
+  a non-numeric written value, is *not bounds-checkable*, the write PROCEEDS (``in_bounds=None``).
   You cannot bound what the record does not declare; refusing would break every limitless record
   and the sanctioned enum write (measured: the reset command lane carries no control block). It is
   the one deliberate fail-open; it carries an honest note so the pass is visible in the result.
 * **Live ``control_t`` is the source of truth** (decision E5), NOT a static limits DB: the
   record's own drive limits cannot drift from the record. They ride the write's existing pre-read
   (``control.limit_low`` / ``control.limit_high``), so O2 needs no extra ``pv_get``.
-* **Scope = min/max only.** ``control_t`` carries DRVL/DRVH (min/max) and minStep (resolution) —
+* **Scope = min/max only.** ``control_t`` carries DRVL/DRVH (min/max) and minStep (resolution):
   no ``max_step`` jump limit and no ``writable`` flag (those are not record fields). So O2 bounds
   a value against ``[DRVL, DRVH]``; a step/jump policy would be a separate, deliberate extension.
 * **The written value arrives as a string** (``set_pv_value(value: str)``). A numeric compare
   coerces it to float; a string that will not coerce is *not bounds-checkable* (fail-open). A
-  coercible but non-finite value (``nan``/``inf``) against a bounded record is refused — it lies
+  coercible but non-finite value (``nan``/``inf``) against a bounded record is refused, it lies
   outside any finite range (fail-closed on garbage).
 """
 
@@ -51,7 +51,7 @@ class BoundsVerdict(BaseModel):
     #: The record's drive limits actually applied; None when not bounds-checkable.
     limit_low: float | None = None
     limit_high: float | None = None
-    #: Human/agent-facing reason — why a value was refused, or why it was not bounds-checkable.
+    #: Human/agent-facing reason, why a value was refused, or why it was not bounds-checkable.
     note: str | None = None
 
 
@@ -74,7 +74,7 @@ def check_value_in_bounds(written: str, readback: Mapping[str, object]) -> Bound
     Args:
         written: the raw string the write tool received (``set_pv_value(value: str)``).
         readback: what the write's pre-read ``pv_get`` returned
-            (``services.epics_client._format_value`` shape — an optional ``control`` block with
+            (``services.epics_client._format_value`` shape, an optional ``control`` block with
             ``limit_low`` / ``limit_high`` when the record declares drive limits).
 
     Returns a :class:`BoundsVerdict`; the caller raises + audits only on ``in_bounds is False``.

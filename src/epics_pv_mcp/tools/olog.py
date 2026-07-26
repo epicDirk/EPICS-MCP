@@ -164,7 +164,7 @@ async def _reply_to_log(
     """Reply to an existing Olog entry (threads via the Log Entry Group). MUTATING, gated, redacted.
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_create` with
-    ``in_reply_to=log_id`` — the same client/server code path as a create (a reply is its own entry,
+    ``in_reply_to=log_id``: the same client/server code path as a create (a reply is its own entry,
     so it carries its OWN attachments). A *log_id* that does not identify an existing entry → HTTP
     400.
     """
@@ -213,7 +213,7 @@ async def _update_log_entry(
 
     Thin MCP adapter over :func:`epics_pv_mcp.services.checkers.query_olog_update`. An argument left
     at ``None`` leaves that field UNCHANGED. *logbooks* and *tags* are comma-separated names and
-    REPLACE the entry's current list (they are not merged) — passing an empty *tags* clears the
+    REPLACE the entry's current list (they are not merged), passing an empty *tags* clears the
     tags, while an empty *logbooks* is refused (an entry must stay in at least one logbook).
     """
     return await query_olog_update(

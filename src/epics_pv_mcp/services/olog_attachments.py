@@ -1,18 +1,18 @@
-"""Attachment prep for the Olog upload/download surface (OA1) — pure, IO-bounded helpers.
+"""Attachment prep for the Olog upload/download surface (OA1), pure, IO-bounded helpers.
 
 Kept out of the transport client (:mod:`epics_pv_mcp.services.olog_client`) and the service
 orchestrator (:mod:`epics_pv_mcp.services.checkers`) so the byte handling is unit-testable in
 isolation, in three single-responsibility steps:
 
-* :func:`plan_attachments` — resolve + SIZE the upload (``stat`` only, NO file read): the write gate
+* :func:`plan_attachments`, resolve + SIZE the upload (``stat`` only, NO file read): the write gate
   refuses an over-limit request before any bytes are materialised (anti-DoS). Mints the client-side
   UUIDs and the id-prefixed unique filenames, and builds the inline-image markup.
-* :func:`read_uploads` — materialise the planned specs into payloads, RE-CHECKING the size budget
+* :func:`read_uploads`, materialise the planned specs into payloads, RE-CHECKING the size budget
   while reading (a file that grew between stat and read is refused; at most one byte over budget is
   ever read).
-* :func:`write_download` — write downloaded bytes to a NEW, boundary-checked workspace file.
+* :func:`write_download`, write downloaded bytes to a NEW, boundary-checked workspace file.
 
-UUIDs are INJECTED (a factory) so the logic stays deterministic — a ``take_screenshot`` → attachment
+UUIDs are INJECTED (a factory) so the logic stays deterministic, a ``take_screenshot`` → attachment
 workflow must be reproducible in a test (the project's determinism rule: no ``uuid`` in the logic).
 """
 
@@ -53,10 +53,10 @@ def plan_attachments(
     embed_image_base64: str | None,
     id_factory: Callable[[], str],
 ) -> AttachmentPlan:
-    """Resolve + SIZE attachments WITHOUT reading file bytes — the anti-DoS half of an upload.
+    """Resolve + SIZE attachments WITHOUT reading file bytes, the anti-DoS half of an upload.
 
     Each *attachment_paths* entry is canonicalised + existence-checked through
-    :func:`~epics_pv_mcp.paths.resolve_user_path` (kind ``file`` — it must exist) and sized by
+    :func:`~epics_pv_mcp.paths.resolve_user_path` (kind ``file``, it must exist) and sized by
     ``stat`` (not read), so an over-limit file is refused by the write gate before it is loaded. The
     filename is id-prefixed ``<uuid>_<basename>`` (exactly CS-Studio's convention) so it is unique
     per submission and a by-name download can never hit the server's duplicate-filename 404.
@@ -103,14 +103,14 @@ def read_uploads(specs: list[_Spec], *, max_total_bytes: int) -> list[Attachment
     """Materialise planned specs into upload payloads, RE-CHECKING the size while reading.
 
     :func:`plan_attachments` sizes by ``stat`` and the write gate refuses an over-limit
-    TOTAL before any read — but a file can grow (or be swapped) between stat and read
+    TOTAL before any read: but a file can grow (or be swapped) between stat and read
     (QA: TOCTOU), which used to materialise AND upload past the cap. Reading is therefore
     budgeted: at most one byte over the remaining budget is ever read, and exceeding it
     refuses with ``OLOG_ATTACH_TOO_LARGE_AT_READ``. *max_total_bytes* is the same cap the gate
     enforced (``olog_attach_max_bytes``).
 
     Its OWN code, deliberately not the gate's ``OLOG_ATTACH_TOO_LARGE``, even though the two
-    refuse on the same cap. They are different events: the gate's is a **gate verdict** — it runs
+    refuse on the same cap. They are different events: the gate's is a **gate verdict**, it runs
     before admission, writes a ``DENY`` audit line and consumes no rate token; this one runs
     **after** the gate admitted the write, so the token is already spent, and it emits **no audit
     line at all** (it is not a gate verdict, and it is raised outside the gate). The write-gate
@@ -137,7 +137,7 @@ def read_uploads(specs: list[_Spec], *, max_total_bytes: int) -> list[Attachment
             raise EpicsError(
                 f"Olog write refused: attachment {spec.filename!r} exceeds the remaining "
                 f"size budget at READ time (limit {max_total_bytes} bytes total, "
-                "EPICS_MCP_OLOG_ATTACH_MAX_BYTES) — the file changed between stat and read.",
+                "EPICS_MCP_OLOG_ATTACH_MAX_BYTES), the file changed between stat and read.",
                 error_code="OLOG_ATTACH_TOO_LARGE_AT_READ",
             )
         remaining -= len(content)
@@ -161,7 +161,7 @@ def write_download(output_path: str, content: bytes, *, label: str = "output_pat
     reject).
     Opens EXCLUSIVELY (``"xb"`` = ``O_CREAT | O_EXCL``): the NEW-file contract the name and
     docstring
-    promise is enforced, not merely stated — an already-existing target raises ``FILE_EXISTS``
+    promise is enforced, not merely stated, an already-existing target raises ``FILE_EXISTS``
     (never a
     silent overwrite / data loss), and a pre-existing symlink at the target is refused rather than
     followed, so it cannot write OUTSIDE the validated parent (``resolve_new_file_path`` checks the

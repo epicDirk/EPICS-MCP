@@ -1,10 +1,10 @@
-"""Concurrency isolation for long-running background work — the K4 bulkhead.
+"""Concurrency isolation for long-running background work, the K4 bulkhead.
 
 ``pv_monitor`` blocks a worker thread for up to ``max_monitor_duration`` (60 s) while its p4p
 subscription runs. If those blocking calls shared the asyncio DEFAULT executor (``min(32, cpu+4)``
-threads — the single pool behind every ``asyncio.to_thread``), enough concurrent monitors would
-occupy all of it, and every other ``to_thread`` call — REST plane checks, PV reads/writes, the Olog
-write path — would queue behind them. Nothing crashes; the server merely *appears* hung.
+threads, the single pool behind every ``asyncio.to_thread``), enough concurrent monitors would
+occupy all of it, and every other ``to_thread`` call: REST plane checks, PV reads/writes, the Olog
+write path, would queue behind them. Nothing crashes; the server merely *appears* hung.
 
 This module owns a DEDICATED :class:`~concurrent.futures.ThreadPoolExecutor` sized by
 ``monitor_max_concurrency``, so a burst of monitors is bounded to that width and can never touch the
@@ -28,7 +28,7 @@ def get_monitor_executor() -> ThreadPoolExecutor:
 
     Sized by ``monitor_max_concurrency`` at first use; the width is read once and fixed for the
     executor's lifetime (a config change takes effect only after :func:`reset_monitor_executor`,
-    which is a test hook — the process never resizes it in normal operation). Threads are named
+    which is a test hook, the process never resizes it in normal operation). Threads are named
     ``epics-monitor_*`` so a stack dump makes the bulkhead visible. The lock mirrors
     ``get_config`` / ``get_context``: it prevents a double-initialisation race on concurrent access.
     """
@@ -50,7 +50,7 @@ def reset_monitor_executor() -> None:
     first)."""
     # wait=False so the reset never blocks on a mid-flight 60 s monitor; cancel_futures drops only
     # QUEUED work. Tests drive their futures to completion before resetting, so no monitor is
-    # orphaned in practice — a future test that asserts WHILE a monitor runs would want wait=True.
+    # orphaned in practice, a future test that asserts WHILE a monitor runs would want wait=True.
     global _monitor_executor
     with _monitor_executor_lock:
         if _monitor_executor is not None:

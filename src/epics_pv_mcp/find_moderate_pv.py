@@ -6,7 +6,7 @@ The archiver live tests need a fixture PV with a handful of samples in a FIXED a
 (the defaults mirror ``tests/test_archiver_live.py``: 3–50 samples, at least 2 strictly inside,
 not capped at ``max_points=50``). Blind enumeration cannot find one: an archive population is
 often bimodal (fast, capped PVs plus carried-only ones whose single sample predates any window),
-so a blind stride finds no middle — measured: five blind strategies over 153 candidates found
+so a blind stride finds no middle, measured: five blind strategies over 153 candidates found
 none, while the rate-report walk below verified its first five candidates in one pass.
 
 THE MEASURED WALK (appliance 2.2.x, 2026-07-17)
@@ -14,24 +14,24 @@ THE MEASURED WALK (appliance 2.2.x, 2026-07-17)
 1. ``GET <mgmt>/mgmt/bpl/getEventRateReport`` WITHOUT a ``limit`` param answers the whole
    report as ``[{pvName, eventRate}]``, sorted by rate descending, ``eventRate`` serialized
    as a string. ``limit`` is NOT a row cap: it behaves as if applied per cluster member with
-   the members' slices merged (row counts = limit × member count, measured twice — 3→48 and
+   the members' slices merged (row counts = limit × member count, measured twice, 3→48 and
    100→1600 on a 16-member cluster; the mechanism is inferred from the counts, not observed).
    Omit it and filter client-side. The no-limit report is near-complete but NOT the whole
    archived set (measured: ~1.5M report rows vs ~1.7M getAllPVs names on the same cluster;
-   the gap is unverified — plausibly paused or rate-less PVs).
+   the gap is unverified, plausibly paused or rate-less PVs).
 2. Filter to a rate band (default ``1e-7..1.6e-6`` Hz ≈ 3–50 events/year).
 3. COUNTER-VERIFY every band hit against the target window with a real history fetch: the
    report's rate is computed by the appliance over its own recent window, not over the
-   caller's target window — a band hit is a hypothesis, never a fixture.
+   caller's target window, a band hit is a hypothesis, never a fixture.
 
-Deliberately NOT a console script (build-once: ``pyproject.toml`` stays untouched) — run it as
+Deliberately NOT a console script (build-once: ``pyproject.toml`` stays untouched), run it as
 ``python -m epics_pv_mcp.find_moderate_pv``. Facility-agnostic: the appliance URLs come from
 ``EPICS_MCP_ARCHIVER_URL`` / ``EPICS_MCP_ARCHIVER_RETRIEVAL_URL``, and nothing site-specific
 lives in this file. Read-only: it only ever issues GETs.
 
-Exit code: ``0`` — at least one candidate verified (recipe printed); ``1`` — an HONEST
+Exit code: ``0``: at least one candidate verified (recipe printed); ``1``: an HONEST
 non-finding (the walk ran, nothing satisfied the precondition; per-stage numbers printed);
-``2`` — the walk could not run at all (missing URL, transport failure, unreadable report).
+``2``: the walk could not run at all (missing URL, transport failure, unreadable report).
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ class RateEntry(TypedDict):
 def parse_rate_report(payload: object) -> list[RateEntry]:
     """Strictly parse a ``getEventRateReport`` payload (S11 discipline).
 
-    Unreadable input RAISES — never a silent item drop: a search that silently skips junk rows
+    Unreadable input RAISES: never a silent item drop: a search that silently skips junk rows
     reports "no candidate found" with the same face as a healthy empty band, turning junk into
     a definitive non-finding (exactly the S11 class). Measured shape (appliance 2.2.x): a JSON
     array of ``{pvName, eventRate}`` objects with ``eventRate`` as a string; numeric rates are
@@ -106,7 +106,7 @@ def filter_band(entries: list[RateEntry], band_min: float, band_max: float) -> l
 def window_epoch_bounds(start: str, end: str) -> tuple[float, float]:
     """Turn an ISO-8601 window (``Z`` accepted) into epoch-second bounds.
 
-    A zone-less value is read as UTC — the same convention the fetch path applies when it
+    A zone-less value is read as UTC, the same convention the fetch path applies when it
     normalizes the window; letting ``timestamp()`` guess the machine's LOCAL zone would shift
     the counting window against the fetched one by the local offset, so a candidate near the
     window edge would be classified against a different window than the one fetched.
@@ -125,7 +125,7 @@ def count_inside(samples: list[Sample], lo_ts: float, hi_ts: float) -> int:
     """Samples inside ``[lo_ts, hi_ts]`` (inclusive bounds).
 
     The appliance also carries the last value from BEFORE the window start into every result,
-    whatever window is asked for — that carried sample must not count, or a dormant PV looks
+    whatever window is asked for, that carried sample must not count, or a dormant PV looks
     window-discriminating when it is not (mirrors the live test's ``_inside_window`` guard).
     """
     return sum(1 for sample in samples if lo_ts <= sample["secs"] <= hi_ts)
@@ -142,7 +142,7 @@ def classify_history(
     """``None`` when the history satisfies the fixture precondition, else the failure reason.
 
     ``status`` must be ``"ok"``: ``withheld`` means the history is UNKNOWN (not proven empty)
-    and ``empty`` cannot discriminate windows — neither may pass as a fixture.
+    and ``empty`` cannot discriminate windows, neither may pass as a fixture.
     """
     if history["status"] != "ok":
         return f"status:{history['status']}"
@@ -180,7 +180,7 @@ def walk_candidates(
 
     Returns ``(verified, fail_reasons, checked)`` with ``verified`` as
     ``(entry, samples, inside)`` triples. A ``fetch`` raising ``ArchiverResponseError``
-    counts that candidate as ``response_error`` and continues — one odd PV must not abort
+    counts that candidate as ``response_error`` and continues, one odd PV must not abort
     the walk, but it is COUNTED, never silently dropped. Any other exception (a transport
     failure above all) PROPAGATES: the caller must not read a dead transport as a
     non-finding.
@@ -286,7 +286,7 @@ def main(argv: list[str] | None = None) -> int:
         retrieval_url=os.environ.get("EPICS_MCP_ARCHIVER_RETRIEVAL_URL") or None,
     )
 
-    # A diagnostic reaching for a raw MGMT report endpoint — the same pattern the live premise
+    # A diagnostic reaching for a raw MGMT report endpoint, the same pattern the live premise
     # test uses; the strict parse right below is this module's own response boundary.
     try:
         payload = client._get(f"{client.base_url}/mgmt/bpl/getEventRateReport", {})
@@ -318,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
             max_verify=args.max_verify,
         )
     except ArchiverConnectionError as exc:
-        # A transport that died mid-walk is NOT a non-finding — exit 2, never 1.
+        # A transport that died mid-walk is NOT a non-finding, exit 2, never 1.
         sys.stderr.write(f"find_moderate_pv: transport failed mid-walk: {exc}\n")
         return 2
 
@@ -329,18 +329,18 @@ def main(argv: list[str] | None = None) -> int:
         )
     out(f"checked={checked} verified={len(verified)} fail_reasons={dict(reasons)}\n")
     if checked and not verified and reasons.get("response_error", 0) == checked:
-        # EVERY checked candidate errored: the walk measured nothing — a wrong history URL
+        # EVERY checked candidate errored: the walk measured nothing, a wrong history URL
         # (e.g. a split deployment without its RETRIEVAL root) must not wear the face of an
         # honest non-finding.
         sys.stderr.write(
-            "find_moderate_pv: every checked candidate answered unreadably — the walk "
+            "find_moderate_pv: every checked candidate answered unreadably, the walk "
             "measured nothing (check the MGMT and RETRIEVAL URLs); this is NOT a non-finding\n"
         )
         return 2
     if not verified:
         # An honest non-finding carries its numbers: what was walked, and why each stage lost.
         out(
-            "no candidate satisfied the precondition — widen --band-min/--band-max or raise "
+            "no candidate satisfied the precondition, widen --band-min/--band-max or raise "
             "--max-verify; every number above is the evidence trail\n"
         )
         return 1

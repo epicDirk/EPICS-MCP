@@ -39,7 +39,7 @@ async def _crossplane_check(
     """Join macro-aware display PVs with an e3 IOC ``st.cmd`` (+ optional .db/Naming/CF). Read-only.
 
     *displays_dir* is the project/dataset ROOT (the inventory binds macros via the operator
-    top-levels there — a narrow per-IOC subdirectory under-resolves). *context_cap* bounds the
+    top-levels there, a narrow per-IOC subdirectory under-resolves). *context_cap* bounds the
     per-display reachability contexts (higher = more complete, slower; ~60 s for a large dataset
     like fbis at the default). *windows_paths* resolves embedded ``<file>`` refs case-insensitively
     for a Windows host; default Linux (the ESS-console truth, deterministic). *module_db_root*

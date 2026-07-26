@@ -1,19 +1,19 @@
-"""EPICS client search-reach primitives — address-list parsing + loopback classification (E8).
+"""EPICS client search-reach primitives, address-list parsing + loopback classification (E8).
 
 The EPICS *client* search env decides where a PV search (and therefore a PV write) can go:
-``EPICS_PVA/CA_ADDR_LIST`` (UDP search targets), ``EPICS_PVA/CA_NAME_SERVERS`` (TCP unicast — not
+``EPICS_PVA/CA_ADDR_LIST`` (UDP search targets), ``EPICS_PVA/CA_NAME_SERVERS`` (TCP unicast, not
 subnet-bound) and ``EPICS_PVA/CA_AUTO_ADDR_LIST`` (subnet broadcast, which EPICS defaults to **ON**
-when unset). This module is the ONE parser for those values — the write-reach startup assert in
+when unset). This module is the ONE parser for those values, the write-reach startup assert in
 :mod:`epics_pv_mcp.safety` and any external lane validator import from here (build-once), so the
 two can never drift apart.
 
 Deliberately fail-closed and resolution-free: a hostname (``some-gateway``,
 ``host.docker.internal``, any FQDN) is **never** classified loopback, even if DNS would resolve it
-to 127.0.0.1 — resolving would make the safety verdict depend on the resolver's answer at assert
+to 127.0.0.1, resolving would make the safety verdict depend on the resolver's answer at assert
 time, not on the config.
 
 Note on server-side vars: ``EPICS_CAS_*`` / ``EPICS_PVAS_*`` (incl. ``*_BEACON_ADDR_LIST``) are
-IOC-**server**-side knobs — they do not exist in an EPICS *client* process like this server, so the
+IOC-**server**-side knobs, they do not exist in an EPICS *client* process like this server, so the
 reach check deliberately does not look for them.
 """
 
@@ -23,7 +23,7 @@ import ipaddress
 from collections.abc import Mapping
 
 #: The six EPICS client search-reach env vars, per provider. The list vars are enumerated
-#: individually (never or-folded — a fallback chain would mask all but the first); the
+#: individually (never or-folded, a fallback chain would mask all but the first); the
 #: ``*_AUTO_ADDR_LIST`` pair is special because its UNSET state means ON (broadcast).
 CLIENT_REACH_PROVIDERS = ("pva", "ca")
 
@@ -33,13 +33,13 @@ def auto_addr_search_disabled(provider: str, value: str) -> bool:
 
     Deliberately parser-faithful, not generous: honouring a spelling the real parser
     rejects (e.g. ``false``, or a padded ``"0 "``) would claim isolation while the client
-    keeps broadcasting — the exact false claim BG14 removed. The two parsers differ:
+    keeps broadcasting, the exact false claim BG14 removed. The two parsers differ:
 
     * pvxs ``parse_bool`` (repos/pvxs/src/config.cpp) accepts ONLY case-insensitive
-      ``NO`` or exactly ``0`` — untrimmed (PickOne hands over the raw getenv value);
+      ``NO`` or exactly ``0``, untrimmed (PickOne hands over the raw getenv value);
       anything else is a parse error that keeps the DEFAULT, and the default is ON.
     * libca (epics-base modules/ca/src/client/iocinf.cpp) disables only when the value
-      CONTAINS the substring ``no`` or ``NO`` (case-sensitive strstr) — ``false``, ``0``
+      CONTAINS the substring ``no`` or ``NO`` (case-sensitive strstr), ``false``, ``0``
       and even ``No`` keep broadcasting.
     """
     if provider == "ca":
@@ -50,7 +50,7 @@ def auto_addr_search_disabled(provider: str, value: str) -> bool:
 def split_host(token: str) -> str:
     """Extract the host part of one EPICS address-list token (``host[:port]``).
 
-    Handles bracketed IPv6 (``[::1]:5075`` → ``::1``) and bare IPv6 (``::1`` — more than one
+    Handles bracketed IPv6 (``[::1]:5075`` → ``::1``) and bare IPv6 (``::1``, more than one
     colon, no port split). Anything malformed (unclosed bracket, non-numeric port) is returned
     whole, so the loopback check downstream fails closed on it instead of misreading it.
     """
@@ -58,12 +58,12 @@ def split_host(token: str) -> str:
         end = token.find("]")
         if end != -1:
             return token[1:end]
-        return token  # unclosed bracket — fail closed downstream
+        return token  # unclosed bracket, fail closed downstream
     if token.count(":") == 1:
         host, _, port = token.partition(":")
         if port.isdigit():
             return host
-        return token  # not a port suffix — fail closed downstream
+        return token  # not a port suffix, fail closed downstream
     return token  # bare host, or bare IPv6 (multiple colons)
 
 
@@ -73,7 +73,7 @@ def parse_address_list(value: str) -> list[str]:
 
 
 def is_loopback_host(host: str) -> bool:
-    """Whether *host* is provably loopback — ``localhost`` or a loopback IP literal.
+    """Whether *host* is provably loopback, ``localhost`` or a loopback IP literal.
 
     Any name that is not an IP literal (FQDN, ``host.docker.internal``, a bare hostname)
     is **False**: it is not resolved (fail-closed, see module docstring).
@@ -92,7 +92,7 @@ def write_reach_violations(environ: Mapping[str, str]) -> list[str]:
     Empty list == the client search reach is provably loopback-only: for BOTH providers the
     auto-addr subnet broadcast is parser-faithfully disabled AND every ``ADDR_LIST`` /
     ``NAME_SERVERS`` token is a loopback host. An empty/unset list var is fine (no search
-    target), but an unset ``*_AUTO_ADDR_LIST`` is a violation — unset means broadcast ON.
+    target), but an unset ``*_AUTO_ADDR_LIST`` is a violation, unset means broadcast ON.
 
     Both providers are checked regardless of the configured ``EPICS_MCP_PROVIDER``: the vars
     are process-global standard EPICS env, and a mis-set idle provider costs nothing to forbid.

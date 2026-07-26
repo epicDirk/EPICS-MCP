@@ -24,7 +24,7 @@ def _run_validate(file_path: str, displays_dir: str | None) -> tuple[list[str], 
 
     *displays_dir* is the dataset ROOT (the inventory binds display macros via the
     operator top-levels found there). Without it the file's own directory is used,
-    which under-resolves a fragment that needs ancestor macros — honest, since a
+    which under-resolves a fragment that needs ancestor macros, honest, since a
     connectivity check on still-templated macros is meaningless anyway.
 
     Returns ``(channels, capped)``. *capped* is True when the file's macro expansion
@@ -88,7 +88,7 @@ async def _validate_pvs(
     ROOT for full macro resolution; without it the file's own directory is used and
     fragments under-resolve. A ``notes`` entry flags when the PV list is a lower bound
     (the macro expansion hit the context cap). NOTE: a full inventory walk is ~60 s for
-    a large dataset — do not call this per-file in a tight loop. The connectivity reads go
+    a large dataset, do not call this per-file in a tight loop. The connectivity reads go
     through ``pv_get_batch`` (native batch + concurrent fallback) in ``max_batch_size`` chunks,
     so a disconnected channel no longer serialises the whole check (M6).
     """
@@ -123,7 +123,7 @@ async def _validate_pvs(
 
     # M6: reuse the shared batch primitive (native batch + M5's concurrent fallback) in
     # max_batch_size chunks instead of a serial per-PV read, and drop the duplicated
-    # connected/disconnected classification — pv_get_batch already sorts good vs. disconnected
+    # connected/disconnected classification, pv_get_batch already sorts good vs. disconnected
     # (results/errors), so a large display no longer takes n×timeout on a disconnected channel.
     cfg = get_config()
     results: list[dict[str, object]] = []
@@ -136,7 +136,7 @@ async def _validate_pvs(
         batch_errors = batch["errors"] if isinstance(batch["errors"], list) else []
         # Emit in INPUT order (not connected-block-then-disconnected-block): iterate the chunk and
         # look each PV up in the batch's results/errors. pv_get_batch keys both by pv_name and a PV
-        # lands in exactly one, so the counts are unchanged — only the ``pvs`` ordering is
+        # lands in exactly one, so the counts are unchanged, only the ``pvs`` ordering is
         # stabilised to match the caller's list.
         by_result = {r["pv_name"]: r for r in batch_results}
         by_error = {e["pv_name"] for e in batch_errors}

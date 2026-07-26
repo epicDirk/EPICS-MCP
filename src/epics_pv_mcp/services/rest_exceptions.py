@@ -3,10 +3,10 @@
 Each REST plane (Naming / ChannelFinder / Archiver / Alarm) keeps its own named trio for clear,
 service-specific error messages, but the three roots here let a caller catch across planes:
 
-* :class:`RestClientError`     — any REST client failure (base of all four service bases)
-* :class:`RestConnectionError` — a connection could not be established/completed (base of the four
+* :class:`RestClientError`, any REST client failure (base of all four service bases)
+* :class:`RestConnectionError`, a connection could not be established/completed (base of the four
   ``*ConnectionError``)
-* :class:`RestResponseError`   — an unexpected response: HTTP error or bad payload (base of the four
+* :class:`RestResponseError`, an unexpected response: HTTP error or bad payload (base of the four
   ``*ResponseError``)
 
 The per-service ``*ConnectionError`` / ``*ResponseError`` derive from BOTH their service base and

@@ -29,14 +29,14 @@ from epics_pv_mcp.services.checkers import (
 )
 
 #: Used by _get_pv_history below; the sibling _is_archived note lives with query_archived in
-#: services/checkers.py (same string, self-contained per layer — no services ↔ tools coupling).
+#: services/checkers.py (same string, self-contained per layer, no services ↔ tools coupling).
 _DISABLED_NOTE = (
     "Archiver Appliance is disabled. Set EPICS_MCP_ARCHIVER_URL to the appliance root "
     "(e.g. http://archiver:17665)."
 )
 
 
-# get_pv_history's tool result shape (S29 — typed MCP outputSchema; the pattern the Olog cluster set
+# get_pv_history's tool result shape (S29, typed MCP outputSchema; the pattern the Olog cluster set
 # in services/checkers_olog.py). ``total=False`` because the disabled path (below) carries only a
 # subset. Every field ABSENT on some return path is typed ``X | None``; the measured rationale lives
 # in ``services/checkers_olog.py``'s "Tool result shapes" header (short version: an absent key is
@@ -45,7 +45,7 @@ _DISABLED_NOTE = (
 # Only ``enabled``/``pv``/``samples``/``total`` are on
 # EVERY path (disabled + enabled) and stay non-nullable; the disabled path omits
 # ``from``/``to``/``capped``/``meta``/``status``/``withheld_reason``, and a success path with no
-# note omits ``note`` — so all seven are nullable. ``samples`` and ``meta`` keep opaque ``dict``
+# note omits ``note``, so all seven are nullable. ``samples`` and ``meta`` keep opaque ``dict``
 # shapes (the sample projection / getData.json meta block). Functional syntax is REQUIRED: ``from``
 # is a Python keyword and cannot be a class-syntax field name. mypy --strict checks every
 # ``return {...}`` literal below against this shape.
@@ -89,7 +89,7 @@ async def _get_pv_history(
         return {"enabled": False, "pv": pv, "samples": [], "total": 0, "note": _DISABLED_NOTE}
 
     def _run() -> ArchiverHistoryResult:
-        # get_pv_history hits /retrieval/data — in a split deployment that lives on a separate
+        # get_pv_history hits /retrieval/data, in a split deployment that lives on a separate
         # Tomcat (:17668) from mgmt (:17665). Pass the retrieval URL; it falls back to
         # archiver_url inside ArchiverClient when the retrieval URL env is unset (single-JVM).
         client = ArchiverClient(
@@ -108,7 +108,7 @@ async def _get_pv_history(
             "total": len(history["samples"]),
             "capped": history["capped"],
             "meta": history["meta"],  # DS-4A: getData.json meta block (EGU units, PREC precision)
-            # DS-4B: status disambiguates an empty result — "empty" (real empty window) vs.
+            # DS-4B: status disambiguates an empty result, "empty" (real empty window) vs.
             # "withheld" (unreadable response), so a bare [] is never mistaken for "no data".
             "status": history["status"],
         }
@@ -118,7 +118,7 @@ async def _get_pv_history(
             result["withheld_reason"] = history["withheld_reason"]
         return result
 
-    # Three outcomes, three classes — see _archiver_error_code. Collapsing them into
+    # Three outcomes, three classes, see _archiver_error_code. Collapsing them into
     # EpicsConnectionError sent readers after a network problem that was not happening: the
     # Archiver 500s on a time it cannot read, and answering IS not being unreachable.
     try:
@@ -131,12 +131,12 @@ async def _get_pv_history(
         raise EpicsError(f"Archiver: {exc}", error_code=_archiver_error_code(exc)) from exc
 
 
-# list_archived_pvs' tool result shape (S29 — typed MCP outputSchema). ``total=False``: the disabled
+# list_archived_pvs' tool result shape (S29, typed MCP outputSchema). ``total=False``: the disabled
 # path omits ``capped`` and the enabled path omits ``note``. ``enabled``/``pvs``/``total`` are on
 # EVERY path → non-nullable; the sometimes-absent ``capped``/``note`` are ``X | None`` (the S29
 # convention that a sometimes-absent field permits null; its conformance test enforces it).
 # Measured under standalone FastMCP: an ABSENT total=False key is DROPPED from the wire, not emitted
-# as null, so nullability here is schema-honesty — the runtime null trap only bites a field set
+# as null, so nullability here is schema-honesty, the runtime null trap only bites a field set
 # EXPLICITLY to None (none here; cf. get_archive_info.found). ``pvs`` is a list of PV NAMES, never
 # free values. class-syntax: all field names are valid identifiers.
 class ArchivedPvsResult(TypedDict, total=False):
@@ -155,13 +155,13 @@ async def _list_archived_pvs(
 ) -> ArchivedPvsResult:
     """List the PV names the Archiver Appliance archives (MGMT getAllPVs / getPVsForThisAppliance).
 
-    Default-disabled — with ``EPICS_MCP_ARCHIVER_URL`` unset returns ``enabled: false`` + an empty
+    Default-disabled, with ``EPICS_MCP_ARCHIVER_URL`` unset returns ``enabled: false`` + an empty
     list and makes NO network call. Uses getAllPVs (whole appliance) or getPVsForThisAppliance (this
-    member, with ``this_appliance=True``) — NOT getMatchingPVs (404 on split/proxied).
+    member, with ``this_appliance=True``), NOT getMatchingPVs (404 on split/proxied).
 
     ``pattern`` (an optional name glob, e.g. ``DEV-TEST01:*``) maps to getAllPVs' ``pv`` param and
     works ONLY there. getPVsForThisAppliance has NO name filter at all, so ``pattern`` with
-    ``this_appliance=True`` is REFUSED rather than ignored — see the guard below. ``capped`` is
+    ``this_appliance=True`` is REFUSED rather than ignored, see the guard below. ``capped`` is
     honest. PV names carry no person data, so no redaction is needed.
     """
     # Refuse BEFORE the config gate: a bad argument is bad regardless of deployment, so a caller
@@ -169,14 +169,14 @@ async def _list_archived_pvs(
     # either way). Mirrors query_olog_create's "gate FIRST, before any client construction or I/O".
     if pattern and this_appliance:
         # Measured against a live appliance: getPVsForThisAppliance ignores pv, regex, pattern AND
-        # name — every reply is byte-identical to the unfiltered one. Forwarding the glob would look
+        # name, every reply is byte-identical to the unfiltered one. Forwarding the glob would look
         # like filtering and silently return a full, plausible list of the WRONG PVs (with
         # capped=true, which reads as a legitimate truncation). A loud refusal beats that.
         # `pattern and` (truthy, not `is not None`) mirrors the client's own `if pattern:` so an
         # empty string stays "no pattern" on both paths.
         raise EpicsError(
             "list_archived_pvs: pattern is not supported together with this_appliance=True. The "
-            "MGMT getPVsForThisAppliance endpoint has no name filter — it IGNORES a pv param "
+            "MGMT getPVsForThisAppliance endpoint has no name filter, it IGNORES a pv param "
             "(measured: the reply is byte-identical with and without it), so it cannot answer a "
             "name-filtered question for one cluster member. Drop this_appliance to filter by name "
             "across the appliance (getAllPVs does honour pv), or drop pattern to enumerate this "
@@ -205,18 +205,18 @@ async def _list_archived_pvs(
     except ArchiverConnectionError as exc:
         raise EpicsConnectionError(f"Archiver: {exc}") from exc
     except ArchiverError as exc:
-        # The server ANSWERED (a served 4xx/5xx) — that is not an outage.
+        # The server ANSWERED (a served 4xx/5xx): that is not an outage.
         raise EpicsError(f"Archiver: {exc}", error_code=_archiver_error_code(exc)) from exc
 
 
-# get_archive_info's tool result shape (S29 — typed MCP outputSchema). ``total=False``: only
+# get_archive_info's tool result shape (S29, typed MCP outputSchema). ``total=False``: only
 # ``enabled``/``pv`` are on EVERY path (disabled, enabled-found, enabled-not-found) → the only two
 # non-nullable fields. ``found`` is on every path but a TRI-STATE: True (record), False (HTTP 404,
 # definitively not archived), None (disabled, plane NOT checked) → ``bool | None``. The disabled
 # path sets it EXPLICITLY to None (emitted as null), so a non-nullable ``found: bool`` would make
 # the advertised schema misrepresent the emitted content; the conformance test is the guard.
 # ``note`` is disabled-only. The 26 getPVTypeInfo projection fields are enabled+found-only and
-# COPIED UNCONVERTED (client dict[str, object]; wire types are mixed — numeric limits as strings,
+# COPIED UNCONVERTED (client dict[str, object]; wire types are mixed, numeric limits as strings,
 # ``paused`` a bool, ``archive_fields``/``data_stores`` lists) → each ``object | None`` is the
 # faithful type. All names are valid identifiers → class-syntax.
 class ArchiveInfoResult(TypedDict, total=False):
@@ -256,10 +256,10 @@ async def _get_archive_info(pv: str, timeout: float = 5.0) -> ArchiveInfoResult:
     """Report the archive configuration of *pv* (Archiver MGMT ``getPVTypeInfo``).
 
     Tool-only (not shared with diagnose), like :func:`_get_pv_history`: builds the client
-    directly against the MGMT root. Default-disabled — with ``EPICS_MCP_ARCHIVER_URL`` unset it
+    directly against the MGMT root. Default-disabled, with ``EPICS_MCP_ARCHIVER_URL`` unset it
     returns ``enabled: false`` + ``found: None`` and makes NO network call. ``found`` is ``None``
     when the plane was NOT checked (disabled), ``False`` when a reachable appliance has no
-    type-info record for *pv* (unknown / never-archived) and ``True`` otherwise — a disabled plane
+    type-info record for *pv* (unknown / never-archived) and ``True`` otherwise, a disabled plane
     must never masquerade as a definitive "not archived", mirroring the sibling ``archived: None``
     / ``configured: None`` / ``registered: None`` gates. The MGMT record carries no person data
     (the client projects it onto its ``_TYPE_INFO_FIELDS`` allowlist).
@@ -274,7 +274,7 @@ async def _get_archive_info(pv: str, timeout: float = 5.0) -> ArchiveInfoResult:
         )
         # Explicit literal-key + presence-guard build: mypy --strict rejects ``**dict[str, object]``
         # into a TypedDict. ``found`` is always present (True, or False on a 404); the 26 type-info
-        # fields appear only on the found path (getPVTypeInfo omits nulls) — each guarded. The
+        # fields appear only on the found path (getPVTypeInfo omits nulls), each guarded. The
         # ``bool()`` on ``found`` is an identity (client returns a real bool) that narrows object.
         info = client.get_pv_type_info(pv)
         result: ArchiveInfoResult = {"enabled": True, "pv": pv}
@@ -339,15 +339,15 @@ async def _get_archive_info(pv: str, timeout: float = 5.0) -> ArchiveInfoResult:
     except ArchiverConnectionError as exc:
         raise EpicsConnectionError(f"Archiver: {exc}") from exc
     except ArchiverError as exc:
-        # The server ANSWERED (a served 4xx/5xx) — that is not an outage.
+        # The server ANSWERED (a served 4xx/5xx): that is not an outage.
         raise EpicsError(f"Archiver: {exc}", error_code=_archiver_error_code(exc)) from exc
 
 
-# get_appliance_info's tool result shape (S29 — typed MCP outputSchema). ``total=False``: the
+# get_appliance_info's tool result shape (S29, typed MCP outputSchema). ``total=False``: the
 # disabled path carries only {enabled, note}. ``enabled`` is on every path → non-nullable; ``note``
 # (disabled-only) and the 8 projected topology fields (enabled-only; ``version`` is also omit-when-
 # null at the client) are ``X | None``. The 8 fields are COPIED UNCONVERTED from getApplianceInfo
-# (client dict[str, object]; the wire types are the vendor bean's — a str URL, an int
+# (client dict[str, object]; the wire types are the vendor bean's, a str URL, an int
 # clusterInetPort) → each ``object | None`` is the faithful type (a concrete str | None would
 # misrepresent a non-str value). No pv/found key (appliance-scoped). class-syntax: valid names.
 class ApplianceInfoResult(TypedDict, total=False):
@@ -364,12 +364,12 @@ class ApplianceInfoResult(TypedDict, total=False):
 
 
 async def _get_appliance_info(timeout: float = 5.0) -> ApplianceInfoResult:
-    """Report the appliance's own topology (Archiver MGMT ``getApplianceInfo``) — Fundort 3.
+    """Report the appliance's own topology (Archiver MGMT ``getApplianceInfo``).
 
     Tool-only (not shared with diagnose), like :func:`_get_archive_info`: builds the client against
-    the MGMT root. Default-disabled — with ``EPICS_MCP_ARCHIVER_URL`` unset it returns
+    the MGMT root. Default-disabled, with ``EPICS_MCP_ARCHIVER_URL`` unset it returns
     ``{enabled: false, note}`` and makes NO network call. The result shape has no ``pv``/``found``
-    key: getApplianceInfo is appliance-scoped, with no PV present/absent duality — the appliance
+    key: getApplianceInfo is appliance-scoped, with no PV present/absent duality, the appliance
     answers (``enabled: true`` + the projected body) or the call errors. A served non-2xx
     (including a 404 = wrong endpoint) propagates as an ArchiverError, never a swallowed answer.
     """
@@ -408,5 +408,5 @@ async def _get_appliance_info(timeout: float = 5.0) -> ApplianceInfoResult:
     except ArchiverConnectionError as exc:
         raise EpicsConnectionError(f"Archiver: {exc}") from exc
     except ArchiverError as exc:
-        # The server ANSWERED (a served 4xx/5xx) — that is not an outage.
+        # The server ANSWERED (a served 4xx/5xx): that is not an outage.
         raise EpicsError(f"Archiver: {exc}", error_code=_archiver_error_code(exc)) from exc

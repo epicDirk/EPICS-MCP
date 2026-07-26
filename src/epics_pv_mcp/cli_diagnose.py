@@ -1,10 +1,10 @@
 """CLI for the live connection diagnosis (``epics-diagnose``).
 
 Diagnoses WHY a PV is (dis)connected and prints a human-readable verdict. Read-only. Exit code is
-**0 even when the PV is disconnected** — a disconnect is a normal diagnostic result, not a crash;
+**0 even when the PV is disconnected**: a disconnect is a normal diagnostic result, not a crash;
 only a usage error returns non-zero. The live probe decides connected/disconnected; ChannelFinder
 (default on, needs ``EPICS_MCP_CHANNELFINDER_URL``), Naming (``--naming``, needs
-``EPICS_MCP_NAMING_URL`` — off by default = no ESS egress), Archiver (``--archiver``) and Alarm
+``EPICS_MCP_NAMING_URL``, off by default = no ESS egress), Archiver (``--archiver``) and Alarm
 (``--alarm``) only explain it.
 
 Usage::

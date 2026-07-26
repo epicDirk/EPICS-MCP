@@ -1124,7 +1124,7 @@ def test_cli_render_glyphs_and_privacy_block(
     assert "i live" in out  # info live-plane glyph
     assert "owner allowlist:" in out
     assert "property allowlist:" in out
-    assert "(empty — all owners redacted)" in out  # the empty-owner fallback line
+    assert "(empty, all owners redacted)" in out  # the empty-owner fallback line
     assert "Olog free-text:     withheld" in out  # the VALUE, not just the label (see below)
 
 

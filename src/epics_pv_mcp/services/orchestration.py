@@ -1,19 +1,19 @@
 """One join-orchestration function per display-aware vertical (M2/C2-iii).
 
 Each cross-plane vertical (crossplane provenance, coverage audit) gets exactly ONE orchestration
-function here — the same shape the diagnose vertical already had (``services.diagnose.diagnose``).
+function here, the same shape the diagnose vertical already had (``services.diagnose.diagnose``).
 The MCP tool wrapper AND the CLI both call it, so the up-to-10-argument lockstep that used to be
 copied line-for-line between ``cli_crossplane.main`` and ``tools/crossplane._run_check`` (and the
-coverage pair) is gone — drift can no longer make the CLI serve a different report than the tool.
+coverage pair) is gone, drift can no longer make the CLI serve a different report than the tool.
 
 **Why here and not in the pure cores** (:mod:`~.crossplane`, :mod:`~.coverage`): the orchestration
 pulls the macro-aware PV inventory (``analyze_display_pvs`` / ``analyze_display_index`` →
 ``opi_navigation`` via :mod:`~.inventory_adapter`), so it is part of the optional ``[displays]``
 surface. The pure cores stay ``opi_navigation``-free (offline-testable) and receive
 already-translated rows. This module is imported ONLY by the two display tools and the two CLIs,
-never by the core server — a standalone install without ``opi_navigation`` never reaches it.
+never by the core server, a standalone install without ``opi_navigation`` never reaches it.
 
-**Path validation lives here** (``resolve_user_path`` — canonicalize + existence + opt-in
+**Path validation lives here** (``resolve_user_path``, canonicalize + existence + opt-in
 ``allowed_roots`` boundary), so the CLI gets the SAME boundary the MCP tool already had. That closes
 the CLI path-validation divergence (S4-4): the CLI no longer does a bare ``Path.is_dir()`` that
 ignored the boundary and skipped canonicalization.
@@ -42,7 +42,7 @@ from epics_pv_mcp.services.inventory_adapter import (
 
 @dataclass(frozen=True)
 class CrossPlaneRequest:
-    """Inputs to :func:`run_crossplane` — bundles the knobs the tool and CLI passed in lockstep.
+    """Inputs to :func:`run_crossplane`, bundles the knobs the tool and CLI passed in lockstep.
 
     ``displays_dir`` is the project/dataset ROOT (macros bind via the operator top-levels there).
     ``module_db_root`` empty = offline (no ``broken`` verdict). Frozen for determinism.
@@ -87,7 +87,7 @@ def run_crossplane(request: CrossPlaneRequest) -> CrossPlaneReport:
     st_info = parse_st_cmd(st_cmd_path.read_text(encoding="utf-8"))
     naming = build_naming_client(request.query_naming)
     # Opt-in IOC .db enumeration: only when a module/db root is given (offline default unchanged).
-    # ``complete`` gates the broken verdict — a partial/templated set withholds it (no false alarm).
+    # ``complete`` gates the broken verdict, a partial/templated set withholds it (no false alarm).
     ioc_db: tuple[set[str], set[str]] | None = None
     ioc_db_complete = False
     if module_db_root is not None:
@@ -110,10 +110,10 @@ def run_crossplane(request: CrossPlaneRequest) -> CrossPlaneReport:
 
 @dataclass(frozen=True)
 class CoverageRequest:
-    """Inputs to :func:`build_coverage_report` — the knobs the tool and CLI passed in lockstep.
+    """Inputs to :func:`build_coverage_report`, the knobs the tool and CLI passed in lockstep.
 
     ``displays_dir`` is the project/dataset ROOT. ``scope`` narrows both the ChannelFinder query and
-    the display set; ``""`` audits the whole site (CF cap risk — small-scope only). Frozen.
+    the display set; ``""`` audits the whole site (CF cap risk, small-scope only). Frozen.
     """
 
     displays_dir: str
