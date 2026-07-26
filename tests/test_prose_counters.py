@@ -423,38 +423,82 @@ def _typed_dict_fields() -> dict[str, dict[str, str]]:
 
 
 @cache
-def _tool_result_type() -> dict[str, str]:
-    """Registered tool name to the type annotation its function declares as its return.
+def _registered_tool_functions() -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Registered tool name to the function that implements it, from the two registrar modules.
 
     Both registration forms, for the same reason :func:`_registered_tools` counts both: server.py
     decorates, display_tools.py calls ``mcp.tool(...)(fn)`` after the fact, and a decorator-only
     reader would know nothing about the display tools at all.
+
+    One discovery, several readers — the return annotation and the parameter names are two
+    questions about the same set, and asking each of them its own way is how the two answers start
+    disagreeing.
     """
-    out: dict[str, str] = {}
+    found: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
     for path in (_SRC / "server.py", _SRC / "display_tools.py"):
         tree = _parsed(path)
-        annotated = {
-            node.name: ast.unparse(node.returns)
+        defined = {
+            node.name: node
             for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.returns is not None
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
         }
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 if any(_is_mcp_tool(decorator) for decorator in node.decorator_list):
-                    out.update({node.name: annotated[node.name]} if node.name in annotated else {})
+                    found[node.name] = node
             elif (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Call)
                 and _is_mcp_tool(node.func)
             ):
-                out.update(
+                found.update(
                     {
-                        argument.id: annotated[argument.id]
+                        argument.id: defined[argument.id]
                         for argument in node.args
-                        if isinstance(argument, ast.Name) and argument.id in annotated
+                        if isinstance(argument, ast.Name) and argument.id in defined
                     }
                 )
-    return out
+    return found
+
+
+@cache
+def _tool_result_type() -> dict[str, str]:
+    """Registered tool name to the type annotation its function declares as its return."""
+    return {
+        name: ast.unparse(node.returns)
+        for name, node in _registered_tool_functions().items()
+        if node.returns is not None
+    }
+
+
+@cache
+def _tools_declaring_parameter(parameter: str) -> frozenset[str]:
+    """Registered tools whose SIGNATURE declares a parameter literally named *parameter*.
+
+    This is the set the title sentences are about: a parameter name is what reaches the wire as a
+    schema property, and the trap those sentences warn about — a strip pass that deletes every
+    ``title`` key — bites exactly there. They were measured against a hand-typed four-element
+    tuple instead, which is not a reading of anything: giving a fifth tool a ``title`` parameter
+    left both sentences false and the whole lane green.
+
+    All three parameter kinds count (positional-only, positional-or-keyword, keyword-only) because
+    all three arrive on the wire as a property name.
+
+    AST over the registrar modules rather than ``mcp.list_tools()``, for the reason this module
+    states elsewhere: the wire answers with fewer tools in the core-only lane. Measured, that makes
+    no difference to THIS answer — no display tool declares a ``title`` parameter — but a count
+    taken from the wire would be lane-dependent by construction, which is the trap
+    ``tests/test_server.py`` warns about at its own ``_TYPED_OUTPUT_TOOLS``.
+    """
+    return frozenset(
+        name
+        for name, node in _registered_tool_functions().items()
+        if any(
+            argument.arg == parameter
+            for group in (node.args.posonlyargs, node.args.args, node.args.kwonlyargs)
+            for argument in group
+        )
+    )
 
 
 def _is_nullable_list(annotation: str) -> bool:
@@ -878,15 +922,18 @@ _CLAIMS: tuple[_Claim, ...] = (
         lambda: len(ts._ARCHIVER_HISTORY_BASE_TYPE),
     ),
     # --- the annotation tables -------------------------------------------------------------------
+    # Read from the SIGNATURES, not from the tuple that sits right under the first of these two
+    # sentences. The tuple binds nothing to the wire on its own; that binding is now an assertion
+    # in ``test_server.py::test_title_parameter_tools_keep_their_title_property``.
     _claim(
         "title-parameter tools",
         r"The (\w+) tools that carry a parameter",
-        lambda: len(ts._TITLE_PARAMETER_TOOLS),
+        lambda: len(_tools_declaring_parameter("title")),
     ),
     _claim(
         "title-parameter tools (trap note)",
         r"the (\w+) tools with a ``title`` PARAMETER",
-        lambda: len(ts._TITLE_PARAMETER_TOOLS),
+        lambda: len(_tools_declaring_parameter("title")),
     ),
     _claim(
         "annotation hint fields",

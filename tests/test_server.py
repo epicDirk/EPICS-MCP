@@ -2875,7 +2875,21 @@ async def test_only_real_title_parameters_remain() -> None:
 async def test_title_parameter_tools_keep_their_title_property() -> None:
     """MA-Q1 critical trap: the four tools with a ``title`` PARAMETER still expose
     ``properties['title']`` WITH its description. A naive 'pop every title key' deletes it. Red on a
-    naive strip."""
+    naive strip.
+
+    AND the tuple itself is pinned to the wire, which it was not: ``_TITLE_PARAMETER_TOOLS`` is
+    hand-typed, this test already had the full tool map in its hand, and nothing compared the two.
+    Giving a fifth tool a ``title`` parameter therefore left the whole lane green while every
+    sentence about that set was false — a loop over a list can only check the members it was
+    given, never that the list is all of them.
+
+    Compared as SETS, deliberately: the tuple is in the author's order and the wire is in
+    registration order (``search_logbook`` is registered first but typed last), so a sequence
+    comparison would go red for a reason that is not a change in the finding — the mistake this
+    estate's ``_UNOBSERVED`` table records for line numbers.
+
+    Red proof, executed: add a ``title`` parameter to ``list_tags`` in server.py. Before this
+    assertion the node stayed green; with it the node names list_tags as on-the-wire-only."""
     from epics_pv_mcp.server import mcp
 
     tools = {t.name: t for t in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
@@ -2885,6 +2899,17 @@ async def test_title_parameter_tools_keep_their_title_property() -> None:
         assert properties["title"].get("description"), (
             f"{name}: title parameter kept but its description was stripped"
         )
+
+    on_the_wire = {
+        name
+        for name, tool in tools.items()
+        if "title" in (tool.inputSchema.get("properties") or {})
+    }
+    assert on_the_wire == set(_TITLE_PARAMETER_TOOLS), (
+        "_TITLE_PARAMETER_TOOLS no longer names the tools that actually put a ``title`` property "
+        f"on the wire — on the wire only: {sorted(on_the_wire - set(_TITLE_PARAMETER_TOOLS))}, "
+        f"in the tuple only: {sorted(set(_TITLE_PARAMETER_TOOLS) - on_the_wire)}"
+    )
 
 
 @pytest.mark.asyncio
