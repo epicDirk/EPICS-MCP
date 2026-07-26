@@ -1686,7 +1686,7 @@ _DISCOVER_PVS_ALWAYS_PRESENT = frozenset({"pattern", "pvs", "total"})
 @pytest.mark.asyncio
 async def test_discover_pvs_exposes_typed_output_schema() -> None:
     """S29: discover_pvs advertises a STRUCTURED outputSchema (DiscoverPvsResult), not the
-    accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype -- and red
+    accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype, and red
     while the tool still carries the explicit ``@mcp.tool(output_schema=None)`` opt-out, which
     OVERRIDES the annotation-derived schema (that kwarg, not any post-pass, is what keeps the
     untyped tools schema-less). Checks properties non-empty, EXACTLY the 6 mapped fields
@@ -1733,13 +1733,13 @@ async def test_discover_pvs_structured_output_conforms_to_its_schema(
       client got ``Output validation error``. Hence the fan-out below.
 
     The explicit null check is a belt on top: no path of this tool emits an explicit ``None`` today,
-    so it is inert here -- it exists to catch a future field that does.
+    so it is inert here, it exists to catch a future field that does.
 
     Part B (static) enforces the nullability convention in BOTH directions: a sometimes-absent
     property must permit null, and an always-present one must NOT (otherwise the advertised shape
     invites a caller to expect a null that never comes, and a later widening to ``X | None`` would
     pass unnoticed). It gets a non-empty floor: with an empty ``properties`` both loops would pass
-    vacuously -- which is precisely the state the ``output_schema=None`` opt-out produces."""
+    vacuously, which is precisely the state the ``output_schema=None`` opt-out produces."""
     from fastmcp import Client
 
     from epics_pv_mcp.config import EpicsConfig
@@ -1748,7 +1748,7 @@ async def test_discover_pvs_structured_output_conforms_to_its_schema(
     from epics_pv_mcp.tools import discover as discover_mod
 
     # discover_pvs -> _discover_by_channelfinder -> query_channels, which resolves get_config in
-    # the checkers module's OWN namespace -- patch it there (NOT tools.discover).
+    # the checkers module's OWN namespace, patch it there (NOT tools.discover).
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(channelfinder_url=""))
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     properties = (tools["discover_pvs"].outputSchema or {}).get("properties", {})
@@ -1763,7 +1763,7 @@ async def test_discover_pvs_structured_output_conforms_to_its_schema(
         """An ENABLED ChannelFinder payload, the only path that emits capped/source.
 
         ``capped`` is deliberately a truthy STRING, not a bool. The seam into this function IS typed
-        (``ChannelQueryResult``, S29) -- and that is exactly why this double matters: an annotation
+        (``ChannelQueryResult``, S29), and that is exactly why this double matters: an annotation
         is not a runtime guarantee when the seam itself is monkeypatched away. That pins the
         ``bool()`` coercion in ``_discover_by_channelfinder``: raw-copying the value instead
         would emit a string into a ``boolean | null`` field and the client call below would go red.
@@ -1903,7 +1903,7 @@ async def test_find_channels_structured_output_conforms_to_its_schema(
     (``channelfinder_client.get_shared_session``), not the client CLASS. Three consequences, each
     measured rather than assumed: the real ``_project`` builds the channel elements, so what the
     wire validates is a payload this server actually produces rather than a fake's invention
-    (⚠️ honestly, the ITEM CONDITION cannot tell the difference -- it is the opaque
+    (⚠️ honestly, the ITEM CONDITION cannot tell the difference, it is the opaque
     ``{type: object}``, so any dict passes it; what the real projection buys is that the four
     client-edge error paths sit in the way); the real client-edge
     guards stay in the path, which is what CLAUDE.md's evidence discipline point 8 recommends; and
@@ -1934,7 +1934,7 @@ async def test_find_channels_structured_output_conforms_to_its_schema(
     Red-proofs, all EXECUTED: delete the disabled-path ``count_only`` special case in
     services/checkers.py and the per-path equality goes red at the ``disabled-count`` row. When
     that was first measured over the FULL suite it reddened ONLY this test (1 failed / 1447
-    passed) -- i.e. NO test guarded that mode's field set. It now reddens two, because the same
+    passed), i.e. NO test guarded that mode's field set. It now reddens two, because the same
     review added the missing key-set assertion to test_channelfinder.py's
     test_tool_count_disabled_makes_no_call as well; the '1447' is kept as the dated measurement
     that justified this row, not as a current count. Widen ``ChannelQueryResult.channels`` to
@@ -3037,12 +3037,12 @@ async def test_stripped_tool_still_returns_structured_content(
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
 # RELATIONAL (a ``<=`` check) so both lanes pass. Measured after typing find_channels (S29): the
 # core lane is 63_756 and the full lane 72_044. Re-MEASURE these two after ANY change that can
-# reach the wire -- a schema OR a description edit; the split below is why the narrower wording
+# reach the wire, a schema OR a description edit; the split below is why the narrower wording
 # was a gap. They are prose, nothing asserts them, and an estimate written instead of a measurement
 # had to be
 # corrected by a follow-up commit once already (`6c0a2ec`). Sizes of the last three steps: +406/+411
 # for discover_pvs, then +775/+775 for find_channels, then +137/+137 for the follow-up that only
-# corrected that tool's DESCRIPTION -- and that last one is the reason the instruction above says
+# corrected that tool's DESCRIPTION, and that last one is the reason the instruction above says
 # "ANY change that can reach the wire": the schema alone would have been ~+410, the rest is
 # description text, and description bytes ride the same wire as schema bytes. Measured twice here
 # because the follow-up's first commit message claimed "unchanged" without measuring.
@@ -3165,17 +3165,17 @@ async def test_consent_meta_tools_document_the_client_scope() -> None:
 # (Claude Code) derives permission prompts from them, so a mislabelled or silently drifted field is
 # security-relevant. These guards freeze a human-reviewed snapshot plus two structural laws so such
 # a change cannot pass unnoticed. Honest limit: they check STRUCTURE + DRIFT, not SEMANTICS (whether
-# a hint matches the tool's true behaviour -- that stays a review). Self-contained: no plan ref.
+# a hint matches the tool's true behaviour, that stays a review). Self-contained: no plan ref.
 
 # The four boolean hint fields, in the fixed order used by the golden map below.
 _ANNOTATION_HINTS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
 
 # Golden map {tool_name: (readOnlyHint, destructiveHint, idempotentHint, openWorldHint)}, measured
-# 2026-07-23 from the ToolAnnotations in server.py + display_tools.py -- a human-reviewed snapshot
+# 2026-07-23 from the ToolAnnotations in server.py + display_tools.py, a human-reviewed snapshot
 # of every tool's client-facing safety labels. Any live annotation change, or a new/renamed tool,
 # turns test_tool_annotations_match_golden_map RED until this map is CONSCIOUSLY updated: that edit
 # is the review checkpoint. Covers all 32 full-lane tools; the 4 display-extra tools are absent in
-# the core-only lane (tolerated -- see _annotation_drift). Regenerate by re-measuring, not by guess.
+# the core-only lane (tolerated, see _annotation_drift). Regenerate by re-measuring, not by guess.
 _ANNOTATION_GOLDEN: dict[str, tuple[bool, bool, bool, bool]] = {
     "add_log_attachment": (False, False, False, True),
     "coverage_audit": (True, False, True, True),
@@ -3214,7 +3214,7 @@ _ANNOTATION_GOLDEN: dict[str, tuple[bool, bool, bool, bool]] = {
 # The display-extra tools live in display_tools.py and register only with the [displays] extra, so
 # they are ABSENT in core-only CI (28 tools) and PRESENT in the full lane (32). AST-scanned, NEVER
 # imported: importing display_tools.py pulls opi_navigation (absent in core-only), which would break
-# collection there -- the same reason test_guide_matches_code.py AST-scans it.
+# collection there, the same reason test_guide_matches_code.py AST-scans it.
 _DISPLAY_TOOLS_SRC = (
     Path(__file__).resolve().parent.parent / "src" / "epics_pv_mcp" / "display_tools.py"
 )
@@ -3235,7 +3235,7 @@ def _annotation_drift(
 ) -> tuple[set[str], set[str]]:
     """The two-lane set logic of Guard C, as a PURE function so both lanes are unit-testable.
 
-    Returns ``(unclassified, unexpected_missing)`` -- both must be empty for Guard C to pass:
+    Returns ``(unclassified, unexpected_missing)``, both must be empty for Guard C to pass:
       * ``unclassified`` = live tools absent from the golden map: a new tool must be consciously
         classified.
       * ``unexpected_missing`` = golden tools absent live that are NOT display-extra: a removed or
@@ -3352,7 +3352,7 @@ async def test_tool_annotations_match_golden_map() -> None:
     """Every tool's four annotation hints MUST match the frozen golden map, the drift guard.
 
     The load-bearing guard: the ONLY one that catches a silent change of an EXISTING tool's
-    annotations -- e.g. flipping set_pv_value to destructive=False/read-only, which Guards A and
+    annotations, e.g. flipping set_pv_value to destructive=False/read-only, which Guards A and
     B AND the MA-Q2 consent guards K1/K2 all pass (A: annotations still present; B: vacuous once not
     destructive; K1: drops out of the destructive net, consent _meta untouched; K2: consent _meta
     still documented). A new/renamed tool or any hint change goes red until _ANNOTATION_GOLDEN is
@@ -3377,7 +3377,7 @@ async def test_tool_annotations_match_golden_map() -> None:
         "hints in _ANNOTATION_GOLDEN (the review checkpoint for a new tool's client-facing labels)."
     )
     assert not unexpected_missing, (
-        f"golden tool(s) missing live and not display-extra: {sorted(unexpected_missing)} -- a "
+        f"golden tool(s) missing live and not display-extra: {sorted(unexpected_missing)}, a "
         "removed or renamed tool; update _ANNOTATION_GOLDEN."
     )
 

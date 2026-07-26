@@ -4,7 +4,7 @@ The ten ``query_olog_*`` functions (search / entry / logbooks / tags / levels / 
 add_attachment / update / download / list_attachments), plus the Olog-only helpers
 (:func:`_unknown_level_note`, :func:`_olog_error_code`, :func:`_reject_unknown_level`,
 :func:`_default_olog_id_factory`) and constants. Held apart from the four REST-plane checkers so the
-Olog surface -- its ``dict[str, object]`` shapes and its gated write path -- lives in one module.
+Olog surface, its ``dict[str, object]`` shapes and its gated write path, lives in one module.
 
 The functions resolve their module-global collaborators (``OlogClient``, ``get_config`` ...) in THIS
 module's namespace, so a test double is installed by patching

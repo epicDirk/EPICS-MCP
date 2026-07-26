@@ -322,7 +322,7 @@ def _archiver_error_code(exc: ArchiverError) -> str:
 # --- Tool result shape (S29): is_archived's archive-status tri-state -----------------------------
 # One total=False TypedDict over every key across query_archived's return paths (disabled /
 # enabled). Same MA-1 nullability rule as AlarmConfiguredResult above: a field ABSENT on some
-# return path -- or present-but-sometimes-None (``archived`` is None on the disabled path) -- is
+# return path, or present-but-sometimes-None (``archived`` is None on the disabled path), is
 # typed ``X | None``; the measured rationale lives in ``services/checkers_olog.py``'s "Tool result
 # shapes" header. ``archived`` is the load-bearing case: an EXPLICIT None on the disabled path, and
 # the WIRE path validates the emitted null against the advertised schema, so a non-nullable
@@ -331,19 +331,19 @@ def _archiver_error_code(exc: ArchiverError) -> str:
 #
 # The 8 DS-4A/AR-D enrichment fields are copied UNCOERCED from the getPVStatus record
 # (get_archive_status: ``result[out_key] = record[source_key]``), so their wire value is whatever
-# the appliance sent -- measured both bool and str across the fixtures -- hence ``object | None``,
+# the appliance sent, measured both bool and str across the fixtures, hence ``object | None``,
 # NOT ``str | None``: a stricter scalar would make a bool value fail its own outputSchema at call
 # time. That consequence is REAL but the mechanism is not fastmcp's: standalone fastmcp builds no
 # output model and does not validate the return. The check that bites lives one layer out, in the
 # MCP SDK's low-level call_tool handler, which runs jsonschema over the structuredContent against
-# the advertised schema -- so the failure surfaces only on the WIRE, never on the in-process
+# the advertised schema, so the failure surfaces only on the WIRE, never on the in-process
 # ``FastMCP.call_tool`` this repo's conformance tests MOSTLY drive (the discover_pvs and
-# find_channels ones are the exceptions -- both drive a real client -- and there is now a generic
+# find_channels ones are the exceptions, both drive a real client, and there is now a generic
 # wire test over every typed tool; the full statement,
 # including the second validator and what neither of them sees, is in checkers_olog.py's header).
 # Which makes the loose type the safer one here: a mis-typed raw-copy would otherwise pass every
 # per-tool test and break a real client. The flip side is that a loose type advertises almost
-# nothing -- ``object | None`` renders as an unconstrained schema, so no validator can ever bite
+# nothing, ``object | None`` renders as an unconstrained schema, so no validator can ever bite
 # on these 8 fields. That is the accepted trade, not an oversight: it is why the wire tests
 # deliberately do NOT chase payload coverage here.
 # ``archived``/``status`` ARE computed (bool / non-empty str), so they stay precisely typed.
@@ -573,7 +573,7 @@ async def query_alarm_history(
         raise EpicsError(f"Alarm Logger: {exc}", error_code=_alarm_error_code(exc)) from exc
 
 
-# find_channels' tool result shape (S29 -- typed MCP outputSchema). It lives HERE, at the shared
+# find_channels' tool result shape (S29, typed MCP outputSchema). It lives HERE, at the shared
 # service, and not at the tool adapter the way ``DiscoverPvsResult`` does: this literal IS the
 # tool's result (``tools/channelfinder.py`` only forwards it), so the type belongs where the dict
 # is built, and the other consumers of the shared payload inherit it.
@@ -587,7 +587,7 @@ async def query_alarm_history(
 # ``services/checkers_olog.py``'s "Tool result shapes" header; the closest precedent for a
 # PARAMETER deciding which keys exist at all is ``OlogDownloadResult`` (as_base64 vs output_path).
 #
-# ``channels`` stays ``list[dict[str, object]]`` instead of a nested TypedDict -- the same
+# ``channels`` stays ``list[dict[str, object]]`` instead of a nested TypedDict, the same
 # convention as ``DiscoverPvsResult.pvs`` and ``ArchiverHistoryResult.samples``; no output shape in
 # this server nests one. Here that is a CHOICE with a price, named rather than hidden: a channel
 # element really is always a ``ChannelInfo`` (6 fields, all required), so the opaque

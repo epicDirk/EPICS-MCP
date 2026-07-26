@@ -489,7 +489,7 @@ async def find_channels(
     The two modes return DISJOINT fields, and the four paths differ further: configured list =
     {enabled, channels, total, capped}, configured count = {enabled, match_count}; with
     ChannelFinder UNCONFIGURED it is {enabled, channels, total, note} and
-    {enabled, match_count, note} -- i.e. `note` is added and `capped` is NOT emitted. Only
+    {enabled, match_count, note}, i.e. `note` is added and `capped` is NOT emitted. Only
     `enabled` is present on every path; read the advertised outputSchema rather than assuming a
     field is there.
 

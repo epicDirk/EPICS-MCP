@@ -30,10 +30,10 @@ _WILDCARD_REGISTRY_NOTE = (
 )
 
 
-# discover_pvs' tool result shape (S29 -- typed MCP outputSchema). Lives here, not at
+# discover_pvs' tool result shape (S29, typed MCP outputSchema). Lives here, not at
 # ``query_channels``: the wildcard branch only READS that shared payload and builds its OWN
 # literal, so this type describes the discover shape, not the ChannelFinder one.
-# (``query_channels`` has since been typed in its own right -- ``ChannelQueryResult`` -- so the
+# (``query_channels`` has since been typed in its own right, ``ChannelQueryResult``, so the
 # point is no longer that the shared signature stays untouched; it is that the two shapes are
 # genuinely different literals.)
 #
@@ -46,19 +46,19 @@ _WILDCARD_REGISTRY_NOTE = (
 # Why the nullability, measured under standalone fastmcp (the two halves differ, and the
 # difference is the point):
 #   * An ABSENT total=False key is DROPPED from the wire, not emitted as null, and the schema
-#     carries no ``required`` -- so an absent key is invisible to a real client. For a
+#     carries no ``required``, so an absent key is invisible to a real client. For a
 #     merely-sometimes-absent field the nullable type is therefore SCHEMA HONESTY, enforced by
 #     the conformance test's Part B, not by the runtime.
 #   * A field set EXPLICITLY to None IS emitted as null, and the wire path DOES validate: the
 #     MCP SDK's low-level handler runs jsonschema against the advertised outputSchema, so a
 #     non-nullable annotation there earns a real client an ``Output validation error``. No such
 #     field exists here today; the rule is written down so the next field does not have to
-#     rediscover it. (The in-process ``FastMCP.call_tool`` shortcut does NOT validate -- which is
+#     rediscover it. (The in-process ``FastMCP.call_tool`` shortcut does NOT validate, which is
 #     why this tool's Part A drives a real ``fastmcp.Client`` instead of that shortcut.)
 #
 # ``pvs`` stays ``list[dict[str, object]]`` rather than a nested TypedDict: the entries are
-# heterogeneous in THREE shapes -- {pv_name, status, value} on a concrete hit, {pv_name, status}
-# on a miss, {pv_name, status, ioc_name, host_name} for a registry match -- and ``value`` carries
+# heterogeneous in THREE shapes, {pv_name, status, value} on a concrete hit, {pv_name, status}
+# on a miss, {pv_name, status, ioc_name, host_name} for a registry match, and ``value`` carries
 # whatever PVA type the channel holds. Same convention as AlarmHistoryResult.events; no output
 # shape in this server uses a nested TypedDict. class-syntax: all names are valid identifiers.
 class DiscoverPvsResult(TypedDict, total=False):
@@ -133,9 +133,9 @@ async def _discover_by_channelfinder(pattern: str, timeout: float | None) -> Dis
     # wholesale by test doubles (see the ``capped`` note below), so its wire type is not a runtime
     # guarantee. The element check is a comprehension FILTER rather than an ``if not ...: continue``
     # because the latter's body is provably dead under the typed seam and mypy's warn_unreachable
-    # rejects it -- the filter form says the same thing and is what diagnose.py:386-387 and
+    # rejects it, the filter form says the same thing and is what diagnose.py:386-387 and
     # checkers_olog.py:751-753 already use on this kind of payload. Honest scope: neither check is
-    # OBSERVED -- no double injects a non-list or a non-dict element today, and the pair is mutually
+    # OBSERVED: no double injects a non-list or a non-dict element today, and the pair is mutually
     # masking (tests/test_client_edge_guards.py records that class). They stay because a typing
     # change must not alter runtime behaviour, not because they are guarded.
     raw_channels = result.get("channels")
@@ -153,7 +153,7 @@ async def _discover_by_channelfinder(pattern: str, timeout: float | None) -> Dis
         "pattern": pattern,
         "pvs": pvs,
         "total": len(pvs),
-        # bool()-coerce, and NOT because the seam is untyped -- it is typed now
+        # bool()-coerce, and NOT because the seam is untyped, it is typed now
         # (``ChannelQueryResult.capped`` is ``bool | None``). The coercion stays for the one reason
         # the annotation cannot cover: the seam is REPLACED wholesale by a test double that
         # deliberately injects a truthy STRING here (pinned by the conformance test's fake), and a
