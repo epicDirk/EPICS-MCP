@@ -36,7 +36,7 @@ Add the server to your `.mcp.json` or `claude_desktop_config.json`.
 }
 ```
 
-**Writes enabled for test PVs only** (triple-gated — the pattern is required, an empty one refuses to start):
+**Writes enabled for test PVs only** (triple-gated: the pattern is required, and an empty one refuses to start):
 
 ```json
 {
