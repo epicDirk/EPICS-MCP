@@ -75,7 +75,7 @@ def test_is_archived_unknown_pv_record_is_the_definitive_negative(
 ) -> None:
     """Positive control for the measured definitive signal: the appliance answers an UNKNOWN pv
     on getPVStatus with a REAL record (measured live, ESS 2.2.1:
-    ``[{"pvName": …, "status": "Not being archived"}]``), never with ``[]`` or an empty body.
+    ``[{"pvName": ..., "status": "Not being archived"}]``), never with ``[]`` or an empty body.
     That record is the definitive negative and stays one; only unreadable payloads raise (S11).
     """
     client = ArchiverClient("http://arch")
@@ -289,7 +289,7 @@ def test_get_pv_history_unreadable_sample_withholds(
     """S11: a sample must carry the measured anchors ``secs`` AND ``val``, and every present
     int field must be coercible, anything else withholds the WHOLE result. The old code
     accepted ANY dict and filled missing fields with 0/None: two different broken dicts both
-    became ``status=ok, sample={secs:0, nanos:0, val:null, …}`` (a fabricated sample)."""
+    became ``status=ok, sample={secs:0, nanos:0, val:null, ...}`` (a fabricated sample)."""
     raw = [{"meta": {"name": "X"}, "data": [sample]}]
     client = ArchiverClient("http://arch")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(raw)))
@@ -443,7 +443,7 @@ def test_get_pv_type_info_unwraps_list(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_get_pv_type_info_unreadable_2xx_raises(
     monkeypatch: pytest.MonkeyPatch, payload: object
 ) -> None:
-    """S11 (replaces the former ``…not_found`` pin, which cemented the defect): a 2xx whose body
+    """S11 (replaces the former ``...not_found`` pin, which cemented the defect): a 2xx whose body
     is not a type-info record must RAISE. The old code mapped ``{}``/junk to ``found:False``
     (conflated with the appliance's definitive 404) and, worse, projected ANY non-empty dict
     as ``found:True`` (auditor probe ``{"unexpected":"shape"}`` → a fabricated archive record).

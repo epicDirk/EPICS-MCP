@@ -543,7 +543,7 @@ def _request_multipart(
 
     *files* is a LIST of ``(name, (filename, content, content_type))`` tuples (see
     :data:`MultipartFiles`). ``requests`` builds the multipart body from it AND sets the
-    ``Content-Type: multipart/form-data; boundary=…`` header itself, so this passes **no** manual
+    ``Content-Type: multipart/form-data; boundary=...`` header itself, so this passes **no** manual
     ``Content-Type`` (one would clobber the boundary and the server could not parse the body). This
     mirrors CS-Studio's own client, which builds the same body by hand
     (``HttpRequestMultipartBody``): a ``logEntry`` JSON part plus one ``files`` part per attachment.
@@ -641,8 +641,8 @@ def _filename_from_content_disposition(header: str | None) -> str | None:
 
     Uses the stdlib :class:`email.message.Message` parser (handles quoting and the RFC 2231
     ``filename*=`` form), so no ad-hoc regex. Olog serves attachments with
-    ``Content-Disposition: attachment; filename=…``; the value is author free text, so callers gate
-    it under the same posture as the bytes (a person can be named in a filename).
+    ``Content-Disposition: attachment; filename=...``; the value is author free text, so callers
+    gate it under the same posture as the bytes (a person can be named in a filename).
     """
     if not header:
         return None
@@ -702,7 +702,7 @@ def rest_get_bytes(
     is refused before any read, and the stream is accumulated only up to the cap); ``None`` = no
     cap,
     but the attachment caller always passes one, so a huge object is never materialised into memory.
-    ``filename`` comes from ``Content-Disposition`` (Olog sends ``attachment; filename=…``) and
+    ``filename`` comes from ``Content-Disposition`` (Olog sends ``attachment; filename=...``) and
     ``content_type`` from the response header (Olog derives it from the file extension server-side
     and
     may omit it → ``None``); both are surfaced but a caller applies the download privacy gate first.

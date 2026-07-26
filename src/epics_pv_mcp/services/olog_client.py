@@ -8,7 +8,7 @@ whether that projection redacts.
 
 Read-only jobs:
 
-  GET {root}/logs/search?desc=…&logbooks=…&tags=…&level=…&title=…&start=…&end=…&size=…&from=…&sort=…
+  GET {root}/logs/search?desc&logbooks&tags&level&title&start&end&size&from&sort
                                                                         → search
   GET {root}/logs/{id}                                                  → one log entry
   GET {root}/logbooks                                                   → list logbook names
@@ -214,7 +214,7 @@ def _names(items: object) -> list[str]:
 def _named_list(data: object, endpoint: str) -> list[str]:
     """STRICT name extraction for the top-level ``/logbooks`` / ``/tags`` listings (S11).
 
-    The measured payload (live) is a list of ``{name, …}`` structs with ``name`` always a string.
+    The measured payload (live) is a list of ``{name, ...}`` structs with ``name`` always a string.
     Anything else used to collapse to ``[]``, a fabricated "there are no logbooks/tags",
     indistinguishable from a genuinely empty server, and a silently dropped item told anyone
     validating a filter name "this one does not exist". Unreadable now raises.
@@ -788,7 +788,7 @@ class OlogClient:
 
         DS-PRIVACY: each ``Logbook`` carries an ``owner`` (PII); :func:`_names` keeps only the
         ``name``, so no owner reaches the caller. The names are the valid filter values for
-        ``search_logbook(logbooks=…)``.
+        ``search_logbook(logbooks=...)``.
         """
         data = self._get(f"{self.base_url}/logbooks", {})
         return _named_list(data, f"GET {self.base_url}/logbooks")
@@ -797,7 +797,7 @@ class OlogClient:
         """Return the names of all Olog tags (``GET /tags``), name-only.
 
         A ``Tag`` has only ``name``/``state`` (no owner), so this is trivially PII-free. The names
-        are the valid filter values for ``search_logbook(tags=…)``.
+        are the valid filter values for ``search_logbook(tags=...)``.
         """
         data = self._get(f"{self.base_url}/tags", {})
         return _named_list(data, f"GET {self.base_url}/tags")
@@ -805,9 +805,9 @@ class OlogClient:
     def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
         """``(names, default_level, note)`` for the Olog levels (``GET /levels``), name-only (OA2).
 
-        Levels are the logbook's TRIAGE axis (Info / Problem / Request / …, site-configurable, not
+        Levels are the logbook's TRIAGE axis (Info / Problem / Request / ..., site-configurable, not
         a fixed enum), so the valid values can only come from the server. These names are the valid
-        values for ``search_logbook(level=…)`` and for ``create_log_entry(level=…)``.
+        values for ``search_logbook(level=...)`` and for ``create_log_entry(level=...)``.
         *default_level* is the one a create uses when no level is given, and is ``None`` with an
         explaining *note* whenever the server does not state it unambiguously (see
         :func:`_level_list`).

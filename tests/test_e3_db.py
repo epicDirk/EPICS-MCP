@@ -389,7 +389,7 @@ def test_parse_st_cmd_empty_p_does_not_outvote_real_prefix() -> None:
     """S7-2 regression lock: an EMPTY ``P=`` carries no device info and must never win the
     majority vote over a real prefix. Two empty ``P=`` + one ``P=REAL:`` → ``REAL:`` (not ``""``).
     Against the pre-fix ``p_value is not None`` code the empties tallied ``{"": 2, "REAL:": 1}`` →
-    ``""`` won and downstream (crossplane ``if prefix and …``) classified ZERO PVs as linked."""
+    ``""`` won and downstream (crossplane ``if prefix and ...``) classified ZERO PVs as linked."""
     info = parse_st_cmd(
         'dbLoadRecords("a.db", "P=")\n'
         'dbLoadRecords("b.db", "P=")\n'

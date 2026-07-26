@@ -154,9 +154,9 @@ def build_device_report(
     *lookup* is the ``find_displays`` result; *live_results* is the ``pv_get_batch`` dict
     (``{"results": [...], "errors": [...]}``) of the LIVE-QUERIED (capped) channel subset;
     *ioc_channels* is the ``_find_channels`` dict, typed at its source as
-    :class:`~epics_pv_mcp.services.checkers.ChannelQueryResult` (``{"enabled": …, "channels": […]}``
-    on the list path); it is taken as a plain ``Mapping`` here so this pure merge stays independent
-    of that shape. The
+    :class:`~epics_pv_mcp.services.checkers.ChannelQueryResult` (``{"enabled": ..., "channels":
+    [...]}`` on the list path); it is taken as a plain ``Mapping`` here so this pure merge stays
+    independent of that shape. The
     per-channel ``channels`` list is derived from the read set (results and errors), joined to its
     serving IOC by exact channel name.
     """
@@ -244,7 +244,7 @@ def _format_channel_value(value: object) -> str:
     """Render a live value compactly, a waveform/array is summarised, not dumped (S7-1).
 
     A p4p waveform value arrives here as a (potentially multi-thousand-element) list; rendering it
-    raw would produce an unreadable line. Summarise an array as ``[N values: a, b, …]`` and cap a
+    raw would produce an unreadable line. Summarise an array as ``[N values: a, b, ...]`` and cap a
     long scalar string to keep the operator-facing report readable.
     """
     if isinstance(value, (list, tuple)):
@@ -252,9 +252,9 @@ def _format_channel_value(value: object) -> str:
         if count == 0:
             return "[0 values]"
         head = ", ".join(str(v) for v in value[:2])
-        return f"[{count} values: {head}{', …' if count > 2 else ''}]"
+        return f"[{count} values: {head}{', ...' if count > 2 else ''}]"
     text = str(value)
-    return text if len(text) <= 80 else text[:79] + "…"
+    return text if len(text) <= 80 else text[:79] + "..."
 
 
 def render_markdown(report: DeviceLookupReport) -> str:

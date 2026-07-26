@@ -13,7 +13,7 @@ class UnknownEpicsEnvVarWarning(UserWarning):
     """An ``EPICS_MCP_*`` environment variable matched no ``EpicsConfig`` field and was ignored.
 
     pydantic-settings' default ``extra="ignore"`` DROPS an unknown ``EPICS_MCP_FOO`` without a
-    trace, so a typo (e.g. ``EPICS_MCP_CHANNELFINDR_URL`` for ``…CHANNELFINDER_URL``) silently
+    trace, so a typo (e.g. ``EPICS_MCP_CHANNELFINDR_URL`` for ``...CHANNELFINDER_URL``) silently
     leaves the real setting at its default. This warning surfaces the likely typo. It subclasses
     ``UserWarning`` so a deployment can filter or escalate it.
     """

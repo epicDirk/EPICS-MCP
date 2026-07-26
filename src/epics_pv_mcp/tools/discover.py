@@ -131,7 +131,7 @@ async def _discover_by_channelfinder(pattern: str, timeout: float | None) -> Dis
 
     # Both shape checks are KEPT although ``query_channels`` is now typed: the seam is replaced
     # wholesale by test doubles (see the ``capped`` note below), so its wire type is not a runtime
-    # guarantee. The element check is a comprehension FILTER rather than an ``if not …: continue``
+    # guarantee. The element check is a comprehension FILTER rather than an ``if not ...: continue``
     # because the latter's body is provably dead under the typed seam and mypy's warn_unreachable
     # rejects it -- the filter form says the same thing and is what diagnose.py:386-387 and
     # checkers_olog.py:751-753 already use on this kind of payload. Honest scope: neither check is

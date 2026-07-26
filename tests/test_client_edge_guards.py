@@ -28,7 +28,7 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   vocabulary before any coverage map is consulted, and 21 remain once the tests that DO execute a
   guard line are removed. The vocabulary figure follows from this repository's AST alone and is
   therefore pinned by a test in the ordinary gate; the two coverage figures are decided by the
-  coverage map and are checked only by ``scripts/guard_audit.py sham --check --coverage-db …``.
+  coverage map and are checked only by ``scripts/guard_audit.py sham --check --coverage-db ...``.
   ⚠️ Every figure in this bullet moved on 2026-07-26, and the uniformity above is the RESULT of
   three separate measurement defects being removed, not a change in the code under audit: the
   population read the function's SOURCE TEXT (a docstring quoting the idiom counted, and so did a

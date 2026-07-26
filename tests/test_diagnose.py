@@ -497,7 +497,7 @@ async def test_shell_field_suffixed_pv_normalized_for_channelfinder(
 ) -> None:
     """Finding A: the CF plane must query/match the BARE record name, not the raw field-suffixed PV.
 
-    ChannelFinder/RecSync register ``…:Val``, never a field reference ``…:Val.EGU``. Without
+    ChannelFinder/RecSync register ``...:Val``, never a field reference ``...:Val.EGU``. Without
     normalization a registered field PV whose IOC is down false-misses in CF and the cause is
     mis-classified away from ioc_down (to unregistered/name_typo/indeterminate).
     """

@@ -501,8 +501,8 @@ def test_deny_call_sites_match_the_canonical_map() -> None:
     adding a new ``_audit_deny``, nor a refusal that never calls the gate at all (see the known gap
     in the module docstring).
 
-    RED-PROOF: add or delete any ``self._audit_deny("…")`` call in either gate, or change one of its
-    code literals, and this fails with the differing Counter, including the case where the new
+    RED-PROOF: add or delete any ``self._audit_deny("...")`` call in either gate, or change one of
+    its code literals, and this fails with the differing Counter, including the case where the new
     path reuses an existing code, which a set comparison would have missed.
     """
     discovered = _discover_gate_modules()

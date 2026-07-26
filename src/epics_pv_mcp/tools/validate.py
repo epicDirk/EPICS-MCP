@@ -67,7 +67,7 @@ def _run_validate(file_path: str, displays_dir: str | None) -> tuple[list[str], 
                 continue
             if ev.top_level_display in capped_tops:
                 capped = True
-            channel = channel_name(ev.pv)  # strip pva://… for the live read
+            channel = channel_name(ev.pv)  # strip pva://... for the live read
             if channel not in seen:
                 seen.add(channel)
                 channels.append(channel)

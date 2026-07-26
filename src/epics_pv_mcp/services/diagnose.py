@@ -363,8 +363,8 @@ async def _gather_channelfinder(
 ) -> ChannelFinderEvidence:
     """Exact-name ChannelFinder lookup. Disabled/errored → withheld (never a false negative).
 
-    Queries and matches by the BARE record name: ChannelFinder/RecSync register ``…:Val``, never a
-    field reference ``…:Val.EGU`` (display PVs routinely reference a field). Without this the CF
+    Queries and matches by the BARE record name: ChannelFinder/RecSync register ``...:Val``, never a
+    field reference ``...:Val.EGU`` (display PVs routinely reference a field). Without this the CF
     plane would false-miss a registered field-suffixed PV and mis-classify the cause, the same
     ``crossplane._record_name`` normalization the sibling cross-plane tools use.
     """
@@ -539,7 +539,7 @@ async def diagnose(
 
 
 def _device_name(pv_name: str) -> str:
-    """Strip the trailing PV property to get the device name (…:EVR-01:12VValue → …:EVR-01)."""
+    """Strip the trailing PV property to get the device name (...:EVR-01:12VValue → ...:EVR-01)."""
     return pv_name.rsplit(":", 1)[0] if ":" in pv_name else pv_name
 
 

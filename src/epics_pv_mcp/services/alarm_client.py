@@ -30,7 +30,7 @@ from epics_pv_mcp.services.alarm_time import normalize_alarm_time
 from epics_pv_mcp.services.redact import project_allowlist, redact_record
 
 # MA-2b(d): there is deliberately NO default alarm-tree name. The former ``"Accelerator"`` default
-# matched nothing at a real facility (the tree names are site-specific, DTL/BIS/FBIS/…, and a
+# matched nothing at a real facility (the tree names are site-specific, DTL/BIS/FBIS/..., and a
 # committed default cannot name one without violating the facility-agnostic guardrail), so it made
 # ``is_alarm_configured`` silently withhold. The caller MUST name the tree (the leading path segment
 # that selects the ES index).
@@ -65,7 +65,7 @@ _ALARM_CONFIG_ALLOWLIST = frozenset(
 )
 
 # DS-PRIVACY: the allowlist fields whose VALUE is AUTHORED free text, a person can be named inside
-# them (guidance prose "call Jane Doe", an ``actions`` ``mailto:jane.doe@…``). Kept for their
+# them (guidance prose "call Jane Doe", an ``actions`` ``mailto:jane.doe@...``). Kept for their
 # PRESENCE but their value is withheld (the Olog free-text treatment). This resolves the former
 # accepted Batch-1 residual after the pre-live-smoke privacy audit exhibited the leak against the
 # non-negotiable "no person data" guardrail (project decision, 2026-07: withhold all five).

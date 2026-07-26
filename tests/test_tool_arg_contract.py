@@ -11,7 +11,7 @@ Both halves had already failed once, and this module is the guard for each:
   ``monitor_pv`` or ``validate_pvs`` to its old argument name left the whole suite GREEN.
 * Two SHIPPED surfaces kept teaching a retired name, the ``compare_machine_state`` prompt
   (``get_pvs(names=[...])``) and the operator guide served as ``epics-pv://guide``
-  (``get_alarm_history`` … ``pv``). A client that follows either builds a call the server rejects.
+  (``get_alarm_history`` ... ``pv``). A client that follows either builds a call the server rejects.
 
 Three guards, in the order the failure happened:
 

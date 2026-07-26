@@ -45,8 +45,9 @@ def _resolve_relative(level: int, module: str | None) -> str | None:
 def _tool_layer_imports(source: str) -> list[str]:
     """Return the tool-layer module names imported by *source*, ABSOLUTE and RELATIVE forms.
 
-    Catches ``import epics_pv_mcp.tools…``, ``from epics_pv_mcp.tools… import x``, ``from ..tools
-    import x`` (relative, previously a blind spot), and ``from .. import tools`` (aliased package).
+    Catches ``import epics_pv_mcp.tools...``, ``from epics_pv_mcp.tools... import x``, ``from
+    ..tools import x`` (relative, previously a blind spot), and ``from .. import tools`` (aliased
+    package).
     """
     tree = ast.parse(source)
     offenders: list[str] = []

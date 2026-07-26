@@ -26,7 +26,7 @@ import pytest
 
 from epics_pv_mcp.resources import get_guide
 
-_ROOT = Path(__file__).resolve().parent.parent  # …/EPICS-MCP-Server
+_ROOT = Path(__file__).resolve().parent.parent  # .../EPICS-MCP-Server
 
 
 def test_guide_loads_as_package_data() -> None:
@@ -164,7 +164,7 @@ def _tracked_text_files() -> list[Path]:
         ).stdout
     except FileNotFoundError as exc:
         # ONLY a missing git binary may skip. A FAILED git call (CalledProcessError:
-        # not-a-repo on an sdist, Windows "dubious ownership", …) must fail loudly:
+        # not-a-repo on an sdist, Windows "dubious ownership", ...) must fail loudly:
         # skipping it silently switched OFF the repo-wide privacy/hermeticity scan (QA:
         # the skip guarded exactly the class of environment drift it should report).
         pytest.skip(f"git binary unavailable, cannot enumerate tracked files: {exc}")

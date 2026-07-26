@@ -163,8 +163,8 @@ def test_is_alarm_configured_hit_does_not_probe_the_tree(monkeypatch: pytest.Mon
 # --- client: strict response schema (S11), unreadable 2xx is NEVER a definitive answer ---
 #
 # Measured payload shapes (local Alarm Logger 5.0.052, live 2026-07-16): /search/alarm returns a
-# list whose docs ALL carry a string `config` (state: docs additionally pv/severity/…, config:
-# docs config_msg/…); /search/alarm/config likewise. `config` is the identity field the client
+# list whose docs ALL carry a string `config` (state: docs additionally pv/severity/..., config:
+# docs config_msg/...); /search/alarm/config likewise. `config` is the identity field the client
 # reads, it is the schema anchor.
 
 

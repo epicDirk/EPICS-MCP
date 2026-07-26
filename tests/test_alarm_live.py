@@ -221,7 +221,7 @@ def test_root_filter_is_honoured(client: AlarmClient, pv: str) -> None:
     )
     real_tree = str(unfiltered[0]["config"]).split("/")[
         1
-    ]  # config = 'state:/<tree>/…' | 'config:/…'
+    ]  # config = 'state:/<tree>/...' | 'config:/...'
     matched, _ = client.get_alarm_history(
         pv, start="7 days", end="now", max_events=_MAX_EVENTS, root=real_tree
     )

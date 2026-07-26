@@ -145,7 +145,7 @@ def _load_display_registrar() -> Callable[[FastMCP], None] | None:
     Degrade-loud posture:
     - A MISSING extra (``find_spec`` None) is the supported core-only state, return None silently
       so the core PV server installs and starts standalone.
-    - An INSTALLED extra that fails to import (broken transitive dep, corrupt module, …) is a
+    - An INSTALLED extra that fails to import (broken transitive dep, corrupt module, ...) is a
       BROKEN deployment, not a missing one: log ERROR with the correct attribution and return None,
       so the core PV server stays up AND no surface over-claims display tools that did not register.
       The catch is broad on purpose, an OPTIONAL extra must never crash the core server, while the
@@ -1134,7 +1134,7 @@ async def list_logbooks(
     """List the valid Phoebus Olog logbook names (Olog REST /logbooks).
 
     Read-only. Disabled by default, returns enabled=false unless EPICS_MCP_OLOG_URL is set. Returns
-    the logbook NAMES only (owners dropped), the valid values for search_logbook(logbooks=…).
+    the logbook NAMES only (owners dropped), the valid values for search_logbook(logbooks=...).
     An unreadable listing raises a loud error, never an empty 'there are none'.
     """
     return await _list_logbooks(timeout)
@@ -1155,7 +1155,7 @@ async def list_tags(
     """List the valid Phoebus Olog tag names (Olog REST /tags).
 
     Read-only. Disabled by default, returns enabled=false unless EPICS_MCP_OLOG_URL is set. Returns
-    the tag NAMES only, the valid values for search_logbook(tags=…). Tags carry no owner.
+    the tag NAMES only, the valid values for search_logbook(tags=...). Tags carry no owner.
     An unreadable listing raises a loud error, never an empty 'there are none'.
     """
     return await _list_tags(timeout)
@@ -1176,8 +1176,8 @@ async def list_log_levels(
     """List the valid Phoebus Olog log levels (Olog REST /levels).
 
     Read-only. Disabled by default, returns enabled=false unless EPICS_MCP_OLOG_URL is set. Levels
-    are the logbook's TRIAGE axis (Info / Problem / Request / … ) and are SITE-CONFIGURABLE, not a
-    fixed enum, so this is the only way to learn the valid values for search_logbook(level=…) and
+    are the logbook's TRIAGE axis (Info / Problem / Request / ... ) and are SITE-CONFIGURABLE, not a
+    fixed enum, so this is the only way to learn the valid values for search_logbook(level=...) and
     for every write that takes one: create_log_entry, reply_to_log and update_log_entry. A Level
     carries no owner, so this is PII-free like list_tags.
 

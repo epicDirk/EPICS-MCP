@@ -80,7 +80,7 @@ def _named_list(data: object, endpoint: str) -> list[str]:
     """STRICT name extraction for the top-level ``/resources/properties`` / ``/resources/tags``
     listings (S11, the ChannelFinder sibling of :func:`olog_client._named_list`).
 
-    Both routes return a list of ``{name, owner, …}`` structs (``PropertyDto``/``TagDto``). The
+    Both routes return a list of ``{name, owner, ...}`` structs (``PropertyDto``/``TagDto``). The
     listing IS the answer to "what can I filter on", so an unreadable payload must never collapse to
     ``[]``: that would fabricate "there are no properties/tags", indistinguishable from a genuinely
     empty server, and tell anyone validating a filter name "this one does not exist". A non-list, or

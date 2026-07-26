@@ -105,7 +105,7 @@ can be an arbitrary host must confine *where* a write can physically go, in addi
 - **When the target is per-write** (an HTTP URL like `http://logbook:8080`): confine it at each write: permit
   a loopback host, or an **exactly-allowlisted** URL over a confidential scheme with remote writes explicitly
   enabled, and take the host from **the same parser the client will actually connect with**, never a second
-  parser and never a substring of the authority (`http://127.0.0.1@logbook-remote/…` has host
+  parser and never a substring of the authority (`http://127.0.0.1@logbook-remote/...` has host
   `logbook-remote` and is refused). **Two URL parsers do not agree on hostile input:** a URL that one library
   reads as a loopback host, another reads as a remote one. A boundary validated with a *different* parser
   than the one that opens the connection is a bypass waiting to be found, so parse with the connecting

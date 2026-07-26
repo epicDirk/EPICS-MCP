@@ -369,8 +369,9 @@ async def query_archived(pv: str, timeout: float = 5.0) -> ArchiveStatusResult:
     Default-disabled: with ``EPICS_MCP_ARCHIVER_URL`` unset, returns a structured ``enabled: false``
     result and makes NO network call (preserves localhost isolation). Shared by the ``is_archived``
     tool and the diagnose Archiver plane. DS-4A: surfaces the enriched MGMT fields
-    (``connection_state``/``last_event``/``is_monitored``/…) alongside ``archived``/``status`` from
-    the SAME single ``getPVStatus`` call (diagnose reads only ``archived``; extras are additive).
+    (``connection_state``/``last_event``/``is_monitored``/...) alongside ``archived``/``status``
+    from the SAME single ``getPVStatus`` call (diagnose reads only ``archived``; extras are
+    additive).
     """
     cfg = get_config()
     if not cfg.archiver_url:

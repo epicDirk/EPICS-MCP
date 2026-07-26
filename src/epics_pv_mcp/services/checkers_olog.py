@@ -76,7 +76,7 @@ from epics_pv_mcp.services.olog_exceptions import (
 #     discover_pvs and find_channels conformance tests.
 #
 #   * TWO validators exist, not one, and they differ. The server-side handler above turns a
-#     mismatch into an error result (surfacing as ``ToolError("Output validation error: …")``).
+#     mismatch into an error result (surfacing as ``ToolError("Output validation error: ...")``).
 #     The client session validates AGAIN on its side, raising a plain ``RuntimeError`` with
 #     different wording. Which one bites matters in one case: a tool whose return is NOT an
 #     object (a bare list, say) is wrapped by fastmcp and SKIPS the server-side check, so only
@@ -406,7 +406,7 @@ async def query_olog_logbooks(timeout: float = 5.0) -> OlogLogbooksResult:
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes no
     network call. When enabled, returns the logbook NAMES only, each Olog ``owner`` (PII) is
     dropped in the client. These names are the valid filter values for
-    ``search_logbook(logbooks=…)``. Backs ``list_logbooks``.
+    ``search_logbook(logbooks=...)``. Backs ``list_logbooks``.
     """
     cfg = get_config()
     if not cfg.olog_url:
@@ -430,7 +430,7 @@ async def query_olog_tags(timeout: float = 5.0) -> OlogTagsResult:
     """List the valid Olog tag names. Read-only, config-gated (a ``Tag`` has no owner, PII-free).
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes no
-    network call. These names are the valid filter values for ``search_logbook(tags=…)``. Backs
+    network call. These names are the valid filter values for ``search_logbook(tags=...)``. Backs
     ``list_tags``.
     """
     cfg = get_config()
@@ -457,8 +457,8 @@ async def query_olog_levels(timeout: float = 5.0) -> OlogLevelsResult:
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes no
     network call. Levels are the logbook's TRIAGE axis and are site-configurable, so the valid
     values can only come from the server, they are the valid values for
-    ``search_logbook(level=…)`` and ``create_log_entry(level=…)``. ``default_level`` is the one a
-    create uses when none is given; it is ``None`` with an explaining ``note`` whenever the server
+    ``search_logbook(level=...)`` and ``create_log_entry(level=...)``. ``default_level`` is the one
+    a create uses when none is given; it is ``None`` with an explaining ``note`` whenever the server
     does not state it unambiguously
     (missing/unreadable flag, none marked, or more than one marked, the server's own seed data has
     two). Backs ``list_log_levels``.

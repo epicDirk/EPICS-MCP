@@ -357,7 +357,7 @@ def _drop_degenerate_limits(d: dict[str, object]) -> None:
 
 
 def _type_id(raw: object) -> str:
-    """The p4p normative-type id (``epics:nt/NTTable:1.0`` …), or ``""`` when unavailable."""
+    """The p4p normative-type id (``epics:nt/NTTable:1.0`` ...), or ``""`` when unavailable."""
     get_id = getattr(raw, "getID", None)
     return str(get_id()) if callable(get_id) else ""
 
@@ -433,7 +433,7 @@ def _extract_nt_ndarray(raw: object) -> dict[str, object]:
     Inlining a full image as a nested list would blow the MCP payload, so this surfaces the
     structural metadata with an honest ``data_omitted`` flag + note instead of the raw array.
     ``shape`` is reported in numpy (rows-first) order: p4p stores ``dimension`` as
-    ``[width, height, …]`` REVERSED from numpy's ``(rows, cols, …)``, so the sizes are reversed
+    ``[width, height, ...]`` REVERSED from numpy's ``(rows, cols, ...)``, so the sizes are reversed
     back to match the array's natural order.
     """
     dims = getattr(raw, "dimension", None)
@@ -729,7 +729,7 @@ def _format_value(pv_name: str, value: object) -> dict[str, object]:
     """Convert a p4p value into a plain, JSON-serialisable dict.
 
     p4p's ``Context`` unwraps Normative Types by default, so ``ctxt.get`` returns
-    value-wrappers (``ntfloat``/``ntint``/``ntenum``/…) whose meta-data lives on the
+    value-wrappers (``ntfloat``/``ntint``/``ntenum``/...) whose meta-data lives on the
     underlying ``p4p.Value`` exposed via ``.raw``, NOT directly on the wrapper. Every
     field is routed through ``raw`` (``getattr(value, "raw", value)`` also handles the
     un-unwrapped ``nt=False`` case).

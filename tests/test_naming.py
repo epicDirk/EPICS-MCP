@@ -139,7 +139,7 @@ def test_validate_name_transport_error_propagates(monkeypatch: pytest.MonkeyPatc
 # --- client: strict response schema (S11), unreadable 2xx is NEVER a definitive answer ---
 #
 # Measured (ESS Naming, live 2026-07-16): GET /rest/deviceNames/{name} with Accept:
-# application/json answers a dict that ALWAYS carries a string `status` (plus name/uuid/…);
+# application/json answers a dict that ALWAYS carries a string `status` (plus name/uuid/...);
 # WITHOUT the Accept header the service answers XML (content-type application/xml), so the
 # client must ask for JSON explicitly. A nonexistent name answers HTTP 204 (No Content), NOT
 # the 404 the old contract assumed (S16a).

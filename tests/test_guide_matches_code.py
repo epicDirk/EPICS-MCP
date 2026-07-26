@@ -104,7 +104,7 @@ def test_guide_env_vars_exist() -> None:
 def _level_param_descriptions(source: str) -> dict[str, str]:
     """``{tool_name: description}`` for every tool parameter literally named ``level``.
 
-    Reads the ``Field(description=…)`` out of the ``Annotated[...]`` annotation. Adjacent string
+    Reads the ``Field(description=...)`` out of the ``Annotated[...]`` annotation. Adjacent string
     literals inside the parentheses are folded into one constant by the parser, so a multi-line
     description arrives here as a single string.
     """

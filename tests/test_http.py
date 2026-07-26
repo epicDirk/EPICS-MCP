@@ -584,8 +584,8 @@ def test_url_host_agrees_with_the_parser_that_connects() -> None:
     so the primitive uses urllib3's answer, and refuses when they cannot agree.
     """
     hostile = "http://evil.example.org:8080\\@127.0.0.1/Olog"
-    assert urlparse(hostile).hostname == "127.0.0.1"  # what urlparse claims…
-    assert parse_url(hostile).host == "evil.example.org"  # …and where the connection would go
+    assert urlparse(hostile).hostname == "127.0.0.1"  # what urlparse claims...
+    assert parse_url(hostile).host == "evil.example.org"  # ...and where the connection would go
     assert url_host(hostile) == "evil.example.org"  # we follow the connection, not the claim
     assert is_loopback_url(hostile) is False
 

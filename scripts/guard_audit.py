@@ -238,7 +238,7 @@ def load_coverage_map(db_path: Path) -> dict[tuple[str, int], set[str]]:
 
 
 # The name a client class carries, in either house form: the dotted string path
-# (``monkeypatch.setattr("…services.olog_client.OlogClient", _Fake)``) or the module object
+# (``monkeypatch.setattr("...services.olog_client.OlogClient", _Fake)``) or the module object
 # (``monkeypatch.setattr(checkers, "OlogClient", _Fake)``).
 _CLIENT_CLASS = re.compile(r"\w*Client")
 
@@ -397,7 +397,7 @@ def claiming_tests() -> dict[str, list[tuple[str, bool]]]:
     first and is useless: it marks every test in a file that doubles a client anywhere, which
     swept in schema and CLI tests that never touch a client.
 
-    The second element flags payload vocabulary (``unreadable``, ``malformed``, ``_raises`` …).
+    The second element flags payload vocabulary (``unreadable``, ``malformed``, ``_raises`` ...).
     That distinguishes "claims something about what the service ANSWERED" (the sham-guard
     candidates) from a double used merely to keep a service-layer test off the network, which is
     a legitimate use of the same tool. It is a filter for reading order, not a verdict.

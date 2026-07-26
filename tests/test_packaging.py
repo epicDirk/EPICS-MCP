@@ -35,7 +35,7 @@ def test_version_fallback_matches_pyproject() -> None:
     source checkout has no installed metadata, that stale literal becomes a silent version lie:
     this test fails the moment the two drift, so a bump can't forget the fallback."""
     package_init = Path(epics_pv_mcp.__file__)
-    repo_root = package_init.resolve().parent.parent.parent  # …/EPICS-MCP-Server
+    repo_root = package_init.resolve().parent.parent.parent  # .../EPICS-MCP-Server
     pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
     declared = pyproject["project"]["version"]
 
@@ -83,7 +83,7 @@ def test_build_failure_classification_fails_on_real_defects() -> None:
     """The classifier's contract, pinned: environment signatures skip, a real backend/
     config error FAILS (pre-fix: everything non-zero skipped)."""
     assert _build_failure_action(0, "") == "ok"
-    assert _build_failure_action(1, "error: Failed to fetch: https://pypi.org/simple/…") == "skip"
+    assert _build_failure_action(1, "error: Failed to fetch: https://pypi.org/simple/...") == "skip"
     assert _build_failure_action(1, "getaddrinfo: Temporary failure in name resolution") == "skip"
     assert _build_failure_action(1, "ValueError: invalid [tool.hatch.build] include") == "fail"
     assert _build_failure_action(1, "hatchling.builders.plugin: unknown target") == "fail"
@@ -97,7 +97,7 @@ def test_operator_guide_ships_in_the_wheel(tmp_path: Path) -> None:
     real inclusion guard for E1's ``pip install`` distribution DoD. Skipped only if the build
     TOOLCHAIN/ENVIRONMENT is unavailable (missing uv, timeout, offline resolver signature); a
     build that fails for any other reason is a real packaging defect and FAILS."""
-    repo_root = Path(epics_pv_mcp.__file__).resolve().parent.parent.parent  # …/EPICS-MCP-Server
+    repo_root = Path(epics_pv_mcp.__file__).resolve().parent.parent.parent  # .../EPICS-MCP-Server
     try:
         result = subprocess.run(
             ["uv", "build", "--wheel", "--out-dir", str(tmp_path)],

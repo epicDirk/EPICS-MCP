@@ -58,7 +58,7 @@ class NamingServiceClient:
         # ESS endpoint. Callers gate on an unset URL (see checkers.build_naming_client + diagnose).
         # Normalise like the other three REST clients (channelfinder/archiver/alarm): strip a
         # trailing slash so a URL configured with OR without it yields the same endpoints (M10;
-        # without this, ``http://naming:8080/enotify-web`` produced ``…enotify-webrest/…`` → 404).
+        # without this, ``http://naming:8080/enotify-web`` gave ``...enotify-webrest/...`` → 404).
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         # Shared cached session (accept header + 3-retry/502-503-504 policy); naming needs no auth.
@@ -70,7 +70,7 @@ class NamingServiceClient:
         self._identity: IdentityVerdict | None = None
 
     # ``base_url`` is the service root WITHOUT a trailing ``/rest``: this property appends it
-    # itself, so configuring the URL with a trailing ``/rest`` yields ``/rest/rest/…`` → 404.
+    # itself, so configuring the URL with a trailing ``/rest`` yields ``/rest/rest/...`` → 404.
     @property
     def names_url(self) -> str:
         return f"{self.base_url}/rest/deviceNames/"

@@ -14,7 +14,7 @@ Four decisions are load-bearing, and each was forced by a measurement rather tha
   / ``fields`` across a comment wrap, i.e. both halves of the same claim, 40 lines apart. Runs of
   own-line comments are joined the same way as docstring paragraphs.
 * **Paragraph, not whole-block.** Flattening a whole docstring lets a match jump a sentence
-  boundary: ``…lives in one module.`` + ``The functions resolve…`` reads as "one module. The
+  boundary: ``...lives in one module.`` + ``The functions resolve...`` reads as "one module. The
   functions" and would be counted as a claim about functions. A bare ``#`` is the comment spelling
   of a blank line and ends a run, without it the rule held for docstrings and quietly not for
   comments, fusing fifteen author paragraphs into single blocks.

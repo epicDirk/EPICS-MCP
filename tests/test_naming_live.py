@@ -61,7 +61,7 @@ def test_registered_device_record_satisfies_the_strict_schema(
     client: NamingServiceClient, device: str
 ) -> None:
     """S11 anchor: the live record carries a readable string ``status`` (measured: a JSON dict
-    with status/name/uuid/… when asked with ``Accept: application/json``). The client now RAISES
+    with status/name/uuid/... when asked with ``Accept: application/json``). The client now RAISES
     on a record without it, this run passing pins the premise against the real service.
     ``registered`` may be True or False (an OBSOLETE fixture is fine); the anchor is that the
     answer is READABLE, never fabricated."""

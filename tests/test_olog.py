@@ -228,7 +228,7 @@ def test_allowlisted_remote_write_target_is_still_read_redacted(
             olog_write_allow_remote=True,
         )
     )
-    gate.check_write_allowed(["Operations"])  # the gate says: writing here is permitted…
+    gate.check_write_allowed(["Operations"])  # the gate says: writing here is permitted...
 
     # assume_test_data=True isolates the URL as the deciding condition, without it the client would
     # redact regardless and this would not test the write-gate/read-predicate separation at all.
@@ -236,7 +236,7 @@ def test_allowlisted_remote_write_target_is_still_read_redacted(
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(_RAW_ENTRY)))
     entry = client.get_log_entry("42")
     assert entry is not None
-    assert entry["title"] == FREETEXT_WITHHELD  # …and reading it is STILL redacted.
+    assert entry["title"] == FREETEXT_WITHHELD  # ...and reading it is STILL redacted.
     assert "owner" not in entry
     for name in _PERSON_NAMES:
         assert name not in str(entry)
@@ -382,7 +382,7 @@ def test_get_log_entry_unreadable_2xx_raises(
 ) -> None:
     """S11: a 200 whose body is not a log entry must RAISE, never a definitive answer.
 
-    Replaces the former ``…empty_body_is_none`` pin, which cemented the defect: ``{}`` collapsed
+    Replaces the former ``...empty_body_is_none`` pin, which cemented the defect: ``{}`` collapsed
     to ``None`` (indistinguishable from the definitive 404 "not found"), and an unrelated
     non-empty dict was PROJECTED as a fabricated entry (auditor probe ``{"unexpected": "shape"}``
     → a plausible log entry that never existed). The measured entry record always carries ``id``.
@@ -805,7 +805,7 @@ def test_list_tags_names_only(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_each_listing_route_targets_its_own_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     """S31: the requested URL is the only observable difference between the three listing routes.
 
-    ``/logbooks``, ``/tags`` and ``/levels`` all return ``[{name, …}]`` and the first two share
+    ``/logbooks``, ``/tags`` and ``/levels`` all return ``[{name, ...}]`` and the first two share
     ``_named_list`` outright, so no type or shape guard can fire on a swap between them: one
     faked response serves every one of them, and asserting on the RESULT pins the slot, not the
     address behind it. The ChannelFinder client carries the same gap between its own two
@@ -840,7 +840,7 @@ def test_each_listing_route_targets_its_own_endpoint(monkeypatch: pytest.MonkeyP
 # Auditor probes (QA 2026-07-16 §8.2/B1): syntactically valid 2xx JSON of the wrong shape used to
 # collapse into plausible definitive answers, search -> ([], False, None) ("no hits"), list
 # endpoints -> [] ("there are none"). The measured payload shapes (local Olog 6.0.4, live): search
-# is {hitCount:int, logs:[entry…]} (bare list = older-version variant, stays valid), every entry
+# is {hitCount:int, logs:[entry...]} (bare list = older-version variant, stays valid), every entry
 # carries `id`, every /logbooks//tags item carries `name`.
 
 

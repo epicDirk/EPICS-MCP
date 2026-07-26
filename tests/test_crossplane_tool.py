@@ -332,7 +332,7 @@ async def test_crossplane_tool_pva_prefixed_pv_links(tmp_path: Path) -> None:
     result = await _crossplane_check(str(displays), str(st_cmd), query_naming=False)
     report = result["report"]
     assert isinstance(report, dict)
-    assert report["pvs_linked"] == ["DEV-TEST01:Ctrl-EVR-01:status"]  # channel form, NOT pva://…
+    assert report["pvs_linked"] == ["DEV-TEST01:Ctrl-EVR-01:status"]  # channel form, NOT pva://...
     assert report["pvs_other_prefix"] == []  # before the fix the raw pva:// PV landed here
 
 

@@ -20,7 +20,7 @@ _operation_counter = itertools.count(1)
 
 
 def _next_operation_id() -> str:
-    """Return the next audit correlation id (``w1``, ``w2``, …). ``count.__next__`` is atomic."""
+    """Return the next audit correlation id (``w1``, ``w2``, ...). ``count.__next__`` is atomic."""
     return f"w{next(_operation_counter)}"
 
 

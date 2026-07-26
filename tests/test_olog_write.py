@@ -199,8 +199,8 @@ class TestUrlBoundary:
         gate = OlogWriteGate(
             _write_config(
                 olog_url=url,
-                olog_write_url_allowlist=url,  # exactly allowlisted…
-                olog_write_allow_remote=True,  # …and remote writes enabled
+                olog_write_url_allowlist=url,  # exactly allowlisted...
+                olog_write_allow_remote=True,  # ...and remote writes enabled
             )
         )
         with pytest.raises(OlogWriteDeniedError):

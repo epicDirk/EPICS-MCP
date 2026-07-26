@@ -10,10 +10,10 @@ the other eight are not worth a live probe, so nobody re-derives that later.
 ``update_log_entry``.
 It is the only deny path whose *decision input* is produced by the SERVER. Both tools take a log
 **id** and nothing else about the target; the logbook names the gate is keyed on are read out of the
-server's own answer (``raw["logbooks"]`` → ``[{"name": …}]``). A mock cannot falsify that class: it
-supplies the very shape the code assumes, so a wrong assumption about the payload passes in memory
-and denies (or fails to deny) against the real thing. Here the deny message must name a logbook this
-test **never passed to the service**, it can only have travelled id → HTTP GET → gate.
+server's own answer (``raw["logbooks"]`` → ``[{"name": ...}]``). A mock cannot falsify that class:
+it supplies the very shape the code assumes, so a wrong assumption about the payload passes in
+memory and denies (or fails to deny) against the real thing. Here the deny message must name a
+logbook this test **never passed to the service**, it can only have travelled id → HTTP GET → gate.
 
 **Not probed live, with reasons (so this list is a decision, not an omission):**
 
@@ -306,7 +306,7 @@ async def test_add_log_attachment_denies_a_logbook_the_server_reported(
     assert excinfo.value.error_code == "OLOG_WRITE_DENIED"
     # Branch 3 and not branch 0/1/2: all four raise the same class with the same code.
     assert _ALLOWLIST_DENY_MESSAGE in str(excinfo.value)
-    # …and it names the logbook the SERVER reported for this entry.
+    # ...and it names the logbook the SERVER reported for this entry.
     assert denied_logbook in str(excinfo.value)
 
 

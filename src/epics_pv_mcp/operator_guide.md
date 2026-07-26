@@ -207,7 +207,7 @@ ephemeral stderr audit would lose this trail on restart. The stages, each `op`-c
   bounds-checked and this line does not appear.)
 - `event=ATTEMPT`: emitted **before** the I/O; a durable record that this write was dispatched.
 - `event=ALLOW`: the put returned successfully.
-- `event=FAILED error_code=…`: the put raised (timeout, connection, or a bug tagged `INTERNAL`).
+- `event=FAILED error_code=...`: the put raised (timeout, connection, or a bug tagged `INTERNAL`).
 - `event=UNKNOWN_PENDING`: **the important one.** The write coroutine was cancelled mid-put (client
   disconnect, `wait_for` timeout, task cancel). The blocking p4p put runs in a worker thread that a
   cancellation does **not** stop, so the value **may still reach the IOC** after the caller sees the
@@ -442,7 +442,7 @@ Each plane has its own beacon, because they do not share one:
 
 | Plane | Beacon | Identified by |
 |---|---|---|
-| ChannelFinder / Olog / Alarm | `GET <base-url>` | exact `name` ("ChannelFinder Service", …) |
+| ChannelFinder / Olog / Alarm | `GET <base-url>` | exact `name` ("ChannelFinder Service", ...) |
 | Archiver (MGMT) | `GET /mgmt/bpl/getApplianceInfo` | the `identity` field |
 | Archiver (retrieval) | `GET /retrieval/bpl/getVersion` | the product name in `version` |
 | Naming | `GET /rest/swagger.json` | `info.title` |
@@ -492,8 +492,8 @@ pass `timeout` ≥ 8 for the first probe.
 
 ### Naming URL: no trailing `/rest`
 Set `EPICS_MCP_NAMING_URL` to the service root **without** `/rest` and without a trailing slash. The
-client appends `/rest/deviceNames/…` itself; a trailing slash is normalized, but
-appending `/rest` yourself yields `/rest/rest/…` → 404.
+client appends `/rest/deviceNames/...` itself; a trailing slash is normalized, but
+appending `/rest` yourself yields `/rest/rest/...` → 404.
 
 ### Archiver history time window: ISO-with-zone only, and a 500 does not mean unreachable
 Three planes, three different time grammars, this is the narrowest, and the only one that is
@@ -578,7 +578,7 @@ messages embed the full request URL, an internal host would leak into this file)
   flapping counter), `connection_first_established` and `connection_last_restablished` (`"Never"` if
   never dropped, note the appliance's upstream typo "Restablished", preserved verbatim);
   `get_archive_info` adds the getPVTypeInfo alarm/display/control limits + `units`/`precision`
-  (`upper_alarm_limit`=HIHI … `*_ctrl_limit`=DRVH/DRVL) and `controlling_pv`/`policy_name`/
+  (`upper_alarm_limit`=HIHI ... `*_ctrl_limit`=DRVH/DRVL) and `controlling_pv`/`policy_name`/
   `modification_time`. ⚠️ The nine numeric limits are ALWAYS present and read `"0.0"` when the PV
   had no ctrl info, `"0.0"` may mean "no limit configured", not a literal zero.
 - **Which appliance am I on? cluster topology?** `get_appliance_info` (no PV) surfaces the whole

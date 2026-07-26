@@ -12,7 +12,7 @@ from the Alarm Logger, which uses the real class and reads ISO with a zone direc
 An unreadable value does not raise; it degrades to *now* and the window collapses:
 
     start=2026-01-01T00:00:00Z & end=2027-01-01T00:00:00Z  ->  HTTP 200, 0 results
-    start=2026-01-01 00:00:00.000 & end=2027-01-01 …       ->  HTTP 200, 9 results
+    start=2026-01-01 00:00:00.000 & end=2027-01-01 ...       ->  HTTP 200, 9 results
 
 Same window, same data, different format. The ISO answer is not an error, it is a **plausible
 empty result**. The shared classifier (:mod:`epics_pv_mcp.services._time_window`) decides what a

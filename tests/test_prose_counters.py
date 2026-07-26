@@ -97,7 +97,7 @@ class _Claim:
 
     THE VOCABULARY, in full, because a declaration nobody can read is a comment:
 
-    * ``"…/name.py"``: a source file the measure must hand to ``_parsed``. Matched on a
+    * ``".../name.py"``: a source file the measure must hand to ``_parsed``. Matched on a
       path-separator boundary, never as a bare suffix: ``"server.py"`` would otherwise be satisfied
       by parsing ``tests/test_server.py``. Spelled the way ``_WATCHED`` spells its labels.
     * ``"_SOME_CONSTANT"``: a name the measure must read off the ``test_server`` module.
@@ -143,7 +143,7 @@ def _derivation_source(measure: Callable[[], int]) -> str:
 
     THE ORDER OF THOSE TWO IS LOAD-BEARING and it used to be the other way round. The lambda walk
     ran first over the WHOLE parsed statement, so a named measure containing a lambda anywhere:
-    a ``key=lambda …`` in a sort, say, had its entire body discarded and only that lambda's body
+    a ``key=lambda ...`` in a sort, say, had its entire body discarded and only that lambda's body
     inspected. Latent on the delivered table (measured: 0 of 79 named measures contain one) and a
     trap the moment one does, because the discarded body is exactly where a typed-in answer would
     sit. A named function is now matched before anything is walked.
@@ -166,9 +166,10 @@ def _derivation_source(measure: Callable[[], int]) -> str:
         node: ast.AST = ast.parse(source).body[0]
     except SyntaxError:
         # ``inspect.getsource`` on a lambda hands back its enclosing statement cut at the first
-        # NEWLINE, which is a FRAGMENT. Most such fragments parse anyway, ``_claim(…, lambda: x),``
-        # is a one-element tuple, so the branch below is NOT the common case the old comment
-        # claimed. It is reached by one layout: arguments on a single wrapped line together with a
+        # NEWLINE, which is a FRAGMENT. Most such fragments parse anyway,
+        # ``_claim(..., lambda: x),`` is a one-element tuple, so the branch below is NOT the common
+        # case the old comment claimed. It is reached by one layout: arguments on a single wrapped
+        # line together with a
         # ``scope=`` keyword, where the fragment is a tuple containing a keyword argument.
         # ``test_the_derivation_reader_handles_a_fragment`` drives exactly that.
         node = ast.parse(f"_({source.strip().rstrip(',')})").body[0]
@@ -418,7 +419,7 @@ def _runtime_bound_constants() -> int:
     """``*_ALWAYS_PRESENT`` constants a REAL-CLIENT conformance test reads.
 
     ⚠️ Honest scope, because this is the one measure in the family that remains a stand-in. The
-    sentence it guards says those constants are "ALREADY runtime-bound … and go red on the same
+    sentence it guards says those constants are "ALREADY runtime-bound ... and go red on the same
     mutation", a MUTATION property, which no constant can settle. What is measured instead is
     which constants the wire-driving tests read, and that is nameable, derivable and moves with
     the thing the sentence is about. It is not the same claim, and pretending otherwise is what
@@ -516,7 +517,7 @@ def _rows_advertising(element_schema: dict[str, object]) -> int:
     """Rows whose advertised element schema EQUALS *element_schema*, value, deliberately.
 
     The sentences this serves say what the rows CARRY ("the N rows carrying ``{"type": "string"}``",
-    "the other M rows are ``{"type": "object", …}``"). Identity answered a different question
+    "the other M rows are ``{"type": "object", ...}``"). Identity answered a different question
     there, and the difference is reachable rather than theoretical: spelling one row out as an
     equal literal changes nothing about what that row advertises, yet made both sentences go red
     while both were still true. Which set a sentence is about may not depend on whether the author
@@ -833,7 +834,7 @@ def _olog_reexport_lines() -> int:
     """``query_olog_*`` names ``services/checkers.py`` re-exports from ``checkers_olog``.
 
     The sentence this serves is about the RE-EXPORT, "for backward compatibility :mod:`~.checkers`
-    re-exports the … functions and ``_olog_error_code``", not about the definitions. Counting the
+    re-exports the ... functions and ``_olog_error_code``", not about the definitions. Counting the
     definitions instead, which is what this claim used to do, read a set the sentence does not
     name: dropping a re-export leaves every definition where it is, so the count stayed right while
     the sentence became false.

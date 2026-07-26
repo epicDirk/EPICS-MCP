@@ -215,7 +215,7 @@ class ArchiverClient:
 
         S11: the payload must be a non-empty list whose first element is a dict carrying a
         string ``status``. Measured (ESS appliance 2.2.1): even an UNKNOWN pv gets a REAL record
-        (``{"pvName": …, "status": "Not being archived"}``), so ``[]``/junk is out of contract
+        (``{"pvName": ..., "status": "Not being archived"}``), so ``[]``/junk is out of contract
         and RAISES. The old code minted a synthetic ``{"status": "Unknown"}`` record, which the
         callers turned into the definitive ``(False, "Unknown")`` / ``archived: false`` (auditor
         probe ARCHIVER_IS_ARCHIVED_BAD_2XX).
