@@ -152,7 +152,7 @@ def build_retrying_session(
     degrades to no-retry rather than failing at construction.
 
     ``retries`` and ``backoff_factor`` are parametrized (Q2) so a caller can request ``retries=0``:
-    a SINGLE attempt with no retry-multiplied timeout, the „one attempt, long timeout" shape this
+    a SINGLE attempt with no retry-multiplied timeout, the "one attempt, long timeout" shape this
     factory could not express before (urllib3 applies the per-request ``timeout`` PER attempt, so a
     3-retry session's worst case is ≈ 4×T plus backoff, with no wall-clock deadline). The default
     stays ``(3, 0.5)`` so every existing caller is unchanged. The ``retries=0`` path mirrors
@@ -189,7 +189,7 @@ def build_retrying_session(
     if verify is not True:
         session.trust_env = False
     if retries <= 0:
-        # Single attempt (Q2 „one attempt, long timeout"): reuse build_write_session's no-retry
+        # Single attempt (Q2 "one attempt, long timeout"): reuse build_write_session's no-retry
         # adapter shape. No Retry import needed, requests builds Retry(total=0) from the int, so
         # even a stripped environment gets a deterministic no-retry adapter here. pool_maxsize is
         # passed only when set, so the default path keeps requests' own default (10).

@@ -3,7 +3,7 @@
 WHY THIS EXISTS
 ---------------
 The archiver live tests need a fixture PV with a handful of samples in a FIXED absolute window
-(the defaults mirror ``tests/test_archiver_live.py``: 3–50 samples, at least 2 strictly inside,
+(the defaults mirror ``tests/test_archiver_live.py``: 3-50 samples, at least 2 strictly inside,
 not capped at ``max_points=50``). Blind enumeration cannot find one: an archive population is
 often bimodal (fast, capped PVs plus carried-only ones whose single sample predates any window),
 so a blind stride finds no middle, measured: five blind strategies over 153 candidates found
@@ -19,7 +19,7 @@ THE MEASURED WALK (appliance 2.2.x, 2026-07-17)
    Omit it and filter client-side. The no-limit report is near-complete but NOT the whole
    archived set (measured: ~1.5M report rows vs ~1.7M getAllPVs names on the same cluster;
    the gap is unverified, plausibly paused or rate-less PVs).
-2. Filter to a rate band (default ``1e-7..1.6e-6`` Hz ≈ 3–50 events/year).
+2. Filter to a rate band (default ``1e-7..1.6e-6`` Hz ≈ 3-50 events/year).
 3. COUNTER-VERIFY every band hit against the target window with a real history fetch: the
    report's rate is computed by the appliance over its own recent window, not over the
    caller's target window, a band hit is a hypothesis, never a fixture.

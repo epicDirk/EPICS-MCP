@@ -96,7 +96,7 @@ different event, and it says so where it is implemented.
 
 **5. Where the surface has network reach: a reach / URL boundary, enforced fail-closed.** A gate whose target
 can be an arbitrary host must confine *where* a write can physically go, in addition to *what* may be written
-(points 1–2):
+(points 1-2):
 
 - **When the target is fixed at construction** (a client search reach): confine it at construction: writes
   enabled while the search reach extends beyond loopback is a config error; refuse to start a write-enabled
@@ -135,7 +135,7 @@ State this plainly where the gate is described, because the word "gate" invites 
   the wire. A gate whose refusals are only asserted in prose, never observed going red, has a documented
   promise, not a verified one.
 
-**Honest limit:** points 1–5 are enforceable in code and are drift-guarded per gate by
+**Honest limit:** points 1-5 are enforceable in code and are drift-guarded per gate by
 `tests/test_write_gate_contract.py`; point 6 and the empty-semantics *rationale* of point 2 are **prose**,
 the category that rots. No CI check proves a future gate author re-decided the empty-shape deliberately or
 scoped the audit claim honestly; the guard there is the review plus the red-provable deny tests of point 6.
