@@ -1,33 +1,33 @@
-"""Drift guard: the tool ARGUMENT contract — the schema, and the prose that teaches it.
+"""Drift guard: the tool ARGUMENT contract, the schema, and the prose that teaches it.
 
 Background (2026-07-25, commit ``9256977``): the tools unified the argument naming "the PV this
-tool is about" — ``pv``/``name`` → ``pv_name``, ``pvs``/``names`` → ``pv_names``. That is BREAKING
-for a client calling by argument name, so the new names have to be pinned — and so does every
+tool is about", ``pv``/``name`` → ``pv_name``, ``pvs``/``names`` → ``pv_names``. That is BREAKING
+for a client calling by argument name, so the new names have to be pinned, and so does every
 surface that TEACHES them.
 
 Both halves had already failed once, and this module is the guard for each:
 
 * The suite pinned only 5 of the 8 renamed tools. Measured by mutation: reverting ``get_pvs``,
   ``monitor_pv`` or ``validate_pvs`` to its old argument name left the whole suite GREEN.
-* Two SHIPPED surfaces kept teaching a retired name — the ``compare_machine_state`` prompt
+* Two SHIPPED surfaces kept teaching a retired name, the ``compare_machine_state`` prompt
   (``get_pvs(names=[...])``) and the operator guide served as ``epics-pv://guide``
   (``get_alarm_history`` … ``pv``). A client that follows either builds a call the server rejects.
 
 Three guards, in the order the failure happened:
 
 1. the wire contract itself (``inputSchema``), including the absence of the retired names;
-2. every ``tool(keyword=...)`` example in the prose, checked against the real schema — this one
+2. every ``tool(keyword=...)`` example in the prose, checked against the real schema, this one
    generalizes to a future rename, because the tool set comes from the live registry;
 3. the retired names of THIS rename, which must not appear beside their tool in prose that carries
    no call syntax (exactly how the guide's occurrence was phrased).
 
 Honest limits, so nobody reads more into this than it proves:
 
-* Guard 3 is a pin for a KNOWN rename. Its table is hand-maintained — a FUTURE rename is not
+* Guard 3 is a pin for a KNOWN rename. Its table is hand-maintained, a FUTURE rename is not
   covered until someone extends it.
 * Guard 3's proximity window is a heuristic, not a parser. 200 characters was chosen BY
   MEASUREMENT: across the current guide, README and every prompt variant it flags exactly the
-  mentions of the one real defect and nothing else — in particular NOT the Archiver ``getAllPVs``
+  mentions of the one real defect and nothing else, in particular NOT the Archiver ``getAllPVs``
   recipe, which legitimately documents a FOREIGN REST API's own ``pv`` query parameter.
 * Guard 2 only sees keyword-call syntax. A positional example (``get_pv_info("PV")``) carries no
   argument name and is out of scope by construction.
@@ -62,7 +62,7 @@ _SINGLE_PV_TOOLS: tuple[str, ...] = (
 )
 
 #: The PV-LIST argument. ``validate_pvs`` takes EITHER a PV list OR a .bob path, so the list is
-#: optional there — the name is pinned for both, "required" only where it genuinely is.
+#: optional there, the name is pinned for both, "required" only where it genuinely is.
 _PV_LIST_ARG = "pv_names"
 _PV_LIST_TOOLS: tuple[str, ...] = ("get_pvs", "validate_pvs")
 _PV_LIST_REQUIRED: frozenset[str] = frozenset({"get_pvs"})
@@ -77,7 +77,7 @@ _UNCHANGED_ARGS: Mapping[str, str] = {
     "find_device": "query",
 }
 
-#: The retired argument name(s) per tool — must survive neither in a schema nor in the prose.
+#: The retired argument name(s) per tool, must survive neither in a schema nor in the prose.
 _RETIRED_ARGS: Mapping[str, tuple[str, ...]] = {
     "monitor_pv": ("name",),
     "is_archived": ("pv",),
@@ -92,7 +92,7 @@ _RETIRED_ARGS: Mapping[str, tuple[str, ...]] = {
 #: Characters after a tool mention within which a retired name counts as "taught by" that tool.
 _RETIRED_WINDOW = 200
 
-#: Registered only with the optional ``[displays]`` extra — absent in a core-only install, where
+#: Registered only with the optional ``[displays]`` extra, absent in a core-only install, where
 #: their rows are skipped instead of failing (mirrors server.py's own registration condition).
 _DISPLAY_GATED: frozenset[str] = frozenset({"validate_pvs", "find_device"})
 
@@ -149,7 +149,7 @@ async def test_single_pv_tools_take_pv_name() -> None:
             f"{tool} lost its {_SINGLE_PV_ARG} argument: {sorted(props)}"
         )
         assert _SINGLE_PV_ARG in _required(schemas[tool]), (
-            f"{tool}.{_SINGLE_PV_ARG} must stay REQUIRED — an optional PV would let a caller "
+            f"{tool}.{_SINGLE_PV_ARG} must stay REQUIRED, an optional PV would let a caller "
             f"omit the very thing the tool is about"
         )
 
@@ -184,7 +184,7 @@ async def test_deliberately_unchanged_arguments_kept_their_names() -> None:
             continue
         assert tool in schemas, f"{tool} is not registered"
         assert arg in _properties(schemas[tool]), (
-            f"{tool}.{arg} was renamed — 9256977 deliberately kept it: a DEVICE name and the "
+            f"{tool}.{arg} was renamed, 9256977 deliberately kept it: a DEVICE name and the "
             f"glob/search parameters are not 'the PV this tool is about'"
         )
 
@@ -205,7 +205,7 @@ async def test_documented_keyword_calls_match_the_real_schema() -> None:
                 checked += 1
                 if keyword not in _properties(schemas[tool]):
                     offenders.append(
-                        f"{surface}: {tool}({keyword}=...) — the tool accepts "
+                        f"{surface}: {tool}({keyword}=...), the tool accepts "
                         f"{sorted(_properties(schemas[tool]))}"
                     )
     assert not offenders, "a shipped surface teaches an argument the tool rejects:\n" + "\n".join(
@@ -213,7 +213,7 @@ async def test_documented_keyword_calls_match_the_real_schema() -> None:
     )
     # Non-empty floor (decision LJ): a regex that silently stops matching would make this
     # guard vacuously green forever.
-    assert checked >= 4, f"only {checked} keyword arguments found — the scan is probably broken"
+    assert checked >= 4, f"only {checked} keyword arguments found, the scan is probably broken"
 
 
 # --- Guard 3: retired names in prose without call syntax --------------------------------------

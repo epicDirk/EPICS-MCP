@@ -53,7 +53,7 @@ def _stub_identity(
     verified: bool = True,
     exc: Exception | None = None,
 ) -> Mock:
-    """Stub the SECOND, INDEPENDENT seam — the swagger identity probe's ``rest_get_json`` — apart
+    """Stub the SECOND, INDEPENDENT seam, the swagger identity probe's ``rest_get_json``, apart
     from the deviceNames GET (``client.session.get``). The S13 gate issues a second request the
     single-response ``_client_with`` mock cannot serve, so the two must be seamed separately.
     ``verified`` picks the correct vs a foreign ``info.title``; pass ``exc`` to simulate a probe
@@ -105,7 +105,7 @@ def test_validate_name_obsolete_not_registered(monkeypatch: pytest.MonkeyPatch) 
 def test_validate_name_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
     """A genuine 404 on the deviceNames endpoint = the DEFINITIVE 'not registered'. S13 POSITIVE
     control: with the responder's identity VERIFIED (swagger beacon), the 404 still maps to a
-    definitive registered=False — the gate must not OVER-withhold a real not-registered."""
+    definitive registered=False, the gate must not OVER-withhold a real not-registered."""
     _stub_identity(monkeypatch, verified=True)
     client = _client_with(monkeypatch, _resp({}, status=404))
     result = client.validate_name("NOPE:nope")
@@ -136,18 +136,18 @@ def test_validate_name_transport_error_propagates(monkeypatch: pytest.MonkeyPatc
         client.validate_name("DEV-TEST01:Ctrl-EVR-01")
 
 
-# --- client: strict response schema (S11) — unreadable 2xx is NEVER a definitive answer ---
+# --- client: strict response schema (S11), unreadable 2xx is NEVER a definitive answer ---
 #
 # Measured (ESS Naming, live 2026-07-16): GET /rest/deviceNames/{name} with Accept:
 # application/json answers a dict that ALWAYS carries a string `status` (plus name/uuid/…);
-# WITHOUT the Accept header the service answers XML (content-type application/xml) — so the
+# WITHOUT the Accept header the service answers XML (content-type application/xml), so the
 # client must ask for JSON explicitly. A nonexistent name answers HTTP 204 (No Content), NOT
 # the 404 the old contract assumed (S16a).
 
 
 def test_session_asks_for_json(monkeypatch: pytest.MonkeyPatch) -> None:
     """Premise pin (S11, measured live 2026-07-16): the real ESS Naming service serves **XML**
-    to a plain ``Accept: */*`` GET — only ``Accept: application/json`` yields the JSON record
+    to a plain ``Accept: */*`` GET, only ``Accept: application/json`` yields the JSON record
     this client parses. The shared ``build_retrying_session`` sets that header today; this pins
     it, because swapping the session builder would silently collapse EVERY live lookup into
     withheld (``resp.json()`` fails on XML). Mutant-red: without the header the requests default
@@ -157,7 +157,7 @@ def test_session_asks_for_json(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_validate_name_payload_without_status_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """S11: a 2xx dict WITHOUT the measured anchor ``status`` must RAISE (→ callers withhold) —
+    """S11: a 2xx dict WITHOUT the measured anchor ``status`` must RAISE (→ callers withhold):
     it used to become the definitive ``registered=False`` with status ''."""
     client = _client_with(monkeypatch, _resp({"unexpected": "shape"}))
     with pytest.raises(NamingServiceResponseError):
@@ -169,7 +169,7 @@ def test_validate_name_unreadable_status_raises(
     status: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """S11 (plan-review finding A2 + diff-review): a non-string ``status`` used to be
-    str()-minted ('123'), and an EMPTY string read as an unknown status — both became the
+    str()-minted ('123'), and an EMPTY string read as an unknown status, both became the
     definitive ``registered=False``. Neither is a measured server value; junk raises instead."""
     client = _client_with(monkeypatch, _resp({"status": status}))
     with pytest.raises(NamingServiceResponseError):
@@ -191,7 +191,7 @@ def test_validate_name_204_is_definitively_not_registered(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """S16(a), measured live (ESS Naming 2026-07-16): a nonexistent name answers HTTP 204
-    (No Content) — NOT 404. Before this, the empty body failed ``resp.json()`` and the lookup
+    (No Content); NOT 404. Before this, the empty body failed ``resp.json()`` and the lookup
     withheld (honest but needlessly vague); the measured 204 is the service's definitive
     "not registered" and maps to it. The 404 branch stays (a second definitive signal). S13
     POSITIVE control: identity VERIFIED, so the 204 still maps to definitive registered=False."""
@@ -215,7 +215,7 @@ def test_check_connectivity_raises_on_error(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_check_connectivity_wraps_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """S8-5 contract guard: a requests.exceptions.Timeout must surface as
-    NamingServiceConnectionError (a withheld transport signal). This is a forward guard — it holds
+    NamingServiceConnectionError (a withheld transport signal). This is a forward guard, it holds
     today because RequestException ⊂ OSError, and it FAILS if the except arm is ever narrowed to
     only ConnectionError, re-opening the raw-escape/false-'not registered' hole."""
     client = NamingServiceClient(base_url="http://naming.example/")
@@ -235,7 +235,7 @@ def test_check_connectivity_uses_configured_timeout(monkeypatch: pytest.MonkeyPa
 
 
 # ---------------------------------------------------------------------------
-# S13 — swagger identity probe (naming_identity.probe_naming_identity) in isolation
+# S13: swagger identity probe (naming_identity.probe_naming_identity) in isolation
 # ---------------------------------------------------------------------------
 
 
@@ -263,14 +263,14 @@ def test_probe_unverified_on_2xx_without_matching_title(
     payload: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A 2xx that does not name itself as the Naming Service is honest ``unverified``
-    (recognisable-but-unproven) — never a hard failure (matches epics-doctor since S14)."""
+    (recognisable-but-unproven), never a hard failure (matches epics-doctor since S14)."""
     _probe_seam(monkeypatch, payload)
     assert probe_naming_identity("http://naming.example") == "unverified"
 
 
 def test_probe_unverified_on_unreadable_2xx_body(monkeypatch: pytest.MonkeyPatch) -> None:
     """A REACHED-but-unreadable 2xx (a non-JSON body → a ValueError/JSONDecodeError wrapped as
-    ``__cause__`` on modern requests) is ``unverified`` — epics-doctor's
+    ``__cause__`` on modern requests) is ``unverified``, epics-doctor's
     _beacon_reached_but_unreadable split, kept in lockstep."""
     wrapped = RestResponseError("unreadable body")
     wrapped.__cause__ = requests.exceptions.JSONDecodeError("Expecting value", "", 0)
@@ -318,13 +318,13 @@ def test_probe_failed_on_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_probe_is_total_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """S13 totality: the probe NEVER raises. ``crossplane_check`` catches only
     NamingServiceResponseError, so a raw escape from the identity path would crash a best-effort
-    report — even an UNEXPECTED error must degrade to ``probe_failed``."""
+    report, even an UNEXPECTED error must degrade to ``probe_failed``."""
     _probe_seam(monkeypatch, raises=RuntimeError("boom"))
     assert probe_naming_identity("http://naming.example") == "probe_failed"
 
 
 # ---------------------------------------------------------------------------
-# S13 — the definitive-negative identity gate wired into naming_client
+# S13: the definitive-negative identity gate wired into naming_client
 # ---------------------------------------------------------------------------
 
 
@@ -357,7 +357,7 @@ def test_definitive_negative_withhold_raises_parent_not_notfound(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """S13 (why the PARENT class): the withhold must raise NamingServiceResponseError, NOT its
-    subclass NamingServiceNotFound — validate_name catches ONLY NotFound and would map it to a
+    subclass NamingServiceNotFound, validate_name catches ONLY NotFound and would map it to a
     false registered=False. Pin that the raised type is not NotFound (mutant: raise NotFound
     instead → validate_name returns a false registered=False)."""
     _stub_identity(monkeypatch, verified=False)
@@ -380,7 +380,7 @@ def test_identity_probed_once_per_instance(monkeypatch: pytest.MonkeyPatch) -> N
 def test_doctor_and_client_share_one_swagger_title() -> None:
     """S13 single-source: epics-doctor's naming plane and the naming identity probe resolve the SAME
     swagger-title constant (imported from naming_identity), so the two identity surfaces cannot
-    drift — a title reword is a ONE-line change in one module."""
+    drift, a title reword is a ONE-line change in one module."""
     from epics_pv_mcp.services import doctor, naming_identity
 
     # Read via __dict__: the constant is imported into doctor's namespace (not re-exported), and
@@ -390,7 +390,7 @@ def test_doctor_and_client_share_one_swagger_title() -> None:
 
 def test_identity_verdict_is_per_instance_not_shared(monkeypatch: pytest.MonkeyPatch) -> None:
     """S13 cache SCOPE (QA F6): the identity verdict caches on the INSTANCE (``self._identity``),
-    never shared across clients — so a SECOND client (possibly pointed at a different host) issues
+    never shared across clients, so a SECOND client (possibly pointed at a different host) issues
     its OWN swagger probe and never inherits the first's ``verified``. The existing
     ``test_identity_probed_once_per_instance`` only pins ONE instance (call_count == 1), so a mutant
     that hoists the cache to a class-/module-level attribute would pass it; this pins TWO instances.
@@ -405,7 +405,7 @@ def test_identity_verdict_is_per_instance_not_shared(monkeypatch: pytest.MonkeyP
 
 def test_definitive_negative_is_not_cached_refetches(monkeypatch: pytest.MonkeyPatch) -> None:
     """S13 / DS-2 (QA F6): a definitive negative RAISES before the ``_names_cache`` write, so the
-    SAME name is re-queried on every lookup — a name may get registered later, and a cached negative
+    SAME name is re-queried on every lookup, a name may get registered later, and a cached negative
     would go stale (worse: replay as an S11 no-status withhold). No existing test pins this: the
     cache test loops over DISTINCT names. Mutant-red: writing ``_names_cache`` before the raise
     makes the second same-name lookup a cache hit, so the deviceNames GET is issued once, not N
@@ -420,7 +420,7 @@ def test_definitive_negative_is_not_cached_refetches(monkeypatch: pytest.MonkeyP
 
 
 def test_naming_lookup_consumes_the_read_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
-    """S3: the Naming device lookup uses a DIRECT ``session.get`` (not ``rest_get_json`` — it needs
+    """S3: the Naming device lookup uses a DIRECT ``session.get`` (not ``rest_get_json``, it needs
     the raw 204/404 for its identity-gated negative answer, which rest_get_json swallows), so it
     consults the shared read throttle itself. Otherwise the documented "bounds the REST planes incl.
     Naming" would be a false promise. With ``read_rate_limit=2`` the 3rd DISTINCT lookup is denied.

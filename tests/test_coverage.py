@@ -79,7 +79,7 @@ def test_record_name_normalized_both_sides() -> None:
 
 def test_audit_coverage_merges_same_record_rows_order_independent() -> None:
     """S5-6 / merge-branch lock: two index rows that normalize to the SAME record (DEV:SP and
-    DEV:SP.EGU) must merge into ONE row with UNIONED displays and roles — independent of input
+    DEV:SP.EGU) must merge into ONE row with UNIONED displays and roles, independent of input
     order. Exercises the field-suffix merge branch (coverage.py:187-198), which no prior test
     entered (every other multi-row test used distinct records)."""
     rows_a = [

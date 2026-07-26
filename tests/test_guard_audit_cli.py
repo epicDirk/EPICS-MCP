@@ -8,8 +8,8 @@ test with new behaviour, and this is it.
 Three of the four run WITHOUT a coverage database, which is the point: recording one costs a full
 suite run under ``COVERAGE_CORE=ctrace``, so the cheap half has to be checkable on its own or
 nobody will ever check it. The fourth supplies a SYNTHETIC map, because DRIVING the reader costs
-nothing even though RECORDING a real map does — conflating those two is how the expensive branch
-nearly shipped untested. They also run IN-PROCESS rather than through a subprocess — a second
+nothing even though RECORDING a real map does, conflating those two is how the expensive branch
+nearly shipped untested. They also run IN-PROCESS rather than through a subprocess, a second
 interpreter would import a second copy of the module and the substitution below would apply to an
 object the code under test never reads, which is precisely the sham this audit exists to find.
 """
@@ -32,7 +32,7 @@ _ARGV = ["guard_audit.py", "sham", "--check"]
 def test_check_without_a_database_agrees_and_names_what_it_could_not_reach(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Exit 0 on agreement — and the unreachable pins are named on the CLEAN run too.
+    """Exit 0 on agreement, and the unreachable pins are named on the CLEAN run too.
 
     A checker that prints "OK" while half its pins were out of reach reads as a verdict about all
     of them. Naming the gap on every run, not only on failure, is what keeps the clean case from
@@ -50,7 +50,7 @@ def test_check_without_a_database_agrees_and_names_what_it_could_not_reach(
 def test_check_reports_a_deviating_pin_by_name_and_exits_one(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Exit 1 means "a pin deviates" — and says WHICH, so the code is never the thing to hunt.
+    """Exit 1 means "a pin deviates", and says WHICH, so the code is never the thing to hunt.
 
     The exit code alone would be ambiguous: 1 is also what an uncaught exception produces. The
     tool answers that by reserving 9 for a crash; this test pins the other half, that a 1 arrives
@@ -74,18 +74,18 @@ def test_check_reports_a_deviating_pin_by_name_and_exits_one(
 def test_check_with_a_database_compares_all_four_pins(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The expensive half is exercised too — and it did not need the expensive input to be.
+    """The expensive half is exercised too, and it did not need the expensive input to be.
 
     The first version of this module skipped it, arguing that a coverage map costs a full ctrace
     suite run. That conflates RECORDING a real map with driving the code that CONSUMES one. Left
     untested, deleting the comparison would have stopped 102 and 20 from ever being checked while
-    the gate stayed green — the exact shape of sham this tool exists to find.
+    the gate stayed green, the exact shape of sham this tool exists to find.
 
     THE MAP MUST DISCRIMINATE, and the first version's did not. It carried the context ``"t::a"``,
     which ends with ``::a`` and therefore matches no test name in the estate, so ``executing`` never
     intersected the claiming tests and both figures came out exactly as they do for an EMPTY map.
     Measured: the whole guard-line intersection in ``cmd_sham`` could be deleted, or its ``in``
-    inverted to ``not in``, and this test stayed green — a sham guard inside the tool that exists to
+    inverted to ``not in``, and this test stayed green, a sham guard inside the tool that exists to
     find sham guards. The context below names a test that really is in the population, so the two
     coverage figures must come out one lower than the AST pair, and the assertions say so.
 
@@ -93,8 +93,8 @@ def test_check_with_a_database_compares_all_four_pins(
     is satisfied by a computation that returns constants; "measured 106" is not.
 
     Honest limit, because the substitution below is easy to over-read: it replaces
-    ``load_coverage_map``, so what is exercised is its CONSUMER. The reader itself — which must
-    query the ``arc`` table, since ``line_bits`` yields a silently empty map — is still covered by
+    ``load_coverage_map``, so what is exercised is its CONSUMER. The reader itself, which must
+    query the ``arc`` table, since ``line_bits`` yields a silently empty map, is still covered by
     no test at all.
     """
     # A real member of the claiming population, and one that carries payload vocabulary, so
@@ -139,14 +139,14 @@ def test_check_with_a_database_compares_all_four_pins(
 def test_a_coverage_context_is_matched_by_file_and_function(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A test is identified by the file it lives in and the function it is — not by a suffix.
+    """A test is identified by the file it lives in and the function it is, not by a suffix.
 
     Both halves were wrong and both were measured on a real ctrace map. The phase was stripped by
     splitting on the FIRST pipe, which truncates a node id that contains one (six do here, e.g. a
     parametrised case whose id ends in ``[level-'|']``). And the claiming test was looked up with
     ``endswith("::" + name)``, which ignores the file and cannot match a parametrised id at all:
-    that credited ``test_olog_write.py::test_unknown_level_refused`` — a candidate carrying payload
-    vocabulary — with a SAME-NAMED test's guard-line execution in another file, and so kept it out
+    that credited ``test_olog_write.py::test_unknown_level_refused``, a candidate carrying payload
+    vocabulary, with a SAME-NAMED test's guard-line execution in another file, and so kept it out
     of the sham-candidate list this audit exists to produce.
 
     Three properties, each driven through ``cmd_sham`` rather than asserted on a helper alone: the
@@ -181,7 +181,7 @@ def test_a_coverage_context_is_matched_by_file_and_function(
 def test_a_crash_exits_nine_and_prints_its_traceback(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Exit 9 is the whole reason exit 1 can mean "a pin deviates" — and nothing asserted it.
+    """Exit 9 is the whole reason exit 1 can mean "a pin deviates", and nothing asserted it.
 
     273c1c5 moved the crash code off 3 (which ``sweep`` uses for a detected foreign write, this
     tool's most safety-critical finding) and announced the contract as delivered. Measured by an
@@ -206,7 +206,7 @@ def test_a_blind_map_still_compares_the_pins_it_already_measured(
     """An unusable map must not silently take the CHEAP pins down with it.
 
     ``cmd_sham`` computes the AST pair before it opens the database, then used to return 2 without
-    comparing anything — so a caller could not tell "your map is unusable" from "your map is
+    comparing anything, so a caller could not tell "your map is unusable" from "your map is
     unusable AND the population moved", and the two figures already in hand were thrown away.
     Exit 2 is still what the map problem decides; what changed is that the cheap half is reported.
     """
@@ -230,7 +230,7 @@ def test_the_candidate_list_is_pinned_by_its_members_not_only_its_length(
 
     ``UNPINNED_VERDICT`` has said since S33 that "a list of the same length with different members
     satisfies every pin below", and nothing acted on it. Now a name that was never read is named,
-    and the exit code says so — swapping one member for another keeps every figure identical and
+    and the exit code says so, swapping one member for another keeps every figure identical and
     must still stop the run.
     """
     swapped_out = guard_audit.PINNED_CANDIDATES[-1]
@@ -256,8 +256,8 @@ def test_the_candidate_list_is_printable_without_a_database(
     """``RERUN_AST``'s first instruction has to be executable at AST cost, or it is not cheap.
 
     It says "re-read the candidate list". That list used to be printed only on the --coverage-db
-    path, so the recipe for a one-second deviation demanded a full COVERAGE_CORE=ctrace suite run
-    — the exact inversion the cheap/expensive split exists to prevent.
+    path, so the recipe for a one-second deviation demanded a full COVERAGE_CORE=ctrace suite run,
+    the exact inversion the cheap/expensive split exists to prevent.
     """
     assert guard_audit.main(["guard_audit.py", "sham", "--list-candidates"]) == 0
     reported = capsys.readouterr().err

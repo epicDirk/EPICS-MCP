@@ -1,8 +1,8 @@
-"""Live round-trip for Olog ATTACHMENTS (OA1) — the differential a mock cannot carry.
+"""Live round-trip for Olog ATTACHMENTS (OA1), the differential a mock cannot carry.
 
 Opt-in: ``pytest -m live`` against a WRITABLE loopback Olog sandbox with attachment download on.
 Uploads a real PNG + a non-image file via multipart, downloads each back (by name AND by GridFS
-id), and asserts the bytes are BYTE-IDENTICAL — the one thing that proves the real server's
+id), and asserts the bytes are BYTE-IDENTICAL, the one thing that proves the real server's
 multipart parsing, filename↔metadata pairing, GridFS storage and streaming download all agree with
 this client (no mock ever sees the server side). All content/tokens are synthetic.
 """
@@ -38,10 +38,10 @@ def _require_live_stack() -> None:
     """Setup-time gate (S30): skip silently by default, fail loudly when a live run is
     demanded (EPICS_MCP_REQUIRE_LIVE=1) and the plane is not configured.
 
-    QA fix: the gate must include the WRITE CREDS — the client fixture reads them with
+    QA fix: the gate must include the WRITE CREDS, the client fixture reads them with
     ``os.environ[...]``, so a missing credential used to KeyError at setup instead of
     skipping (undemanded) / failing with the reason (demanded). The prerequisites are the
-    import-time module constants (the same values the test bodies use — one consistent
+    import-time module constants (the same values the test bodies use, one consistent
     snapshot); only the DEMAND is read fresh.
     """
     assert_live_available(
@@ -85,7 +85,7 @@ def test_attachment_round_trip_is_byte_identical(client: OlogClient) -> None:
 
     Covers both file types (image + non-image), both download routes (by log+filename and by GridFS
     id), and the whole-mode entry read surfacing both attachments. A byte mismatch here would mean
-    the multipart framing, the filename↔part pairing, or the download encoding is wrong — none of
+    the multipart framing, the filename↔part pairing, or the download encoding is wrong, none of
     which an offline mock can observe.
     """
     logbook = _LOGBOOKS.split(",")[0].strip()
@@ -119,7 +119,7 @@ def test_attachment_round_trip_is_byte_identical(client: OlogClient) -> None:
 
 def test_download_is_withheld_without_the_flag() -> None:
     """The privacy posture, live: a client WITHOUT the opt-in flag refuses to hand back bytes even
-    against the same declared sandbox — the flag, not the URL alone, unlocks byte egress."""
+    against the same declared sandbox, the flag, not the URL alone, unlocks byte egress."""
     from epics_pv_mcp.services.olog_exceptions import OlogAttachmentDownloadDenied
 
     assert _URL is not None
@@ -152,7 +152,7 @@ def test_add_attachment_is_additive_and_byte_identical(client: OlogClient) -> No
     second = _upload(_BLOB, "oa1b-second.bob", None)
     client.add_attachment(log_id, raw, [second])
 
-    # the entry now carries BOTH attachments — existing preserved (anti-retainAll), new added
+    # the entry now carries BOTH attachments, existing preserved (anti-retainAll), new added
     after = client.get_raw_entry(log_id)
     assert after is not None
     attachments = after["attachments"]
@@ -160,10 +160,10 @@ def test_add_attachment_is_additive_and_byte_identical(client: OlogClient) -> No
     names = {a["filename"] for a in attachments}
     assert first["filename"] in names and second["filename"] in names
 
-    # and every CONTENT field is unchanged (updateLog would wipe a field not round-tripped) —
+    # and every CONTENT field is unchanged (updateLog would wipe a field not round-tripped):
     # anti-overwrite. NOT every field: `owner` IS re-stamped by the server on every call to this
     # endpoint. This test cannot see that, because it creates and attaches as the SAME account, so
-    # before and after are identical either way — see
+    # before and after are identical either way, see
     # test_add_attachment_restamps_the_owner, which uses a second principal to make it visible.
     assert after["title"] == "OA1b additive attach"
     assert "original" in str(after["source"])
@@ -182,7 +182,7 @@ def test_add_attachment_restamps_the_owner(client: OlogClient) -> None:
     """OQ4: attaching a file REWRITES the entry's author. Measured, not read off the source.
 
     ``POST /logs/multipart`` delegates straight to the server's ``updateLog``, which calls
-    ``persistedLog.setOwner(principal.getName())`` UNCONDITIONALLY — so a caller who only meant to
+    ``persistedLog.setOwner(principal.getName())`` UNCONDITIONALLY, so a caller who only meant to
     add a file also takes over authorship of someone else's entry. The original author then exists
     only in the server-side archived version, which this server cannot read.
 
@@ -225,7 +225,7 @@ def test_add_attachment_restamps_the_owner(client: OlogClient) -> None:
     after = client.get_raw_entry(log_id)
     assert after is not None
     assert after["owner"] == os.environ["EPICS_MCP_OLOG_WRITE_USER"], (
-        "the server did NOT re-stamp the owner — if this ever fails, the caveat in the guide, the "
+        "the server did NOT re-stamp the owner, if this ever fails, the caveat in the guide, the "
         "README, the tool descriptions and the server instructions is wrong and must be revisited"
     )
     assert after["owner"] != author_before  # authorship really moved

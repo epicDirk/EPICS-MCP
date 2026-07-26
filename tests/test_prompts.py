@@ -17,7 +17,7 @@ def test_diagnose_pv_contains_steps() -> None:
 
 def test_compare_machine_state_with_file() -> None:
     # Positive control: with the display tools available the reference_file path still uses the
-    # display-gated validate_pvs tool — the correct full-install behaviour (NOT a bug pin).
+    # display-gated validate_pvs tool, the correct full-install behaviour (NOT a bug pin).
     result = compare_machine_state(
         "MPS:", reference_file="status.bob", display_tools_available=True
     )
@@ -33,7 +33,7 @@ def test_compare_machine_state_without_file() -> None:
 
 def test_compare_machine_state_core_only_omits_validate_pvs() -> None:
     # Guard B1 (S26/N05): core-only (no [displays] extra) the reference_file path must NOT instruct
-    # the LLM to call the display-gated validate_pvs tool — that would be an impossible plan.
+    # the LLM to call the display-gated validate_pvs tool, that would be an impossible plan.
     result = compare_machine_state(
         "MPS:", reference_file="status.bob", display_tools_available=False
     )

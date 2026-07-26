@@ -52,7 +52,7 @@ class TestSetPvValueSuccess:
         sl = SafetyLayer(cfg)
         mock_get_safety.return_value = sl
 
-        # O3: pv_get is now called TWICE — once for the old value (audit), once for the readback.
+        # O3: pv_get is now called TWICE, once for the old value (audit), once for the readback.
         # side_effect gives the old read then the readback (20.0 == written "20.0" → verified).
         mock_pv_get.side_effect = [
             {"pv_name": "TEST:PV", "value": 10.0},
@@ -125,7 +125,7 @@ class TestSetPvValueRateLimited:
 class TestSetPvValueFailed:
     """A write that passes the gate but fails at pv_put: audited (FAILED) + re-raised.
 
-    No real PV is touched — pv_put is mocked to raise (AsyncMock side_effect).
+    No real PV is touched: pv_put is mocked to raise (AsyncMock side_effect).
     """
 
     @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
@@ -250,7 +250,7 @@ class TestSetPvValueAuditTrail:
             await _set_pv_value("TEST:PV", "2.0")
 
         events = _audit_events(caplog)
-        # ATTEMPT before the put, ALLOW after it, then the O3 READBACK verdict — all one op.
+        # ATTEMPT before the put, ALLOW after it, then the O3 READBACK verdict, all one op.
         assert [e for e, _ in events] == ["ATTEMPT", "ALLOW", "READBACK_OK"]
         ops = {op for _, op in events}
         assert events[0][1] is not None and ops == {events[0][1]}
@@ -292,7 +292,7 @@ class TestSetPvValueAuditTrail:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         # The put "hangs" (a rendezvous Event marks that we are inside pv_put), then the task is
-        # cancelled — mirroring a client disconnect / wait_for timeout while the to_thread put is
+        # cancelled, mirroring a client disconnect / wait_for timeout while the to_thread put is
         # in flight. No real PV is touched.
         mock_get_safety.return_value = SafetyLayer(
             EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
@@ -318,7 +318,7 @@ class TestSetPvValueAuditTrail:
         # ATTEMPT (before the put) then UNKNOWN_PENDING (on cancel), correlated by op.
         assert [e for e, _ in events] == ["ATTEMPT", "UNKNOWN_PENDING"]
         assert events[0][1] is not None and events[0][1] == events[1][1]
-        # A cancelled write is NEVER labelled ALLOW or FAILED — and never reaches the readback.
+        # A cancelled write is NEVER labelled ALLOW or FAILED, and never reaches the readback.
         assert "event=ALLOW" not in caplog.text
         assert "event=FAILED" not in caplog.text
         assert "READBACK" not in caplog.text
@@ -327,7 +327,7 @@ class TestSetPvValueAuditTrail:
 class TestSetPvValueReadback:
     """O3: after the ALLOW, the write reads the value back and returns a structured verdict.
 
-    A mismatch or an unreadable readback is NEVER a tool error — the write already happened; the
+    A mismatch or an unreadable readback is NEVER a tool error, the write already happened; the
     loudness is the ``verified`` field plus the ``READBACK_*`` audit event, not an exception.
     """
 
@@ -354,7 +354,7 @@ class TestSetPvValueReadback:
         with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
             result = await _set_pv_value("TEST:PV", "20.0")
 
-        # The put succeeded (status success), but verification FAILED — loud via field + audit.
+        # The put succeeded (status success), but verification FAILED, loud via field + audit.
         assert result["status"] == "success"
         assert result["verified"] is False
         assert result["readback"] == 99.0
@@ -374,7 +374,7 @@ class TestSetPvValueReadback:
         mock_get_safety.return_value = SafetyLayer(
             EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
         )
-        # Old read succeeds; the readback pv_get times out — "not verifiable", NOT a failure.
+        # Old read succeeds; the readback pv_get times out, "not verifiable", NOT a failure.
         mock_pv_get.side_effect = [
             {"pv_name": "TEST:PV", "value": 10.0},
             PVTimeoutError("readback timed out"),
@@ -401,7 +401,7 @@ class TestSetPvValueReadback:
         mock_get_safety.return_value = SafetyLayer(
             EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
         )
-        # The readback carried value None + a note (the p4p extraction fallback) — not a reading.
+        # The readback carried value None + a note (the p4p extraction fallback), not a reading.
         mock_pv_get.side_effect = [
             {"pv_name": "TEST:PV", "value": 10.0},
             {"pv_name": "TEST:PV", "value": None, "note": "value extraction failed"},
@@ -444,7 +444,7 @@ class TestSetPvValueBounds:
         ):
             await _set_pv_value("TEST:PV", "130")
 
-        # The put NEVER happened — the value never reached the IOC.
+        # The put NEVER happened: the value never reached the IOC.
         mock_pv_put.assert_not_awaited()
         assert "event=BOUNDS_DENY" in caplog.text
         # A refused-before-put write emits no ATTEMPT/ALLOW/READBACK.

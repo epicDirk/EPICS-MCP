@@ -1,4 +1,4 @@
-"""Live probes for the Olog search time window — the class of bug a mock CANNOT catch.
+"""Live probes for the Olog search time window, the class of bug a mock CANNOT catch.
 
 Opt-in: ``pytest -m live`` with ``EPICS_MCP_OLOG_URL`` pointing at a reachable Olog.
 
@@ -10,7 +10,7 @@ so a fully-mocked suite reports green while `search_logbook` answers "no entries
 containing everything. Two reviewers read the Java and drew opposite (both wrong) conclusions; only
 execution settled it.
 
-The assertions are DIFFERENTIAL — the same window expressed several ways must give the same answer —
+The assertions are DIFFERENTIAL: the same window expressed several ways must give the same answer:
 rather than exact counts, so they hold against any Olog with any data. The windows are fixed
 constants, not derived from the clock, so a run is reproducible.
 """
@@ -48,15 +48,15 @@ def _require_live_stack() -> None:
 # A window wide enough to contain any sandbox entry, expressed two ways. Fixed, not clock-derived.
 _WIDE_ISO = ("2020-01-01T00:00:00Z", "2030-01-01T00:00:00Z")
 _WIDE_WALL = ("2020-01-01 00:00:00.000", "2030-01-01 00:00:00.000")
-# A window that predates any sandbox entry — the negative control.
+# A window that predates any sandbox entry: the negative control.
 _PAST = ("2020-01-01T00:00:00Z", "2020-01-02T00:00:00Z")
 
 #: The message for a failed positive control. It must NOT claim "your data is stale": an empty
-#: reference also comes from auth, a wrong URL, a client regression or a changed payload — and a
+#: reference also comes from auth, a wrong URL, a client regression or a changed payload, and a
 #: ``total`` of ``None`` means the count could not be read at all, which is NOT "zero entries".
 _NO_REFERENCE = (
     "positive control not met; the comparison is not evaluable. Check fixture, config, backend "
-    "and client — an empty (or unreadable) reference cannot tell a honoured window from a "
+    "and client, an empty (or unreadable) reference cannot tell a honoured window from a "
     "dropped one."
 )
 
@@ -69,7 +69,7 @@ def client() -> OlogClient:
 
 @pytest.fixture
 def whole_client() -> OlogClient:
-    """A client that may see free text — for probes that must READ a title to derive a probe word.
+    """A client that may see free text, for probes that must READ a title to derive a probe word.
 
     Declaring test data is not enough on its own: the client un-redacts only when the URL is ALSO
     loopback, so pointing this suite at a real server keeps the free text withheld and the probes
@@ -88,20 +88,20 @@ def _iso_from_ms(epoch_ms: int) -> str:
 
 
 def test_iso_window_is_honoured(client: OlogClient) -> None:
-    """THE regression. Sent raw, this exact window returned 0 of 9 entries — a plausible empty
+    """THE regression. Sent raw, this exact window returned 0 of 9 entries, a plausible empty
     answer, not an error. It must now return the logbook's actual content."""
     total = _hits(client, *_WIDE_ISO)
-    assert total, "an ISO window spanning 2020-2030 returned nothing — the window is being dropped"
+    assert total, "an ISO window spanning 2020-2030 returned nothing, the window is being dropped"
 
 
 def test_iso_and_wall_clock_windows_agree(client: OlogClient) -> None:
     """The decisive differential: the same window in two notations must give the same answer.
 
-    Stronger than 'ISO returns something' — it pins that ISO is honoured FAITHFULLY, not merely
+    Stronger than 'ISO returns something', it pins that ISO is honoured FAITHFULLY, not merely
     that the request survives.
 
     The guard is load-bearing: ``_hits`` returns ``int | None``, so without it this was green both
-    on an empty logbook (``0 == 0``) and on an unreadable count (``None == None``) — two very
+    on an empty logbook (``0 == 0``) and on an unreadable count (``None == None``), two very
     different facts, neither of them "the notations agree".
     """
     iso, wall = _hits(client, *_WIDE_ISO), _hits(client, *_WIDE_WALL)
@@ -113,10 +113,10 @@ def test_iso_and_wall_clock_windows_agree(client: OlogClient) -> None:
 def test_relative_window_agrees_with_absolute(client: OlogClient) -> None:
     """A wide relative amount must find what a wide absolute window finds.
 
-    HONEST LIMIT — read before trusting this: the two windows are NOT the same instant ('3650
+    HONEST LIMIT: read before trusting this: the two windows are NOT the same instant ('3650
     days' is clock-relative, the absolute one is fixed) and on a young logbook both simply contain
     EVERY entry, which is why they agree. So this pins that a relative amount PARSES and is not
-    rejected — it cannot see a relative window that is dropped entirely, because searching
+    rejected, it cannot see a relative window that is dropped entirely, because searching
     everything returns the same total. The boundary itself is pinned by
     test_narrow_window_discriminates; that is where a dropped window goes red.
     """
@@ -135,7 +135,7 @@ def test_past_window_returns_nothing(client: OlogClient) -> None:
 
 
 def test_narrow_window_discriminates(client: OlogClient) -> None:
-    """A window starting at the NEWEST entry must exclude the older ones — the filter is
+    """A window starting at the NEWEST entry must exclude the older ones, the filter is
     time-accurate, not merely present. This is the test that goes red on a dropped window.
 
     Two things here are deliberate:
@@ -151,11 +151,11 @@ def test_narrow_window_discriminates(client: OlogClient) -> None:
     assert wide, _NO_REFERENCE
 
     stamps = [int(str(e["createdDate"])) for e in entries if e.get("createdDate") is not None]
-    assert stamps, "entries carry no createdDate — cannot derive a boundary from the data"
+    assert stamps, "entries carry no createdDate, cannot derive a boundary from the data"
     narrow = _hits(client, _iso_from_ms(max(stamps)), _WIDE_ISO[1])
     assert narrow is not None, _NO_REFERENCE
     assert narrow < wide, (
-        f"a window starting at the newest entry returned {narrow} of {wide} — either the window is "
+        f"a window starting at the newest entry returned {narrow} of {wide}, either the window is "
         "ignored, or the newest timestamp is shared by every entry the window would have excluded "
         "(a fixture with no time spread cannot discriminate)"
     )
@@ -163,7 +163,7 @@ def test_narrow_window_discriminates(client: OlogClient) -> None:
 
 def test_year_amount_rejected_before_any_request(client: OlogClient) -> None:
     """Olog cannot subtract years from a point in time. Left to the server this is a 400 that an
-    anonymous read only ever sees as 401 ('unauthorized') — so it is refused here instead."""
+    anonymous read only ever sees as 401 ('unauthorized'), so it is refused here instead."""
     with pytest.raises(TimeWindowFormatError, match="days or weeks"):
         client.search_logbook(start="1 year")
 
@@ -176,7 +176,7 @@ def test_sort_orders_the_page(client: OlogClient) -> None:
     """The positive control: without it, the probe below could not tell 'sort was applied' from
     'sort does nothing at all'."""
     down, up = _order(client, "down"), _order(client, "up")
-    assert down, "no entries — the sort probes below would prove nothing"
+    assert down, "no entries, the sort probes below would prove nothing"
     assert down != up
 
 
@@ -184,24 +184,24 @@ def test_unreadable_sort_silently_reverses_on_the_server(client: OlogClient) -> 
     """The reason the tool constrains sort to a Literal, measured rather than assumed.
 
     Olog does not reject an order it cannot read: anything that is not 'down'/'desc' becomes
-    ASC — the REVERSE of our documented default — behind a 200 and a well-formed page. 'newest'
+    ASC: the REVERSE of our documented default, behind a 200 and a well-formed page. 'newest'
     is the sharpest case: the word an operator would reach for to mean newest-first returns
     oldest-first.
 
     This measures the SERVER, not us: the tool layer rejects these values before they are sent
     (Literal['down','up']), so this asks the client directly. Should a future Olog reject them
-    itself, this test goes red and says the constraint may be relaxed — a refusal is only correct
+    itself, this test goes red and says the constraint may be relaxed, a refusal is only correct
     while its premise holds.
 
     The inline positive control is not decoration. This test is cited in CLAUDE.md as the model of
-    "pin the premise so it goes red when the server improves" — and it could not go red at all: on
+    "pin the premise so it goes red when the server improves", and it could not go red at all: on
     an empty logbook every ``_order`` is ``[]`` and ``[] == []`` passes. The control lived in the
     NEIGHBOURING test, which pytest runs independently, so a red neighbour never stopped this one
     from reporting green. A guard that cannot fail is not a guard.
     """
     down, up = _order(client, "down"), _order(client, "up")
-    assert down, "no entries — this probe cannot distinguish any sort order"
-    assert down != up, "sort has no effect at all — an unreadable value cannot be shown to collapse"
+    assert down, "no entries, this probe cannot distinguish any sort order"
+    assert down != up, "sort has no effect at all, an unreadable value cannot be shown to collapse"
     for unreadable in ("garbage", "newest", "asc", ""):
         assert _order(client, unreadable) == up, f"{unreadable!r} no longer collapses to ASC"
 
@@ -212,7 +212,7 @@ def test_unreadable_sort_silently_reverses_on_the_server(client: OlogClient) -> 
 def test_live_payloads_satisfy_the_strict_schema(client: OlogClient) -> None:
     """S11 anchor: the strict response schema (search wrapper, entries carry ``id``, listings
     carry ``name``) was DERIVED from this live payload (measured 2026-07-16, Olog 6.x). This pins
-    the premise so it goes red if a server stops matching — the schema is then re-MEASURED, never
+    the premise so it goes red if a server stops matching, the schema is then re-MEASURED, never
     loosened blindly. A mock cannot carry this burden: it only ever knows what we assumed."""
     entries, _capped, total = client.search_logbook(start=_WIDE_ISO[0], end=_WIDE_ISO[1], size=5)
     assert entries, _NO_REFERENCE
@@ -229,14 +229,14 @@ def test_live_payloads_satisfy_the_strict_schema(client: OlogClient) -> None:
 # --- OA2/OA5: the level + title facets, with the control that makes a probe MEAN something ---
 #
 # Olog's parameter switch ends in `default: // Unsupported search parameters are ignored`, so a
-# filter it does not understand is DROPPED, not rejected — and the answer is a well-formed 200 with
+# filter it does not understand is DROPPED, not rejected, and the answer is a well-formed 200 with
 # the unfiltered set. "The filter returned results" therefore proves nothing on its own. Every probe
 # below carries three things: a positive control (must match), a negative control (must not), and
 # the IGNORED-PARAMETER control that shows what a dropped filter actually looks like.
 
 
 def _raw_hit_count(client: OlogClient, params: dict[str, str]) -> int | None:
-    """``hitCount`` for an arbitrary query — deliberately bypassing ``search_logbook``.
+    """``hitCount`` for an arbitrary query, deliberately bypassing ``search_logbook``.
 
     The client only ever sends parameters it knows, so it cannot express the one query this file
     needs most: a filter under a name the server does NOT know. Reaching past the public method is
@@ -256,7 +256,7 @@ def test_level_filter_is_honoured_by_the_server(client: OlogClient) -> None:
     """The differential probe behind the documented level promise (CLAUDE.md's hard rule).
 
     Positive: filtering by a level present in the fixture returns exactly the entries carrying it.
-    Negative: the entries of a DIFFERENT level are absent — without this, a dropped filter would
+    Negative: the entries of a DIFFERENT level are absent, without this, a dropped filter would
     look identical. Control: the same value under an unknown parameter name comes back UNFILTERED,
     which is what "silently ignored" looks like, so the positive result cannot be explained that
     way."""
@@ -274,23 +274,23 @@ def test_level_filter_is_honoured_by_the_server(client: OlogClient) -> None:
     # PRECONDITION, not an assertion about the filter: the per-level counts are read from the same
     # single page as `unfiltered`, so they only add up while the fixture fits in one page. Stated
     # explicitly (rather than left as a bare equality that would start failing for an unrelated
-    # reason once the sandbox outgrows `size`) — and skipped, not failed, because a fixture too
+    # reason once the sandbox outgrows `size`), and skipped, not failed, because a fixture too
     # large to page in one go says nothing about whether the level filter works.
     if unfiltered is None or unfiltered != sum(counts.values()):
         pytest.skip(
             f"fixture no longer fits one page ({unfiltered} total vs {sum(counts.values())} "
-            "counted) — the arithmetic control needs a single-page fixture"
+            "counted), the arithmetic control needs a single-page fixture"
         )
     assert unfiltered == count + other_count + sum(
         n for lvl, n in counts.items() if lvl not in (level, other)
     )
     ignored = _raw_hit_count(client, {"size": "200", "notaparameter": level})
     assert ignored == unfiltered, (
-        "the ignored-parameter control did not come back unfiltered — this server may now reject "
+        "the ignored-parameter control did not come back unfiltered, this server may now reject "
         "unknown parameters, which would make the control meaningless (re-measure before trusting)"
     )
     assert len(entries) != unfiltered, (
-        "the level filter narrowed nothing — indistinguishable from having been dropped"
+        "the level filter narrowed nothing, indistinguishable from having been dropped"
     )
 
 
@@ -307,16 +307,16 @@ def test_level_filter_is_case_insensitive(client: OlogClient) -> None:
 
 
 def test_unknown_level_is_silently_zero_not_an_error(client: OlogClient) -> None:
-    """S8, measured: an unrecognised level is NOT rejected — the server answers 200 with 0 hits.
+    """S8, measured: an unrecognised level is NOT rejected, the server answers 200 with 0 hits.
 
     This is why ``list_log_levels`` exists and why an empty level-filtered result is annotated: at
     the wire there is no difference between "this level does not exist" and "no entries have this
     level", so a typo reads as a fact about the logbook. Goes red if a future Olog starts validating
-    the value — the annotation could then be simplified.
+    the value, the annotation could then be simplified.
 
     The non-emptiness precondition is load-bearing, not decoration: on an empty logbook ``entries ==
     []`` holds no matter what the server does, so without it this test would be green against an
-    Olog that rejects the value loudly — the exact ``[] == []`` class already documented for
+    Olog that rejects the value loudly: the exact ``[] == []`` class already documented for
     ``test_unreadable_sort_silently_reverses_on_the_server``."""
     reference, _capped, _total = client.search_logbook(size=200)
     assert reference, _NO_REFERENCE
@@ -326,20 +326,20 @@ def test_unknown_level_is_silently_zero_not_an_error(client: OlogClient) -> None
 
 
 def test_title_filter_is_honoured_and_matches_whole_words(whole_client: OlogClient) -> None:
-    """``title`` filters as named, case-insensitively, and matches whole WORDS — not substrings.
+    """``title`` filters as named, case-insensitively, and matches whole WORDS, not substrings.
 
     The fragment is DERIVED, not hard-coded: a strict prefix of a real title word that is itself not
-    a word anywhere in the fixture. That makes the substring claim decidable rather than likely —
+    a word anywhere in the fixture. That makes the substring claim decidable rather than likely:
     bare, it must find nothing; wildcarded, it must find the word it was taken from. (Nothing from
     the fixture is committed; titles are read at runtime.)
 
     Takes the WHOLE-mode client on purpose: the probe word has to be read out of a real title, and
     the default posture WITHHOLDS title free text. Deriving from a redacted title silently probes
-    the withheld-placeholder text instead — which matches nothing and fails the positive control
+    the withheld-placeholder text instead, which matches nothing and fails the positive control
     (measured while writing this test).
 
     Worth stating because it is the OPPOSITE of ``find_channels``, whose bare value is an anchored
-    substring glob — copying that wording over would have been a false documented promise."""
+    substring glob, copying that wording over would have been a false documented promise."""
     entries, _capped, _total = whole_client.search_logbook(size=200)
     assert entries, _NO_REFERENCE
     titles = [
@@ -348,10 +348,10 @@ def test_title_filter_is_honoured_and_matches_whole_words(whole_client: OlogClie
         if isinstance(entry.get("title"), str) and entry["title"] != FREETEXT_WITHHELD
     ]
     if not titles:
-        pytest.skip("titles are withheld here (not a declared loopback sandbox) — no probe word")
+        pytest.skip("titles are withheld here (not a declared loopback sandbox), no probe word")
     words = {word for title in titles for word in title.lower().split() if word.isalnum()}
 
-    # Sorted by (-length, word) so a length tie breaks on the WORD, not on set-iteration order —
+    # Sorted by (-length, word) so a length tie breaks on the WORD, not on set-iteration order:
     # which depends on PYTHONHASHSEED and would make the chosen probe differ between runs of the
     # same fixture, contradicting this file's own reproducibility promise.
     probe = next((w for w in sorted(words, key=lambda w: (-len(w), w)) if len(w) >= 4), None)
@@ -368,7 +368,7 @@ def test_title_filter_is_honoured_and_matches_whole_words(whole_client: OlogClie
     assert hits(probe.upper()) == hits(probe), "must be case-insensitive"
     assert hits("zzznosuchtitleword") == 0  # negative control
     assert hits(fragment) == 0, (
-        "a bare word FRAGMENT matched — title is not the whole-word matcher the tool description "
+        "a bare word FRAGMENT matched, title is not the whole-word matcher the tool description "
         "promises (and is not the anchored substring glob of find_channels either); re-measure"
     )
     assert hits(f"{fragment}*") >= hits(probe), "the wildcard must find at least the word itself"
@@ -378,13 +378,13 @@ def test_documented_combination_semantics_hold(
     client: OlogClient, whole_client: OlogClient
 ) -> None:
     """Pins the three COMBINATION promises the tool description makes, each of which was documented
-    from one probe and nothing else — an unpinned promise is one server upgrade from being a lie.
+    from one probe and nothing else, an unpinned promise is one server upgrade from being a lie.
 
-    * ``level`` ORs over ``,`` ``;`` ``|`` — all three separators, not just the comma that got
+    * ``level`` ORs over ``,`` ``;`` ``|``, all three separators, not just the comma that got
       measured first: two levels joined must return the union of their individual counts.
-    * several ``title`` words are AND-ed — two words from the SAME title must return that title's
+    * several ``title`` words are AND-ed, two words from the SAME title must return that title's
       count, two words from DIFFERENT titles must return nothing.
-    * a quoted ``title`` matches the phrase IN ORDER — reversing the words must return nothing.
+    * a quoted ``title`` matches the phrase IN ORDER, reversing the words must return nothing.
     """
     counts = _levels_in_fixture(client)
     nonzero = [name for name, count in counts.items() if count]
@@ -398,7 +398,7 @@ def test_documented_combination_semantics_hold(
 
     # The title half needs the WHOLE-mode client: the default posture withholds title free text,
     # and a probe word derived from the withheld placeholder matches nothing (measured twice
-    # while writing this file — it presents as a skip or a failed positive control, never as a
+    # while writing this file, it presents as a skip or a failed positive control, never as a
     # real result).
     entries, _capped, _total = whole_client.search_logbook(size=200)
     titles = [
@@ -408,26 +408,26 @@ def test_documented_combination_semantics_hold(
     ]
     pair = next((t.lower().split() for t in sorted(titles) if len(t.split()) >= 2), None)
     if pair is None:
-        pytest.skip("no multi-word title readable in this posture — cannot probe AND/phrase")
+        pytest.skip("no multi-word title readable in this posture, cannot probe AND/phrase")
 
     def hits(value: str) -> int:
         return len(whole_client.search_logbook(title=value, size=200)[0])
 
     assert hits(f"{pair[0]} {pair[1]}") == hits(f'"{pair[0]} {pair[1]}"'), (
         "AND-ing two adjacent words and quoting them as a phrase disagree on a title that "
-        "contains them in that order — one of the two documented rules is wrong"
+        "contains them in that order, one of the two documented rules is wrong"
     )
     assert hits(f"{pair[0]} zzznosuchtitleword") == 0, "several title words are not AND-ed"
     assert hits('"zzznosuch wordpairzzz"') == 0  # negative control for the phrase form
 
 
 def test_blank_filters_are_refused_before_any_request(client: OlogClient) -> None:
-    """Pins BOTH halves of the asymmetry the guard exists for — read straight off the server, so it
+    """Pins BOTH halves of the asymmetry the guard exists for, read straight off the server, so it
     goes red if Olog ever starts treating the two fields alike.
 
     A blank ``level`` matches nothing (0 hits, reading exactly like "no such entries"); a blank
     ``title`` is dropped entirely (the UNFILTERED count, presented as a filtered result). Neither is
-    "no filter", and because they disagree, neither behaviour can be inferred from the other — hence
+    "no filter", and because they disagree, neither behaviour can be inferred from the other, hence
     the client refuses both before sending."""
     unfiltered = _raw_hit_count(client, {"size": "200"})
     assert unfiltered, _NO_REFERENCE
@@ -451,22 +451,22 @@ def test_levels_listing_satisfies_the_strict_schema(client: OlogClient) -> None:
     # default to agree with it. `default is None or default in names` would be satisfied by None
     # alone, so it stays green exactly when the shape change it exists to catch happens (a renamed
     # or dropped `defaultLevel` yields None and the anchor never notices). Deriving the expectation
-    # from the payload keeps this true for any Olog with any seed data — including the two-defaults
+    # from the payload keeps this true for any Olog with any seed data, including the two-defaults
     # case the seed file ships, where withholding is the CORRECT answer.
     raw = client._get(f"{client.base_url}/levels", {})
     assert isinstance(raw, list)
     flagged = [item["name"] for item in raw if item.get("defaultLevel") is True]
     assert [str(item["name"]) for item in raw] == names
     assert default == (flagged[0] if len(flagged) == 1 else None), (
-        f"extracted default {default!r} disagrees with the wire, which flags {flagged!r} — "
+        f"extracted default {default!r} disagrees with the wire, which flags {flagged!r}, "
         "the 'defaultLevel' premise this anchor pins no longer holds"
     )
 
-    # NOT "every entry's level is listed" — that assertion used to stand here and was over-strict:
+    # NOT "every entry's level is listed", that assertion used to stand here and was over-strict:
     # its own message already explained why it cannot hold ("a level can be deleted while entries
     # keep the string"), and that is precisely the premise the READ side is built on. Measured
     # 2026-07-20: an entry written with an unlisted level ("Urgnet") is stored verbatim, so the
-    # unlisted-level state is not a sandbox defect but the normal case the code is designed around —
+    # unlisted-level state is not a sandbox defect but the normal case the code is designed around:
     # and the WRITE-side guard exists exactly because the server allows it (see
     # test_server_does_not_validate_a_written_level, which deliberately creates such an entry).
     #
@@ -477,22 +477,22 @@ def test_levels_listing_satisfies_the_strict_schema(client: OlogClient) -> None:
     assert counts, _NO_REFERENCE
     assert set(counts) & set(names), (
         f"no entry carries any listed level: entries use {sorted(counts)}, /levels lists "
-        f"{sorted(names)} — the listing and the corpus do not belong to the same server"
+        f"{sorted(names)}, the listing and the corpus do not belong to the same server"
     )
 
 
 def test_unknown_id_error_is_loud_not_a_not_found(client: OlogClient) -> None:
     """S16(b) premise pin, measured 2026-07-16: a real Olog answers **401** (not the documented
-    404) for an unknown id on this anonymous read path — its error dispatch requires auth. The
+    404) for an unknown id on this anonymous read path, its error dispatch requires auth. The
     loud error is the correct surface (``found:false`` stays reserved for a genuine 404, which
-    this server never emits here). Goes red if a future Olog starts answering 404 — then the
+    this server never emits here). Goes red if a future Olog starts answering 404, then the
     documented contract finally matches the wire and this pin gets updated."""
     with pytest.raises(OlogError):
         client.get_log_entry("99999999")
 
 
 # ======================================================================================
-# The premise behind the WRITE-side level guard (OQ1) — pinned so it goes red if Olog changes
+# The premise behind the WRITE-side level guard (OQ1), pinned so it goes red if Olog changes
 # ======================================================================================
 
 
@@ -500,7 +500,7 @@ def test_server_does_not_validate_a_written_level() -> None:
     """The PREMISE of the OQ1 guard, measured instead of read off the Java source.
 
     ``create_log_entry`` / ``update_log_entry`` refuse an unknown or blank ``level``. That refusal
-    is only correct while the server itself does NOT validate — otherwise the client would be
+    is only correct while the server itself does NOT validate, otherwise the client would be
     turning a server-side 400 into a made-up story, or worse, refusing something the server would
     have accepted meaningfully.
 
@@ -510,7 +510,7 @@ def test_server_does_not_validate_a_written_level() -> None:
     level, this test fails FIRST and the three tool descriptions + the operator guide get corrected
     instead of quietly lying.
 
-    Deliberately bypasses the service layer and drives the client directly — the service is exactly
+    Deliberately bypasses the service layer and drives the client directly, the service is exactly
     what refuses, so going through it could never observe the server.
     """
     assert_live_available(
@@ -521,7 +521,7 @@ def test_server_does_not_validate_a_written_level() -> None:
         ),
         "pins the server behaviour that justifies the write-side level refusal: needs a WRITABLE "
         "loopback Olog (EPICS_MCP_ALLOW_OLOG_WRITE + _WRITE_LOGBOOKS + _WRITE_USER; the "
-        "password is read with a '' default — a wrong one fails loudly as 401)",
+        "password is read with a '' default, a wrong one fails loudly as 401)",
         demanded=live_demanded(os.environ),
     )
     logbook = str(os.environ["EPICS_MCP_OLOG_WRITE_LOGBOOKS"]).split(",")[0].strip()
@@ -539,7 +539,7 @@ def test_server_does_not_validate_a_written_level() -> None:
     bogus = "Urgnet"  # a typo of a real level, so it cannot collide with a site's vocabulary
     assert bogus not in known, "pick a value the server really does not know"
 
-    # (1) an UNKNOWN level is accepted and stored verbatim — no 400, no coercion to the default
+    # (1) an UNKNOWN level is accepted and stored verbatim, no 400, no coercion to the default
     created = client.create_log_entry(
         title="live pin: unknown level is not validated",
         logbooks=[logbook],
@@ -550,7 +550,7 @@ def test_server_does_not_validate_a_written_level() -> None:
     stored = client.get_raw_entry(entry_id)
     assert stored is not None
     assert stored["level"] == bogus, (
-        "the server VALIDATES a written level now — the write-side refusal's premise is gone; "
+        "the server VALIDATES a written level now, the write-side refusal's premise is gone; "
         "update the level descriptions in server.py and the operator guide"
     )
 
@@ -572,5 +572,5 @@ def test_server_does_not_validate_a_written_level() -> None:
     after = client.get_raw_entry(blank_id)
     assert after is not None
     assert after["level"] in ("", None), (
-        "a blank level no longer clears the field — the blank-level refusal needs a rethink"
+        "a blank level no longer clears the field, the blank-level refusal needs a rethink"
     )

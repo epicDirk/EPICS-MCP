@@ -1,4 +1,4 @@
-"""Offline tests for the Olog WRITE surface — gate, URL boundary, allowlist, audit privacy, client.
+"""Offline tests for the Olog WRITE surface, gate, URL boundary, allowlist, audit privacy, client.
 
 No network. Covers the OlogWriteGate (env gate + test-server URL boundary + logbook allowlist +
 rate limit + privacy-clean audit), the client PUT path (JSON shape, redaction, error mapping) and
@@ -189,7 +189,7 @@ class TestUrlBoundary:
 
     @pytest.mark.parametrize("url", ["garbage", "http://[::1]./Olog", ""])
     def test_sec2_unparseable_url_denied_even_when_allowlisted(self, url: str) -> None:
-        """SEC-2: an unparseable URL fails closed BEFORE the allowlist — which cannot save it.
+        """SEC-2: an unparseable URL fails closed BEFORE the allowlist, which cannot save it.
 
         Regression guard for the shared-primitive refactor: the host extraction must stay an
         UP-FRONT veto. Rewriting the gate as "if is_loopback_url(): True; return allow_remote and
@@ -223,7 +223,7 @@ class TestUrlBoundary:
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         # SEC-2 (QA-hardened): urlparse RAISES ValueError on a malformed bracketed-IPv6 authority
-        # (Python 3.12+). It must be a clean, AUDITED OlogWriteDeniedError — not an uncaught crash.
+        # (Python 3.12+). It must be a clean, AUDITED OlogWriteDeniedError, not an uncaught crash.
         gate = OlogWriteGate(_write_config(olog_url="http://[::1]./Olog"))
         with (
             caplog.at_level(logging.INFO, logger=_AUDIT_LOGGER),
@@ -233,7 +233,7 @@ class TestUrlBoundary:
         assert "event=DENY" in caplog.text
 
     def test_private_non_loopback_denied(self) -> None:
-        # An RFC1918 private IP is NOT loopback — the ESS production Olog lives on a private net, so
+        # An RFC1918 private IP is NOT loopback: the ESS production Olog lives on a private net, so
         # "private = allowed" would defeat the prod NO-GO. Denied unless allowlisted + remote.
         gate = OlogWriteGate(_write_config(olog_url="http://10.0.0.5:8080/Olog"))
         with pytest.raises(OlogWriteDeniedError):
@@ -241,9 +241,9 @@ class TestUrlBoundary:
 
 
 # ======================================================================================
-# OlogWriteGate: logbook allowlist (deny-all on empty — fail-closed like PV, in a DIFFERENT shape:
+# OlogWriteGate: logbook allowlist (deny-all on empty, fail-closed like PV, in a DIFFERENT shape:
 # PV refuses to START on an empty pattern, this gate constructs and denies at runtime. NOT an
-# inverse — neither is fail-open; see the write-gate contract, point 2, in CLAUDE.md.)
+# inverse, neither is fail-open; see the write-gate contract, point 2, in CLAUDE.md.)
 # ======================================================================================
 
 
@@ -304,7 +304,7 @@ class TestRateLimit:
         """S28: two concurrent create_log_entry run in DIFFERENT worker threads (this gate is called
         under asyncio.to_thread), so the purge->len-check->append MUST be atomic. With limit=1 the
         rendezvous forces the check->append interleaving; exactly ONE write is admitted. This test
-        goes RED (admits==2) against the pre-S28 unlocked code — proven by the mutant on HEAD~1."""
+        goes RED (admits==2) against the pre-S28 unlocked code, proven by the mutant on HEAD~1."""
         gate = OlogWriteGate(_write_config(olog_write_rate_limit=1))
         admits = concurrent_admit_count(gate, lambda: gate.check_write_allowed(["Ops"]))
         assert admits == 1
@@ -399,7 +399,7 @@ class TestGateConfigFailClosed:
     def test_audit_path_validated_on_repeated_construction(self, tmp_path: Path) -> None:
         # QA 2026-07-19 (OA1-QA #A3): the audit-path guard must not be skipped just because an
         # EARLIER gate already attached a handler to the process-global olog_audit logger. A later
-        # OlogWriteGate with a broken audit path must STILL fail closed — mirrors
+        # OlogWriteGate with a broken audit path must STILL fail closed, mirrors
         # test_safety.py::test_audit_path_validated_on_repeated_construction (the 2026-07-17 fix
         # this makes OlogWriteGate symmetric to).
         audit = logging.getLogger(_AUDIT_LOGGER)
@@ -497,7 +497,7 @@ class TestCreateClient:
             captured["json"] = kwargs.get("json")
             captured["params"] = kwargs.get("params")
             captured["headers"] = kwargs.get("headers")
-            # a FULL server response with owner + free text — must be redacted before return
+            # a FULL server response with owner + free text, must be redacted before return
             return _resp(
                 {
                     "id": 5,
@@ -529,7 +529,7 @@ class TestCreateClient:
         assert isinstance(headers, dict)
         assert headers["X-Olog-Client-Info"] == "epics-pv-mcp"
         # auth rode on the dedicated WRITE session (where the PUT goes); the read session keeps it
-        # too, byte-identical — a silent drop on either would 401 a secured server.
+        # too, byte-identical, a silent drop on either would 401 a secured server.
         assert client._write_session.headers.get("authorization") == "Basic dXNlcjpwYXNz"
         assert client.session.headers.get("authorization") == "Basic dXNlcjpwYXNz"
         # redaction: owner dropped, free text withheld, logbook name-only, NO person name leaks
@@ -551,7 +551,7 @@ class TestCreateClient:
         monkeypatch.setattr(client._write_session, "put", _put)
         client.create_log_entry(title="re", logbooks=["Ops"], in_reply_to="42")
         assert captured["params"] == {"inReplyTo": "42"}
-        # description is ALWAYS sent as a present string (empty here) — Olog save path NPEs on null.
+        # description is ALWAYS sent as a present string (empty here); Olog save path NPEs on null.
         body = captured["json"]
         assert isinstance(body, dict)
         assert body["description"] == ""
@@ -584,7 +584,7 @@ class TestCreateClient:
     def test_response_without_entry_identity_is_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """S11: a 2xx write response that is not a log entry must RAISE — any non-empty dict used
+        """S11: a 2xx write response that is not a log entry must RAISE, any non-empty dict used
         to be PROJECTED as the created entry (a fabricated write confirmation). The measured
         entry record always carries ``id``."""
         client = OlogClient("http://olog:8080/Olog")
@@ -674,7 +674,7 @@ class TestToolOrchestration:
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
         # The core regression: a person named in the free-text title/description NEVER reaches the
-        # audit — audit_write only ever sees title_len, never the text.
+        # audit, audit_write only ever sees title_len, never the text.
         config_module._config = _write_config()
         monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _FakeClient)
         with caplog.at_level(logging.INFO, logger=_AUDIT_LOGGER):
@@ -710,7 +710,7 @@ class TestToolOrchestration:
         monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _FailingClient)
         with (
             caplog.at_level(logging.INFO, logger=_AUDIT_LOGGER),
-            # S11 §8: the server ANSWERED (a served 400) — since the split this surfaces as
+            # S11 §8: the server ANSWERED (a served 400), since the split this surfaces as
             # EpicsError, no longer relabelled EpicsConnectionError ("cannot reach Olog", which
             # sent the operator retrying against an outage that was not happening).
             pytest.raises(EpicsError) as excinfo,
@@ -732,7 +732,7 @@ class TestToolOrchestration:
 
 
 # ======================================================================================
-# Create: level vocabulary (OQ1) — the write-side counterpart to the update path's checks
+# Create: level vocabulary (OQ1), the write-side counterpart to the update path's checks
 # ======================================================================================
 
 
@@ -755,7 +755,7 @@ class _LevelCountingClient:
 class TestCreateLevelVocabulary:
     @pytest.mark.asyncio
     async def test_unknown_level_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # RED-PROOF: create had the same hole as update — `level="Urgnet"` was stored verbatim and
+        # RED-PROOF: create had the same hole as update, `level="Urgnet"` was stored verbatim and
         # the entry then matched no level filter. Checking only update would move the asymmetry.
         config_module._config = _write_config()
         monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _LevelCountingClient)
@@ -778,7 +778,7 @@ class TestCreateLevelVocabulary:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # THE ordering property: the vocabulary check sits BEFORE check_write_allowed, so a typo
-        # costs no token. This is the gate's own documented rule, not a local choice —
+        # costs no token. This is the gate's own documented rule, not a local choice:
         # OlogWriteGate's docstring states that a denial never consumes a token, and the attachment
         # size cap (step 3b) sits ahead of the rate limit for exactly this reason. Same idiom as
         # test_sec3_empty_logbooks_denied_without_rate_token: with rate_limit=1, a valid create must
@@ -824,7 +824,7 @@ class TestCreateLevelVocabulary:
 def test_write_session_is_distinct_from_the_shared_read_session() -> None:
     """K5 hardening pin: the READ session is now a PROCESS-SHARED cached session, but the Olog WRITE
     session must stay a SEPARATE per-instance session (build_write_session: no retries, trust_env
-    off — a non-idempotent PUT must never be replayed, and must not inherit the read pool).
+    off, a non-idempotent PUT must never be replayed, and must not inherit the read pool).
     A refactor collapsing write onto the shared read session would leak the read pool + 3-retry
     policy into writes; this goes red on that mutant."""
     from requests.adapters import HTTPAdapter

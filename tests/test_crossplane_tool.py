@@ -2,7 +2,7 @@
 
 These exercise the WIRED path: a real .bob over the macro-aware ``opi_navigation`` inventory →
 JoinPv rows → join → report. The display carries a ``<macros>`` scope so the macro PV ``$(P)Cmd``
-RESOLVES to a concrete channel and lands in ``linked`` (not ``indeterminate``) — the Wedge-1 payoff.
+RESOLVES to a concrete channel and lands in ``linked`` (not ``indeterminate``), the Wedge-1 payoff.
 NOTE: the display ``<macros>`` (P) is the binding namespace, NOT the st.cmd's P= macro; without the
 display ``<macros>`` the PV would stay ``dynamic``.
 """
@@ -43,7 +43,7 @@ def _setup(tmp_path: Path) -> tuple[Path, Path]:
 @pytest.mark.asyncio
 async def test_crossplane_tool_macro_pv_resolves_to_linked(tmp_path: Path) -> None:
     """The Wedge-1 payoff: the macro PV ``$(P)Cmd`` is now RESOLVED (via the display <macros>) to a
-    concrete linked PV — no longer ``indeterminate``. Both display PVs share the IOC prefix.
+    concrete linked PV, no longer ``indeterminate``. Both display PVs share the IOC prefix.
     """
     displays, st_cmd = _setup(tmp_path)
     result = await _crossplane_check(str(displays), str(st_cmd), query_naming=False)
@@ -78,7 +78,7 @@ async def test_cli_and_tool_render_identical_report(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """C2-iii parity: the CLI and the MCP tool drive the SAME orchestrator (run_crossplane), so
-    against one fixture they render byte-identical Markdown — the duplicated join is gone (M2)."""
+    against one fixture they render byte-identical Markdown, the duplicated join is gone (M2)."""
     displays, st_cmd = _setup(tmp_path)
     tool_result = await _crossplane_check(str(displays), str(st_cmd))
     assert isinstance(tool_result["markdown"], str)
@@ -101,7 +101,7 @@ def test_cli_crossplane_rejects_displays_dir_outside_allowed_roots(
     """S4-4 CLI boundary lock: the CLI must honor EPICS_MCP_ALLOWED_ROOTS (via resolve_user_path in
     the shared orchestrator), not just check ``is_dir()``. An EXISTING displays_dir outside the
     allowed root exits 2. Distinct from the missing-dir test (which the old bare Path.is_dir() code
-    also returned 2 for) — here the dir exists, so only the boundary check produces the exit 2."""
+    also returned 2 for), here the dir exists, so only the boundary check produces the exit 2."""
     import epics_pv_mcp.config as config_module
 
     displays, st_cmd = _setup(tmp_path)  # both exist, but outside the allowed root
@@ -170,7 +170,7 @@ async def test_crossplane_tool_fragment_not_double_attributed(tmp_path: Path) ->
 @pytest.mark.asyncio
 async def test_crossplane_tool_module_db_root_emits_broken(tmp_path: Path) -> None:
     """End-to-end Phase-2 payoff: with a provably complete IOC .db (only dbLoadRecords, no iocsh),
-    the linked PV ``$(P)Cmd`` — absent from the .db — is reported ``broken``; ``status`` (present)
+    the linked PV ``$(P)Cmd``, absent from the .db, is reported ``broken``; ``status`` (present)
     is not. The IOC .db's $(P) is bound by the st.cmd's per-load macro (P=$(P) → env P).
     """
     displays, st_cmd = _setup(tmp_path)
@@ -213,7 +213,7 @@ async def test_crossplane_tool_module_db_root_withholds_broken_when_incomplete(
     result = await _crossplane_check(str(displays), str(st_cmd), module_db_root=str(module_db))
     report = result["report"]
     assert isinstance(report, dict)
-    assert report["broken"] == []  # withheld — completeness cannot be proven
+    assert report["broken"] == []  # withheld, completeness cannot be proven
     assert any("withheld" in note.lower() for note in report["notes"])
 
 
@@ -339,7 +339,7 @@ async def test_crossplane_tool_pva_prefixed_pv_links(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_crossplane_tool_pva_prefixed_pv_broken_against_db(tmp_path: Path) -> None:
     """Wedge-1 mini-fix end-to-end (latent trap, crossplane.py:198): the SAME edge normalization
-    fixes the broken comparison — a ``pva://``-prefixed linked PV absent from a provably complete
+    fixes the broken comparison, a ``pva://``-prefixed linked PV absent from a provably complete
     IOC .db is now correctly ``broken`` (channel-form linked_pvs vs. channel-form .db records, no
     protocol mismatch). Before the fix the pva:// PV never reached ``linked``, so the trap slept.
     """

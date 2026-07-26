@@ -1,4 +1,4 @@
-"""Per-gate deny-path contract test — what makes the write-gate contract CI-enforced, not prose.
+"""Per-gate deny-path contract test, what makes the write-gate contract CI-enforced, not prose.
 
 The contract lives in ``CLAUDE.md`` ("Write-gate contract: what any in-server write gate must
 provide (hard)"). Its six points are: (1) an env on/off gate, default OFF; (2) an allowlist whose
@@ -10,60 +10,60 @@ scope statement plus **every deny path must be red-provable**.
 This module is point 6 made executable, and it is the template a THIRD write surface inherits.
 It has two halves that must agree:
 
-* **Executable rows** — :data:`DENY_PATHS` lists every way each gate can refuse. Each row is driven
+* **Executable rows**: :data:`DENY_PATHS` lists every way each gate can refuse. Each row is driven
   for real and checked on four axes: the typed exception, its machine-readable ``error_code``,
   exactly one terminal ``event=DENY`` audit line carrying the expected code, and the point-3
   invariant that the denial consumed no rate token.
-* **A drift guard** — the AST scan counts the ``_audit_deny`` call sites per gate module and
+* **A drift guard**: the AST scan counts the ``_audit_deny`` call sites per gate module and
   compares them against the same canonical map. A new deny path that nobody registered here fails
   the build instead of shipping untested.
 
 The two gates deliberately differ where the contract says the shape is a per-surface choice:
 the PV gate *refuses to start* on an empty name-pattern and emits ATTEMPT/UNKNOWN around its
 mid-flight-interruptible put; the Olog gate *constructs and denies at runtime* on an empty logbook
-allowlist and has no mid-flight window. Neither is fail-open — see contract point 2.
+allowlist and has no mid-flight window. Neither is fail-open, see contract point 2.
 
 **Why the no-token assertion compares CONTENT, not length.** Two of the nine rows are rate-limit
 denials, and a rate-limit denial can only fire once the window is FULL: at the moment of refusal the
 token deque holds ``maxlen`` entries, so ``len(...) == 0`` is unreachable there. Comparing the
-length before and after is worse than useless — the deque is at ``maxlen``, so a wrongly appended
+length before and after is worse than useless, the deque is at ``maxlen``, so a wrongly appended
 token *evicts* an old one and the length is unchanged, leaving the guard green under the very bug it
 exists to catch. Comparing the deque's *contents* goes red on all nine rows. For the same reason a
 config with ``rate_limit=0`` (an empty deque) must never be used to make this assertion look easy:
 it would pass without proving anything.
 
-**Deliberately OUT of scope** — three distinct buckets, kept apart because they fail differently:
+**Deliberately OUT of scope**: three distinct buckets, kept apart because they fail differently:
 
 1. *Boot refuses.* A write-enabled process with no durable audit sink configured refuses to start
    (contract point 4); that is ``test_server.py::test_main_refuses_write_enabled_without_durable_
    audit_sink``, not a per-call denial.
 2. *Posture-dependent construction refuses (PV).* An empty write pattern or a non-loopback EPICS
-   search reach raise ``SafetyConfigError`` from ``SafetyLayer.__init__`` — before an audit logger
+   search reach raise ``SafetyConfigError`` from ``SafetyLayer.__init__``, before an audit logger
    exists, so they emit no DENY line by construction. Covered in ``test_safety.py``.
 3. *Lazy construction refuses (Olog).* The same class of failure, but the Olog gate is built on
    first use, so its unwritable-sink refusal surfaces at the first write rather than at boot.
    Covered in ``test_olog_write.py``.
 
 Also out of scope, and for a different reason: ``BOUNDS_DENY`` (``safety.py::audit_bounds_deny``) is
-a real audited event but *not* a gate verdict — it fires after the gate admitted the write, so it
+a real audited event but *not* a gate verdict, it fires after the gate admitted the write, so it
 legitimately HAS consumed a token and would (correctly) violate the point-3 invariant asserted here.
 
-**Pre-gate refusals — the error-code axis is closed, the audit axis is a reasoned scope limit.**
+**Pre-gate refusals, the error-code axis is closed, the audit axis is a reasoned scope limit.**
 Some refusals happen *before* a gate is consulted: the whole-mode preconditions in
 ``services/checkers_olog.py`` (``add_log_attachment`` / ``update_log_entry``), their client-side
 backstop in ``services/olog_exceptions.py``, and the read throttle in ``services/_http.py``. Where
 this module stands on each axis:
 
-* **Error code — closed, and now guarded as a RULE.** Those four used to carry the gates' own
+* **Error code, closed, and now guarded as a RULE.** Those four used to carry the gates' own
   ``OLOG_WRITE_DENIED`` / ``RATE_LIMIT_EXCEEDED``, so a caller could not tell an un-audited pre-gate
   refusal from an audited gate DENY. They now carry ``OLOG_WHOLE_MODE_REQUIRED`` and
   ``READ_RATE_LIMIT_EXCEEDED``, and :func:`test_no_pre_gate_refusal_carries_a_gate_error_code`
-  sweeps BOTH layers the contract names — ``services/`` and ``tools/`` — resolving a raise through
+  sweeps BOTH layers the contract names, ``services/`` and ``tools/``, resolving a raise through
   aliases, relative imports, attribute callees, locally defined subclasses (minus the ones that
   override the code) and plain ``raise Cls``, so a SIXTH case fails the build rather than shipping.
-* **Audit line — deliberately none, which is a scope limit, not an oversight.** Contract point 4
+* **Audit line, deliberately none, which is a scope limit, not an oversight.** Contract point 4
   clamps the audit promise to *gate verdicts and writes that reach the I/O*; a pre-gate refusal is
-  neither — no gate ran, no token was taken, no write was attempted. Emitting a gate ``DENY`` from
+  neither, no gate ran, no token was taken, no write was attempted. Emitting a gate ``DENY`` from
   ``services/`` would also put an audit call site OUTSIDE the reach of the ``_audit_deny`` drift
   guard below (which scans the gate modules only), i.e. buy a new blind spot in the name of a fix.
   The reasoning is written at the raise sites, and the behaviour is pinned by
@@ -75,7 +75,7 @@ this module stands on each axis:
   one is prose again. The cost is a wider blast radius on the read path (the throttle is opt-in,
   default off) and it was accepted knowingly.
 
-**On live coverage, per surface — the premise is not the same on both.** For the PV gate every deny
+**On live coverage, per surface, the premise is not the same on both.** For the PV gate every deny
 path raises before any network I/O, so a live deny test would execute identical code beside an
 unused socket; the in-memory rows are the honest coverage, not a lesser substitute. For the Olog
 gate that premise does **not** hold: on the attachment/update tool paths a real HTTP round-trip
@@ -83,7 +83,7 @@ happens before the gate is consulted, so these rows prove the gate *method*, not
 inside the tool path. Contract point 6 prefers a live deny test over an in-memory one, and for that
 one class it now exists: ``tests/test_write_gate_live.py`` drives ``olog_allowlist_miss`` on both
 round-tripping tools against a real Olog, keyed on logbooks the SERVER reported. Exactly one path
-is covered that way, deliberately — it is the only one whose decision input a mock cannot falsify;
+is covered that way, deliberately, it is the only one whose decision input a mock cannot falsify;
 the module's docstring argues each of the other eight out by name. So: **PV = not applicable with a
 reason, Olog = one path live, the rest reasoned.** Not "every deny path is proven against the wire".
 """
@@ -132,7 +132,7 @@ _PV_TARGET = "SIM:PS-01:Cur-SP"
 _PV_ALLOWLIST = r"^SIM:PS-01:.*-SP$"
 _PV_OFF_ALLOWLIST = "SIM:PS-02:Cur-SP"
 
-# Small enough to fill the window in two calls, and >=1 so the deque is never empty — an empty
+# Small enough to fill the window in two calls, and >=1 so the deque is never empty, an empty
 # deque would make the no-token assertion vacuous (see module docstring).
 _RATE_LIMIT = 2
 
@@ -150,7 +150,7 @@ def _reset_singletons() -> Iterator[None]:
 
 
 class _WriteGate(Protocol):
-    """The seam every write gate shares — the sliding-window token deque of contract point 3."""
+    """The seam every write gate shares, the sliding-window token deque of contract point 3."""
 
     _timestamps: collections.deque[float]
 
@@ -160,24 +160,24 @@ class DenyPath:
     """One way a write gate can refuse, as an executable contract row.
 
     ``arm`` returns a freshly built gate already in the state where this path fires, together with
-    the thunk that triggers the refusal — so the two gates' differently-shaped
+    the thunk that triggers the refusal, so the two gates' differently-shaped
     ``check_write_allowed`` signatures stay inside their own closures and the test body stays
     uniform.
     """
 
     path_id: str
     module: str
-    """Gate module filename — ties this row to the AST scan below."""
+    """Gate module filename, ties this row to the AST scan below."""
     audit_logger: str
     arm: Callable[[], tuple[_WriteGate, Callable[[], None]]]
     exception: type[EpicsError]
     exception_error_code: str
     audit_error_code: str
-    """The code in the DENY audit line. NOT always the exception's own — see attach_too_large."""
+    """The code in the DENY audit line. NOT always the exception's own, see attach_too_large."""
 
 
 # ======================================================================================
-# PV gate (SafetyLayer) — env gate, name allowlist, rate limit
+# PV gate (SafetyLayer): env gate, name allowlist, rate limit
 # ======================================================================================
 
 
@@ -194,7 +194,7 @@ def _arm_pv_allowlist_miss() -> tuple[_WriteGate, Callable[[], None]]:
 
 
 def _arm_pv_rate_limit() -> tuple[_WriteGate, Callable[[], None]]:
-    # The window must be FULL for this path to fire at all — hence a NON-empty token deque at the
+    # The window must be FULL for this path to fire at all, hence a NON-empty token deque at the
     # moment of denial, which is exactly why the invariant compares contents and not length.
     gate = SafetyLayer(
         EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=_RATE_LIMIT)
@@ -205,7 +205,7 @@ def _arm_pv_rate_limit() -> tuple[_WriteGate, Callable[[], None]]:
 
 
 # ======================================================================================
-# Olog gate (OlogWriteGate) — logbooks, env gate, URL boundary, allowlist, size cap, rate limit
+# Olog gate (OlogWriteGate): logbooks, env gate, URL boundary, allowlist, size cap, rate limit
 # ======================================================================================
 
 
@@ -265,7 +265,7 @@ def _arm_olog_rate_limit() -> tuple[_WriteGate, Callable[[], None]]:
 
 
 # ======================================================================================
-# The canonical map — the single place a new deny path gets registered
+# The canonical map: the single place a new deny path gets registered
 # ======================================================================================
 
 DENY_PATHS: tuple[DenyPath, ...] = (
@@ -357,7 +357,7 @@ DENY_PATHS: tuple[DenyPath, ...] = (
 
 
 # ======================================================================================
-# Half 1 — every registered deny path, driven for real
+# Half 1: every registered deny path, driven for real
 # ======================================================================================
 
 
@@ -371,7 +371,7 @@ def test_deny_path_satisfies_the_contract(path: DenyPath, caplog: pytest.LogCapt
     * (ii): drop that path's ``self._audit_deny(...)`` call → ``expected exactly one DENY line,
       got []``.
     * (iii): the deny branches append no token, so DELETING them proves nothing about the token
-      invariant. The mutant that drives it red is the opposite one — append a token on the deny
+      invariant. The mutant that drives it red is the opposite one, append a token on the deny
       path (e.g. ``self._timestamps.append(time.monotonic())`` before the raise) → the content
       comparison fails on every row, including the two rate-limit rows where a length comparison
       would stay green because the full deque merely evicts its oldest entry.
@@ -416,7 +416,7 @@ def test_rate_limited_rows_deny_on_a_non_empty_window() -> None:
 
 
 # ======================================================================================
-# Half 2 — the drift guard: the code's deny call sites vs. the canonical map
+# Half 2: the drift guard: the code's deny call sites vs. the canonical map
 # ======================================================================================
 
 _GATE_PACKAGE_DIR = Path(safety_module.__file__).parent
@@ -430,7 +430,7 @@ EXPECTED_DENY_CALL_SITES: dict[str, Counter[str]] = {
 
 
 def _discover_gate_modules() -> dict[str, ast.Module]:
-    """Every package module that defines an ``_audit_deny`` — i.e. every in-server write gate.
+    """Every package module that defines an ``_audit_deny``, i.e. every in-server write gate.
 
     Discovered by scanning, not hard-coded: a THIRD gate module enrols itself automatically and
     then fails :func:`test_deny_call_sites_match_the_canonical_map` until someone registers its
@@ -451,8 +451,8 @@ def _audit_deny_error_codes(module_name: str, tree: ast.Module) -> Counter[str]:
     """Count the ``error_code`` literal of every ``self._audit_deny(...)`` call site in *tree*.
 
     The parameter position is read from the module's OWN ``_audit_deny`` signature (``self``
-    excluded) rather than hard-coded: the two existing gates already disagree — the PV gate takes
-    ``pv_name`` first, the Olog gate takes ``error_code`` first — so a fixed index would be a coin
+    excluded) rather than hard-coded: the two existing gates already disagree, the PV gate takes
+    ``pv_name`` first, the Olog gate takes ``error_code`` first, so a fixed index would be a coin
     flip for a third. Keyword form is honoured too, and a call whose code cannot be resolved to a
     string literal fails LOUDLY: an unreadable call site must never be miscounted as absent, which
     would read exactly like "this deny path was removed".
@@ -462,12 +462,12 @@ def _audit_deny_error_codes(module_name: str, tree: ast.Module) -> Counter[str]:
         if isinstance(node, ast.FunctionDef) and node.name == _AUDIT_DENY:
             parameters = [argument.arg for argument in node.args.args if argument.arg != "self"]
             assert "error_code" in parameters, (
-                f"{module_name}: {_AUDIT_DENY} has no error_code parameter ({parameters}) — "
+                f"{module_name}: {_AUDIT_DENY} has no error_code parameter ({parameters}), "
                 "the drift-guard anchor broke"
             )
             index = parameters.index("error_code")
             break
-    assert index is not None, f"{module_name}: no {_AUDIT_DENY} definition — the anchor broke"
+    assert index is not None, f"{module_name}: no {_AUDIT_DENY} definition, the anchor broke"
 
     codes: Counter[str] = Counter()
     for node in ast.walk(tree):
@@ -482,7 +482,7 @@ def _audit_deny_error_codes(module_name: str, tree: ast.Module) -> Counter[str]:
             value = node.args[index] if index < len(node.args) else None
         assert isinstance(value, ast.Constant) and isinstance(value.value, str), (
             f"{module_name}:{node.lineno}: {_AUDIT_DENY} is not called with a literal error_code, "
-            "so the drift guard cannot read it — pass a literal, or teach the guard to resolve it. "
+            "so the drift guard cannot read it, pass a literal, or teach the guard to resolve it. "
             "Failing loudly rather than counting this call site as absent."
         )
         codes[value.value] += 1
@@ -494,7 +494,7 @@ def test_deny_call_sites_match_the_canonical_map() -> None:
 
     Counts, not a set of codes: nine paths share only five codes (four Olog paths are all
     ``OLOG_WRITE_DENIED``), so set equality would stay green when a tenth path reuses an existing
-    code — the most likely way this drifts, given the Olog gate's numbered check list grows in
+    code, the most likely way this drifts, given the Olog gate's numbered check list grows in
     place.
 
     Honest limit: counting call sites cannot see a path that WIDENS an existing condition instead of
@@ -502,19 +502,19 @@ def test_deny_call_sites_match_the_canonical_map() -> None:
     in the module docstring).
 
     RED-PROOF: add or delete any ``self._audit_deny("…")`` call in either gate, or change one of its
-    code literals, and this fails with the differing Counter — including the case where the new
+    code literals, and this fails with the differing Counter, including the case where the new
     path reuses an existing code, which a set comparison would have missed.
     """
     discovered = _discover_gate_modules()
-    assert discovered, "no write-gate module found — the AST anchor broke"
+    assert discovered, "no write-gate module found, the AST anchor broke"
     assert set(discovered) == set(EXPECTED_DENY_CALL_SITES), (
-        "the set of write-gate modules changed — register the new gate's deny paths in DENY_PATHS "
+        "the set of write-gate modules changed, register the new gate's deny paths in DENY_PATHS "
         f"and EXPECTED_DENY_CALL_SITES. found={sorted(discovered)} "
         f"expected={sorted(EXPECTED_DENY_CALL_SITES)}"
     )
     for module_name, tree in discovered.items():
         codes = _audit_deny_error_codes(module_name, tree)
-        assert codes, f"{module_name}: no {_AUDIT_DENY} call sites — the AST anchor broke"
+        assert codes, f"{module_name}: no {_AUDIT_DENY} call sites, the AST anchor broke"
         assert codes == EXPECTED_DENY_CALL_SITES[module_name], (
             f"{module_name}: audited deny call sites drifted from the canonical map. "
             f"code={dict(codes)} map={dict(EXPECTED_DENY_CALL_SITES[module_name])}"
@@ -557,15 +557,15 @@ async def test_pre_gate_refusal_is_coded_apart_and_writes_no_audit_line(
 
     Two claims, and the second is the one that actually carries the rule:
 
-    1. The refusal reports ``OLOG_WHOLE_MODE_REQUIRED`` — its own code, not the gate's
-       ``OLOG_WRITE_DENIED`` — while remaining catchable as ``OlogWriteDeniedError``.
+    1. The refusal reports ``OLOG_WHOLE_MODE_REQUIRED``, its own code, not the gate's
+       ``OLOG_WRITE_DENIED``: while remaining catchable as ``OlogWriteDeniedError``.
     2. It writes **no audit line at all**. That is what makes its own code NECESSARY rather than
        cosmetic, and it is the promise the contract scopes ("a refusal raised before the gate is
        consulted writes no audit line").
 
     A POSITIVE CONTROL runs first, through the same ``caplog`` at the same level: a real gate DENY
     on the same logger IS captured. Without it, "no DENY line" would also pass if the audit logger
-    were simply not being captured — the failure mode a previous review of this suite caught, and
+    were simply not being captured, the failure mode a previous review of this suite caught, and
     the reason ``caplog.set_level`` is set EXPLICITLY here instead of relying on the root level.
 
     RED-PROOF (mutant): point ``OlogWholeModeRequiredError`` back at ``EpicsError.__init__(...,
@@ -579,7 +579,7 @@ async def test_pre_gate_refusal_is_coded_apart_and_writes_no_audit_line(
     with pytest.raises(OlogWriteDeniedError):
         fire_control()
     assert [r for r in caplog.records if "event=DENY" in r.message], (
-        "the audit logger is not being captured — the no-audit assertion below could never go red"
+        "the audit logger is not being captured, the no-audit assertion below could never go red"
     )
     assert control_gate is not None
     caplog.clear()
@@ -601,13 +601,13 @@ async def test_pre_gate_refusal_is_coded_apart_and_writes_no_audit_line(
 
 
 # ======================================================================================
-# Half 3 — the RULE the drift guard above cannot see: no PRE-GATE refusal wears a gate code
+# Half 3: the RULE the drift guard above cannot see: no PRE-GATE refusal wears a gate code
 # ======================================================================================
 #
 # Half 2 counts ``_audit_deny`` call sites INSIDE the two gate modules. It is blind to the other
 # half of contract point 4: a refusal raised ABOVE the gate, which emits no audit line at all and
-# must therefore not carry the gate's error code. The contract names that layer explicitly — "a
-# precondition in the TOOL or service layer above it" — so both are scanned here, and neither is a
+# must therefore not carry the gate's error code. The contract names that layer explicitly, "a
+# precondition in the TOOL or service layer above it", so both are scanned here, and neither is a
 # directory the gate-module scan opens.
 #
 # This half asserts the RULE, not the five known symptoms: a SIXTH pre-gate refusal that reuses a
@@ -659,7 +659,7 @@ def _exception_codes_by_origin() -> dict[tuple[str, str], str]:
     """``(defining module, class name) -> error_code`` for every coded exception in this repo.
 
     Keyed on the DEFINING module, not on the bare name, so the AST scan below can resolve a raised
-    name through the importing module's own ``from X import Y [as Z]`` — alias-proof, and immune to
+    name through the importing module's own ``from X import Y [as Z]``, alias-proof, and immune to
     two hierarchies happening to reuse a class name.
     """
     codes: dict[tuple[str, str], str] = {}
@@ -677,7 +677,7 @@ def _exception_codes_by_origin() -> dict[tuple[str, str], str]:
 
 
 def _gate_audit_codes() -> frozenset[str]:
-    """The codes the gates emit in their DENY audit lines — DERIVED from the canonical table.
+    """The codes the gates emit in their DENY audit lines, DERIVED from the canonical table.
 
     Never hard-coded: a third gate registering rows with a new audit code widens this guard in the
     same edit, instead of leaving it silently scoped to the two gates that existed when it was
@@ -690,7 +690,7 @@ def _absolute_module(node: ast.ImportFrom, package: str) -> str | None:
     """The module an ``ImportFrom`` refers to, spelled absolutely.
 
     ``node.module`` alone is a trap: for ``from ..errors import X`` it is the bare ``"errors"`` and
-    ``node.level`` (here 2) carries the rest. Looking it up unresolved simply misses — silently, the
+    ``node.level`` (here 2) carries the rest. Looking it up unresolved simply misses, silently, the
     worst failure mode for a guard. Level 1 means "this package", level 2 "the parent", and so on.
     """
     if node.level == 0:
@@ -698,7 +698,7 @@ def _absolute_module(node: ast.ImportFrom, package: str) -> str | None:
     parts = package.split(".")
     kept = len(parts) - (node.level - 1)
     if kept <= 0:
-        return None  # climbs above the top-level package — not importable, nothing to resolve
+        return None  # climbs above the top-level package, not importable, nothing to resolve
     base = ".".join(parts[:kept])
     return f"{base}.{node.module}" if node.module else base
 
@@ -734,7 +734,7 @@ def _defines_own_error_code(class_node: ast.ClassDef) -> bool:
     Both repo conventions count: a ClassVar assignment, and an ``__init__`` that passes an
     ``error_code=`` keyword on (the ``PVWriteBoundsError`` shape, calling ``EpicsError.__init__``
     directly). Without this check the inheritance walk below would flag exactly the classes that
-    exist BECAUSE of contract point 4 — ``OlogWholeModeRequiredError`` and ``ReadRateLimitError``
+    exist BECAUSE of contract point 4, ``OlogWholeModeRequiredError`` and ``ReadRateLimitError``
     both subclass a gate-code carrier and both override the code. That false positive is the whole
     risk of resolving inheritance at all, so it is checked first.
     """
@@ -770,10 +770,10 @@ def _local_names_carrying_gate_codes(
 
     Three sources, because a name can reach a gate code three ways:
 
-    * ``from X import Y [as Z]`` — absolute or relative, both resolved to the defining module.
-    * ``import X [as Z]`` — the dotted spelling ``Z.Y`` is registered too, so an attribute-style
+    * ``from X import Y [as Z]``: absolute or relative, both resolved to the defining module.
+    * ``import X [as Z]``: the dotted spelling ``Z.Y`` is registered too, so an attribute-style
       raise resolves.
-    * a class DEFINED here that inherits a gate-code carrier without overriding the code — the
+    * a class DEFINED here that inherits a gate-code carrier without overriding the code, the
       shape a future pre-gate refusal is most likely to take, since the repo has just grown three
       such subclasses (all of which DO override, and are therefore correctly left out).
 
@@ -849,7 +849,7 @@ def _names_bound_to_gate_code_instances(
 ) -> dict[str, str]:
     """``variable -> code`` for ``exc = <gate-code class>(...)``, so ``raise exc`` is still seen.
 
-    Building the exception first and raising the variable is ordinary Python, not a dodge — and it
+    Building the exception first and raising the variable is ordinary Python, not a dodge, and it
     would otherwise slip past the ``raise`` scan entirely.
     """
     bound: dict[str, str] = {}
@@ -876,13 +876,13 @@ def _raise_gate_code_findings(
     Four spellings are resolved, because the rule is about the CODE that reaches the caller, not
     about one way of writing a raise:
 
-    * ``raise OlogWriteDeniedError(...)`` — the class carries the code (also as ``errs.Cls(...)``,
+    * ``raise OlogWriteDeniedError(...)``: the class carries the code (also as ``errs.Cls(...)``,
       via the module-alias map, and as a locally defined subclass that does not override it).
-    * ``raise EpicsError(..., error_code="OLOG_WRITE_DENIED")`` — a literal keyword on a generic
+    * ``raise EpicsError(..., error_code="OLOG_WRITE_DENIED")``: a literal keyword on a generic
       error; an explicit code wins over the class default, so this is checked first.
-    * ``raise OlogWriteDeniedError`` — no parentheses. Python instantiates it for you; the caller
+    * ``raise OlogWriteDeniedError``: no parentheses. Python instantiates it for you; the caller
       cannot tell the difference, and it is the cheapest way to slip past a callee-only scan.
-    * ``exc = OlogWriteDeniedError(...); raise exc`` — via the assignment map.
+    * ``exc = OlogWriteDeniedError(...); raise exc``: via the assignment map.
 
     A bare ``raise`` (re-raising what was caught) is NOT a finding: it propagates an already
     classified code rather than minting one.
@@ -892,7 +892,7 @@ def _raise_gate_code_findings(
     for node in (n for n in ast.walk(tree) if isinstance(n, ast.Raise)):
         raised = node.exc
         if raised is None:
-            continue  # a bare `raise` re-raises what was caught — not a new refusal
+            continue  # a bare `raise` re-raises what was caught, not a new refusal
         if isinstance(raised, ast.Call):
             keyword = next((kw for kw in raised.keywords if kw.arg == "error_code"), None)
             if isinstance(keyword, ast.keyword) and isinstance(keyword.value, ast.Constant):
@@ -921,17 +921,17 @@ def _raise_gate_code_findings(
 def test_no_pre_gate_refusal_carries_a_gate_error_code() -> None:
     """Contract point 4: "a refusal raised outside the gate must not carry the gate's error code."
 
-    Nothing under ``services/`` or ``tools/`` is a write gate — the two gates live in ``safety.py``
+    Nothing under ``services/`` or ``tools/`` is a write gate, the two gates live in ``safety.py``
     and ``olog_safety.py`` one directory up. So every refusal raised in those two layers happens
     BEFORE a gate is consulted, writes no audit line, and must be reportable apart from an audited
     gate DENY. Otherwise the audit's coverage claim is unfalsifiable from outside: a caller seeing
     ``OLOG_WRITE_DENIED`` cannot know whether a DENY line exists for it.
 
     ``tools/`` is scanned because the contract names it: *"a precondition in the TOOL or service
-    layer above it"*. It is clean today, so adding it is a no-op with a proof — which is the point:
+    layer above it"*. It is clean today, so adding it is a no-op with a proof, which is the point:
     the guard's reach should match the rule's reach, not the location of the last five findings.
 
-    RED-PROOF (measured on ``f954cc6``, the commit before the fix): four findings —
+    RED-PROOF (measured on ``f954cc6``, the commit before the fix): four findings:
     ``checkers_olog.py`` raised ``OlogWriteDeniedError`` twice for its whole-mode preconditions,
     ``olog_exceptions.py`` pinned ``OLOG_WRITE_DENIED`` on ``OlogWholeModeRequired``, and
     ``_http.py`` raised the write gates' ``RateLimitError`` from the read throttle; the fifth
@@ -940,29 +940,29 @@ def test_no_pre_gate_refusal_carries_a_gate_error_code() -> None:
     any of the spellings :func:`_raise_gate_code_findings` resolves into either scanned package.
 
     Honest limits, so nobody reads more into a green run than it proves:
-    * It sees both packages FLAT — a future sub-package would need its own sweep — and it does not
+    * It sees both packages FLAT, a future sub-package would need its own sweep, and it does not
       look at the src ROOT, where ``errors.py`` and the two gate modules legitimately carry these
       codes and an exclusion list would be needed.
     * A code computed at runtime (``error_code=_olog_error_code(exc)``, the re-raise wrappers) is
-      out of static reach. Those propagate an already-classified code rather than minting one —
+      out of static reach. Those propagate an already-classified code rather than minting one:
       but note that a *constructed* literal (``"OLOG_" + "WRITE_DENIED"``) would mint one and is
       equally invisible here. Static analysis buys the common shapes, not every shape.
     * A star-import (``from epics_pv_mcp.errors import *``) and a factory (``raise make_denial()``)
       both hide the name this scan resolves.
-    * It proves the CODE axis of point 4 only. The AUDIT axis — that these refusals write no line —
+    * It proves the CODE axis of point 4 only. The AUDIT axis, that these refusals write no line,
       is a deliberate scope decision documented at the raise sites, and is pinned behaviourally by
       :func:`test_pre_gate_refusal_is_coded_apart_and_writes_no_audit_line`.
     """
     gate_codes = _gate_audit_codes()
-    assert gate_codes, "no gate audit codes derived from DENY_PATHS — the anchor broke"
+    assert gate_codes, "no gate audit codes derived from DENY_PATHS, the anchor broke"
     codes_by_origin = _exception_codes_by_origin()
-    assert codes_by_origin, "no coded exceptions discovered — the import anchor broke"
+    assert codes_by_origin, "no coded exceptions discovered, the import anchor broke"
 
     findings: list[str] = []
     for directory, package in _SCANNED_PACKAGES:
         module_paths = sorted(directory.glob("*.py"))
         assert len(module_paths) > 10, (
-            f"only {len(module_paths)} modules found under {directory} — the scan anchor broke"
+            f"only {len(module_paths)} modules found under {directory}, the scan anchor broke"
         )
         for module_path in module_paths:
             tree = ast.parse(module_path.read_text(encoding="utf-8"))
@@ -974,7 +974,7 @@ def test_no_pre_gate_refusal_carries_a_gate_error_code() -> None:
 
     assert not findings, (
         "a refusal raised OUTSIDE a write gate carries one of the gates' audit error codes "
-        f"{sorted(gate_codes)} — give it its own code (write-gate contract point 4):\n  "
+        f"{sorted(gate_codes)}, give it its own code (write-gate contract point 4):\n  "
         + "\n  ".join(findings)
     )
 
@@ -993,6 +993,6 @@ def test_canonical_map_covers_every_audited_deny_call_site() -> None:
     for path in DENY_PATHS:
         from_rows.setdefault(path.module, Counter())[path.audit_error_code] += 1
     assert from_rows == EXPECTED_DENY_CALL_SITES, (
-        "DENY_PATHS and EXPECTED_DENY_CALL_SITES disagree — every audited deny call site needs "
+        "DENY_PATHS and EXPECTED_DENY_CALL_SITES disagree, every audited deny call site needs "
         f"exactly one executable row. rows={ {k: dict(v) for k, v in from_rows.items()} }"
     )

@@ -1,7 +1,7 @@
 """Offline tests for the diagnose_connection service (no network).
 
 Two layers: the PURE :func:`derive_cause` decision tree (the whole branch matrix, no I/O) and the
-async :func:`diagnose` shell (mocked live probe + planes) — especially the exception-catching
+async :func:`diagnose` shell (mocked live probe + planes), especially the exception-catching
 inversion (a disconnect is caught, never raised) and the diagnose-level Naming gate (empty URL →
 withheld, no client).
 """
@@ -94,7 +94,7 @@ def _ev(
 
 
 # ---------------------------------------------------------------------------
-# PURE derive_cause — the full branch matrix
+# PURE derive_cause: the full branch matrix
 # ---------------------------------------------------------------------------
 
 
@@ -267,7 +267,7 @@ def test_disconnected_cf_withheld_is_indeterminate() -> None:
 
 
 def test_every_branch_stays_within_the_cause_enum() -> None:
-    """Every path yields one of the 5 allowed causes — network_unreachable never appears."""
+    """Every path yields one of the 5 allowed causes, network_unreachable never appears."""
     allowed = {"healthy", "ioc_down", "name_typo", "unregistered", "indeterminate"}
     states: tuple[State, ...] = ("connected", "disconnected", "unknown")
     codes = (None, "PV_TIMEOUT", "PV_NOT_FOUND", "EPICS_CONNECTION_FAILED")
@@ -286,7 +286,7 @@ def test_every_branch_stays_within_the_cause_enum() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Async shell — mocked probe + planes
+# Async shell: mocked probe + planes
 # ---------------------------------------------------------------------------
 
 
@@ -321,7 +321,7 @@ async def test_live_probe_runs_concurrently_with_planes(monkeypatch: pytest.Monk
 
     Proven deterministically with a rendezvous (no wall-clock): pv_get (inside _probe_live)
     waits for an event that query_channels (inside the ChannelFinder plane) sets. If the probe
-    still ran SERIALLY before the gather, the CF plane would never start and this would deadlock —
+    still ran SERIALLY before the gather, the CF plane would never start and this would deadlock:
     which ``asyncio.wait_for`` turns into a clean failure instead of a hang.
     """
     cf_started = asyncio.Event()
@@ -469,7 +469,7 @@ async def test_shell_gatherer_is_total_on_unexpected_error(monkeypatch: pytest.M
 
 
 def test_crossplane_naming_gated_on_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    """QA-delta 3 (updated): crossplane tool + CLI now honour the naming_url gate too — the client
+    """QA-delta 3 (updated): crossplane tool + CLI now honour the naming_url gate too, the client
     has NO built-in ESS prod default. Requested but naming_url unset → no client (no egress); set →
     a client bound to the configured URL."""
     from epics_pv_mcp.services import checkers
@@ -487,7 +487,7 @@ def test_crossplane_naming_gated_on_config(monkeypatch: pytest.MonkeyPatch) -> N
 
 # ---------------------------------------------------------------------------
 # QA regression: the two membership planes must not turn a false negative into a
-# confident wrong cause (Findings A + B) — the state stays correct either way.
+# confident wrong cause (Findings A + B), the state stays correct either way.
 # ---------------------------------------------------------------------------
 
 
@@ -578,7 +578,7 @@ async def test_shell_naming_reachable_unregistered_stays_name_typo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Finding B guard: a REACHABLE Naming service reporting 'not registered' must still yield
-    name_typo — the connectivity probe must not over-withhold a genuine negative."""
+    name_typo, the connectivity probe must not over-withhold a genuine negative."""
 
     async def fake_pv_get(name: str, timeout: float | None = None) -> dict[str, object]:
         raise PVTimeoutError("timeout")
@@ -613,8 +613,8 @@ def test_check_defaults_anchored_to_constants_not_stray_literals() -> None:
     """S6-4 anchor lock (non-tautological): every check_* default at EVERY code site must be a NAME
     node referencing a DEFAULT_CHECK_* constant, never a bare literal. The prior ``default is True``
     / ``is False`` assertion could not tell a constant from a stray ``= True`` (bool singletons: any
-    ``True`` is the same object), so a re-introduced literal — un-anchoring the site from the single
-    source — shipped green. This parses the AST and FAILS on any ast.Constant default; against the
+    ``True`` is the same object), so a re-introduced literal, un-anchoring the site from the single
+    source, shipped green. This parses the AST and FAILS on any ast.Constant default; against the
     pre-fix server.py (bare ``= True``/``= False``) it goes red."""
     import ast
     from pathlib import Path
@@ -658,7 +658,7 @@ def test_check_defaults_anchored_to_constants_not_stray_literals() -> None:
 
 def test_cli_diagnose_defaults_match_the_check_constants(monkeypatch: pytest.MonkeyPatch) -> None:
     """S6-4 CLI value lock: cli_diagnose derives check_* from argparse flags (store_true), so it
-    can't reference the constants directly — but its EMPTY-flag defaults must still equal them. Spy
+    can't reference the constants directly, but its EMPTY-flag defaults must still equal them. Spy
     the diagnose() call with no flags set and assert each check_* kwarg == the constant. If someone
     flips a constant but leaves the CLI's opt-in/opt-out flag structure, this goes red."""
     from types import SimpleNamespace
@@ -685,7 +685,7 @@ def test_cli_diagnose_defaults_match_the_check_constants(monkeypatch: pytest.Mon
 
 
 def test_derive_cause_unknown_state_fails_loud() -> None:
-    """S6-5: a State value outside the Literal (future growth) hits assert_never — a loud runtime
+    """S6-5: a State value outside the Literal (future growth) hits assert_never, a loud runtime
     error instead of a silent None that would surface as an AttributeError deep in the caller."""
     from typing import cast
 

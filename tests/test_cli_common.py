@@ -16,7 +16,7 @@ def test_positive_timeout_accepts_a_positive_number() -> None:
 
 @pytest.mark.parametrize("bad", ["-1", "0", "0.0", "-0.5"])
 def test_positive_timeout_rejects_nonpositive(bad: str) -> None:
-    """F22: a non-positive timeout must be a usage error, not silently accepted — a <=0 timeout
+    """F22: a non-positive timeout must be a usage error, not silently accepted, a <=0 timeout
     flows into a live probe and can make a HEALTHY service look unreachable. RED before the guard
     (a bare ``type=float`` accepts every one of these)."""
     with pytest.raises(argparse.ArgumentTypeError):

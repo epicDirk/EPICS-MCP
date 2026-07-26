@@ -100,7 +100,7 @@ class TestEpicsConfigValidation:
             EpicsConfig()
 
     def test_uppercase_provider_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # provider is a lowercase Literal — "CA" must fail, not silently mis-provider.
+        # provider is a lowercase Literal, "CA" must fail, not silently mis-provider.
         monkeypatch.setenv("EPICS_MCP_PROVIDER", "CA")
         with pytest.raises(ValidationError):
             EpicsConfig()
@@ -133,7 +133,7 @@ class TestEpicsConfigValidation:
             EpicsConfig()
 
     def test_whitespace_padded_provider_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # pydantic does not strip a Literal — " ca" must fail, not silently pass.
+        # pydantic does not strip a Literal, " ca" must fail, not silently pass.
         monkeypatch.setenv("EPICS_MCP_PROVIDER", " ca")
         with pytest.raises(ValidationError):
             EpicsConfig()
@@ -164,7 +164,7 @@ class TestUnknownEnvVarGuard:
 
     def test_reserved_live_test_var_does_not_warn(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # EPICS_MCP_LIVE_* / _OLOG_TEST_* / _REQUIRE_LIVE are read by the TEST harness (live_gate,
-        # the *_live.py modules), never by the server — they are intentionally not config fields and
+        # the *_live.py modules), never by the server, they are intentionally not config fields and
         # must not trip the guard during an opt-in live run.
         monkeypatch.setenv("EPICS_MCP_LIVE_ALARM_PV", "SIM:X")
         with warnings.catch_warnings(record=True) as caught:

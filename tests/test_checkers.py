@@ -1,4 +1,4 @@
-"""Tests for services/checkers — the services-layer edge to the four REST planes (M8/M9/C8).
+"""Tests for services/checkers, the services-layer edge to the four REST planes (M8/M9/C8).
 
 Covers the branches the tool/crossplane/coverage tests don't reach: the checker adapters'
 error→RuntimeError translation (so the pure cores WITHHOLD a cell, never false-flag it), the
@@ -34,7 +34,7 @@ def test_checkers_reexports_olog_surface_from_checkers_olog() -> None:
     """The ten ``query_olog_*`` functions and the private ``_olog_error_code`` moved to
     :mod:`~.checkers_olog` (MA-1) and are re-exported by :mod:`~.checkers` as the SAME objects, so
     ``from ...checkers import query_olog_*`` keeps working. ``OlogClient`` no longer lives in the
-    ``checkers`` namespace — patching it there would be a silent no-op."""
+    ``checkers`` namespace, patching it there would be a silent no-op."""
     names = (
         "query_olog_add_attachment",
         "query_olog_create",
@@ -201,7 +201,7 @@ async def test_query_channels_translates_error_to_epics_connection(
 # --- query_* error branches (S11 §8): a RESPONSE error must NOT be relabelled "unreachable" ---
 #
 # The clients now RAISE their plane's ResponseError on an unreadable 2xx (S11). These query
-# functions used to collapse EVERY plane error into EpicsConnectionError — "cannot reach the
+# functions used to collapse EVERY plane error into EpicsConnectionError, "cannot reach the
 # service" about a server that ANSWERED. That is the neighbouring falsehood of the class S11
 # closes; query_olog_search and query_archived already live the honest three-way split.
 
@@ -265,7 +265,7 @@ async def test_query_channels_response_error_is_not_a_connection_error(
 async def test_query_olog_response_error_is_not_a_connection_error(
     method: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Each of the three remaining olog query functions has its own except block — each must
+    """Each of the three remaining olog query functions has its own except block, each must
     stop relabelling a ResponseError as 'Olog unreachable' (search already splits)."""
     monkeypatch.setattr(checkers_olog, "get_config", lambda: EpicsConfig(olog_url="http://olog"))
 
@@ -296,7 +296,7 @@ async def test_query_olog_response_error_is_not_a_connection_error(
 
 
 def test_build_naming_client_forwards_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    """build_naming_client must pass the tool timeout THROUGH to the client — before the DS-2
+    """build_naming_client must pass the tool timeout THROUGH to the client, before the DS-2
     lookup tool it built the client without a timeout, so a tool timeout would have been silently
     lost. The default stays 5.0 so existing positional callers (orchestration, diagnose tests) are
     unchanged."""
@@ -366,7 +366,7 @@ async def test_query_naming_lookup_404_is_definitive_not_registered(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A reachable service answering 'not registered' (validate_name → registered=False on a 404) is
-    a DEFINITIVE answer, NOT withheld — the split that DS-2 protects."""
+    a DEFINITIVE answer, NOT withheld, the split that DS-2 protects."""
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(naming_url="http://naming"))
     client = _naming_client_mock(
         validate_result={"registered": False, "status": "", "message": "not registered"}
@@ -382,7 +382,7 @@ async def test_query_naming_lookup_obsolete_preserves_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """DS-2 point 2: a non-ACTIVE registered name (OBSOLETE/DELETED) surfaces registered:false WITH
-    the status string preserved verbatim — a DEFINITIVE answer, not withheld. Pins the unconditional
+    the status string preserved verbatim, a DEFINITIVE answer, not withheld. Pins the unconditional
     status pass-through against a future refactor that only surfaced status on the registered=true
     branch (the ACTIVE and 404 tests would both still pass, silently regressing this guarantee)."""
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(naming_url="http://naming"))
@@ -419,7 +419,7 @@ async def test_query_naming_lookup_unreachable_is_withheld(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An unreachable service (check_connectivity raises) is WITHHELD and never reaches the
-    lookup — no false verdict from a down/timing-out service."""
+    lookup, no false verdict from a down/timing-out service."""
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(naming_url="http://naming"))
     client = _naming_client_mock(connectivity_error=NamingServiceConnectionError("refused"))
     monkeypatch.setattr(checkers, "NamingServiceClient", Mock(return_value=client))
@@ -433,7 +433,7 @@ async def test_query_naming_lookup_timeout_reaches_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Plan DS-2 timeout wiring: the tool timeout must land in the NamingServiceClient
-    (build_naming_client must forward it — it did NOT before this change)."""
+    (build_naming_client must forward it, it did NOT before this change)."""
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(naming_url="http://naming"))
     client = _naming_client_mock(
         validate_result={"registered": True, "status": "ACTIVE", "message": "ok"}

@@ -35,7 +35,7 @@ async def test_monitor_clamped_duration() -> None:
 
 
 async def test_monitor_truncated() -> None:
-    """_monitor_pv surfaces the service's truncated flag verbatim — the honest over-fetch
+    """_monitor_pv surfaces the service's truncated flag verbatim, the honest over-fetch
     detection lives in pv_monitor (see test_epics_client.py). With the service mocked, the
     tool must pass (events, truncated) straight through."""
     mock_events = [{"pv_name": "TEST:PV", "value": float(i)} for i in range(100)]

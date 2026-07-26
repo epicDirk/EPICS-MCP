@@ -32,7 +32,7 @@ def test_classify_other_is_connection() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _format_value — p4p unwrapped wrappers expose meta-data via ``.raw``.
+# _format_value, p4p unwrapped wrappers expose meta-data via ``.raw``.
 # Fakes mirror that shape: a wrapper with ``.raw`` whose attributes are the
 # NTScalar / NTEnum sub-structures (no live EPICS needed for the fake-based tests).
 # ---------------------------------------------------------------------------
@@ -44,7 +44,7 @@ def _wrap(raw: SimpleNamespace) -> SimpleNamespace:
 
 
 class _FakeArray:
-    """Stands in for a numpy array — exposes ``tolist`` (real scalars are plain Python)."""
+    """Stands in for a numpy array, exposes ``tolist`` (real scalars are plain Python)."""
 
     def __init__(self, data: list[Any]) -> None:
         self._data = data
@@ -54,7 +54,7 @@ class _FakeArray:
 
 
 class _FakeStruct:
-    """Stands in for a nested p4p ``Value`` struct — exposes BOTH ``todict()`` and ``tolist()``.
+    """Stands in for a nested p4p ``Value`` struct, exposes BOTH ``todict()`` and ``tolist()``.
 
     Faithful to the real p4p contract that broke the first DS-6 attempt: a real ``p4p.Value`` has
     ``tolist()`` too (not numpy-exclusive), and its ``tolist()`` returns raw ``(name, value)``
@@ -78,7 +78,7 @@ class _FakeStruct:
 
 
 class _FakeNDArrayData:
-    """Stands in for the numpy image array inside an NTNDArray — dtype/size, tolist must NOT run."""
+    """Stands in for the numpy image array inside an NTNDArray, dtype/size, tolist must NOT run."""
 
     def __init__(self, dtype: str, size: int) -> None:
         self.dtype = dtype
@@ -173,7 +173,7 @@ def test_format_value_array_uses_tolist() -> None:
 
 
 # ---------------------------------------------------------------------------
-# DS-6 — complex PVA types (NTTable / NTNDArray / nested struct) are surfaced as real,
+# DS-6, complex PVA types (NTTable / NTNDArray / nested struct) are surfaced as real,
 # JSON-serialisable data instead of value=None or a raw p4p passthrough that fails at the MCP
 # JSON boundary. Every test json.dumps the COMPLETE tool result (the real failure surface).
 # ---------------------------------------------------------------------------
@@ -205,7 +205,7 @@ def test_format_value_nttable_columns() -> None:
 def test_format_value_ntndarray_shape_dtype_only() -> None:
     """NTNDArray -> shape/dtype summary with the pixel data OMITTED (never inlined as a list).
 
-    p4p stores ``dimension`` as ``[width, height]`` — REVERSED from numpy's ``(rows, cols)`` —
+    p4p stores ``dimension`` as ``[width, height]``, REVERSED from numpy's ``(rows, cols)``,
     so a 2-row×3-col image has wire dimension sizes ``[3, 2]``; the reported shape is reversed
     back to numpy order ``[2, 3]``. (A real-p4p test below pins this against an actual NTNDArray.)
     """
@@ -241,7 +241,7 @@ def test_format_value_nested_struct_not_raw_passthrough() -> None:
 
 def test_format_value_unsupported_struct_without_todict_is_summarised() -> None:
     """A structured value that cannot be converted (no todict) is surfaced as an honest summary,
-    never the raw object and never a crash — the last-resort fallback."""
+    never the raw object and never a crash, the last-resort fallback."""
 
     class _Opaque:
         def getID(self) -> str:
@@ -260,7 +260,7 @@ def test_format_value_unsupported_struct_without_todict_is_summarised() -> None:
 
 def test_format_value_broken_complex_type_falls_back_to_none() -> None:
     """The None-path: if extraction raises, value stays None (honest 'could not read'), never a
-    crash and never garbage — same contract as before, now covering complex types."""
+    crash and never garbage, same contract as before, now covering complex types."""
 
     class _Boom:
         def getID(self) -> str:
@@ -276,7 +276,7 @@ def test_format_value_broken_complex_type_falls_back_to_none() -> None:
 
 
 def test_format_value_string_scalar_carries_alarm() -> None:
-    # A real string NTScalar DOES carry an alarm struct — the fake must too.
+    # A real string NTScalar DOES carry an alarm struct, the fake must too.
     raw = SimpleNamespace(value="hello", alarm=SimpleNamespace(severity=0, status=0, message=""))
 
     result = _format_value("STR:PV", _wrap(raw))
@@ -362,7 +362,7 @@ def test_value_alarm_active_surfaces_limits_and_severities() -> None:
 
 
 def test_value_alarm_without_active_field_surfaces_real_limits() -> None:
-    # No ``active`` field (defaults False): real (non-zero, non-NaN) limits are STILL surfaced —
+    # No ``active`` field (defaults False): real (non-zero, non-NaN) limits are STILL surfaced:
     # the active flag is metadata, not a visibility gate.
     raw = SimpleNamespace(
         value=4.2,
@@ -539,7 +539,7 @@ def test_format_value_real_p4p() -> None:
 
 # --- DS-6 against REAL p4p complex types (the shapes SimpleNamespace fakes cannot reproduce:
 #     a real p4p Value has BOTH tolist() and todict(), and structure[]/union-array come back as
-#     plain Python lists of Value/ndarray). Each asserts json.dumps(result) succeeds — the real
+#     plain Python lists of Value/ndarray). Each asserts json.dumps(result) succeeds, the real
 #     MCP-boundary failure surface. These are the tests that would have caught the first attempt.
 
 
@@ -610,8 +610,8 @@ def test_format_value_real_p4p_nttable_serialises() -> None:
     """A real NTTable -> {labels, columns:{name:list}}; json.dumps(result) must succeed.
 
     p4p's default Context does NOT unwrap NTTable (its unwrap set is NTScalar/NTScalarArray/
-    NTEnum/NTNDArray), so production passes the RAW NTTable Value here — routed by its top-level
-    getID/labels — not the unwrapped list-of-rows that ``NTTable.unwrap`` would produce.
+    NTEnum/NTNDArray), so production passes the RAW NTTable Value here, routed by its top-level
+    getID/labels, not the unwrapped list-of-rows that ``NTTable.unwrap`` would produce.
     """
     from p4p.nt import NTTable
 
@@ -725,7 +725,7 @@ async def test_monitor_format_failure_yields_none(monkeypatch: Any) -> None:
 
     events, truncated = await epics_client.pv_monitor("X:Y", duration=0.2, max_events=1)
 
-    # QA: the fallback event must DECLARE itself — a bare {"value": None} was
+    # QA: the fallback event must DECLARE itself, a bare {"value": None} was
     # indistinguishable from a genuinely-None reading in the event count.
     assert len(events) == 1
     assert truncated is False  # one event delivered, cap 1 → complete, not truncated
@@ -735,7 +735,7 @@ async def test_monitor_format_failure_yields_none(monkeypatch: Any) -> None:
 
 
 class _MultiEventContext:
-    """Deliver *n* synthetic events synchronously on subscribe — drives the monitor's
+    """Deliver *n* synthetic events synchronously on subscribe, drives the monitor's
     over-fetch / truncation logic deterministically (F27)."""
 
     def __init__(self, n: int) -> None:
@@ -749,7 +749,7 @@ class _MultiEventContext:
 
 async def test_pv_monitor_flags_overflow_and_trims(monkeypatch: Any) -> None:
     """F27 over-fetch-by-one: when MORE than max_events arrive, pv_monitor returns EXACTLY
-    max_events events and truncated=True — a dropped event is never reported as a complete
+    max_events events and truncated=True, a dropped event is never reported as a complete
     read. RED on the pre-fix cap (== max_events): it cannot tell overflow from an exactly-
     full stream, and a naive `>` swap makes truncated permanently False (silent loss)."""
     monkeypatch.setattr(
@@ -785,7 +785,7 @@ async def test_pv_monitor_runs_on_dedicated_executor(monkeypatch: Any) -> None:
     executor, not the shared asyncio default executor. Otherwise >= monitor_max_concurrency
     concurrent monitors (each blocking up to max_monitor_duration = 60 s) occupy the whole default
     pool, and every other ``to_thread`` call (REST plane checks, PV reads/writes, the Olog write
-    path) queues behind them — the server appears hung though nothing crashed. The worker thread's
+    path) queues behind them, the server appears hung though nothing crashed. The worker thread's
     name proves which executor ran it. RED before K4 (``asyncio.to_thread`` → the default pool,
     whose threads are NOT named ``epics-monitor``)."""
     captured: dict[str, str] = {}
@@ -816,7 +816,7 @@ class _FailBatchContext:
 
 async def test_pv_get_batch_fallback_classifies_each_pv(monkeypatch: Any) -> None:
     """After the native batch fails, each PV is read individually and sorted good→results,
-    disconnected→errors — one bad PV does not sink the healthy ones."""
+    disconnected→errors, one bad PV does not sink the healthy ones."""
     monkeypatch.setattr(epics_client, "get_context", _FailBatchContext)
 
     async def fake_pv_get(name: str, timeout: float | None = None) -> dict[str, object]:
@@ -840,7 +840,7 @@ async def test_pv_get_batch_fallback_runs_concurrently(monkeypatch: Any) -> None
 
     Proven deterministically with a rendezvous (no wall-clock): the FIRST read blocks on an event
     that only the SECOND read sets. A serial for-loop would deadlock (FIRST never returns, so SECOND
-    never starts) — asyncio.wait_for turns that into a clean failure instead of a hang."""
+    never starts), asyncio.wait_for turns that into a clean failure instead of a hang."""
     monkeypatch.setattr(epics_client, "get_context", _FailBatchContext)
     second_started = asyncio.Event()
 
@@ -861,7 +861,7 @@ async def test_pv_get_batch_fallback_runs_concurrently(monkeypatch: Any) -> None
 
 
 class _NativeBatchContext:
-    """A p4p Context stand-in whose batch get SUCCEEDS, returning one wrapped value per name — so
+    """A p4p Context stand-in whose batch get SUCCEEDS, returning one wrapped value per name, so
     the NATIVE happy path (ctxt.get(list) → zip → _format_value) is exercised, not the fallback."""
 
     def get(self, names: list[str], timeout: object = None) -> list[object]:
@@ -869,7 +869,7 @@ class _NativeBatchContext:
 
 
 async def test_pv_get_batch_native_success_path(monkeypatch: Any) -> None:
-    """C5 coverage gap: the native-batch SUCCESS path (epics_client.py:104-108) was never run —
+    """C5 coverage gap: the native-batch SUCCESS path (epics_client.py:104-108) was never run:
     both existing batch tests force the fallback via _FailBatchContext. Here the native get returns
     a list, so every name is formatted and lands in results with NO fallback and NO errors."""
     monkeypatch.setattr(epics_client, "get_context", _NativeBatchContext)
@@ -905,7 +905,7 @@ async def test_pv_get_batch_native_bad_value_isolated(monkeypatch: Any) -> None:
 
 
 class _ShortBatchContext:
-    """A p4p Context stand-in whose batch get returns FEWER values than requested names — a broken
+    """A p4p Context stand-in whose batch get returns FEWER values than requested names, a broken
     provider violating the length contract. Returns one wrapped value for any number of names."""
 
     def get(self, names: list[str], timeout: object = None) -> list[object]:
@@ -927,7 +927,7 @@ async def test_pv_get_batch_native_length_mismatch_raises(monkeypatch: Any) -> N
 #     Pre-fix, both fell through to the generic converter, which kept ONLY the value field:
 #     two semantically different matrices came out bit-identical, and an NTMultiChannel lost
 #     its channel names and per-channel severities while the structurally-zero top-level
-#     alarm read NO_ALARM next to a MAJOR channel. Inequality proofs on purpose — they hit
+#     alarm read NO_ALARM next to a MAJOR channel. Inequality proofs on purpose, they hit
 #     the bit-identity frontally and cannot be greened by cosmetic extra fields.
 
 
@@ -940,7 +940,7 @@ def _nt_matrix(flat: list[float], dim: list[int]) -> object:
 
 
 def test_format_value_real_p4p_ntmatrix_distinguishes_transposed_shapes() -> None:
-    """A 2x3 and a 3x2 NTMatrix over the same flat values must NOT serialise identically —
+    """A 2x3 and a 3x2 NTMatrix over the same flat values must NOT serialise identically:
     pre-fix the `dim` field was dropped and the shape was unrecoverable."""
     flat = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
 
@@ -975,7 +975,7 @@ def _nt_multi_channel(
     user_tags: list[int] | None = None,
 ) -> object:
     """A real NTMultiChannel Value. `NTMultiChannel.wrap()` raises NotImplementedError and
-    `.type()` returns a Value PROTOTYPE (not a Type) — hence Value(proto.type(), ...)."""
+    `.type()` returns a Value PROTOTYPE (not a Type), hence Value(proto.type(), ...)."""
     import numpy as np
     from p4p import Value
     from p4p.nt import NTMultiChannel
@@ -1019,12 +1019,12 @@ def test_format_value_real_p4p_ntmultichannel_surfaces_channels() -> None:
     assert press["severity_text"] == "MAJOR"  # the MAJOR that NO_ALARM hid pre-fix
     assert press["connected"] is False
     # The top-level alarm block of an NTMultiChannel is structural (says nothing about the
-    # channels) — the value must carry the note that points readers at channels[].
+    # channels), the value must carry the note that points readers at channels[].
     assert "note" in value and "channels[]" in str(value["note"])
 
 
 def test_format_value_real_p4p_ntmultichannel_surfaces_user_tag() -> None:
-    """QA: `userTag` is an NT-spec per-channel parallel array too — the fix that promised
+    """QA: `userTag` is an NT-spec per-channel parallel array too, the fix that promised
     "no more silently lost sibling fields" still dropped it."""
     result = _format_value(
         "MC:PV",
@@ -1040,7 +1040,7 @@ def test_format_value_real_p4p_ntmultichannel_surfaces_user_tag() -> None:
 
 
 def test_format_value_extraction_failure_is_declared() -> None:
-    """QA: a crashed value extraction left a bare ``{"value": None}`` — indistinguishable
+    """QA: a crashed value extraction left a bare ``{"value": None}``, indistinguishable
     from a genuinely-None reading for every consumer that condenses this dict further
     (validate/discover/write-readback/monitor). The fallback now declares itself in-band,
     following the established data_omitted/note honesty pattern."""
@@ -1057,7 +1057,7 @@ def test_format_value_extraction_failure_is_declared() -> None:
 
 
 def test_format_value_real_p4p_ntmatrix_scalar_value_is_kept() -> None:
-    """A malformed NTMatrix whose value is a SCALAR must keep the scalar as one row —
+    """A malformed NTMatrix whose value is a SCALAR must keep the scalar as one row:
     pre-fix it was silently dropped to ``rows=[[]]`` (shape [0])."""
     from p4p import Type, Value
 
@@ -1072,7 +1072,7 @@ def test_format_value_real_p4p_ntmatrix_scalar_value_is_kept() -> None:
 
 
 def test_extract_nt_matrix_non_integral_dim_is_not_trusted() -> None:
-    """A non-integral `dim` (only constructible via fakes — the real wire type is int[])
+    """A non-integral `dim` (only constructible via fakes, the real wire type is int[])
     must not be int-truncated into a note that misquotes the wire: report flat + the RAW
     dim in the note."""
     from epics_pv_mcp.services.epics_client import _extract_nt_matrix
@@ -1096,8 +1096,8 @@ def test_format_value_non_string_descriptor_is_omitted() -> None:
 
 
 def test_format_value_foreign_typed_structs_are_not_marker_routed() -> None:
-    """QA: a value with an EXPLICIT foreign type id must go through the generic converter
-    — the structural markers (choices/dimension/labels/channelName) exist for id-less
+    """QA: a value with an EXPLICIT foreign type id must go through the generic converter,
+    the structural markers (choices/dimension/labels/channelName) exist for id-less
     fakes and anonymous structs only. Pre-fix each marker captured foreign structs: a
     custom OptionSet was minted into an NTEnum with a FABRICATED index=0 contradicting
     its own data, a `dimension` sibling produced a wrong-shape NTNDArray summary that
@@ -1151,7 +1151,7 @@ def test_format_value_foreign_typed_structs_are_not_marker_routed() -> None:
 
 def test_format_value_anonymous_marker_structs_still_fall_back() -> None:
     """Counter-control: the markers stay a FALLBACK for ANONYMOUS values (a bare p4p
-    struct reports getID() == "structure"; fakes have no getID at all) — NT-shaped data
+    struct reports getID() == "structure"; fakes have no getID at all), NT-shaped data
     from an id-stripping provider keeps its bespoke extraction."""
     from p4p import Type, Value
 
@@ -1169,7 +1169,7 @@ def test_format_value_anonymous_marker_structs_still_fall_back() -> None:
 
 def test_format_value_real_p4p_descriptor_surfaces() -> None:
     """The optional NT `descriptor` (free-text description every NT type may carry) must
-    reach the output — pre-fix it was dropped for ALL NT types (no block extractor)."""
+    reach the output, pre-fix it was dropped for ALL NT types (no block extractor)."""
     from p4p import Type, Value
 
     t = Type([("value", "d"), ("descriptor", "s")], id="epics:nt/NTScalar:1.0")
@@ -1182,7 +1182,7 @@ def test_format_value_real_p4p_descriptor_surfaces() -> None:
 
 
 def test_format_value_real_p4p_empty_descriptor_is_omitted() -> None:
-    """An unset descriptor arrives as "" on the wire — it carries no information and must
+    """An unset descriptor arrives as "" on the wire, it carries no information and must
     be omitted, not reported as an empty string."""
     from p4p import Type, Value
 

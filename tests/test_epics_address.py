@@ -22,7 +22,7 @@ class TestSplitHost:
             ("localhost:5064", "localhost"),
             ("[::1]:5075", "::1"),
             ("[2001:db8::1]:5075", "2001:db8::1"),
-            ("::1", "::1"),  # bare IPv6, multiple colons — not port-split
+            ("::1", "::1"),  # bare IPv6, multiple colons, not port-split
             ("gateway.example.org:5075", "gateway.example.org"),
         ],
     )
@@ -82,7 +82,7 @@ class TestAutoAddrSearchDisabled:
             ("YES", False),
             ("", False),  # unset/empty → default ON
             ("false", False),  # a spelling the pvxs parser rejects → still broadcasts
-            ("0 ", False),  # untrimmed — pvxs does not trim
+            ("0 ", False),  # untrimmed, pvxs does not trim
         ],
     )
     def test_pva(self, value: str, disabled: bool) -> None:

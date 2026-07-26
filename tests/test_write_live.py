@@ -1,4 +1,4 @@
-"""Live write + readback verification (O3) — the class of correctness a mock CANNOT show.
+"""Live write + readback verification (O3), the class of correctness a mock CANNOT show.
 
 Opt-in: ``pytest -m live`` with ``EPICS_MCP_ALLOW_PV_WRITE=true``, a loopback EPICS search env, and
 ``EPICS_MCP_LIVE_WRITE_PV`` pointing at a WRITABLE numeric PV inside the write allowlist. Optional
@@ -19,7 +19,7 @@ If the put did not land, or the readback read the wrong PV / a stale value, ``ve
 the inverted-compare and mismatch mutants; here the live claim is "a real write is verified True
 and the readback reflects the value written".
 
-The values are facility-agnostic — every PV name and value arrives from the environment; nothing
+The values are facility-agnostic, every PV name and value arrives from the environment; nothing
 site-specific is committed.
 """
 
@@ -36,7 +36,7 @@ from epics_pv_mcp.tools.write import _set_pv_value
 from tests.live_gate import assert_live_available, live_demanded
 
 # The autouse conftest fixture ``_isolate_epics_search_env`` strips the EPICS search env so posture
-# tests measure the code, not the machine — which also removes the route to the IOC.
+# tests measure the code, not the machine, which also removes the route to the IOC.
 # ``loopback_write_env`` re-injects the loopback write lane AFTER that strip; a live WRITE can ONLY
 # run loopback anyway (the SafetyLayer reach assert fails closed on a non-loopback reach when writes
 # are on), so this is the only lane the probe could use. The PV NAME still comes from the
@@ -84,7 +84,7 @@ class TestLiveWriteReadback:
     """The O3 readback machinery against a real IOC."""
 
     async def test_write_same_value_verifies(self, pv: str) -> None:
-        """Writing the current value back verifies True — the OK path against a real record,
+        """Writing the current value back verifies True, the OK path against a real record,
         non-disruptive and always in range."""
         baseline = await _read_numeric(pv)
         result = await _set_pv_value(pv, str(baseline))
@@ -94,7 +94,7 @@ class TestLiveWriteReadback:
 
     async def test_write_changed_value_verifies_and_restores(self, pv: str) -> None:
         """Writing a DIFFERENT value: the readback must reflect the NEW value (verified True). This
-        is the strong probe — a readback that returned the stale baseline would flip verified to
+        is the strong probe, a readback that returned the stale baseline would flip verified to
         False. Needs a safe in-range EPICS_MCP_LIVE_WRITE_VALUE; the original is always restored."""
         target = os.environ.get("EPICS_MCP_LIVE_WRITE_VALUE")
         assert_live_available(
@@ -124,7 +124,7 @@ class TestLiveWriteReadback:
 class TestLiveWriteBounds:
     """The O2 value-bounds guard against a real IOC: an out-of-range write is refused BEFORE the
     put, so the live value is unchanged (the value never reached the IOC). The class a mock cannot
-    show — a mock only knows what the client sent, never that the record's own limits blocked it."""
+    show, a mock only knows what the client sent, never that the record's own limits blocked it."""
 
     async def test_out_of_range_write_is_refused_and_value_unchanged(self, pv: str) -> None:
         # O2 only bites a record that DECLARES drive limits; a limitless record correctly fails
@@ -136,7 +136,7 @@ class TestLiveWriteBounds:
         )
         assert_live_available(
             has_limits,
-            f"live bounds probe: {pv} declares no control drive limits (DRVL/DRVH) — point "
+            f"live bounds probe: {pv} declares no control drive limits (DRVL/DRVH), point "
             "EPICS_MCP_LIVE_WRITE_PV at a record WITH drive limits",
             demanded=live_demanded(os.environ),
         )
@@ -150,7 +150,7 @@ class TestLiveWriteBounds:
 
         baseline = await _read_numeric(pv)
         try:
-            # The out-of-range write must be refused before the put — a real PVWriteBoundsError.
+            # The out-of-range write must be refused before the put, a real PVWriteBoundsError.
             with pytest.raises(PVWriteBoundsError):
                 await _set_pv_value(pv, out_of_range)
             # And the live value must be UNCHANGED: the put never happened. A missing guard would
@@ -160,5 +160,5 @@ class TestLiveWriteBounds:
                 f"out-of-range value landed at the IOC: {after!r} != baseline {baseline!r}"
             )
         finally:
-            # Defensive restore — even though the write should never have landed.
+            # Defensive restore: even though the write should never have landed.
             await _set_pv_value(pv, str(baseline))

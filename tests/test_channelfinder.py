@@ -65,10 +65,10 @@ def test_project_extracts_ioc_host_tags(monkeypatch: pytest.MonkeyPatch) -> None
 def test_project_never_fabricates_from_malformed_properties(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """QA: a null property value was str()-minted into the literal string "None" — flowing
+    """QA: a null property value was str()-minted into the literal string "None", flowing
     through the allowlist into host_name and device_lookup's source_host; a non-str name
     was stringified into an invented key; junk items vanished without the documented
-    rationale. The projection stays LENIENT (inside an anchored record — same rationale as
+    rationale. The projection stays LENIENT (inside an anchored record, same rationale as
     olog_client._names) but never fabricates: malformed entries drop whole."""
     client = ChannelFinderClient("http://cf:8080/ChannelFinder")
     payload = [
@@ -96,7 +96,7 @@ def test_project_never_fabricates_from_malformed_properties(
 
 def test_project_redacts_person_owner_and_recceiverid(monkeypatch: pytest.MonkeyPatch) -> None:
     """DS-PRIVACY: a service-account owner (recceiver) is kept, a person's username owner is
-    redacted to "", and the opaque properties['recceiverID'] is dropped — technical provenance
+    redacted to "", and the opaque properties['recceiverID'] is dropped, technical provenance
     (iocName/hostName) is untouched."""
     client = ChannelFinderClient("http://cf")
     payload = [
@@ -125,7 +125,7 @@ def test_project_redacts_person_owner_and_recceiverid(monkeypatch: pytest.Monkey
 def test_project_allowlists_properties_drops_person_property(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """DS-PRIVACY: the pre-live-smoke audit exhibited a person-name leak through a property VALUE —
+    """DS-PRIVACY: the pre-live-smoke audit exhibited a person-name leak through a property VALUE:
     the reccaster ENGINEER/LOCATION env-var convention (devIocStats) or a cfstore custom field. The
     surfaced properties must be an ALLOWLIST of known-technical names, dropping any other property
     by default; the technical iocName/hostName survive (and still feed ioc_name/host_name)."""
@@ -133,7 +133,7 @@ def test_project_allowlists_properties_drops_person_property(
     payload = [
         {
             "name": "SYS:PV1",
-            "owner": "recceiver",  # safe RecSync service account — owner gives no protection here
+            "owner": "recceiver",  # safe RecSync service account, owner gives no protection here
             "properties": [
                 {"name": "iocName", "value": "IOC1", "owner": "recceiver"},
                 {"name": "hostName", "value": "host1", "owner": "recceiver"},
@@ -248,7 +248,7 @@ def test_non_list_payload_raises(monkeypatch: pytest.MonkeyPatch) -> None:
         client.find_channels("X")
 
 
-# --- client: strict response schema (S11) — unreadable 2xx is NEVER a definitive answer ---
+# --- client: strict response schema (S11), unreadable 2xx is NEVER a definitive answer ---
 
 
 @pytest.mark.parametrize(
@@ -259,7 +259,7 @@ def test_non_list_payload_raises(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_find_channels_non_dict_item_raises(
     payload: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """S11: a non-dict element in the channel list must RAISE — it used to be silently dropped
+    """S11: a non-dict element in the channel list must RAISE, it used to be silently dropped
     (a fabricated smaller registry; two different malformed payloads both looked 'successful')."""
     client = ChannelFinderClient("http://cf")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
@@ -275,7 +275,7 @@ def test_find_channels_non_dict_item_raises(
 def test_find_channels_record_without_name_raises(
     record: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """S11: a channel record without a usable ``name`` must RAISE — it used to become
+    """S11: a channel record without a usable ``name`` must RAISE, it used to become
     ``ChannelInfo(name="")``, an identity-less phantom channel that entered downstream sets
     (crossplane/coverage) as the empty string. Measured (ESS CF): ``name`` is always present."""
     client = ChannelFinderClient("http://cf")
@@ -302,7 +302,7 @@ def test_check_connectivity_raises_on_transport_failure(monkeypatch: pytest.Monk
 
 def test_check_connectivity_ssl_error_chains_cause(monkeypatch: pytest.MonkeyPatch) -> None:
     """A TLS/CA failure on the HEAD probe chains the SSLError (via `from exc`) so the doctor
-    classifier buckets it ca_error, not unreachable — a dropped `from exc` would misclassify it."""
+    classifier buckets it ca_error, not unreachable, a dropped `from exc` would misclassify it."""
     client = ChannelFinderClient("http://cf")
     monkeypatch.setattr(
         client.session, "head", Mock(side_effect=requests.exceptions.SSLError("self-signed"))
@@ -469,7 +469,7 @@ def test_build_params_empty_collections_emit_nothing() -> None:
 
 
 def test_build_params_gate_rejects_non_allowlisted_property() -> None:
-    """DS-privacy: a filter on a redacted property (e.g. accessGroup) is a redaction bypass —
+    """DS-privacy: a filter on a redacted property (e.g. accessGroup) is a redaction bypass:
     it reconstructs the name→value partition the projection hides. Fail closed."""
     with pytest.raises(ValueError, match="allowlist"):
         _build_query_params("*", 10, has_properties={"accessGroup": "x"}, allowed_properties=_ALLOW)
@@ -529,12 +529,12 @@ def test_build_params_rejects_contradictory_tag() -> None:
 
 def test_build_params_rejects_separator_in_negated_value() -> None:
     """A |,; in a not_property_values value flips the single negation into an OR-of-negations
-    tautology (matches anything having the property) — reject. has_properties values keep OR."""
+    tautology (matches anything having the property), reject. has_properties values keep OR."""
     with pytest.raises(ValueError, match="separator"):
         _build_query_params(
             "*", 10, not_property_values={"pvStatus": "a|b"}, allowed_properties=_ALLOW
         )
-    # has_properties value with a separator is the intended OR — allowed
+    # has_properties value with a separator is the intended OR, allowed
     assert _build_query_params(
         "*", 10, has_properties={"pvStatus": "a|b"}, allowed_properties=_ALLOW
     ) == {"~name": "*", "~size": "10", "pvStatus": "a|b"}
@@ -586,12 +586,12 @@ def test_each_route_targets_its_own_endpoint(monkeypatch: pytest.MonkeyPatch) ->
     """S31: the requested URL is the only observable difference between the sibling routes.
 
     ``list_properties`` and ``list_tags`` return the SAME shape and both go through the same
-    ``_named_list`` helper, so no type or shape guard can ever fire on a swap between them —
+    ``_named_list`` helper, so no type or shape guard can ever fire on a swap between them:
     measured: pointing ``list_tags`` at the properties URL left the whole suite green, and
     against a real ChannelFinder it would have returned property names as tags. The one
     asymmetric step, the allowlist filter in ``list_properties``, works the wrong way round for
     detection: it makes the properties answer SMALLER, so a swapped ``list_tags`` would not stand
-    out by being too large. ``find_channels`` carries the same gap and worse — against the
+    out by being too large. ``find_channels`` carries the same gap and worse, against the
     properties URL, ``_project`` turns ``{name, owner}`` dicts into plausible invented channels.
 
     Together with test_count_channels_targets_the_count_endpoint above, this pins all four URL
@@ -599,13 +599,13 @@ def test_each_route_targets_its_own_endpoint(monkeypatch: pytest.MonkeyPatch) ->
 
     The assertion follows each call immediately because ``call_args`` holds only the LAST call.
     ``call_count`` pins something narrower than it looks: exactly one request per route. ⚠️ It is
-    NOT a floor against a route that stops requesting — measured, that case is already caught by
+    NOT a floor against a route that stops requesting, measured, that case is already caught by
     the URL assertion, since the three routes expect three DIFFERENT urls and a predecessor's
     stale ``call_args`` can never satisfy the next one. An earlier version of this docstring
     claimed otherwise; what the line actually catches is a route issuing a SECOND request.
 
     Red-proof: point ``list_tags`` at ``self.properties_url`` (or ``find_channels`` at it) in
-    services/channelfinder_client.py. mypy stays green — both are ``str``."""
+    services/channelfinder_client.py. mypy stays green, both are ``str``."""
     base = "http://cf:8080/ChannelFinder"
     client = ChannelFinderClient(base)
     getter = Mock(return_value=_resp([{"name": "SIM:PV1", "owner": "someone"}]))
@@ -636,7 +636,7 @@ def test_count_channels_rejects_non_numeric(
 
 @pytest.mark.asyncio
 async def test_tool_no_filter_passes_no_extra_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The No-Filter path must call find_channels with NO filter kwargs — this is why the 4 fixed-
+    """The No-Filter path must call find_channels with NO filter kwargs, this is why the 4 fixed-
     signature doubles stay green. A double WITHOUT **kwargs proves it (a TypeError would fail)."""
     monkeypatch.setattr(
         "epics_pv_mcp.services.checkers.get_config",
@@ -678,7 +678,7 @@ async def test_tool_forwards_set_filters(monkeypatch: pytest.MonkeyPatch) -> Non
 
 @pytest.mark.asyncio
 async def test_tool_count_only_returns_match_count(monkeypatch: pytest.MonkeyPatch) -> None:
-    """count_only returns a DISTINCT {enabled, match_count} — never overloads total, no capped."""
+    """count_only returns a DISTINCT {enabled, match_count}, never overloads total, no capped."""
     monkeypatch.setattr(
         "epics_pv_mcp.services.checkers.get_config",
         lambda: EpicsConfig(channelfinder_url="http://cf"),
@@ -711,7 +711,7 @@ async def test_tool_maps_bad_filter_to_invalid_input(monkeypatch: pytest.MonkeyP
 async def test_tool_count_disabled_makes_no_call(monkeypatch: pytest.MonkeyPatch) -> None:
     """The count mode's disabled path: no client is constructed, and the SHAPE is the count shape.
 
-    Both halves were missing and the name promised the first of them — found by the adversarial
+    Both halves were missing and the name promised the first of them, found by the adversarial
     review of the S29 typing commit. Without the ``_boom`` double this test asserted nothing about
     "no call" at all (its list-mode twin above always had one); without the exact key set it also
     could not tell the count literal from the list literal, which is the disjointness the typed
@@ -740,10 +740,10 @@ async def test_tool_count_disabled_makes_no_call(monkeypatch: pytest.MonkeyPatch
 def test_list_properties_intersects_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
     """list_properties surfaces ONLY allowlisted property names present on the server, sorted.
 
-    A non-allowlisted name (ENGINEER — a person-bearing cfstore property) is excluded, exactly as
+    A non-allowlisted name (ENGINEER, a person-bearing cfstore property) is excluded, exactly as
     ``_project`` reduces per-channel properties to ``_safe_property_names``. Otherwise the tool
     would advertise filter keys ``find_channels`` refuses with INVALID_INPUT. The list route
-    carries ``owner``/``value`` — both dropped (name-only).
+    carries ``owner``/``value``, both dropped (name-only).
     """
     client = ChannelFinderClient("http://cf:8080/ChannelFinder")
     payload = [
@@ -770,7 +770,7 @@ def test_list_tags_returns_all_names_sorted_owner_dropped(
 
 
 def test_list_vocabulary_strict_on_bad_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    """S11: a non-list payload or an item without a string 'name' RAISES, never collapses to [] —
+    """S11: a non-list payload or an item without a string 'name' RAISES, never collapses to []:
     the listing IS the answer, so 'unreadable' must not read as 'there are none'.
 
     S31: the diagnosis must also name the endpoint that was ACTUALLY requested. The label used to
@@ -790,7 +790,7 @@ def test_list_vocabulary_strict_on_bad_payload(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_list_vocabulary_empty_is_valid(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An empty server list yields [] (valid — genuinely no tags/properties), NOT a raise."""
+    """An empty server list yields [] (valid, genuinely no tags/properties), NOT a raise."""
     client = ChannelFinderClient("http://cf")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([])))
     assert client.list_tags() == []
@@ -842,7 +842,7 @@ async def test_vocabulary_enabled_returns_names(monkeypatch: pytest.MonkeyPatch)
 
 @pytest.mark.asyncio
 async def test_vocabulary_enabled_empty_is_not_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A CONFIGURED ChannelFinder with no vocabulary yields enabled=true + empty lists — DISTINCT
+    """A CONFIGURED ChannelFinder with no vocabulary yields enabled=true + empty lists, DISTINCT
     from the disabled envelope (enabled=false + note). Locks the documented invariant that an empty
     vocabulary must never collapse into a 'disabled' appearance (e.g. a regression to
     ``enabled = bool(properties or tags)``). Empty is genuinely reachable: a configured CF whose

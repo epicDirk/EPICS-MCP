@@ -41,7 +41,7 @@ def test_is_alarm_configured_true(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_is_alarm_configured_detail_strips_person_fields(monkeypatch: pytest.MonkeyPatch) -> None:
-    """DS-PRIVACY: a real config-change doc carries user/host (who changed it) — the returned detail
+    """DS-PRIVACY: a real config-change doc carries user/host (who changed it), the returned detail
     must drop them (and any unknown field) while keeping the technical config."""
     client = AlarmClient("http://alarm:8081")
     raw = {
@@ -68,8 +68,8 @@ def test_is_alarm_configured_detail_strips_person_fields(monkeypatch: pytest.Mon
 
 def test_is_alarm_configured_withholds_authored_freetext(monkeypatch: pytest.MonkeyPatch) -> None:
     """DS-PRIVACY (defense-in-depth): if an alarm-logger ever surfaces the authored free-text
-    fields FLAT at top level, each VALUE must be withheld (Olog treatment) — key kept, value gone.
-    NOTE: the CURRENT upstream nests these inside ``config_msg`` (dropped by the allowlist — see
+    fields FLAT at top level, each VALUE must be withheld (Olog treatment), key kept, value gone.
+    NOTE: the CURRENT upstream nests these inside ``config_msg`` (dropped by the allowlist, see
     ``..._drops_config_msg_person_data``); this only guards the hypothetical flat shape."""
     client = AlarmClient("http://alarm:8081")
     raw = {
@@ -86,7 +86,7 @@ def test_is_alarm_configured_withholds_authored_freetext(monkeypatch: pytest.Mon
     }
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([raw])))
     _, detail = client.is_alarm_configured("Vac-VVMC-01:Pos-R", config_name="Accelerator")
-    # authored free-text values are withheld — no person can leak inside the prose / a mailto action
+    # authored free-text values are withheld, no person can leak inside the prose / a mailto action
     for field in ("description", "guidance", "displays", "commands", "actions"):
         assert detail[field] == FREETEXT_WITHHELD, field
     # technical fields pass through; audit metadata is gone
@@ -100,8 +100,8 @@ def test_is_alarm_configured_withholds_authored_freetext(monkeypatch: pytest.Mon
 def test_is_alarm_configured_drops_config_msg_person_data(monkeypatch: pytest.MonkeyPatch) -> None:
     """DS-PRIVACY (real upstream shape): a ``/search/alarm/config`` doc deserializes to the
     Phoebus ``AlarmLogMessage`` shape {config, user, host, enabled, config_msg, message_time}. The
-    person data — who changed it (``user``/``host``) and the serialized ``AlarmConfigMessage``
-    (``config_msg``, which embeds guidance prose / ``mailto:`` actions) — rides in fields that are
+    person data, who changed it (``user``/``host``) and the serialized ``AlarmConfigMessage``
+    (``config_msg``, which embeds guidance prose / ``mailto:`` actions), rides in fields that are
     NONE of them on the allowlist. The load-bearing drop is the allowlist projection: assert the
     three person-bearing fields are absent and only the technical fields remain."""
     client = AlarmClient("http://alarm:8081")
@@ -150,7 +150,7 @@ def test_is_alarm_configured_withheld_when_tree_silent(monkeypatch: pytest.Monke
 
 
 def test_is_alarm_configured_hit_does_not_probe_the_tree(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The extra request is on the MISS path only — a hit already proves the tree was read as
+    # The extra request is on the MISS path only, a hit already proves the tree was read as
     # intended, so the common case still costs exactly one round trip.
     client = AlarmClient("http://alarm")
     getter = Mock(return_value=_resp([{"config": "config:/Accelerator/C/X"}]))
@@ -160,12 +160,12 @@ def test_is_alarm_configured_hit_does_not_probe_the_tree(monkeypatch: pytest.Mon
     assert getter.call_count == 1
 
 
-# --- client: strict response schema (S11) — unreadable 2xx is NEVER a definitive answer ---
+# --- client: strict response schema (S11), unreadable 2xx is NEVER a definitive answer ---
 #
 # Measured payload shapes (local Alarm Logger 5.0.052, live 2026-07-16): /search/alarm returns a
 # list whose docs ALL carry a string `config` (state: docs additionally pv/severity/…, config:
 # docs config_msg/…); /search/alarm/config likewise. `config` is the identity field the client
-# reads — it is the schema anchor.
+# reads, it is the schema anchor.
 
 
 @pytest.mark.parametrize(
@@ -176,7 +176,7 @@ def test_is_alarm_configured_hit_does_not_probe_the_tree(monkeypatch: pytest.Mon
 def test_is_alarm_configured_unreadable_payload_raises(
     payload: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """S11: a non-list 2xx main payload must RAISE — it used to be read as ``[]`` (a miss) and
+    """S11: a non-list 2xx main payload must RAISE, it used to be read as ``[]`` (a miss) and
     fall through to the tree probe, where an answering tree turned it into a DEFINITIVE
     ``False``. Unreadable must never reach the tree probe."""
     client = AlarmClient("http://alarm")
@@ -212,7 +212,7 @@ def test_is_alarm_configured_unreadable_record_raises(
 
 def test_is_alarm_configured_junk_tree_probe_withholds(monkeypatch: pytest.MonkeyPatch) -> None:
     """S11: a MISS whose tree probe returns junk must stay withheld (None), never a definitive
-    ``False`` — junk is no proof the tree name was read as intended."""
+    ``False``: junk is no proof the tree name was read as intended."""
     client = AlarmClient("http://alarm")
     monkeypatch.setattr(
         client.session,
@@ -232,7 +232,7 @@ def test_is_alarm_configured_junk_tree_probe_withholds(monkeypatch: pytest.Monke
 def test_get_alarm_history_unreadable_payload_raises(
     payload: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """S11: an unreadable 2xx history payload must RAISE — it used to read as ``([], False)``,
+    """S11: an unreadable 2xx history payload must RAISE, it used to read as ``([], False)``,
     indistinguishable from "no alarms in the window" (auditor probe ALARM_HISTORY_BAD_2XX)."""
     client = AlarmClient("http://alarm")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
@@ -250,7 +250,7 @@ def test_get_alarm_history_unreadable_record_raises(
 ) -> None:
     """S11: junk records in the history list were silently dropped (a fabricated, smaller
     history). Every record must be a dict carrying a string ``config`` (measured: BOTH doc
-    types — state: and config: — always carry it)."""
+    types, state: and config:, always carry it)."""
     client = AlarmClient("http://alarm")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
     with pytest.raises(AlarmResponseError):
@@ -285,7 +285,7 @@ def test_is_alarm_configured_false_on_leaf_mismatch(monkeypatch: pytest.MonkeyPa
 def test_is_alarm_configured_query_format(monkeypatch: pytest.MonkeyPatch) -> None:
     # Load-bearing: the config param MUST carry a leading slash + config name (the server does
     # config.split("/")[1] to pick the ES index) and span component nesting with "*". The tree
-    # probe on the miss path asks the same shape WITHOUT the PV — it must select the same index,
+    # probe on the miss path asks the same shape WITHOUT the PV, it must select the same index,
     # or it would answer for a different tree than the one being judged.
     client = AlarmClient("http://alarm")
     getter = Mock(return_value=_resp([]))
@@ -382,7 +382,7 @@ def test_get_alarm_history_projects_technical_fields(monkeypatch: pytest.MonkeyP
 
 def test_get_alarm_history_strips_person_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     """DS-PRIVACY: an alarm state doc can carry user/host (WHO acknowledged/enabled/disabled) plus a
-    command and a config_msg — the returned events must drop them (and any unknown field) while
+    command and a config_msg, the returned events must drop them (and any unknown field) while
     keeping the technical alarm data. Mirrors the is_alarm_configured allowlist guard."""
     client = AlarmClient("http://alarm:8081")
     raw = [
@@ -413,7 +413,7 @@ def test_get_alarm_history_strips_person_fields(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_get_alarm_history_capped(monkeypatch: pytest.MonkeyPatch) -> None:
-    """capped=True when the server returns MORE than max_events — the client fetches max_events+1
+    """capped=True when the server returns MORE than max_events, the client fetches max_events+1
     (honest off-by-one) and keeps the newest max_events."""
     client = AlarmClient("http://alarm:8081")
     # max_events=3 → request 4, got 4; `config` = the measured always-present anchor (S11)
@@ -426,7 +426,7 @@ def test_get_alarm_history_capped(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_get_alarm_history_exactly_max_events_not_capped(monkeypatch: pytest.MonkeyPatch) -> None:
     """Boundary: the server returns EXACTLY max_events records (fewer than the max_events+1 we
-    requested) → the window is complete, capped=False. Pins the honest strict ``>`` — a ``>=``
+    requested) → the window is complete, capped=False. Pins the honest strict ``>``, a ``>=``
     regression would false-flag exactly max_events real events as truncated (which the
     size=max_events+1 idiom exists to avoid), and every OTHER capped test survives that mutation."""
     client = AlarmClient("http://alarm:8081")
@@ -442,7 +442,7 @@ def test_get_alarm_history_query_params(monkeypatch: pytest.MonkeyPatch) -> None
     """pv passes through, start/end are NORMALIZED to zone-explicit ISO; the endpoint is
     /search/alarm; size = max_events+1 so capped is an honest fetched>max_events.
 
-    This test previously asserted that start/end 'pass through' unchanged — pinning the very
+    This test previously asserted that start/end 'pass through' unchanged, pinning the very
     behaviour that was broken. The Alarm Logger reads a bare wall clock in ITS OWN zone and reads
     a zone-less ISO not at all (silently as 'now' -> 200 + empty). Sending the zone removes both
     ambiguities; see services/alarm_time. Do not restore the pass-through.
@@ -465,7 +465,7 @@ def test_get_alarm_history_naive_iso_gains_the_zone(monkeypatch: pytest.MonkeyPa
     """THE alarm regression, at the wire level.
 
     Measured live against a real Alarm Logger: 'start=2026-07-08T12:45:58Z' returned events while
-    the identical 'start=2026-07-08T12:45:58' returned 0 — the zone-less form matches none of the
+    the identical 'start=2026-07-08T12:45:58' returned 0, the zone-less form matches none of the
     server's parsers and degrades to 'now'. A 7-day window is far too wide for a mere zone shift to
     empty, so this is the collapse, not an offset. It is also the most likely wrong value there is:
     datetime.now().isoformat() emits exactly this.
@@ -482,7 +482,7 @@ def test_get_alarm_history_naive_iso_gains_the_zone(monkeypatch: pytest.MonkeyPa
 def test_get_alarm_history_relative_amount_passes_through(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A relative amount is the server's to resolve — its clock owns its data."""
+    """A relative amount is the server's to resolve, its clock owns its data."""
     client = AlarmClient("http://alarm:8081")
     getter = Mock(return_value=_resp([]))
     monkeypatch.setattr(client.session, "get", getter)
@@ -495,7 +495,7 @@ def test_get_alarm_history_relative_amount_passes_through(
 def test_get_alarm_history_bad_time_makes_no_request(monkeypatch: pytest.MonkeyPatch) -> None:
     """A value the server would misread is refused BEFORE any I/O.
 
-    '500 millis' is the sharpest case: measured live it RETURNS DATA — for a 500-MINUTE window,
+    '500 millis' is the sharpest case: measured live it RETURNS DATA, for a 500-MINUTE window,
     because the unit dispatch tests startsWith("mi") before equals("ms"). Wrong data beats no data
     only in the sense that it is harder to notice.
     """
@@ -584,7 +584,7 @@ def test_check_connectivity_raises_on_transport_failure(monkeypatch: pytest.Monk
 
 
 async def test_is_alarm_configured_tool_requires_config_name() -> None:
-    """MA-2b(d): the alarm tree is a REQUIRED tool parameter — no silent 'Accelerator' default that
+    """MA-2b(d): the alarm tree is a REQUIRED tool parameter, no silent 'Accelerator' default that
     matches nothing at a real facility (is_alarm_configured would else always withhold). Mutant
     (a default restored) -> config_name drops out of the schema's 'required' -> this fails."""
     from epics_pv_mcp.server import mcp
@@ -600,7 +600,7 @@ async def test_query_alarm_configured_without_tree_withholds_no_guess(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """MA-2b(d): with no tree named, query_alarm_configured withholds honestly instead of probing a
-    guessed default tree — the AlarmClient must NOT even be constructed (no network for a guess)."""
+    guessed default tree, the AlarmClient must NOT even be constructed (no network for a guess)."""
     from epics_pv_mcp.services import checkers
 
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(alarm_url="http://alarm"))
@@ -670,7 +670,7 @@ def test_get_alarm_history_command_restricts_to_config_docs(
 
 async def test_get_alarm_history_tool_severity_and_command_are_enums() -> None:
     """MA-2b(b/c): command/severity/current_severity are Literal-restricted at the tool boundary
-    (structural typo-rejection — an unsupported value would otherwise be silently ignored by the
+    (structural typo-rejection, an unsupported value would otherwise be silently ignored by the
     server and broaden). Mutant (free str) -> the enum vanishes from the schema -> this fails."""
     import json
 
@@ -693,7 +693,7 @@ def test_get_alarm_history_command_capped_survives_config_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """QA(2026-07-22): the client-side config: filter must NOT consume the size=max_events+1
-    over-fetch sentinel — a truncated window whose newest page holds a dropped state: doc must
+    over-fetch sentinel, a truncated window whose newest page holds a dropped state: doc must
     still report capped=True. Mutant (capped computed AFTER the filter) -> capped=False on a
     truncated window -> this fails (the silent false-completeness the QA found)."""
     client = AlarmClient("http://alarm")

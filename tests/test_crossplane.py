@@ -2,8 +2,8 @@
 
 The join consumes :class:`JoinPv` rows (macro-expanded, operator-facing display-PV instances from
 the ``opi_navigation`` inventory); these tests build them by hand for full determinism (no I/O, no
-``analyze_pv_inventory``). The adapter that produces JoinPv from a real PvInventory — including the
-operator-facing/fragment-seed filter — is covered in ``test_inventory_adapter.py``; the wired
+``analyze_pv_inventory``). The adapter that produces JoinPv from a real PvInventory, including the
+operator-facing/fragment-seed filter, is covered in ``test_inventory_adapter.py``; the wired
 end-to-end path (real .bob → resolved → linked) in ``test_crossplane_tool.py``.
 """
 
@@ -97,7 +97,7 @@ def test_linked_indeterminate_and_other_prefix() -> None:
 
 
 def test_naming_service_error_withholds_verdict_not_crash() -> None:
-    """A non-404 naming failure must not abort the join — the report has naming=None (withheld) and
+    """A non-404 naming failure must not abort the join, the report has naming=None (withheld) and
     the rest of the cross-plane buckets are still produced (DS-2 / audit S5)."""
     join = [_jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:status")]
     report = crossplane_check(join, _st(), naming=_RaisingNaming())
@@ -116,20 +116,20 @@ def test_resolved_macro_collapses_to_linked() -> None:
 
 
 def test_join_is_string_literal_so_raw_protocol_prefix_misbuckets() -> None:
-    """Join CONTRACT — the reason normalization belongs at the ADAPTER edge, not here.
+    """Join CONTRACT, the reason normalization belongs at the ADAPTER edge, not here.
 
     crossplane_check buckets a resolved ca/pva PV by a LITERAL ``jp.pv.startswith(prefix)`` (:162);
-    it deliberately does NOT strip protocols (single responsibility — ``crossplane.py`` carries no
+    it deliberately does NOT strip protocols (single responsibility, ``crossplane.py`` carries no
     ``opi_navigation`` import). So a RAW ``pva://``-prefixed PV that shares the IOC device prefix
     mis-buckets as ``other_prefix``; only its CHANNEL form (what the adapter produces) reaches
-    ``linked``. This pins WHY the adapter must normalize — if the join ever stripped protocols
+    ``linked``. This pins WHY the adapter must normalize, if the join ever stripped protocols
     itself, the raw case below would flip to ``linked`` and this test fails (a guard for the
     responsibility split). NB: bucketing keys on ``jp.protocol`` (:158), so both rows are pva.
     """
     raw = "pva://DEV-TEST01:Ctrl-EVR-01:X"
     channel = "DEV-TEST01:Ctrl-EVR-01:X"
     raw_report = crossplane_check([_jp("a.bob", raw, protocol="pva")], _st())
-    assert raw_report.pvs_other_prefix == (raw,)  # join does NOT strip — by design
+    assert raw_report.pvs_other_prefix == (raw,)  # join does NOT strip, by design
     assert raw_report.pvs_linked == ()
     channel_report = crossplane_check([_jp("a.bob", channel, protocol="pva")], _st())
     assert channel_report.pvs_linked == (channel,)  # channel form (adapter output) links correctly
@@ -256,7 +256,7 @@ def test_broken_write_surfaced() -> None:
 
 
 def test_broken_write_is_strict_subset_of_broken() -> None:
-    # QA C7: broken_write must be exactly the WRITABLE broken PVs, not a copy of broken — a
+    # QA C7: broken_write must be exactly the WRITABLE broken PVs, not a copy of broken, a
     # read-only broken PV stays out of broken_write.
     join = [
         _jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:CmdW", role="write"),
@@ -273,7 +273,7 @@ def test_broken_write_is_strict_subset_of_broken() -> None:
 
 def test_broken_withheld_over_empty_resolved_set() -> None:
     # QA C1 (defense-in-depth): even if a caller marks an EMPTY .db set complete, broken must be
-    # withheld — proving absence against zero known PVs would flag every linked PV.
+    # withheld, proving absence against zero known PVs would flag every linked PV.
     join = [_jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:anything")]
     report = crossplane_check(join, _st(), ioc_db=(set[str](), set[str]()), ioc_db_complete=True)
     assert report.broken == ()
@@ -413,7 +413,7 @@ def test_cf_empty_url_note_when_requested_without_checker() -> None:
 
 
 def test_cf_field_suffix_normalized_before_diff() -> None:
-    # F3: a field-suffixed linked PV (.EGU/.VAL) normalizes to its record name before the diff — the
+    # F3: a field-suffixed linked PV (.EGU/.VAL) normalizes to its record name before the diff, the
     # .EGU twin of a registered record must NOT be a false cf_unregistered.
     join = [
         _jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:Delay-SP.EGU"),
@@ -442,7 +442,7 @@ def test_cf_record_field_sub_and_no_dot_and_sim_excluded() -> None:
 
 
 def test_cf_distinct_from_broken_both_at_once() -> None:
-    # A linked PV absent from BOTH the .db AND ChannelFinder appears in BOTH buckets — two planes,
+    # A linked PV absent from BOTH the .db AND ChannelFinder appears in BOTH buckets, two planes,
     # both true, not mutually exclusive (no contradiction).
     join = [
         _jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:served"),
@@ -484,7 +484,7 @@ def test_cf_ratio_caveat_silent_below_threshold() -> None:
 
 def test_cf_lower_bound_caveat_when_context_capped() -> None:
     # F6 lower-bound: context_capped + cf_unregistered non-empty → undercount caveat (independent of
-    # the ratio caveat — different trigger).
+    # the ratio caveat, different trigger).
     join = [_jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:miss")]
     report = crossplane_check(
         join, _st(), channelfinder=_FakeCF(set()), cf_requested=True, context_capped=("big.bob",)

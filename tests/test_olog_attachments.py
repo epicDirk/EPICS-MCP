@@ -1,9 +1,9 @@
-"""Offline tests for the Olog ATTACHMENT surface (OA1) — transport, prep, client, gate, service.
+"""Offline tests for the Olog ATTACHMENT surface (OA1), transport, prep, client, gate, service.
 
 No network. Covers the two new transport helpers (multipart PUT + streaming byte GET), the pure
-attachment-prep helpers (plan / read / write — anti-DoS stat-before-read, deterministic injected
+attachment-prep helpers (plan / read / write, anti-DoS stat-before-read, deterministic injected
 UUIDs), the client upload/download paths + the download-privacy backstop, the write-gate size cap +
-audit, and the service orchestration — including red-proofs for the four new guards:
+audit, and the service orchestration, including red-proofs for the four new guards:
 
 * download bytes WITHHELD unless whole-mode AND the explicit opt-in flag,
 * an over-size upload DENIED by the gate,
@@ -129,7 +129,7 @@ class TestMultipartTransport:
 
     def test_post_multipart_uses_the_post_verb(self) -> None:
         # OA1b: attach-to-existing rides POST /logs/multipart (the server's updateLog), the ONLY
-        # transport difference from create — same body, same redirect refusal.
+        # transport difference from create, same body, same redirect refusal.
         session = MagicMock()
         session.request.return_value = _ok_resp({"id": 7})
         out = _http.rest_post_multipart(
@@ -303,12 +303,12 @@ class TestAttachmentPrep:
         assert read_uploads(plan.specs, max_total_bytes=1024)[0]["content"] == data
 
     def test_read_uploads_refuses_a_file_grown_past_the_cap(self, tmp_path: Path) -> None:
-        """QA (TOCTOU): plan_attachments sizes by ``stat``, the gate checks that sum —
+        """QA (TOCTOU): plan_attachments sizes by ``stat``, the gate checks that sum:
         but a file can grow (or be swapped) between stat and read. read_uploads used to
         ``read_bytes()`` unconditionally, materialising AND uploading past the cap; the
         thrice-documented "an over-limit file is never loaded" promise hung on filesystem
         timing. It now re-checks while reading (at most one byte over budget is ever
-        read) and refuses — under its OWN code, not the gate's: this refusal runs AFTER the gate
+        read) and refuses, under its OWN code, not the gate's: this refusal runs AFTER the gate
         admitted the write (the rate token is already spent) and writes no audit line, so the
         write-gate contract (CLAUDE.md, point 4) forbids it from wearing the gate's
         ``OLOG_ATTACH_TOO_LARGE``, which a caller must be able to read as "audited, nothing
@@ -323,7 +323,7 @@ class TestAttachmentPrep:
         assert excinfo.value.error_code == "OLOG_ATTACH_TOO_LARGE_AT_READ"
 
     def test_read_uploads_budget_is_cumulative(self, tmp_path: Path) -> None:
-        """Two files that each fit but together exceed the budget are refused — the cap
+        """Two files that each fit but together exceed the budget are refused, the cap
         is the TOTAL upload, mirroring the gate's ``plan.total_bytes`` semantics."""
         _set_config()
         a, b = tmp_path / "a.bin", tmp_path / "b.bin"
@@ -665,7 +665,7 @@ class TestServiceCreate:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         # Write disabled → the precondition check denies FIRST. If plan_attachments (stat) ran
-        # before the gate, this NON-EXISTENT path would raise EpicsError(INVALID_INPUT) instead — so
+        # before the gate, this NON-EXISTENT path would raise EpicsError(INVALID_INPUT) instead, so
         # a clean OlogWriteDeniedError proves the "deny before any I/O" ordering.
         config_module._config = _write_config(allow_olog_write=False)
         monkeypatch.setattr(checkers_module, "OlogClient", _CaptureClient)
@@ -849,7 +849,7 @@ class TestServiceList:
 
 
 # ======================================================================================
-# OA1b — add_log_attachment: client round-trip + whole-mode + service gating
+# OA1b: add_log_attachment: client round-trip + whole-mode + service gating
 # ======================================================================================
 
 # A representative RAW whole-mode entry (as measured from the live sandbox: source + properties
@@ -917,7 +917,7 @@ class TestClientAddAttachment:
         assert log_json["level"] == "Info"
         assert log_json["logbooks"] == [{"name": "Ops", "owner": None, "state": "Active"}]
         assert log_json["tags"] == [{"name": "shift"}]
-        # attachments = existing (checksum dropped) + new — the anti-retainAll list
+        # attachments = existing (checksum dropped) + new, the anti-retainAll list
         assert log_json["attachments"] == [
             {"id": "old1", "filename": "old1_a.png", "fileMetadataDescription": "image"},
             {"id": "new1", "filename": "new1_x.bob", "fileMetadataDescription": "file"},
@@ -949,7 +949,7 @@ class TestClientAddAttachment:
 
     def test_refuses_unroundtrippable_attachments(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # RED-PROOF: attaching also round-trips the EXISTING attachment list, and retention is
-        # filename-keyed — so an entry whose current attachments collide case-insensitively cannot
+        # filename-keyed, so an entry whose current attachments collide case-insensitively cannot
         # be attached to without the server silently dropping one of them. Refuse instead.
         captured: dict[str, Any] = {}
 
@@ -975,7 +975,7 @@ class TestClientAddAttachment:
 
     def test_get_raw_entry_refuses_when_not_whole_mode(self) -> None:
         # RED-PROOF (guard a, client backstop): a redacted client (loopback but no assume_test_data)
-        # must refuse to read the round-trip source — no redacted entry is ever round-tripped.
+        # must refuse to read the round-trip source, no redacted entry is ever round-tripped.
         client = OlogClient(_LOOPBACK, assume_test_data=False)
         assert client.whole_mode is False
         with pytest.raises(OlogWholeModeRequired):
@@ -1047,7 +1047,7 @@ class TestServiceAddAttachment:
 
     @pytest.mark.asyncio
     async def test_refuses_when_not_whole_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # RED-PROOF (guard a, service): a redacted server is refused up front — no read, no write.
+        # RED-PROOF (guard a, service): a redacted server is refused up front, no read, no write.
         config_module._config = _write_config()
         _AddCaptureClient.whole = False
         _AddCaptureClient.calls = {}
@@ -1106,7 +1106,7 @@ class TestServiceAddAttachment:
     ) -> None:
         # This branch had NO test at all: only the ALLOW path was covered, so a broken FAILED-audit
         # call could not go red here (mypy caught one that pytest did not). Same reasoning as the
-        # update path — POST /logs/multipart IS the destructive updateLog, so a timeout can leave
+        # update path; POST /logs/multipart IS the destructive updateLog, so a timeout can leave
         # the entry mutated while the caller sees FAILED; the record must name it.
         _set_config(olog_url=_LOOPBACK, allow_olog_write=True, olog_write_logbooks="Ops")
         _AddCaptureClient.whole = True

@@ -13,7 +13,7 @@ from epics_pv_mcp.safety import SafetyLayer, get_safety
 
 # E8: constructing a writes-ON SafetyLayer now asserts the process EPICS search env is
 # loopback-only. The autouse env strip (conftest) leaves *_AUTO_ADDR_LIST unset = broadcast ON,
-# which the reach assert (correctly) rejects — so every writes-on construction in this module
+# which the reach assert (correctly) rejects, so every writes-on construction in this module
 # runs under the loopback lane. The reach go-red tests below override a var ON TOP of it.
 pytestmark = pytest.mark.usefixtures("loopback_write_env")
 
@@ -54,7 +54,7 @@ class TestPatternAllowlist:
         sl.check_write_allowed("TEST:pv")
 
     def test_empty_pattern_with_writes_on_raises(self) -> None:
-        # S22: writes ENABLED with an EMPTY allowlist pattern is a misconfiguration — every PV
+        # S22: writes ENABLED with an EMPTY allowlist pattern is a misconfiguration, every PV
         # would be writable. It must fail closed at construction (SafetyConfigError), not
         # warn-and-allow. This replaces the former test_empty_pattern_allows_all, which cemented
         # the allow-all footgun.
@@ -64,7 +64,7 @@ class TestPatternAllowlist:
 
     def test_explicit_allow_all_pattern_is_permitted(self) -> None:
         # Positive control: the guard forbids the SILENT empty default, not a DELIBERATE choice.
-        # An operator may allow every PV with an explicit '.*' — that must construct fine.
+        # An operator may allow every PV with an explicit '.*', that must construct fine.
         SafetyLayer(EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10))
 
 
@@ -101,7 +101,7 @@ class TestWriteReachAssert:
             SafetyLayer(self._writes_on())
 
     def test_auto_addr_list_unset_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Unset means broadcast ON (EPICS default) — must be rejected, not treated as "no target".
+        # Unset means broadcast ON (EPICS default): must be rejected, not treated as "no target".
         monkeypatch.delenv("EPICS_PVA_AUTO_ADDR_LIST", raising=False)
         with pytest.raises(SafetyConfigError):
             SafetyLayer(self._writes_on())
@@ -118,7 +118,7 @@ class TestWriteReachAssert:
             SafetyLayer(self._writes_on())
 
     def test_ipv6_loopback_accepted(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Positive control: ::1 IS loopback — a bracketed IPv6 loopback with a port constructs.
+        # Positive control: ::1 IS loopback, a bracketed IPv6 loopback with a port constructs.
         monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "[::1]:5075")
         SafetyLayer(self._writes_on())
 
@@ -151,7 +151,7 @@ class TestSafetyConfigGuard:
     """G5: an out-of-range write_rate_limit fails closed, not as a bare ValueError."""
 
     def test_negative_rate_limit_raises_safety_config_error(self) -> None:
-        # model_construct bypasses G2's ge=1 validation — the SafetyLayer guard
+        # model_construct bypasses G2's ge=1 validation, the SafetyLayer guard
         # must convert deque(maxlen=-1)'s bare ValueError into SafetyConfigError.
         cfg = EpicsConfig.model_construct(write_rate_limit=-1)
         with pytest.raises(SafetyConfigError):
@@ -299,7 +299,7 @@ class TestAuditReadback:
 
 
 class TestAuditDeny:
-    """Rejected writes must leave a DENY audit record — and consume no rate token."""
+    """Rejected writes must leave a DENY audit record, and consume no rate token."""
 
     def test_gate_off_emits_deny(
         self, safety_locked: SafetyLayer, caplog: pytest.LogCaptureFixture

@@ -1,12 +1,12 @@
 """Tests for the pure value-bounds core (:mod:`epics_pv_mcp.bounds`).
 
-No network, no clock, no env — :func:`check_value_in_bounds` is a total function over (written
+No network, no clock, no env, :func:`check_value_in_bounds` is a total function over (written
 string, readback dict). These cover the three verdict classes (in-range / out-of-range / not
 bounds-checkable) plus the fail-open cases (no control, dropped limits, non-numeric written) and the
 fail-closed non-finite case.
 
 Red-provability (Evidence #5): the out-of-range tests go red under a mutant that inverts the compare
-or widens the limits to infinity — a guard that cannot go red is the defect.
+or widens the limits to infinity, a guard that cannot go red is the defect.
 """
 
 from __future__ import annotations

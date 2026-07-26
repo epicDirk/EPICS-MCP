@@ -56,12 +56,12 @@ def test_substitute_basic_undefined_and_nested() -> None:
 
 # --- BG2: the $(NAME=default) grammar (epics-base macLib, modules/libcom/src/macLib) ---
 # Pre-fix, _MACRO_REF_RE required the char class to touch the closing bracket, so ANY
-# reference carrying a default did not match at all — not even with the macro defined.
+# reference carrying a default did not match at all, not even with the macro defined.
 
 
 def test_substitute_default_form_defined_wins() -> None:
     """A DEFINED macro beats its default (macCore.c:860-880). Pre-fix `$(P=DEF)` did not
-    match AT ALL — the reference stayed literal although P was defined."""
+    match AT ALL, the reference stayed literal although P was defined."""
     assert substitute("$(P=DEF)", {"P": "X:"}) == "X:"
     assert substitute("${P=DEF}", {"P": "X:"}) == "X:"
 
@@ -90,27 +90,27 @@ def test_substitute_default_may_be_a_macro() -> None:
 
 def test_substitute_computed_name_still_resolves() -> None:
     """Regression pin (GREEN pre-fix): a name that is itself a macro (macCore.c:798).
-    The naive scanner rewrite breaks exactly this case — it must keep working."""
+    The naive scanner rewrite breaks exactly this case, it must keep working."""
     assert substitute("$($(SEL)_PV)", {"SEL": "A", "A_PV": "hit"}) == "hit"
 
 
 def test_substitute_scoped_macro_comma_terminates_the_name() -> None:
     """`$(A,B=1)`: a top-level ',' terminates the NAME (macCore.c:794); the scoped
-    arguments are recognised but NOT evaluated — undefined stays literal (needs-msi)."""
+    arguments are recognised but NOT evaluated, undefined stays literal (needs-msi)."""
     assert substitute("$(A,B=1)", {"A": "x"}) == "x"
     assert substitute("$(A,B=1)", {}) == "$(A,B=1)"
     assert substitute("${FOO=,BAR}", {}) == ""  # default ends at the top-level ','
 
 
 def test_substitute_name_charset_follows_maclib() -> None:
-    """macLib names end only at a top-level '=', ',' or the bracket — '-' is legal."""
+    """macLib names end only at a top-level '=', ',' or the bracket, '-' is legal."""
     assert substitute("$(P-1)", {"P-1": "x"}) == "x"
 
 
 def test_substitute_bracket_types_do_not_cross_match() -> None:
-    """QA: macLib is bracket-TYPE-faithful (macCore.c:793 — macEnd is "=,)" for `$(` and
+    """QA: macLib is bracket-TYPE-faithful (macCore.c:793, macEnd is "=,)" for `$(` and
     "=,}" for `${`): for a `$(` reference a `}` is a NAME character, never a terminator.
-    A cross-matching scanner RESOLVED the typo `$(P}` — minting a PV name the IOC never
+    A cross-matching scanner RESOLVED the typo `$(P}`, minting a PV name the IOC never
     serves, straight into the cross-plane gate."""
     assert substitute("$(P}", {"P": "x"}) == "$(P}"
     assert substitute("${P)", {"P": "x"}) == "${P)"
@@ -120,16 +120,16 @@ def test_substitute_bracket_types_do_not_cross_match() -> None:
 
 
 def test_substitute_bare_brackets_do_not_nest() -> None:
-    """macLib scans raw characters: a bare '(' inside a default does not nest — only a
+    """macLib scans raw characters: a bare '(' inside a default does not nest, only a
     '$'-introduced reference does. `$(P=f(x))` closes at the FIRST ')' (default "f(x",
-    trailing ")" stays literal) — macLib-identical in both branches."""
+    trailing ")" stays literal), macLib-identical in both branches."""
     assert substitute("$(P=f(x))", {}) == "f(x)"
     assert substitute("$(P=f(x))", {"P": "v"}) == "v)"
 
 
 def test_substitute_expanded_name_is_looked_up_verbatim() -> None:
-    """QA: macLib copies an expanded name VERBATIM into the lookup buffer (macCore.c:798)
-    — a '=' arriving from a macro VALUE never becomes a default separator. Re-parsing the
+    """QA: macLib copies an expanded name VERBATIM into the lookup buffer (macCore.c:798),
+    a '=' arriving from a macro VALUE never becomes a default separator. Re-parsing the
     re-emitted text did exactly that and fabricated "B_PV" into the resolved set."""
     assert substitute("$($(SEL)_PV)", {"SEL": "A=B"}) == "$($(SEL)_PV)"
     assert substitute("$($(SEL)_PV)", {"SEL": "A=B", "A=B_PV": "hit"}) == "hit"
@@ -139,13 +139,13 @@ def test_substitute_expanded_name_is_looked_up_verbatim() -> None:
 
 
 def test_substitute_name_with_bare_dollar_still_resolves() -> None:
-    """A '$' NOT followed by a bracket is an ordinary name character (macLib) — the
+    """A '$' NOT followed by a bracket is an ordinary name character (macLib), the
     unresolved-reference check must look for '$('/'${', not for a bare '$'."""
     assert substitute("$(A$B)", {"A$B": "x"}) == "x"
 
 
 def test_substitute_pathological_nesting_never_raises() -> None:
-    """QA: `ioc_db_pvs` documents "Never raises" — the name-expansion recursion must be
+    """QA: `ioc_db_pvs` documents "Never raises", the name-expansion recursion must be
     depth-BOUNDED, not stack-bounded (2000-deep nesting raised RecursionError). Hostile
     depth resolves to nothing and stays a literal (needs-msi), without an exception."""
     hostile = "$(" * 2000 + "X" + ")" * 2000
@@ -158,7 +158,7 @@ def test_substitute_pathological_nesting_never_raises() -> None:
 
 def test_ioc_db_pvs_default_macros_resolve() -> None:
     """BG2 integration: a record name built from default-form macros must land in
-    `resolved` — pre-fix it was stamped needs-msi (unresolved) although every macro
+    `resolved`: pre-fix it was stamped needs-msi (unresolved) although every macro
     carries a usable default. This is the path that feeds the cross-plane gate."""
     resolved, unresolved = ioc_db_pvs('record(ai, "$(P=DEV:)$(R=temp)value") {}\n', {})
     assert resolved == {"DEV:tempvalue"}
@@ -216,7 +216,7 @@ def test_device_name_strips_single_trailing_colon() -> None:
 
 
 def test_ioc_db_pvs_captures_aliases() -> None:
-    # A display PV may reference an ALIAS, not the record name — both must count as served.
+    # A display PV may reference an ALIAS, not the record name, both must count as served.
     db = 'record(bi, "$(P)rec") { alias("$(P)recAlias") }\nalias("$(P)rec", "$(P)other")\n'
     resolved, unresolved = ioc_db_pvs(db, {"P": "SYS:"})
     assert resolved == {"SYS:rec", "SYS:recAlias", "SYS:other"}
@@ -465,7 +465,7 @@ def test_load_ioc_db_walks_module_root_once_for_many_basename_loads(
 def test_load_ioc_db_direct_resolves_never_walk_module_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """S7-3 lazy: when every load resolves via the DIRECT path, the basename index is never built —
+    """S7-3 lazy: when every load resolves via the DIRECT path, the basename index is never built:
     ZERO filesystem walks (eager build walked once even on this happy path). The index is lazy now,
     built only on the first basename fallback."""
     loads = "".join(f'dbLoadRecords("f{i}.db", "P=SYS:")\n' for i in range(5))
@@ -484,5 +484,5 @@ def test_load_ioc_db_direct_resolves_never_walk_module_root(
 
     monkeypatch.setattr(e3_db, "_iter_files_bounded", counting)
     result = load_ioc_db(info, tmp_path)
-    assert calls == 0  # never walked — all loads resolved directly (lazy index)
+    assert calls == 0  # never walked, all loads resolved directly (lazy index)
     assert result.resolved == frozenset({"SYS:x"})

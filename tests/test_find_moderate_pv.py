@@ -22,7 +22,7 @@ home:
       non-UTC machine; on a UTC machine the mutant is invisible by construction)
 * M12 argument validation removed    → test_impossible_argument_combinations_are_usage_errors
 
-All names are synthetic — no facility value is committed.
+All names are synthetic: no facility value is committed.
 """
 
 from __future__ import annotations
@@ -107,7 +107,7 @@ def test_parse_rejects_a_non_object_row() -> None:
 
 @pytest.mark.parametrize("bad_name", [None, "", 7], ids=["missing", "empty", "non-str"])
 def test_parse_rejects_a_degenerate_pv_name(bad_name: object) -> None:
-    """A row without a real name must not be silently dropped — junk would otherwise wear the
+    """A row without a real name must not be silently dropped, junk would otherwise wear the
     same face as a healthy, smaller report (the S11 class, degenerate-anchor variant)."""
     row: dict[str, object] = {"eventRate": "1.0"}
     if bad_name is not None:
@@ -146,7 +146,7 @@ def test_band_bounds_are_inclusive_and_order_is_preserved() -> None:
 
 
 def test_carried_pre_window_sample_does_not_count() -> None:
-    """The appliance carries the last pre-window value into EVERY result — counting it would
+    """The appliance carries the last pre-window value into EVERY result, counting it would
     let a dormant PV (n=1, inside=0) pass as window-discriminating."""
     samples = [_sample(_LO - 86400), _sample(_LO + 10), _sample(_LO + 20)]
     assert count_inside(samples, _LO, _HI) == 2
@@ -183,7 +183,7 @@ def test_classify_verifies_the_exact_precondition_boundary() -> None:
     ids=["withheld", "empty", "capped", "too-few-samples", "too-few-inside"],
 )
 def test_classify_names_each_failing_precondition(history: HistoryResult, reason: str) -> None:
-    """``withheld`` is UNKNOWN (not proven empty) and ``empty`` cannot discriminate windows —
+    """``withheld`` is UNKNOWN (not proven empty) and ``empty`` cannot discriminate windows:
     neither may pass as a fixture; the remaining reasons mirror the live test's guards."""
     assert _classify(history) == reason
 
@@ -252,7 +252,7 @@ def test_walk_honours_the_verify_budget() -> None:
 
 
 def test_walk_counts_unreadable_candidates_and_continues() -> None:
-    """One odd PV must not abort the walk — but it is COUNTED, never silently dropped
+    """One odd PV must not abort the walk, but it is COUNTED, never silently dropped
     (a dropped one would make a broken backend look like a smaller, healthy band)."""
 
     def fetch(pv_name: str) -> HistoryResult:
@@ -269,7 +269,7 @@ def test_walk_counts_unreadable_candidates_and_continues() -> None:
 
 
 def test_walk_lets_a_transport_failure_propagate() -> None:
-    """A transport that dies mid-walk is NOT a non-finding — it must reach the caller
+    """A transport that dies mid-walk is NOT a non-finding, it must reach the caller
     (which exits 2), never be counted down into an honest-looking 'nothing found'."""
 
     def fetch(_pv_name: str) -> HistoryResult:

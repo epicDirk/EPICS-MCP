@@ -70,13 +70,13 @@ def _err_resp(status: int) -> Mock:
 # --- client: the redaction switch (ESS-spec pending, decisions 2026-07-15) ---
 #
 # Against a real server the projection below is unchanged. Entries leave WHOLE only when BOTH hold:
-# a loopback URL AND the operator's explicit `assume_test_data` declaration. Neither suffices alone
-# — a port-forward serves production on localhost without the URL changing (so the URL cannot prove
+# a loopback URL AND the operator's explicit `assume_test_data` declaration. Neither suffices alone,
+# a port-forward serves production on localhost without the URL changing (so the URL cannot prove
 # the data is synthetic), and a flag alone would not catch "pointed at the facility and forgot".
 
 
 def _sandbox(url: str = "http://localhost:8080/Olog") -> OlogClient:
-    """A client for a DECLARED local sandbox — the only configuration that sees whole entries."""
+    """A client for a DECLARED local sandbox, the only configuration that sees whole entries."""
     return OlogClient(url, assume_test_data=True)
 
 
@@ -97,7 +97,7 @@ def test_loopback_without_the_declaration_still_redacts(monkeypatch: pytest.Monk
     """THE tunnel guard: a loopback URL alone must NOT un-redact.
 
     `ssh -L 8080:olog-prod:8080` makes a production logbook answer on localhost with the URL
-    unchanged — so the address can never be the sufficient condition. Only a person can declare the
+    unchanged, so the address can never be the sufficient condition. Only a person can declare the
     data synthetic. Default (no declaration) = redact.
     """
     client = OlogClient("http://localhost:8080/Olog", assume_test_data=False)
@@ -109,12 +109,12 @@ def test_loopback_without_the_declaration_still_redacts(monkeypatch: pytest.Monk
 
 
 def test_sandbox_refuses_to_follow_a_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A declared sandbox must not follow a redirect — it could land on a real server un-redacted.
+    """A declared sandbox must not follow a redirect, it could land on a real server un-redacted.
 
     Demonstrated live (QA 2026-07-15): a loopback server answering 302 -> a non-loopback address
     made the client return that server's entries WHOLE, because the mode was decided from the
     configured URL while requests silently followed the hop. Olog's REST API has no legitimate
-    redirect, so the client refuses to follow one at all — a loud error beats a silent leak.
+    redirect, so the client refuses to follow one at all, a loud error beats a silent leak.
     """
     client = _sandbox()
     captured: dict[str, object] = {}
@@ -139,7 +139,7 @@ def test_sandbox_refuses_to_follow_a_redirect(monkeypatch: pytest.MonkeyPatch) -
 def test_declaration_without_loopback_still_redacts(monkeypatch: pytest.MonkeyPatch) -> None:
     """The other half: declaring test data does NOT un-redact a remote server.
 
-    Catches "pointed at the facility and forgot the flag was on" — loopback stays necessary.
+    Catches "pointed at the facility and forgot the flag was on", loopback stays necessary.
     """
     client = OlogClient("https://olog.example.org/Olog", assume_test_data=True)
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(_RAW_ENTRY)))
@@ -163,7 +163,7 @@ def test_client_reads_the_declaration_from_config(monkeypatch: pytest.MonkeyPatc
 
 
 def test_declared_sandbox_keeps_the_derived_shape(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The full mode only ADDS fields — it never changes the shape the caller already relies on.
+    """The full mode only ADDS fields, it never changes the shape the caller already relies on.
 
     Regression guard: returning the server dict verbatim would drop ``attachment_count`` (it is
     SYNTHESISED, not an Olog field) and flip ``logbooks``/``tags`` from list[str] to list[dict].
@@ -196,7 +196,7 @@ def test_full_mode_search_still_truncates(monkeypatch: pytest.MonkeyPatch) -> No
     """The full mode must not disturb ``[:size]`` truncation.
 
     ``capped``/``total_matches`` are computed on the RAW list before projection. (This test used
-    to also pin a silent non-dict FILTER inside the comprehension — S11 removed that filter: a
+    to also pin a silent non-dict FILTER inside the comprehension; S11 removed that filter: a
     junk element in the page now raises instead of silently shrinking the result, see
     ``test_search_entry_without_identity_raises``.)
     """
@@ -215,7 +215,7 @@ def test_allowlisted_remote_write_target_is_still_read_redacted(
     """THE core regression: a URL the WRITE gate would allow remotely must still READ redacted.
 
     ``OlogWriteGate._url_write_allowed`` returns True for an allowlisted remote host with
-    ``allow_remote`` — reusing it as the read predicate would surface a PRODUCTION logbook in the
+    ``allow_remote``: reusing it as the read predicate would surface a PRODUCTION logbook in the
     clear. Only ``is_loopback_url`` may drive the redaction. This pins that for good.
     """
     remote = "https://olog.example.org/Olog"
@@ -230,7 +230,7 @@ def test_allowlisted_remote_write_target_is_still_read_redacted(
     )
     gate.check_write_allowed(["Operations"])  # the gate says: writing here is permitted…
 
-    # assume_test_data=True isolates the URL as the deciding condition — without it the client would
+    # assume_test_data=True isolates the URL as the deciding condition, without it the client would
     # redact regardless and this would not test the write-gate/read-predicate separation at all.
     client = OlogClient(remote, assume_test_data=True)
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(_RAW_ENTRY)))
@@ -251,7 +251,7 @@ def test_allowlisted_remote_write_target_is_still_read_redacted(
     ],
 )
 def test_spoofed_or_unparseable_url_redacts(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail-safe: anything not provably loopback is redacted — even WITH the declaration set.
+    """Fail-safe: anything not provably loopback is redacted, even WITH the declaration set.
 
     ``assume_test_data=True`` on purpose: it isolates the loopback check as the deciding condition,
     so this stays a real test of the URL logic. Without it the client would redact anyway and the
@@ -342,7 +342,7 @@ def test_get_log_entry_found_and_redacted(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_get_log_entry_404_is_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
     """A missing/deleted id makes the Olog answer HTTP 404 -> found:false (None), NOT a raised
-    error (the archiver getPVTypeInfo 404 lesson) — else 'does this exist?' == a real outage."""
+    error (the archiver getPVTypeInfo 404 lesson), else 'does this exist?' == a real outage."""
     client = OlogClient("http://olog")
     http_error = requests.exceptions.HTTPError("404")
     http_error.response = Mock(status_code=404)
@@ -364,7 +364,7 @@ def test_get_log_entry_quotes_log_id_in_url(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_get_log_entry_non_404_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A NON-404 failure (5xx / unreachable) must PROPAGATE — a could-not-read is never reported
+    """A NON-404 failure (5xx / unreachable) must PROPAGATE, a could-not-read is never reported
     as 'not found' (the inverse of the 404 case)."""
     client = OlogClient("http://olog")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp({}, ok=False)))
@@ -380,7 +380,7 @@ def test_get_log_entry_non_404_propagates(monkeypatch: pytest.MonkeyPatch) -> No
 def test_get_log_entry_unreadable_2xx_raises(
     payload: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """S11: a 200 whose body is not a log entry must RAISE — never a definitive answer.
+    """S11: a 200 whose body is not a log entry must RAISE, never a definitive answer.
 
     Replaces the former ``…empty_body_is_none`` pin, which cemented the defect: ``{}`` collapsed
     to ``None`` (indistinguishable from the definitive 404 "not found"), and an unrelated
@@ -433,7 +433,7 @@ async def test_get_log_entry_tool_disabled_no_network(monkeypatch: pytest.Monkey
     result = await _get_log_entry("1")
     assert result["enabled"] is False
     # S11: a DISABLED plane was the lone `found: False` among four
-    # None-on-disabled siblings (archived/configured/registered/get_archive_info's found) —
+    # None-on-disabled siblings (archived/configured/registered/get_archive_info's found):
     # a definitive "this entry does not exist" from a plane that was never asked. None = not
     # checked; False stays reserved for the definitive 404.
     assert result["found"] is None
@@ -442,7 +442,7 @@ async def test_get_log_entry_tool_disabled_no_network(monkeypatch: pytest.Monkey
 
 @pytest.mark.asyncio
 async def test_search_logbook_tool_enabled_is_redacted(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The LAYERING contract: the tool routes through the redacting client — a person named in the
+    """The LAYERING contract: the tool routes through the redacting client, a person named in the
     free-text title/description of a raw entry never reaches the tool result."""
     monkeypatch.setattr(
         "epics_pv_mcp.services.checkers_olog.get_config",
@@ -490,7 +490,7 @@ def _search_client_raising(exc: BaseException) -> type:
 
 @pytest.mark.asyncio
 async def test_search_bad_time_is_not_a_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An unusable time window is a bad ARGUMENT — nothing was ever sent, so 'cannot reach Olog'
+    """An unusable time window is a bad ARGUMENT, nothing was ever sent, so 'cannot reach Olog'
     would be a lie. Pins that TimeWindowFormatError is not swept up by the OlogError branch."""
     monkeypatch.setattr(
         "epics_pv_mcp.services.checkers_olog.get_config",
@@ -510,7 +510,7 @@ async def test_search_bad_time_is_not_a_connection_error(monkeypatch: pytest.Mon
 async def test_search_served_error_is_not_a_connection_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The server ANSWERED and said no — that is not an outage."""
+    """The server ANSWERED and said no, that is not an outage."""
     monkeypatch.setattr(
         "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
@@ -532,7 +532,7 @@ async def test_search_served_error_is_not_a_connection_error(
 async def test_search_connection_failure_still_maps_to_connection_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Counter-test: the split must not over-reach — a real outage stays a connection error."""
+    """Counter-test: the split must not over-reach, a real outage stays a connection error."""
     monkeypatch.setattr(
         "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
@@ -655,7 +655,7 @@ def test_search_logbook_iso_window_sent_as_wall_clock_with_tz(
     assert params["start"] == "2026-01-01 00:00:00.000"
     assert params["end"] == "2027-01-01 00:00:00.000"
     assert "T" not in str(params["start"])
-    # Without an explicit tz Olog reads the wall clock in the SERVER's zone — silently offset
+    # Without an explicit tz Olog reads the wall clock in the SERVER's zone, silently offset
     # against any Olog not running UTC, which no UTC-sandbox test would ever reveal.
     assert params["tz"] == "UTC"
 
@@ -718,7 +718,7 @@ def test_search_logbook_without_window_sends_no_time_params(
 
 
 def test_search_logbook_bad_time_makes_no_request(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A value Olog cannot read is refused BEFORE any I/O — never sent and silently misread."""
+    """A value Olog cannot read is refused BEFORE any I/O, never sent and silently misread."""
     client = OlogClient("http://olog")
 
     def _fail(*_a: object, **_k: object) -> Mock:
@@ -735,7 +735,7 @@ def test_search_logbook_start_after_end_rejected_client_side(
     """Both values absolute -> we can compare them ourselves, deterministically.
 
     Left to the server this is a 400, which our ANONYMOUS read path only ever sees as a 401
-    ('unauthorized') — actively misleading for what is a swapped window.
+    ('unauthorized'), actively misleading for what is a swapped window.
     """
     client = OlogClient("http://olog")
 
@@ -751,7 +751,7 @@ def test_search_logbook_401_message_explains_anonymous_error_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Measured: Olog turns EVERY server-side 400 into a 401 for an anonymous caller (its error
-    dispatch requires auth). Our read path IS anonymous, so 401 — not 400 — is the reachable
+    dispatch requires auth). Our read path IS anonymous, so 401, not 400, is the reachable
     branch, and blaming credentials would send the user hunting the wrong problem."""
     client = OlogClient("http://olog")
 
@@ -766,7 +766,7 @@ def test_search_logbook_401_message_explains_anonymous_error_dispatch(
 def test_search_logbook_400_message_names_the_time_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A deployment with read credentials sees Olog's real 400 — it must name the likely cause."""
+    """A deployment with read credentials sees Olog's real 400, it must name the likely cause."""
     client = OlogClient("http://olog")
 
     def _get(url: str, params: object = None, timeout: object = None, **_: object) -> Mock:
@@ -810,17 +810,17 @@ def test_each_listing_route_targets_its_own_endpoint(monkeypatch: pytest.MonkeyP
     faked response serves every one of them, and asserting on the RESULT pins the slot, not the
     address behind it. The ChannelFinder client carries the same gap between its own two
     vocabulary routes (its ``_named_list`` docstring calls itself that helper's sibling), where a
-    swap was measured to leave the whole suite green — this client has three swappable routes
+    swap was measured to leave the whole suite green, this client has three swappable routes
     rather than two.
 
     Assertions follow each call immediately because ``call_args`` holds only the LAST call.
-    ``call_count`` pins exactly one request per route — ⚠️ NOT, as an earlier version of this
+    ``call_count`` pins exactly one request per route, ⚠️ NOT, as an earlier version of this
     docstring claimed, a floor against a route that stops requesting: the three routes expect
     three different urls, so that case already fails the URL assertion. Measured: it goes red on
     a route issuing a SECOND request.
 
     Red-proof: point ``list_tags`` at ``f"{self.base_url}/logbooks"`` in
-    services/olog_client.py. mypy stays green — every one of these is an f-string of ``str``."""
+    services/olog_client.py. mypy stays green, every one of these is an f-string of ``str``."""
     base = "http://logbook:8080/Olog"
     client = OlogClient(base)
     getter = Mock(return_value=_resp([{"name": "Info", "defaultLevel": True}]))
@@ -835,10 +835,10 @@ def test_each_listing_route_targets_its_own_endpoint(monkeypatch: pytest.MonkeyP
     assert getter.call_count == 3
 
 
-# --- client: strict response schema (S11) — unreadable 2xx is NEVER a definitive answer ---
+# --- client: strict response schema (S11), unreadable 2xx is NEVER a definitive answer ---
 #
 # Auditor probes (QA 2026-07-16 §8.2/B1): syntactically valid 2xx JSON of the wrong shape used to
-# collapse into plausible definitive answers — search -> ([], False, None) ("no hits"), list
+# collapse into plausible definitive answers, search -> ([], False, None) ("no hits"), list
 # endpoints -> [] ("there are none"). The measured payload shapes (local Olog 6.0.4, live): search
 # is {hitCount:int, logs:[entry…]} (bare list = older-version variant, stays valid), every entry
 # carries `id`, every /logbooks//tags item carries `name`.
@@ -852,7 +852,7 @@ def test_each_listing_route_targets_its_own_endpoint(monkeypatch: pytest.MonkeyP
 def test_search_unreadable_2xx_payload_raises(
     payload: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """S11: an unreadable 2xx search payload must RAISE — it used to read as ``([], False, None)``,
+    """S11: an unreadable 2xx search payload must RAISE, it used to read as ``([], False, None)``,
     indistinguishable from a genuinely empty search (auditor probe OLOG_SEARCH_BAD_2XX)."""
     client = OlogClient("http://olog")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
@@ -868,7 +868,7 @@ def test_search_unreadable_2xx_payload_raises(
 def test_search_entry_without_identity_raises(
     payload: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """S11: every entry of the page must be a dict carrying the measured anchor ``id`` — junk
+    """S11: every entry of the page must be a dict carrying the measured anchor ``id``, junk
     entries were silently DROPPED before (a fabricated, smaller result)."""
     client = OlogClient("http://olog")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
@@ -888,7 +888,7 @@ def test_search_unreadable_hitcount_raises(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_search_empty_results_stay_valid(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Positive control: both MEASURED empty shapes stay a real empty result, not an error —
+    """Positive control: both MEASURED empty shapes stay a real empty result, not an error:
     strictness must not flag a genuinely empty search (the S14 false-red lesson)."""
     client = OlogClient("http://olog")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([])))
@@ -907,12 +907,12 @@ def test_search_empty_results_stay_valid(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_list_logbooks_unreadable_2xx_raises(
     payload: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """S11: the top-level /logbooks listing IS the answer — an unreadable payload or item must
+    """S11: the top-level /logbooks listing IS the answer, an unreadable payload or item must
     RAISE. It used to collapse to ``[]`` ("there are no logbooks") or silently drop items (a
     fabricated "this logbook does not exist" for anyone validating a name against the list).
 
     S31: the diagnosis must also name the endpoint that was ACTUALLY requested. All three listing
-    labels were hand-written literals, decoupled from the URL the route builds — a swapped route
+    labels were hand-written literals, decoupled from the URL the route builds, a swapped route
     would have produced a correctly-worded error about the wrong address."""
     client = OlogClient("http://olog")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
@@ -1114,7 +1114,7 @@ async def test_list_log_levels_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> 
 async def test_list_log_levels_propagates_the_withholding_note(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The note is the whole point of withholding an ambiguous default — a service that computed it
+    """The note is the whole point of withholding an ambiguous default, a service that computed it
     and then dropped it would surface a bare null the caller cannot interpret."""
     monkeypatch.setattr(
         "epics_pv_mcp.services.checkers_olog.get_config",
@@ -1148,7 +1148,7 @@ async def test_list_log_levels_splits_outage_from_bad_answer(
 ) -> None:
     """Two different facts, two different next actions: "the service is down" vs "the service
     ANSWERED and we could not read it". Collapsing them sends the reader after the wrong problem
-    (S11 section 8 — the same split search already lives)."""
+    (S11 section 8, the same split search already lives)."""
     monkeypatch.setattr(
         "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
@@ -1169,7 +1169,7 @@ async def test_list_log_levels_splits_outage_from_bad_answer(
 # --- search: the level/title facets (OA2/OA5) ---
 #
 # What a mock CAN prove: that we SEND what we claim to send, and that the blank guard fires before
-# any request. What it CANNOT prove is whether the server HONOURS the filter — Olog silently drops
+# any request. What it CANNOT prove is whether the server HONOURS the filter; Olog silently drops
 # parameters it does not know, so that half lives in tests/test_olog_live.py as a differential
 # probe carrying both controls.
 
@@ -1199,7 +1199,7 @@ def test_search_omits_level_and_title_when_not_filtering(monkeypatch: pytest.Mon
 
 def test_level_split_matches_java_trim_not_python_strip() -> None:
     """Python's ``strip()`` is Unicode-aware; Java's ``trim()`` is not. Stripping more than the
-    server does would normalise an UNMATCHABLE level into a configured name — the cross-check would
+    server does would normalise an UNMATCHABLE level into a configured name, the cross-check would
     then see a known level, stay silent, and let a fabricated emptiness through.
 
     Measured 2026-07-19: level='\\xa0Info' returns 0 hits where level='Info' returns 19, i.e. the
@@ -1215,7 +1215,7 @@ def test_level_split_matches_java_trim_not_python_strip() -> None:
 def test_title_blank_guard_uses_the_titles_own_separator_class() -> None:
     """`title` and `level` do NOT share a separator class, and assuming they do is a silent bug.
 
-    The server's title class is the Java literal ``[\\|,;\\s+]`` — inside a character class that
+    The server's title class is the Java literal ``[\\|,;\\s+]``, inside a character class that
     trailing ``+`` is a LITERAL member, not a quantifier. So a ``+``-only title yields no search
     terms and Olog returns the UNFILTERED set (measured: title='+' -> every entry), while the same
     value is a perfectly ordinary level (measured: level='+' -> 0 hits, genuinely filtered)."""
@@ -1272,7 +1272,7 @@ class _FakeSearch:
 
     ``search_logbook`` mirrors the REAL signature keyword for keyword rather than swallowing
     ``**kwargs``, and records what it was called with. A permissive double is not neutral here: it
-    absorbs exactly the defect class these tests exist to catch — a service layer that forwards a
+    absorbs exactly the defect class these tests exist to catch, a service layer that forwards a
     misspelled keyword, or forwards nothing at all, would still be green against ``**kwargs``.
     """
 
@@ -1343,7 +1343,7 @@ async def test_service_forwards_level_and_title_to_the_client(
 @pytest.mark.asyncio
 async def test_empty_page_past_the_end_is_not_annotated(monkeypatch: pytest.MonkeyPatch) -> None:
     """An empty PAGE is not an empty RESULT. Paging past the end returns no entries while
-    total_matches says something DID match — annotating that would contradict the very payload it
+    total_matches says something DID match, annotating that would contradict the very payload it
     is attached to, and would blame a level that is doing its job."""
     monkeypatch.setattr(
         "epics_pv_mcp.services.checkers_olog.get_config",
@@ -1367,7 +1367,7 @@ async def test_empty_page_past_the_end_is_not_annotated(monkeypatch: pytest.Monk
 @pytest.mark.asyncio
 async def test_note_does_not_judge_a_wildcard_level(monkeypatch: pytest.MonkeyPatch) -> None:
     """Olog HONOURS a wildcard level (measured: 'Inf*' returns the Info entries), so a wildcard
-    part cannot be checked against the name list — declaring it 'not a configured level' would deny
+    part cannot be checked against the name list, declaring it 'not a configured level' would deny
     the real cause. It is named as unchecked instead."""
     monkeypatch.setattr(
         "epics_pv_mcp.services.checkers_olog.get_config",
@@ -1410,7 +1410,7 @@ async def test_empty_result_names_an_unknown_level(monkeypatch: pytest.MonkeyPat
     assert isinstance(note, str)
     assert "Warning" in note
     assert "does not name a configured level" in note
-    # It states a fact about the VALUE and must NOT claim to know why the result is empty — other
+    # It states a fact about the VALUE and must NOT claim to know why the result is empty, other
     # filters in the same search can produce the identical 0.
     assert "may account for the empty result as well" in note
 
@@ -1421,7 +1421,7 @@ async def test_empty_result_for_a_known_level_is_not_annotated(
 ) -> None:
     """A configured level that simply has no entries is an honest 0. Annotating it would be noise,
     and noise trains the reader to skip the note that matters. Also pins the case-insensitive
-    comparison — the server matches case-insensitively, so the cross-check must too."""
+    comparison, the server matches case-insensitively, so the cross-check must too."""
     monkeypatch.setattr(
         "epics_pv_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
@@ -1433,7 +1433,7 @@ async def test_empty_result_for_a_known_level_is_not_annotated(
 
 @pytest.mark.asyncio
 async def test_nonempty_result_is_never_annotated(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The extra /levels lookup runs ONLY on an empty result — a result that found something needs
+    """The extra /levels lookup runs ONLY on an empty result, a result that found something needs
     no excuse, and must not pay for a second round trip."""
     monkeypatch.setattr(
         "epics_pv_mcp.services.checkers_olog.get_config",

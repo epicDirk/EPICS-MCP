@@ -1,12 +1,12 @@
 """Tests for the pure readback-verification core (:mod:`epics_pv_mcp.readback`).
 
-No network, no clock, no env — :func:`verify_readback` is a total function over (written string,
+No network, no clock, no env, :func:`verify_readback` is a total function over (written string,
 readback dict, tolerance). These cover the four verdict classes (ok / mismatch / not-verifiable /
 type-coercion) plus the two tolerance sources (live ``min_step`` vs. the epsilon fallback) and the
 magnitude-safety property that motivated ``math.isclose``.
 
 Red-provability (Evidence #5): the mismatch and magnitude tests go red under a mutant that inverts
-the comparison or replaces the tolerance with ``inf`` — a guard that cannot go red is the defect.
+the comparison or replaces the tolerance with ``inf``, a guard that cannot go red is the defect.
 """
 
 from __future__ import annotations
@@ -67,7 +67,7 @@ class TestToleranceSource:
 
 class TestMagnitudeSafety:
     """The property that motivated math.isclose: tolerance scales with magnitude (relative),
-    so a large-magnitude roundtrip is not a false mismatch — a flat absolute epsilon would fail."""
+    so a large-magnitude roundtrip is not a false mismatch, a flat absolute epsilon would fail."""
 
     def test_large_magnitude_relative_tolerance(self) -> None:
         # 1e6 with a 0.05 absolute difference: rel_tol=1e-6 → 1.0 abs allowance → matches.

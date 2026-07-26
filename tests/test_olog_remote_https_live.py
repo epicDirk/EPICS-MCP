@@ -1,9 +1,9 @@
-"""Live verification of the REMOTE-HTTPS Olog write path (OA1c) — positive + negative control.
+"""Live verification of the REMOTE-HTTPS Olog write path (OA1c), positive + negative control.
 
 The OA1 live plan was loopback-only, so the remote-https multipart upload path (a non-loopback
 https URL, CA from ``EPICS_MCP_CA_BUNDLE``, the env-independent ``_write_session``) was never
 exercised. This closes that gap against a LOCAL self-signed TLS reverse proxy in front of the
-loopback Olog sandbox — no real facility, a synthetic hostname (a ``*.localtest.me`` name that
+loopback Olog sandbox, no real facility, a synthetic hostname (a ``*.localtest.me`` name that
 resolves to 127.0.0.1) and a throwaway self-signed cert.
 
 Opt-in: ``pytest -m live`` with the proxy + cert wired via env (see the module skipif below).
@@ -11,9 +11,9 @@ Opt-in: ``pytest -m live`` with the proxy + cert wired via env (see the module s
 * **Positive:** a create-with-attachment through the FULL gate over the https proxy URL succeeds
   (the gate's remote lane: allowlist + ``OLOG_WRITE_ALLOW_REMOTE`` + https; the write session trusts
   the CA from config, not the env). The uploaded bytes are then read back byte-identically through a
-  SEPARATE loopback whole-mode client — proving the https upload actually stored them.
+  SEPARATE loopback whole-mode client, proving the https upload actually stored them.
 * **Negative:** the SAME upload WITHOUT the CA bundle fails TLS verification (the self-signed cert
-  is not in the system trust store) — the CA, not the URL alone, is what makes the write succeed.
+  is not in the system trust store), the CA, not the URL alone, is what makes the write succeed.
 
 ⚠️ Download stays correctly REDACTED against the non-loopback URL (whole-mode needs loopback), so
 this verifies the UPLOAD / write-TLS path; the byte cross-check reads back via loopback.
@@ -69,7 +69,7 @@ _PNG = base64.b64decode(
 
 def _remote_config(*, ca_bundle: str) -> EpicsConfig:
     """A config pointing Olog write at the non-loopback https proxy, CA from *ca_bundle* (may be
-    empty to force system-trust-store verification — the negative control)."""
+    empty to force system-trust-store verification, the negative control)."""
     assert _PROXY is not None
     return EpicsConfig(
         olog_url=_PROXY,
@@ -133,7 +133,7 @@ async def test_https_upload_succeeds_with_ca_and_bytes_are_stored(tmp_path: Path
 
 @pytest.mark.asyncio
 async def test_https_upload_fails_without_ca() -> None:
-    """NEGATIVE: the same upload WITHOUT the CA bundle fails TLS verification — the self-signed cert
+    """NEGATIVE: the same upload WITHOUT the CA bundle fails TLS verification, the self-signed cert
     is not trusted by the system store, so the write cannot proceed."""
     config_module._config = _remote_config(ca_bundle="")  # verify falls back to the system store
     olog_safety_module._olog_safety = None
@@ -146,5 +146,5 @@ async def test_https_upload_fails_without_ca() -> None:
     )
     with pytest.raises(OlogConnectionError) as exc:
         client.create_log_entry(title="neg", logbooks=[_LOGBOOK], attachments=[upload])
-    # not merely "unreachable" (the proxy IS up — the positive test connects) but a TLS/CA failure
+    # not merely "unreachable" (the proxy IS up, the positive test connects) but a TLS/CA failure
     assert is_ssl_error(exc.value)

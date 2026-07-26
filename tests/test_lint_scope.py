@@ -1,6 +1,6 @@
 """Drift guard for the lint scope (S25 / F20).
 
-Before S25 the ruff hooks scoped only ``src tests``, so ``scripts/`` — tracked product code —
+Before S25 the ruff hooks scoped only ``src tests``, so ``scripts/``, tracked product code:
 was silently unlinted while ``pre-commit run --all-files`` still reported green (a green-gate
 claim that did not cover everything, measured: ``ruff check .`` was red on
 ``scripts/check_no_ess_internal.py``). This guard pins ``scripts`` into the ruff hook scope so the
@@ -27,7 +27,7 @@ def test_ruff_hooks_include_scripts_in_scope() -> None:
 
 def test_mypy_scope_includes_scripts() -> None:
     """mypy must type-check ``scripts/`` too (H4). Ruff was extended to ``scripts`` but the mypy
-    ``files`` list lagged, leaving tracked scripts/ product code type-unchecked — the same gap that
+    ``files`` list lagged, leaving tracked scripts/ product code type-unchecked, the same gap that
     motivated linting scripts/ in the first place."""
     data = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
     files = data["tool"]["mypy"]["files"]

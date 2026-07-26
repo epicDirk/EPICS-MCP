@@ -101,7 +101,7 @@ async def test_discover_wildcard_delegates_to_channelfinder() -> None:
     assert isinstance(pvs, list)
     assert {pv["pv_name"] for pv in pvs} == {"SIM:PS-01:Cur-RB", "SIM:PS-02:Cur-RB"}
     assert all(pv["status"] == "registered" for pv in pvs)
-    # Registration != liveness — a status a caller could mistake for a live connect must not appear.
+    # Registration != liveness, a status a caller could mistake for a live connect must not appear.
     assert all(pv["status"] not in {"found", "not_found", "timeout", "error"} for pv in pvs)
 
 
@@ -120,7 +120,7 @@ async def test_discover_wildcard_carries_channelfinder_cap() -> None:
 
 async def test_discover_wildcard_cf_disabled_keeps_honest_stub() -> None:
     """MA-2: with ChannelFinder NOT configured, the wildcard branch keeps today's honest stub
-    (empty + a note naming ChannelFinder) — never a bare empty that reads as 'no such PV'."""
+    (empty + a note naming ChannelFinder), never a bare empty that reads as 'no such PV'."""
     with patch(
         "epics_pv_mcp.tools.discover.query_channels",
         new_callable=AsyncMock,

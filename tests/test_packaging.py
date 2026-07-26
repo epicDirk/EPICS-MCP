@@ -32,7 +32,7 @@ def _fallback_version_literals(init_source: str) -> list[str]:
 def test_version_fallback_matches_pyproject() -> None:
     """C7 drift guard: ``__init__.py``'s ``PackageNotFoundError`` fallback is a hardcoded version
     string that must be hand-synced with ``pyproject [project].version`` on every bump. When a
-    source checkout has no installed metadata, that stale literal becomes a silent version lie —
+    source checkout has no installed metadata, that stale literal becomes a silent version lie:
     this test fails the moment the two drift, so a bump can't forget the fallback."""
     package_init = Path(epics_pv_mcp.__file__)
     repo_root = package_init.resolve().parent.parent.parent  # …/EPICS-MCP-Server
@@ -41,13 +41,13 @@ def test_version_fallback_matches_pyproject() -> None:
 
     fallbacks = _fallback_version_literals(package_init.read_text(encoding="utf-8"))
     assert fallbacks == [declared], (
-        f"__init__.py __version__ fallback {fallbacks} != pyproject version {declared!r} — "
+        f"__init__.py __version__ fallback {fallbacks} != pyproject version {declared!r}, "
         "sync the hardcoded fallback on every version bump"
     )
 
 
 #: stderr signatures of a build that failed for ENVIRONMENT reasons (offline resolver,
-#: unreachable index, proxy) — the only non-zero outcomes that may skip. Everything else
+#: unreachable index, proxy), the only non-zero outcomes that may skip. Everything else
 #: (a broken [tool.hatch.build], a backend error, an include regression) is exactly the
 #: defect class this test exists to catch and must FAIL, not skip.
 _OFFLINE_BUILD_SIGNATURES = (
@@ -67,7 +67,7 @@ def _build_failure_action(returncode: int, stderr: str) -> str:
     """Classify a wheel-build outcome: ``ok`` | ``skip`` (environment) | ``fail`` (defect).
 
     QA: the former blanket ``returncode != 0 -> skip`` silently swallowed every REAL
-    packaging failure too — the test skipped exactly its own target class, while its
+    packaging failure too, the test skipped exactly its own target class, while its
     docstring promised "never a silent pass". Split out as a pure function so the
     classification itself is unit-testable offline.
     """
@@ -93,7 +93,7 @@ def test_operator_guide_ships_in_the_wheel(tmp_path: Path) -> None:
     """The ``epics-pv://guide`` resource reads ``operator_guide.md`` as package data. The
     ``importlib.resources`` load test passes off the *source tree* in an editable install, so it
     cannot catch a wheel-exclusion regression (a stray ``[tool.hatch.build]`` include that forgets
-    ``*.md``, a move/rename). This builds an actual wheel and asserts the file is inside it — the
+    ``*.md``, a move/rename). This builds an actual wheel and asserts the file is inside it, the
     real inclusion guard for E1's ``pip install`` distribution DoD. Skipped only if the build
     TOOLCHAIN/ENVIRONMENT is unavailable (missing uv, timeout, offline resolver signature); a
     build that fails for any other reason is a real packaging defect and FAILS."""
@@ -114,7 +114,7 @@ def test_operator_guide_ships_in_the_wheel(tmp_path: Path) -> None:
         pytest.skip(f"wheel build failed with an offline signature: {result.stderr[-400:]}")
     if action == "fail":
         pytest.fail(
-            "wheel build failed — a real packaging defect, not a toolchain gap:\n"
+            "wheel build failed, a real packaging defect, not a toolchain gap:\n"
             f"{result.stderr[-400:]}"
         )
 
@@ -123,7 +123,7 @@ def test_operator_guide_ships_in_the_wheel(tmp_path: Path) -> None:
     with zipfile.ZipFile(wheels[0]) as wheel:
         names = wheel.namelist()
     assert "epics_pv_mcp/operator_guide.md" in names, (
-        "operator_guide.md missing from the wheel — the guide resource would raise "
+        "operator_guide.md missing from the wheel, the guide resource would raise "
         f"FileNotFoundError in a pip-installed server. Package files: "
         f"{sorted(n for n in names if n.startswith('epics_pv_mcp/'))}"
     )

@@ -108,7 +108,7 @@ async def test_cli_and_tool_render_identical_report(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """C2-iii parity: the CLI and the MCP tool drive the SAME orchestrator (build_coverage_report),
-    so against one fixture they render identical Markdown — the duplicated join is gone (M2)."""
+    so against one fixture they render identical Markdown, the duplicated join is gone (M2)."""
     displays = _setup(tmp_path)
     scope = "DEV-TEST01:Ctrl-EVR-01:"
     tool_result = await _coverage_audit(str(displays), scope=scope)
@@ -150,7 +150,7 @@ def test_cli_coverage_rejects_displays_dir_outside_allowed_roots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """S4-4 CLI boundary lock: the CLI must honor EPICS_MCP_ALLOWED_ROOTS (via resolve_user_path in
-    the shared orchestrator). An EXISTING displays_dir outside the allowed root exits 2 — the case
+    the shared orchestrator). An EXISTING displays_dir outside the allowed root exits 2, the case
     the pre-remediation bare Path.is_dir() short-circuit would have let through (it returns 0)."""
     import epics_pv_mcp.config as config_module
 

@@ -58,7 +58,7 @@ async def test_generic_exception_is_confined_to_the_class_name_and_logged(
         await boom()
 
     wire = str(exc_info.value)
-    assert wire == "[INTERNAL] ValueError"  # class name only — no raw detail on the wire
+    assert wire == "[INTERNAL] ValueError"  # class name only, no raw detail on the wire
     assert secret not in wire  # the exact leak the hardening closes (RED on the old code)
     # ...but the full detail survives SERVER-SIDE (message + traceback) for debugging:
     logged = "\n".join(
@@ -82,7 +82,7 @@ async def test_success_passes_through_and_preserves_signature() -> None:
 
 
 async def test_base_error_code_default() -> None:
-    """A plain EpicsError carries its default error_code (UNKNOWN) into the tag —
+    """A plain EpicsError carries its default error_code (UNKNOWN) into the tag:
     NOT the INTERNAL branch, which is reserved for non-EpicsError exceptions."""
 
     @translate_epics_errors
@@ -94,11 +94,11 @@ async def test_base_error_code_default() -> None:
 
 
 async def test_decorator_raises_the_mcp_runtime_tool_error() -> None:
-    """Q1: pin that the decorator raises the RUNTIME's ToolError — the class the server runs on.
+    """Q1: pin that the decorator raises the RUNTIME's ToolError, the class the server runs on.
     Since the standalone-fastmcp migration that is ``fastmcp.exceptions.ToolError`` (server.py
     builds on ``from fastmcp import FastMCP``). The SDK-bundled, identically-named
     ``mcp.server.fastmcp.exceptions.ToolError`` is now the FOREIGN class the runtime no longer
-    knows — raising it would defeat the tool-boundary translation. The module is pinned so an
+    knows, raising it would defeat the tool-boundary translation. The module is pinned so an
     import can't silently regress back to it."""
     from fastmcp.exceptions import ToolError as RuntimeToolError
 

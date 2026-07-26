@@ -17,7 +17,7 @@ from epics_pv_mcp.services._http import clear_shared_sessions, reset_read_thrott
 
 # The display-aware tools and their opi_navigation-coupled tests need the optional
 # `[displays]` extra. When opi_navigation is not installed (a standalone core install),
-# skip those test modules at collection so the core suite still runs — mirroring
+# skip those test modules at collection so the core suite still runs, mirroring
 # server.py, which registers the display tools only when opi_navigation is importable.
 if importlib.util.find_spec("opi_navigation") is None:
     collect_ignore = [
@@ -59,7 +59,7 @@ def _isolate_epics_search_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def _clear_shared_session_cache() -> Iterator[None]:
     """K5: the HTTP read-session factory memoises per config in a PROCESS-global lru_cache. Clear it
     around every test so a session built under one test's monkeypatched ``get_config`` never leaks
-    into the next — deterministic sessions regardless of test order."""
+    into the next, deterministic sessions regardless of test order."""
     clear_shared_sessions()
     yield
     clear_shared_sessions()
@@ -89,7 +89,7 @@ def _reset_read_throttle() -> Iterator[None]:
 # pinned to loopback, subnet broadcast parser-faithfully OFF. Tests that construct a
 # writes-on SafetyLayer against the process env opt in via
 # ``pytestmark = pytest.mark.usefixtures("loopback_write_env")`` (the reach assert would
-# otherwise fire on the stripped env — unset *_AUTO_ADDR_LIST means broadcast ON).
+# otherwise fire on the stripped env, unset *_AUTO_ADDR_LIST means broadcast ON).
 _LOOPBACK_WRITE_LANE = {
     "EPICS_PVA_ADDR_LIST": "127.0.0.1",
     "EPICS_PVA_NAME_SERVERS": "127.0.0.1:5075",
@@ -114,7 +114,7 @@ def config() -> EpicsConfig:
 
 @pytest.fixture
 def write_config() -> EpicsConfig:
-    """Config with writes enabled. An explicit permissive pattern ('.*' — allow-all for any valid
+    """Config with writes enabled. An explicit permissive pattern ('.*', allow-all for any valid
     PV name) stands in for the former implicit empty default; writes-on now REQUIRES a non-empty
     pattern (S22). Note: '.*' is marginally stricter than the old empty default (fullmatch does not
     cross newlines), but PV names never contain newlines, so the tests are unaffected."""
@@ -133,7 +133,7 @@ def pattern_config() -> EpicsConfig:
 
 @pytest.fixture
 def safety(write_config: EpicsConfig, loopback_write_env: None) -> SafetyLayer:
-    """SafetyLayer with writes enabled (needs the loopback lane — E8 reach assert)."""
+    """SafetyLayer with writes enabled (needs the loopback lane, E8 reach assert)."""
     return SafetyLayer(write_config)
 
 
@@ -147,7 +147,7 @@ def safety_locked(config: EpicsConfig) -> SafetyLayer:
 
 
 class _RateLimitOwner(Protocol):
-    """Anything with a sliding-window timestamp deque — both write gates satisfy this."""
+    """Anything with a sliding-window timestamp deque, both write gates satisfy this."""
 
     _timestamps: collections.deque[float]
 
@@ -155,7 +155,7 @@ class _RateLimitOwner(Protocol):
 class _RendezvousDeque(collections.deque[float]):
     """A deque whose FIRST ``append`` opens the len-check -> append window that exposes a
     non-atomic rate limiter: it signals ``checked`` (so a second thread may start) and then sleeps a
-    BOUNDED time before recording. Bounded sleep (not a Barrier) never deadlocks the locked code —
+    BOUNDED time before recording. Bounded sleep (not a Barrier) never deadlocks the locked code:
     the lock holder just sleeps briefly and releases. See S28."""
 
     def __init__(self, maxlen: int | None) -> None:
@@ -174,7 +174,7 @@ def concurrent_admit_count() -> Callable[[_RateLimitOwner, Callable[[], None]], 
     """Return a driver that runs ``call`` from TWO threads through ``owner``'s rate check->append
     seam and returns the number of admitted (non-``RateLimitError``) calls. Deterministic: thread 2
     starts only after thread 1 has passed its len-check (``checked``), and the bounded sleep keeps
-    the window open without a Barrier — so a properly locked limiter admits exactly 1 (no deadlock)
+    the window open without a Barrier, so a properly locked limiter admits exactly 1 (no deadlock)
     while a non-atomic one admits 2. Swap in a limit=1 config for the sharpest signal."""
 
     def _run(owner: _RateLimitOwner, call: Callable[[], None]) -> int:

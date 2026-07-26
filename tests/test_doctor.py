@@ -102,7 +102,7 @@ def test_classify_served_non2xx_is_api_error_reachable() -> None:
 
 def test_classify_retry_error_is_api_error() -> None:
     """A retry-exhausted 502/503/504 (chained RetryError, no .response) is api_error (reachable),
-    NOT unreachable — the host answered repeatedly with a 5xx."""
+    NOT unreachable: the host answered repeatedly with a 5xx."""
     exc = RuntimeError("x")
     exc.__cause__ = requests.exceptions.RetryError("too many 503 error responses")
     reachable, ca_ok, status, detail = _classify_failure(exc)
@@ -123,7 +123,7 @@ def test_classify_transport_failure_is_unreachable() -> None:
 
 @pytest.fixture(autouse=True)
 def _identity_never_touches_the_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub the identity probes for every run_doctor test — AUTOUSE, deliberately.
+    """Stub the identity probes for every run_doctor test, AUTOUSE, deliberately.
 
     The identity probe issues its own GET (it does not go through the mocked client classes), so
     without this a single reachable plane in an offline test would resolve a hostname for real. The
@@ -143,7 +143,7 @@ def _identity_never_touches_the_network(monkeypatch: pytest.MonkeyPatch) -> None
     # rest_get_json is stubbed too, and that one is not belt-and-braces: the retrieval plane calls
     # it DIRECTLY as its transport probe, outside the mocked client classes. Measured before this
     # line existed: test_archiver_api_error_is_reachable_not_unreachable spent 12.1s of the suite's
-    # 17s resolving a fake hostname — passing, silently, over the network. A hermetic test that is
+    # 17s resolving a fake hostname, passing, silently, over the network. A hermetic test that is
     # merely slow is how "no network" rots.
     monkeypatch.setattr("epics_pv_mcp.services.doctor.rest_get_json", lambda *_a, **_k: {})
     monkeypatch.setattr("epics_pv_mcp.services.doctor._identify", _identified)
@@ -190,7 +190,7 @@ async def test_all_disabled_is_ok_and_makes_no_network(monkeypatch: pytest.Monke
     }
     for plane in report.planes:
         assert plane.status == ("info" if plane.plane == "live" else "disabled")
-    # Nothing was left unproven because nothing was probed at all — verification_complete is
+    # Nothing was left unproven because nothing was probed at all, verification_complete is
     # VACUOUSLY true here, and identified_planes carries the machine-readable difference between
     # "all confirmed" and "nothing ran": it must be empty.
     assert report.verification_complete is True
@@ -210,7 +210,7 @@ async def test_reachable_plane_is_ok(monkeypatch: pytest.MonkeyPatch) -> None:
 # --- the identity probe: the full result matrix, offline (S4) ---
 #
 # WHY THIS EXISTS: "ok" used to mean only "check_connectivity did not raise". check_connectivity is
-# a HEAD and counts ANY HTTP response as reachable — so a ChannelFinder URL pointing at a DEAD
+# a HEAD and counts ANY HTTP response as reachable, so a ChannelFinder URL pointing at a DEAD
 # container reported "✓ channelfinder ok", because a different service on that port answered 401
 # (its blanket auth answers 401 for every path, so the status said nothing about CF at all).
 # These drive the REAL _identify against a patched rest_get_json: no network, full matrix.
@@ -242,7 +242,7 @@ def test_identity_of_a_different_known_service_is_unverified_with_the_name(
     """S14: a foreign service name is "cannot confirm", never a hard failure.
 
     The earlier ``wrong_service``+exit-1 verdict rested on "a misconfiguration that is
-    unambiguous at any site" — refuted by measurement (2026-07-16): a path-based reverse
+    unambiguous at any site", refuted by measurement (2026-07-16): a path-based reverse
     proxy served the REAL ChannelFinder API while the base GET answered as ``Olog Service``,
     so the doctor failed a WORKING configuration. The found name must still surface in the
     detail (it is the actionable clue when the config IS wrong).
@@ -254,7 +254,7 @@ def test_identity_of_a_different_known_service_is_unverified_with_the_name(
     assert "ChannelFinder Service" in (check.detail or "")
     assert "the name of the olog service" in (check.detail or "")  # the plane mapping survives
     assert check.status in _NON_FAILING_STATUSES  # honest doubt, exit 0
-    # And the vocabulary itself is gone — a re-added dead Literal value (paired with its glyph)
+    # And the vocabulary itself is gone: a re-added dead Literal value (paired with its glyph)
     # would survive every functional test, since nothing emits it anymore.
     assert "wrong_service" not in get_args(PlaneStatus)
 
@@ -280,7 +280,7 @@ def test_identity_substring_is_not_enough(monkeypatch: pytest.MonkeyPatch) -> No
 def test_identity_unusable_body_is_unverified(
     monkeypatch: pytest.MonkeyPatch, payload: object
 ) -> None:
-    """No usable name → unverified. NEVER ok, and never a failure either — it is a "don't know"."""
+    """No usable name → unverified. NEVER ok, and never a failure either, it is a "don't know"."""
     _payload(monkeypatch, payload)
     check = _identify("alarm", "http://alarm.example", None, 5.0)
     assert (check.status, check.identified) == ("unverified", False)
@@ -303,9 +303,9 @@ def test_identity_failed_probe_is_identity_probe_failed(
     monkeypatch: pytest.MonkeyPatch, exc: Exception
 ) -> None:
     """S12: a FAILED identity probe (a served non-2xx, a transport error, or a refused redirect) is
-    ``identity_probe_failed`` — NOT the honest ``unverified`` (that is for a 2xx answered-but-not-
+    ``identity_probe_failed``: NOT the honest ``unverified`` (that is for a 2xx answered-but-not-
     nameable). This is exactly where the 401 of the dead-container case lands: rest_get_json raises
-    on a non-2xx BEFORE parsing, so an auth wall can never reach the name check — and it must no
+    on a non-2xx BEFORE parsing, so an auth wall can never reach the name check, and it must no
     longer collapse to a silent exit 0. A TLS/transport failure DURING the identity GET is re-homed
     here too (the transport HEAD already proved reachability+CA to the same host).
 
@@ -336,14 +336,14 @@ def test_identity_unreadable_2xx_body_stays_unverified(monkeypatch: pytest.Monke
     check = _identify("channelfinder", "http://cf.example/ChannelFinder", None, 5.0)
     assert (check.status, check.identified) == ("unverified", False)
     assert check.reachable is True  # the endpoint answered 2xx; only identity is unproven
-    assert check.status in _NON_FAILING_STATUSES  # honest, exit 0 — never a failed probe
+    assert check.status in _NON_FAILING_STATUSES  # honest, exit 0, never a failed probe
 
 
 def test_identity_unreadable_2xx_raw_valueerror_stays_unverified(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """S12 min-version robustness (diff-review R1): on the ``requests>=2.25`` floor a bad-JSON 2xx
-    raises the STDLIB ``json.JSONDecodeError`` — a ``ValueError`` but NOT a ``RequestException``, so
+    raises the STDLIB ``json.JSONDecodeError``, a ``ValueError`` but NOT a ``RequestException``, so
     ``rest_get_json`` does not wrap it and it arrives RAW (``__cause__`` is None). It must still be
     ``unverified`` (the service answered 2xx), so the discriminator checks the exception ITSELF.
 
@@ -357,7 +357,7 @@ def test_identity_unreadable_2xx_raw_valueerror_stays_unverified(
 
 
 def test_archiver_identity_requires_the_identity_field(monkeypatch: pytest.MonkeyPatch) -> None:
-    """check_connectivity accepts ANY parseable 2xx JSON — an empty {} passes it. The appliance's
+    """check_connectivity accepts ANY parseable 2xx JSON, an empty {} passes it. The appliance's
     own 'identity' field is what makes it an Archiver rather than "something served JSON here"."""
     _payload(monkeypatch, {})
     assert _identify_archiver("http://arch.example:17665", None, 5.0).status == "unverified"
@@ -369,7 +369,7 @@ def test_archiver_identity_requires_the_identity_field(monkeypatch: pytest.Monke
 
 
 def test_naming_identifies_via_its_swagger_contract(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The Naming Service DOES have an identity beacon — an earlier pass claimed it had none.
+    """The Naming Service DOES have an identity beacon, an earlier pass claimed it had none.
 
     That claim came from three probed paths plus an all-quantifier ("structurally unverifiable"),
     while the refuting evidence sat in the workspace the whole time. /rest/swagger.json is an
@@ -384,21 +384,21 @@ def test_naming_unfamiliar_title_is_unverified(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The title is documentation prose and may be reworded, so an unfamiliar one means "cannot
-    confirm" — honest doubt, exit 0 (since S14 that is the ONLY verdict any unconfirmed
+    confirm", honest doubt, exit 0 (since S14 that is the ONLY verdict any unconfirmed
     identity can earn; the harder wrong_service verdict was refuted by measurement)."""
     _payload(monkeypatch, {"info": {"title": "Some other API"}})
     assert _identify_naming("http://naming.example", 5.0).status == "unverified"
 
 
 def test_retrieval_identifies_via_getversion(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Retrieval serves /retrieval/bpl — probing /mgmt/bpl there 404s and proves nothing, which is
+    """Retrieval serves /retrieval/bpl, probing /mgmt/bpl there 404s and proves nothing, which is
     exactly how an earlier pass concluded (wrongly) that retrieval had no identity endpoint."""
     probe = _identify_retrieval_plane
     _payload(monkeypatch, {"version": "Archiver Appliance Version 2.2.1"})
     check = probe("http://arch.example:17668", None, 5.0)
     assert (check.status, check.identified) == ("ok", True)
 
-    # The release number must NOT be pinned — an upgrade is not a misconfiguration.
+    # The release number must NOT be pinned: an upgrade is not a misconfiguration.
     _payload(monkeypatch, {"version": "Archiver Appliance Version 9.9.9"})
     assert probe("http://arch.example:17668", None, 5.0).status == "ok"
 
@@ -419,11 +419,11 @@ def test_retrieval_identity_is_anchored_at_a_word_boundary(
 ) -> None:
     """S18(a): a version string whose NAME merely contains the product name must NOT identify.
 
-    ``_identify`` matches the service name EXACTLY and its docstring says why — a substring would
+    ``_identify`` matches the service name EXACTLY and its docstring says why, a substring would
     let a service calling itself "Not Olog Service" pass. Three functions later the retrieval probe
     shipped a containment check anyway (`_ARCHIVER_PRODUCT in version`), fail-open: the reasoning
     was written down and then ignored within the same file. The match is anchored at the START
-    *and at a word boundary* — a bare ``startswith`` closed only the left side ("Archiver
+    *and at a word boundary*, a bare ``startswith`` closed only the left side ("Archiver
     ApplianceX" still passed; the adversarial review of the first fix caught it). Only the release
     number after the full product name is variable (measured live on two real deployments:
     "Archiver Appliance Version 2.2.1").
@@ -439,7 +439,7 @@ def test_retrieval_identity_is_anchored_at_a_word_boundary(
 # --- the alarm plane also checks its Elasticsearch backend (MA-2b(e)) ---
 #
 # The alarm logger's GET / beacon reports elastic.status ALONGSIDE its name. The transport probe is
-# a blind HEAD (check_connectivity), so it reports "reachable" even when ES is dead — and the search
+# a blind HEAD (check_connectivity), so it reports "reachable" even when ES is dead, and the search
 # history tools would then fail while the doctor said "✓ ok". _identify_alarm reads elastic.status
 # from the SAME body the name check already parses (no second request). The healthy sentinel is
 # EXACTLY "Connected"; a dead ES yields a string starting "Failed to connect to elastic " (measured
@@ -451,7 +451,7 @@ def test_alarm_elastic_down_is_backend_down(monkeypatch: pytest.MonkeyPatch) -> 
     """Reachable + identified, but ES is down → a hard failure, not a silent ok.
 
     Red-proof: the pre-change alarm path used the shared name-only ``_identify``, which returns
-    ``ok`` for this exact body — the blind-HEAD lie this change closes.
+    ``ok`` for this exact body, the blind-HEAD lie this change closes.
     """
     _payload(
         monkeypatch,
@@ -514,7 +514,7 @@ def test_alarm_name_check_precedes_the_elastic_check(
     monkeypatch: pytest.MonkeyPatch, body: object
 ) -> None:
     """The identity gate runs FIRST: an unusable / foreign name is ``unverified`` (an honest "don't
-    know"), never ``backend_down`` — even when ``elastic.status`` says the backend is down. We do
+    know"), never ``backend_down``, even when ``elastic.status`` says the backend is down. We do
     not report a backend failure for a service we cannot confirm IS the alarm logger."""
     _payload(monkeypatch, body)
     check = _identify_alarm("http://alarm.example", None, 5.0)
@@ -540,7 +540,7 @@ def test_alarm_failed_probe_is_identity_probe_failed(
 
     Red-proof (mutation): deleting the ``if isinstance(payload, Exception)`` branch in
     _identify_alarm lets the exception fall through to _classify_phoebus_name(exc) → name=None →
-    unverified (exit 0), reintroducing the S12 silent-exit-0 regression on the alarm plane — this
+    unverified (exit 0), reintroducing the S12 silent-exit-0 regression on the alarm plane, this
     test then goes red.
     """
     _raises(monkeypatch, exc)
@@ -552,7 +552,7 @@ def test_alarm_failed_probe_is_identity_probe_failed(
 
 def test_alarm_unreadable_2xx_body_stays_unverified(monkeypatch: pytest.MonkeyPatch) -> None:
     """A 2xx alarm beacon whose body is not JSON is honest ``unverified`` (answered, not nameable),
-    NOT ``identity_probe_failed`` — the same ValueError carve-out as the shared _identify path, now
+    NOT ``identity_probe_failed``, the same ValueError carve-out as the shared _identify path, now
     exercised through _identify_alarm's OWN fetch-failure branch (the alarm production entry
     point)."""
     cause = json.JSONDecodeError("Expecting value", "<html>login</html>", 0)
@@ -574,14 +574,14 @@ async def test_alarm_backend_down_flows_through_run_doctor_to_exit_one(
 
     This is the one test that pins _check_alarm to _identify_alarm rather than the old name-only
     _identify. The four unit tests above call _identify_alarm directly, and the autouse fixture
-    stubs BOTH _identify and _identify_alarm to the same identified=True value — so reverting the
+    stubs BOTH _identify and _identify_alarm to the same identified=True value, so reverting the
     wiring line (_check_alarm._id → _identify("alarm", ...)) is otherwise invisible to every test.
     Here the REAL _identify_alarm and a real rest_get_json body are restored over the autouse stubs;
     with the wiring reverted, _check_alarm would call the STILL-STUBBED _identify → status 'ok' →
     this fails.
 
     Red-proof (mutation): point _check_alarm._id back at _identify and this test goes red (status
-    'ok', report.ok True) — the exact pre-MA-2b(e) blind-HEAD behaviour the change removes.
+    'ok', report.ok True), the exact pre-MA-2b(e) blind-HEAD behaviour the change removes.
     """
     _set_config(monkeypatch, alarm_url="http://alarm.example")
     monkeypatch.setattr("epics_pv_mcp.services.doctor.AlarmClient", _OkClient)
@@ -604,7 +604,7 @@ def test_unknown_status_fails_closed() -> None:
     """The allowlist is the point: a new or mistyped status must FAIL, not slip through as exit 0.
 
     With the previous failure DENYLIST, a typo like "wrong-service" was simply absent from it and
-    therefore counted as healthy — fail-open, in the one tool whose job is to catch bad config.
+    therefore counted as healthy, fail-open, in the one tool whose job is to catch bad config.
     """
     assert "wrong-service" not in _NON_FAILING_STATUSES  # the typo'd twin of a former status
     assert {"ok", "disabled", "info", "unverified"} == _NON_FAILING_STATUSES
@@ -638,10 +638,10 @@ def test_status_partition_is_total_and_disjoint() -> None:
 async def test_every_rest_plane_is_actually_identity_probed(
     monkeypatch: pytest.MonkeyPatch, plane: str, url_field: str, client_name: str
 ) -> None:
-    """The WIRING guard — the identity logic being correct is worthless if nobody calls it.
+    """The WIRING guard, the identity logic being correct is worthless if nobody calls it.
 
     Measured with a mutant: deleting the identity argument from the plane gatherers (i.e. exactly
-    the pre-S4 state) left the whole gate chain green — 47/48 tests, ruff, mypy — while the doctor
+    the pre-S4 state) left the whole gate chain green, 47/48 tests, ruff, mypy, while the doctor
     went back to reporting "✓ channelfinder ok" for a dead container, now under the even bolder
     "every configured plane answered AS ITSELF". Only this assertion notices.
     """
@@ -650,7 +650,7 @@ async def test_every_rest_plane_is_actually_identity_probed(
     report = await run_doctor()
     checked = _plane(report, plane)
     assert checked.identified is True, (
-        f"{plane}: reachable but never identity-probed — a transport probe alone is what let a "
+        f"{plane}: reachable but never identity-probed, a transport probe alone is what let a "
         "dead container report ok"
     )
 
@@ -659,7 +659,7 @@ async def test_retrieval_falls_back_to_the_archiver_url_like_the_client_does(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A single-JVM appliance leaves EPICS_MCP_ARCHIVER_RETRIEVAL_URL empty and serves retrieval on
-    the archiver port — ArchiverClient resolves `retrieval_url or base_url` (archiver_client.py) and
+    the archiver port; ArchiverClient resolves `retrieval_url or base_url` (archiver_client.py) and
     get_pv_history queries it. Reporting that plane as "disabled" would be the same false all-clear
     this check exists to remove, only wearing a more reassuring word.
     """
@@ -678,13 +678,13 @@ async def test_retrieval_url_without_archiver_url_is_a_config_error(
     """S18(b): EPICS_MCP_ARCHIVER_RETRIEVAL_URL set while EPICS_MCP_ARCHIVER_URL is empty.
 
     Every archiver tool gates on EPICS_MCP_ARCHIVER_URL (tools/archiver.py, checkers.py), so that
-    retrieval URL is never used by anything — yet the fallback fix reported the STRONGEST all-clear
+    retrieval URL is never used by anything, yet the fallback fix reported the STRONGEST all-clear
     the tool knows for it (measured against a live retrieval endpoint: ``ok=True,
     verification_complete=True`` while every archiver tool was disabled). A fix against false-green
     that produced false-green. The pair is dead config and must FAIL, loudly, without probing:
     an ``ok`` next to a config error would only muddy what the operator has to change.
 
-    Red-proof: on the pre-fix code this test FAILS — the plane is probed instead of refused
+    Red-proof: on the pre-fix code this test FAILS, the plane is probed instead of refused
     (live it reported ``ok``; under this test's boom-mock the probe errors, either way the
     status is not ``config_error``).
     """
@@ -698,17 +698,17 @@ async def test_retrieval_url_without_archiver_url_is_a_config_error(
     assert "EPICS_MCP_ARCHIVER_URL" in (retrieval.detail or "")
     assert retrieval.status not in _NON_FAILING_STATUSES  # it must drive exit 1
     assert report.ok is False
-    # The archiver plane itself stays honestly disabled — the ERROR is the inconsistent pair.
+    # The archiver plane itself stays honestly disabled, the ERROR is the inconsistent pair.
     assert _plane(report, "archiver").status == "disabled"
 
 
 async def test_retrieval_plane_is_actually_identity_probed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The wiring guard for the SIXTH plane — the matrix above covers five and left retrieval out.
+    """The wiring guard for the SIXTH plane, the matrix above covers five and left retrieval out.
 
     Not a matrix row, because retrieval has no client class (its transport probe calls
-    rest_get_json directly) and a lone retrieval URL is a ``config_error`` since S18(b) — so the
+    rest_get_json directly) and a lone retrieval URL is a ``config_error`` since S18(b), so the
     wired path to guard is the fallback one (archiver URL set). Mutant-proof: removing the
     identity argument from the ``_run_probe`` call in ``_check_retrieval_plane`` leaves every
     other test green; only this assertion notices (``identified`` stays None).
@@ -718,7 +718,7 @@ async def test_retrieval_plane_is_actually_identity_probed(
     report = await run_doctor()
     retrieval = _plane(report, "archiver_retrieval")
     assert retrieval.identified is True, (
-        "archiver_retrieval: reachable but never identity-probed — the same gap the matrix "
+        "archiver_retrieval: reachable but never identity-probed, the same gap the matrix "
         "guards against for the other five planes"
     )
 
@@ -768,12 +768,12 @@ async def test_inconclusive_plane_keeps_ok_and_is_reported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """S12: a FAILED identity probe (identity_probe_failed) is reachable-but-suspect. ``ok`` stays
-    True (it is NOT a hard failure), so the exit code cannot be derived from ``ok`` alone — it lands
+    True (it is NOT a hard failure), so the exit code cannot be derived from ``ok`` alone, it lands
     in ``inconclusive_identity_planes`` (the field a machine reader must check ALONGSIDE
     ``unverified_planes``), and ``verification_complete`` is False.
 
     Red-proof (the FLAW-B trap): a naive ``ok = all(status in _NON_FAILING_STATUSES)`` (leaving the
-    old line) flips ``ok`` to False here — which would collapse exit 3 into exit 1. Pins the union.
+    old line) flips ``ok`` to False here, which would collapse exit 3 into exit 1. Pins the union.
     """
     _set_config(monkeypatch, channelfinder_url="http://cf.example/ChannelFinder")
     monkeypatch.setattr("epics_pv_mcp.services.doctor.ChannelFinderClient", _OkClient)
@@ -792,7 +792,7 @@ async def test_inconclusive_plane_keeps_ok_and_is_reported(
     report = await run_doctor()
     cf = _plane(report, "channelfinder")
     assert cf.status == "identity_probe_failed"
-    assert report.ok is True  # NOT a hard failure — pins the ok-union
+    assert report.ok is True  # NOT a hard failure, pins the ok-union
     assert report.verification_complete is False
     assert report.inconclusive_identity_planes == ["channelfinder"]
     assert report.unverified_planes == []
@@ -858,7 +858,7 @@ async def test_privacy_report_reflects_override(monkeypatch: pytest.MonkeyPatch)
 @pytest.mark.parametrize(
     ("olog_url", "declared", "withheld"),
     [
-        # Both conditions must hold before free text is surfaced — mirror of OlogClient._redact.
+        # Both conditions must hold before free text is surfaced, mirror of OlogClient._redact.
         ("http://localhost:8080/Olog", True, False),  # declared local sandbox → full
         ("http://127.0.0.1:8080/Olog", True, False),
         ("http://localhost:8080/Olog", False, True),  # loopback but NOT declared → withheld
@@ -874,7 +874,7 @@ def test_privacy_report_olog_freetext_matches_the_client(
 ) -> None:
     """The doctor must REPORT the effective Olog posture, never assert a static guarantee.
 
-    This is the tool an operator runs to CHECK the privacy posture — a hardcoded "always withheld"
+    This is the tool an operator runs to CHECK the privacy posture, a hardcoded "always withheld"
     would make it lie in exactly the configuration where the answer differs, and its tests would
     stay green. Tested against ``_privacy_report`` directly: it is the unit that carries the
     decision, and ``run_doctor`` would probe the URL over the network.
@@ -957,7 +957,7 @@ async def test_live_plane_probe_generic_exception_disconnected(
 
 
 async def test_live_posture_sees_name_servers(monkeypatch: pytest.MonkeyPatch) -> None:
-    """BG14 red proof 1: `EPICS_PVA_NAME_SERVERS` alone is a search path — TCP unicast to the
+    """BG14 red proof 1: `EPICS_PVA_NAME_SERVERS` alone is a search path: TCP unicast to the
     named servers, NOT subnet-bound (pvxs client.cpp startNS()). Pre-fix the posture ignored
     the var entirely and claimed `localhost-isolated` while the client dialed out."""
     _set_config(monkeypatch)
@@ -974,7 +974,7 @@ async def test_live_posture_honours_auto_addr_list_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """BG14 red proof 2 (the stronger one): with NOTHING set, pvxs still broadcasts PV
-    searches into the local subnets — autoAddrList defaults to true (pvxs pvxs/client.h).
+    searches into the local subnets, autoAddrList defaults to true (pvxs pvxs/client.h).
     The unconditional `localhost-isolated (no address list set)` claim was wrong even for
     the null environment; this test kills the unconditional formulation, not just one
     forgotten variable."""
@@ -990,7 +990,7 @@ async def test_live_posture_isolated_only_when_auto_addr_explicitly_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Positive control: the isolation claim survives in exactly the one state where it is
-    true — every search list unset AND the auto-addr search explicitly disabled."""
+    true, every search list unset AND the auto-addr search explicitly disabled."""
     _set_config(monkeypatch)
     monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", "NO")
     monkeypatch.setenv("EPICS_CA_AUTO_ADDR_LIST", "NO")
@@ -1003,7 +1003,7 @@ async def test_live_posture_isolated_only_when_auto_addr_explicitly_off(
 async def test_live_posture_names_every_set_search_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """All set search vars appear in the posture — none is masked by another (pre-fix the
+    """All set search vars appear in the posture, none is masked by another (pre-fix the
     `or` fallback reported ONLY the PVA list and swallowed the rest)."""
     _set_config(monkeypatch)
     monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "192.0.2.255")
@@ -1020,11 +1020,11 @@ async def test_live_posture_names_every_set_search_path(
 async def test_live_posture_rejects_off_spellings_pvxs_does_not_parse(
     monkeypatch: pytest.MonkeyPatch, value: str
 ) -> None:
-    """BG14-QA: pvxs' parse_bool accepts ONLY case-insensitive "NO" or exactly "0" —
+    """BG14-QA: pvxs' parse_bool accepts ONLY case-insensitive "NO" or exactly "0":
     untrimmed (PickOne passes the raw getenv value); anything else is a parse error that
     keeps the DEFAULT, and the default is broadcast (pvxs src/config.cpp, pvxs/client.h).
     Claiming isolation for a spelling the real parser rejects would be exactly the false
-    claim BG14 removed — "false" is the likeliest real-world case, since this repo's own
+    claim BG14 removed, "false" is the likeliest real-world case, since this repo's own
     env convention is `EPICS_MCP_*=false`."""
     _set_config(monkeypatch)
     monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", value)
@@ -1039,7 +1039,7 @@ async def test_live_posture_rejects_off_spellings_pvxs_does_not_parse(
     [
         ("no", True),
         ("NO", True),
-        ("nope", True),  # strstr: any substring "no" disables — pinned so the semantics stay honest
+        ("nope", True),  # strstr: any substring "no" disables, pinned so the semantics stay honest
         ("No", False),  # mixed case matches neither strstr("no") nor strstr("NO")
         ("false", False),
         ("0", False),
@@ -1049,7 +1049,7 @@ async def test_live_posture_ca_off_is_substring_case_sensitive(
     monkeypatch: pytest.MonkeyPatch, value: str, isolated: bool
 ) -> None:
     """libca disables the auto search only when the value CONTAINS "no" or "NO" as a
-    case-sensitive substring (epics-base modules/ca/src/client/iocinf.cpp) — "false",
+    case-sensitive substring (epics-base modules/ca/src/client/iocinf.cpp), "false",
     "0" and even "No" keep broadcasting on a ca provider."""
     _set_config(monkeypatch, provider="ca")
     monkeypatch.setenv("EPICS_CA_AUTO_ADDR_LIST", value)
@@ -1075,7 +1075,7 @@ def test_cli_all_disabled_exits_zero(
 
 @pytest.mark.parametrize("bad", ["-1", "0"])
 def test_cli_nonpositive_timeout_is_usage_error(bad: str) -> None:
-    """F22: --timeout <= 0 is a usage error (exit 2), rejected at parse time before any probe —
+    """F22: --timeout <= 0 is a usage error (exit 2), rejected at parse time before any probe:
     a <=0 timeout would otherwise flow into run_doctor and make a healthy plane look unreachable."""
     with pytest.raises(SystemExit) as exc:
         cli_doctor.main(["--timeout", bad])
@@ -1255,7 +1255,7 @@ def test_cli_verdict_with_nothing_configured_claims_no_identity(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """S18(c): with not a single REST plane configured, the verdict used to read "every configured
-    plane answered AS ITSELF" — vacuously true over the empty set, and it READS as a confirmation
+    plane answered AS ITSELF", vacuously true over the empty set, and it READS as a confirmation
     of probes that never ran. Nothing failed, so exit stays 0; but the sentence must say that
     nothing was verified either.
 
@@ -1283,7 +1283,7 @@ def test_cli_verdict_counts_the_identity_verified_planes(
 
 async def test_identified_planes_is_the_positive_signal(monkeypatch: pytest.MonkeyPatch) -> None:
     """S18(c), machine side: ``verification_complete`` alone cannot tell "all confirmed" from
-    "nothing ran" — it is vacuously True on an empty config, and three docs tell scripts to read
+    "nothing ran", it is vacuously True on an empty config, and three docs tell scripts to read
     it. ``identified_planes`` is the positive counterpart to ``unverified_planes``: a script that
     wants POSITIVE confirmation asserts it is non-empty (found by the adversarial review of the
     first S18 fix, which had closed the vacuous truth only on the human-rendered verdict line).
@@ -1298,7 +1298,7 @@ async def test_identified_planes_is_the_positive_signal(monkeypatch: pytest.Monk
 def test_every_plane_status_has_a_render_mark() -> None:
     """Every PlaneStatus value must carry its own glyph in the CLI render.
 
-    ``_render`` falls back to "?" for an unknown status — which is the ``unverified`` mark, so a
+    ``_render`` falls back to "?" for an unknown status, which is the ``unverified`` mark, so a
     status missing from ``_STATUS_MARK`` would silently wear the honest-doubt glyph. This guard
     makes adding a status without a mark a red test instead (it caught exactly that while
     ``config_error`` was being added).
@@ -1309,7 +1309,7 @@ def test_every_plane_status_has_a_render_mark() -> None:
 def test_cli_reports_full_olog_freetext_for_a_declared_sandbox(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The human render must say FULL for a declared local sandbox — the doctor cannot lie.
+    """The human render must say FULL for a declared local sandbox, the doctor cannot lie.
 
     Asserting the VALUE, not just the label: the other CLI test only checked that the line existed,
     which is why a hardcoded "always withheld" could have survived both doctor tests untouched.
@@ -1325,7 +1325,7 @@ def test_cli_reports_full_olog_freetext_for_a_declared_sandbox(
 
 
 def test_cli_bad_arg_exits_two() -> None:
-    """argparse rejects an unknown flag with SystemExit(2) — the usage-error convention."""
+    """argparse rejects an unknown flag with SystemExit(2), the usage-error convention."""
     with pytest.raises(SystemExit) as excinfo:
         cli_doctor.main(["--nonsense"])
     assert excinfo.value.code == 2

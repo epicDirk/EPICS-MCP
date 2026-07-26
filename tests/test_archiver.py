@@ -28,7 +28,7 @@ from epics_pv_mcp.tools.archiver import (
 )
 
 # A valid window for the tests that are about something else (payload shapes, caps, errors).
-# These were "a"/"b" until the client gained a time contract — placeholders that no layer ever
+# These were "a"/"b" until the client gained a time contract, placeholders that no layer ever
 # looked at, and that a real Archiver answers with an HTTP 500. They stayed green only because
 # nothing validated them, which is the same blind spot the normalization closes.
 _T0 = "2026-06-01T00:00:00Z"
@@ -75,7 +75,7 @@ def test_is_archived_unknown_pv_record_is_the_definitive_negative(
 ) -> None:
     """Positive control for the measured definitive signal: the appliance answers an UNKNOWN pv
     on getPVStatus with a REAL record (measured live, ESS 2.2.1:
-    ``[{"pvName": …, "status": "Not being archived"}]``) — never with ``[]`` or an empty body.
+    ``[{"pvName": …, "status": "Not being archived"}]``), never with ``[]`` or an empty body.
     That record is the definitive negative and stays one; only unreadable payloads raise (S11).
     """
     client = ArchiverClient("http://arch")
@@ -89,7 +89,7 @@ def test_is_archived_unknown_pv_record_is_the_definitive_negative(
     assert status == "Not being archived"
 
 
-# --- client: strict response schema (S11) — unreadable 2xx is NEVER a definitive answer ---
+# --- client: strict response schema (S11), unreadable 2xx is NEVER a definitive answer ---
 
 
 @pytest.mark.parametrize(
@@ -109,7 +109,7 @@ def test_is_archived_unknown_pv_record_is_the_definitive_negative(
 def test_is_archived_unreadable_2xx_raises(
     monkeypatch: pytest.MonkeyPatch, payload: object
 ) -> None:
-    """S11: an unreadable getPVStatus payload must RAISE — it used to become a synthetic
+    """S11: an unreadable getPVStatus payload must RAISE, it used to become a synthetic
     ``{"status": "Unknown"}`` record and thus the definitive ``(False, "Unknown")`` (auditor
     probe ARCHIVER_IS_ARCHIVED_BAD_2XX). Measured: even an unknown PV gets a real record, so
     ``[]`` is out of contract too."""
@@ -124,7 +124,7 @@ def test_get_archive_status_unreadable_2xx_raises(
     monkeypatch: pytest.MonkeyPatch, payload: object
 ) -> None:
     """S11: same guard through the enriched sibling (``archived: false, status: "Unknown"`` was
-    the fabricated tool answer — auditor probe ARCHIVER_STATUS_BAD_2XX)."""
+    the fabricated tool answer, auditor probe ARCHIVER_STATUS_BAD_2XX)."""
     client = ArchiverClient("http://arch")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
     with pytest.raises(ArchiverResponseError):
@@ -161,7 +161,7 @@ def test_get_pv_history_status_ok_projects_and_caps(monkeypatch: pytest.MonkeyPa
 
 def test_get_pv_history_status_empty_keeps_meta(monkeypatch: pytest.MonkeyPatch) -> None:
     """DS-4B: a VALID response with an empty data array is genuinely-empty history (status
-    'empty', no withheld_reason) — NOT conflated with a malformed response. The meta block
+    'empty', no withheld_reason), NOT conflated with a malformed response. The meta block
     (units/precision) is still surfaced for the window."""
     raw = [{"meta": {"name": "X", "EGU": "V", "PREC": "2"}, "data": []}]
     client = ArchiverClient("http://arch")
@@ -188,7 +188,7 @@ def test_get_pv_history_withheld_unexpected_payload(
     monkeypatch: pytest.MonkeyPatch, payload: object
 ) -> None:
     """DS-4B: an uninterpretable response is WITHHELD (status 'withheld',
-    withheld_reason 'unexpected_payload') — a bare [] must never masquerade as 'empty history'
+    withheld_reason 'unexpected_payload'), a bare [] must never masquerade as 'empty history'
     when the truth is 'could not read'."""
     client = ArchiverClient("http://arch")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
@@ -201,7 +201,7 @@ def test_get_pv_history_withheld_unexpected_payload(
 
 def test_get_pv_history_meta_none_and_nondict_coerced(monkeypatch: pytest.MonkeyPatch) -> None:
     """A present-but-non-dict meta (JSON null / list) coerces to {} and does NOT make the result
-    withheld — the data array is still the source of truth for empty/ok."""
+    withheld, the data array is still the source of truth for empty/ok."""
     payloads: list[object] = [[{"meta": None, "data": []}], [{"meta": ["x"], "data": []}]]
     for payload in payloads:
         client = ArchiverClient("http://arch")
@@ -251,7 +251,7 @@ def test_get_pv_history_nonpositive_max_points_not_withheld(
 def test_get_pv_history_mixed_valid_and_junk_withholds(monkeypatch: pytest.MonkeyPatch) -> None:
     """S11 (flips the former 'mixed junk is ok' pin): ONE unreadable element in the data array
     withholds the WHOLE result. Silently skipping junk fabricated a smaller history that read as
-    the complete answer — the auditor fed two DIFFERENT broken arrays and both came back
+    the complete answer, the auditor fed two DIFFERENT broken arrays and both came back
     ``status=ok``. Withheld ≠ no: the caller learns the window could not be read."""
     raw = [
         {
@@ -287,7 +287,7 @@ def test_get_pv_history_unreadable_sample_withholds(
     monkeypatch: pytest.MonkeyPatch, sample: object
 ) -> None:
     """S11: a sample must carry the measured anchors ``secs`` AND ``val``, and every present
-    int field must be coercible — anything else withholds the WHOLE result. The old code
+    int field must be coercible, anything else withholds the WHOLE result. The old code
     accepted ANY dict and filled missing fields with 0/None: two different broken dicts both
     became ``status=ok, sample={secs:0, nanos:0, val:null, …}`` (a fabricated sample)."""
     raw = [{"meta": {"name": "X"}, "data": [sample]}]
@@ -308,13 +308,13 @@ def test_get_pv_history_connection_error(monkeypatch: pytest.MonkeyPatch) -> Non
         client.get_pv_history("X", _T0, _T1)
 
 
-# --- client: get_pv_type_info (DS-4B — archive configuration via getPVTypeInfo) ---
+# --- client: get_pv_type_info (DS-4B, archive configuration via getPVTypeInfo) ---
 
 
 def test_get_pv_type_info_projects_fields(monkeypatch: pytest.MonkeyPatch) -> None:
-    """DS-4B: getPVTypeInfo surfaces the archive CONFIGURATION — sampling (method/period),
+    """DS-4B: getPVTypeInfo surfaces the archive CONFIGURATION, sampling (method/period),
     retention (the STS/MTS/LTS data stores), computed rates, DBRType, archived fields, source
-    host and creation time — projected onto snake_case keys."""
+    host and creation time, projected onto snake_case keys."""
     record = {
         "pvName": "X",
         "DBRType": "DBR_SCALAR_DOUBLE",
@@ -330,7 +330,7 @@ def test_get_pv_type_info_projects_fields(monkeypatch: pytest.MonkeyPatch) -> No
         "creationTime": "2026-06-01T00:00:00.000Z",
         "applianceIdentity": "appliance0",
         "paused": "false",
-        # AR-D: alarm/display/control limits — the appliance renames the dbr fields to camelCase
+        # AR-D: alarm/display/control limits, the appliance renames the dbr fields to camelCase
         # and serializes every numeric limit as a STRING (PVTypeInfo.java, JSONEncoder .toString()).
         "upperAlarmLimit": "90.0",  # HIHI
         "upperWarningLimit": "80.0",  # HIGH
@@ -351,7 +351,7 @@ def test_get_pv_type_info_projects_fields(monkeypatch: pytest.MonkeyPatch) -> No
     client = ArchiverClient("http://arch:17665")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(record)))
     result = client.get_pv_type_info("X")
-    # Exact-equality pins the invariant "surface ONLY the _TYPE_INFO_FIELDS allowlist" — it excludes
+    # Exact-equality pins the invariant "surface ONLY the _TYPE_INFO_FIELDS allowlist", it excludes
     # userParams (free text) AND pvName (a non-allowlisted field in the input) AND any future
     # non-allowlisted field a denylist refactor might leak, not merely "the one named field".
     assert result == {
@@ -390,7 +390,7 @@ def test_get_pv_type_info_projects_fields(monkeypatch: pytest.MonkeyPatch) -> No
 def test_get_pv_type_info_omits_absent_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     """A sparse record surfaces found=True but omits the fields it lacks (no null noise).
 
-    The fixture carries ``pvName`` — the measured always-present anchor (S11); the assertion is
+    The fixture carries ``pvName``, the measured always-present anchor (S11); the assertion is
     unchanged because ``pvName`` is deliberately NOT allowlisted into the output.
     """
     client = ArchiverClient("http://arch")
@@ -445,7 +445,7 @@ def test_get_pv_type_info_unreadable_2xx_raises(
 ) -> None:
     """S11 (replaces the former ``…not_found`` pin, which cemented the defect): a 2xx whose body
     is not a type-info record must RAISE. The old code mapped ``{}``/junk to ``found:False``
-    (conflated with the appliance's definitive 404) and — worse — projected ANY non-empty dict
+    (conflated with the appliance's definitive 404) and, worse, projected ANY non-empty dict
     as ``found:True`` (auditor probe ``{"unexpected":"shape"}`` → a fabricated archive record).
     Measured (ESS appliance 2.2.1): the record always carries ``pvName``; the unknown-PV signal
     on this endpoint is HTTP 404 and ONLY that (see ``test_get_pv_type_info_404_is_not_found``).
@@ -458,7 +458,7 @@ def test_get_pv_type_info_unreadable_2xx_raises(
 
 def test_get_pv_type_info_404_is_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
     """The appliance answers getPVTypeInfo with HTTP 404 for a never-archived PV (unlike
-    getPVStatus, which 200s). That 404 must map to found:False, NOT a raised error — otherwise a
+    getPVStatus, which 200s). That 404 must map to found:False, NOT a raised error, otherwise a
     normal "not archived" PV is indistinguishable from an unreachable appliance."""
     client = ArchiverClient("http://arch")
     http_error = requests.exceptions.HTTPError("404")
@@ -471,7 +471,7 @@ def test_get_pv_type_info_404_is_not_found(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_get_pv_type_info_non_404_error_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A NON-404 failure (5xx / unreachable) must PROPAGATE as an ArchiverError — a could-not-read
+    """A NON-404 failure (5xx / unreachable) must PROPAGATE as an ArchiverError, a could-not-read
     is never silently reported as "not archived" (the inverse of the 404 case)."""
     client = ArchiverClient("http://arch")
     http_error = requests.exceptions.HTTPError("500")
@@ -483,13 +483,13 @@ def test_get_pv_type_info_non_404_error_propagates(monkeypatch: pytest.MonkeyPat
         client.get_pv_type_info("X")
 
 
-# --- client: get_appliance_info (Fundort 3 — the getApplianceInfo body doctor discards) ---
+# --- client: get_appliance_info (Fundort 3, the getApplianceInfo body doctor discards) ---
 
 
 def test_get_appliance_info_projects_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fundort 3: get_appliance_info surfaces the WHOLE getApplianceInfo body that doctor discards
     (doctor reads only ``identity``). Exact-equality pins two invariants: all 8 vendor fields ARE
-    projected onto snake_case keys, AND any non-allowlisted extra is dropped — even a plausible
+    projected onto snake_case keys, AND any non-allowlisted extra is dropped, even a plausible
     future field like ``serverStartEpochSeconds`` that this appliance version does not send. Field
     names + the all-string contract are the vendor getApplianceInfo JSON body (GetApplianceInfo.java
     / ApplianceInfo.java), not a live measurement."""
@@ -503,7 +503,7 @@ def test_get_appliance_info_projects_fields(monkeypatch: pytest.MonkeyPatch) -> 
         "dataRetrievalURL": "http://archiver:17665/retrieval",
         "clusterInetPort": "archiver:16670",
         "version": "Archiver Appliance 2.2.1",
-        "serverStartEpochSeconds": "1717200000",  # not in this version's body — must NOT leak
+        "serverStartEpochSeconds": "1717200000",  # not in this version's body, must NOT leak
         "someUnknownField": "SHOULD NOT be surfaced",
     }
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(body)))
@@ -525,7 +525,7 @@ def test_get_appliance_info_projects_fields(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_get_appliance_info_omits_absent_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     """A body missing optional keys (``version`` on a pre-version.txt appliance, a plane URL) omits
-    them — no null noise. ``identity`` is the always-present anchor: the appliance names itself."""
+    them, no null noise. ``identity`` is the always-present anchor: the appliance names itself."""
     client = ArchiverClient("http://archiver:17665")
     body = {"identity": "appliance0", "mgmtURL": "http://archiver:17665/mgmt/bpl"}
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(body)))
@@ -559,7 +559,7 @@ def test_get_appliance_info_unreadable_2xx_raises(
     monkeypatch: pytest.MonkeyPatch, payload: object
 ) -> None:
     """A 2xx whose body is not a getApplianceInfo record (no non-empty ``identity``, wrapped in a
-    list, or non-dict) RAISES rather than fabricating an empty success — a wrong-endpoint 200 (e.g.
+    list, or non-dict) RAISES rather than fabricating an empty success, a wrong-endpoint 200 (e.g.
     the retrieval webapp answering on /mgmt/bpl) must never read as a valid-but-empty appliance.
     Mirrors the getPVStatus/getPVTypeInfo S11 anchor discipline; ``identity`` is the anchor. The
     vendor body is a single object, so a list wrapper is out of contract (unlike getPVTypeInfo)."""
@@ -574,7 +574,7 @@ def test_get_appliance_info_served_error_propagates(
     monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
     """Unlike getPVTypeInfo (where 404 = 'PV not archived' → found:False), a no-arg getApplianceInfo
-    has no not-found duality: a served non-2xx — INCLUDING 404 — means the WRONG endpoint (the
+    has no not-found duality: a served non-2xx, INCLUDING 404, means the WRONG endpoint (the
     retrieval webapp serves /retrieval/bpl, not /mgmt/bpl) and PROPAGATES as an ArchiverError, never
     a swallowed empty answer."""
     client = ArchiverClient("http://archiver:17665")
@@ -631,7 +631,7 @@ def test_retrieval_url_defaults_to_base(monkeypatch: pytest.MonkeyPatch) -> None
     assert captured[0] == "http://arch:17665/retrieval/data/getData.json"
 
 
-# --- client: get_archive_status (DS-4A — enriched getPVStatus fields) ---
+# --- client: get_archive_status (DS-4A, enriched getPVStatus fields) ---
 
 
 def test_get_archive_status_enriches_present_fields(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -685,7 +685,7 @@ def test_get_archive_status_surfaces_connection_cluster_and_drops_unknown(
 ) -> None:
     """AR-D: get_archive_status also surfaces the getPVStatus connection-history cluster
     (connectionLossRegainCount / connectionFirstEstablished / connectionLastRestablished) alongside
-    the DS-4A fields — the already-fetched-but-discarded diagnostic bytes ("does this PV flap? when
+    the DS-4A fields, the already-fetched-but-discarded diagnostic bytes ("does this PV flap? when
     did it last reconnect?"). Exact-equality pins TWO invariants the DS-4A per-key asserts missed:
     the new cluster IS surfaced, AND any non-allowlisted extra (``lastRotateLogs`` epoch-0 noise,
     ``someUnknownField``) is dropped. Source keys + the all-string value contract are the Archiver
@@ -770,7 +770,7 @@ async def test_get_archive_info_tool_disabled_no_network(monkeypatch: pytest.Mon
     monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _boom)
     result = await _get_archive_info("X")
     assert result["enabled"] is False
-    # found is None (NOT checked) when disabled — a disabled plane must never masquerade as a
+    # found is None (NOT checked) when disabled, a disabled plane must never masquerade as a
     # definitive "no archive record" (found:False), mirroring the sibling archived/configured None.
     assert result["found"] is None
 
@@ -960,7 +960,7 @@ async def test_get_appliance_info_tool_disabled_no_network(
 @pytest.mark.asyncio
 async def test_get_appliance_info_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """_get_appliance_info builds the client (MGMT base) and surfaces the projected body under
-    enabled:true — exact-equality pins the {enabled, **projection} shape (no pv, no found)."""
+    enabled:true, exact-equality pins the {enabled, **projection} shape (no pv, no found)."""
     monkeypatch.setattr(
         "epics_pv_mcp.tools.archiver.get_config",
         lambda: EpicsConfig(archiver_url="http://archiver:17665"),
@@ -1008,7 +1008,7 @@ def test_check_connectivity_served_non2xx_raises_response_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A served non-2xx (e.g. ARCHIVER_URL points at the wrong webapp) → ArchiverResponseError,
-    NOT ArchiverConnectionError — doctor reads it as 'api_error' (reachable), not 'unreachable'."""
+    NOT ArchiverConnectionError: doctor reads it as 'api_error' (reachable), not 'unreachable'."""
     client = ArchiverClient("http://arch:17665")
     resp = Mock()
     http_error = requests.exceptions.HTTPError("404")
@@ -1111,7 +1111,7 @@ def test_get_all_pvs_capped_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(["A", "B", "C"])))
     names, capped = client.get_all_pvs(limit=3)
     assert names == ["A", "B", "C"]
-    assert capped is False  # exactly limit — an off-by-one (>=) regression would flip this
+    assert capped is False  # exactly limit, an off-by-one (>=) regression would flip this
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(["A", "B", "C", "D"])))
     names, capped = client.get_all_pvs(limit=3)
     assert names == ["A", "B", "C"]  # sliced to limit
@@ -1119,7 +1119,7 @@ def test_get_all_pvs_capped_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_coerce_pv_names_nonpositive_limit_clamped() -> None:
-    """A non-positive limit is clamped to >=1 — never a negative slice that silently drops the last
+    """A non-positive limit is clamped to >=1, never a negative slice that silently drops the last
     name (`names[:-1]`) or empties the list, with a falsely-True capped."""
     for bad in (-1, 0):
         names, capped = ArchiverClient._coerce_pv_names(["A", "B", "C"], bad, "getAllPVs")
@@ -1133,7 +1133,7 @@ def test_coerce_pv_names_nonpositive_limit_clamped() -> None:
     ids=["number-item", "dict-item", "null-item"],
 )
 def test_coerce_pv_names_non_string_item_raises(payload: object) -> None:
-    """S11: a list item that is not a string must RAISE — ``str()`` used to mint junk into
+    """S11: a list item that is not a string must RAISE, ``str()`` used to mint junk into
     plausible PV "names" (``{'name': 'PV:A'}`` became the literal name ``"{'name': 'PV:A'}"``).
     Measured (ESS 2.2.1): getAllPVs returns a bare array of strings, nothing else."""
     with pytest.raises(ArchiverResponseError):
@@ -1236,7 +1236,7 @@ async def test_list_archived_pvs_forwards_pattern_and_limit(
 
 # --- get_pv_history: the time window on the wire (live-established contract) ---
 #
-# The Archiver reads zone-explicit ISO and NOTHING else — measured live: a naive ISO, a
+# The Archiver reads zone-explicit ISO and NOTHING else, measured live: a naive ISO, a
 # space-separated wall clock, a bare date and '7 days' are each an HTTP 500. It never answers one
 # of them wrongly (unlike Olog/Alarm), but it is the narrowest of the three planes, so the
 # notations a caller learned elsewhere are normalized here rather than turned into a server error.
@@ -1262,7 +1262,7 @@ def _history_params(
 @pytest.mark.parametrize(
     "start",
     [
-        "2026-07-08T00:00:00Z",  # already correct — must stay stable (idempotence)
+        "2026-07-08T00:00:00Z",  # already correct, must stay stable (idempotence)
         "2026-07-08T00:00:00",  # naive ISO: HTTP 500 today
         "2026-07-08 00:00:00",  # the wall clock Olog requires: HTTP 500 today
         "2026-07-08",  # bare date: HTTP 500 today
@@ -1281,7 +1281,7 @@ def test_get_pv_history_absolute_notations_all_reach_the_wire_as_iso_z(
 
 
 def test_get_pv_history_relative_amount_makes_no_request(monkeypatch: pytest.MonkeyPatch) -> None:
-    """'7 days' works on the alarm/logbook planes and is an HTTP 500 here — so it is refused by
+    """'7 days' works on the alarm/logbook planes and is an HTTP 500 here, so it is refused by
     name BEFORE any I/O. Asserting the message alone would still pass if we sent it."""
     client = ArchiverClient("http://archiver:17665")
 
@@ -1294,7 +1294,7 @@ def test_get_pv_history_relative_amount_makes_no_request(monkeypatch: pytest.Mon
 
 
 def test_get_pv_history_shares_the_wire_format_with_the_alarm_plane() -> None:
-    """Both planes parse a real ISO_INSTANT, so they must agree byte-for-byte — goes red if
+    """Both planes parse a real ISO_INSTANT, so they must agree byte-for-byte, goes red if
     someone forks the emitter for one of them."""
     value = "2026-07-08T12:45:58.123456Z"
     assert normalize_archiver_time(value, param="start") == normalize_alarm_time(
@@ -1305,7 +1305,7 @@ def test_get_pv_history_shares_the_wire_format_with_the_alarm_plane() -> None:
 # --- get_pv_history: the ERROR CLASS at the tool boundary ---
 #
 # The Archiver 500s on a time it cannot read. Reporting that as EPICS_CONNECTION_FAILED sent the
-# reader after VPN/network problems that were not happening — the appliance answered.
+# reader after VPN/network problems that were not happening, the appliance answered.
 
 
 def _history_client_raising(exc: BaseException) -> type:
@@ -1346,7 +1346,7 @@ async def test_get_pv_history_served_error_is_not_a_connection_error(
 async def test_get_pv_history_bad_time_is_not_a_connection_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A window this plane cannot read is a bad ARGUMENT — nothing was ever sent."""
+    """A window this plane cannot read is a bad ARGUMENT, nothing was ever sent."""
     monkeypatch.setattr(
         "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
     )
@@ -1364,7 +1364,7 @@ async def test_get_pv_history_bad_time_is_not_a_connection_error(
 async def test_get_pv_history_connection_failure_still_maps_to_connection_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Counter-test: the split must not over-reach — a real outage stays a connection error."""
+    """Counter-test: the split must not over-reach, a real outage stays a connection error."""
     monkeypatch.setattr(
         "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
     )
@@ -1378,7 +1378,7 @@ async def test_get_pv_history_connection_failure_still_maps_to_connection_error(
 
 
 def test_archiver_error_code_without_a_readable_status(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A retry-exhausted 502/503/504 arrives as requests.RetryError — not a ConnectionError, and
+    """A retry-exhausted 502/503/504 arrives as requests.RetryError, not a ConnectionError, and
     with no readable status. Generic token, but still NOT 'unreachable': the host did answer."""
     assert _archiver_error_code(ArchiverResponseError("opaque")) == "ARCHIVER_RESPONSE_ERROR"
 
@@ -1397,10 +1397,10 @@ async def test_list_archived_pvs_refuses_pattern_with_this_appliance(
     """pattern + this_appliance=True must be REFUSED, not silently answered unfiltered.
 
     This test replaces one named ..._this_appliance_ignores_pattern, which asserted
-    `captured == {"limit": 9}  # pattern silently dropped` — it pinned the bug as intended
+    `captured == {"limit": 9}  # pattern silently dropped`: it pinned the bug as intended
     behaviour while four caller-facing surfaces promised the filter worked.
 
-    Measured against a live appliance: getPVsForThisAppliance ignores pv/regex/pattern/name alike —
+    Measured against a live appliance: getPVsForThisAppliance ignores pv/regex/pattern/name alike:
     every reply is byte-identical to the unfiltered one. So the old behaviour handed the caller a
     full, plausible list of the WRONG PVs behind a capped=true that reads as a fair truncation.
     """
@@ -1418,7 +1418,7 @@ async def test_list_archived_pvs_refuses_pattern_with_this_appliance(
 async def test_list_archived_pvs_refusal_fires_even_when_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A bad argument is bad regardless of deployment — so the refusal precedes the config gate.
+    """A bad argument is bad regardless of deployment, so the refusal precedes the config gate.
 
     Pins the ordering: a caller testing without an archiver still learns the call is wrong instead
     of getting a friendly enabled:false that hides it until production.

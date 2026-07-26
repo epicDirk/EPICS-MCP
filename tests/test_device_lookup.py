@@ -151,7 +151,7 @@ def test_build_device_report_channelfinder_unreachable_note() -> None:
     iocs = {
         "enabled": True,
         "channels": [],
-        "note": "ChannelFinder unreachable — source IOC not resolved.",
+        "note": "ChannelFinder unreachable, source IOC not resolved.",
     }
     report = build_device_report(
         PvLookupResult(
@@ -238,7 +238,7 @@ def test_build_device_report_live_capped_note() -> None:
 def test_build_device_report_capped_note_counts_attempts_not_responses() -> None:
     """S7-5 regression lock: the capped note counts live_read (channels ATTEMPTED), not
     len(channels) (p4p RESPONSES). These diverge whenever fewer responses return than were
-    attempted — after S27 that arises from a degraded live read (find_device's empty-envelope
+    attempted, after S27 that arises from a degraded live read (find_device's empty-envelope
     fallback on a provider-contract breach), not from a native strict=False truncation (which now
     raises). Here a hand-built 1-of-2 pins the counting invariant."""
     live = {"results": [{"pv_name": "DEV:X", "value": 0}], "errors": []}  # only 1 response returned
@@ -273,7 +273,7 @@ def test_build_device_report_surfaces_degraded_live_note() -> None:
     live = {
         "results": [],
         "errors": [],
-        "note": "Live read unavailable — malformed provider batch.",
+        "note": "Live read unavailable, malformed provider batch.",
     }
     report = build_device_report(
         PvLookupResult(
@@ -299,7 +299,7 @@ def test_build_device_report_surfaces_degraded_live_note() -> None:
 
 def test_render_header_and_capped_note_agree_on_the_attempt_count() -> None:
     """Consistency (QA): in the S7-5 divergence case (2 attempted, 1 returned) the render header and
-    the capped note must show the SAME quantity — both live_read (2 of 500), never 1 in the header
+    the capped note must show the SAME quantity, both live_read (2 of 500), never 1 in the header
     and 2 in the note. Before this fix the header used len(channels)=1 while the note used
     live_read=2, so the two lines contradicted each other."""
     live = {"results": [{"pv_name": "DEV:X", "value": 0}], "errors": []}  # only 1 of 2 came back

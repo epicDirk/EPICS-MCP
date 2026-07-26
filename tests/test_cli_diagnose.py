@@ -1,4 +1,4 @@
-"""Tests for the epics-diagnose CLI (cli_diagnose) — the module was 0% covered (M14/C8).
+"""Tests for the epics-diagnose CLI (cli_diagnose), the module was 0% covered (M14/C8).
 
 Golden ``_render`` plus ``main()`` driven as an AsyncMock spy: the exit-0-on-disconnect contract,
 flag threading, JSON mode, and the argparse usage error. The heavy ``diagnose()`` logic lives in
@@ -166,7 +166,7 @@ def test_main_missing_pv_name_is_argparse_usage_error() -> None:
 
 @pytest.mark.parametrize("bad", ["-1", "0"])
 def test_main_nonpositive_timeout_is_usage_error(bad: str) -> None:
-    """F22: --timeout <= 0 must fail as a usage error (exit 2), rejected at parse time — a <=0
+    """F22: --timeout <= 0 must fail as a usage error (exit 2), rejected at parse time, a <=0
     timeout would otherwise flow into the live probe and make a healthy PV look disconnected."""
     with pytest.raises(SystemExit) as exc:
         cli_diagnose.main(["SYS:PV", "--timeout", bad])

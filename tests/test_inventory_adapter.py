@@ -1,7 +1,7 @@
 """Tests for the opi_navigation PV-inventory → JoinPv adapter (operator-facing filter).
 
 The QA-High regression: ``inv.displays`` seeds EVERY .bob standalone, so embed-only fragments get
-their own ``DisplayPvInventory`` (``operator_facing=False``). The adapter MUST skip them — otherwise
+their own ``DisplayPvInventory`` (``operator_facing=False``). The adapter MUST skip them, otherwise
 a fragment path is mis-attributed as a "display" and the lifted PV is double-counted (once via the
 operator parent, once via the fragment seed).
 """
@@ -41,7 +41,7 @@ def _ev(
 
 def test_inventory_join_skips_fragment_seeds() -> None:
     """A PV lifted to the operator parent appears ONCE (via the parent); the embed-only fragment's
-    standalone seed (operator_facing=False) is filtered out — no double attribution / double count.
+    standalone seed (operator_facing=False) is filtered out, no double attribution / double count.
     """
     inv = PvInventory(
         repo_root="x",
@@ -72,7 +72,7 @@ def test_inventory_join_skips_fragment_seeds() -> None:
 
 def test_inventory_join_keeps_all_buckets_of_operator_displays() -> None:
     """Within an operator-facing display, ALL resolution/protocol buckets are forwarded
-    (the join itself classifies them) — the adapter does not pre-filter by resolution/protocol.
+    (the join itself classifies them), the adapter does not pre-filter by resolution/protocol.
     """
     inv = PvInventory(
         repo_root="x",
@@ -121,13 +121,13 @@ def test_inventory_join_keeps_all_buckets_of_operator_displays() -> None:
 
 
 def test_inventory_join_normalizes_real_channel_protocols() -> None:
-    """Wedge-1 mini-fix (Option A) — full protocol × normalization matrix.
+    """Wedge-1 mini-fix (Option A), full protocol × normalization matrix.
 
     The adapter strips the ca/pva protocol prefix so the join can compare a channel name against the
     protocol-free IOC prefix/.db (translation at the edge); the protocol survives in
     ``JoinPv.protocol``. The guard is on PROTOCOL, not resolution (sharp-edge §5): a ``pva://`` PV
     is normalized even when ``dynamic`` (real channel everywhere), while ``loc``/``sim``/``sys``
-    keep their RAW form regardless (only displayed in ``non_channel``, never prefix-compared —
+    keep their RAW form regardless (only displayed in ``non_channel``, never prefix-compared:
     stripping drops the tag and could collide with a real bare channel). A bare ca is idempotent.
     """
     pre = "DEV-TEST01:Ctrl-EVR-01:"
@@ -141,7 +141,7 @@ def test_inventory_join_normalizes_real_channel_protocols() -> None:
                     _ev(f"pva://{pre}X", "op.bob", protocol="pva"),  # pva:// stripped
                     _ev(f"ca://{pre}Y", "op.bob", protocol="ca"),  # ca:// stripped
                     _ev(f"{pre}Bare", "op.bob", protocol="ca"),  # bare ca untouched (idempotent)
-                    # dynamic pva:// is STILL normalized — the guard is on protocol, not resolution.
+                    # dynamic pva:// is STILL normalized, the guard is on protocol, not resolution.
                     _ev(f"pva://{pre}$(N)Dyn", "op.bob", protocol="pva", resolution="dynamic"),
                     _ev("loc://state", "op.bob", protocol="loc"),  # loc:// kept raw
                     _ev("sim://ramp", "op.bob", protocol="sim"),  # sim:// kept raw
@@ -156,7 +156,7 @@ def test_inventory_join_normalizes_real_channel_protocols() -> None:
         (f"{pre}Y", "ca"),  # ca:// stripped
         (f"{pre}Bare", "ca"),  # bare ca untouched (idempotent)
         (f"{pre}$(N)Dyn", "pva"),  # dynamic pva:// also stripped (protocol-guard, not resolution)
-        ("loc://state", "loc"),  # loc:// kept raw — only displayed, never prefix-compared
+        ("loc://state", "loc"),  # loc:// kept raw, only displayed, never prefix-compared
         ("sim://ramp", "sim"),  # sim:// kept raw
         ("sys://TIME", "sys"),  # sys:// kept raw
     }
@@ -167,7 +167,7 @@ def test_analyze_adapters_smoke_over_real_bob(tmp_path: Path) -> None:
     BOTH adapters over a tiny .bob ROOT and assert the consumed JoinPv/IndexRow fields survive.
 
     Fails LOUD if the SHA-pinned opi_navigation renames/removes a consumed field or changes the
-    analyze_pv_inventory API/return shape — the seam the hand-built model tests above cannot catch
+    analyze_pv_inventory API/return shape, the seam the hand-built model tests above cannot catch
     (they construct the models directly instead of running the analyzer)."""
     root = tmp_path / "ds"
     root.mkdir()

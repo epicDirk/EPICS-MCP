@@ -1,7 +1,7 @@
 """Tests for the shared time-window classifier and the two per-plane wire formats.
 
 The contract under test was established by LIVE measurement against both an Olog sandbox and a real
-Alarm Logger, not by reading the server source — two prior reviewers read the same Java and drew
+Alarm Logger, not by reading the server source, two prior reviewers read the same Java and drew
 opposite (both wrong) conclusions, and a third assessment cleared the alarm plane on a partial read.
 Every expectation below mirrors an observed server response; see ``services/_time_window`` for the
 mechanism.
@@ -63,7 +63,7 @@ class TestClassifyRelative:
 
 
 class TestRejected:
-    """Each of these was measured returning a WRONG answer silently — 200 with an empty list.
+    """Each of these was measured returning a WRONG answer silently, 200 with an empty list.
 
     That is the failure this module exists to prevent, so they must raise before any request.
     """
@@ -74,7 +74,7 @@ class TestRejected:
             _classify(value)
 
     def test_millis_rejected_because_it_means_minutes(self) -> None:
-        # Measured live on the Alarm Logger: '500 millis' RETURNED DATA — for a 500-MINUTE window.
+        # Measured live on the Alarm Logger: '500 millis' RETURNED DATA, for a 500-MINUTE window.
         # The unit dispatch tests startsWith("mi") before equals("ms"). A 1000x error that never
         # announces itself, which is worse than an empty result.
         with pytest.raises(TimeWindowFormatError, match="millis"):
@@ -107,7 +107,7 @@ class TestRejected:
 
     def test_error_is_a_value_error_not_a_plane_error(self) -> None:
         """Must not be a per-plane RestClientError: checkers maps those to 'cannot reach it',
-        which is a lie — nothing was sent. Pinned so the class is not 'tidied' into a
+        which is a lie, nothing was sent. Pinned so the class is not 'tidied' into a
         *_exceptions module."""
         from epics_pv_mcp.services.rest_exceptions import RestClientError
 
@@ -152,21 +152,21 @@ class TestFormatIsoZ:
         assert wire == "2026-07-08T12:45:58.000Z"
 
     def test_keeps_the_fraction_when_zero(self) -> None:
-        """isoformat() drops it — the wire form would then vary with the input."""
+        """isoformat() drops it, the wire form would then vary with the input."""
         assert format_iso_z(datetime(2026, 1, 1, tzinfo=UTC)).endswith(".000Z")
 
     def test_year_is_zero_padded(self) -> None:
         assert format_iso_z(datetime(99, 1, 2, 3, 4, 5, tzinfo=UTC)) == "0099-01-02T03:04:05.000Z"
 
     def test_sub_millisecond_is_truncated_not_rounded(self) -> None:
-        # 999_999 us rounds to 1000 ms — which is not a millisecond field. Truncation is the only
+        # 999_999 us rounds to 1000 ms, which is not a millisecond field. Truncation is the only
         # safe direction, and it keeps the boundary inside the caller's window.
         wire = format_iso_z(datetime(2026, 1, 1, 0, 0, 0, 999_999, tzinfo=UTC))
         assert wire == "2026-01-01T00:00:00.999Z"
 
 
 class TestOlogWireFormat:
-    """Olog cannot read ISO at all — it gets a space-separated wall clock plus an explicit tz."""
+    """Olog cannot read ISO at all, it gets a space-separated wall clock plus an explicit tz."""
 
     def test_iso_becomes_wall_clock(self) -> None:
         wire, is_absolute = normalize_olog_time("2026-01-01T00:00:00Z", param="start")
@@ -176,7 +176,7 @@ class TestOlogWireFormat:
 
     def test_date_only_becomes_midnight(self) -> None:
         # Live: Olog REJECTS a bare date (its date-only pattern cannot resolve an instant), so we
-        # expand it — exactly what upstream Phoebus' own parser does.
+        # expand it, exactly what upstream Phoebus' own parser does.
         assert normalize_olog_time("2026-07-15", param="start")[0] == "2026-07-15 00:00:00.000"
 
     def test_native_format_round_trips(self) -> None:
@@ -205,7 +205,7 @@ class TestOlogWireFormat:
 
 
 class TestAlarmWireFormat:
-    """The Alarm Logger reads zone-explicit ISO natively — so it gets the zone, not a bare clock."""
+    """The Alarm Logger reads zone-explicit ISO natively, so it gets the zone, not a bare clock."""
 
     def test_naive_iso_gains_the_zone(self) -> None:
         """THE alarm regression. Measured live: sent naive, this returned 0 events for a window
@@ -215,7 +215,7 @@ class TestAlarmWireFormat:
         )
 
     def test_zoned_iso_is_normalized_not_passed_through(self) -> None:
-        """Already correct, but still canonicalized — one wire form regardless of input."""
+        """Already correct, but still canonicalized, one wire form regardless of input."""
         assert normalize_alarm_time("2026-07-08T12:45:58Z", param="start") == (
             "2026-07-08T12:45:58.000Z"
         )
@@ -226,14 +226,14 @@ class TestAlarmWireFormat:
         )
 
     def test_wall_clock_is_anchored_to_utc(self) -> None:
-        """The Alarm Logger reads a bare wall clock in ITS OWN zone — sending the zone removes
+        """The Alarm Logger reads a bare wall clock in ITS OWN zone, sending the zone removes
         that dependency on where the server happens to run."""
         assert normalize_alarm_time("2026-07-08 12:45:58", param="start") == (
             "2026-07-08T12:45:58.000Z"
         )
 
     def test_millis_are_kept(self) -> None:
-        """Truncating to the second would move a caller's boundary silently — the same class of
+        """Truncating to the second would move a caller's boundary silently, the same class of
         quiet inaccuracy this module removes."""
         assert normalize_alarm_time("2026-07-08T12:45:58.123456Z", param="start") == (
             "2026-07-08T12:45:58.123Z"
@@ -249,7 +249,7 @@ class TestAlarmWireFormat:
 
 
 def test_both_planes_share_one_classifier() -> None:
-    """The traps are subtle and identical on both planes — pinning that they are enforced from ONE
+    """The traps are subtle and identical on both planes, pinning that they are enforced from ONE
     implementation, so a fix or a newly-found trap can never land on only one of them."""
     for normalize in (
         lambda v: normalize_olog_time(v, param="start"),

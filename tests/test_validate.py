@@ -10,7 +10,7 @@ from epics_pv_mcp.tools.validate import _validate_pvs
 
 # An operator-facing parent that embeds a fragment and binds its $(PRP) macro; the
 # fragment's PV is templated on $(PRP), so its resolved value is LIFTED to the parent
-# display — display_path-keying on the fragment would miss it; origin_file recovers it.
+# display, display_path-keying on the fragment would miss it; origin_file recovers it.
 _PARENT = (
     '<display version="2.0.0"><name>Overview</name>'
     '<widget type="embedded"><name>e</name>'
@@ -129,7 +129,7 @@ async def test_validate_pvs_no_input() -> None:
 
 async def test_validate_pvs_file_path_fragment_resolves_via_origin_file(tmp_path: Path) -> None:
     """G1: an embedded fragment's macro PV resolves (lifted to its parent) and is
-    recovered via origin_file aggregation — the exact case display_path-keying returns
+    recovered via origin_file aggregation, the exact case display_path-keying returns
     0 for. The concrete, macro-resolved channel is what gets connectivity-checked."""
     root, fragment = _dataset(tmp_path)
     mock = AsyncMock(
@@ -140,7 +140,7 @@ async def test_validate_pvs_file_path_fragment_resolves_via_origin_file(tmp_path
 
     assert result["total"] == 1
     assert result["connected"] == 1
-    # The resolved channel DEV-TEST01:Spu01:Val, NOT the raw $(PRP):Val — read as one batch.
+    # The resolved channel DEV-TEST01:Spu01:Val, NOT the raw $(PRP):Val, read as one batch.
     mock.assert_awaited_once_with(["DEV-TEST01:Spu01:Val"], None)
 
 
@@ -207,7 +207,7 @@ async def test_validate_pvs_no_displays_dir_honors_allowed_roots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """G3: even in file_path-only mode (displays_dir=None) the allowed_roots boundary
-    is enforced — a file_path outside the allowed roots is rejected before any walk."""
+    is enforced, a file_path outside the allowed roots is rejected before any walk."""
     import epics_pv_mcp.config as config_module
 
     _, fragment = _dataset(tmp_path)

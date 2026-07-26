@@ -140,7 +140,7 @@ def test_verify_kwarg_ca_path_sets_verify_and_pins_trust_env() -> None:
 
 
 def test_verify_kwarg_false_disables_and_pins_trust_env() -> None:
-    """tls_verify=False must actually disable verification — pinning trust_env off is what makes the
+    """tls_verify=False must actually disable verification, pinning trust_env off is what makes the
     escape hatch real even when REQUESTS_CA_BUNDLE is set in the environment."""
     session = build_retrying_session(verify=False)
     assert session.verify is False
@@ -174,7 +174,7 @@ def test_verify_default_config_verifies_and_keeps_trust_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The plain default (ca_bundle empty, tls_verify True) verifies against certifi and leaves
-    trust_env on — the zero-code REQUESTS_CA_BUNDLE path stays available."""
+    trust_env on, the zero-code REQUESTS_CA_BUNDLE path stays available."""
     monkeypatch.setattr(
         "epics_pv_mcp.services._http.get_config",
         lambda: EpicsConfig(ca_bundle="", tls_verify=True),
@@ -191,7 +191,7 @@ def test_write_session_has_no_retry_adapter() -> None:
     """S23/F06: the Olog write session must NOT blindly retry. Olog ``PUT /logs`` is NOT idempotent
     (each PUT mints a new entry), so a request the server PROCESSED but whose response was lost
     would, under the read session's 3-retry policy, be replayed into a DUPLICATE log entry.
-    ``max_retries.total == 0`` on both schemes — a lost PUT surfaces as an error, never a retry."""
+    ``max_retries.total == 0`` on both schemes, a lost PUT surfaces as an error, never a retry."""
     session = build_write_session()
     for scheme in ("http://x", "https://x"):
         adapter = session.get_adapter(scheme)
@@ -210,7 +210,7 @@ def test_write_session_pins_trust_env_off_even_on_plain_default() -> None:
 
 
 def test_write_session_carries_optional_auth_header() -> None:
-    """The write session must actually carry the auth header — the write NEEDS it. A silent drop
+    """The write session must actually carry the auth header, the write NEEDS it. A silent drop
     would 401 the server, and against an auth-less loopback sandbox it would pass unnoticed."""
     session = build_write_session(auth_header="Basic dXNlcjpwYXNz")
     assert session.headers["authorization"] == "Basic dXNlcjpwYXNz"
@@ -236,7 +236,7 @@ def test_naming_client_session_inherits_ca_from_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """DS-1 acceptance 3(c): the Naming client that diagnose._gather_naming constructs DIRECTLY
-    (bypassing the checkers factory) still inherits the CA — the chokepoint covers it too."""
+    (bypassing the checkers factory) still inherits the CA, the chokepoint covers it too."""
     monkeypatch.setattr(
         "epics_pv_mcp.services._http.get_config",
         lambda: EpicsConfig(ca_bundle="ca.pem"),
@@ -253,7 +253,7 @@ def test_two_clients_reuse_one_session(monkeypatch: pytest.MonkeyPatch) -> None:
     """K5: the five REST clients are rebuilt on EVERY tool-call (each in its own ``_run()`` thread),
     so a fresh ``requests.Session`` per ``__init__`` paid a new TCP/TLS handshake each time. Two
     independently constructed clients with the same ``(auth, verify)`` must now share ONE cached
-    session — the point of the connection-reuse change. RED before K5 (each ``__init__`` built its
+    session, the point of the connection-reuse change. RED before K5 (each ``__init__`` built its
     own session, so the two were distinct instances)."""
     monkeypatch.setattr(
         "epics_pv_mcp.services._http.get_config",
@@ -265,7 +265,7 @@ def test_two_clients_reuse_one_session(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_shared_session_differs_by_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Different auth headers must NOT collapse onto one session — a client sending a Basic header
+    """Different auth headers must NOT collapse onto one session, a client sending a Basic header
     and a no-auth client sharing one session would leak the credential to the wrong host."""
     monkeypatch.setattr(
         "epics_pv_mcp.services._http.get_config",
@@ -297,7 +297,7 @@ def test_shared_session_reresolves_verify_on_config_change(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The cache key uses the RESOLVED verify, so a config change selects a DIFFERENT entry rather
-    than serving a session built under the old TLS trust — the one correctness trap of caching a
+    than serving a session built under the old TLS trust, the one correctness trap of caching a
     config-derived object. Same call, two CA bundles → two sessions."""
     target = "epics_pv_mcp.services._http.get_config"
     monkeypatch.setattr(target, lambda: EpicsConfig(ca_bundle="a.pem"))
@@ -311,7 +311,7 @@ def test_shared_session_reresolves_verify_on_config_change(
 
 def test_shared_session_blocks_cookies(monkeypatch: pytest.MonkeyPatch) -> None:
     """K5 hardening: the shared session is hit concurrently from worker threads, and a requests
-    cookie jar is the one per-request-MUTABLE shared state — a Set-Cookie mutating it while another
+    cookie jar is the one per-request-MUTABLE shared state, a Set-Cookie mutating it while another
     thread iterates it in prepare_request races (RuntimeError: dictionary changed size). These are
     stateless REST reads, so the shared session blocks all cookie storage via a DefaultCookiePolicy
     with an EMPTY allowed_domains (set_ok is False for every domain). RED before the policy: a fresh
@@ -397,7 +397,7 @@ def test_rest_get_json_refuses_redirect_with_neutral_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """F20 (S21, under S12): a refused redirect (allow_redirects=False) must NOT claim "different
-    host" — that is objectively false for a same-origin redirect (http→https, trailing slash). The
+    host", that is objectively false for a same-origin redirect (http→https, trailing slash). The
     message names a redirect TARGET, not a host.
 
     Red-proof: match="redirect target" reds the pre-fix "different host" wording.
@@ -423,7 +423,7 @@ def test_rest_put_json_refuses_redirect_with_neutral_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """F20 on the WRITE path: the same "different host" wording is equally wrong for a same-origin
-    redirect. Behaviour (refuse the redirect) is unchanged — only the message text.
+    redirect. Behaviour (refuse the redirect) is unchanged, only the message text.
 
     Red-proof: match="redirect target" reds the pre-fix "different host" wording.
     """
@@ -485,7 +485,7 @@ def test_is_retry_error_detects_retryerror() -> None:
     err = ArchiverResponseError("x")
     err.__cause__ = requests.exceptions.RetryError("too many 503 error responses")
     assert is_retry_error(err) is True
-    # RetryError has no .response, so http_status can't read a code — hence is_retry_error exists.
+    # RetryError has no .response, so http_status can't read a code, hence is_retry_error exists.
     assert http_status(err) is None
 
 
@@ -497,11 +497,11 @@ def test_is_retry_error_false_for_others() -> None:
 
 
 # ----------------------------------------------------------------------------------------------
-# is_loopback_url — the shared "is this a local test server?" primitive
+# is_loopback_url, the shared "is this a local test server?" primitive
 #
 # Extracted from the Olog write gate so the READ redaction can reuse the SAME hardened host
 # extraction without reusing the gate's POLICY (`_url_write_allowed` also returns True for an
-# allowlisted REMOTE host — see test_reads_a_url_the_write_gate_would_allow_remotely).
+# allowlisted REMOTE host, see test_reads_a_url_the_write_gate_would_allow_remotely).
 # ----------------------------------------------------------------------------------------------
 
 
@@ -526,7 +526,7 @@ def test_is_loopback_url_true_for_local_test_servers(url: str) -> None:
     [
         "https://olog.example.org/Olog",  # a plain hostname is not an IP literal
         "http://olog:8080/Olog",  # the docker-compose service name (used by the redaction tests)
-        # RFC1918 PRIVATE is NOT loopback — a production service lives on a private network.
+        # RFC1918 PRIVATE is NOT loopback: a production service lives on a private network.
         "http://10.0.0.5/Olog",
         "http://192.168.1.10/Olog",
         "http://172.16.0.1/Olog",
@@ -543,7 +543,7 @@ def test_is_loopback_url_false_for_remote_hosts(url: str) -> None:
         "http://127.0.0.1@evil.example.org/Olog",  # userinfo: the HOST is evil.example.org
         "http://localhost@evil.example.org/Olog",
         # Backslash in the authority: urlparse splits at the LAST '@' and calls 127.0.0.1 the host,
-        # but urllib3 — the parser requests actually CONNECTS with — resolves evil.example.org.
+        # but urllib3, the parser requests actually CONNECTS with, resolves evil.example.org.
         # Whoever decides must use the parser that connects, or the decision describes a different
         # server than the one on the wire.
         "http://evil.example.org:8080\\@127.0.0.1/Olog",
@@ -559,14 +559,14 @@ def test_is_loopback_url_fails_closed_on_hostile_or_malformed(url: str) -> None:
     """Anything unparseable or spoofed resolves to NOT-loopback.
 
     Same boolean direction as the write gate: False -> restrict. For a write that means "deny",
-    for a read it means "redact" — fail-closed and fail-safe agree, so no inversion is needed.
+    for a read it means "redact", fail-closed and fail-safe agree, so no inversion is needed.
     """
     assert is_loopback_url(url) is False
 
 
 @pytest.mark.parametrize("url", ["http://./Olog", "http://.../Olog", "", "garbage", "http:///x"])
 def test_url_host_returns_none_for_everything_unparseable(url: str) -> None:
-    """url_host must return None — never "" — for anything without a usable host.
+    """url_host must return None, never "", for anything without a usable host.
 
     Callers use ``url_host(url) is None`` as a hard veto (the write gate denies such a URL even when
     it is exactly allowlisted). An empty string slips past that identity check: "http://./Olog" has
@@ -577,10 +577,10 @@ def test_url_host_returns_none_for_everything_unparseable(url: str) -> None:
 
 
 def test_url_host_agrees_with_the_parser_that_connects() -> None:
-    """url_host must name the host requests would actually reach — not a different one.
+    """url_host must name the host requests would actually reach, not a different one.
 
     urllib3 is what requests connects with. Where the two parsers disagree (a backslash in the
-    authority), a decision built on urlparse describes a server other than the one on the wire —
+    authority), a decision built on urlparse describes a server other than the one on the wire:
     so the primitive uses urllib3's answer, and refuses when they cannot agree.
     """
     hostile = "http://evil.example.org:8080\\@127.0.0.1/Olog"
@@ -639,7 +639,7 @@ def test_rest_get_json_throttled_over_limit(monkeypatch: pytest.MonkeyPatch) -> 
     with pytest.raises(RateLimitError) as exc_info:
         _call()
     assert isinstance(exc_info.value, ReadRateLimitError)
-    # The read denial carries the machine-readable contract callers key on — and it is deliberately
+    # The read denial carries the machine-readable contract callers key on, and it is deliberately
     # NOT the write gates' RATE_LIMIT_EXCEEDED: this throttle is not a write gate, writes no audit
     # line, and sits on reads the Olog write tools perform BEFORE their gate is consulted. The
     # write-gate contract (CLAUDE.md, point 4) forbids a refusal raised outside a gate from
@@ -665,11 +665,11 @@ def test_rest_get_json_unthrottled_by_default(monkeypatch: pytest.MonkeyPatch) -
             conn_exc=RestConnectionError,
             resp_exc=RestResponseError,
         )
-    assert session.get.call_count == 50  # all 50 reads went through — no throttling
+    assert session.get.call_count == 50  # all 50 reads went through, no throttling
 
 
 def test_rest_get_bytes_shares_the_read_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The OTHER GET chokepoint counts against the SAME budget — attachment/byte reads are throttled
+    """The OTHER GET chokepoint counts against the SAME budget, attachment/byte reads are throttled
     too, not just ``rest_get_json``. With the single token already spent, ``rest_get_bytes`` raises
     before it ever issues the request."""
     monkeypatch.setattr(
@@ -691,7 +691,7 @@ def test_rest_get_bytes_shares_the_read_throttle(monkeypatch: pytest.MonkeyPatch
 
 
 def test_read_throttle_window_slides() -> None:
-    """The window slides — a read older than 60 s is purged, so the budget refills over time rather
+    """The window slides, a read older than 60 s is purged, so the budget refills over time rather
     than being a permanent counter. Seed one stale timestamp directly (deterministic, no clock
     mocking): the next check purges it and admits, and only then is the window full again."""
     throttle = ReadThrottle(1)

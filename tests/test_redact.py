@@ -54,7 +54,7 @@ def test_redact_record_projects_then_withholds() -> None:
         "title": FREETEXT_WITHHELD,
         "description": FREETEXT_WITHHELD,
     }
-    # No person name — neither from the owner key nor from any free-text field — leaks.
+    # No person name, neither from the owner key nor from any free-text field, leaks.
     for name in ("a.person", "b.person", "c.person"):
         assert name not in str(result)
 

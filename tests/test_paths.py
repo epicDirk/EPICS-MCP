@@ -64,7 +64,7 @@ def test_traversal_is_collapsed(tmp_path: Path) -> None:
 def test_empty_allowed_roots_is_no_boundary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Default/empty must mean NO boundary — guards the ""→[""]→CWD trap that would
+    # Default/empty must mean NO boundary: guards the ""→[""]→CWD trap that would
     # otherwise silently restrict every path to the current working directory.
     monkeypatch.setenv("EPICS_MCP_ALLOWED_ROOTS", "")
     assert resolve_user_path(str(tmp_path), kind="dir", label="d") == tmp_path.resolve()

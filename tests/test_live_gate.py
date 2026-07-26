@@ -1,10 +1,10 @@
 """Offline tests of the live gate (tests/live_gate.py).
 
-The point of this file: CI can NEVER run the live half (no live stack) — but it CAN pin
+The point of this file: CI can NEVER run the live half (no live stack), but it CAN pin
 the DECISION about it. Exactly that half is pinned here, deterministic and offline.
 
 Counter-probe discipline: every positive case has its negative. "Skips when the
-prerequisite is missing" alone would also stay green if the gate ALWAYS skipped — so it
+prerequisite is missing" alone would also stay green if the gate ALWAYS skipped, so it
 is equally measured that it does NOT hold anyone up when the prerequisite is present and
 does NOT stay silent when demanded.
 """
@@ -24,7 +24,7 @@ def _outcome_of(gate_call: Callable[[], None]) -> BaseException | None:
     """CAPTURE the gate's outcome instead of letting it propagate.
 
     Critical, and learned the expensive way (sister repo, decision IW): a propagated
-    ``Skipped`` turns THIS test into a skip — the watchdog vanishes exactly as silently
+    ``Skipped`` turns THIS test into a skip, the watchdog vanishes exactly as silently
     as the defect it guards. Measured there: without this capture, the mutant "demanded
     branch removed" stayed green (2 skipped instead of 2 failed), so the watchdog proved
     nothing.
@@ -52,7 +52,7 @@ def test_live_demanded_rejects_everything_else(value: str) -> None:
 
 
 def test_live_demanded_is_false_when_var_absent() -> None:
-    """The default run and CI do not set the variable — that MUST stay silent."""
+    """The default run and CI do not set the variable, that MUST stay silent."""
     assert live_demanded({}) is False
 
 
@@ -78,12 +78,12 @@ def test_missing_and_not_demanded_skips() -> None:
 
 
 def test_missing_but_demanded_fails_loudly() -> None:
-    """The core of S30: a DEMANDED live run no longer skips — it goes red."""
+    """The core of S30: a DEMANDED live run no longer skips, it goes red."""
     outcome = _outcome_of(lambda: assert_live_available(False, REASON, demanded=True))
     assert isinstance(outcome, pytest.fail.Exception), f"expected Failed, got {outcome!r}"
-    # No skip — that is the entire difference the order stands on.
+    # No skip: that is the entire difference the order stands on.
     assert not isinstance(outcome, pytest.skip.Exception)
-    # The message must name BOTH: that it was demanded and what was missing — otherwise
+    # The message must name BOTH: that it was demanded and what was missing, otherwise
     # the reader hunts the cause in the test code instead of their environment.
     message = str(outcome)
     assert REQUIRE_LIVE_ENV in message

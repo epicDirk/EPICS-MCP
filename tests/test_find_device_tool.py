@@ -3,7 +3,7 @@
 These exercise the WIRED path: a real operator .bob over the macro-aware ``opi_navigation``
 inventory → ``find_displays`` → channel collection → live read → report. The p4p batch read is
 mocked AT THE find_device IMPORT SITE (``epics_pv_mcp.tools.find_device.pv_get_batch``) with a
-hand-built ``{results, errors}`` — no real IOC, no shared p4p fake. ChannelFinder is disabled by
+hand-built ``{results, errors}``, no real IOC, no shared p4p fake. ChannelFinder is disabled by
 default (no URL), so source IOC is honestly absent. The pure merge is in ``test_device_lookup.py``.
 """
 
@@ -181,7 +181,7 @@ async def test_find_device_tool_channelfinder_enabled_substring(
 async def test_find_device_tool_channelfinder_unreachable_degrades(
     mock_batch: AsyncMock, mock_cf: AsyncMock, tmp_path: Path
 ) -> None:
-    """A transient ChannelFinder failure must NOT sink the tool — screens + live still return, with
+    """A transient ChannelFinder failure must NOT sink the tool, screens + live still return, with
     an honest 'unreachable' note (Impl-QA M2). CF is best-effort, not a hard dependency."""
     mock_batch.return_value = {"results": [{"pv_name": _STATUS, "value": 1}], "errors": []}
     mock_cf.side_effect = EpicsConnectionError("ChannelFinder: connection refused")
@@ -200,7 +200,7 @@ async def test_find_device_tool_channelfinder_non_epics_error_degrades(
     mock_batch: AsyncMock, mock_cf: AsyncMock, tmp_path: Path
 ) -> None:
     """S7-6: a NON-EpicsError from ChannelFinder (an unexpected client/projection bug) must ALSO
-    degrade — screens + live still return with an 'unreachable' note, the tool never propagates."""
+    degrade, screens + live still return with an 'unreachable' note, the tool never propagates."""
     mock_batch.return_value = {"results": [{"pv_name": _STATUS, "value": 1}], "errors": []}
     mock_cf.side_effect = ValueError("unexpected projection bug")  # NOT an EpicsError
     result = await _find_device("DEV-TEST01:Ctrl-EVR-01", str(_displays(tmp_path)))
@@ -236,7 +236,7 @@ async def test_find_device_live_read_contract_error_degrades(
     mock_batch: AsyncMock, tmp_path: Path
 ) -> None:
     """S27: a provider length-contract breach (UPSTREAM_CONTRACT_ERROR) from the live batch read
-    must degrade the LIVE part but keep the already-computed offline screens — must NOT sink the
+    must degrade the LIVE part but keep the already-computed offline screens, must NOT sink the
     whole tool. Goes RED against the pre-S27 find_device (live read sits outside try/except → the
     error propagates and _find_device raises)."""
     mock_batch.side_effect = EpicsError(
@@ -248,7 +248,7 @@ async def test_find_device_live_read_contract_error_degrades(
 
     report = result["report"]
     assert isinstance(report, dict)
-    # Offline screens survive the live-read failure — the point of degrading, not sinking.
+    # Offline screens survive the live-read failure, the point of degrading, not sinking.
     assert [s["display_path"] for s in report["screens"]] == ["panel.bob"]
     # Live degraded to an empty envelope: no per-channel status, but the tool did NOT raise.
     assert report["channels"] == []

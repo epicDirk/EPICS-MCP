@@ -1,4 +1,4 @@
-"""Offline tests for the Olog ENTRY-EDIT surface (OA3) — helper, client, gate, service.
+"""Offline tests for the Olog ENTRY-EDIT surface (OA3), helper, client, gate, service.
 
 No network. Olog's update is destructive (it prunes any attachment not resubmitted and NULLS any
 field not sent), so every test here defends the round-trip that makes a field edit safe. Red-proofs
@@ -112,7 +112,7 @@ class TestUnroundtrippableFilenames:
 
     def test_case_insensitive_collision_is_flagged(self) -> None:
         # RED-PROOF (guard i): Attachment.compareTo uses filename.compareToIgnoreCase inside a
-        # TreeSet, so "a.png" and "A.PNG" collapse to ONE element — the id never disambiguates them.
+        # TreeSet, so "a.png" and "A.PNG" collapse to ONE element, the id never disambiguates them.
         entry: dict[str, object] = {
             "attachments": [{"id": "1", "filename": "a.png"}, {"id": "2", "filename": "A.PNG"}]
         }
@@ -144,7 +144,7 @@ class TestUnroundtrippableFilenames:
 
     def test_sharp_s_is_not_a_false_collision(self) -> None:
         # casefold() folds ß→ss and would refuse this pair; Java's compareToIgnoreCase folds per
-        # character and does not, so these two DO round-trip — refusing them would be a false alarm.
+        # character and does not, so these two DO round-trip, refusing them would be a false alarm.
         entry: dict[str, object] = {
             "attachments": [
                 {"id": "1", "filename": "straße.txt"},
@@ -202,7 +202,7 @@ def _sent_log_json(captured: dict[str, Any]) -> dict[str, Any]:
 class TestClientUpdate:
     def test_unedited_fields_round_trip_verbatim(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # RED-PROOF (guard c, inverse): a title-only edit must leave EVERY other field byte-for-byte
-        # as it was — updateLog is a full replace, so anything not resubmitted is nulled.
+        # as it was, updateLog is a full replace, so anything not resubmitted is nulled.
         captured = _capture_post(monkeypatch)
         client = OlogClient(_LOOPBACK, assume_test_data=True)
         client.update_log_entry(_RAW_ENTRY, title="new title")
@@ -228,7 +228,7 @@ class TestClientUpdate:
         assert log_json["attachments"] == [
             {"id": "old1", "filename": "old1_a.png", "fileMetadataDescription": "image"}
         ]
-        assert len(captured["files"]) == 1  # logEntry only — no file parts, no bytes re-sent
+        assert len(captured["files"]) == 1  # logEntry only, no file parts, no bytes re-sent
 
     def test_body_edit_is_written_to_source(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # RED-PROOF (guard j): under markup=commonmark the server regenerates description FROM
@@ -283,7 +283,7 @@ class TestClientUpdate:
 
     def test_edited_level_overlays_the_raw_value(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # RED-PROOF (the level overlay): every OTHER update_log_entry call in this file omits
-        # `level`, so only the ELSE branch of the overlay was ever executed — sabotaging it to
+        # `level`, so only the ELSE branch of the overlay was ever executed, sabotaging it to
         # `raw_entry.get("level")` left the whole suite green. The value must differ from
         # _RAW_ENTRY["level"] ("Info"), or both branches produce the same payload and the mutant
         # survives. The sibling service-level assertion (TestServiceUpdate) cannot cover this: it
@@ -307,7 +307,7 @@ class TestOlogErrorCode:
 
     def test_refusals_carry_their_own_code_not_internal(self) -> None:
         # The class of three: all are permanent refusals that never wrap an HTTP response, and all
-        # three used to fall through to INTERNAL — i.e. "transient, try again".
+        # three used to fall through to INTERNAL, i.e. "transient, try again".
         assert checkers_module._olog_error_code(OlogRoundTripUnsafe("x")) == "INVALID_INPUT"
         # Its own code, NOT the write gate's OLOG_WRITE_DENIED: both this client backstop and its
         # service-level twin refuse BEFORE the gate is consulted and emit no audit line, and the
@@ -324,7 +324,7 @@ class TestOlogErrorCode:
 
     def test_connection_and_response_branches_survive_the_new_one(self) -> None:
         # ORDER REGRESSION: OlogConnectionError and OlogResponseError are themselves OlogError
-        # subclasses, so a naively hoisted `isinstance(exc, OlogError)` branch would swallow both —
+        # subclasses, so a naively hoisted `isinstance(exc, OlogError)` branch would swallow both:
         # and with them the HTTP-status resolution. This pins the precedence.
         assert checkers_module._olog_error_code(OlogConnectionError("x")) == "OLOG_CONNECTION_ERROR"
         assert checkers_module._olog_error_code(OlogResponseError("x")) == "OLOG_RESPONSE_ERROR"
@@ -373,7 +373,7 @@ class _UpdateCaptureClient:
         return _UpdateCaptureClient.tags_available
 
     def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
-        # Same 3-tuple shape as the real client — the write-side check reads [0] (the names).
+        # Same 3-tuple shape as the real client, the write-side check reads [0] (the names).
         return _UpdateCaptureClient.levels_available, "Info", None
 
     def update_log_entry(
@@ -418,7 +418,7 @@ class TestServiceUpdate:
     @pytest.mark.asyncio
     async def test_needs_at_least_one_field(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # RED-PROOF (guard f): an all-unchanged call would still rewrite the entry server-side
-        # (new modifyDate + an archived version) for no reason — refuse before any I/O.
+        # (new modifyDate + an archived version) for no reason, refuse before any I/O.
         config_module._config = _write_config()
         _install_fake(monkeypatch)
         with pytest.raises(EpicsError) as exc:
@@ -428,7 +428,7 @@ class TestServiceUpdate:
 
     @pytest.mark.asyncio
     async def test_numeric_id_required(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # RED-PROOF (guard b): refused before any network — and isascii() keeps non-ASCII digits
+        # RED-PROOF (guard b): refused before any network, and isascii() keeps non-ASCII digits
         # (which int() handles inconsistently) out too.
         config_module._config = _write_config()
         _install_fake(monkeypatch)
@@ -440,7 +440,7 @@ class TestServiceUpdate:
 
     @pytest.mark.asyncio
     async def test_empty_title_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Olog's update — unlike create — does NOT reject an empty title, so we must.
+        # Olog's update, unlike create, does NOT reject an empty title, so we must.
         config_module._config = _write_config()
         _install_fake(monkeypatch)
         with pytest.raises(EpicsError) as exc:
@@ -450,7 +450,7 @@ class TestServiceUpdate:
 
     @pytest.mark.asyncio
     async def test_refuses_when_not_whole_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # RED-PROOF (guard a): a redacted server is refused up front — no read, no write.
+        # RED-PROOF (guard a): a redacted server is refused up front, no read, no write.
         config_module._config = _write_config()
         _install_fake(monkeypatch)
         _UpdateCaptureClient.whole = False
@@ -471,7 +471,7 @@ class TestServiceUpdate:
     async def test_failed_write_is_audited_then_reraised(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
-        # RED-PROOF: a write that raises must still leave a FAILED audit record — an attempted
+        # RED-PROOF: a write that raises must still leave a FAILED audit record, an attempted
         # write that vanishes from the audit trail is the "silent mistake" the gate exists against.
         config_module._config = _write_config(olog_write_logbooks="Ops")
         _install_fake(monkeypatch)
@@ -493,7 +493,7 @@ class TestServiceUpdate:
         # RED-PROOF: the server archives and mutates BEFORE answering, so a timeout leaves an
         # APPLIED edit in front of a client that sees FAILED. Without the id, the only record of the
         # attempt cannot say WHICH entry may now be altered. (audit_write_failed omitted entry_id on
-        # a create-specific rationale — "none exists for a failed create" — that does not hold for
+        # a create-specific rationale, "none exists for a failed create", that does not hold for
         # an edit.)
         config_module._config = _write_config(olog_write_logbooks="Ops")
         _install_fake(monkeypatch)
@@ -513,7 +513,7 @@ class TestServiceUpdate:
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
         # RED-PROOF (OQ5): a REFUSAL reported as INTERNAL reads as a transient server fault and
-        # invites a retry — and every retry burns a rate token and writes another FAILED line for a
+        # invites a retry, and every retry burns a rate token and writes another FAILED line for a
         # write that never happened. Both the raised error AND the audit must carry the honest code,
         # which is why the fix sits in _olog_error_code (the audit calls it directly) and not in an
         # except clause.
@@ -575,7 +575,7 @@ class TestServiceUpdate:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # RED-PROOF (guard h): the union would still be non-empty, so the gate's own non-empty
-        # check cannot catch this — the EFFECTIVE set has to be checked separately.
+        # check cannot catch this, the EFFECTIVE set has to be checked separately.
         config_module._config = _write_config(olog_write_logbooks="Ops")
         _install_fake(monkeypatch)
         with pytest.raises(EpicsError) as exc:
@@ -621,7 +621,7 @@ class TestServiceUpdate:
 
     @pytest.mark.asyncio
     async def test_unknown_level_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # RED-PROOF: Olog validates the level on NEITHER write path — "Urgnet" comes back HTTP 200
+        # RED-PROOF: Olog validates the level on NEITHER write path, "Urgnet" comes back HTTP 200
         # and the entry then matches no level filter at all. level was the one of the three
         # server-managed fields that went through unchecked.
         config_module._config = _write_config(olog_write_logbooks="Ops")
@@ -636,7 +636,7 @@ class TestServiceUpdate:
     async def test_blank_level_refused_with_its_own_message(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # RED-PROOF: a blank level is not "no change" — the server stores it and the entry silently
+        # RED-PROOF: a blank level is not "no change", the server stores it and the entry silently
         # loses its triage level. Distinct message from the vocabulary refusal on purpose: the two
         # failures need different fixes from the caller.
         config_module._config = _write_config(olog_write_logbooks="Ops")

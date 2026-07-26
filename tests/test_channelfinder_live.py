@@ -1,21 +1,21 @@
-"""Live probes for the ChannelFinder name glob — semantics only the server knows.
+"""Live probes for the ChannelFinder name glob, semantics only the server knows.
 
 Opt-in: ``pytest -m live`` with ``EPICS_MCP_CHANNELFINDER_URL`` and ``EPICS_MCP_LIVE_CF_GLOB`` set.
 
 WHY THESE EXIST
 ---------------
-The client passes ``name_pattern`` through verbatim as ``~name`` — no escaping, no rewriting, no
-anchoring — so every property of the match is the server's, and the tool description used to
+The client passes ``name_pattern`` through verbatim as ``~name``, no escaping, no rewriting, no
+anchoring, so every property of the match is the server's, and the tool description used to
 promise only "glob (ChannelFinder syntax: * and ?)". Two properties it stayed silent about both
 mislead quietly rather than loudly:
 
-* ANCHORED — a bare substring matches NOTHING. That reads as "no such channel", not as "you
+* ANCHORED: a bare substring matches NOTHING. That reads as "no such channel", not as "you
   needed stars", which is the same failure mode as an unreadable time window: a well-formed
   answer to a question the caller did not ask.
-* CASE-INSENSITIVE — ``*Temp*`` matches ``...MorTemPrd``. Harmless when known, confusing when not.
+* CASE-INSENSITIVE, ``*Temp*`` matches ``...MorTemPrd``. Harmless when known, confusing when not.
 
 The assertions are DIFFERENTIAL (the same target expressed several ways) plus a positive control
-(the glob must actually hit) and a negative control (an impossible glob must return nothing —
+(the glob must actually hit) and a negative control (an impossible glob must return nothing:
 otherwise "it returns channels" would also pass if the filter were ignored entirely).
 """
 
@@ -55,7 +55,7 @@ def client() -> ChannelFinderClient:
 
 @pytest.fixture
 def glob() -> str:
-    """A glob known to match a handful of channels — kept well under any cap, so a count
+    """A glob known to match a handful of channels, kept well under any cap, so a count
     comparison compares matches and not the cap. The MA-2 filter controls additionally require it
     to straddle at least one Active AND one Inactive ``pvStatus`` channel (the positive-subset test
     needs an Inactive subset; the negation test needs both an Active to pull and a non-Active
@@ -65,7 +65,7 @@ def glob() -> str:
 
 #: The result cap for the probes. ``find_channels`` returns a plain list with NO ``capped`` flag
 #: (unlike the alarm/archiver clients), so truncation is only visible as ``len(...)`` reaching this
-#: value — which is why every set comparison below has to check the length against it itself.
+#: value, which is why every set comparison below has to check the length against it itself.
 _MAX_RESULTS = 300
 
 
@@ -75,11 +75,11 @@ def _names(client: ChannelFinderClient, pattern: str, max_results: int = _MAX_RE
 
 
 def test_glob_matches_something(client: ChannelFinderClient, glob: str) -> None:
-    """The positive control — without hits, every probe below is vacuously green."""
+    """The positive control, without hits, every probe below is vacuously green."""
     names = _names(client, glob)
     assert names, f"{glob!r} matched nothing: set EPICS_MCP_LIVE_CF_GLOB to a glob that hits"
     assert len(names) < _MAX_RESULTS, (
-        "glob hits the cap — pick a narrower one, or counts compare the cap"
+        "glob hits the cap, pick a narrower one, or counts compare the cap"
     )
 
 
@@ -92,15 +92,15 @@ def test_glob_is_case_insensitive(client: ChannelFinderClient, glob: str) -> Non
     """Differential: the same glob in three cases must return the IDENTICAL set.
 
     Both guards are inline on purpose. The positive control lives in a NEIGHBOURING test, and
-    pytest runs that one independently — so a glob that matches nothing left this comparing
+    pytest runs that one independently, so a glob that matches nothing left this comparing
     ``[] == [] == []``: green, and proving nothing about case at all. The cap check has to be here
     too: three results truncated at the same cap are equal for a reason that has nothing to do
     with case (200-vs-200 is the cap, not evidence).
     """
     as_typed = _names(client, glob)
-    assert as_typed, f"{glob!r} matched nothing — a case comparison of empty sets proves nothing"
+    assert as_typed, f"{glob!r} matched nothing, a case comparison of empty sets proves nothing"
     assert len(as_typed) < _MAX_RESULTS, (
-        f"{glob!r} hits the cap ({_MAX_RESULTS}) — the three sets would compare the cap, not case"
+        f"{glob!r} hits the cap ({_MAX_RESULTS}), the three sets would compare the cap, not case"
     )
     assert _names(client, glob.lower()) == _names(client, glob.upper()) == as_typed
 
@@ -117,8 +117,8 @@ def test_glob_is_anchored(client: ChannelFinderClient, glob: str) -> None:
     assert _names(client, exact) == [exact]
 
     inner = exact[len(exact) // 3 : len(exact) // 3 + 8]
-    assert _names(client, inner) == [], f"{inner!r} matched unanchored — the glob is not anchored"
-    assert _names(client, f"*{inner}*"), f"'*{inner}*' matched nothing — inner is not a substring"
+    assert _names(client, inner) == [], f"{inner!r} matched unanchored, the glob is not anchored"
+    assert _names(client, f"*{inner}*"), f"'*{inner}*' matched nothing, inner is not a substring"
 
 
 # --- S11 schema anchor: the strict client schema, pinned against the REAL payload ---
@@ -126,11 +126,11 @@ def test_glob_is_anchored(client: ChannelFinderClient, glob: str) -> None:
 
 def test_live_channels_satisfy_the_strict_schema(client: ChannelFinderClient, glob: str) -> None:
     """S11 anchor: every channel record carries a non-empty string ``name`` (measured
-    2026-07-16) — the client now RAISES on a nameless/non-dict record instead of minting
+    2026-07-16), the client now RAISES on a nameless/non-dict record instead of minting
     ``ChannelInfo(name="")``, so this run passing pins the premise against the real registry."""
     channels = client.find_channels(glob, max_results=20)
     assert channels, (
-        "positive control not met: the fixture glob matched nothing — the schema anchor cannot "
+        "positive control not met: the fixture glob matched nothing, the schema anchor cannot "
         "pin anything. Check EPICS_MCP_LIVE_CF_GLOB."
     )
     assert all(isinstance(channel["name"], str) and channel["name"] for channel in channels)
@@ -138,24 +138,24 @@ def test_live_channels_satisfy_the_strict_schema(client: ChannelFinderClient, gl
 
 # --- MA-2 PROPERTY filter controls: these ARE the differential live probe that lifted the
 # --- "UNVERIFIED" marker for the property filters (has_properties / lacks_properties /
-# --- not_property_values / count_only). The TAG filters (has_tags / lacks_tags) stay UNVERIFIED —
+# --- not_property_values / count_only). The TAG filters (has_tags / lacks_tags) stay UNVERIFIED:
 # --- the sandbox CF carries no tags to probe them. All controls run on the SURFACED,
 # --- always-allowlisted ``pvStatus`` property (no §8 override needed). Counts assert via the
 # --- uncapped ``/count`` endpoint; any pulled list is checked against the cap itself (find_channels
-# --- has no ``capped`` flag — truncation shows only as ``len == _MAX_RESULTS``).
+# --- has no ``capped`` flag, truncation shows only as ``len == _MAX_RESULTS``).
 
 
 def test_filter_positive_is_a_strict_subset(client: ChannelFinderClient, glob: str) -> None:
     """Positive control: a value filter returns a NON-EMPTY subset and every member actually
     carries that value. Without the member check, ``has_properties`` being silently dropped would
-    still pass — it would return the whole glob, which is also non-empty. ``pvStatus`` is surfaced,
+    still pass, it would return the whole glob, which is also non-empty. ``pvStatus`` is surfaced,
     so the value is verifiable on each record."""
     total = client.count_channels(glob)
     matches = client.find_channels(
         glob, max_results=_MAX_RESULTS, has_properties={"pvStatus": "Inactive"}
     )
     assert 0 < len(matches) < _MAX_RESULTS, (
-        f"{glob!r} filtered on pvStatus=Inactive returned {len(matches)} channels — need a "
+        f"{glob!r} filtered on pvStatus=Inactive returned {len(matches)} channels, need a "
         "non-empty, un-capped subset (pick a glob that straddles Active and Inactive)"
     )
     assert len(matches) <= total, "a filtered subset cannot exceed the unfiltered count"
@@ -169,11 +169,11 @@ def test_filter_absence_partitions_the_glob(client: ChannelFinderClient, glob: s
     complements, so their counts must sum to the unfiltered total. Uses the uncapped ``/count``
     endpoint (no cap guard needed) and proves ``lacks_properties`` does not silently broaden."""
     total = client.count_channels(glob)
-    assert total > 0, f"{glob!r} matched nothing — the partition would be a vacuous 0 == 0"
+    assert total > 0, f"{glob!r} matched nothing, the partition would be a vacuous 0 == 0"
     lacking = client.count_channels(glob, lacks_properties=["pvStatus"])
     having = client.count_channels(glob, has_properties={"pvStatus": "*"})
     assert lacking + having == total, (
-        f"lacks({lacking}) + has-present({having}) != total({total}) — the absence filter does "
+        f"lacks({lacking}) + has-present({having}) != total({total}), the absence filter does "
         "not partition the glob"
     )
     # No member of the 'lacks' set carries the property. Vacuously true when ``lacking == 0``,
@@ -186,14 +186,14 @@ def test_filter_absence_partitions_the_glob(client: ChannelFinderClient, glob: s
 def test_filter_negation_excludes_that_value_only(client: ChannelFinderClient, glob: str) -> None:
     """Negation control: ``not_property_values={p: v}`` drops the channels whose ``p == v`` while
     keeping the other-valued ones. Pull a concrete ``Active`` channel, then assert it is ABSENT
-    from the negated result AND that a non-Active survivor remains — the two-sided proof a single
+    from the negated result AND that a non-Active survivor remains, the two-sided proof a single
     'it returned fewer' count could not give. Vocabulary-agnostic: the survivor need only carry
     ``pvStatus != Active``, not the specific value 'Inactive'."""
     active = client.find_channels(
         glob, max_results=_MAX_RESULTS, has_properties={"pvStatus": "Active"}
     )
     assert active and len(active) < _MAX_RESULTS, (
-        f"{glob!r} has no un-capped Active channel to negate against — pick a glob that has one"
+        f"{glob!r} has no un-capped Active channel to negate against, pick a glob that has one"
     )
     an_active_name = active[0]["name"]
 
@@ -201,7 +201,7 @@ def test_filter_negation_excludes_that_value_only(client: ChannelFinderClient, g
     # pvStatus is PRESENT but != Active, or 'a survivor remains' is a fixture gap, not a negation
     # defect. Asserted via the uncapped /count so a failure points at the fixture, not the server.
     assert client.count_channels(glob, not_property_values={"pvStatus": "Active"}) > 0, (
-        f"{glob!r} has no channel with pvStatus present and != Active — pick a glob that straddles "
+        f"{glob!r} has no channel with pvStatus present and != Active, pick a glob that straddles "
         "Active and a non-Active value (the negation would have no survivor to keep)"
     )
 
@@ -214,23 +214,21 @@ def test_filter_negation_excludes_that_value_only(client: ChannelFinderClient, g
         "not_property_values did not exclude the channel whose value it negated"
     )
     # A channel lacking pvStatus does NOT match not_property_values, so every survivor must carry
-    # pvStatus with a value != Active — value-selective negation, not a blanket drop.
+    # pvStatus with a value != Active, value-selective negation, not a blanket drop.
     assert all(c["properties"].get("pvStatus") not in (None, "Active") for c in negated), (
-        "a survivor does not carry a non-Active pvStatus — the filter is not a value negation"
+        "a survivor does not carry a non-Active pvStatus, the filter is not a value negation"
     )
 
 
 def test_count_only_agrees_with_the_list(client: ChannelFinderClient, glob: str) -> None:
     """count_only cross-check: the ``/count`` endpoint and the pulled list must agree on the SAME
-    filtered query. Kept under the cap so the list is complete — otherwise this would measure the
+    filtered query. Kept under the cap so the list is complete, otherwise this would measure the
     cap, not the count."""
     listed = client.find_channels(
         glob, max_results=_MAX_RESULTS, has_properties={"pvStatus": "Active"}
     )
-    assert listed, (
-        f"{glob!r} has no Active channel — count/list agreement would be a vacuous 0 == 0"
-    )
-    assert len(listed) < _MAX_RESULTS, "list hit the cap — count_only would legitimately disagree"
+    assert listed, f"{glob!r} has no Active channel, count/list agreement would be a vacuous 0 == 0"
+    assert len(listed) < _MAX_RESULTS, "list hit the cap, count_only would legitimately disagree"
     counted = client.count_channels(glob, has_properties={"pvStatus": "Active"})
     assert counted == len(listed), (
         f"count_only({counted}) != len(find_channels)({len(listed)}) for the same filter"
@@ -239,10 +237,10 @@ def test_count_only_agrees_with_the_list(client: ChannelFinderClient, glob: str)
 
 def test_impossible_value_collapses_to_zero(client: ChannelFinderClient, glob: str) -> None:
     """Negative control on the VALUE axis: an impossible ``pvStatus`` value must collapse to 0, not
-    broaden. This is exactly why '0 matches != unknown property' holds — an unknown VALUE and an
+    broaden. This is exactly why '0 matches != unknown property' holds, an unknown VALUE and an
     unknown property NAME both narrow to nothing, indistinguishably."""
     assert client.count_channels(glob) > 0, (
-        f"{glob!r} matched nothing — a collapse to 0 proves nothing when the glob is already empty"
+        f"{glob!r} matched nothing, a collapse to 0 proves nothing when the glob is already empty"
     )
     impossible = {"pvStatus": "ZZZ-no-such-status-XYZ"}
     assert client.find_channels(glob, max_results=_MAX_RESULTS, has_properties=impossible) == []

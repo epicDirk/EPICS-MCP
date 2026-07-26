@@ -2,7 +2,7 @@
 
 The intended dependency direction is ``server → tools → services → clients``.
 ``services/diagnose`` used to import ``_is_archived`` / ``_is_alarm_configured`` /
-``_find_channels`` from ``tools/*`` — a ``service → tool`` inversion that made ``diagnose``
+``_find_channels`` from ``tools/*``, a ``service → tool`` inversion that made ``diagnose``
 unusable without the MCP tool layer. C2-ii lifted that per-plane query logic into
 :mod:`epics_pv_mcp.services.checkers`, so the inversion is gone.
 
@@ -43,7 +43,7 @@ def _resolve_relative(level: int, module: str | None) -> str | None:
 
 
 def _tool_layer_imports(source: str) -> list[str]:
-    """Return the tool-layer module names imported by *source* — ABSOLUTE and RELATIVE forms.
+    """Return the tool-layer module names imported by *source*, ABSOLUTE and RELATIVE forms.
 
     Catches ``import epics_pv_mcp.tools…``, ``from epics_pv_mcp.tools… import x``, ``from ..tools
     import x`` (relative, previously a blind spot), and ``from .. import tools`` (aliased package).
@@ -60,7 +60,7 @@ def _tool_layer_imports(source: str) -> list[str]:
                 if node.module is not None and _imports_the_tool_layer(resolved):
                     offenders.append(resolved)  # from ..tools[.x] import y
                 else:
-                    # from .. import tools — the package is `resolved`, `tools` is an imported name.
+                    # from .. import tools, the package is `resolved`, `tools` is an imported name.
                     offenders.extend(
                         f"{resolved}.{alias.name}"
                         for alias in node.names
@@ -78,7 +78,7 @@ def _tool_layer_imports(source: str) -> list[str]:
 def test_services_layer_never_imports_the_tool_layer() -> None:
     """No ``services/*.py`` module may import ``epics_pv_mcp.tools`` (layering inversion guard)."""
     modules = sorted(_SERVICES_DIR.glob("*.py"))
-    assert modules, f"no services modules found under {_SERVICES_DIR} — check the path"
+    assert modules, f"no services modules found under {_SERVICES_DIR}, check the path"
     violations = {
         path.name: offenders
         for path in modules
@@ -91,7 +91,7 @@ def test_services_layer_never_imports_the_tool_layer() -> None:
 
 
 def test_tool_layer_import_detector_catches_all_forms() -> None:
-    """The detector must flag EVERY way a services module could reach the tool layer — including the
+    """The detector must flag EVERY way a services module could reach the tool layer, including the
     RELATIVE forms the old walker missed (it only matched the absolute ``epics_pv_mcp.tools`` name,
     so ``from ..tools import x`` slipped through and a regression could ship green)."""
     # Absolute forms (already covered before).
