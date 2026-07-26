@@ -41,11 +41,11 @@ class EpicsConfig(BaseSettings):
 
     # --- Safety ---
     allow_pv_write: bool = False
-    # Regex-Allowlist für Schreib-PVs. Bei aktivem allow_pv_write ist ein nicht-leeres Pattern
-    # PFLICHT: ein leeres Pattern mit writes-on wird beim Start als SafetyConfigError abgelehnt
-    # (fail-closed, siehe SafetyLayer.__init__) — nicht mehr ein stiller allow-all. Wer wirklich
-    # jeden PV schreibbar will, sagt das explizit (z. B. '.*'). Default leer ist sicher, weil
-    # allow_pv_write per Default False ist.
+    # Regex allowlist for writable PVs. With allow_pv_write on, a non-empty pattern is MANDATORY:
+    # an empty pattern with writes on is rejected at startup as a SafetyConfigError (fail-closed,
+    # see SafetyLayer.__init__) instead of silently meaning allow-all. Anyone who really wants
+    # every PV writable says so explicitly (for instance '.*'). The empty default is safe because
+    # allow_pv_write defaults to False.
     pv_write_pattern: str = ""
     # max writes per minute; ge=1 — "block all" is the allow_pv_write gate, not 0.
     write_rate_limit: int = Field(default=10, ge=1)

@@ -175,14 +175,14 @@ mcp = FastMCP(
     "epics-pv-mcp",
     version=__version__,
     instructions=build_instructions(_DISPLAY_TOOLS_AVAILABLE),
-    # mask_error_details steuert NUR, ob der Detail-Text einer NICHT-ToolError-Exception (ein
-    # echter interner Bug) den Client erreicht: True maskiert ihn zu "Error calling tool '<name>'",
-    # False/None geben ihn durch. Der kuratierte ``[<code>] message`` / ``[INTERNAL] …``-ToolError-
-    # Text erreicht den Client OHNEHIN unter allen Einstellungen (ToolError ist die absichtliche
-    # Client-Grenze — gemessen None/False/True). Explizit False = das ungemaskte SDK-1.0-Verhalten
-    # (verhaltenserhaltend), hier deckungsgleich mit dem standalone-Default None. Härtungs-Option
-    # (bewusste Betreiber-Wahl, NICHT eigenmächtig geändert): True würde interne Exception-Strings
-    # maskieren — konsistenter mit der Redaktions-Posture, dafür ohne Detail bei einem Bug.
+    # mask_error_details controls ONLY whether the detail text of a NON-ToolError exception (a
+    # genuine internal bug) reaches the client: True masks it to "Error calling tool '<name>'",
+    # False and None pass it through. The curated ``[<code>] message`` / ``[INTERNAL] ...``
+    # ToolError text reaches the client under EVERY setting anyway (ToolError is the deliberate
+    # client boundary, measured for None, False and True). An explicit False is the unmasked
+    # SDK 1.0 behaviour, kept identical here to the standalone default None. A hardening option
+    # and a deliberate operator choice, not ours to make: True would mask internal exception
+    # strings, more consistent with the redaction posture but leaving no detail on a bug.
     mask_error_details=False,
 )
 

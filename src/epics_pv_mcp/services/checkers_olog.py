@@ -375,8 +375,8 @@ async def query_olog_entry(log_id: str, timeout: float = 5.0) -> OlogEntryResult
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` with
     ``found: None`` — the plane was NOT checked, mirroring the ``archived: None`` /
     ``configured: None`` / ``registered: None`` / get_archive_info ``found: None`` siblings
-    (S11 Zusatzfläche 3: this was the lone ``found: False`` among them — a definitive "does not
-    exist" from a plane that was never asked). ``found`` is False ONLY for the definitive 404.
+    (S11: this was the lone ``found: False`` among them, a definitive "does not exist" from a
+    plane that was never asked). ``found`` is False ONLY for the definitive 404.
     Backs ``get_log_entry``.
     """
     cfg = get_config()

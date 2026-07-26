@@ -50,7 +50,7 @@ from epics_pv_mcp.services.crossplane import (
     _record_name,
 )
 
-#: A coverage cell. ``withheld`` heisst NIE ``no`` — die Fläche konnte nicht antworten.
+#: A coverage cell. ``withheld`` NEVER means ``no``: the plane could not answer.
 Coverage3 = Literal["yes", "no", "withheld"]
 
 

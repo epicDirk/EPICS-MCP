@@ -104,7 +104,7 @@ def _named_list(data: object, endpoint: str) -> list[str]:
     return names
 
 
-# MA-2 CF-Query-Fläche. The reserved ChannelFinder query params (the ``switch`` cases in the vendor
+# CF query surface. The reserved ChannelFinder query params (the ``switch`` cases in the vendor
 # ``ChannelRepository.getBuiltQuery``). A caller-supplied property/tag NAME must never collide with
 # one of these, and — critically — a trailing ``!`` (the vendor's negation marker on the KEY) must
 # never be synthesised on ``~name``: the server strips the ``!`` and filters ``~name`` POSITIVELY,
@@ -282,14 +282,14 @@ class ChannelFinderClient:
 
     @property
     def properties_url(self) -> str:
-        # MA-2 CF-Query-Fläche: the vendor property-definition list route
+        # CF query surface: the vendor property-definition list route
         # (PropertyController.list → GET {root}/resources/properties). The list endpoint returns
         # every PropertyDto with an empty ``channels`` (no join) — only ``name`` is meaningful here.
         return f"{self.base_url}/resources/properties"
 
     @property
     def tags_url(self) -> str:
-        # MA-2 CF-Query-Fläche: the vendor tag-definition list route
+        # CF query surface: the vendor tag-definition list route
         # (TagController.list → GET {root}/resources/tags).
         return f"{self.base_url}/resources/tags"
 

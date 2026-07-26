@@ -56,12 +56,12 @@ def _cleanup() -> None:
 
 
 def _classify_p4p_error(name: str, exc: BaseException, *, action: str) -> EpicsError:
-    """Klassifiziere eine generische (Nicht-Timeout-)p4p-Exception.
+    """Classify a generic (non-timeout) p4p exception.
 
-    p4p hat keinen eigenen „PV not found"-Exceptiontyp — dieser Subfall ist nur
-    an der Fehlermeldung erkennbar. Diese eine Stelle ersetzt die zuvor in
-    pv_get / pv_put / pv_monitor wortgleich duplizierte String-Klassifikation
-    (Low-Level raised, EINE Schicht fängt + übersetzt — QUALITY-STANDARD §1).
+    p4p has no dedicated "PV not found" exception type, so that sub-case is only
+    recognisable from the error message. This one place replaces the string
+    classification that pv_get / pv_put / pv_monitor used to duplicate verbatim
+    (the low level raises, ONE layer catches and translates).
     """
     msg = str(exc).lower()
     if "not found" in msg or "search" in msg:
@@ -111,9 +111,9 @@ async def pv_get_batch(names: list[str], timeout: float | None = None) -> dict[s
     try:
         values = await asyncio.to_thread(ctxt.get, names, timeout=timeout)
     except Exception as exc:  # noqa: BLE001
-        # Batch fehlgeschlagen -> Einzelabfrage-Fallback. Die Wurzel des Batch-Fehlers nicht still
-        # verschlucken (für die Diagnose loggen); die Einzelabfragen liefern danach je PV einen
-        # genauen Fehler.
+        # The batch failed, so fall back to per-PV reads. The root cause of the batch failure is
+        # not swallowed (it is logged for diagnosis); the individual reads then produce one
+        # precise error per PV.
         logger.debug("Batch get failed, falling back to concurrent individual gets: %s", exc)
         # M5: run the per-PV reads CONCURRENTLY instead of serially, so ONE disconnected channel
         # degrades the fallback to ~1×timeout instead of n×timeout. return_exceptions=True keeps a
@@ -122,9 +122,9 @@ async def pv_get_batch(names: list[str], timeout: float | None = None) -> dict[s
             *(pv_get(name, timeout=timeout) for name in names),
             return_exceptions=True,
         )
-        # asyncio.gather(return_exceptions=True) garantiert len(individual)==len(names) UND Ordnung
-        # -> hier KEIN Längen-Guard (ein strict=True wäre ein Wächter, der nie rot werden kann;
-        # Evidence-Regel 5). Der Provider-Vertrag wird im else-Zweig geprüft, wo er feuern kann.
+        # asyncio.gather(return_exceptions=True) guarantees len(individual)==len(names) AND order,
+        # so NO length guard here (a strict=True would be a guard that can never go red; evidence
+        # rule 5). The provider contract is checked in the else branch, where it can fire.
         for name, outcome in zip(names, individual, strict=False):
             if not isinstance(outcome, BaseException):
                 results.append(outcome)
@@ -141,10 +141,10 @@ async def pv_get_batch(names: list[str], timeout: float | None = None) -> dict[s
                 # arise from the native-batch failure, so do not chain it to that context.
                 raise outcome from None
     else:
-        # Nativer Batch OK. Provider-Längen-Vertrag HIER durchsetzen (außerhalb des except), damit
-        # ein Verstoß LAUT als UPSTREAM_CONTRACT_ERROR scheitert statt in den Fallback geschluckt
-        # zu werden — ein Raise im try würde vom except Exception gefangen (S27/F11: kein stiller
-        # Verlust). p4p prä-sized sein Ergebnis auf len(names) -> feuert nur bei kaputtem Provider.
+        # Native batch OK. The provider length contract is enforced HERE, outside the except, so
+        # that a violation fails LOUDLY as UPSTREAM_CONTRACT_ERROR instead of being swallowed into
+        # the fallback: a raise inside the try would be caught by except Exception (no silent
+        # loss). p4p pre-sizes its result to len(names), so this fires only on a broken provider.
         if len(values) != len(names):
             raise EpicsError(
                 f"EPICS provider returned {len(values)} values for {len(names)} requested PVs",
@@ -224,9 +224,9 @@ async def pv_monitor(
                 try:
                     collected.append(_format_value(name, value))
                 except Exception:  # noqa: BLE001
-                    # ein Monitor-Callback darf den Worker-Thread nie crashen; value=None
-                    # statt str(value) — der Wrapper-str() ergäbe ctime-Müll (s. _format_value)
-                    # — aber DEKLARIERT, sonst zählt ein Format-Crash als echtes None-Event.
+                    # a monitor callback must never crash the worker thread; value=None rather
+                    # than str(value), whose wrapper repr would be ctime noise (see _format_value),
+                    # but DECLARED, so a formatting crash is not counted as a real None event.
                     logger.debug("monitor format failed for PV %s", name, exc_info=True)
                     collected.append(
                         {
@@ -249,7 +249,7 @@ async def pv_monitor(
                 )
             )
         except Exception as exc:  # noqa: BLE001
-            # jeden Monitor-Fehler übersetzen + sammeln (eine Schicht fängt)
+            # translate and collect every monitor error (one layer catches)
             error_holder.append(_classify_p4p_error(name, exc, action="monitoring"))
         finally:
             if sub is not None:

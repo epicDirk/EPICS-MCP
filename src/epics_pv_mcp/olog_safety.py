@@ -379,11 +379,12 @@ class OlogWriteGate:
             # a raw OSError at the first write. Built UNCONDITIONALLY so the path check runs on
             # every construction (now truly symmetric to SafetyLayer).
             try:
-                # encoding="utf-8": ohne die Angabe nimmt FileHandler die Plattform-Locale
-                # (Windows cp1252) — ein μ/Ω/ä in einer Audit-Zeile (z. B. ein Logbuch-Name mit
-                # schwedischem Buchstaben) löst dann einen UnicodeEncodeError aus, den die stdlib
-                # ``Handler.handleError`` STILL schluckt (s. _emit-Docstring): die Zeile fällt
-                # spurlos weg. UTF-8 fixiert die Kodierung plattformunabhängig.
+                # encoding="utf-8": without it FileHandler takes the platform locale
+                # (Windows cp1252), and one micro sign, ohm sign or accented letter in an audit
+                # line (for instance a logbook name with a non-ASCII letter) raises a
+                # UnicodeEncodeError that the stdlib ``Handler.handleError`` swallows SILENTLY
+                # (see the _emit docstring): the line disappears without trace. UTF-8 fixes the
+                # encoding across platforms.
                 handler = logging.FileHandler(self._config.audit_log_file, encoding="utf-8")
             except OSError as exc:
                 raise SafetyConfigError(

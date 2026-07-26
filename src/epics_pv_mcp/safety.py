@@ -42,8 +42,8 @@ class SafetyLayer:
 
     def __init__(self, config: EpicsConfig, environ: Mapping[str, str] | None = None) -> None:
         self._config = config
-        # Fail-closed: ein kaputtes Allowlist-Pattern darf die Schreib-Sperre
-        # NICHT still aushebeln — lieber klar scheitern als ungeschützt schreiben.
+        # Fail-closed: a broken allowlist pattern must NOT quietly disable the write lock.
+        # Failing loudly is better than writing unguarded.
         try:
             self._pattern: re.Pattern[str] | None = (
                 re.compile(config.pv_write_pattern) if config.pv_write_pattern else None
@@ -354,15 +354,15 @@ class SafetyLayer:
         audit.setLevel(logging.INFO)
         handler: logging.Handler
         if self._config.audit_log_file:
-            # Fail-closed: ein kaputter/nicht schreibbarer Audit-Pfad darf nicht erst beim ersten
-            # Write als roher FileNotFoundError crashen — symmetrisch zur Regex-Validierung im
-            # __init__ klar als SafetyConfigError scheitern. Läuft bei JEDER Konstruktion.
+            # Fail-closed: a broken or unwritable audit path must not crash as a raw
+            # FileNotFoundError at the first write. It fails here as a SafetyConfigError,
+            # symmetric to the regex validation in __init__, and on EVERY construction.
             try:
-                # encoding="utf-8": ohne die Angabe nimmt FileHandler die Plattform-Locale
-                # (Windows cp1252) — ein μ/Ω/ä in einer Audit-Zeile (echte EPICS-Einheiten,
-                # schwedische Namen) löst dann einen UnicodeEncodeError aus, den die stdlib
-                # ``Handler.handleError`` STILL schluckt (s. _emit-Docstring): die Zeile fällt
-                # spurlos weg. UTF-8 fixiert die Kodierung plattformunabhängig.
+                # encoding="utf-8": without it FileHandler takes the platform locale
+                # (Windows cp1252), and one micro sign, ohm sign or accented letter in an audit
+                # line (real EPICS units, non-ASCII names) raises a UnicodeEncodeError that the
+                # stdlib ``Handler.handleError`` swallows SILENTLY (see the _emit docstring): the
+                # line disappears without trace. UTF-8 fixes the encoding across platforms.
                 handler = logging.FileHandler(self._config.audit_log_file, encoding="utf-8")
             except OSError as exc:
                 raise SafetyConfigError(
