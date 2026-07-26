@@ -193,10 +193,11 @@ work.
 
    ⚠️ Record the map with `COVERAGE_CORE=ctrace`. On Python 3.12+ coverage defaults to the
    `sys.monitoring` core, which disables a location after its FIRST observation, so every later
-   test covering the same line leaves no context row. Measured here: 72 covering tests under the
-   default core versus 291 under ctrace (median 2 versus 12, 56 of 61 lines affected). An audit
-   driven by the default map runs a quarter of the relevant tests and reports false survivors —
-   it becomes the sham guard it was built to find.
+   test covering the same line leaves no context row. Measured here, both maps on the same
+   1472-test tree (2026-07-26): 72 tests touch a guard line under the default core versus 292 under
+   ctrace (median 2 versus 13, and the default map is poorer on 58 of the 61 covered lines). An
+   audit driven by the default map runs a quarter of the relevant tests and reports false
+   survivors — it becomes the sham guard it was built to find.
 
 Honest limit: these are prose rules — the category that rots (see above). No CI guard can prove
 they were followed; the guard is the adversarial counter-probe itself.

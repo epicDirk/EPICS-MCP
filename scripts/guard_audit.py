@@ -16,10 +16,12 @@ Two directions, and they answer different questions:
 
 ⚠️ The map MUST be recorded with ``COVERAGE_CORE=ctrace``. On Python 3.12+ coverage defaults to
 the ``sys.monitoring`` core, which disables a location after its FIRST observation, so later
-tests covering the same line leave no context row. Measured on this repository: 72 covering tests
-under the default core versus 291 under ctrace, median 2 versus 12. A sweep driven by the default
-map would run a quarter of the relevant tests and report false survivors — the audit would itself
-be the sham guard it exists to find. Record it with::
+tests covering the same line leave no context row. Measured on this repository, both maps recorded
+on the same 1472-test tree (2026-07-26): 72 tests touch a guard line under the default core versus
+292 under ctrace, median 2 versus 13 per covered line, and the default map reports fewer covering
+tests on 58 of the 61 covered guard lines. A sweep driven by the default map would run a quarter of
+the relevant tests and report false survivors — the audit would itself be the sham guard it exists
+to find. Record it with::
 
     COVERAGE_CORE=ctrace COVERAGE_FILE=<scratch>/cov uv run pytest \\
         --cov=src --cov-branch --cov-context=test

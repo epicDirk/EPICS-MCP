@@ -54,7 +54,11 @@ from pathlib import Path
 
 # Number words the prose actually uses, plus headroom. Deliberately a closed list: a generic
 # word-to-int parser would happily read "one" out of "one of the two halves", where the article is
-# not a count. Measured, the prose reaches "THIRTEEN"; the list runs to twenty for headroom.
+# not a count.
+#
+# The list deliberately runs past what the watched prose currently spells, and deliberately names no
+# figure for how far past: THIS FILE IS UNWATCHED, so a count written into it rots exactly the way
+# the counts it guards do. The previous wording named one, and it was wrong.
 _WORD_VALUES: dict[str, int] = {
     "one": 1,
     "two": 2,
