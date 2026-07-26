@@ -17,10 +17,16 @@ rejected rather than merely postponed.
 
 The prose-counter guard reads Python comments and docstrings. It does not read `.md` files.
 
-Measured: **32** size-naming phrases across **9** tracked markdown files (the detector's own
+Measured: **38** size-naming phrases across **10** tracked markdown files (the detector's own
 vocabulary — a number paired with one of `prose_numbers.COLLECTION_NOUNS`, or the `N of the M`
-shape). **11 of those 32 sit in `CHANGELOG.md` and `CLAUDE.md` and are deliberately historical** —
-a changelog entry that said "22 schemas" in a past release must keep saying it.
+shape). **12 of those sit in `CHANGELOG.md` and `CLAUDE.md` and are deliberately historical** —
+a changelog entry that said "22 schemas" in a past release must keep saying it. This page is in its
+own census, and is one of the ten files.
+
+⚠️ Those three figures were first written as 32 / 9 / 11: the count of the tree BEFORE the last two
+commits of the batch that added this page, and before the page itself existed. Corrected. They are
+the clearest illustration of the header above — nothing re-runs a number in a markdown file, so
+re-measure before quoting it.
 
 Why no guard: it would need roughly twenty "historical, not derivable" rows — precisely the
 construction `tests/test_prose_counters.py` already rejected, in writing, for its own two files ("a
@@ -30,11 +36,23 @@ part of. **That figure belongs on a release checklist, not in the gate.** Tracke
 
 ## 2 · A number is guarded only where a sentence states it
 
-Two sentences may state one figure. A pattern over one of them says nothing about the other, and
-this has bitten twice: a "17" restated as "those 17 keys sit on 28 targets" went unwatched, which is
-why the red-proof recipe recorded for exactly that defect ran green again on shipped code. Both are
-patterned now. There is no completeness pin over `tests/test_client_edge_guards.py`'s own docstring,
-so a figure added to it ships unwatched — work item S42.
+Two sentences may state one figure. A pattern over one of them says nothing about the other, because
+`test_the_recorded_figures_match_the_prose_that_states_them` uses `re.search` — one pattern per
+WORDING, and only the first occurrence of each.
+
+This has bitten three times, and the third was found by the QA of the commit that fixed the second.
+A "17" restated as "those 17 keys sit on 28 targets" went unwatched, which is why the red-proof recipe
+recorded for exactly that defect ran green again on shipped code. Then four MORE restatements in the
+same docstring — the 28 twice, the "eight", and the vocabulary count — turned out to be settable to
+absurd values with the whole suite green. All are patterned now, which is why that table looks
+repetitive: the rows are not duplicates, they are the other sentences.
+
+What is **still** unguarded, and this is the honest residue rather than a hypothetical: there is no
+COMPLETENESS pin over that docstring. A figure added to it next month ships unwatched, exactly as
+these four did. Work item S42. Separately, three sentences in that same file stated a superseded
+`PINNED_COVERAGE` pair in the present tense for a day; the repair was to stop repeating a pinned
+figure at all, rather than to correct the copies — a second copy of a guarded number is an unguarded
+number.
 
 ## 3 · The anti-hard-coding meta-guard is a spelling check, one frame deep
 
@@ -80,8 +98,14 @@ asserting "I verified the map" would itself be the sham form this audit exists t
 ## 6 · The sham audit does not see helper- or fixture-installed doubles
 
 The audited population is tests that install a client class double **in their own body**, read from
-the syntax tree. A double installed by a helper or a fixture is invisible. Measured: **22**
-`_install_fake(` call sites in `tests/test_olog_update.py` alone.
+the syntax tree. A double installed by a helper or a fixture is invisible. Measured over the syntax
+tree: **21** calls to `_install_fake` in `tests/test_olog_update.py` alone, in 21 distinct tests —
+which is what `scripts/guard_audit.py`'s own note beside the helper has said all along.
+
+⚠️ This entry first said **22**, from `grep -c "_install_fake("`, which counts the `def` line as a
+call site. A raw token count standing in for the set the sentence names is the defect this whole
+page documents, committed on the page itself; it is the reason the figure above says how it was
+measured.
 
 This is a declared blind spot, not an unknown one, and widening the population is a feature rather
 than a repair: it forces a fresh `COVERAGE_CORE=ctrace` recording, because the coverage-dependent
@@ -95,8 +119,14 @@ the candidate **members** are frozen, not merely their count, so a new name is n
 is sent back to it rather than silently inheriting the old verdict.
 
 Two smaller decisions of the same kind, recorded here so they do not become work items that never
-get ticked: the `unknown` branch of `classify` is unreachable by construction, and exit code 2 is
-shared by two distinct outcomes (no map, and a pin mismatch). Both are accepted as they are.
+get ticked: the `unknown` fallback in **`_compare`** is unreachable by construction (everything it
+could describe is in `PINNED`), and exit code 2 is shared by two distinct outcomes — an absent
+coverage map, and an absent map *together with* a pin mismatch. Both are accepted as they are.
+
+⚠️ This entry named `classify` instead of `_compare` when it was written. `classify` has no such
+branch in any revision; the workspace roadmap's own note had it right, and the page mis-transcribed
+it on the way in. A page of limits that sends a reader to the wrong function costs exactly what the
+limit was meant to save.
 
 ## 8 · The prose detector's own reading behaviour is barely pinned
 
@@ -105,10 +135,18 @@ three times running, without effect on the currently watched prose — so both o
 could be reverted with nothing going red. Work item S37.
 
 ⛔ One specific tempting repair is measured to be **wrong**: making the boundary class case-sensitive.
-**666 of about 1440** sentence boundaries in the watched prose begin lower case, so a capital-only
-rule stops recognising them and re-introduces the cross-sentence pairing the look-ahead exists to
-prevent. The class in the code now says "any letter", which is what it always did under
-`re.IGNORECASE`.
+Counting a boundary as `[.;:]` + whitespace + a letter, inside the comment runs and docstring
+paragraphs the detector actually reads across the five watched files, **669 of 1300** are followed by
+a lower-case word — just over half. A capital-only rule stops recognising those and re-introduces the
+cross-sentence pairing the look-ahead exists to prevent. The class in the code now says "any letter",
+which is what it always did under `re.IGNORECASE`.
+
+⚠️ This pair of figures was first written here as "666 of about 1440" — the previous commit's tree,
+stale on arrival, in two files, under the header above that promises a measurement of the tree at the
+stated date. It is corrected and the method is now stated so it can be re-derived rather than
+trusted. Nothing re-runs it: `prose_numbers.py` is deliberately unwatched and "boundaries" is not a
+`COLLECTION_NOUNS` member, so no guard can reach either number. The **share** is what carries the ⛔
+decision, and it is not close.
 
 ## 9 · Prose rules rot, and that includes this page
 

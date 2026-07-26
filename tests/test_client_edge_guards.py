@@ -161,8 +161,13 @@ _RERUN = (
 )
 
 # S33: the figures the docstring above states, each next to the thing that decides it. Only the
-# figures a SOURCE-LEVEL measurement can settle are here; 102 and 20 are decided by the coverage
-# map and live in ``guard_audit.PINNED_COVERAGE``, checked by ``sham --check`` instead.
+# figures a SOURCE-LEVEL measurement can settle are here; the coverage-decided pair lives in
+# ``guard_audit.PINNED_COVERAGE`` and is checked by ``sham --check --coverage-db`` instead.
+#
+# This comment used to name that pair as "102 and 20". They became 103 and 21 in ``9253fc9``, and
+# three sentences in this file went on stating the old values in the present tense — inside the
+# module whose job is to stop exactly that. They are not named here any more: a figure the tool pins
+# does not need a second, unguarded copy in a comment beside it.
 _PROSE_FIGURES: tuple[tuple[str, str, Callable[[], int]], ...] = (
     (
         "tests with a client class double",
@@ -208,6 +213,32 @@ _PROSE_FIGURES: tuple[tuple[str, str, Callable[[], int]], ...] = (
         "keys carrying more than one target",
         r"(\w+) of those keys do",
         _keys_with_several_targets,
+    ),
+    # ``re.search`` takes the FIRST occurrence per pattern, so one row per WORDING and not per
+    # figure. The caveat two lines below the sentences above restates the 28 twice and the eight
+    # once, and the sham bullet restates the vocabulary count — measured, all four could be set to
+    # absurd values with the whole suite green. One pattern per wording is the only shape that
+    # covers them, which is why these look repetitive: they are not duplicates, they are the other
+    # sentences.
+    (
+        "targets behind the keys (restated in the caveat)",
+        r"DERIVED here is the (\w+) and",
+        _targets_behind_recorded_keys,
+    ),
+    (
+        "targets behind the keys (restated once more)",
+        r"(\w+) counts every target on those lines",
+        _targets_behind_recorded_keys,
+    ),
+    (
+        "keys with several targets (restated in the caveat)",
+        r"and the (\w+), not the",
+        _keys_with_several_targets,
+    ),
+    (
+        "payload vocabulary (restated in the sham bullet)",
+        r"(\w+) of those also carry payload",
+        lambda: population()[EDGE_VOCABULARY],
     ),
     (
         "either-way findings",
@@ -274,8 +305,10 @@ def test_the_ast_derivable_audit_figures_are_pinned() -> None:
     number — the verdict "no sham guard found" was reached by a human reading a specific list, and
     a longer list has not been read.
 
-    The other two figures (102, 20) are decided by which tests EXECUTED a guard line. That needs a
-    coverage map, so they are pinned in the tool and checked deliberately, not here.
+    The other two figures are decided by which tests EXECUTED a guard line. That needs a coverage
+    map, so they are pinned in ``guard_audit.PINNED_COVERAGE`` and checked deliberately, not here —
+    and they are referred to rather than repeated, because this sentence named them as "102, 20"
+    for a whole day after ``9253fc9`` moved them.
     """
     assert population() == PINNED_AST, (
         f"the client-double population changed: measured {population()}, recorded {PINNED_AST}. "
@@ -290,9 +323,11 @@ def test_the_recorded_figures_match_the_prose_that_states_them() -> None:
     because nothing runs it. Each figure in ``_PROSE_FIGURES`` is re-derived from what produces it.
 
     NOT everything in that docstring, and the difference is the honest part. Two kinds of figure
-    are only PINNED, never recomputed: 102, 20, 19 and "only 2" are coverage-sweep results held in
-    ``guard_audit.PINNED_COVERAGE`` and checked by ``sham --check --coverage-db``; the "one" and
-    the "two" below are sweep results too, and comparing them to ``len()`` of the hand-typed table
+    are only PINNED, never recomputed. The coverage-decided PAIR is held in
+    ``guard_audit.PINNED_COVERAGE`` and checked by ``sham --check --coverage-db`` — deliberately not
+    restated here, since restating a pinned figure is how this file came to assert a superseded one.
+    The sweep-decided figures (the 19, the "only 2", the "one" and the "two") are held NOWHERE but
+    in this docstring and the tables below it; comparing them to ``len()`` of the hand-typed table
     that records them proves the prose matches the TABLE, not that either matches a fresh sweep.
     Only the AST-derived rows — the population, the target count, the row count, the eight, the
     RAISE guards, the live modules — are re-measured from the code.
