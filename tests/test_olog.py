@@ -432,7 +432,7 @@ async def test_get_log_entry_tool_disabled_no_network(monkeypatch: pytest.Monkey
     monkeypatch.setattr("epics_pv_mcp.services.checkers_olog.OlogClient", _boom)
     result = await _get_log_entry("1")
     assert result["enabled"] is False
-    # S11 (Zusatzfläche 3): a DISABLED plane was the lone `found: False` among four
+    # S11: a DISABLED plane was the lone `found: False` among four
     # None-on-disabled siblings (archived/configured/registered/get_archive_info's found) —
     # a definitive "this entry does not exist" from a plane that was never asked. None = not
     # checked; False stays reserved for the definitive 404.

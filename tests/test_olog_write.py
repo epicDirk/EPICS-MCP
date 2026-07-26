@@ -415,15 +415,15 @@ class TestGateConfigFailClosed:
 
 
 class TestOlogAuditSink:
-    """K1/K2 (symmetrisch zu test_safety.py::TestAuditSink): der Olog-Audit-FileHandler muss
-    UTF-8 kodieren UND UTC stempeln. Ein ``μ``/``Ω``/``ä`` in einer Audit-Zeile (Logbuch-Name,
-    Level, Titel-Länge — nie Freitext) fällt ohne ``encoding="utf-8"`` unter cp1252 spurlos weg
-    (``Handler.handleError`` schluckt den ``UnicodeEncodeError``); ein Lokalzeit-Stempel ist beim
-    Vorfall-Nachvollzug mehrdeutig.
+    """K1/K2 (symmetric to test_safety.py::TestAuditSink): the Olog audit FileHandler must encode
+    UTF-8 AND stamp UTC. A non-ASCII character in an audit line (logbook name, level, title
+    length, never free text) vanishes without trace under cp1252 unless ``encoding="utf-8"`` is
+    set (``Handler.handleError`` swallows the ``UnicodeEncodeError``), and a local-time stamp is
+    ambiguous when an incident is reconstructed.
     """
 
     def test_audit_file_handler_encodes_utf8(self, tmp_path: Path) -> None:
-        # K1 (portabler Red-Proof): ``.encoding`` muss "utf-8" sein (ohne Angabe: None).
+        # K1 (portable red proof): ``.encoding`` must be "utf-8" (without it, None).
         audit = logging.getLogger(_AUDIT_LOGGER)
         saved = audit.handlers[:]
         audit.handlers.clear()
@@ -439,15 +439,15 @@ class TestOlogAuditSink:
             audit.handlers.extend(saved)
 
     def test_audit_line_with_unicode_units_survives(self, tmp_path: Path) -> None:
-        # K1 (funktionaler Beleg): eine Audit-Zeile mit μ/Ω/ä landet unverfälscht in der Datei.
-        # Ω (U+03A9) ist in cp1252 nicht darstellbar → auf Windows sicherer Red-Proof-Trigger.
+        # K1 (functional evidence): an audit line with non-ASCII characters reaches the file
+        # unaltered. U+03A9 has no cp1252 mapping, so it is a safe red-proof trigger on Windows.
         audit = logging.getLogger(_AUDIT_LOGGER)
         saved = audit.handlers[:]
         audit.handlers.clear()
         try:
             log_path = tmp_path / "olog-audit.log"
             gate = OlogWriteGate(EpicsConfig(audit_log_file=str(log_path)))
-            probe = "OLOG_WRITE logbook=Ström-50Ω title_len=12 μ ä"
+            probe = "OLOG_WRITE logbook=probe-50Ω title_len=12 μ äöü"
             gate._emit(probe)
             handler = gate._audit_handler
             assert handler is not None

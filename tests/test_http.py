@@ -86,11 +86,11 @@ def test_session_forwards_optional_auth_header() -> None:
 
 
 def test_session_retries_zero_yields_single_attempt_default_still_three() -> None:
-    """Q2: der Aufrufer kann ``retries=0`` verlangen — genau EIN Versuch, kein durch die
-    Retry-Zahl multiplizierter Timeout mehr (der bisher unausdrückbare Fall „ein Versuch, langer
-    Timeout"). ``retries=0`` spiegelt die No-Retry-Adapter-Form von :func:`build_write_session`
-    (``max_retries.total == 0`` auf beiden Schemata). Der Default bleibt bei 3, damit bestehende
-    Aufrufer unverändert die geteilte 3-Retry-Politik bekommen."""
+    """Q2: a caller may ask for ``retries=0``, meaning exactly ONE attempt and no timeout
+    multiplied by the retry count. That case ("one attempt, long timeout") could not be expressed
+    before. ``retries=0`` mirrors the no-retry adapter form of :func:`build_write_session`
+    (``max_retries.total == 0`` on both schemes). The default stays at 3, so existing callers keep
+    the shared 3-retry policy unchanged."""
     single = build_retrying_session(retries=0)
     for scheme in ("http://x", "https://x"):
         adapter = single.get_adapter(scheme)
@@ -107,8 +107,8 @@ def test_session_retries_zero_yields_single_attempt_default_still_three() -> Non
 
 
 def test_session_retries_and_backoff_are_honoured_when_overridden() -> None:
-    """Beide Stellschrauben sind parametrisierbar; die Werte landen auf der gemounteten
-    ``Retry``-Politik, während die geteilte 502/503/504-``status_forcelist`` erhalten bleibt."""
+    """Both knobs are parameterisable; the values land on the mounted ``Retry`` policy, while the
+    shared 502/503/504 ``status_forcelist`` is preserved."""
     session = build_retrying_session(retries=5, backoff_factor=1.5)
     for scheme in ("http://x", "https://x"):
         adapter = session.get_adapter(scheme)

@@ -386,10 +386,10 @@ class TestSafetyConfig:
             SafetyLayer(cfg)
 
     def test_invalid_audit_path_raises_safety_config_error(self, tmp_path: Path) -> None:
-        # Ein kaputter/nicht schreibbarer Audit-Pfad darf nicht erst beim ersten Write
-        # als roher FileNotFoundError crashen, sondern fail-closed scheitern (symmetrisch
-        # zur Regex-Validierung). Den prozess-globalen Audit-Logger leeren, damit der
-        # FileHandler überhaupt erzeugt wird (sonst greift "if not audit.handlers").
+        # A broken or unwritable audit path must not crash as a raw FileNotFoundError at the
+        # first write; it must fail closed, symmetric to the regex validation. The
+        # process-global audit logger is cleared so the FileHandler is built at all
+        # (otherwise "if not audit.handlers" short-circuits).
         audit = logging.getLogger("epics_pv_mcp.audit")
         saved = audit.handlers[:]
         audit.handlers.clear()
@@ -447,25 +447,25 @@ class TestSafetyConfig:
 
 
 class TestAuditSink:
-    """K1/K2: der Audit-FileHandler muss UTF-8 kodieren UND UTC stempeln.
+    """K1/K2: the audit FileHandler must encode UTF-8 AND stamp UTC.
 
-    Beide Defekte sind STILL verlustbehaftet: ein ``μ``/``Ω``/``ä`` (echte EPICS-Einheiten,
-    schwedische Namen) in einer Audit-Zeile löst ohne ``encoding="utf-8"`` unter der Plattform-
-    Locale (Windows cp1252) einen ``UnicodeEncodeError`` aus, den die stdlib-``Handler.handleError``
-    SCHLUCKT — die Zeile verschwindet spurlos; und ein naiver Lokalzeit-Stempel ist beim
-    Nachvollzug eines Vorfalls über Zonen/Sommerzeit hinweg mehrdeutig.
+    Both defects lose data SILENTLY. A micro sign, an ohm sign or an accented letter (real EPICS
+    units, non-ASCII names) in an audit line raises a ``UnicodeEncodeError`` under the platform
+    locale (Windows cp1252) without ``encoding="utf-8"``, and the stdlib
+    ``Handler.handleError`` SWALLOWS it, so the line vanishes without trace. A naive local-time
+    stamp is ambiguous when an incident is reconstructed across time zones and daylight saving.
     """
 
     def test_audit_file_handler_encodes_utf8(self, tmp_path: Path) -> None:
-        # K1 (portabler Red-Proof): der FileHandler trägt explizit encoding="utf-8". Ohne die
-        # Angabe ist ``.encoding`` None (Plattform-Locale) — auf jeder Plattform rot messbar.
+        # K1 (portable red proof): the FileHandler carries an explicit encoding="utf-8". Without
+        # it ``.encoding`` is None (the platform locale), which measures red on every platform.
         audit = logging.getLogger("epics_pv_mcp.audit")
         saved = audit.handlers[:]
         audit.handlers.clear()
         try:
             sl = SafetyLayer(EpicsConfig(audit_log_file=str(tmp_path / "audit.log")))
             handler = sl._audit_handler
-            assert isinstance(handler, logging.FileHandler)  # ein echter Datei-Sink
+            assert isinstance(handler, logging.FileHandler)  # a real file sink
             assert handler.encoding == "utf-8"
         finally:
             for h in audit.handlers[:]:
@@ -474,16 +474,16 @@ class TestAuditSink:
             audit.handlers.extend(saved)
 
     def test_audit_line_with_unicode_units_survives(self, tmp_path: Path) -> None:
-        # K1 (funktionaler Beleg): eine Audit-Zeile mit μ/Ω/ä landet unverfälscht in der Datei.
-        # Auf cp1252 (Windows) fällt sie ohne encoding="utf-8" spurlos weg (handleError schluckt
-        # den UnicodeEncodeError). Ω (U+03A9) ist in cp1252 nicht darstellbar → sicherer Trigger.
+        # K1 (functional evidence): an audit line with non-ASCII characters reaches the file
+        # unaltered. Under cp1252 (Windows) it vanishes without encoding="utf-8" (handleError
+        # swallows the UnicodeEncodeError). U+03A9 has no cp1252 mapping, so it is a safe trigger.
         audit = logging.getLogger("epics_pv_mcp.audit")
         saved = audit.handlers[:]
         audit.handlers.clear()
         try:
             log_path = tmp_path / "audit.log"
             sl = SafetyLayer(EpicsConfig(audit_log_file=str(log_path)))
-            probe = "SIM:PS-01:Cur-RB 12 μA 50 Ω Håkan-ä"
+            probe = "SIM:PS-01:Cur-RB 12 μA 50 Ω probe-äöü"
             sl._emit("UNIT_PROBE pv=%s", probe)
             handler = sl._audit_handler
             assert handler is not None

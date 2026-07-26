@@ -176,7 +176,7 @@ def test_build_device_report_channelfinder_unreachable_note() -> None:
 
 
 def test_build_device_report_cf_capped_note() -> None:
-    """F16 (S11 Zusatzfläche 4): a CAPPED ChannelFinder fetch must surface a note — the honest
+    """F16: a CAPPED ChannelFinder fetch must surface a note, the honest
     ``capped`` computed by query_channels was silently discarded here, so a >max_results device
     quietly joined against a TRUNCATED registry and some channels showed ``source_ioc=None``
     with no explanation (silent degradation, indistinguishable from 'CF has no entry')."""

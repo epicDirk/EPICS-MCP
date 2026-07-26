@@ -406,7 +406,7 @@ async def test_find_channels_capped_is_honest_at_the_boundary(
     assert result["total"] == 3
 
 
-# --- MA-2 CF-Query-Fläche: _build_query_params (pure, deterministic) ---
+# --- CF query surface: _build_query_params (pure, deterministic) ---
 #
 # Exact-equality pins BOTH what we emit AND what we never emit (the AR-D discipline). The vendor
 # grammar (ChannelRepository.getBuiltQuery) is the ground truth: negation is a trailing '!' on the
@@ -734,7 +734,7 @@ async def test_tool_count_disabled_makes_no_call(monkeypatch: pytest.MonkeyPatch
     assert set(result) == {"enabled", "match_count", "note"}
 
 
-# --- MA-2 CF-Query-Fläche: list_channel_vocabulary (property + tag NAME discovery) ---
+# --- CF query surface: list_channel_vocabulary (property + tag NAME discovery) ---
 
 
 def test_list_properties_intersects_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:

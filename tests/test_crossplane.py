@@ -106,8 +106,8 @@ def test_naming_service_error_withholds_verdict_not_crash() -> None:
 
 
 def test_resolved_macro_collapses_to_linked() -> None:
-    # WEDGE-KERNBEWEIS: eine vormals makro-templatisierte PV, jetzt vom Inventar konkret aufgelöst
-    # (resolution="resolved") und prefix-teilend → landet in pvs_linked, NICHT in pvs_indeterminate.
+    # Core proof: a PV that used to be macro-templated, now resolved concretely by the inventory
+    # (resolution="resolved") and prefix-sharing, lands in pvs_linked, NOT in pvs_indeterminate.
     join = [_jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:Cmd", role="write")]
     report = crossplane_check(join, _st())
     assert report.pvs_linked == ("DEV-TEST01:Ctrl-EVR-01:Cmd",)
@@ -149,7 +149,7 @@ def test_dynamic_and_unresolved_stay_indeterminate() -> None:
 
 
 def test_indeterminate_distinct_vs_occurrences() -> None:
-    # Dieselbe unauflösbare PV über ZWEI Displays: distinct 1, aber 2 (display, pv)-Referenzen.
+    # The same unresolvable PV across TWO displays: distinct 1, but 2 (display, pv) references.
     join = [
         _jp("a.bob", "SYS:Status", resolution="dynamic"),
         _jp("b.bob", "SYS:Status", resolution="dynamic"),
@@ -173,7 +173,7 @@ def test_non_channel_protocol_excluded() -> None:
 
 
 def test_linked_write_split() -> None:
-    # Dieselbe PV read+write über zwei Displays: distinct 1 linked, aber als writable geführt.
+    # The same PV read+write across two displays: distinct 1 linked, but carried as writable.
     join = [
         _jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:SP", role="read"),
         _jp("b.bob", "DEV-TEST01:Ctrl-EVR-01:SP", role="write"),

@@ -1,4 +1,4 @@
-"""Tests für epics_client-Hilfsfunktionen (ohne EPICS-Verbindung außer dem echten-p4p-Test)."""
+"""Tests for the epics_client helpers (no EPICS connection except the real-p4p test)."""
 
 import asyncio
 import json

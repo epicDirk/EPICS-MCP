@@ -388,7 +388,7 @@ def test_compare_machine_state_prompt_hides_capability_arg() -> None:
 
 
 def test_build_instructions_omits_display_claims_core_only() -> None:
-    """Guard C (S26, Fläche 3): the instructions advertise the display-gated capabilities only when
+    """Guard C (S26): the instructions advertise the display-gated capabilities only when
     the extra is available — a core-only install must not over-claim them. Both branches by direct
     call of the pure builder."""
     from epics_pv_mcp.server import build_instructions
@@ -454,10 +454,10 @@ async def test_olog_tools_expose_typed_output_schema() -> None:
         OlogUpdateResult,
     )
 
-    # Identität auf den exakten TypedDict-FELD-SET verankert: standalone FastMCP lässt den Root-
-    # ``title`` weg, den der SDK-Stack als TypedDict-Namen trug. set-Gleichheit fängt ein Tool,
-    # das an den FALSCHEN TypedDict verdrahtet ist — inkl. reply_to_log, das OlogCreateResult
-    # TEILEN MUSS (gleicher Feld-Set), nicht ein eigenes Typ.
+    # Identity anchored on the exact TypedDict FIELD SET: standalone FastMCP omits the root
+    # ``title`` that the SDK stack carried as the TypedDict name. Set equality catches a tool
+    # wired to the WRONG TypedDict, including reply_to_log, which MUST SHARE OlogCreateResult
+    # (same field set) rather than own a type of its own.
     expected_type = {
         "search_logbook": OlogSearchResult,
         "get_log_entry": OlogEntryResult,
@@ -3125,8 +3125,8 @@ async def test_destructive_tools_carry_consent_meta_or_are_explicitly_deferred()
     # ...and the consent reaches the wire under the _meta alias (what the client receives):
     set_pv = {t.name: t for t in tools}["set_pv_value"]
     wire = ListToolsResult(tools=[set_pv]).model_dump_json(by_alias=True, exclude_none=True)
-    # Key-Presence statt Whole-Dict: standalone FastMCP hängt zusätzlich "fastmcp":{"tags":[]}
-    # ans _meta (siehe _CONSENT_META-Kommentar oben — andere anthropic/*-Keys sind ohnehin erlaubt).
+    # Key presence rather than whole-dict: standalone FastMCP also appends "fastmcp":{"tags":[]}
+    # to _meta (see the _CONSENT_META comment above; other anthropic/* keys are allowed anyway).
     assert '"anthropic/requiresUserInteraction":true' in wire
 
 

@@ -161,9 +161,9 @@ async def test_crossplane_tool_fragment_not_double_attributed(tmp_path: Path) ->
     result = await _crossplane_check(str(displays), str(st_cmd))
     report = result["report"]
     assert isinstance(report, dict)
-    # Fragment-PV konkret aufgelöst + prefix-teilend → linked, dem OPERATOR-Eltern zugeschrieben.
+    # Fragment PV resolved concretely and prefix-sharing: linked, attributed to the OPERATOR parent.
     assert "DEV-TEST01:Ctrl-EVR-01:Cmd" in report["pvs_linked"]
-    assert report["displays_linked"] == ["operator.bob"]  # NICHT frag.bob (Fragment-Seed gefiltert)
+    assert report["displays_linked"] == ["operator.bob"]  # NOT frag.bob (fragment seed filtered)
 
 
 @pytest.mark.asyncio
