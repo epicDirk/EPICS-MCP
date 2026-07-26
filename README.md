@@ -141,6 +141,7 @@ To reach a real control system, set the address list in the launcher's environme
 | [Architecture](ARCHITECTURE.md) | The `server → tools → services → clients` layering and the plane model |
 | [Security policy](SECURITY.md) | Reporting a vulnerability, and an honest statement of what the write gates are **not** |
 | [Contributing](CONTRIBUTING.md) | Dev setup, the gate chain, Definition of Done |
+| [Known limits](docs/known-limits.md) | What is deliberately **not** guarded, dated and measured — including the tempting repairs that were probed and rejected |
 | [Changelog](CHANGELOG.md) | Release history |
 
 ## Built at a facility, designed to be facility-agnostic

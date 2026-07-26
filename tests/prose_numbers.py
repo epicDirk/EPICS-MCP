@@ -110,9 +110,21 @@ def _alternation(words: Iterable[str]) -> str:
 # lookbehind rejects ``v2.0``, ``ISO-8601`` and ``DS-4A``, which this prose is full of.
 _NUMBER = rf"(?<![-\w.])(?<!\d\.)(?:\d[\d_]*|{_alternation(_WORD_VALUES)})\b"
 
-# A full stop followed by a capital ends a sentence; followed by anything else it is an
+# A full stop followed by a LETTER ends a sentence; followed by anything else it is an
 # abbreviation ("7 (resp. 9) rows", where BOTH numbers are real claims).
-_BREAK = r"(?![.;:]\s+[A-Z])"
+#
+# The class says "any letter" because that is what the rule has always done: both patterns compile
+# with re.IGNORECASE, which made the older ``[A-Z]`` spelling match lower case too. It read as a
+# capital-letter rule and was not one.
+#
+# ⛔ DO NOT "fix" this by requiring a capital. That is the tempting repair and it is measured to be
+# wrong: 666 of about 1440 sentence boundaries in the watched prose begin with a lower-case word
+# (an identifier, a ``«``-quoted term, a continued clause), so a capital-only rule stops
+# recognising them as boundaries and re-introduces the cross-sentence pairing this look-ahead exists
+# to prevent -- the defect the module docstring records. Swapping ``[A-Z]`` for the honest class was
+# verified to change nothing: the detected site KEYS are identical set-for-set, and the per-file
+# phrase counts stay pinned.
+_BREAK = r"(?![.;:]\s+[^\W\d_])"
 
 # A number, at most two intervening words, then one of the closed nouns.
 #

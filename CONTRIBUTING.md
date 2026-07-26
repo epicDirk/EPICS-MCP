@@ -43,9 +43,22 @@ absent, so the core suite stays green. A checkout with `--extra all` runs everyt
   satisfied by editing the number they report.**
   - *A number written next to a collection noun* ("the 26 projection fields", "all 22 schemas",
     "four paths") in `tests/test_server.py`, `server.py`, `services/checkers.py`,
-    `services/checkers_olog.py` or `tools/archiver.py` must be DERIVED in
-    `tests/test_prose_counters.py::_CLAIMS` or listed in `_FROZEN` with a written reason, and that
-    file's phrase count re-pinned. Rewording a sentence means updating its pattern, not its figure.
+    `services/checkers_olog.py` or `tools/archiver.py`. **Which nouns count is a closed list,
+    `prose_numbers.COLLECTION_NOUNS`** — read it, do not guess, and note that this obligation is
+    NOT the same on both sides of it:
+    - Noun **in** the list: the detector finds the phrase, so all three routes are open — derive it
+      in `tests/test_prose_counters.py::_CLAIMS`, or list it in `_FROZEN` with a written reason, and
+      re-pin that file's phrase count either way.
+    - Noun **outside** the list ("modes", "halves", "planes"): the detector never sees the phrase,
+      so only a `_CLAIMS` entry works — a claim is matched against the text directly. An `_FROZEN`
+      row for it goes **red** (`test_every_frozen_entry_still_exists` finds no such site), and so
+      does re-pinning the count (nothing was added to count). Both were probed. Adding the noun to
+      `COLLECTION_NOUNS` is the other legitimate answer, and it is a bigger change: it re-opens the
+      whole watched estate and will surface phrases that then need rows.
+
+    Rewording a sentence means updating its pattern, not its figure. A new claim must also declare
+    what it READS (`_Claim.reads`, keyword-only and required) — that declaration is traced, so it
+    has to be true rather than plausible.
   - *A new test that installs a client class double in its own body* moves the audited population
     and reddens `tests/test_client_edge_guards.py::test_the_ast_derivable_audit_figures_are_pinned`.
     Re-measure with `uv run python scripts/guard_audit.py sham --check`. That verdict was reached
@@ -55,6 +68,15 @@ absent, so the core suite stays green. A checkout with `--extra all` runs everyt
   `COVERAGE_CORE=ctrace` suite run, so it only happens if someone does it deliberately —
   `uv run python scripts/guard_audit.py sham --check --coverage-db <db>`, recipe in
   `scripts/guard_audit.py`. Without it, two of that audit's four figures are recorded and unverified.
+  ⚠️ Point `COVERAGE_FILE` at a path **outside the repository** while recording, or the run
+  overwrites the working `.coverage`. And record with `COVERAGE_CORE=ctrace`: on Python 3.12+ the
+  default core disables a location after its first observation, so a map recorded without it makes
+  the audit report false survivors — the reasoning is in `CLAUDE.md`'s evidence section.
+
+- **What this repository deliberately does NOT guard** is written down and dated in
+  [docs/known-limits.md](docs/known-limits.md). Read it before building a guard for something —
+  several of the obvious candidates were measured and rejected for a reason, and the reason is
+  there rather than in a commit body.
 
 ## Live / sandbox tests
 

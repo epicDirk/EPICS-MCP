@@ -189,6 +189,16 @@ _PROSE_FIGURES: tuple[tuple[str, str, Callable[[], int]], ...] = (
         r"the table below has (\w+) rows",
         lambda: len(_UNOBSERVED),
     ),
+    # The SECOND statement of the row count, and it was unwatched. The row above catches "the table
+    # below has N rows"; this sentence restates the same N as "those N keys sit on 28 targets", and
+    # nothing compared it — which is why the recipe 72e3250 recorded for exactly this defect ran
+    # green again on the shipped code. Two sentences stating one figure need two patterns; a guard
+    # over one of them says nothing about the other.
+    (
+        "keys the targets sit on (restated)",
+        r"those (\w+) keys sit on",
+        lambda: len(_UNOBSERVED),
+    ),
     (
         "targets those rows sit on",
         r"keys sit on (\w+) targets",
