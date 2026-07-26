@@ -649,7 +649,7 @@ def _class_error_code(exception_class: type[BaseException]) -> str | None:
         return class_level
     try:
         probe = exception_class("probe")
-    except Exception:  # noqa: BLE001 — a class with a different signature is just not in the map
+    except Exception:  # noqa: BLE001 (a class with a different signature is just not in the map)
         return None
     instance_level = getattr(probe, "error_code", None)
     return instance_level if isinstance(instance_level, str) else None

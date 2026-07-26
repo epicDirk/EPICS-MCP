@@ -33,7 +33,7 @@ def _outcome_of(gate_call: Callable[[], None]) -> BaseException | None:
     """
     try:
         gate_call()
-    except BaseException as exc:  # noqa: BLE001 — Skipped/Failed inherit from BaseException
+    except BaseException as exc:  # noqa: BLE001 (Skipped/Failed inherit from BaseException)
         return exc
     return None
 
