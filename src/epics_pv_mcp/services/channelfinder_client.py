@@ -1,10 +1,10 @@
 """Read-only client for the EPICS ChannelFinder REST API.
 
 ChannelFinder is the runtime PV directory: which IOC/host serves a PV, plus the tags and
-properties RecSync/recceiver report. This client issues **GET queries only** — it never
+properties RecSync/recceiver report. This client issues **GET queries only**, it never
 writes. Verified against the ChannelFinder REST docs (channelfinder.readthedocs.io):
 
-  GET {root}/resources/channels?~name={glob}&~size={limit}   — query channels by name glob
+  GET {root}/resources/channels?~name={glob}&~size={limit}, query channels by name glob
 
 The configured ``channelfinder_url`` is the ChannelFinder **service root including any
 context path**, e.g. ``http://cf-host:8080/ChannelFinder``; ``/resources/channels`` is
@@ -29,26 +29,26 @@ from epics_pv_mcp.services.channelfinder_exceptions import (
 )
 from epics_pv_mcp.services.redact import project_allowlist
 
-# Default upper bound on returned channels — a broad glob (``*``) can match a whole site.
+# Default upper bound on returned channels: a broad glob (``*``) can match a whole site.
 DEFAULT_MAX_RESULTS = 500
 
 # DS-PRIVACY: ChannelFinder ``owner`` is the account that owns the channel. For RecSync-populated
-# channels it is the ``recceiver`` SERVICE account (audit-observed) — not a person. But a channel
-# created via the CF web UI / cfstore is owned by the logged-in ENGINEER'S ESS username — a personal
-# name — and the two are indistinguishable from the value alone. So we keep ``owner`` ONLY when it
+# channels it is the ``recceiver`` SERVICE account (audit-observed), not a person. But a channel
+# created via the CF web UI / cfstore is owned by the logged-in ENGINEER'S ESS username, a personal
+# name, and the two are indistinguishable from the value alone. So we keep ``owner`` ONLY when it
 # is on this conservative service-account allowlist and redact any other value to ``""`` (unknown →
 # redacted, the safe default). The Batch-3 redactor at the ``services/checkers`` chokepoint is the
 # durable form; this is the Batch-1 interim guard.
 _SAFE_OWNER_ACCOUNTS = frozenset({"recceiver"})
 
 # DS-PRIVACY: the surfaced ``properties`` were formerly an ALLOW-BY-DEFAULT denylist (only
-# ``recceiverID`` popped) — any OTHER property VALUE passed through verbatim. The reccaster
+# ``recceiverID`` popped), any OTHER property VALUE passed through verbatim. The reccaster
 # ENGINEER/LOCATION env-var convention (devIocStats) and CF-web-UI/cfstore custom properties carry a
 # person's name in the value. We instead ALLOWLIST the known-technical RecSync property names via
 # :func:`~epics_pv_mcp.services.redact.project_allowlist`, so an unknown/new person-bearing property
 # is dropped by default (the codebase-wide allowlist principle). ``iocName``/``hostName`` also feed
 # the dedicated ``ioc_name``/``host_name`` fields. If a live ESS smoke shows a useful technical
-# property missing here, ADD it to this set — do not fall back to a denylist.
+# property missing here, ADD it to this set, do not fall back to a denylist.
 _SAFE_PROPERTY_NAMES = frozenset({"iocName", "hostName", "iocid", "pvStatus", "time"})
 
 
@@ -78,14 +78,14 @@ def resolve_safe_property_names(cfg: EpicsConfig) -> frozenset[str]:
 
 def _named_list(data: object, endpoint: str) -> list[str]:
     """STRICT name extraction for the top-level ``/resources/properties`` / ``/resources/tags``
-    listings (S11 — the ChannelFinder sibling of :func:`olog_client._named_list`).
+    listings (S11, the ChannelFinder sibling of :func:`olog_client._named_list`).
 
     Both routes return a list of ``{name, owner, …}`` structs (``PropertyDto``/``TagDto``). The
     listing IS the answer to "what can I filter on", so an unreadable payload must never collapse to
-    ``[]`` — that would fabricate "there are no properties/tags", indistinguishable from a genuinely
+    ``[]``: that would fabricate "there are no properties/tags", indistinguishable from a genuinely
     empty server, and tell anyone validating a filter name "this one does not exist". A non-list, or
     an item that is not a dict with a string ``name``, RAISES; an EMPTY list is valid (returns
-    ``[]``). Only ``name`` is read — the DS-privacy ``owner`` (a person's ESS username on a
+    ``[]``). Only ``name`` is read, the DS-privacy ``owner`` (a person's ESS username on a
     CF-web-UI/cfstore object) and ``value`` are dropped.
     """
     if not isinstance(data, list):
@@ -106,7 +106,7 @@ def _named_list(data: object, endpoint: str) -> list[str]:
 
 # CF query surface. The reserved ChannelFinder query params (the ``switch`` cases in the vendor
 # ``ChannelRepository.getBuiltQuery``). A caller-supplied property/tag NAME must never collide with
-# one of these, and — critically — a trailing ``!`` (the vendor's negation marker on the KEY) must
+# one of these, and, critically, a trailing ``!`` (the vendor's negation marker on the KEY) must
 # never be synthesised on ``~name``: the server strips the ``!`` and filters ``~name`` POSITIVELY,
 # so ``~name!`` is a silent broaden, not a negation.
 _RESERVED_QUERY_KEYS = frozenset(
@@ -120,7 +120,7 @@ def _validate_filter_name(name: str, *, kind: str) -> str:
     """Return the trimmed property/tag name, or raise ``ValueError``.
 
     Rejects a blank name, a leading ``~`` (reserved-param collision) and a trailing ``!`` (the
-    vendor negation marker) — the three ways a caller string could smuggle in a reserved or negated
+    vendor negation marker), the three ways a caller string could smuggle in a reserved or negated
     key such as the forbidden ``~name!``. Run on EVERY property-name-accepting surface BEFORE a
     ``!`` is appended, so no code path can emit ``~name!``.
     """
@@ -155,10 +155,10 @@ def _build_query_params(
     filter; negation is a trailing ``!`` on the KEY (``prop!``); ``prop!=*`` (value literally ``*``)
     means "lacks the property"; ``prop!=value`` means "has the property, value != value" (a channel
     lacking it does NOT match); tag values are OR / any-of; distinct property keys are AND. Unknown
-    params are NOT silently ignored (unlike Olog/Alarm) — the server treats any non-``~`` key as a
+    params are NOT silently ignored (unlike Olog/Alarm), the server treats any non-``~`` key as a
     property filter, so a typo narrows the result to ~0 rather than being a no-op.
 
-    DS-PRIVACY: the property-filter axis is GATED to *allowed_properties* — the SAME allowlist the
+    DS-PRIVACY: the property-filter axis is GATED to *allowed_properties*, the SAME allowlist the
     response projection uses (:meth:`ChannelFinderClient._project`). Filtering on a redacted
     property (e.g. ``accessGroup``) would reconstruct the exact name->value partition the projection
     hides, so a non-allowlisted property name is refused (an empty allowlist disables property
@@ -177,7 +177,7 @@ def _build_query_params(
         if clean not in allowed_properties:
             raise ValueError(
                 f"property {name!r} is not on the ChannelFinder safe-property allowlist "
-                "(filtering is limited to surfaced technical properties — DS-privacy)"
+                "(filtering is limited to surfaced technical properties, DS-privacy)"
             )
         if clean in claimed:
             raise ValueError(
@@ -203,7 +203,7 @@ def _build_query_params(
             raise ValueError(f"not_property_values[{name!r}] value must not be blank")
         if any(sep in value for sep in _VALUE_SEPARATORS):
             raise ValueError(
-                f"not_property_values[{name!r}] must not contain a value separator (| , ;) — it "
+                f"not_property_values[{name!r}] must not contain a value separator (| , ;), it "
                 "would flip the single negation into an OR-of-negations tautology"
             )
         params[f"{clean}!"] = value  # prop!=value => has prop whose value != value
@@ -245,7 +245,7 @@ class ChannelFinderClient:
         self.timeout = timeout
         self.session = get_shared_session(auth_header=auth_header)
         # DS-PRIVACY: resolve the (site-configurable) allowlists ONCE at construction from config,
-        # falling back to the ESS defaults when unset. ``_project`` reads these instance fields —
+        # falling back to the ESS defaults when unset. ``_project`` reads these instance fields:
         # a facility can set its own service accounts / technical properties (or redact everything).
         cfg = get_config()
         self._safe_owner_accounts = resolve_safe_owner_accounts(cfg)
@@ -254,7 +254,7 @@ class ChannelFinderClient:
     def check_connectivity(self) -> bool:
         """Return True if ChannelFinder is reachable; raise ChannelFinderConnectionError otherwise.
 
-        A HEAD to the service root proves transport + TLS (the CA bundle) — any HTTP response counts
+        A HEAD to the service root proves transport + TLS (the CA bundle), any HTTP response counts
         as reachable (the status is irrelevant here, as in the Naming client). A transport/TLS
         failure is re-raised as ChannelFinderConnectionError with the original requests error as
         ``__cause__``, so a caller (doctor) can inspect it (:func:`is_ssl_error`) to tell a CA
@@ -284,7 +284,7 @@ class ChannelFinderClient:
     def properties_url(self) -> str:
         # CF query surface: the vendor property-definition list route
         # (PropertyController.list → GET {root}/resources/properties). The list endpoint returns
-        # every PropertyDto with an empty ``channels`` (no join) — only ``name`` is meaningful here.
+        # every PropertyDto with an empty ``channels`` (no join), only ``name`` is meaningful here.
         return f"{self.base_url}/resources/properties"
 
     @property
@@ -336,7 +336,7 @@ class ChannelFinderClient:
             raise ChannelFinderResponseError(
                 f"ChannelFinder returned a non-list payload for '{name_pattern}'"
             )
-        # S11: a non-dict element must raise — it used to be silently dropped, shrinking the
+        # S11: a non-dict element must raise, it used to be silently dropped, shrinking the
         # registry answer without a trace (two different malformed payloads both "succeeded").
         channels: list[ChannelInfo] = []
         for channel in data:
@@ -361,11 +361,11 @@ class ChannelFinderClient:
         """Return the EXACT number of channels matching the name glob + filters (MA-2).
 
         Uses ChannelFinder's ``/resources/channels/count`` endpoint, which returns a true full-match
-        count as a bare JSON number — independent of ``~size`` and never window-capped — so it
+        count as a bare JSON number, independent of ``~size`` and never window-capped, so it
         answers "how many PVs match" without pulling the matches. Same filter grammar and the same
         DS-privacy allowlist gate as :meth:`find_channels`. Raises
         :class:`ChannelFinderResponseError` if the payload is not a numeric scalar (a JSON boolean
-        is rejected explicitly — ``bool`` is an ``int`` subclass).
+        is rejected explicitly, ``bool`` is an ``int`` subclass).
         """
         params = _build_query_params(
             name_pattern,
@@ -402,7 +402,7 @@ class ChannelFinderClient:
         """The ChannelFinder property NAMES a caller can filter ``find_channels`` on, sorted.
 
         Fetches ``/resources/properties`` and reduces it to the DS-privacy
-        ``self._safe_property_names`` allowlist — the SAME gate ``_project`` applies to per-channel
+        ``self._safe_property_names`` allowlist, the SAME gate ``_project`` applies to per-channel
         properties and ``_build_query_params`` enforces on ``has_properties``. So this lists exactly
         the property keys that are both present in this instance AND accepted as a filter; a
         non-allowlisted, person-bearing property (ENGINEER/LOCATION, a cfstore custom field) is
@@ -426,7 +426,7 @@ class ChannelFinderClient:
 
         Fetches ``/resources/tags``. Tags are UNGATED (as in ``_project`` and
         ``_build_query_params``, which validate but do not allowlist tag names), so every tag name
-        is returned — the per-tag ``owner`` is dropped (name-only). Raises
+        is returned, the per-tag ``owner`` is dropped (name-only). Raises
         :class:`ChannelFinderResponseError` on an unreadable payload (never ``[]``); an empty CF
         yields ``[]``.
         """
@@ -449,11 +449,11 @@ class ChannelFinderClient:
 
         DS-PRIVACY: ``owner`` is kept only when it is on the (site-configurable) owner allowlist
         ``self._safe_owner_accounts`` (ESS default :data:`_SAFE_OWNER_ACCOUNTS`), else redacted to
-        ``""`` — a CF-web-UI/cfstore channel is owned by a person's ESS username. ``properties`` is
+        ``""``: a CF-web-UI/cfstore channel is owned by a person's ESS username. ``properties`` is
         reduced to the ``self._safe_property_names`` allowlist (ESS default
         :data:`_SAFE_PROPERTY_NAMES`), so a person-bearing property value (ENGINEER/LOCATION or a
         cfstore custom field) is dropped by default. The per-property ``owner`` is never read.
-        IOC/host/tags — the technical provenance — are untouched.
+        IOC/host/tags, the technical provenance, are untouched.
         """
         raw_props = channel.get("properties")
         props: dict[str, str] = {}
@@ -462,8 +462,8 @@ class ChannelFinderClient:
             # identity is guarded below; olog_client._names documents the same rationale):
             # one malformed property must not sink the whole channel. Lenient never means
             # FABRICATING though (QA): a null value used to be str()-minted into the
-            # literal string "None" — flowing through the allowlist into host_name and
-            # device_lookup's source_host — and a non-str name was stringified into an
+            # literal string "None", flowing through the allowlist into host_name and
+            # device_lookup's source_host, and a non-str name was stringified into an
             # invented key. Malformed entries are dropped whole instead.
             for prop in raw_props:
                 if not isinstance(prop, dict):
@@ -473,7 +473,7 @@ class ChannelFinderClient:
                 if isinstance(prop_name, str) and prop_name and isinstance(prop_value, str):
                     props[prop_name] = prop_value
         # DS-PRIVACY: allowlist surfaced properties (deny-by-default; see _safe_property_names).
-        # isinstance narrows the generic allowlist result back to str — values ARE str here
+        # isinstance narrows the generic allowlist result back to str, values ARE str here
         # (built above), and narrowing never fabricates (unlike the former str() minting).
         allowlisted = project_allowlist(props, self._safe_property_names)
         props = {k: v for k, v in allowlisted.items() if isinstance(v, str)}
@@ -489,7 +489,7 @@ class ChannelFinderClient:
         raw_owner = str(channel.get("owner", ""))
         owner = raw_owner if raw_owner in self._safe_owner_accounts else ""
         # S11: the identity field is required. A record without a usable name used to become
-        # ChannelInfo(name="") — an identity-less phantom that entered downstream sets
+        # ChannelInfo(name=""), an identity-less phantom that entered downstream sets
         # (crossplane/coverage registered_under) as "". Measured (ESS CF): name is always there.
         raw_name = channel.get("name")
         if not isinstance(raw_name, str) or not raw_name:

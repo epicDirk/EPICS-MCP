@@ -1,4 +1,4 @@
-"""p4p wrapper — singleton Context with async public API.
+"""p4p wrapper, singleton Context with async public API.
 
 p4p is synchronous; every blocking call is dispatched via ``asyncio.to_thread``
 so the FastMCP event loop is never blocked.
@@ -90,7 +90,7 @@ async def pv_get_batch(names: list[str], timeout: float | None = None) -> dict[s
     """Batch-get PVs. Returns the partial-failure envelope ``{"results": [...], "errors": [...]}``.
 
     Raises ``EpicsError(error_code="UPSTREAM_CONTRACT_ERROR")`` if the native batch returns a
-    different number of values than requested names — a broken provider must fail loudly rather than
+    different number of values than requested names, a broken provider must fail loudly rather than
     silently drop the surplus PVs (S27/F11 "no silent loss"). Also raises ``BATCH_TOO_LARGE`` if
     ``len(names)`` exceeds ``max_batch_size``.
     """
@@ -185,7 +185,7 @@ async def pv_monitor(
     """Monitor a PV for *duration* seconds, returning ``(events, truncated)``.
 
     Collects up to *max_events* events; ``truncated`` is True iff MORE than *max_events*
-    actually arrived — detected by over-collecting exactly one extra "canary" event, then
+    actually arrived, detected by over-collecting exactly one extra "canary" event, then
     trimming it off (the same honest over-fetch as ``get_alarm_history``'s ``size=max+1``).
     A stream that delivers exactly *max_events* and then goes quiet is NOT truncated.
 
@@ -207,7 +207,7 @@ async def pv_monitor(
     error_holder: list[Exception] = []
 
     def _monitor_thread() -> None:
-        """Run in a worker thread — p4p monitor is synchronous."""
+        """Run in a worker thread, p4p monitor is synchronous."""
 
         def _on_value(value: object) -> None:
             if stop_event.is_set():
@@ -258,7 +258,7 @@ async def pv_monitor(
     # K4 bulkhead: run the blocking p4p subscription on the DEDICATED monitor executor, not the
     # shared asyncio default pool. A monitor holds its thread up to max_monitor_duration (60 s), so
     # dispatching it here (instead of asyncio.to_thread) keeps a burst of monitors from starving the
-    # default pool that every other to_thread call — REST checks, PV reads/writes — depends on.
+    # default pool that every other to_thread call, REST checks, PV reads/writes, depends on.
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(get_monitor_executor(), _monitor_thread)
 
@@ -297,7 +297,7 @@ _ALARM_STATUS_TEXT: dict[int, str] = {
 
 
 # A field-mapping spec: (p4p attribute, output key, cast). ``Callable[..., object]`` is
-# the only mypy-strict-clean annotation — bare ``Callable`` needs type args, and
+# the only mypy-strict-clean annotation, bare ``Callable`` needs type args, and
 # ``Callable[[object], object]`` rejects the ``float``/``int`` casts (their __init__ is
 # not object->object).
 _FieldSpec = list[tuple[str, str, Callable[..., object]]]
@@ -331,7 +331,7 @@ def _collect(struct: object, spec: _FieldSpec) -> dict[str, object]:
     """Map present p4p struct fields to output keys via their cast.
 
     A single malformed field (e.g. an unset limit serialised as ``None``) is skipped,
-    never aborting the whole block — that is the per-field robustness guard.
+    never aborting the whole block, that is the per-field robustness guard.
     """
     out: dict[str, object] = {}
     for attr, key, cast in spec:
@@ -345,7 +345,7 @@ def _collect(struct: object, spec: _FieldSpec) -> dict[str, object]:
 
 
 def _drop_degenerate_limits(d: dict[str, object]) -> None:
-    """A zero-width range (``limit_low == limit_high``) is an unset pair — drop both.
+    """A zero-width range (``limit_low == limit_high``) is an unset pair, drop both.
 
     EPICS display/control limits default to ``0.0/0.0`` when unconfigured, which would
     otherwise read as a real ``[0, 0]`` engineering range. control/display carry no
@@ -365,8 +365,8 @@ def _type_id(raw: object) -> str:
 def _is_p4p_value(obj: object) -> bool:
     """True for a p4p ``Value`` (struct / union / wrapper).
 
-    Crucial discriminator: a real p4p ``Value`` exposes BOTH ``todict()`` AND ``tolist()`` — the
-    latter is NOT numpy-exclusive — so a struct cannot be told apart from a numpy array by
+    Crucial discriminator: a real p4p ``Value`` exposes BOTH ``todict()`` AND ``tolist()``, the
+    latter is NOT numpy-exclusive, so a struct cannot be told apart from a numpy array by
     ``tolist`` alone. A numpy array has ``tolist`` but no ``todict``. Requiring ``todict`` plus a
     ``getID``/``type`` marker identifies the p4p ``Value`` and routes it through ``todict()`` (a
     struct's ``tolist()`` yields raw ``(name, value)`` tuples with numpy/Value leaves un-converted).
@@ -401,7 +401,7 @@ def _jsonify(obj: object) -> object:
 
     The single robust converter behind DS-6. A p4p ``Value`` goes via ``todict()`` (NOT
     ``tolist()``); a numpy array via ``tolist()``; dicts/lists/tuples recurse element-wise (so a
-    ``structure[]`` list-of-Value or a union list-of-ndarray is fully converted — a plain ``list``
+    ``structure[]`` list-of-Value or a union list-of-ndarray is fully converted, a plain ``list``
     is never trusted wholesale); scalars pass through; anything else becomes an honest summary.
     Guarantees the result never contains a raw p4p object or a numpy array.
     """
@@ -486,7 +486,7 @@ def _extract_nt_matrix(raw: object) -> dict[str, object]:
         values = [values_obj]  # malformed scalar value: keep it as one row, never drop it
     raw_dims = _jsonified_list(raw, "dim")
     # `dim` is int[] on the wire; a non-integral entry is only constructible via fakes and
-    # must NOT be int-truncated into a note that misquotes the wire — report flat + raw.
+    # must NOT be int-truncated into a note that misquotes the wire, report flat + raw.
     dims = [d for d in raw_dims if isinstance(d, int) and not isinstance(d, bool)]
     if len(dims) != len(raw_dims):
         dims = []  # a non-integral entry -> the whole dim is untrusted
@@ -513,7 +513,7 @@ def _extract_nt_multi_channel(raw: object) -> dict[str, object]:
     each is read defensively by index (a missing/short array simply omits that key).
 
     The ``note`` counters a structural trap this extractor exists for: the TOP-LEVEL alarm
-    of an NTMultiChannel says nothing about the channels — it typically reads NO_ALARM right
+    of an NTMultiChannel says nothing about the channels, it typically reads NO_ALARM right
     next to a MAJOR channel, so the per-channel severities surfaced here are the ones that
     matter. The top-level block is still reported (it IS on the wire), note included.
     """
@@ -572,7 +572,7 @@ def _extract_value(raw: object) -> tuple[object, dict[str, object] | None]:
 
     Scalars pass through; arrays become lists; NTEnum keeps its numeric index plus an ``enum``
     block. DS-6: complex normative types that previously slipped through as a raw p4p wrapper
-    (failing at the MCP JSON boundary) or as ``value=None`` are surfaced as real data — NTTable as
+    (failing at the MCP JSON boundary) or as ``value=None`` are surfaced as real data, NTTable as
     ``{labels, columns}``, NTNDArray as a shape/dtype summary (pixel data omitted), NTMatrix as
     ``{shape, rows}``, NTMultiChannel as per-channel records ``{channels: [...]}``, and every other
     shape (nested struct, ``structure[]``, variant-union array, numpy array) via the robust
@@ -581,11 +581,11 @@ def _extract_value(raw: object) -> tuple[object, dict[str, object] | None]:
     type_id = _type_id(raw)
     # Routing discipline (QA-hardened): an EXPLICIT type id is authoritative. The structural
     # markers below (choices/dimension/labels/channelName) would otherwise capture foreign
-    # structs and mint them into NT shapes — a fabricated enum index, a wrong-shape NTNDArray
+    # structs and mint them into NT shapes, a fabricated enum index, a wrong-shape NTNDArray
     # summary withholding the real values, an NTMultiChannel note on a non-NTMultiChannel.
     # They stay ONLY as a fallback for ANONYMOUS values: a fake without getID() reports "",
     # a bare p4p struct reports "structure"; anything else is routed by its id or converted
-    # generically. NTMatrix has no marker at all — `dim` is far too generic a field name
+    # generically. NTMatrix has no marker at all, `dim` is far too generic a field name
     # (pinned by the real-p4p generic-struct test).
     anonymous = type_id in ("", "structure")
     val_field = getattr(raw, "value", raw)
@@ -612,7 +612,7 @@ def _extract_value(raw: object) -> tuple[object, dict[str, object] | None]:
         anonymous and getattr(raw, "channelName", None) is not None
     ):
         return _extract_nt_multi_channel(raw), None
-    # Everything else (scalar, numpy array, nested struct, structure[], union array) — one robust,
+    # Everything else (scalar, numpy array, nested struct, structure[], union array), one robust,
     # recursive converter that discriminates a p4p Value (-> todict) from a numpy array (-> tolist).
     return _jsonify(val_field), None
 
@@ -672,9 +672,9 @@ def _extract_value_alarm(raw: object) -> dict[str, object] | None:
     reports ``active=False`` even when HIHI/HIGH/LOW/LOLO thresholds ARE configured, so gating
     on it (the old behaviour) hid every real limit. Per-field filtering replaces the gate:
 
-    * ``NaN`` limits are ALWAYS dropped — that is the QSRV2 "unset" marker, never a real value.
-    * when ``active`` is False/absent, ``0``-valued limits/severities are ALSO dropped as unset
-      — a 0.0-sending producer (e.g. QSRV1/CA) would otherwise look like a real ``[0,0]``
+    * ``NaN`` limits are ALWAYS dropped, that is the QSRV2 "unset" marker, never a real value.
+    * when ``active`` is False/absent, ``0``-valued limits/severities are ALSO dropped as unset,
+      a 0.0-sending producer (e.g. QSRV1/CA) would otherwise look like a real ``[0,0]``
       threshold (preserves the original unconfigured-limit suppression).
     * when ``active`` is True every non-NaN field is kept, so a legitimately-zero configured
       limit stays visible (no regression of the prior active=True behaviour).
@@ -698,10 +698,10 @@ def _extract_value_alarm(raw: object) -> dict[str, object] | None:
 
 
 def _extract_descriptor(raw: object) -> str | None:
-    """The optional NT ``descriptor`` — the free-text description every NT type may carry.
+    """The optional NT ``descriptor``, the free-text description every NT type may carry.
 
     Previously dropped for ALL NT types (no block extractor claimed it). An unset
-    descriptor arrives as ``""`` on the wire — absent and unset look the same there, and
+    descriptor arrives as ``""`` on the wire, absent and unset look the same there, and
     an empty description carries no information, so it is omitted rather than reported.
     Only a genuine ``str`` is accepted: ``str()`` on a malformed non-string field would
     serialise p4p repr garbage (the same trap :func:`_format_value` documents for values).
@@ -730,12 +730,12 @@ def _format_value(pv_name: str, value: object) -> dict[str, object]:
 
     p4p's ``Context`` unwraps Normative Types by default, so ``ctxt.get`` returns
     value-wrappers (``ntfloat``/``ntint``/``ntenum``/…) whose meta-data lives on the
-    underlying ``p4p.Value`` exposed via ``.raw`` — NOT directly on the wrapper. Every
+    underlying ``p4p.Value`` exposed via ``.raw``, NOT directly on the wrapper. Every
     field is routed through ``raw`` (``getattr(value, "raw", value)`` also handles the
     un-unwrapped ``nt=False`` case).
 
-    Surfaced fields (all best-effort — absent on records that do not define them):
-    ``value`` (scalar/array, or enum index — DBR_CHAR waveforms come back as int lists),
+    Surfaced fields (all best-effort, absent on records that do not define them):
+    ``value`` (scalar/array, or enum index, DBR_CHAR waveforms come back as int lists),
     ``enum`` (index/label/choices for NTEnum), ``alarm`` (severity/status code + text +
     message), ``timestamp`` (seconds/nanoseconds), ``display`` (units, precision OR format,
     description, display limits), ``control`` (drive limits, min_step), ``value_alarm``
@@ -757,8 +757,8 @@ def _format_value(pv_name: str, value: object) -> dict[str, object]:
         if enum is not None:
             result["enum"] = enum
     except Exception:  # noqa: BLE001
-        # Honest fallback: value stays None (NEVER str(value) — the wrapper's __str__
-        # prepends a ctime() and would emit garbage like "Thu Jan  1 1970 4.2") — but
+        # Honest fallback: value stays None (NEVER str(value), the wrapper's __str__
+        # prepends a ctime() and would emit garbage like "Thu Jan  1 1970 4.2"), but
         # DECLARED: a bare {"value": None} is indistinguishable from a genuinely-None
         # reading for every consumer that condenses this dict (validate/discover/
         # write-readback/monitor). Same honesty pattern as data_omitted.
