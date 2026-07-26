@@ -40,6 +40,7 @@ from __future__ import annotations
 import ast
 import functools
 import inspect
+import json
 import re
 import textwrap
 from collections import Counter
@@ -331,68 +332,171 @@ def _full_lane_tools() -> int:
     return _core_lane_tools() + _display_tools()
 
 
-def _items_valued(element_schema: dict[str, object]) -> int:
-    """Rows of ``_OUTPUT_ARRAY_ITEMS`` that declare *element_schema* — by identity, as intended."""
+def _rows_sharing(element_schema: dict[str, object]) -> int:
+    """Rows of ``_OUTPUT_ARRAY_ITEMS`` that hold *element_schema* ITSELF — identity, deliberately.
+
+    The sentence this serves is about ALIASING: "they are module dicts, so assigning into one
+    would silently move N (resp. M) rows". Exactly the rows pointing at that object would move,
+    so identity is the property the sentence names, and a row spelled out as an equal literal is
+    correctly not one of them.
+    """
     return sum(1 for value in ts._OUTPUT_ARRAY_ITEMS.values() if value is element_schema)
+
+
+def _rows_advertising(element_schema: dict[str, object]) -> int:
+    """Rows whose advertised element schema EQUALS *element_schema* — value, deliberately.
+
+    The sentences this serves say what the rows CARRY ("the N rows carrying ``{"type": "string"}``",
+    "the other M rows are ``{"type": "object", …}``"). Identity answered a different question
+    there, and the difference is reachable rather than theoretical: spelling one row out as an
+    equal literal changes nothing about what that row advertises, yet made both sentences go red
+    while both were still true. Which set a sentence is about may not depend on whether the author
+    reused the module dict or repeated its contents.
+    """
+    return sum(1 for value in ts._OUTPUT_ARRAY_ITEMS.values() if value == element_schema)
 
 
 @cache
 def _distinct_element_schemas() -> int:
-    """How many element schemas the array rows share between them."""
-    return len({id(value) for value in ts._OUTPUT_ARRAY_ITEMS.values()})
+    """How many DIFFERENT element schemas the array rows advertise between them.
 
-
-def _is_typed_dict(node: ast.ClassDef) -> bool:
-    return any(
-        (isinstance(base, ast.Name) and base.id == "TypedDict")
-        or (isinstance(base, ast.Attribute) and base.attr == "TypedDict")
-        for base in node.bases
-    )
+    By value, for the same reason as :func:`_rows_advertising`: the sentence is about the schemas
+    the estate advertises, and two equal dicts are one advertised schema however many objects
+    happen to hold it. Normalized through ``json.dumps(sort_keys=True)`` because the schemas are
+    dicts and a set needs a hashable, order-independent key.
+    """
+    return len({json.dumps(schema, sort_keys=True) for schema in ts._OUTPUT_ARRAY_ITEMS.values()})
 
 
 @cache
-def _nullable_array_fields() -> frozenset[str]:
-    """``TypedDict`` FIELDS annotated ``list[...] | None``, across the whole package.
+def _typed_dict_fields() -> dict[str, dict[str, str]]:
+    """Every ``TypedDict`` in the package by name, with its fields' normalized annotations.
 
-    Read from the ANNOTATIONS rather than from a live schema on purpose: ``mcp.list_tools()``
-    answers differently in the two lanes, and a count taken there would pass locally and break
-    core-only CI. Matched by field name, which is what ``_OUTPUT_ARRAY_ITEMS`` is keyed on.
+    BOTH spellings, and the functional one is not hypothetical: ``ArchiverHistoryResult`` in
+    ``tools/archiver.py`` HAS to use it, because ``from`` is a Python keyword and cannot be a
+    class-syntax field name. A class-syntax-only index did not see that tool's result shape at
+    all — latent while none of its fields is nullable, and silent the moment one becomes so.
 
-    Two scoping mistakes were possible and both are closed. Reading only the two ``checkers``
-    modules missed three of the array rows — they are declared in ``tools/discover.py``,
-    ``tools/archiver.py`` and ``services/archiver_client.py`` — so the count was right only by the
-    accident of those three being non-nullable. And accepting any annotated assignment let a
-    function LOCAL stand in for a field (``warnings: list[str] = []`` already exists inside a
-    function body), so only class-body annotations of a ``TypedDict`` subclass count.
+    Only class-body annotations count, never any annotated assignment: a function LOCAL would
+    otherwise stand in for a field (``warnings: list[str] = []`` already exists inside a function
+    body in this package).
+
+    Base resolution is deliberately ABSENT rather than carried untested — measured, no TypedDict
+    in this package inherits from another one, so the code that walked bases would never run.
+    Inherited fields therefore stay outside every count that reads this index; that is a scope
+    statement, not an oversight, and it goes red the day it matters only if someone adds the walk
+    together with a test for it.
     """
-    names: set[str] = set()
+    index: dict[str, dict[str, str]] = {}
     for path in sorted(_SRC.rglob("*.py")):
         for node in ast.walk(_parsed(path)):
-            if not isinstance(node, ast.ClassDef) or not _is_typed_dict(node):
-                continue
-            for item in node.body:
-                if not isinstance(item, ast.AnnAssign) or not isinstance(item.target, ast.Name):
+            if isinstance(node, ast.ClassDef) and any(
+                (isinstance(base, ast.Name) and base.id == "TypedDict")
+                or (isinstance(base, ast.Attribute) and base.attr == "TypedDict")
+                for base in node.bases
+            ):
+                index[node.name] = {
+                    item.target.id: ast.unparse(item.annotation).replace(" ", "")
+                    for item in node.body
+                    if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
+                }
+            elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+                called = node.value.func
+                functional = (isinstance(called, ast.Name) and called.id == "TypedDict") or (
+                    isinstance(called, ast.Attribute) and called.attr == "TypedDict"
+                )
+                target = node.targets[0] if node.targets else None
+                fields = node.value.args[1] if len(node.value.args) > 1 else None
+                if not functional or not isinstance(target, ast.Name):
                     continue
-                annotation = ast.unparse(item.annotation).replace(" ", "")
-                if annotation.startswith("list[") and annotation.endswith("|None"):
-                    names.add(item.target.id)
-    return frozenset(names)
+                if not isinstance(fields, ast.Dict):
+                    raise AssertionError(
+                        f"{path.name}: {target.id} uses the functional TypedDict form without a "
+                        "literal field mapping, so its fields cannot be read from the syntax tree"
+                    )
+                index[target.id] = {
+                    key.value: ast.unparse(annotation).replace(" ", "")
+                    for key, annotation in zip(fields.keys, fields.values, strict=True)
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str)
+                }
+    return index
+
+
+@cache
+def _tool_result_type() -> dict[str, str]:
+    """Registered tool name to the type annotation its function declares as its return.
+
+    Both registration forms, for the same reason :func:`_registered_tools` counts both: server.py
+    decorates, display_tools.py calls ``mcp.tool(...)(fn)`` after the fact, and a decorator-only
+    reader would know nothing about the display tools at all.
+    """
+    out: dict[str, str] = {}
+    for path in (_SRC / "server.py", _SRC / "display_tools.py"):
+        tree = _parsed(path)
+        annotated = {
+            node.name: ast.unparse(node.returns)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.returns is not None
+        }
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                if any(_is_mcp_tool(decorator) for decorator in node.decorator_list):
+                    out.update({node.name: annotated[node.name]} if node.name in annotated else {})
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Call)
+                and _is_mcp_tool(node.func)
+            ):
+                out.update(
+                    {
+                        argument.id: annotated[argument.id]
+                        for argument in node.args
+                        if isinstance(argument, ast.Name) and argument.id in annotated
+                    }
+                )
+    return out
+
+
+def _is_nullable_list(annotation: str) -> bool:
+    """A normalized annotation that renders as ``anyOf[array, null]`` on the wire."""
+    return annotation.startswith("list[") and annotation.endswith("|None")
 
 
 @cache
 def _nullable_array_rows() -> int:
-    """Array rows whose field is an ``X | None`` — the ``anyOf[array, null]`` subset."""
-    nullable = _nullable_array_fields()
-    return sum(1 for _tool, field in ts._OUTPUT_ARRAY_ITEMS if field in nullable)
+    """Array rows whose field is an ``X | None`` — the ``anyOf[array, null]`` subset.
+
+    Bound to the (tool, field) PAIR the row is keyed on, resolved through the TOOL'S OWN result
+    type. Matching by field NAME across the package read a set the sentence does not name, and the
+    collisions are real rather than imagined: ``pvs``, ``tags``, ``properties`` and ``samples``
+    each carry two different annotations here, so one internal TypedDict declaring any of them
+    nullable would have moved this count without a single array row changing.
+
+    Loud rather than lenient when a row stops resolving: a silent skip would let the count fall
+    while the prose stayed green, which is the whole failure mode this module exists for.
+    """
+    index = _typed_dict_fields()
+    results = _tool_result_type()
+    found = 0
+    for tool, field in ts._OUTPUT_ARRAY_ITEMS:
+        fields = index.get(results.get(tool, ""))
+        if fields is None or field not in fields:
+            raise AssertionError(
+                f"the array row ({tool!r}, {field!r}) no longer resolves to a TypedDict field "
+                f"(the tool's return annotation reads {results.get(tool)!r}) — the row, the "
+                "return annotation or the result shape moved"
+            )
+        found += _is_nullable_list(fields[field])
+    return found
 
 
 @cache
 def _channel_info_fields() -> int:
     """Fields of ``ChannelInfo`` — a NAMESAKE of the find_channels key count, not the same set."""
-    for node in ast.walk(_parsed(_SRC / "services" / "channelfinder_client.py")):
-        if isinstance(node, ast.ClassDef) and node.name == "ChannelInfo":
-            return sum(1 for item in node.body if isinstance(item, ast.AnnAssign))
-    raise AssertionError("ChannelInfo is gone from channelfinder_client.py")
+    fields = _typed_dict_fields().get("ChannelInfo")
+    if fields is None:
+        raise AssertionError("ChannelInfo is gone from the package's TypedDicts")
+    return len(fields)
 
 
 @cache
@@ -435,6 +539,30 @@ def _olog_query_functions() -> int:
         for node in _parsed(_SRC / "services" / "checkers_olog.py").body
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
         and node.name.startswith("query_olog_")
+    )
+
+
+@cache
+def _olog_reexport_lines() -> int:
+    """``query_olog_*`` names ``services/checkers.py`` re-exports from ``checkers_olog``.
+
+    The sentence this serves is about the RE-EXPORT — "for backward compatibility :mod:`~.checkers`
+    re-exports the … functions and ``_olog_error_code``" — not about the definitions. Counting the
+    definitions instead, which is what this claim used to do, read a set the sentence does not
+    name: dropping a re-export leaves every definition where it is, so the count stayed right while
+    the sentence became false.
+
+    ``name as name`` is the whole criterion, and not a stylistic detail: under
+    ``no_implicit_reexport`` the bare form does not re-export at all, which is what the comment
+    above those lines in ``checkers.py`` says itself. The source module is part of the criterion
+    too, because the sentence names it.
+    """
+    return sum(
+        1
+        for node in ast.walk(_parsed(_SRC / "services" / "checkers.py"))
+        if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("checkers_olog")
+        for alias in node.names
+        if alias.name.startswith("query_olog_") and alias.asname == alias.name
     )
 
 
@@ -560,25 +688,29 @@ _CLAIMS: tuple[_Claim, ...] = (
         lambda: len(_tools_named_by_in_process_tests()),
     ),
     # --- family 4: the element-schema split ------------------------------------------------------
+    # ALIASING versus ADVERTISED, and the two halves genuinely differ. The shared-dict note is
+    # about what assigning into a module dict would move, so it reads IDENTITY; the two sentences
+    # below it say what the rows carry, so they read the VALUE. One measure served all four and was
+    # therefore wrong for two of them.
     _claim(
         "string-item rows (shared-dict note)",
         r"silently move (\w+) \(resp",
-        lambda: _items_valued(ts._STRING_ITEMS),
+        lambda: _rows_sharing(ts._STRING_ITEMS),
     ),
     _claim(
         "opaque-item rows (shared-dict note)",
         r"silently move \w+ \(resp\. (\w+)\) rows",
-        lambda: _items_valued(ts._OPAQUE_OBJECT_ITEMS),
+        lambda: _rows_sharing(ts._OPAQUE_OBJECT_ITEMS),
     ),
     _claim(
         "string-item rows",
         r"most for the (\w+) rows carrying",
-        lambda: _items_valued(ts._STRING_ITEMS),
+        lambda: _rows_advertising(ts._STRING_ITEMS),
     ),
     _claim(
         "opaque-item rows",
         r"the other (\w+) rows are",
-        lambda: _items_valued(ts._OPAQUE_OBJECT_ITEMS),
+        lambda: _rows_advertising(ts._OPAQUE_OBJECT_ITEMS),
     ),
     # --- family 5: the declared arrays -----------------------------------------------------------
     _claim("declared arrays", r"of the (\w+) declared arrays", lambda: len(ts._OUTPUT_ARRAY_ITEMS)),
@@ -802,8 +934,10 @@ _CLAIMS: tuple[_Claim, ...] = (
     ),
     # --- the canonical Olog block ----------------------------------------------------------------
     _claim("olog query functions", r"The (\w+) ``query_olog_\*`` functions", _olog_query_functions),
+    # The re-export sentence is about checkers.py's import block, not about checkers_olog.py's
+    # definitions — equal today, and the day a re-export is dropped they are not.
     _claim(
-        "olog query functions (re-export)", r"re-exports the (\w+) functions", _olog_query_functions
+        "olog query functions (re-export)", r"re-exports the (\w+) functions", _olog_reexport_lines
     ),
 )
 
