@@ -3,13 +3,13 @@
 This module is the one place higher layers reach the ChannelFinder / Archiver / Alarm / Naming
 REST clients. It carries two kinds of edge:
 
-1. **Injected protocol checkers + factories** (M8) — the pure cross-plane cores
+1. **Injected protocol checkers + factories** (M8), the pure cross-plane cores
    (:mod:`~.crossplane`, :mod:`~.coverage`) define the checker *Protocols* and receive concrete
    checkers as parameters. Each adapter translates its REST client's errors into ``RuntimeError``
    (a truncated ChannelFinder registry into :class:`~.crossplane.CFRegistryCapped`) so the pure
    cores can withhold a verdict without importing a client or catching broad exceptions.
 
-2. **Per-plane async query functions** (M9) — :func:`query_archived`, :func:`query_alarm_configured`
+2. **Per-plane async query functions** (M9), :func:`query_archived`, :func:`query_alarm_configured`
    and :func:`query_channels` hold the config-gate (``*_URL`` set?) + off-loop
    (:func:`asyncio.to_thread`) + error-translation logic that used to live in ``tools/*``. The MCP
    tool wrappers **and** :mod:`~.diagnose` now call the SAME service function, so ``diagnose`` no
@@ -89,7 +89,7 @@ class CFRegistryChecker:
     ChannelFinder/network errors into ``RuntimeError`` (and a truncated result into
     :class:`~.crossplane.CFRegistryCapped`) so the pure core can withhold cf_unregistered
     without importing the ChannelFinder client or catching broad exceptions. Counts **all**
-    registered channels regardless of ``pvStatus`` — a momentarily Inactive-but-present channel
+    registered channels regardless of ``pvStatus``, a momentarily Inactive-but-present channel
     (recsync ``cleanOnStart``/reannounce lag) must NOT be flagged unregistered, which would
     violate the "never false-flag" contract.
     """
@@ -104,7 +104,7 @@ class CFRegistryChecker:
             client = ChannelFinderClient(self._url, auth_header=self._auth)
             channels = client.find_channels(f"{prefix}*", max_results=self._max_results)
             if len(channels) >= self._max_results:
-                # Truncated registry — withhold rather than diff a partial set (would false-flag).
+                # Truncated registry: withhold rather than diff a partial set (would false-flag).
                 # CFRegistryCapped is a RuntimeError, NOT a ChannelFinderError → not caught below.
                 raise CFRegistryCapped(
                     f"ChannelFinder returned >= {self._max_results} channels for '{prefix}*'"
@@ -160,7 +160,7 @@ class AlarmConfigChecker:
         if configured is None:
             # Tree produced nothing → the cell is unknown, not `no` (withheld != no).
             raise RuntimeError(
-                f"Alarm tree {self._config_name!r} returned no configuration at all — "
+                f"Alarm tree {self._config_name!r} returned no configuration at all, "
                 "unknown or misspelled tree name, or an empty tree"
             )
         return configured
@@ -169,8 +169,8 @@ class AlarmConfigChecker:
 def build_cf_checker(query_channelfinder: bool) -> ChannelFinderChecker | None:
     """Build the ChannelFinder checker iff requested AND a URL is configured.
 
-    Returns ``None`` when not requested, or requested but ``channelfinder_url`` is unset — in the
-    latter case the caller passes ``cf_requested=True`` so the core emits an honest "skipped — URL
+    Returns ``None`` when not requested, or requested but ``channelfinder_url`` is unset, in the
+    latter case the caller passes ``cf_requested=True`` so the core emits an honest "skipped, URL
     unset" note (no silent no-op).
     """
     if not query_channelfinder:
@@ -219,7 +219,7 @@ def build_alarm_checker(query_alarm: bool, alarm_config: str | None) -> AlarmChe
     """Build the Alarm checker iff requested AND ``EPICS_MCP_ALARM_URL`` is set (else None).
 
     MA-2b(d): when the plane is actually active (requested AND URL set) the caller MUST name the
-    alarm tree — a missing ``alarm_config`` is a LOUD ``INVALID_INPUT`` rather than a silent scan of
+    alarm tree, a missing ``alarm_config`` is a LOUD ``INVALID_INPUT`` rather than a silent scan of
     a guessed default tree that matches nothing. When the plane is inactive (not requested / URL
     unset) a missing tree is moot, so it returns ``None`` without complaint.
     """
@@ -238,10 +238,10 @@ def build_alarm_checker(query_alarm: bool, alarm_config: str | None) -> AlarmChe
 
 
 # ---------------------------------------------------------------------------
-# Per-plane async query functions (M9) — the config-gate + off-loop + error-translation logic
+# Per-plane async query functions (M9), the config-gate + off-loop + error-translation logic
 # lifted out of the tool layer. The MCP tool wrappers AND diagnose() call these SAME functions,
 # so services/diagnose no longer imports upward from tools/*. Each returns the exact
-# tool-facing dict shape it did before the lift (lossless — the tool wrappers are now thin).
+# tool-facing dict shape it did before the lift (lossless, the tool wrappers are now thin).
 # ---------------------------------------------------------------------------
 
 #: Archiver disabled note (mirrored in tools/archiver._get_pv_history, which is tool-only).
@@ -259,16 +259,16 @@ _CF_DISABLED_NOTE = (
 )
 _NAMING_DISABLED_NOTE = (
     "ESS Naming Service is disabled. Set EPICS_MCP_NAMING_URL to the naming service root "
-    "(e.g. http://naming.example) — WITHOUT a trailing /rest — to enable device-name lookup."
+    "(e.g. http://naming.example), WITHOUT a trailing /rest, to enable device-name lookup."
 )
 
 
 # Withheld (configured=None), NOT a negative: the tree yielded no configuration at all, so
 # "this PV is not configured" cannot be told apart from "that is not the tree name". The name is
-# case-sensitive in the query even though it is lower-cased to pick the index — see
+# case-sensitive in the query even though it is lower-cased to pick the index, see
 # AlarmClient.is_alarm_configured.
 _ALARM_TREE_UNKNOWN_NOTE = (
-    "Alarm config tree {config!r} returned no configuration at all — unknown or misspelled tree "
+    "Alarm config tree {config!r} returned no configuration at all, unknown or misspelled tree "
     "name (it is CASE-SENSITIVE here), or an empty tree. Answer withheld rather than reported as "
     "'not configured'."
 )
@@ -276,7 +276,7 @@ _ALARM_TREE_UNKNOWN_NOTE = (
 # MA-2b(d): no alarm tree named. There is no correct default (site-specific trees), so we withhold
 # rather than probe a guessed tree that would match nothing and read as "not configured".
 _ALARM_NO_TREE_NOTE = (
-    "No alarm config tree was named, so alarm config cannot be checked — there is no correct "
+    "No alarm config tree was named, so alarm config cannot be checked, there is no correct "
     "default tree (they are site-specific). Answer withheld; name the tree to query."
 )
 
@@ -284,7 +284,7 @@ _ALARM_NO_TREE_NOTE = (
 def _alarm_error_code(exc: AlarmError) -> str:
     """A discrete error code for an Alarm-Logger failure whose SERVER answered.
 
-    The served HTTP status when it is readable, else a generic token — the sibling of
+    The served HTTP status when it is readable, else a generic token, the sibling of
     :func:`_archiver_error_code` (see there for why these stay per-plane instead of one
     generalized helper).
     """
@@ -303,16 +303,16 @@ def _archiver_error_code(exc: ArchiverError) -> str:
     """A discrete error code for an Archiver failure whose SERVER answered.
 
     The served HTTP status when it is readable, else a generic token. Lives in the services layer
-    (like its sibling :func:`_olog_error_code`) so ``tools/archiver`` imports it DOWNWARD — the
+    (like its sibling :func:`_olog_error_code`) so ``tools/archiver`` imports it DOWNWARD, the
     ``services → tools`` direction is what the M9 lift exists to prevent.
 
     Kept separate from ``_olog_error_code`` rather than generalized: that one also feeds the Olog
     write AUDIT (which must stay metadata-only, SEC-5) and carries an EpicsError branch for the
     write gate, so folding them together would put that audit in the blast radius of an unrelated
-    fix — for six lines of status-to-token boilerplate.
+    fix, for six lines of status-to-token boilerplate.
 
     Note: a retry-exhausted 502/503/504 arrives as ``requests.RetryError``, which is NOT a
-    ConnectionError — so it lands here as an ArchiverResponseError with no readable status and maps
+    ConnectionError, so it lands here as an ArchiverResponseError with no readable status and maps
     to ARCHIVER_RESPONSE_ERROR. That is correct: the host DID answer, repeatedly.
     """
     status = http_status(exc)
@@ -415,18 +415,18 @@ async def query_archived(pv: str, timeout: float = 5.0) -> ArchiveStatusResult:
     except ArchiverConnectionError as exc:
         raise EpicsConnectionError(f"Archiver: {exc}") from exc
     except ArchiverError as exc:
-        # The server ANSWERED (a served 4xx/5xx) — that is not an outage. Safe for diagnose, which
+        # The server ANSWERED (a served 4xx/5xx): that is not an outage. Safe for diagnose, which
         # catches Exception totally here and withholds either way (diagnose._gather_archiver).
         raise EpicsError(f"Archiver: {exc}", error_code=_archiver_error_code(exc)) from exc
 
 
 # --- Tool result shape (S29): is_alarm_configured's tri-state ------------------------------------
 # One total=False TypedDict over every key across query_alarm_configured's return paths (disabled /
-# no-tree-withheld / configured). Same MA-1 nullability rule as the Olog shapes — the measured
+# no-tree-withheld / configured). Same MA-1 nullability rule as the Olog shapes, the measured
 # rationale (absent key is DROPPED, not null; an explicit None IS emitted and the WIRE path
 # validates it) lives once in ``services/checkers_olog.py``'s "Tool result shapes" header; do not
-# restate it here. A field ABSENT on some return path — or present-but-sometimes-None
-# (``configured`` is None on the disabled/withheld/tree-unknown paths) — is typed ``X | None``.
+# restate it here. A field ABSENT on some return path, or present-but-sometimes-None
+# (``configured`` is None on the disabled/withheld/tree-unknown paths), is typed ``X | None``.
 # ``configured`` is the load-bearing case: it is an EXPLICIT None, so a non-nullable annotation
 # would make a real client's call fail validation, not merely mis-advertise the shape.
 # Only ``enabled`` + ``pv`` are present on EVERY path and never null. fastmcp yields a typed
@@ -453,11 +453,11 @@ async def query_alarm_configured(
     Default-disabled: with ``EPICS_MCP_ALARM_URL`` unset, returns ``enabled: false`` and makes no
     network call. Shared by the ``is_alarm_configured`` tool and the diagnose Alarm plane.
 
-    MA-2b(d): *config_name* (the alarm tree) has NO default — there is no correct one (the trees are
+    MA-2b(d): *config_name* (the alarm tree) has NO default, there is no correct one (the trees are
     site-specific and a committed default cannot name one). With it ``None`` the answer is withheld
     honestly (``configured: None`` + a note) instead of probing a guessed tree that matches nothing;
     NO network call is made for the guess. The ``is_alarm_configured`` tool makes the tree required,
-    so a user never reaches this branch — ``diagnose`` (which has no tree to offer) degrades to an
+    so a user never reaches this branch, ``diagnose`` (which has no tree to offer) degrades to an
     honest withheld here instead of a silently-wrong answer.
     """
     cfg = get_config()
@@ -492,12 +492,12 @@ async def query_alarm_configured(
     except AlarmConnectionError as exc:
         raise EpicsConnectionError(f"Alarm Logger: {exc}") from exc
     except AlarmError as exc:
-        # S11 §8: the server ANSWERED (a served 4xx/5xx or an unreadable 2xx) — relabelling that
+        # S11 §8: the server ANSWERED (a served 4xx/5xx or an unreadable 2xx), relabelling that
         # "cannot reach the Alarm Logger" sends the caller after an outage that is not happening.
         raise EpicsError(f"Alarm Logger: {exc}", error_code=_alarm_error_code(exc)) from exc
 
 
-# get_alarm_history's tool result shape (S29 — typed MCP outputSchema). ``total=False``: the
+# get_alarm_history's tool result shape (S29, typed MCP outputSchema). ``total=False``: the
 # disabled path carries {enabled, pv, events, note}; the enabled path adds start/end/total/capped.
 # ``enabled``/``pv``/``events`` are on EVERY path (events is [] when disabled, never null) →
 # non-nullable; ``start``/``end``/``total``/``capped`` (enabled-only) and ``note`` (disabled-only)
@@ -529,7 +529,7 @@ async def query_alarm_history(
 
     Default-disabled: with ``EPICS_MCP_ALARM_URL`` unset, returns ``enabled: false`` and makes no
     network call. *start*/*end* are required (a defaultless query must not pull the whole history).
-    Events are newest-first and projected onto the technical allowlist — the raw doc's
+    Events are newest-first and projected onto the technical allowlist, the raw doc's
     ``user``/``host``/``command`` are stripped (DS-PRIVACY). ``capped`` is True when more than
     *max_events* matched (the newest are kept). Shared by the ``get_alarm_history`` tool.
     """
@@ -568,7 +568,7 @@ async def query_alarm_history(
     except AlarmConnectionError as exc:
         raise EpicsConnectionError(f"Alarm Logger: {exc}") from exc
     except AlarmError as exc:
-        # S11 §8: the server ANSWERED — an unreadable payload is not an outage.
+        # S11 §8: the server ANSWERED, an unreadable payload is not an outage.
         raise EpicsError(f"Alarm Logger: {exc}", error_code=_alarm_error_code(exc)) from exc
 
 
@@ -631,7 +631,7 @@ async def query_channels(
         return {"enabled": False, "channels": [], "total": 0, "note": _CF_DISABLED_NOTE}
 
     # Conditional forwarding: pass ONLY the filters that are actually set, so the no-filter path is
-    # a byte-identical call to the pre-MA-2 code — that is what keeps ``find_device``/``diagnose``
+    # a byte-identical call to the pre-MA-2 code, that is what keeps ``find_device``/``diagnose``
     # and the fixed-signature CF test doubles (which take no filter kwargs) working untouched.
     filters: dict[str, Any] = {}
     if has_properties:
@@ -670,18 +670,18 @@ async def query_channels(
         return await asyncio.to_thread(_run)
     except ValueError as exc:
         # MA-2: a rejected/redacted filter (the _build_query_params guards) is BAD INPUT, not an
-        # outage — surface it as INVALID_INPUT, never as an unreachable/response error.
+        # outage, surface it as INVALID_INPUT, never as an unreachable/response error.
         raise EpicsError(f"ChannelFinder: {exc}", error_code="INVALID_INPUT") from exc
     except ChannelFinderConnectionError as exc:
         raise EpicsConnectionError(f"ChannelFinder: {exc}") from exc
     except ChannelFinderError as exc:
-        # S11 §8: the server ANSWERED — an unreadable payload is not an outage.
+        # S11 §8: the server ANSWERED, an unreadable payload is not an outage.
         raise EpicsError(
             f"ChannelFinder: {exc}", error_code=_channelfinder_error_code(exc)
         ) from exc
 
 
-# list_channel_vocabulary's tool result shape (S29 — typed MCP outputSchema). ``total=False``: the
+# list_channel_vocabulary's tool result shape (S29, typed MCP outputSchema). ``total=False``: the
 # disabled path adds ``note`` and the enabled path omits it. ``enabled``/``properties``/``tags`` are
 # on EVERY path (both list the same keys; disabled returns empty lists, never null) → non-nullable;
 # only ``note`` (disabled-only) is ``str | None``. ``properties``/``tags`` are lists of NAMES.
@@ -723,7 +723,7 @@ async def query_channel_vocabulary(timeout: float = 5.0) -> ChannelVocabularyRes
     except ChannelFinderConnectionError as exc:
         raise EpicsConnectionError(f"ChannelFinder: {exc}") from exc
     except ChannelFinderError as exc:
-        # S11 §8: the server ANSWERED — an unreadable payload is not an outage.
+        # S11 §8: the server ANSWERED, an unreadable payload is not an outage.
         raise EpicsError(
             f"ChannelFinder: {exc}", error_code=_channelfinder_error_code(exc)
         ) from exc
@@ -731,8 +731,8 @@ async def query_channel_vocabulary(timeout: float = 5.0) -> ChannelVocabularyRes
 
 # Nullability mirrors AlarmConfiguredResult (see its comment above; the measured rationale lives
 # in ``services/checkers_olog.py``'s "Tool result shapes" header). A field ABSENT on some return
-# path — status/message (success-only), withheld (withheld-only), note (disabled/withheld) — or
-# None on some path — ``registered``, the tri-state — is typed ``X | None``. ``registered`` is the
+# path, status/message (success-only), withheld (withheld-only), note (disabled/withheld), or
+# None on some path, ``registered``, the tri-state, is typed ``X | None``. ``registered`` is the
 # load-bearing case: an EXPLICIT None, which the wire path validates. Only ``enabled`` + ``name``
 # are present on EVERY path and never null. fastmcp then yields a typed outputSchema
 # (``properties``;
@@ -753,13 +753,13 @@ async def query_naming_lookup(name: str, timeout: float = 5.0) -> NameLookupResu
 
     Read-only, config-gated. Default-disabled: with ``EPICS_MCP_NAMING_URL`` unset, returns a
     structured ``enabled: false`` result and makes NO network call (no ESS egress). Backs the
-    standalone ``lookup_device_name`` tool — the one naming plane that had no ``query_*`` sibling
+    standalone ``lookup_device_name`` tool, the one naming plane that had no ``query_*`` sibling
     (it was only reachable indirectly via ``diagnose_connection``/``crossplane_check``).
 
-    Answer semantics (DS-2 — a service error must NEVER masquerade as "not registered"):
+    Answer semantics (DS-2, a service error must NEVER masquerade as "not registered"):
 
     * **Reachable + registered** → ``registered: true`` with ``status`` (ACTIVE) and ``message``.
-    * **Reachable + not registered** (a genuine 404 on ``deviceNames``) → ``registered: false`` — a
+    * **Reachable + not registered** (a genuine 404 on ``deviceNames``) → ``registered: false``, a
       DEFINITIVE answer.
     * **Reachable + OBSOLETE/DELETED/unknown** → ``registered: false`` with the status preserved.
     * **Unreachable / 5xx / bad JSON / timeout** → ``registered: null`` + ``withheld: true`` with a
@@ -796,7 +796,7 @@ async def query_naming_lookup(name: str, timeout: float = 5.0) -> NameLookupResu
         # Both check_connectivity (NamingServiceConnectionError) and validate_name
         # (NamingServiceResponseError on a NON-404 failure) raise NamingServiceError subclasses; a
         # genuine 404 is handled INSIDE validate_name (returns registered=False, does not raise).
-        # WITHHOLD on any service error — an unexpected bug (non-NamingServiceError) still escapes
+        # WITHHOLD on any service error: an unexpected bug (non-NamingServiceError) still escapes
         # to the tool shell's translate_epics_errors as an [INTERNAL] ToolError.
         return {
             "enabled": True,

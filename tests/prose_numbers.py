@@ -1,6 +1,6 @@
 """Read the NUMBERS that comments and docstrings claim, so a test can compare them to the sets.
 
-S32. Prose here routinely names the size of a set — "all 22 schemas", "7 (resp. 9) rows",
+S32. Prose here routinely names the size of a set, "all 22 schemas", "7 (resp. 9) rows",
 "TEN of the twelve". Nothing checked those, and every typing step re-typed them by hand: in the
 S29 11th target 18 counters were pulled over, two QA rounds found 8 of them still wrong, and one
 had been wrong *before* that build started. This module is the reading half of the guard; the
@@ -9,24 +9,24 @@ comparing half is ``tests/test_prose_counters.py``.
 Four decisions are load-bearing, and each was forced by a measurement rather than chosen:
 
 * **Prose is read per PARAGRAPH, not per line.** A claim straddles the 100-column wrap often
-  enough that a line-wise regex is not merely lossy but silently lossy — ``test_server.py`` splits
+  enough that a line-wise regex is not merely lossy but silently lossy, ``test_server.py`` splits
   ``EXACTLY the 11`` / ``mapped fields`` across a docstring wrap and ``ArchiverHistoryResult's 11``
   / ``fields`` across a comment wrap, i.e. both halves of the same claim, 40 lines apart. Runs of
   own-line comments are joined the same way as docstring paragraphs.
 * **Paragraph, not whole-block.** Flattening a whole docstring lets a match jump a sentence
   boundary: ``…lives in one module.`` + ``The functions resolve…`` reads as "one module. The
   functions" and would be counted as a claim about functions. A bare ``#`` is the comment spelling
-  of a blank line and ends a run — without it the rule held for docstrings and quietly not for
+  of a blank line and ends a run, without it the rule held for docstrings and quietly not for
   comments, fusing fifteen author paragraphs into single blocks.
 * **NOTHING is filtered after a match; every condition lives inside the pattern.** This one cost
   the same defect twice. First the collection noun was a post-filter: the greedy gap matched "all
   22 schemas finds the same enum" through to "the", the hit was dropped, and ``finditer`` resumed
-  *past* the phrase — seven of the estate's most drift-prone claims were lost. Then the sentence
+  *past* the phrase, seven of the estate's most drift-prone claims were lost. Then the sentence
   break was a post-filter and did it again: "the 7 rows. Both tools agree" matched from the 7
   through to "tools", was discarded whole, and the valid "7 rows" inside was never tried.
   **A rejected match is not a neutral event; it consumes the text.** Both now sit in the pattern.
 * **A site is keyed by its enclosing QUALNAME, never by line number.** Line numbers move with any
-  edit above them, so a table keyed on them rots for a reason that is not a change in the finding —
+  edit above them, so a table keyed on them rots for a reason that is not a change in the finding:
   the lesson ``tests/test_client_edge_guards.py`` records for its own ``_UNOBSERVED`` table. For
   the same reason the tokenizer is fed through ``io.StringIO``: ``str.splitlines`` also breaks on
   form feed, which the tokenizer does not, and one page separator would desync every row below it.
@@ -34,11 +34,11 @@ Four decisions are load-bearing, and each was forced by a measurement rather tha
 Honest scope, in full, because the numbers invite over-reading. This finds a number that is either
 PAIRED with one of the closed ``COLLECTION_NOUNS`` across at most **two** intervening words, or in
 the ``N of the M`` shape where the noun is elided. It therefore does NOT see: a size named with any
-other noun ("modes", "halves", "planes" — measured, about 60 such pairings exist in the watched
+other noun ("modes", "halves", "planes", measured, about 60 such pairings exist in the watched
 prose); a number above twenty spelled as a word; a hyphenated compound ("twenty-two" reads as 20);
 a gap of three or more words; and numbers inside f-string assertion messages, which are neither
 comments nor docstrings. "Three independent red directions" names a size and is invisible here by
-design — those are claims about test bodies, which no constant can settle. The consumer states the
+design, those are claims about test bodies, which no constant can settle. The consumer states the
 same limits in its own docstring rather than implying coverage.
 """
 
@@ -82,7 +82,7 @@ _WORD_VALUES: dict[str, int] = {
     "twenty": 20,
 }
 
-# The collection nouns a number may be paired with. Closed on purpose — see the module docstring.
+# The collection nouns a number may be paired with. Closed on purpose, see the module docstring.
 COLLECTION_NOUNS: frozenset[str] = frozenset(
     {
         "arrays",
@@ -156,12 +156,12 @@ _BREAK = r"(?![.;:]\s+[^\W\d_])"
 #     was ACCEPTED where the old filter had at least rejected it. The gap word therefore may not
 #     end in a terminator, which is what makes backtracking try the shorter, correct pairing.
 # The gap classes are DISJOINT (separators are whitespace-or-punctuation-then-whitespace, words are
-# non-space): overlapping classes made the partition ambiguous, and a run of dashes — this estate
-# rules its sections with 75 of them — cost minutes of backtracking.
+# non-space): overlapping classes made the partition ambiguous, and a run of dashes, this estate
+# rules its sections with 75 of them, cost minutes of backtracking.
 _GAP = rf"(?:{_BREAK}[^\w\s]*\s+[^\s]*[^\s.;:]){{0,2}}{_BREAK}[^\w\s]*\s+"
 _PAIRED = re.compile(rf"{_NUMBER}{_GAP}(?:{_alternation(COLLECTION_NOUNS)})\b", re.IGNORECASE)
 
-# "TEN of the twelve", "13 of the 20", "Five of the 16" — the noun is elided, so _PAIRED is blind
+# "TEN of the twelve", "13 of the 20", "Five of the 16", the noun is elided, so _PAIRED is blind
 # to these. They are among the most drift-prone claims here, so they get their own shape.
 _OF_THE = re.compile(rf"{_NUMBER}\s+of\s+(?:the|those|these)\s+{_NUMBER}", re.IGNORECASE)
 
@@ -178,7 +178,7 @@ class ProseBlock:
     text: str
 
     def where(self) -> str:
-        """``path:line`` plus the enclosing scope — what a failure message should print."""
+        """``path:line`` plus the enclosing scope, what a failure message should print."""
         return f"{self.path}:{self.lineno} [{self.qualname}]"
 
 
@@ -258,7 +258,7 @@ def _comment_blocks(
     """Runs of own-line comments at one indentation, joined into one paragraph each.
 
     A bare ``#`` ends the run: it is the comment spelling of a blank line. Without that the
-    "paragraph, not whole-block" rule would hold for docstrings and quietly not for comments —
+    "paragraph, not whole-block" rule would hold for docstrings and quietly not for comments:
     measured, that fused fifteen author paragraphs into single blocks, one of them 1200 characters
     long, and produced a pairing that reached across ``) install ->`` into an unrelated noun.
     """
@@ -273,7 +273,7 @@ def _comment_blocks(
             out.append(ProseBlock(path, run_start, _qualname_at(spans, run_start), " ".join(run)))
 
     # io.StringIO, not splitlines(): str.splitlines also breaks on form feed and friends, which the
-    # tokenizer does not, so one page separator would desync every row below it — and rows feed the
+    # tokenizer does not, so one page separator would desync every row below it, and rows feed the
     # qualname lookup, i.e. exactly the key this module promises stays stable.
     for token in tokenize.generate_tokens(io.StringIO(source).readline):
         if token.type != tokenize.COMMENT:

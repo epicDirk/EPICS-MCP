@@ -1,35 +1,35 @@
 """S32: the numbers this repository's prose NAMES are compared to the sets they describe.
 
-Comments and docstrings here state sizes — "all 22 schemas", "7 (resp. 9) rows", "TEN of the
-twelve" — and until now nothing checked a single one of them. The cost was measured, not feared:
+Comments and docstrings here state sizes: "all 22 schemas", "7 (resp. 9) rows", "TEN of the
+twelve", and until now nothing checked a single one of them. The cost was measured, not feared:
 the S29 11th typing target pulled 18 counters over by hand, two adversarial QA rounds found 8 of
 them still wrong, and one had already been wrong before that build began. The reading half of this
 guard is ``tests/prose_numbers.py``; this module is the comparing half.
 
 WHAT IS PROMISED, in three parts, because a vaguer promise would be the same defect one layer up:
 
-* **Derived** — every claim in ``_CLAIMS`` is compared to a set that is computed here and now. A
+* **Derived**: every claim in ``_CLAIMS`` is compared to a set that is computed here and now. A
   wrong number goes red with its file, line and enclosing scope. Nothing in ``_CLAIMS`` may carry a
   typed-in expectation; ``test_no_claim_hard_codes_its_expectation`` enforces that.
-* **Inventoried** — every OTHER phrase the detector finds is listed in ``_FROZEN`` with a reason.
+* **Inventoried**: every OTHER phrase the detector finds is listed in ``_FROZEN`` with a reason.
   Those are not verified: a new one, or a vanished one, goes red (``test_inventory_is_partitioned``
   and ``test_inventory_size_is_pinned``), but their VALUE is nobody's promise. Most are historical
   anchors, runtime measurements, or claims about test bodies, which no constant can settle.
-* **Out of scope** — the detector pairs a number with one of a closed list of collection nouns, or
+* **Out of scope**: the detector pairs a number with one of a closed list of collection nouns, or
   reads the ``N of the M`` shape. It does not see every statement about a size, and it does not see
   numbers inside f-string assertion messages at all. The closed list lives in
   ``prose_numbers.COLLECTION_NOUNS`` and is the whole of the coverage claim.
 
 Which claims are DERIVED and which are merely inventoried was decided by measurement, not taste: a
-``git`` pickaxe over the real S29 commits shows the drift lives in five families — the typed-tool
+``git`` pickaxe over the real S29 commits shows the drift lives in five families, the typed-tool
 cardinality, the untyped remainder, the explicit rows of ``_ALWAYS_PRESENT_BY_TOOL``, the element
-schema split, and the declared arrays — plus the per-tool "EXACTLY the N mapped fields" line every
+schema split, and the declared arrays, plus the per-tool "EXACTLY the N mapped fields" line every
 typing step adds a new one of. Lane counts and the "four paths" family have not moved once in the
 recorded history of the file.
 
 Every measurement here reads a module constant or AST-scans a source file. None of them takes a
 length from ``mcp.list_tools()``: that answers with FEWER tools in the core-only lane than in the
-full one, so a count taken there would pass locally and break the core-only CI — the trap
+full one, so a count taken there would pass locally and break the core-only CI, the trap
 ``tests/test_server.py`` warns about at its own ``_TYPED_OUTPUT_TOOLS``. (This paragraph
 deliberately names no figure. A module that derives the lane counts for five other files must not
 hand-type them in its own docstring, where nothing would ever check them.)
@@ -68,14 +68,14 @@ _SRC = _TESTS.parent / "src" / "epics_pv_mcp"
 # This guard's own two files are NOT watched, and the honest reason is a trade-off, not a triumph.
 # Watching them surfaces dozens of phrases, the overwhelming majority QUOTATIONS of the estate's
 # prose used to explain the design ("all 22 schemas", "TEN of the twelve"); inventorying those
-# would add rows saying "this is an example, not a claim" — a blanket exemption wearing a table's
+# would add rows saying "this is an example, not a claim", a blanket exemption wearing a table's
 # clothes. The worst offender, a core-lane tool count in the docstring of the module that computes
 # it, was removed rather than inventoried.
 #
 # What is NOT claimed: that nothing here can rot. These files still name derived values in prose,
 # and several of them use nouns the detector does not know ("constants", "words", "pairings"), so
 # watching the files would not catch those anyway. Closing that properly is its own piece of work
-# and is recorded as such — it is not silently finished.
+# and is recorded as such, it is not silently finished.
 _WATCHED: tuple[tuple[str, Path], ...] = (
     ("tests/test_server.py", _TESTS / "test_server.py"),
     ("services/checkers_olog.py", _SRC / "services" / "checkers_olog.py"),
@@ -92,22 +92,22 @@ class _Claim:
     ``reads`` is the field this guard was missing, and its absence was the root of every stand-in
     measure an outside QA found here: a claim held ``(label, pattern, callable)``, the measure was
     an opaque thunk returning a number, and the only structural check on it searched the derivation
-    for THE ANSWER — the one property that says nothing about which set was read. The cheapest
+    for THE ANSWER, the one property that says nothing about which set was read. The cheapest
     expression that happens to answer correctly today was therefore always admissible.
 
     THE VOCABULARY, in full, because a declaration nobody can read is a comment:
 
-    * ``"…/name.py"`` — a source file the measure must hand to ``_parsed``. Matched on a
+    * ``"…/name.py"``: a source file the measure must hand to ``_parsed``. Matched on a
       path-separator boundary, never as a bare suffix: ``"server.py"`` would otherwise be satisfied
       by parsing ``tests/test_server.py``. Spelled the way ``_WATCHED`` spells its labels.
-    * ``"_SOME_CONSTANT"`` — a name the measure must read off the ``test_server`` module.
-    * ``"__dict__"`` — the measure scans that module's NAMESPACE rather than naming a constant,
+    * ``"_SOME_CONSTANT"``: a name the measure must read off the ``test_server`` module.
+    * ``"__dict__"``: the measure scans that module's NAMESPACE rather than naming a constant,
       which is what a suffix scan over ``vars(ts)`` does. A deliberately weaker declaration, and it
       says so by being a different word.
 
     WHAT ``reads`` DOES AND DOES NOT PROVE. Traced, it establishes that the measure touched the
-    object the claim names. It does not establish that the SENTENCE means that object — that stays a
-    human reading — and it does not establish that the answer DEPENDS on what was touched: a measure
+    object the claim names. It does not establish that the SENTENCE means that object, that stays a
+    human reading, and it does not establish that the answer DEPENDS on what was touched: a measure
     could read a constant and ignore it. Both limits are recorded in ``docs/known-limits.md``.
     """
 
@@ -138,19 +138,19 @@ def _derivation_source(measure: Callable[[], int]) -> str:
 
     Parsed, never split on text. A NAMED function yields its body WITHOUT the docstring: those
     docstrings explain which set they count, and accusing them would punish the explanation the
-    rest of this module asks for. A LAMBDA yields its body — its enclosing statement carries the
+    rest of this module asks for. A LAMBDA yields its body, its enclosing statement carries the
     claim's own pattern, which legitimately contains digits. Only executable code is searched.
 
     THE ORDER OF THOSE TWO IS LOAD-BEARING and it used to be the other way round. The lambda walk
-    ran first over the WHOLE parsed statement, so a named measure containing a lambda anywhere —
-    a ``key=lambda …`` in a sort, say — had its entire body discarded and only that lambda's body
+    ran first over the WHOLE parsed statement, so a named measure containing a lambda anywhere:
+    a ``key=lambda …`` in a sort, say, had its entire body discarded and only that lambda's body
     inspected. Latent on the delivered table (measured: 0 of 79 named measures contain one) and a
     trap the moment one does, because the discarded body is exactly where a typed-in answer would
     sit. A named function is now matched before anything is walked.
 
     An unreadable source is an ERROR, not an empty string. ``functools.partial``, a callable
     object and a dynamically compiled function all raise here, and returning "" for them made the
-    anti-hard-coding check silently inspect nothing — an acquittal indistinguishable from a
+    anti-hard-coding check silently inspect nothing, an acquittal indistinguishable from a
     verdict. ``partial(_paths_rows, _DISCOVER_CONFORMANCE)`` is a straight-faced refactor of nine
     claims in this file, and it would have taken all nine out of the guard's reach at once.
     """
@@ -160,14 +160,14 @@ def _derivation_source(measure: Callable[[], int]) -> str:
         raise AssertionError(
             f"the derivation of {getattr(measure, '__name__', measure)!r} cannot be read, so "
             "test_no_claim_hard_codes_its_expectation would inspect nothing and pass. A measure "
-            "must be a plain function or lambda — not a functools.partial, not a callable object."
+            "must be a plain function or lambda, not a functools.partial, not a callable object."
         ) from unreadable
     try:
         node: ast.AST = ast.parse(source).body[0]
     except SyntaxError:
         # ``inspect.getsource`` on a lambda hands back its enclosing statement cut at the first
-        # NEWLINE, which is a FRAGMENT. Most such fragments parse anyway — ``_claim(…, lambda: x),``
-        # is a one-element tuple — so the branch below is NOT the common case the old comment
+        # NEWLINE, which is a FRAGMENT. Most such fragments parse anyway, ``_claim(…, lambda: x),``
+        # is a one-element tuple, so the branch below is NOT the common case the old comment
         # claimed. It is reached by one layout: arguments on a single wrapped line together with a
         # ``scope=`` keyword, where the fragment is a tuple containing a keyword argument.
         # ``test_the_derivation_reader_handles_a_fragment`` drives exactly that.
@@ -191,7 +191,7 @@ class _SourceRecorder:
     preference: ``vars(obj)`` reads ``obj.__dict__`` directly and never reaches ``__getattr__``, so
     a ``__getattr__`` proxy handed ``_always_present_constants`` its own instance attributes instead
     of the module namespace. Measured, the twelve ``*_ALWAYS_PRESENT`` constants then counted as 0
-    and the subtraction derived from them as -2 — a tracer that changes the answer it is watching is
+    and the subtraction derived from them as -2, a tracer that changes the answer it is watching is
     worse than no tracer, because its verdict looks like a finding.
 
     It delegates rather than stubs for a related reason: ``_none_valued`` iterates the mapping it is
@@ -211,13 +211,13 @@ class _SourceRecorder:
 def _memoized_helpers() -> tuple[Any, ...]:
     """Every memoized helper in this module, DISCOVERED rather than listed.
 
-    A hand-kept list would blind the tracer the day someone adds a helper and forgets to extend it —
+    A hand-kept list would blind the tracer the day someone adds a helper and forgets to extend it:
     and noticing a measure that reads nothing is the tracer's entire job. Discovery also keeps the
     count out of the prose, which matters here: this file is deliberately unwatched, so a number
     written into it rots exactly the way the numbers it guards do.
 
     WHICH helpers this actually protects, measured rather than assumed: the ones BETWEEN a claim and
-    the two seams. ``_parsed`` itself is not among them — the tracer replaces it with a wrapper that
+    the two seams. ``_parsed`` itself is not among them, the tracer replaces it with a wrapper that
     records the path BEFORE delegating, so a warm ``_parsed`` still reports its file. Hiding
     ``_parsed`` from this scan therefore changes nothing (probed), while hiding an intermediate such
     as ``_tools_declaring_parameter`` makes the second claim that uses it return a cached answer
@@ -240,12 +240,12 @@ def _trace_measure(measure: Callable[[], int]) -> tuple[int, frozenset[str], fro
     TWO SEAMS ARE ENOUGH, and that is a measured property of this module rather than a hope:
     ``_parsed`` is the only file reader in it (``test_the_tracer_can_see_every_source`` asserts
     exactly that, so the precondition travels with the tracer), and every constant arrives through
-    the ``test_server`` module object. Should either stop holding, the tracer goes blind — which is
+    the ``test_server`` module object. Should either stop holding, the tracer goes blind, which is
     why the assertion is a test and not a comment.
 
     Every memoized helper is cleared first and afterwards. A measure whose answer is already cached
     touches nothing at all, so a tracer reading warm caches would report every claim as reading
-    nothing — green, and about as informative as a coin.
+    nothing, green, and about as informative as a coin.
     """
     module = sys.modules[__name__]
     paths: set[str] = set()
@@ -280,7 +280,7 @@ def _provenance_faults(claim: _Claim) -> list[str]:
 
     Asymmetric on purpose, because the two seams differ in what they can resolve:
 
-    * ``test_server`` names are compared for EQUALITY — the recorder sees each name separately.
+    * ``test_server`` names are compared for EQUALITY, the recorder sees each name separately.
     * FILES are checked in one direction only. Two measures reach their file through
       ``_typed_dict_fields``, which parses the whole package, so "this file was parsed" cannot be
       told apart from "some file in ``src`` was parsed". Tightening that needs a third recorder over
@@ -290,7 +290,7 @@ def _provenance_faults(claim: _Claim) -> list[str]:
     FIRST it checks that the recorder did not change the measurement, and that check is here
     because it was needed: the first recorder written for this used ``__getattr__``, ``vars(ts)``
     never reached it, and the twelve ``*_ALWAYS_PRESENT`` constants traced as 0. A trace of a
-    different computation than the guard checks is not evidence about the guard — and it fails
+    different computation than the guard checks is not evidence about the guard, and it fails
     towards accusing innocent claims, which is the worse direction.
     """
     untraced = claim.measure()
@@ -333,7 +333,7 @@ def _none_valued(mapping: Mapping[str, str | None]) -> int:
 
 @cache
 def _parsed(path: Path) -> ast.Module:
-    """Parse once per process. Nothing here mutates a source file, so caching is safe — and the
+    """Parse once per process. Nothing here mutates a source file, so caching is safe, and the
     uncached version re-read and re-parsed the 177 KB test module up to 44 times per run."""
     return ast.parse(path.read_text(encoding="utf-8-sig"))
 
@@ -344,7 +344,7 @@ def _module_ast(module: Any) -> ast.Module:
 
 @cache
 def _always_present_constants() -> int:
-    """The ``*_ALWAYS_PRESENT`` constants — the "twelve" the prose counts."""
+    """The ``*_ALWAYS_PRESENT`` constants, the "twelve" the prose counts."""
     return sum(1 for name in vars(ts) if name.endswith("_ALWAYS_PRESENT"))
 
 
@@ -358,12 +358,12 @@ def _named_tests(suffix: str) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
 
 @cache
 def _conformance_tests() -> int:
-    """The per-tool ``*_conforms_to_its_schema`` tests — the other "twelve"."""
+    """The per-tool ``*_conforms_to_its_schema`` tests, the other "twelve"."""
     return len(_named_tests("_conforms_to_its_schema"))
 
 
 def _drives_real_client(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    """The test constructs a ``Client`` — i.e. it goes over the wire."""
+    """The test constructs a ``Client``, i.e. it goes over the wire."""
     return any(
         isinstance(inner, ast.Call)
         and isinstance(inner.func, ast.Name)
@@ -373,7 +373,7 @@ def _drives_real_client(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
 
 
 def _drives_in_process(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    """The test calls ``mcp.call_tool`` — the in-process path, receiver included.
+    """The test calls ``mcp.call_tool``, the in-process path, receiver included.
 
     THE RECEIVER IS THE WHOLE DISCRIMINATOR, not decoration. Measured: all twelve conformance
     tests contain some ``.call_tool``, because the two wire tests call it on their ``Client``.
@@ -393,8 +393,8 @@ def _drives_in_process(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
 def _real_client_conformance_tests() -> int:
     """Conformance tests that drive a REAL client.
 
-    The ``paths``-table half of the old conjunction is gone. It carried no information — every
-    test with a table also builds a ``Client`` — and it was the half that made this a proxy: a
+    The ``paths``-table half of the old conjunction is gone. It carried no information, every
+    test with a table also builds a ``Client``, and it was the half that made this a proxy: a
     conformance test converted to ``async with Client(mcp)`` WITHOUT a table (the direction this
     estate's own docstrings advocate) stayed uncounted, so "TEN of the twelve drive
     FastMCP.call_tool" would have gone on reading ten while the truth was nine.
@@ -404,7 +404,7 @@ def _real_client_conformance_tests() -> int:
 
 @cache
 def _in_process_conformance_tests() -> int:
-    """Conformance tests that call ``mcp.call_tool`` — measured, not "the twelve minus the two".
+    """Conformance tests that call ``mcp.call_tool``, measured, not "the twelve minus the two".
 
     Deriving this by subtraction guaranteed the two figures summed to twelve, which is what the
     sentence asserts, but it could not notice a test that drives NEITHER path. The guarantee is
@@ -419,7 +419,7 @@ def _runtime_bound_constants() -> int:
 
     ⚠️ Honest scope, because this is the one measure in the family that remains a stand-in. The
     sentence it guards says those constants are "ALREADY runtime-bound … and go red on the same
-    mutation" — a MUTATION property, which no constant can settle. What is measured instead is
+    mutation", a MUTATION property, which no constant can settle. What is measured instead is
     which constants the wire-driving tests read, and that is nameable, derivable and moves with
     the thing the sentence is about. It is not the same claim, and pretending otherwise is what
     the previous version did by counting TESTS and calling the answer a count of constants.
@@ -476,7 +476,7 @@ def _registered_tools(path: Path) -> int:
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             found += sum(1 for decorator in node.decorator_list if _is_mcp_tool(decorator))
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Call):
-            # ``mcp.tool(...)(fn)`` — the call-position form. Requiring the OUTER call's func to
+            # ``mcp.tool(...)(fn)``: the call-position form. Requiring the OUTER call's func to
             # be a call is what keeps a decorator, which ``ast.walk`` also visits on its own, from
             # being counted a second time.
             found += _is_mcp_tool(node.func)
@@ -485,7 +485,7 @@ def _registered_tools(path: Path) -> int:
 
 @cache
 def _core_lane_tools() -> int:
-    """Tools ``server.py`` registers — the core lane, AST-scanned, never taken from the wire."""
+    """Tools ``server.py`` registers, the core lane, AST-scanned, never taken from the wire."""
     return _registered_tools(_SRC / "server.py")
 
 
@@ -502,7 +502,7 @@ def _full_lane_tools() -> int:
 
 
 def _rows_sharing(element_schema: dict[str, object]) -> int:
-    """Rows of ``_OUTPUT_ARRAY_ITEMS`` that hold *element_schema* ITSELF — identity, deliberately.
+    """Rows of ``_OUTPUT_ARRAY_ITEMS`` that hold *element_schema* ITSELF, identity, deliberately.
 
     The sentence this serves is about ALIASING: "they are module dicts, so assigning into one
     would silently move N (resp. M) rows". Exactly the rows pointing at that object would move,
@@ -513,7 +513,7 @@ def _rows_sharing(element_schema: dict[str, object]) -> int:
 
 
 def _rows_advertising(element_schema: dict[str, object]) -> int:
-    """Rows whose advertised element schema EQUALS *element_schema* — value, deliberately.
+    """Rows whose advertised element schema EQUALS *element_schema*, value, deliberately.
 
     The sentences this serves say what the rows CARRY ("the N rows carrying ``{"type": "string"}``",
     "the other M rows are ``{"type": "object", …}``"). Identity answered a different question
@@ -544,13 +544,13 @@ def _typed_dict_fields() -> dict[str, dict[str, str]]:
     BOTH spellings, and the functional one is not hypothetical: ``ArchiverHistoryResult`` in
     ``tools/archiver.py`` HAS to use it, because ``from`` is a Python keyword and cannot be a
     class-syntax field name. A class-syntax-only index did not see that tool's result shape at
-    all — latent while none of its fields is nullable, and silent the moment one becomes so.
+    all, latent while none of its fields is nullable, and silent the moment one becomes so.
 
     Only class-body annotations count, never any annotated assignment: a function LOCAL would
     otherwise stand in for a field (``warnings: list[str] = []`` already exists inside a function
     body in this package).
 
-    Base resolution is deliberately ABSENT rather than carried untested — measured, no TypedDict
+    Base resolution is deliberately ABSENT rather than carried untested, measured, no TypedDict
     in this package inherits from another one, so the code that walked bases would never run.
     Inherited fields therefore stay outside every count that reads this index; that is a scope
     statement, not an oversight, and it goes red the day it matters only if someone adds the walk
@@ -599,7 +599,7 @@ def _registered_tool_functions() -> dict[str, ast.FunctionDef | ast.AsyncFunctio
     decorates, display_tools.py calls ``mcp.tool(...)(fn)`` after the fact, and a decorator-only
     reader would know nothing about the display tools at all.
 
-    One discovery, several readers — the return annotation and the parameter names are two
+    One discovery, several readers, the return annotation and the parameter names are two
     questions about the same set, and asking each of them its own way is how the two answers start
     disagreeing.
     """
@@ -645,8 +645,8 @@ def _tools_declaring_parameter(parameter: str) -> frozenset[str]:
     """Registered tools whose SIGNATURE declares a parameter literally named *parameter*.
 
     This is the set the title sentences are about: a parameter name is what reaches the wire as a
-    schema property, and the trap those sentences warn about — a strip pass that deletes every
-    ``title`` key — bites exactly there. They were measured against a hand-typed four-element
+    schema property, and the trap those sentences warn about, a strip pass that deletes every
+    ``title`` key, bites exactly there. They were measured against a hand-typed four-element
     tuple instead, which is not a reading of anything: giving a fifth tool a ``title`` parameter
     left both sentences false and the whole lane green.
 
@@ -655,7 +655,7 @@ def _tools_declaring_parameter(parameter: str) -> frozenset[str]:
 
     AST over the registrar modules rather than ``mcp.list_tools()``, for the reason this module
     states elsewhere: the wire answers with fewer tools in the core-only lane. Measured, that makes
-    no difference to THIS answer — no display tool declares a ``title`` parameter — but a count
+    no difference to THIS answer, no display tool declares a ``title`` parameter, but a count
     taken from the wire would be lane-dependent by construction, which is the trap
     ``tests/test_server.py`` warns about at its own ``_TYPED_OUTPUT_TOOLS``.
     """
@@ -723,7 +723,7 @@ def _union_members(annotation: str) -> frozenset[str]:
 
 
 def _row_admits_null(annotation: str) -> bool:
-    """Whether an ARRAY row's field admits ``None`` — i.e. renders as ``anyOf[array, null]``.
+    """Whether an ARRAY row's field admits ``None``, i.e. renders as ``anyOf[array, null]``.
 
     THE QUESTION IS ONLY NULLABILITY, and getting that wrong is what two rounds of QA found here.
     Whether the field is an array is already settled elsewhere and better: ``_OUTPUT_ARRAY_ITEMS``
@@ -732,14 +732,14 @@ def _row_admits_null(annotation: str) -> bool:
     the wire by construction. A predicate that also asked "does the annotation start with
     ``list[``" was therefore re-deciding a settled question, and deciding it from the spelling:
 
-    * first it asked ``startswith("list[") and endswith("|None")``. ``None | list[str]`` — the
-      identical type, the identical wire schema — answered False, so a genuinely nullable new row
+    * first it asked ``startswith("list[") and endswith("|None")``. ``None | list[str]``, the
+      identical type, the identical wire schema, answered False, so a genuinely nullable new row
       shipped green with the prose false, and re-spelling an existing field reddened a true
       sentence. Both directions measured.
     * then it asked the same question of the union members, which fixed the ORDER and left
       ``Sequence[str] | None``, ``tuple[str, ...] | None``, ``Union[list[str], None]``,
       ``typing.Optional[list[str]]``, ``Annotated[list[str] | None, Field(...)]`` and the quoted
-      forward reference each answering wrongly — five of them false-RED on correct prose. A fix
+      forward reference each answering wrongly, five of them false-RED on correct prose. A fix
       that moves the boundary of a wrong question is still the wrong question.
 
     Asking only about ``None`` removes the container from the criterion altogether, which is why
@@ -750,7 +750,7 @@ def _row_admits_null(annotation: str) -> bool:
 
 @cache
 def _nullable_array_rows() -> int:
-    """Array rows whose field is an ``X | None`` — the ``anyOf[array, null]`` subset.
+    """Array rows whose field is an ``X | None``, the ``anyOf[array, null]`` subset.
 
     Bound to the (tool, field) PAIR the row is keyed on, resolved through the TOOL'S OWN result
     type. Matching by field NAME across the package read a set the sentence does not name, and the
@@ -769,7 +769,7 @@ def _nullable_array_rows() -> int:
         if fields is None or field not in fields:
             raise AssertionError(
                 f"the array row ({tool!r}, {field!r}) no longer resolves to a TypedDict field "
-                f"(the tool's return annotation reads {results.get(tool)!r}) — the row, the "
+                f"(the tool's return annotation reads {results.get(tool)!r}), the row, the "
                 "return annotation or the result shape moved"
             )
         found += _row_admits_null(fields[field])
@@ -778,7 +778,7 @@ def _nullable_array_rows() -> int:
 
 @cache
 def _channel_info_fields() -> int:
-    """Fields of ``ChannelInfo`` — a NAMESAKE of the find_channels key count, not the same set."""
+    """Fields of ``ChannelInfo``, a NAMESAKE of the find_channels key count, not the same set."""
     fields = _typed_dict_fields().get("ChannelInfo")
     if fields is None:
         raise AssertionError("ChannelInfo is gone from the package's TypedDicts")
@@ -798,7 +798,7 @@ def _destructive_golden_rows() -> int:
 
 @cache
 def _paths_rows(test_name: str) -> int:
-    """Rows of the ``paths`` table inside *test_name* — the return paths it drives."""
+    """Rows of the ``paths`` table inside *test_name*, the return paths it drives."""
     for node in _module_ast(ts).body:
         if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) or node.name != test_name:
             continue
@@ -819,7 +819,7 @@ _FIND_CHANNELS_CONFORMANCE = "test_find_channels_structured_output_conforms_to_i
 
 @cache
 def _olog_query_functions() -> int:
-    """``query_olog_*`` coroutines in checkers_olog.py — the "ten" its own header claims."""
+    """``query_olog_*`` coroutines in checkers_olog.py, the "ten" its own header claims."""
     return sum(
         1
         for node in _parsed(_SRC / "services" / "checkers_olog.py").body
@@ -832,8 +832,8 @@ def _olog_query_functions() -> int:
 def _olog_reexport_lines() -> int:
     """``query_olog_*`` names ``services/checkers.py`` re-exports from ``checkers_olog``.
 
-    The sentence this serves is about the RE-EXPORT — "for backward compatibility :mod:`~.checkers`
-    re-exports the … functions and ``_olog_error_code``" — not about the definitions. Counting the
+    The sentence this serves is about the RE-EXPORT, "for backward compatibility :mod:`~.checkers`
+    re-exports the … functions and ``_olog_error_code``", not about the definitions. Counting the
     definitions instead, which is what this claim used to do, read a set the sentence does not
     name: dropping a re-export leaves every definition where it is, so the count stayed right while
     the sentence became false.
@@ -891,7 +891,7 @@ _MAPPED_FIELD_CLAIMS: tuple[tuple[str, str], ...] = (
 
 
 def _size_of(constant: str) -> Callable[[], int]:
-    """A closure per row — a loop variable captured directly would measure the LAST constant."""
+    """A closure per row, a loop variable captured directly would measure the LAST constant."""
 
     def measure() -> int:
         return len(getattr(ts, constant))
@@ -900,7 +900,7 @@ def _size_of(constant: str) -> Callable[[], int]:
 
 
 def _mapped_field_claims() -> tuple[_Claim, ...]:
-    """One claim per row, each DECLARING the constant it measures — generated, not typed out.
+    """One claim per row, each DECLARING the constant it measures, generated, not typed out.
 
     The declaration comes from the same row as the measure, so the two cannot drift apart. That is
     the one place in this table where generating ``reads`` is right rather than circular: the row
@@ -1057,7 +1057,7 @@ _CLAIMS: tuple[_Claim, ...] = (
         reads=("tests/test_server.py",),
     ),
     # Anchored on the TOOL NAME. One pattern matched BOTH module-level sentences, so the
-    # find_channels claim was verified against discover_pvs' table. Equal today — which means the
+    # find_channels claim was verified against discover_pvs' table. Equal today, which means the
     # day either tool gains a path, the guard would demand the CORRECT sentence be changed back.
     _claim(
         "find_channels return paths",
@@ -1089,7 +1089,7 @@ _CLAIMS: tuple[_Claim, ...] = (
     ),
     _claim(
         "find_channels paths (modes)",
-        r"(\w+) paths . and here the \w+ are two MODES",
+        r"(\w+) paths, and here the \w+ are two MODES",
         lambda: _paths_rows(_FIND_CHANNELS_CONFORMANCE),
         scope=_FIND_CHANNELS_CONFORMANCE,
         reads=("tests/test_server.py",),
@@ -1147,7 +1147,7 @@ _CLAIMS: tuple[_Claim, ...] = (
     ),
     # The detector cannot see this one: four words sit between the number and its noun and the gap
     # allows two. A claim is matched against the block text directly, so it guards the sentence
-    # anyway — and it must, because its twin thirty lines away IS derived. Which of two sentences
+    # anyway, and it must, because its twin thirty lines away IS derived. Which of two sentences
     # about the same set is watched may not depend on how the author spelled the type.
     _claim(
         "archive-status enrichment fields (exposes note)",
@@ -1359,7 +1359,7 @@ _CLAIMS: tuple[_Claim, ...] = (
         reads=("services/checkers_olog.py",),
     ),
     # The re-export sentence is about checkers.py's import block, not about checkers_olog.py's
-    # definitions — equal today, and the day a re-export is dropped they are not.
+    # definitions, equal today, and the day a re-export is dropped they are not.
     _claim(
         "olog query functions (re-export)",
         r"re-exports the (\w+) functions",
@@ -1372,7 +1372,7 @@ _CLAIMS: tuple[_Claim, ...] = (
 # --- the inventory ------------------------------------------------------------------------------
 
 # Phrases the detector finds and NOBODY verifies, each with the reason it cannot be derived. Keyed
-# by (file, enclosing scope, phrase, value) — never by line number, which moves with any edit above
+# by (file, enclosing scope, phrase, value), never by line number, which moves with any edit above
 # it and would rot this table for a reason that is not a change in the finding.
 _FROZEN: dict[tuple[str, str, str, int], str] = {
     # --- not a count at all: the detector paired a number with a noun it does not govern ---------
@@ -1400,13 +1400,13 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
         "test_every_typed_tool_conforms_to_its_schema_over_the_wire",
         "13 of the 20",
         13,
-    ): "how many tools emit no null on the driven path — observed at runtime, not declared",
+    ): "how many tools emit no null on the driven path, observed at runtime, not declared",
     (
         "tests/test_server.py",
         "test_search_logbook_payload_path_is_guarded_below_the_client",
         "1``: 19 other tests",
         19,
-    ): "how many tests fall under a mutated env var — a suite measurement, and the sentence itself "
+    ): "how many tests fall under a mutated env var, a suite measurement, and the sentence itself "
     "records that it had already drifted once",
     # --- claims about TEST BODIES: about code shape, not about a collection ----------------------
     (
@@ -1426,9 +1426,9 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
         "test_output_schema_typed_only_for_typed_tools",
         "two sibling tests",
         2,
-    ): ("test functions that react to one mutation — no table declares them"),
+    ): ("test functions that react to one mutation, no table declares them"),
     ("tests/test_server.py", "test_output_schema_typed_only_for_typed_tools", "three tests", 3): (
-        "test functions a red proof turns red — measured by running it, not declared"
+        "test functions a red proof turns red, measured by running it, not declared"
     ),
     # --- structural claims about code that no constant enumerates -------------------------------
     ("server.py", "main", "three olog write paths", 3): (
@@ -1438,7 +1438,7 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
         "guards in the JSON-Schema walker; no table lists them"
     ),
     ("services/checkers_olog.py", "<module>", "four rest-plane checkers", 4): (
-        "REST planes, not a Python collection — there is no plane enum to count"
+        "REST planes, not a Python collection, there is no plane enum to count"
     ),
     ("services/checkers_olog.py", "<module>", "two validators", 2): (
         "a fact about the fastmcp SDK, not about this repository"
@@ -1447,17 +1447,17 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
         "gate modules named in prose; the write-gate contract test discovers them by scanning"
     ),
     ("tools/archiver.py", "<module>", "two non-nullable fields", 2): (
-        "fields present on every path of one schema — a shape claim, not a table size"
+        "fields present on every path of one schema, a shape claim, not a table size"
     ),
     # --- a DIFFERENT set that happens to have the same size --------------------------------------
     ("tests/test_server.py", _FIND_CHANNELS_CONFORMANCE, "two enabled paths", 2): (
         "the enabled half of the return paths, not the return-path table itself"
     ),
     ("tests/test_server.py", _FIND_CHANNELS_CONFORMANCE, "four client-edge error paths", 4): (
-        "error paths inside the ChannelFinder client — a different four from the return paths"
+        "error paths inside the ChannelFinder client, a different four from the return paths"
     ),
     ("tests/test_server.py", _FIND_CHANNELS_CONFORMANCE, "two of the four", 2): (
-        "how few paths satisfy the union — a coverage property, measured, not declared"
+        "how few paths satisfy the union, a coverage property, measured, not declared"
     ),
 }
 
@@ -1490,7 +1490,7 @@ def _claim_matches(block: ProseBlock) -> list[tuple[re.Match[str], _Claim]]:
 
 
 def _is_covered(block: ProseBlock, site: ProseSite) -> bool:
-    """Covered means the number sits in a claim's CAPTURE GROUP — not merely in its match.
+    """Covered means the number sits in a claim's CAPTURE GROUP, not merely in its match.
 
     The distinction is load-bearing and was found by measurement: "satisfiable by two of the four"
     is one match whose group holds only the four, so a span-wide test counted the *two* as guarded
@@ -1522,7 +1522,7 @@ def test_every_claimed_counter_matches_its_set() -> None:
 
 
 def test_every_claim_still_matches_prose() -> None:
-    """Every claim must still find its phrase — a claim that matches nothing verifies nothing.
+    """Every claim must still find its phrase, a claim that matches nothing verifies nothing.
 
     Without this the table decays into a sham guard the moment a sentence is reworded: it would
     keep passing while watching a phrase that no longer exists."""
@@ -1550,7 +1550,7 @@ def test_inventory_is_partitioned() -> None:
                 continue
             unclaimed.append(f"{_describe(site)}\n        key: {site.key!r}")
     assert not unclaimed, (
-        "these prose numbers are neither derived nor inventoried — add a claim in _CLAIMS if the "
+        "these prose numbers are neither derived nor inventoried, add a claim in _CLAIMS if the "
         "number follows from a set, or an _FROZEN row with the reason it cannot:\n  "
         + "\n  ".join(unclaimed)
     )
@@ -1569,7 +1569,7 @@ def test_inventory_size_is_pinned() -> None:
     Narrow on purpose, because the honest residual is narrow: a deleted DERIVED phrase is normally
     caught by ``test_every_claim_still_matches_prose`` and a deleted INVENTORIED one by
     ``test_every_frozen_entry_still_exists``. What escapes both is ONE occurrence of a phrase whose
-    claim or frozen row still matches somewhere else — and several claims do match twice."""
+    claim or frozen row still matches somewhere else, and several claims do match twice."""
     actual = Counter(site.block.path for site in iter_sites(_watched_blocks()))
     drift = {
         path: (actual.get(path, 0), _INVENTORY_SIZES.get(path))
@@ -1581,7 +1581,7 @@ def test_inventory_size_is_pinned() -> None:
         + ", ".join(
             f"{path} {found} vs {pinned}" for path, (found, pinned) in sorted(drift.items())
         )
-        + ". A phrase was added or removed — update the pin together with _CLAIMS/_FROZEN."
+        + ". A phrase was added or removed, update the pin together with _CLAIMS/_FROZEN."
     )
 
 
@@ -1600,7 +1600,7 @@ def test_every_claim_declares_which_source_it_reads() -> None:
     Until now the only structural check on a measure searched its derivation for THE ANSWER, which
     is the one property that says nothing about the set. An outside QA measured the consequence:
     at least twelve of the derivations answered correctly while reading a DIFFERENT set from the one
-    their sentence names, in both failure directions — stale-green (the wrong set happened to have
+    their sentence names, in both failure directions, stale-green (the wrong set happened to have
     the right size) and false-red (a correct sentence reddened because the measure watched a
     neighbour). Neither direction is visible to a spelling check.
 
@@ -1611,7 +1611,7 @@ def test_every_claim_declares_which_source_it_reads() -> None:
     HOW FAR THIS REACHES, stated here because the field name invites over-reading:
 
     * It proves the measure touched the object the claim names. It does NOT prove the sentence
-      means that object — that stays a human reading, and no construct can replace it.
+      means that object, that stays a human reading, and no construct can replace it.
     * It does not prove the ANSWER depends on what was touched. A measure could read a constant and
       ignore it.
     * The FILE half is one-directional and, for the two measures that reach their file through
@@ -1621,16 +1621,16 @@ def test_every_claim_declares_which_source_it_reads() -> None:
     All three limits are written down in ``docs/known-limits.md`` rather than left to be discovered.
 
     Cost, measured rather than estimated: about six seconds for the whole table. That is two cold
-    measurement passes per claim — one traced, one not, because the recorder is compared against the
-    untraced answer — with every memoized helper cleared on both sides of the traced one. The
+    measurement passes per claim, one traced, one not, because the recorder is compared against the
+    untraced answer, with every memoized helper cleared on both sides of the traced one. The
     clearing is what the seconds buy: against a warm cache a measure touches nothing at all and the
     test would pass while proving nothing. Halving it by leaving the caches warm afterwards is
-    possible and deliberately not done — it would let a value computed under the recorder outlive
+    possible and deliberately not done, it would let a value computed under the recorder outlive
     the trace, and a cheap test that can poison the rest of the suite is the wrong trade.
     """
     faults = [f"{claim.label}: {fault}" for claim in _CLAIMS for fault in _provenance_faults(claim)]
     assert not faults, (
-        "these claims do not read what they declare — correct the declaration if the measure is "
+        "these claims do not read what they declare, correct the declaration if the measure is "
         "right, or the measure if the declaration is:\n  " + "\n  ".join(faults)
     )
 
@@ -1650,7 +1650,7 @@ def test_the_tracer_can_see_every_source() -> None:
     """The tracer's PRECONDITION, asserted instead of assumed: ``_parsed`` is the only file reader.
 
     The tracer watches two seams. If a measure ever reads a file some other way, that read becomes
-    invisible and every claim resting on it silently stops being traced — a guard that cannot go red
+    invisible and every claim resting on it silently stops being traced, a guard that cannot go red
     is the defect it was built to remove. So the property the tracer depends on is a test, and it
     names no count: the reader has to sit inside ``_parsed``, however many there are."""
     tree = _parsed(Path(__file__))
@@ -1675,7 +1675,7 @@ def test_the_tracer_reports_a_declared_but_unread_source() -> None:
     """The tracer's own red proof, in the file rather than in a commit body.
 
     A tracer that fails to notice a declared-and-untouched source traces nothing while looking
-    green — the exact shape this whole guard exists to find, one layer up. The subject is therefore
+    green, the exact shape this whole guard exists to find, one layer up. The subject is therefore
     a synthetic claim whose declaration is deliberately false in every direction the checker
     claims to cover: a constant it never reads, a file it never parses, and a constant it reads
     without declaring.
@@ -1717,7 +1717,7 @@ def test_the_union_walk_reads_a_type_and_not_a_spelling() -> None:
     Every spelling below is the SAME TYPE and the same wire schema, so all must yield the same
     members. Two rounds of QA found this predicate answering by spelling: first the order
     (``None | X``), then the alias, the dotted alias, the ``Annotated`` wrapper, the non-``list``
-    container and the quoted forward reference — five of the seven false-RED on correct prose.
+    container and the quoted forward reference, five of the seven false-RED on correct prose.
 
     The nested-union assertion carries the PARSE-not-split property, and it is asserted on
     ``_union_members`` rather than through the nullability predicate on purpose: routed through the
@@ -1725,8 +1725,8 @@ def test_the_union_walk_reads_a_type_and_not_a_spelling() -> None:
     ``dict[str, int | None]`` can never satisfy the predicate whatever the walk does. An assertion
     that cannot go red is the defect this module exists to remove, so it was moved to where it can.
 
-    Red proof, executed: replace the final ``yield`` with ``.split("|")`` — the strawman the
-    ``_union_members`` docstring names — and this test reddens naming ``dict[str,int|None]``, while
+    Red proof, executed: replace the final ``yield`` with ``.split("|")``, the strawman the
+    ``_union_members`` docstring names, and this test reddens naming ``dict[str,int|None]``, while
     ``test_every_claimed_counter_matches_its_set`` stays GREEN under the same mutation. That green
     is the measurement that this property has no other guard in the module.
     """
@@ -1750,11 +1750,11 @@ def test_an_array_row_is_nullable_by_its_type_not_by_its_container() -> None:
     """An array row admits null or it does not; which array container it uses is not the question.
 
     The row set is pinned equal to the wire's array-typed properties elsewhere, so asking about the
-    container here re-decided a settled question from the spelling — and got it wrong for
+    container here re-decided a settled question from the spelling, and got it wrong for
     ``Sequence[str] | None`` and ``tuple[str, ...] | None``, both of which render as
     ``anyOf[array, null]`` exactly like ``list[str] | None``.
 
-    Red proof, executed: restore the ``list[``-prefix requirement and the THIRD assertion fails —
+    Red proof, executed: restore the ``list[``-prefix requirement and the THIRD assertion fails:
     named precisely, because pytest stops at the first failing assert, so "the third and fourth
     fail" would be a claim about a run nobody has seen. The fourth reddens the same way once the
     third is removed.
@@ -1772,7 +1772,7 @@ def test_the_conformance_tests_partition_into_two_kinds() -> None:
 
     "TEN of the twelve drive ``FastMCP.call_tool``. The other TWO drive a real client" is only
     meaningful while the two kinds are disjoint and together are all of them. Measuring each side
-    independently — which is what stops them being proxies — drops that guarantee: a thirteenth
+    independently, which is what stops them being proxies, drops that guarantee: a thirteenth
     conformance test driving NEITHER, or one converted to drive BOTH, would leave both figures
     describing a set that is no longer a partition, and every claim above would stay green.
 
@@ -1812,8 +1812,8 @@ def test_the_derivation_reader_reads_the_body_it_claims_to() -> None:
 
     (1) A named measure yields its own body, docstring excluded, EVEN when it contains a lambda.
     The old order walked for a lambda first and returned that lambda's body, discarding the very
-    statements a typed-in answer would sit in. (2) A fragment — the shape ``inspect.getsource``
-    hands back for a lambda on a wrapped argument line carrying a ``scope=`` keyword — is still
+    statements a typed-in answer would sit in. (2) A fragment, the shape ``inspect.getsource``
+    hands back for a lambda on a wrapped argument line carrying a ``scope=`` keyword, is still
     read; that repair branch had never been executed by anything. (3) An unreadable measure is an
     error rather than an empty string, so the check cannot silently inspect nothing.
     """
@@ -1831,22 +1831,22 @@ def test_the_derivation_reader_reads_the_body_it_claims_to() -> None:
 
 
 def test_no_claim_hard_codes_its_expectation() -> None:
-    """No claim may spell out the answer it is supposed to derive — in EITHER half.
+    """No claim may spell out the answer it is supposed to derive, in EITHER half.
 
     Checking only the pattern is not enough, and that was settled by execution rather than by
     argument: replacing one claim's derivation with a typed-in answer left every test in this
     module green. A typed-in integer in the MEASURE is the same defect as one in the PATTERN, so
-    the derivation's source is inspected too, in digits AND in words — this prose spells its
+    the derivation's source is inspected too, in digits AND in words, this prose spells its
     numbers as words far more often than as digits, so a digits-only check guards the rarer half.
 
     HOW FAR THIS ACTUALLY REACHES, because the promise above is easy to over-read. It is a
     check on the SPELLING of the answer, one frame deep, and an outside QA measured all three of
     its blind spots: ``lambda: 20 + 2`` passes for an expected 22 (the answer is never spelled),
     ``lambda: _helper()`` passes whatever ``_helper`` returns (only the immediate frame is
-    inspected — 41 of the delivered derivations call a module helper), and a regex may split the
+    inspected, 41 of the delivered derivations call a module helper), and a regex may split the
     literal (``(1[1])`` captures an 11 the skeleton search cannot see). What it does catch is the
     defect it was built for: a bare typed-in answer, in either half. Closing the rest needs a
-    different mechanism, not a wider regex — a claim declaring what it READS, which is separate
+    different mechanism, not a wider regex, a claim declaring what it READS, which is separate
     work recorded as such.
 
     Doubles as the precondition for the rest of the module: a pattern that captures nothing would

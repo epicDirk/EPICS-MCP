@@ -48,11 +48,11 @@ from epics_pv_mcp.services.olog_exceptions import (
 # (disabled / not-found / withheld / success + the conditionally-added note/warnings/attachments/
 # download-sink keys). Every field ABSENT on some return path is typed ``X | None``.
 #
-# WHY the nullability — the canonical statement for every typed output shape in this server;
+# WHY the nullability: the canonical statement for every typed output shape in this server;
 # the other shapes point here instead of repeating it. Measured under standalone fastmcp, and the
 # two halves genuinely differ:
 #
-#   * An ABSENT ``total=False`` key is DROPPED from the wire — NOT emitted as null — and the
+#   * An ABSENT ``total=False`` key is DROPPED from the wire, NOT emitted as null, and the
 #     generated schema carries no ``required``, so a missing key is invisible to a caller. For a
 #     merely-sometimes-absent field the nullable type is therefore SCHEMA HONESTY: the advertised
 #     shape must not claim a type the payload never carries. What enforces it is the conformance
@@ -62,8 +62,8 @@ from epics_pv_mcp.services.olog_exceptions import (
 #     structuredContent against the advertised ``outputSchema``, so a non-nullable annotation on a
 #     field that can be an explicit None earns a real client an ``Output validation error``
 #     instead of an answer.
-#   * The in-process ``FastMCP.call_tool`` shortcut — which MOST conformance tests here use (all
-#     but the discover_pvs and find_channels ones, which drive a real client) — does NOT validate.
+#   * The in-process ``FastMCP.call_tool`` shortcut, which MOST conformance tests here use (all
+#     but the discover_pvs and find_channels ones, which drive a real client), does NOT validate.
 #     A test driving it
 #     therefore cannot see a violation a real client would hit; only a test driving a real
 #     ``fastmcp.Client`` can. That asymmetry is why the static Part B carries the guarantee for the
@@ -81,7 +81,7 @@ from epics_pv_mcp.services.olog_exceptions import (
 #     different wording. Which one bites matters in one case: a tool whose return is NOT an
 #     object (a bare list, say) is wrapped by fastmcp and SKIPS the server-side check, so only
 #     the client-side one fires. Every typed tool here returns a TypedDict, so today the
-#     server-side handler is always the one that speaks — but an assertion on that exact wording
+#     server-side handler is always the one that speaks, but an assertion on that exact wording
 #     is an assumption about the shape of the return, not a universal truth.
 #
 #   * Neither validator sees an ERROR result: a raised tool never reaches the schema check at
@@ -90,14 +90,14 @@ from epics_pv_mcp.services.olog_exceptions import (
 # Superseded by the above: the earlier note that fastmcp "serializes an omitted total=False key as
 # null because convert_result dumps the model WITHOUT exclude_none". That described the
 # SDK-bundled FastMCP 1.0; after the standalone-fastmcp migration there is no model and no
-# model_dump on this path — ``convert_result`` hands the raw dict to ``to_jsonable_python``.
+# model_dump on this path, ``convert_result`` hands the raw dict to ``to_jsonable_python``.
 # The nullability CONCLUSION was right and stands; only the mechanism was wrong.
 #
 # Only fields present on EVERY return path (``enabled`` + each tool's core status/payload fields)
 # stay non-nullable. The nested entry/entries/attachments projections keep ``dict[str, object]``
 # inner shapes (whole-mode vs redacted-mode variance). fastmcp turns these into a typed
 # ``outputSchema`` (``properties``; ``anyOf[T, null]`` for the nullable fields) instead of the bare
-# ``{additionalProperties: true}`` a plain dict yields — provided the tool does not opt out with
+# ``{additionalProperties: true}`` a plain dict yields, provided the tool does not opt out with
 # ``@mcp.tool(output_schema=None)``, which overrides the annotation entirely.
 # mypy --strict checks every ``return {...}`` literal against its declared shape here.
 
@@ -190,7 +190,7 @@ _OLOG_DISABLED_NOTE = (
 )
 # The download/list posture message: raw attachment bytes (and filenames, for a list) are author
 # free text and bypass the dict-based redaction, so they leave ONLY from a declared local sandbox
-# with the explicit opt-in — the same whole-mode threshold as an entry read, plus a second flag.
+# with the explicit opt-in, the same whole-mode threshold as an entry read, plus a second flag.
 _ATTACH_WITHHELD_NOTE = (
     "Attachment bytes are withheld. Raw bytes leave only from a declared local test sandbox "
     "(loopback EPICS_MCP_OLOG_URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA) AND with "
@@ -203,7 +203,7 @@ _ATTACH_LIST_WITHHELD_NOTE = (
     "is a declared local test sandbox (loopback + EPICS_MCP_OLOG_ASSUME_TEST_DATA)."
 )
 # A base64 download is returned IN the tool result (response tokens), so it is capped far below the
-# path-based ceiling (olog_attach_max_bytes) — a large blob must go to a workspace file, not the
+# path-based ceiling (olog_attach_max_bytes), a large blob must go to a workspace file, not the
 # model context. The effective base64 cap is min(this, olog_attach_max_bytes).
 _BASE64_DOWNLOAD_MAX_BYTES = 5 * 1024 * 1024
 
@@ -223,12 +223,12 @@ def _unknown_level_note(client: OlogClient, level: str) -> str | None:
     second when the first is true. This runs ONLY on a genuinely empty result, so the extra
     ``GET /levels`` costs nothing on the path that found something.
 
-    Deliberately makes the WEAKEST claim that is still useful — a statement about the VALUE, never
+    Deliberately makes the WEAKEST claim that is still useful, a statement about the VALUE, never
     about the CAUSE of the emptiness. The stronger wording ("this is 'no such level', NOT 'no
     entries have it'") was wrong in four measured ways, each of which this now avoids:
 
     * **Wildcards are honoured.** ``level="Inf*"`` returns the ``Info`` entries (measured), so a
-      value containing ``*``/``?`` cannot be judged against the name list at all — those parts are
+      value containing ``*``/``?`` cannot be judged against the name list at all, those parts are
       excluded from the verdict and named separately as unchecked.
     * **An OR-ed list is not all-or-nothing.** With ``level="Info,Warnign"`` the search really did
       run on ``Info``; concluding "no such level" over the whole filter is false.
@@ -236,9 +236,9 @@ def _unknown_level_note(client: OlogClient, level: str) -> str | None:
       ``text`` filter can produce the same 0. The note says the value is unconfigured; it does not
       claim that is *why* nothing matched.
     * It is only reached for a genuinely empty RESULT, never an empty PAGE past the end of a
-      paginated set — the caller decides that (see :func:`query_olog_search`).
+      paginated set, the caller decides that (see :func:`query_olog_search`).
 
-    Returns ``None`` when every checkable part IS a configured level — then the result needs no
+    Returns ``None`` when every checkable part IS a configured level, then the result needs no
     annotation. If ``/levels`` itself cannot be read, that is SAID rather than swallowed or raised:
     a failed cross-check must not overturn a search that succeeded (withheld ≠ no), and must not
     silently look like a clean bill of health either."""
@@ -250,7 +250,7 @@ def _unknown_level_note(client: OlogClient, level: str) -> str | None:
     except OlogError as exc:
         return (
             f"Nothing matched. Could not verify whether {level!r} names configured levels "
-            f"({exc}) — Olog returns 0 hits and no error for an unrecognised level, so this "
+            f"({exc}), Olog returns 0 hits and no error for an unrecognised level, so this "
             "result may mean the value does not exist rather than that no entries carry it."
         )
     known = {name.casefold() for name in names}
@@ -263,7 +263,7 @@ def _unknown_level_note(client: OlogClient, level: str) -> str | None:
     note = (
         f"Nothing matched. {parts} {'do' if plural else 'does'} not name a configured level on "
         f"this server (known: {', '.join(names) or 'none'}), and Olog returns 0 hits rather than "
-        f"an error for an unrecognised level — so {'these values' if plural else 'that value'} "
+        f"an error for an unrecognised level, so {'these values' if plural else 'that value'} "
         "matched nothing by construction."
     )
     recognised = [part for part in checkable if part not in unknown]
@@ -275,7 +275,7 @@ def _unknown_level_note(client: OlogClient, level: str) -> str | None:
     if wildcards:
         note += (
             f" {', '.join(map(repr, wildcards))} contains a wildcard, which Olog honours but which "
-            "cannot be checked against the level names — it is not part of this verdict."
+            "cannot be checked against the level names, it is not part of this verdict."
         )
     if not recognised and not wildcards:
         note += " Other filters in this search may account for the empty result as well."
@@ -300,7 +300,7 @@ async def query_olog_search(
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns a structured ``enabled: false``
     result and makes NO network call (no ESS egress). Every returned entry passes the Olog client's
     output projection: redacted against a real server (author dropped, free text withheld), but
-    WHOLE against a declared loopback test sandbox — do NOT assume this layer only ever sees
+    WHOLE against a declared loopback test sandbox, do NOT assume this layer only ever sees
     redacted data (ESS-spec pending; see services.olog_client._project). *offset*
     (Olog wire ``from``) pages past the first *size* results; *sort* orders by create time (``down``
     newest-first default, ``up`` oldest-first). ``total`` is the number of entries returned;
@@ -310,7 +310,7 @@ async def query_olog_search(
     *level* and *title* (OA2/OA5) filter by triage level and title; both are server-honoured and
     case-insensitive (differentially probed 2026-07-19, both controls). A blank value for either is
     refused before any request. Because Olog answers an UNKNOWN level with 0 hits instead of an
-    error, an empty level-filtered result gets a ``note`` saying so (:func:`_unknown_level_note`) —
+    error, an empty level-filtered result gets a ``note`` saying so (:func:`_unknown_level_note`):
     otherwise "this level does not exist" is indistinguishable from "no entries have it". Backs
     ``search_logbook``.
     """
@@ -340,8 +340,8 @@ async def query_olog_search(
             "capped": capped,
         }
         # Only a GENUINELY empty result is worth explaining. An empty PAGE past the end of a
-        # paginated set (offset beyond total_matches) also has no entries, but something DID match
-        # — annotating it would contradict total_matches in the very same payload.
+        # paginated set (offset beyond total_matches) also has no entries, but something DID match,
+        # annotating it would contradict total_matches in the very same payload.
         nothing_matched = not entries and not total_matches
         if level and nothing_matched:
             note = _unknown_level_note(client, level)
@@ -351,7 +351,7 @@ async def query_olog_search(
 
     # Three outcomes, three classes. Collapsing them all into EpicsConnectionError (as this did)
     # tells the caller the service is unreachable when in truth the ARGUMENT was bad or the server
-    # ANSWERED and said no — three different next actions reported as one.
+    # ANSWERED and said no: three different next actions reported as one.
     try:
         return await asyncio.to_thread(_run)
     except TimeWindowFormatError as exc:
@@ -373,7 +373,7 @@ async def query_olog_entry(log_id: str, timeout: float = 5.0) -> OlogEntryResult
     """Return one Olog entry by id (URL+declaration-bound posture). Read-only, config-gated.
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` with
-    ``found: None`` — the plane was NOT checked, mirroring the ``archived: None`` /
+    ``found: None``, the plane was NOT checked, mirroring the ``archived: None`` /
     ``configured: None`` / ``registered: None`` / get_archive_info ``found: None`` siblings
     (S11: this was the lone ``found: False`` among them, a definitive "does not exist" from a
     plane that was never asked). ``found`` is False ONLY for the definitive 404.
@@ -395,7 +395,7 @@ async def query_olog_entry(log_id: str, timeout: float = 5.0) -> OlogEntryResult
     except OlogConnectionError as exc:
         raise EpicsConnectionError(f"Olog: {exc}") from exc
     except OlogError as exc:
-        # S11 §8: the server ANSWERED — an unreadable payload is not an outage (search already
+        # S11 §8: the server ANSWERED, an unreadable payload is not an outage (search already
         # lives this three-way split; see query_olog_search).
         raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
 
@@ -404,7 +404,7 @@ async def query_olog_logbooks(timeout: float = 5.0) -> OlogLogbooksResult:
     """List the valid Olog logbook names. Read-only, config-gated, name-only (owners dropped).
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes no
-    network call. When enabled, returns the logbook NAMES only — each Olog ``owner`` (PII) is
+    network call. When enabled, returns the logbook NAMES only, each Olog ``owner`` (PII) is
     dropped in the client. These names are the valid filter values for
     ``search_logbook(logbooks=…)``. Backs ``list_logbooks``.
     """
@@ -421,13 +421,13 @@ async def query_olog_logbooks(timeout: float = 5.0) -> OlogLogbooksResult:
     except OlogConnectionError as exc:
         raise EpicsConnectionError(f"Olog: {exc}") from exc
     except OlogError as exc:
-        # S11 §8: the server ANSWERED — an unreadable payload is not an outage (search already
+        # S11 §8: the server ANSWERED, an unreadable payload is not an outage (search already
         # lives this three-way split; see query_olog_search).
         raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
 
 
 async def query_olog_tags(timeout: float = 5.0) -> OlogTagsResult:
-    """List the valid Olog tag names. Read-only, config-gated (a ``Tag`` has no owner — PII-free).
+    """List the valid Olog tag names. Read-only, config-gated (a ``Tag`` has no owner, PII-free).
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes no
     network call. These names are the valid filter values for ``search_logbook(tags=…)``. Backs
@@ -446,7 +446,7 @@ async def query_olog_tags(timeout: float = 5.0) -> OlogTagsResult:
     except OlogConnectionError as exc:
         raise EpicsConnectionError(f"Olog: {exc}") from exc
     except OlogError as exc:
-        # S11 §8: the server ANSWERED — an unreadable payload is not an outage (search already
+        # S11 §8: the server ANSWERED, an unreadable payload is not an outage (search already
         # lives this three-way split; see query_olog_search).
         raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
 
@@ -456,11 +456,11 @@ async def query_olog_levels(timeout: float = 5.0) -> OlogLevelsResult:
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes no
     network call. Levels are the logbook's TRIAGE axis and are site-configurable, so the valid
-    values can only come from the server — they are the valid values for
+    values can only come from the server, they are the valid values for
     ``search_logbook(level=…)`` and ``create_log_entry(level=…)``. ``default_level`` is the one a
     create uses when none is given; it is ``None`` with an explaining ``note`` whenever the server
     does not state it unambiguously
-    (missing/unreadable flag, none marked, or more than one marked — the server's own seed data has
+    (missing/unreadable flag, none marked, or more than one marked, the server's own seed data has
     two). Backs ``list_log_levels``.
     """
     cfg = get_config()
@@ -489,7 +489,7 @@ async def query_olog_levels(timeout: float = 5.0) -> OlogLevelsResult:
     except OlogConnectionError as exc:
         raise EpicsConnectionError(f"Olog: {exc}") from exc
     except OlogError as exc:
-        # S11 §8: the server ANSWERED — an unreadable payload is not an outage (search already
+        # S11 §8: the server ANSWERED, an unreadable payload is not an outage (search already
         # lives this three-way split; see query_olog_search).
         raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
 
@@ -500,17 +500,17 @@ def _olog_error_code(exc: BaseException) -> str:
     An :class:`EpicsError` carries its own code; an Olog connection/response error maps to a
     discrete token (the served HTTP status for a response error, when known); any other
     :class:`OlogError` carries its code as a class attribute; anything else is INTERNAL. Never the
-    exception message — a write FAILED audit must stay metadata-only (SEC-5), which is also why this
+    exception message, a write FAILED audit must stay metadata-only (SEC-5), which is also why this
     stays freetext-free now that the read path classifies errors with it.
 
     ORDER MATTERS. The ``OlogError`` branch is LAST because ``OlogConnectionError`` and
     ``OlogResponseError`` are themselves OlogError subclasses: hoisting it would swallow both
     existing branches, and with them the HTTP-status resolution. (Their class attributes carry the
     same codes as a backstop, so a future reorder degrades to the honest token rather than to
-    INTERNAL — but the status refinement lives only here.)
+    INTERNAL, but the status refinement lives only here.)
 
     Why the branch exists at all: every REFUSAL in ``olog_exceptions`` used to land on INTERNAL,
-    which reads as a transient fault and invites a retry — each attempt burning a rate token and
+    which reads as a transient fault and invites a retry, each attempt burning a rate token and
     writing a FAILED audit line for a write that never happened."""
     if isinstance(exc, EpicsError):
         return exc.error_code
@@ -525,18 +525,18 @@ def _olog_error_code(exc: BaseException) -> str:
 
 
 def _reject_unknown_level(client: OlogClient, level: str | None, caller: str) -> None:
-    """Refuse a ``level`` the server does not know — the write-side counterpart to the logbook/tag
+    """Refuse a ``level`` the server does not know, the write-side counterpart to the logbook/tag
     existence checks in :func:`query_olog_update`.
 
     Olog validates none of the three on a write: an unknown level is stored verbatim and HTTP 200
     comes back, after which the entry matches no level filter at all (``level="Urgnet"``). A BLANK
-    level is worse than unknown — it is accepted and silently CLEARS the field — so it is refused
+    level is worse than unknown, it is accepted and silently CLEARS the field, so it is refused
     separately, before any request, and with its own message.
 
     Exact string match, deliberately. Neither read-side helper fits here:
     :func:`~epics_pv_mcp.services.olog_client.split_level_values` is search semantics (OR-split on
     ``[|,;]`` + trim) and :func:`_unknown_level_note` matches casefold and tolerates wildcards. A
-    level being WRITTEN is a scalar — ``"Info,Problem"`` and ``" Info"`` are values the server would
+    level being WRITTEN is a scalar, ``"Info,Problem"`` and ``" Info"`` are values the server would
     store literally and no filter would ever find again.
 
     The listing is fail-closed by construction (``list_log_levels`` raises rather than collapsing to
@@ -546,14 +546,14 @@ def _reject_unknown_level(client: OlogClient, level: str | None, caller: str) ->
         return
     if not level.strip():
         raise EpicsError(
-            f"{caller}: level must not be empty — Olog accepts a blank level and would store it, "
+            f"{caller}: level must not be empty: Olog accepts a blank level and would store it, "
             "silently clearing the entry's triage level",
             error_code="INVALID_INPUT",
         )
     known = client.list_log_levels()[0]
     if level not in known:
         raise EpicsError(
-            f"{caller}: unknown level {level!r} — Olog does not validate the level on a write, so "
+            f"{caller}: unknown level {level!r}: Olog does not validate the level on a write, so "
             "the entry would be stored with a value that no level filter matches. Known levels: "
             f"{', '.join(known)}",
             error_code="INVALID_INPUT",
@@ -577,12 +577,12 @@ async def query_olog_create(
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes NO
     network call. When enabled, the CHEAP :class:`~epics_pv_mcp.olog_safety.OlogWriteGate` stages
-    (env gate + test-server URL boundary + logbook allowlist) run BEFORE any I/O — such a denial
+    (env gate + test-server URL boundary + logbook allowlist) run BEFORE any I/O, such a denial
     raises (audited DENY) before a client is even constructed. The two REMAINING stages are later:
     since the level check was added, a ``GET /levels`` (only when a ``level`` is passed) and the
     attachment ``stat`` both happen BEFORE the attachment size cap and the rate token, so a denial
-    from *those* two does follow some I/O. That ordering is deliberate — a bad level must not cost a
-    rate token — and is spelled out at the call sites below. The full server response
+    from *those* two does follow some I/O. That ordering is deliberate, a bad level must not cost a
+    rate token, and is spelled out at the call sites below. The full server response
     is run through the read redaction before return (owner dropped, title/description withheld). A
     completed write is audited ALLOW; a write that passes the gate but fails at the HTTP layer is
     audited FAILED (no entry id/owner) and re-raised. Backs ``create_log_entry`` / ``reply_to_log``.
@@ -592,7 +592,7 @@ async def query_olog_create(
     ``![](attachment/<uuid>)`` markup is appended to the description. Attachment SIZES are summed
     (``stat``, not read) and fed to the gate's size cap BEFORE any bytes are read; the UUIDs are
     minted by *id_factory* (injected for deterministic tests). ``attachments_uploaded`` echoes the
-    ``{id[, filename]}`` of each upload (filename only in whole-mode — it is author free text).
+    ``{id[, filename]}`` of each upload (filename only in whole-mode, it is author free text).
     """
     cfg = get_config()
     if not cfg.olog_url:
@@ -602,7 +602,7 @@ async def query_olog_create(
 
     def _run() -> OlogCreateResult:
         gate = get_olog_safety()
-        # Cheap gate checks FIRST — env / URL boundary / logbook allowlist — BEFORE any filesystem
+        # Cheap gate checks FIRST, env / URL boundary / logbook allowlist, BEFORE any filesystem
         # I/O, so a denied write never even stats the attachment paths (no file-existence oracle for
         # a caller the gate rejects). A denial is audited DENY and propagates unchanged.
         gate.check_write_preconditions(logbooks, caller=caller)
@@ -610,7 +610,7 @@ async def query_olog_create(
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=auth)
         # Level vocabulary BEFORE the rate token, mirroring the update path (see the ordering note
         # there): a typo must not cost a token. This is the ONE network read that happens before the
-        # full gate, and only when a level was actually passed — a create that takes the server
+        # full gate, and only when a level was actually passed, a create that takes the server
         # default still makes exactly one HTTP call. It stays BEHIND check_write_preconditions (a
         # caller the gate rejects gets no vocabulary oracle) and AHEAD of plan_attachments (no path
         # is stat'ed for a write that a bad level already doomed), so both properties the comment
@@ -619,11 +619,11 @@ async def query_olog_create(
         # Now resolve + SIZE attachments (stat, NO read yet) so the size cap can refuse an
         # over-limit
         # upload before any bytes are materialised (anti-DoS). A bad path / bad base64 raises
-        # EpicsError(INVALID_INPUT) here — before the full gate, and still before any file READ.
+        # EpicsError(INVALID_INPUT) here, before the full gate, and still before any file READ.
         plan = plan_attachments(attachments, embed_image_base64, id_factory)
         # Full gate: re-runs the (idempotent) cheap checks, then the attachment size cap and the
         # rate
-        # token — the token is taken only here, on the success path, once. File READ + network
+        # token, the token is taken only here, on the success path, once. File READ + network
         # follow.
         gate.check_write_allowed(logbooks, caller=caller, attachment_bytes=plan.total_bytes)
         uploads = (
@@ -683,7 +683,7 @@ async def query_olog_create(
     except OlogConnectionError as exc:
         raise EpicsConnectionError(f"Olog: {exc}") from exc
     except OlogError as exc:
-        # S11 §8: the server ANSWERED — an unreadable payload is not an outage (search already
+        # S11 §8: the server ANSWERED, an unreadable payload is not an outage (search already
         # lives this three-way split; see query_olog_search).
         raise EpicsError(f"Olog: {exc}", error_code=_olog_error_code(exc)) from exc
 
@@ -701,7 +701,7 @@ async def query_olog_add_attachment(
     Default-disabled (no ``EPICS_MCP_OLOG_URL`` → ``enabled: false``, no network). WHOLE-MODE ONLY:
     the server's ``POST /logs/multipart`` runs a DESTRUCTIVE ``updateLog`` (it prunes any attachment
     not resubmitted and overwrites title/body/logbooks/tags/level/properties), so a safe attach must
-    round-trip the target entry's FULL content — readable only whole (loopback +
+    round-trip the target entry's FULL content, readable only whole (loopback +
     ``EPICS_MCP_OLOG_ASSUME_TEST_DATA``). Against a redacted server it is refused. The write goes
     through the SAME :class:`~epics_pv_mcp.olog_safety.OlogWriteGate` as create, with the allowlist
     keyed on the TARGET entry's own logbooks (read first). Backs ``add_log_attachment``.
@@ -724,15 +724,15 @@ async def query_olog_add_attachment(
     def _run() -> OlogAddAttachmentResult:
         auth = basic_auth_header(cfg.olog_write_user, cfg.olog_write_password)
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=auth)
-        # Whole-mode FIRST — before any read or write. It is required for the round-trip source AND
+        # Whole-mode FIRST, before any read or write. It is required for the round-trip source AND
         # implies the loopback write-URL boundary; a redacted/remote server is refused structurally.
         #
         # PRE-GATE refusal, and deliberately NOT audited (write-gate contract point 4). The audit
-        # promise is scoped to *gate verdicts and writes that reach the I/O*; this is neither — the
+        # promise is scoped to *gate verdicts and writes that reach the I/O*; this is neither, the
         # gate below has not been consulted, no rate token exists, no write was attempted. Calling
         # the gate's _audit_deny from here would also emit a DENY line from OUTSIDE the two gate
         # modules, i.e. outside the reach of the drift guard in tests/test_write_gate_contract.py
-        # that counts them — a new blind spot dressed up as a fix. What the contract DOES require is
+        # that counts them, a new blind spot dressed up as a fix. What the contract DOES require is
         # that this refusal not masquerade as an audited gate DENY, hence its own error code
         # (OLOG_WHOLE_MODE_REQUIRED via OlogWholeModeRequiredError, a subclass of
         # OlogWriteDeniedError so existing handlers still catch it).
@@ -740,8 +740,8 @@ async def query_olog_add_attachment(
             raise OlogWholeModeRequiredError(
                 "Olog write refused: add_log_attachment needs a declared local test sandbox "
                 "(loopback EPICS_MCP_OLOG_URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA). Attaching to an "
-                "existing entry must round-trip its full content — the server's update prunes any "
-                "attachment or field not resubmitted — which is withheld against a redacted server."
+                "existing entry must round-trip its full content, the server's update prunes any "
+                "attachment or field not resubmitted, which is withheld against a redacted server."
             )
         raw = client.get_raw_entry(log_id)
         if raw is None:
@@ -815,7 +815,7 @@ async def query_olog_update(
     Default-disabled (no ``EPICS_MCP_OLOG_URL`` → ``enabled: false``, no network). WHOLE-MODE ONLY
     for the same structural reason as ``add_log_attachment``: the server's update is DESTRUCTIVE (it
     prunes any attachment not resubmitted and NULLS any field not sent), so a safe edit must
-    round-trip the target entry's FULL content — readable only whole (loopback +
+    round-trip the target entry's FULL content, readable only whole (loopback +
     ``EPICS_MCP_OLOG_ASSUME_TEST_DATA``). Against a redacted server it is refused.
 
     ``None`` means "leave unchanged"; only the fields passed are overlaid. The write goes
@@ -848,7 +848,7 @@ async def query_olog_update(
         )
     if title is not None and not title.strip():
         raise EpicsError(
-            "update_log_entry: title must not be empty — unlike create, Olog's update does NOT "
+            "update_log_entry: title must not be empty, unlike create, Olog's update does NOT "
             "reject an empty title, so the entry would silently lose it",
             error_code="INVALID_INPUT",
         )
@@ -857,16 +857,16 @@ async def query_olog_update(
     def _run() -> OlogUpdateResult:
         auth = basic_auth_header(cfg.olog_write_user, cfg.olog_write_password)
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=auth)
-        # Whole-mode FIRST — before any read or write. Required for the round-trip source AND it
+        # Whole-mode FIRST, before any read or write. Required for the round-trip source AND it
         # implies the loopback write-URL boundary; a redacted/remote server is refused structurally.
-        # PRE-GATE and un-audited on purpose, with its own error code — same reasoning as the twin
+        # PRE-GATE and un-audited on purpose, with its own error code, same reasoning as the twin
         # in query_olog_add_attachment above (write-gate contract point 4).
         if not client.whole_mode:
             raise OlogWholeModeRequiredError(
                 "Olog write refused: update_log_entry needs a declared local test sandbox "
                 "(loopback EPICS_MCP_OLOG_URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA). Editing an entry "
-                "must round-trip its full content — the server's update prunes any attachment and "
-                "nulls any field not resubmitted — which is withheld against a redacted server."
+                "must round-trip its full content, the server's update prunes any attachment and "
+                "nulls any field not resubmitted, which is withheld against a redacted server."
             )
         raw = client.get_raw_entry(stripped_id)
         if raw is None:
@@ -880,7 +880,7 @@ async def query_olog_update(
         unsafe = unroundtrippable_attachment_filenames(raw)
         if unsafe:
             raise EpicsError(
-                f"update_log_entry: entry {stripped_id} cannot be edited safely — its attachments "
+                f"update_log_entry: entry {stripped_id} cannot be edited safely, its attachments "
                 f"({', '.join(unsafe)}) would not survive the round-trip, because Olog matches "
                 "attachments by filename (case-insensitively) and would silently drop the "
                 "duplicate/unnamed one.",
@@ -898,7 +898,7 @@ async def query_olog_update(
                 "update_log_entry: an entry must stay in at least one logbook",
                 error_code="INVALID_INPUT",
             )
-        # ...and the union of before+after (what the allowlist must cover — a move writes to both).
+        # ...and the union of before+after (what the allowlist must cover, a move writes to both).
         gate_logbooks = sorted(set(current_logbooks) | set(effective_logbooks))
         raw_level = raw.get("level")
         entry_level = raw_level if isinstance(raw_level, str) else None
@@ -908,13 +908,13 @@ async def query_olog_update(
         # first, then the name validation reads, then the rate token last.
         gate.check_write_preconditions(gate_logbooks, caller=caller)
         # Olog's update does NOT validate logbook/tag existence (create does) or the level (neither
-        # path does) — an unknown name would be stored silently as a phantom reference and an
+        # path does), an unknown name would be stored silently as a phantom reference and an
         # unknown level as a value no filter matches, so all three are checked here.
         if logbooks is not None:
             unknown = sorted(set(logbooks) - set(client.list_logbooks()))
             if unknown:
                 raise EpicsError(
-                    f"update_log_entry: unknown logbook(s) {', '.join(unknown)} — Olog's update "
+                    f"update_log_entry: unknown logbook(s) {', '.join(unknown)}: Olog's update "
                     "would store them silently as phantom references.",
                     error_code="INVALID_INPUT",
                 )
@@ -922,7 +922,7 @@ async def query_olog_update(
             unknown_tags = sorted(set(tags) - set(client.list_tags()))
             if unknown_tags:
                 raise EpicsError(
-                    f"update_log_entry: unknown tag(s) {', '.join(unknown_tags)} — Olog's update "
+                    f"update_log_entry: unknown tag(s) {', '.join(unknown_tags)}: Olog's update "
                     "would store them silently as phantom references.",
                     error_code="INVALID_INPUT",
                 )
@@ -987,14 +987,14 @@ async def query_olog_download(
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` +
     ``downloaded: false`` and makes NO network call. Bytes leave ONLY from a declared local sandbox
-    (whole-mode) AND with the explicit ``EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD`` opt-in —
+    (whole-mode) AND with the explicit ``EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD`` opt-in:
     otherwise
     the result is ``withheld: true`` and NO byte fetch happens (the posture is checked BEFORE the
     request; the client's :meth:`~.OlogClient._require_attachment_bytes_allowed` is a further
-    backstop). Identify the attachment by ``(log_id + filename)`` — the primary route — or by
+    backstop). Identify the attachment by ``(log_id + filename)``, the primary route, or by
     ``attachment_id`` (the by-id route an inline image uses). Bytes cross the MCP boundary either
     written to ``output_path`` (a NEW workspace file, ``EPICS_MCP_ALLOWED_ROOTS``-checked) or, with
-    ``as_base64=true``, base64-encoded in the result (small files only — the payload is response
+    ``as_base64=true``, base64-encoded in the result (small files only, the payload is response
     tokens). Backs ``download_log_attachment``.
     """
     if not filename and not attachment_id:
@@ -1011,7 +1011,7 @@ async def query_olog_download(
         )
     if as_base64 and output_path:
         # Contradictory sinks: base64 would silently win (the elif below never runs) and the
-        # smaller base64 cap would apply — an output_path handover for a >5 MiB file would then
+        # smaller base64 cap would apply, an output_path handover for a >5 MiB file would then
         # fail spuriously. Refuse up front rather than pick one silently.
         raise EpicsError(
             "download takes either output_path or as_base64, not both",
@@ -1023,7 +1023,7 @@ async def query_olog_download(
 
     def _run() -> OlogDownloadResult:
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
-        # Posture FIRST: if raw bytes may not leave, withhold structurally — no byte fetch at all.
+        # Posture FIRST: if raw bytes may not leave, withhold structurally, no byte fetch at all.
         if not client.attachment_bytes_allowed:
             return {
                 "enabled": True,
@@ -1044,7 +1044,7 @@ async def query_olog_download(
             content, server_filename, content_type = client.get_attachment(
                 log_id, filename, max_bytes=max_bytes
             )
-        else:  # unreachable — the outer guards ensure one identity is fully specified
+        else:  # unreachable, the outer guards ensure one identity is fully specified
             raise EpicsError("download identity is incomplete", error_code="INVALID_INPUT")
         result: OlogDownloadResult = {
             "enabled": True,
@@ -1057,7 +1057,7 @@ async def query_olog_download(
             result["content_base64"] = base64.b64encode(content).decode("ascii")
         elif output_path is not None:
             result["output_path"] = write_download(output_path, content)
-        else:  # unreachable — guarded above
+        else:  # unreachable, guarded above
             raise EpicsError("download needs output_path or as_base64", error_code="INVALID_INPUT")
         return result
 
@@ -1114,9 +1114,9 @@ async def query_olog_list_attachments(
                 "attachments": attachments,
                 "attachment_count": len(attachments),
             }
-        # Redacted mode: no raw list — only the synthesised count; filenames withheld. entry is an
+        # Redacted mode: no raw list, only the synthesised count; filenames withheld. entry is an
         # untyped dict, so narrow the count to int|None at runtime (a non-int would be a projection
-        # bug — surface None, not a wrong-typed value).
+        # bug, surface None, not a wrong-typed value).
         raw_count = entry.get("attachment_count")
         return {
             "enabled": True,
