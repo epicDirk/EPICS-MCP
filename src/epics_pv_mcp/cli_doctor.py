@@ -102,7 +102,7 @@ def _render(report: DoctorReport) -> str:
     olog_freetext = (
         "withheld"
         if report.privacy.olog_freetext_withheld
-        else "FULL (declared local test data — ESS-spec pending)"
+        else "FULL (declared local test data, ESS-spec pending)"
     )
     lines.append(f"  Olog free-text:     {olog_freetext}")
     lines.append("")

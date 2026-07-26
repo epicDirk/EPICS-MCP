@@ -1321,7 +1321,7 @@ def test_cli_reports_full_olog_freetext_for_a_declared_sandbox(
     )
     cli_doctor.main([])
     out = capsys.readouterr().out
-    assert "Olog free-text:     FULL (declared local test data — ESS-spec pending)" in out
+    assert "Olog free-text:     FULL (declared local test data, ESS-spec pending)" in out
 
 
 def test_cli_bad_arg_exits_two() -> None:
