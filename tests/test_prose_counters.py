@@ -42,12 +42,14 @@ import functools
 import inspect
 import json
 import re
+import sys
 import textwrap
 from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -85,19 +87,50 @@ _WATCHED: tuple[tuple[str, Path], ...] = (
 
 @dataclass(frozen=True)
 class _Claim:
-    """A phrase that names a size, and the set that decides what the size is."""
+    """A phrase that names a size, the set that decides the size, and WHICH SOURCES that set is.
+
+    ``reads`` is the field this guard was missing, and its absence was the root of every stand-in
+    measure an outside QA found here: a claim held ``(label, pattern, callable)``, the measure was
+    an opaque thunk returning a number, and the only structural check on it searched the derivation
+    for THE ANSWER — the one property that says nothing about which set was read. The cheapest
+    expression that happens to answer correctly today was therefore always admissible.
+
+    THE VOCABULARY, in full, because a declaration nobody can read is a comment:
+
+    * ``"…/name.py"`` — a source file the measure must hand to ``_parsed``. Matched on a
+      path-separator boundary, never as a bare suffix: ``"server.py"`` would otherwise be satisfied
+      by parsing ``tests/test_server.py``. Spelled the way ``_WATCHED`` spells its labels.
+    * ``"_SOME_CONSTANT"`` — a name the measure must read off the ``test_server`` module.
+    * ``"__dict__"`` — the measure scans that module's NAMESPACE rather than naming a constant,
+      which is what a suffix scan over ``vars(ts)`` does. A deliberately weaker declaration, and it
+      says so by being a different word.
+
+    WHAT ``reads`` DOES AND DOES NOT PROVE. Traced, it establishes that the measure touched the
+    object the claim names. It does not establish that the SENTENCE means that object — that stays a
+    human reading — and it does not establish that the answer DEPENDS on what was touched: a measure
+    could read a constant and ignore it. Both limits are recorded in ``docs/known-limits.md``.
+    """
 
     label: str
     phrase: re.Pattern[str]
     measure: Callable[[], int]
+    reads: tuple[str, ...]
     scope: str = ""
 
     def applies_to(self, block: ProseBlock) -> bool:
         return not self.scope or block.qualname == self.scope
 
 
-def _claim(label: str, pattern: str, measure: Callable[[], int], scope: str = "") -> _Claim:
-    return _Claim(label, re.compile(pattern, re.IGNORECASE), measure, scope)
+def _claim(
+    label: str,
+    pattern: str,
+    measure: Callable[[], int],
+    *,
+    reads: tuple[str, ...],
+    scope: str = "",
+) -> _Claim:
+    """*reads* is keyword-only and REQUIRED, so a new claim cannot be added without declaring it."""
+    return _Claim(label, re.compile(pattern, re.IGNORECASE), measure, reads, scope)
 
 
 def _derivation_source(measure: Callable[[], int]) -> str:
@@ -146,6 +179,142 @@ def _derivation_source(measure: Callable[[], int]) -> str:
         if isinstance(inner, ast.Lambda):
             return ast.unparse(inner.body)
     return source
+
+
+# --- the provenance tracer --------------------------------------------------------------------
+
+
+class _SourceRecorder:
+    """A DELEGATING stand-in for the ``test_server`` module that records every name read off it.
+
+    ``__getattribute__`` and not ``__getattr__``, and that is a measurement rather than a
+    preference: ``vars(obj)`` reads ``obj.__dict__`` directly and never reaches ``__getattr__``, so
+    a ``__getattr__`` proxy handed ``_always_present_constants`` its own instance attributes instead
+    of the module namespace. Measured, the twelve ``*_ALWAYS_PRESENT`` constants then counted as 0
+    and the subtraction derived from them as -2 — a tracer that changes the answer it is watching is
+    worse than no tracer, because its verdict looks like a finding.
+
+    It delegates rather than stubs for a related reason: ``_none_valued`` iterates the mapping it is
+    handed, so a stub would raise where the real module measures.
+    """
+
+    def __init__(self, module: ModuleType, seen: set[str]) -> None:
+        object.__setattr__(self, "_module", module)
+        object.__setattr__(self, "_seen", seen)
+
+    def __getattribute__(self, name: str) -> Any:
+        module = object.__getattribute__(self, "_module")
+        object.__getattribute__(self, "_seen").add(name)
+        return getattr(module, name)
+
+
+def _memoized_helpers() -> tuple[Any, ...]:
+    """Every memoized helper in this module, DISCOVERED rather than listed.
+
+    A hand-kept list would blind the tracer the day someone adds a helper and forgets to extend it —
+    and noticing a measure that reads nothing is the tracer's entire job. Discovery also keeps the
+    count out of the prose, which matters here: this file is deliberately unwatched, so a number
+    written into it rots exactly the way the numbers it guards do.
+
+    WHICH helpers this actually protects, measured rather than assumed: the ones BETWEEN a claim and
+    the two seams. ``_parsed`` itself is not among them — the tracer replaces it with a wrapper that
+    records the path BEFORE delegating, so a warm ``_parsed`` still reports its file. Hiding
+    ``_parsed`` from this scan therefore changes nothing (probed), while hiding an intermediate such
+    as ``_tools_declaring_parameter`` makes the second claim that uses it return a cached answer
+    having touched nothing at all, and the tracer says so.
+    """
+    return tuple(
+        value
+        for value in vars(sys.modules[__name__]).values()
+        if callable(value) and hasattr(value, "cache_clear")
+    )
+
+
+#: Names a measure reads only as a side effect of AST-parsing a module, never as a source itself.
+_TRACE_ARTEFACTS: frozenset[str] = frozenset({"__file__"})
+
+
+def _trace_measure(measure: Callable[[], int]) -> tuple[int, frozenset[str], frozenset[str]]:
+    """Run *measure* with this module's two bottlenecks recorded; report what it touched.
+
+    TWO SEAMS ARE ENOUGH, and that is a measured property of this module rather than a hope:
+    ``_parsed`` is the only file reader in it (``test_the_tracer_can_see_every_source`` asserts
+    exactly that, so the precondition travels with the tracer), and every constant arrives through
+    the ``test_server`` module object. Should either stop holding, the tracer goes blind — which is
+    why the assertion is a test and not a comment.
+
+    Every memoized helper is cleared first and afterwards. A measure whose answer is already cached
+    touches nothing at all, so a tracer reading warm caches would report every claim as reading
+    nothing — green, and about as informative as a coin.
+    """
+    module = sys.modules[__name__]
+    paths: set[str] = set()
+    attributes: set[str] = set()
+    real_parsed = _parsed
+
+    def recording_parsed(path: Path) -> ast.Module:
+        paths.add(Path(path).as_posix())
+        return real_parsed(path)
+
+    helpers = _memoized_helpers()
+    try:
+        for helper in helpers:
+            helper.cache_clear()
+        with pytest.MonkeyPatch.context() as patcher:
+            patcher.setattr(module, "_parsed", recording_parsed)
+            patcher.setattr(module, "ts", _SourceRecorder(ts, attributes))
+            answer = measure()
+    finally:
+        for helper in helpers:
+            helper.cache_clear()
+    return answer, frozenset(paths), frozenset(attributes)
+
+
+def _provenance_faults(claim: _Claim) -> list[str]:
+    """Where *claim*'s declared sources and the sources it actually touches disagree.
+
+    BOTH DIRECTIONS for the module attributes, and the second one is what keeps ``reads`` a
+    declaration rather than a lower bound: a measure free to read an extra constant without saying
+    so is precisely the "cheapest expression that answers correctly today" this field exists to
+    stop.
+
+    Asymmetric on purpose, because the two seams differ in what they can resolve:
+
+    * ``test_server`` names are compared for EQUALITY — the recorder sees each name separately.
+    * FILES are checked in one direction only. Two measures reach their file through
+      ``_typed_dict_fields``, which parses the whole package, so "this file was parsed" cannot be
+      told apart from "some file in ``src`` was parsed". Tightening that needs a third recorder over
+      the index's keys; until then it is written down in ``docs/known-limits.md`` rather than
+      implied away here.
+
+    FIRST it checks that the recorder did not change the measurement, and that check is here
+    because it was needed: the first recorder written for this used ``__getattr__``, ``vars(ts)``
+    never reached it, and the twelve ``*_ALWAYS_PRESENT`` constants traced as 0. A trace of a
+    different computation than the guard checks is not evidence about the guard — and it fails
+    towards accusing innocent claims, which is the worse direction.
+    """
+    untraced = claim.measure()
+    traced, paths, attributes = _trace_measure(claim.measure)
+    declared_files = {entry for entry in claim.reads if entry.endswith(".py")}
+    declared_names = set(claim.reads) - declared_files
+    observed_names = attributes - _TRACE_ARTEFACTS
+
+    faults = [
+        f"the recorders changed the measurement ({traced} traced versus {untraced} untraced), so "
+        "the trace describes a different computation than the one the guard checks"
+    ] * (traced != untraced)
+    faults += [
+        f"declares the source file {entry!r}, which the measure never parsed"
+        for entry in sorted(declared_files)
+        if not any(path == entry or path.endswith(f"/{entry}") for path in paths)
+    ]
+    faults += [
+        f"reads ts.{name} without declaring it" for name in sorted(observed_names - declared_names)
+    ]
+    faults += [
+        f"declares ts.{name} but never reads it" for name in sorted(declared_names - observed_names)
+    ]
+    return faults
 
 
 # --- the measurements -------------------------------------------------------------------------
@@ -658,8 +827,14 @@ def _size_of(constant: str) -> Callable[[], int]:
 
 
 def _mapped_field_claims() -> tuple[_Claim, ...]:
+    """One claim per row, each DECLARING the constant it measures — generated, not typed out.
+
+    The declaration comes from the same row as the measure, so the two cannot drift apart. That is
+    the one place in this table where generating ``reads`` is right rather than circular: the row
+    IS the authored statement, and it is authored once instead of eleven times.
+    """
     return tuple(
-        _claim(f"{constant} size", _MAPPED, _size_of(constant), scope=test)
+        _claim(f"{constant} size", _MAPPED, _size_of(constant), reads=(constant,), scope=test)
         for test, constant in _MAPPED_FIELD_CLAIMS
     )
 
@@ -670,66 +845,81 @@ _CLAIMS: tuple[_Claim, ...] = (
         "typed tools (recursive traversal)",
         r"traversal of all (\w+) schemas",
         lambda: len(ts._TYPED_OUTPUT_TOOLS),
+        reads=("_TYPED_OUTPUT_TOOLS",),
     ),
     _claim(
         "typed tools (recursive walk)",
         r"walk of all (\w+) typed schemas",
         lambda: len(ts._TYPED_OUTPUT_TOOLS),
+        reads=("_TYPED_OUTPUT_TOOLS",),
     ),
     _claim(
         "typed tools (scope note)",
         rf"properties of the (\w+) tools in {_TYPED}",
         lambda: len(ts._TYPED_OUTPUT_TOOLS),
+        reads=("_TYPED_OUTPUT_TOOLS",),
     ),
     _claim(
         "typed tools (scan note)",
         r"a scan of all (\w+) schemas",
         lambda: len(ts._TYPED_OUTPUT_TOOLS),
+        reads=("_TYPED_OUTPUT_TOOLS",),
     ),
     # --- family 2: the untyped remainder --------------------------------------------------------
     _claim(
         "untyped remainder",
         r"list fields of the (\w+) tools that are not typed yet",
         lambda: _full_lane_tools() - len(ts._TYPED_OUTPUT_TOOLS),
+        reads=("_TYPED_OUTPUT_TOOLS", "server.py", "display_tools.py"),
     ),
     # --- family 3: the rows of _ALWAYS_PRESENT_BY_TOOL and the twelve constants ------------------
     _claim(
         "explicit rows",
         r"the (\w+) explicit rows point straight at",
         lambda: len(ts._ALWAYS_PRESENT_BY_TOOL) - len(ts._OLOG_ALWAYS_PRESENT),
+        reads=("_ALWAYS_PRESENT_BY_TOOL", "_OLOG_ALWAYS_PRESENT"),
     ),
     _claim(
         "static-check constants",
         r"(\w+) of the \w+ are consulted only to",
         lambda: _always_present_constants() - _runtime_bound_constants(),
+        reads=("__dict__", "tests/test_server.py"),
     ),
     _claim(
         "always-present constants",
         r"\w+ of the (\w+) are consulted only to",
         _always_present_constants,
+        reads=("__dict__",),
     ),
     _claim(
         "runtime-bound constants",
         r"The remaining (\w+), _DISCOVER_PVS_ALWAYS_PRESENT",
         _runtime_bound_constants,
+        reads=("tests/test_server.py",),
     ),
     _claim(
         "in-process conformance tests",
         r"(\w+) of the \w+ drive ``FastMCP.call_tool``",
         _in_process_conformance_tests,
+        reads=("tests/test_server.py",),
     ),
     _claim(
-        "conformance tests", r"\w+ of the (\w+) drive ``FastMCP.call_tool``", _conformance_tests
+        "conformance tests",
+        r"\w+ of the (\w+) drive ``FastMCP.call_tool``",
+        _conformance_tests,
+        reads=("tests/test_server.py",),
     ),
     _claim(
         "real-client conformance tests",
         r"The other (\w+), test_discover_pvs",
         _real_client_conformance_tests,
+        reads=("tests/test_server.py",),
     ),
     _claim(
         "tools those ten cover",
         r"of the (\w+) tools THOSE TEN cover",
         lambda: len(_tools_named_by_in_process_tests()),
+        reads=("_TYPED_OUTPUT_TOOLS", "tests/test_server.py"),
     ),
     # --- family 4: the element-schema split ------------------------------------------------------
     # ALIASING versus ADVERTISED, and the two halves genuinely differ. The shared-dict note is
@@ -740,32 +930,50 @@ _CLAIMS: tuple[_Claim, ...] = (
         "string-item rows (shared-dict note)",
         r"silently move (\w+) \(resp",
         lambda: _rows_sharing(ts._STRING_ITEMS),
+        reads=("_OUTPUT_ARRAY_ITEMS", "_STRING_ITEMS"),
     ),
     _claim(
         "opaque-item rows (shared-dict note)",
         r"silently move \w+ \(resp\. (\w+)\) rows",
         lambda: _rows_sharing(ts._OPAQUE_OBJECT_ITEMS),
+        reads=("_OUTPUT_ARRAY_ITEMS", "_OPAQUE_OBJECT_ITEMS"),
     ),
     _claim(
         "string-item rows",
         r"most for the (\w+) rows carrying",
         lambda: _rows_advertising(ts._STRING_ITEMS),
+        reads=("_OUTPUT_ARRAY_ITEMS", "_STRING_ITEMS"),
     ),
     _claim(
         "opaque-item rows",
         r"the other (\w+) rows are",
         lambda: _rows_advertising(ts._OPAQUE_OBJECT_ITEMS),
+        reads=("_OUTPUT_ARRAY_ITEMS", "_OPAQUE_OBJECT_ITEMS"),
     ),
     # --- family 5: the declared arrays -----------------------------------------------------------
-    _claim("declared arrays", r"of the (\w+) declared arrays", lambda: len(ts._OUTPUT_ARRAY_ITEMS)),
-    _claim("nullable arrays", r"(\w+) of the \w+ declared arrays", _nullable_array_rows),
+    _claim(
+        "declared arrays",
+        r"of the (\w+) declared arrays",
+        lambda: len(ts._OUTPUT_ARRAY_ITEMS),
+        reads=("_OUTPUT_ARRAY_ITEMS",),
+    ),
+    _claim(
+        "nullable arrays",
+        r"(\w+) of the \w+ declared arrays",
+        _nullable_array_rows,
+        reads=("_OUTPUT_ARRAY_ITEMS", "server.py", "display_tools.py", "tools/archiver.py"),
+    ),
     _claim(
         "nullable arrays (schema-test note)",
         r"the (\w+) rows happen to match",
         _nullable_array_rows,
+        reads=("_OUTPUT_ARRAY_ITEMS", "server.py", "display_tools.py", "tools/archiver.py"),
     ),
     _claim(
-        "shared element schemas", r"The (\w+) element schemas the estate", _distinct_element_schemas
+        "shared element schemas",
+        r"The (\w+) element schemas the estate",
+        _distinct_element_schemas,
+        reads=("_OUTPUT_ARRAY_ITEMS",),
     ),
     # --- the return-path tables the real-client conformance tests drive ---------------------------
     _claim(
@@ -773,6 +981,7 @@ _CLAIMS: tuple[_Claim, ...] = (
         r"discover_pvs emits on EVERY one of its (\w+) return paths",
         lambda: _paths_rows(_DISCOVER_CONFORMANCE),
         scope="<module>",
+        reads=("tests/test_server.py",),
     ),
     # Anchored on the TOOL NAME. One pattern matched BOTH module-level sentences, so the
     # find_channels claim was verified against discover_pvs' table. Equal today — which means the
@@ -782,51 +991,62 @@ _CLAIMS: tuple[_Claim, ...] = (
         r"find_channels emits on EVERY one of its (\w+) return paths",
         lambda: _paths_rows(_FIND_CHANNELS_CONFORMANCE),
         scope="<module>",
+        reads=("tests/test_server.py",),
     ),
     _claim(
         "discover_pvs paths (part A)",
         r"drives ALL (\w+) return paths",
         lambda: _paths_rows(_DISCOVER_CONFORMANCE),
         scope=_DISCOVER_CONFORMANCE,
+        reads=("tests/test_server.py",),
     ),
     _claim(
         "discover_pvs paths (matter)",
         r"ALL (\w+) paths matter",
         lambda: _paths_rows(_DISCOVER_CONFORMANCE),
         scope=_DISCOVER_CONFORMANCE,
+        reads=("tests/test_server.py",),
     ),
     _claim(
         "discover_pvs paths (union)",
         r"The (\w+) paths together",
         lambda: _paths_rows(_DISCOVER_CONFORMANCE),
         scope=_DISCOVER_CONFORMANCE,
+        reads=("tests/test_server.py",),
     ),
     _claim(
         "find_channels paths (modes)",
         r"(\w+) paths . and here the \w+ are two MODES",
         lambda: _paths_rows(_FIND_CHANNELS_CONFORMANCE),
         scope=_FIND_CHANNELS_CONFORMANCE,
+        reads=("tests/test_server.py",),
     ),
     _claim(
         "find_channels paths (rows)",
         r"makes all (\w+) rows load-bearing",
         lambda: _paths_rows(_FIND_CHANNELS_CONFORMANCE),
         scope=_FIND_CHANNELS_CONFORMANCE,
+        reads=("tests/test_server.py",),
     ),
     _claim(
         "find_channels paths (load-bearing)",
         r"the reason all (\w+) paths are load-bearing",
         lambda: _paths_rows(_FIND_CHANNELS_CONFORMANCE),
         scope=_FIND_CHANNELS_CONFORMANCE,
+        reads=("tests/test_server.py",),
     ),
     _claim(
         "find_channels paths (coverage)",
         r"satisfiable by two of the (\w+)",
         lambda: _paths_rows(_FIND_CHANNELS_CONFORMANCE),
         scope=_FIND_CHANNELS_CONFORMANCE,
+        reads=("tests/test_server.py",),
     ),
     _claim(
-        "real-client paths (wire note)", r"drive a real client over (\w+) paths", _return_path_rows
+        "real-client paths (wire note)",
+        r"drive a real client over (\w+) paths",
+        _return_path_rows,
+        reads=("tests/test_server.py",),
     ),
     # find_channels' OWN table, not the union: _return_path_rows raises when the two conformance
     # tables disagree, so binding this find_channels sentence to it would turn a discover_pvs
@@ -835,9 +1055,13 @@ _CLAIMS: tuple[_Claim, ...] = (
         "find_channels return paths (tool description)",
         r"the (\w+) paths differ further",
         lambda: _paths_rows(_FIND_CHANNELS_CONFORMANCE),
+        reads=("tests/test_server.py",),
     ),
     _claim(
-        "find_channels keys", r"permits all (\w+) keys", lambda: len(ts._FIND_CHANNELS_BASE_TYPE)
+        "find_channels keys",
+        r"permits all (\w+) keys",
+        lambda: len(ts._FIND_CHANNELS_BASE_TYPE),
+        reads=("_FIND_CHANNELS_BASE_TYPE",),
     ),
     # --- the per-tool mapped-field lines ---------------------------------------------------------
     *_mapped_field_claims(),
@@ -846,6 +1070,7 @@ _CLAIMS: tuple[_Claim, ...] = (
         "archive-status enrichment fields",
         r"The (\w+) DS-4A/AR-D enrichment fields",
         lambda: _none_valued(ts._ARCHIVE_STATUS_BASE_TYPE),
+        reads=("_ARCHIVE_STATUS_BASE_TYPE",),
     ),
     # The detector cannot see this one: four words sit between the number and its noun and the gap
     # allows two. A claim is matched against the block text directly, so it guards the sentence
@@ -856,58 +1081,69 @@ _CLAIMS: tuple[_Claim, ...] = (
         r"The (\w+) ``object \| None`` enrichment fields",
         lambda: _none_valued(ts._ARCHIVE_STATUS_BASE_TYPE),
         scope="test_is_archived_exposes_typed_output_schema",
+        reads=("_ARCHIVE_STATUS_BASE_TYPE",),
     ),
     _claim(
         "archive-status enrichment fields (runtime note)",
         r"status \+ the (\w+) enrichment fields",
         lambda: _none_valued(ts._ARCHIVE_STATUS_BASE_TYPE),
+        reads=("_ARCHIVE_STATUS_BASE_TYPE",),
     ),
     _claim(
         "appliance topology fields",
         r"the (\w+) object\|None topology fields",
         lambda: _none_valued(ts._GET_APPLIANCE_INFO_BASE_TYPE),
+        reads=("_GET_APPLIANCE_INFO_BASE_TYPE",),
     ),
     _claim(
         "archive-info projection fields",
         r"The (\w+) getPVTypeInfo projection fields",
         lambda: _none_valued(ts._GET_ARCHIVE_INFO_BASE_TYPE),
+        reads=("_GET_ARCHIVE_INFO_BASE_TYPE",),
     ),
     _claim(
         "archive-info type-info fields",
         r"the (\w+) object\|None type-info fields",
         lambda: _none_valued(ts._GET_ARCHIVE_INFO_BASE_TYPE),
+        reads=("_GET_ARCHIVE_INFO_BASE_TYPE",),
     ),
     # --- the same subsets, re-stated in src/ where the values are produced -----------------------
     _claim(
         "enrichment fields (validator note)",
         r"bite on these (\w+) fields",
         lambda: _none_valued(ts._ARCHIVE_STATUS_BASE_TYPE),
+        reads=("_ARCHIVE_STATUS_BASE_TYPE",),
     ),
     _claim(
         "type-info fields (builder note)",
         r"the (\w+) type-info fields appear only",
         lambda: _none_valued(ts._GET_ARCHIVE_INFO_BASE_TYPE),
+        reads=("_GET_ARCHIVE_INFO_BASE_TYPE",),
     ),
     _claim(
         "topology fields (builder note)",
         r"the (\w+) projected topology fields",
         lambda: _none_valued(ts._GET_APPLIANCE_INFO_BASE_TYPE),
+        reads=("_GET_APPLIANCE_INFO_BASE_TYPE",),
     ),
     _claim(
         "topology fields (copy note)",
         r"The (\w+) fields are COPIED UNCONVERTED",
         lambda: _none_valued(ts._GET_APPLIANCE_INFO_BASE_TYPE),
+        reads=("_GET_APPLIANCE_INFO_BASE_TYPE",),
     ),
     _claim(
         "ChannelInfo fields",
         r"``ChannelInfo`` \((\w+) fields, all required\)",
         _channel_info_fields,
+        reads=("services/channelfinder_client.py",),
     ),
     # --- the per-tool tables the Olog and archiver-history claims point at ------------------------
     _claim(
         "olog always-present tools",
         r"uniform over all (\w+) tools",
         lambda: len(ts._OLOG_ALWAYS_PRESENT),
+        reads=("_OLOG_ALWAYS_PRESENT",),
     ),
     # "Pre-fix this tripped on 8/11 tools": the numerator is a frozen historical measurement, but
     # the DENOMINATOR is the live Olog tool count and drifts with every Olog tool added.
@@ -915,11 +1151,13 @@ _CLAIMS: tuple[_Claim, ...] = (
         "olog tools (historical ratio)",
         r"tripped on \d+/(\w+) tools",
         lambda: len(ts._OLOG_ALWAYS_PRESENT),
+        reads=("_OLOG_ALWAYS_PRESENT",),
     ),
     _claim(
         "archiver-history fields",
         r"ArchiverHistoryResult's (\w+) fields",
         lambda: len(ts._ARCHIVER_HISTORY_BASE_TYPE),
+        reads=("_ARCHIVER_HISTORY_BASE_TYPE",),
     ),
     # --- the annotation tables -------------------------------------------------------------------
     # Read from the SIGNATURES, not from the tuple that sits right under the first of these two
@@ -929,62 +1167,131 @@ _CLAIMS: tuple[_Claim, ...] = (
         "title-parameter tools",
         r"The (\w+) tools that carry a parameter",
         lambda: len(_tools_declaring_parameter("title")),
+        reads=("server.py", "display_tools.py"),
     ),
     _claim(
         "title-parameter tools (trap note)",
         r"the (\w+) tools with a ``title`` PARAMETER",
         lambda: len(_tools_declaring_parameter("title")),
+        reads=("server.py", "display_tools.py"),
     ),
     _claim(
         "annotation hint fields",
         r"The (\w+) boolean hint fields",
         lambda: len(ts._ANNOTATION_HINTS),
+        reads=("_ANNOTATION_HINTS",),
     ),
     _claim(
         "annotation hint fields (law)",
         r"with all (\w+) hint fields explicitly set",
         lambda: len(ts._ANNOTATION_HINTS),
+        reads=("_ANNOTATION_HINTS",),
     ),
     _claim(
         "annotation hint fields (client note)",
         r"The (\w+) hints drive real client behaviour",
         lambda: len(ts._ANNOTATION_HINTS),
+        reads=("_ANNOTATION_HINTS",),
     ),
     _claim(
         "annotation hint fields (default note)",
         r"leaves all (\w+) fields None",
         lambda: len(ts._ANNOTATION_HINTS),
+        reads=("_ANNOTATION_HINTS",),
     ),
     _claim(
         "destructive golden rows",
         r"antecedent holds for exactly (\w+) tools today",
         _destructive_golden_rows,
+        reads=("_ANNOTATION_GOLDEN", "_ANNOTATION_HINTS"),
     ),
     # --- the two lanes ---------------------------------------------------------------------------
-    _claim("core lane (displays absent)", r"\[displays\] absent, (\w+) tools", _core_lane_tools),
-    _claim("full lane (install note)", r"a full \((\w+)\) install", _full_lane_tools),
-    _claim("core lane (budget)", r"core-only lane \((\w+) tools\)", _core_lane_tools),
-    _claim("full lane (budget)", r"the full lane \((\w+)\) pass", _full_lane_tools),
-    _claim("full lane (golden map)", r"Covers all (\w+) full-lane tools", _full_lane_tools),
     _claim(
-        "display tools (golden map)", r"the (\w+) display-extra tools are absent in", _display_tools
+        "core lane (displays absent)",
+        r"\[displays\] absent, (\w+) tools",
+        _core_lane_tools,
+        reads=("server.py",),
     ),
-    _claim("core lane (golden map)", r"core-only CI \((\w+) tools\)", _core_lane_tools),
     _claim(
-        "full lane (golden map presence)", r"PRESENT in the full lane \((\w+)\)", _full_lane_tools
+        "full lane (install note)",
+        r"a full \((\w+)\) install",
+        _full_lane_tools,
+        reads=("server.py", "display_tools.py"),
     ),
-    _claim("core lane (drift logic)", r"Core-only lane \((\w+)\)", _core_lane_tools),
-    _claim("core lane (annotations)", r"core-only CI = (\w+) tools", _core_lane_tools),
-    _claim("full lane (annotations)", r"core-only CI = \w+ tools, full = (\w+)", _full_lane_tools),
     _claim(
-        "display tools (registrar)", r"registers exactly the (\w+) display tools", _display_tools
+        "core lane (budget)",
+        r"core-only lane \((\w+) tools\)",
+        _core_lane_tools,
+        reads=("server.py",),
+    ),
+    _claim(
+        "full lane (budget)",
+        r"the full lane \((\w+)\) pass",
+        _full_lane_tools,
+        reads=("server.py", "display_tools.py"),
+    ),
+    _claim(
+        "full lane (golden map)",
+        r"Covers all (\w+) full-lane tools",
+        _full_lane_tools,
+        reads=("server.py", "display_tools.py"),
+    ),
+    _claim(
+        "display tools (golden map)",
+        r"the (\w+) display-extra tools are absent in",
+        _display_tools,
+        reads=("display_tools.py",),
+    ),
+    _claim(
+        "core lane (golden map)",
+        r"core-only CI \((\w+) tools\)",
+        _core_lane_tools,
+        reads=("server.py",),
+    ),
+    _claim(
+        "full lane (golden map presence)",
+        r"PRESENT in the full lane \((\w+)\)",
+        _full_lane_tools,
+        reads=("server.py", "display_tools.py"),
+    ),
+    _claim(
+        "core lane (drift logic)",
+        r"Core-only lane \((\w+)\)",
+        _core_lane_tools,
+        reads=("server.py",),
+    ),
+    _claim(
+        "core lane (annotations)",
+        r"core-only CI = (\w+) tools",
+        _core_lane_tools,
+        reads=("server.py",),
+    ),
+    _claim(
+        "full lane (annotations)",
+        r"core-only CI = \w+ tools, full = (\w+)",
+        _full_lane_tools,
+        reads=("server.py", "display_tools.py"),
+    ),
+    _claim(
+        "display tools (registrar)",
+        r"registers exactly the (\w+) display tools",
+        _display_tools,
+        reads=("display_tools.py",),
     ),
     # --- the canonical Olog block ----------------------------------------------------------------
-    _claim("olog query functions", r"The (\w+) ``query_olog_\*`` functions", _olog_query_functions),
+    _claim(
+        "olog query functions",
+        r"The (\w+) ``query_olog_\*`` functions",
+        _olog_query_functions,
+        reads=("services/checkers_olog.py",),
+    ),
     # The re-export sentence is about checkers.py's import block, not about checkers_olog.py's
     # definitions — equal today, and the day a re-export is dropped they are not.
     _claim(
-        "olog query functions (re-export)", r"re-exports the (\w+) functions", _olog_reexport_lines
+        "olog query functions (re-export)",
+        r"re-exports the (\w+) functions",
+        _olog_reexport_lines,
+        reads=("services/checkers.py",),
     ),
 )
 
@@ -1211,7 +1518,124 @@ def _named_measure_containing_a_lambda() -> int:
     return len(ordered) + 19
 
 
-_FRAGMENT_PROBE = _claim("fragment probe", r"(\w+) probes", lambda: 22, scope="nowhere")
+_FRAGMENT_PROBE = _claim("fragment probe", r"(\w+) probes", lambda: 22, scope="nowhere", reads=())
+
+
+def test_every_claim_declares_which_source_it_reads() -> None:
+    """S32's ROOT repair: a claim says which set its measure reads, and the reading is traced.
+
+    Until now the only structural check on a measure searched its derivation for THE ANSWER, which
+    is the one property that says nothing about the set. An outside QA measured the consequence:
+    at least twelve of the derivations answered correctly while reading a DIFFERENT set from the one
+    their sentence names, in both failure directions — stale-green (the wrong set happened to have
+    the right size) and false-red (a correct sentence reddened because the measure watched a
+    neighbour). Neither direction is visible to a spelling check.
+
+    ``reads`` turns that into something decidable. Provenance IS decidable where "this derives it"
+    is not: which symbol did the measure touch, which file did it parse. Both directions of the
+    attribute half are enforced, so ``reads`` is a declaration and not a lower bound.
+
+    HOW FAR THIS REACHES, stated here because the field name invites over-reading:
+
+    * It proves the measure touched the object the claim names. It does NOT prove the sentence
+      means that object — that stays a human reading, and no construct can replace it.
+    * It does not prove the ANSWER depends on what was touched. A measure could read a constant and
+      ignore it.
+    * The FILE half is one-directional and, for the two measures that reach their file through
+      ``_typed_dict_fields``, nearly free: that index parses the whole package, so "this file was
+      parsed" does not distinguish it from any other file under ``src``.
+
+    All three limits are written down in ``docs/known-limits.md`` rather than left to be discovered.
+
+    Cost, measured rather than estimated: about six seconds for the whole table. That is two cold
+    measurement passes per claim — one traced, one not, because the recorder is compared against the
+    untraced answer — with every memoized helper cleared on both sides of the traced one. The
+    clearing is what the seconds buy: against a warm cache a measure touches nothing at all and the
+    test would pass while proving nothing. Halving it by leaving the caches warm afterwards is
+    possible and deliberately not done — it would let a value computed under the recorder outlive
+    the trace, and a cheap test that can poison the rest of the suite is the wrong trade.
+    """
+    faults = [f"{claim.label}: {fault}" for claim in _CLAIMS for fault in _provenance_faults(claim)]
+    assert not faults, (
+        "these claims do not read what they declare — correct the declaration if the measure is "
+        "right, or the measure if the declaration is:\n  " + "\n  ".join(faults)
+    )
+
+
+def test_no_claim_leaves_its_sources_undeclared() -> None:
+    """An empty ``reads`` is the state this repair removes, so it may not come back.
+
+    ``_claim`` makes the field keyword-only and required, which stops it being FORGOTTEN; nothing
+    stops it being passed empty, and an empty declaration traces to nothing and proves nothing."""
+    undeclared = [claim.label for claim in _CLAIMS if not claim.reads]
+    assert not undeclared, (
+        f"these claims declare no source at all, so nothing about them is traced: {undeclared}"
+    )
+
+
+def test_the_tracer_can_see_every_source() -> None:
+    """The tracer's PRECONDITION, asserted instead of assumed: ``_parsed`` is the only file reader.
+
+    The tracer watches two seams. If a measure ever reads a file some other way, that read becomes
+    invisible and every claim resting on it silently stops being traced — a guard that cannot go red
+    is the defect it was built to remove. So the property the tracer depends on is a test, and it
+    names no count: the reader has to sit inside ``_parsed``, however many there are."""
+    tree = _parsed(Path(__file__))
+    spans = pn._scope_spans(tree)
+    elsewhere = [
+        f"line {node.lineno} in {pn._qualname_at(spans, node.lineno)}: {ast.unparse(node)}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Attribute) and node.func.attr in {"read_text", "read_bytes"})
+            or (isinstance(node.func, ast.Name) and node.func.id == "open")
+        )
+        and pn._qualname_at(spans, node.lineno) != "_parsed"
+    ]
+    assert not elsewhere, (
+        "a file is read outside ``_parsed``, so the provenance tracer cannot see it and every "
+        f"claim that declares that file is untraced: {elsewhere}"
+    )
+
+
+def test_the_tracer_reports_a_declared_but_unread_source() -> None:
+    """The tracer's own red proof, in the file rather than in a commit body.
+
+    A tracer that fails to notice a declared-and-untouched source traces nothing while looking
+    green — the exact shape this whole guard exists to find, one layer up. The subject is therefore
+    a synthetic claim whose declaration is deliberately false in every direction the checker
+    claims to cover: a constant it never reads, a file it never parses, and a constant it reads
+    without declaring.
+    """
+    lying = _claim(
+        "tracer self-test",
+        r"(\w+) probes",
+        lambda: len(ts._ANNOTATION_HINTS),
+        reads=("_OLOG_ALWAYS_PRESENT", "services/checkers_olog.py"),
+        scope="nowhere",
+    )
+    faults = _provenance_faults(lying)
+    assert any("services/checkers_olog.py" in fault for fault in faults), (
+        f"a declared-but-unparsed FILE went unreported, so the file half traces nothing: {faults}"
+    )
+    assert any(
+        "declares ts._OLOG_ALWAYS_PRESENT but never reads it" in fault for fault in faults
+    ), f"a declared-but-unread CONSTANT went unreported: {faults}"
+    assert any("reads ts._ANNOTATION_HINTS without declaring it" in fault for fault in faults), (
+        f"an UNDECLARED read went unreported, so ``reads`` is a lower bound after all: {faults}"
+    )
+
+    honest = _claim(
+        "tracer self-test (honest)",
+        r"(\w+) probes",
+        lambda: len(ts._ANNOTATION_HINTS),
+        reads=("_ANNOTATION_HINTS",),
+        scope="nowhere",
+    )
+    assert _provenance_faults(honest) == [], (
+        "a truthful declaration must produce no fault, or the tracer accuses everything and "
+        "therefore discriminates nothing"
+    )
 
 
 def test_the_conformance_tests_partition_into_two_kinds() -> None:
