@@ -80,11 +80,11 @@ class OlogWholeModeRequired(OlogError):
 
     # Same condition, same code as the service-level twin that normally catches this first:
     # checkers raises OlogWholeModeRequiredError (= OLOG_WHOLE_MODE_REQUIRED). That code is NOT the
-    # write gate's OLOG_WRITE_DENIED, deliberately, per the write-gate contract (CLAUDE.md, point
-    # 4): both twins refuse BEFORE the gate is consulted and therefore emit NO audit line, and a
-    # refusal raised outside the gate must not be reportable as an audited gate DENY. It used to
-    # carry OLOG_WRITE_DENIED, which made the un-audited refusal indistinguishable from the audited
-    # one at the caller.
+    # write gate's OLOG_WRITE_DENIED, deliberately, per the write-gate contract
+    # (docs/write-gate-contract.md, point 4): both twins refuse BEFORE the gate is consulted and
+    # therefore emit NO audit line, and a refusal raised outside the gate must not be reportable as
+    # an audited gate DENY. It used to carry OLOG_WRITE_DENIED, which made the un-audited refusal
+    # indistinguishable from the audited one at the caller.
     error_code: ClassVar[str] = "OLOG_WHOLE_MODE_REQUIRED"
 
 

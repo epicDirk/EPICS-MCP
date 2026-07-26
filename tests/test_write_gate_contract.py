@@ -1,7 +1,7 @@
 """Per-gate deny-path contract test, what makes the write-gate contract CI-enforced, not prose.
 
-The contract lives in ``CLAUDE.md`` ("Write-gate contract: what any in-server write gate must
-provide (hard)"). Its six points are: (1) an env on/off gate, default OFF; (2) an allowlist whose
+The contract lives in ``docs/write-gate-contract.md`` (CLAUDE.md carries the one-line-per-point
+summary). Its six points are: (1) an env on/off gate, default OFF; (2) an allowlist whose
 empty-semantics are fail-closed in a deliberate per-surface *shape*; (3) a rate limit where a write
 denied by the gate consumes no token; (4) a mandatory, metadata-only, durable audit of every gate
 verdict; (5) a fail-closed reach/URL boundary where the surface has network reach; (6) an honest

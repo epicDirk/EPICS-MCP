@@ -642,8 +642,8 @@ def test_rest_get_json_throttled_over_limit(monkeypatch: pytest.MonkeyPatch) -> 
     # The read denial carries the machine-readable contract callers key on, and it is deliberately
     # NOT the write gates' RATE_LIMIT_EXCEEDED: this throttle is not a write gate, writes no audit
     # line, and sits on reads the Olog write tools perform BEFORE their gate is consulted. The
-    # write-gate contract (CLAUDE.md, point 4) forbids a refusal raised outside a gate from
-    # carrying that gate's code.
+    # write-gate contract (docs/write-gate-contract.md, point 4) forbids a refusal raised outside a
+    # gate from carrying that gate's code.
     assert exc_info.value.error_code == "READ_RATE_LIMIT_EXCEEDED"
     assert exc_info.value.details == {"limit": 2, "window_seconds": 60.0}
 

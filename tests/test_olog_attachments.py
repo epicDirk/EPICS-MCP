@@ -310,8 +310,8 @@ class TestAttachmentPrep:
         timing. It now re-checks while reading (at most one byte over budget is ever
         read) and refuses, under its OWN code, not the gate's: this refusal runs AFTER the gate
         admitted the write (the rate token is already spent) and writes no audit line, so the
-        write-gate contract (CLAUDE.md, point 4) forbids it from wearing the gate's
-        ``OLOG_ATTACH_TOO_LARGE``, which a caller must be able to read as "audited, nothing
+        write-gate contract (docs/write-gate-contract.md, point 4) forbids it from wearing the
+        gate's ``OLOG_ATTACH_TOO_LARGE``, which a caller must be able to read as "audited, nothing
         consumed"."""
         _set_config()
         f = tmp_path / "grow.bin"

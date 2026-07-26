@@ -311,8 +311,8 @@ class TestOlogErrorCode:
         assert checkers_module._olog_error_code(OlogRoundTripUnsafe("x")) == "INVALID_INPUT"
         # Its own code, NOT the write gate's OLOG_WRITE_DENIED: both this client backstop and its
         # service-level twin refuse BEFORE the gate is consulted and emit no audit line, and the
-        # write-gate contract (CLAUDE.md, point 4) forbids an un-audited pre-gate refusal from
-        # being reportable as an audited gate DENY.
+        # write-gate contract (docs/write-gate-contract.md, point 4) forbids an un-audited pre-gate
+        # refusal from being reportable as an audited gate DENY.
         assert (
             checkers_module._olog_error_code(OlogWholeModeRequired("x"))
             == "OLOG_WHOLE_MODE_REQUIRED"
