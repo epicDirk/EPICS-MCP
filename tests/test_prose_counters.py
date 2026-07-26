@@ -38,6 +38,7 @@ hand-type them in its own docstring, where nothing would ever check them.)
 from __future__ import annotations
 
 import ast
+import functools
 import inspect
 import re
 import textwrap
@@ -47,6 +48,8 @@ from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from tests import prose_numbers as pn
 from tests import test_server as ts
@@ -99,34 +102,48 @@ def _claim(label: str, pattern: str, measure: Callable[[], int], scope: str = ""
 def _derivation_source(measure: Callable[[], int]) -> str:
     """A claim's derivation as source text, so a typed-in answer THERE is visible too.
 
-    Parsed, never split on text. A lambda yields its BODY — its enclosing statement carries the
-    claim's own pattern, which legitimately contains digits. A named function yields its body
-    WITHOUT the docstring: those docstrings explain which set they count, and accusing them would
-    punish the explanation the rest of this module asks for. Only executable code is searched.
+    Parsed, never split on text. A NAMED function yields its body WITHOUT the docstring: those
+    docstrings explain which set they count, and accusing them would punish the explanation the
+    rest of this module asks for. A LAMBDA yields its body — its enclosing statement carries the
+    claim's own pattern, which legitimately contains digits. Only executable code is searched.
 
-    Unreadable source yields the empty string — no accusation, which is the honest answer when
-    nothing was inspected.
+    THE ORDER OF THOSE TWO IS LOAD-BEARING and it used to be the other way round. The lambda walk
+    ran first over the WHOLE parsed statement, so a named measure containing a lambda anywhere —
+    a ``key=lambda …`` in a sort, say — had its entire body discarded and only that lambda's body
+    inspected. Latent on the delivered table (measured: 0 of 79 named measures contain one) and a
+    trap the moment one does, because the discarded body is exactly where a typed-in answer would
+    sit. A named function is now matched before anything is walked.
+
+    An unreadable source is an ERROR, not an empty string. ``functools.partial``, a callable
+    object and a dynamically compiled function all raise here, and returning "" for them made the
+    anti-hard-coding check silently inspect nothing — an acquittal indistinguishable from a
+    verdict. ``partial(_paths_rows, _DISCOVER_CONFORMANCE)`` is a straight-faced refactor of nine
+    claims in this file, and it would have taken all nine out of the guard's reach at once.
     """
     try:
         source = textwrap.dedent(inspect.getsource(measure))
-    except (OSError, TypeError):  # pragma: no cover - no measure here is unreadable
-        return ""
+    except (OSError, TypeError) as unreadable:
+        raise AssertionError(
+            f"the derivation of {getattr(measure, '__name__', measure)!r} cannot be read, so "
+            "test_no_claim_hard_codes_its_expectation would inspect nothing and pass. A measure "
+            "must be a plain function or lambda — not a functools.partial, not a callable object."
+        ) from unreadable
     try:
         node: ast.AST = ast.parse(source).body[0]
     except SyntaxError:
-        # ``inspect.getsource`` on a lambda hands back its enclosing STATEMENT, which is a
-        # fragment (``_claim(..., lambda: x),``) and does not parse. Wrapping it in a call makes
-        # it parse; splitting on the word "lambda" instead — the first attempt — truncated a
-        # ruff-wrapped lambda to its first line and would have let a typed-in answer back in.
+        # ``inspect.getsource`` on a lambda hands back its enclosing statement cut at the first
+        # NEWLINE, which is a FRAGMENT. Most such fragments parse anyway — ``_claim(…, lambda: x),``
+        # is a one-element tuple — so the branch below is NOT the common case the old comment
+        # claimed. It is reached by one layout: arguments on a single wrapped line together with a
+        # ``scope=`` keyword, where the fragment is a tuple containing a keyword argument.
+        # ``test_the_derivation_reader_handles_a_fragment`` drives exactly that.
         node = ast.parse(f"_({source.strip().rstrip(',')})").body[0]
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        body = node.body[1:] if ast.get_docstring(node) else node.body
+        return "\n".join(ast.unparse(statement) for statement in body)
     for inner in ast.walk(node):
         if isinstance(inner, ast.Lambda):
             return ast.unparse(inner.body)
-    if isinstance(node, ast.Expr | ast.FunctionDef | ast.AsyncFunctionDef):
-        target = node if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) else None
-        if target is not None:
-            body = target.body[1:] if ast.get_docstring(target) else target.body
-            return "\n".join(ast.unparse(statement) for statement in body)
     return source
 
 
@@ -942,6 +959,38 @@ def test_inventory_size_is_pinned() -> None:
     )
 
 
+def _named_measure_containing_a_lambda() -> int:
+    """A measure of the shape that used to blind the reader. Its answer is in the BODY."""
+    ordered = sorted([3, 1, 2], key=lambda item: item)
+    return len(ordered) + 19
+
+
+_FRAGMENT_PROBE = _claim("fragment probe", r"(\w+) probes", lambda: 22, scope="nowhere")
+
+
+def test_the_derivation_reader_reads_the_body_it_claims_to() -> None:
+    """The reader's three promises, each driven rather than described.
+
+    (1) A named measure yields its own body, docstring excluded, EVEN when it contains a lambda.
+    The old order walked for a lambda first and returned that lambda's body, discarding the very
+    statements a typed-in answer would sit in. (2) A fragment — the shape ``inspect.getsource``
+    hands back for a lambda on a wrapped argument line carrying a ``scope=`` keyword — is still
+    read; that repair branch had never been executed by anything. (3) An unreadable measure is an
+    error rather than an empty string, so the check cannot silently inspect nothing.
+    """
+    body = _derivation_source(_named_measure_containing_a_lambda)
+    assert "19" in body, "the named measure's own body must be inspected"
+    assert body.strip() != "item", "not merely the lambda it happens to contain"
+    assert "A measure of the shape" not in body, "and not its docstring"
+
+    assert _derivation_source(_FRAGMENT_PROBE.measure) == "22", (
+        "a lambda whose enclosing statement is an unparseable fragment must still be read"
+    )
+
+    with pytest.raises(AssertionError, match="cannot be read"):
+        _derivation_source(functools.partial(len, [1] * 16))
+
+
 def test_no_claim_hard_codes_its_expectation() -> None:
     """No claim may spell out the answer it is supposed to derive — in EITHER half.
 
@@ -950,6 +999,16 @@ def test_no_claim_hard_codes_its_expectation() -> None:
     module green. A typed-in integer in the MEASURE is the same defect as one in the PATTERN, so
     the derivation's source is inspected too, in digits AND in words — this prose spells its
     numbers as words far more often than as digits, so a digits-only check guards the rarer half.
+
+    HOW FAR THIS ACTUALLY REACHES, because the promise above is easy to over-read. It is a
+    check on the SPELLING of the answer, one frame deep, and an outside QA measured all three of
+    its blind spots: ``lambda: 20 + 2`` passes for an expected 22 (the answer is never spelled),
+    ``lambda: _helper()`` passes whatever ``_helper`` returns (only the immediate frame is
+    inspected — 41 of the delivered derivations call a module helper), and a regex may split the
+    literal (``(1[1])`` captures an 11 the skeleton search cannot see). What it does catch is the
+    defect it was built for: a bare typed-in answer, in either half. Closing the rest needs a
+    different mechanism, not a wider regex — a claim declaring what it READS, which is separate
+    work recorded as such.
 
     Doubles as the precondition for the rest of the module: a pattern that captures nothing would
     raise ``IndexError`` deep in the coverage scan, naming neither ``_CLAIMS`` nor the row.
