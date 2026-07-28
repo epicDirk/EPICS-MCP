@@ -92,9 +92,21 @@ pip install git+https://github.com/epicDirk/EPICS-MCP-Server
 
 From a local checkout, `uv tool install .` and `pip install .` do the same thing.
 
-This installs the **core** server: live PV access, diagnosis, and the REST-service planes. The
-display-aware tools (`validate_pvs`, `crossplane_check`, `coverage_audit`, `find_device`) need
-the optional `[displays]` extra, see [Related and roadmap](#related-and-roadmap).
+<!-- Once the first release is published, this replaces the two commands above:
+
+     uv tool install epics-pv-mcp
+     pip install epics-pv-mcp
+
+     The package is publishable today (built metadata verified clean, release workflow in place);
+     what is outstanding is a version bump and a tag. See CONTRIBUTING.md, "Releasing". -->
+
+This installs the **core** server: live PV access, diagnosis, and the REST-service planes, plus
+five commands (`epics-pv-mcp`, `epics-doctor`, `epics-diagnose`, `epics-crossplane`,
+`epics-coverage`).
+
+The last two are **display-aware** and need the `opi_navigation` engine, which is not part of the
+package: they refuse with an explanation rather than running. Everything else works without it.
+See [Related and roadmap](#related-and-roadmap).
 
 ## Quick start
 

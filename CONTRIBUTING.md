@@ -88,6 +88,54 @@ when the package is absent, so the core suite stays green.
   several of the obvious candidates were measured and rejected for a reason, and the reason is
   there rather than in a commit body.
 
+## Releasing
+
+Publishing fails expensively and exactly once: a package index never lets a version number be
+reused, so a wrong upload cannot be withdrawn, only superseded. Hence the order below, and hence
+the gates.
+
+**One-off, before the first release ever happens:**
+
+1. Decide the display question. The four display-aware tools depend on `opi_navigation`, which is
+   in a private repository. The current answer is **not yet**, with a named condition: revisit once
+   the Java live plugin and the CS-Studio MCP have been tested in practice. Until then the engine
+   stays a dependency group and the published package does not offer it. The same note sits in
+   `pyproject.toml` next to the group, so neither copy is the only one.
+2. Create the account on the index and register a **Trusted Publisher** for `epics-pv-mcp`:
+   repository `epicDirk/EPICS-MCP-Server`, workflow `publish.yml`, environment `pypi`. Trusted
+   Publishing uses OIDC, so no API token is ever stored in this repository.
+3. Run the workflow once manually (`workflow_dispatch`, `dry_run` left at its default `true`). It
+   installs, tests, clears `dist/`, builds and gates, and stops before uploading. That rehearsal is
+   the point of the manual trigger: it is the only way to test a release workflow without
+   releasing. ⚠️ **Still outstanding**: the workflow has never run, because it cannot until it is
+   pushed. Everything it does has been replayed by hand locally, which is not the same thing.
+
+**Every release:**
+
+1. Bump `[project].version` in `pyproject.toml` **and** the hardcoded fallback in
+   `src/epics_pv_mcp/__init__.py`. This is not optional bookkeeping: with no installed metadata
+   (a source checkout) the stale literal becomes a silent version lie, and
+   `tests/test_packaging.py::test_version_fallback_matches_pyproject` goes red if they drift.
+2. Close the `[Unreleased]` section in `CHANGELOG.md` under the new version.
+3. Run the gates one more time, then rehearse: `rm -rf dist && uv build && uv run python
+   scripts/check_release_ready.py dist/*`. The gate reads the BUILT metadata, never
+   `pyproject.toml`, because the two can differ; it refuses a direct reference, a pre-release
+   version, and a description that would not render.
+4. Tag `vX.Y.Z` and push the tag. That is what triggers the upload.
+5. Afterwards: swap the install command in `README.md` (the replacement text is already there,
+   commented out) and add the index badge.
+
+**Two traps, both measured here rather than imagined:**
+
+- `uv build` does **not** clear `dist/`. A three-week-old artifact was still sitting there during
+  this work, carrying a dependency reference the current build no longer has, and `dist/*` would
+  have uploaded it alongside the new files. The workflow clears the directory; a manual release
+  must too.
+- A published package is not the same thing as a working one. Installing the built wheel into a
+  clean environment and running all five console scripts found two that died on their import chain
+  with a bare traceback. Do that check by hand whenever an entry point or an optional dependency
+  changes; no unit test replaces it.
+
 ## Live / sandbox tests
 
 Tests that need a running EPICS stack are opt-in and skip by default, so the standard run
