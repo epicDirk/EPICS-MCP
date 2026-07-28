@@ -98,7 +98,19 @@ _EXCEPTIONS_FILE = Path(__file__).with_name(".language-exceptions")
 # (the word lists ARE German), the exceptions file (it quotes the fragments it exempts) and the
 # guard's test (its probes are German sentences). A fragment key would have to enumerate every
 # probe and would rot on the next one.
-_SELF_EXEMPT = frozenset({Path(__file__).name, _EXCEPTIONS_FILE.name, "test_language_guard.py"})
+#
+# Keyed on the RESOLVED PATH of each of those three files, not on its bare name. A name key exempts
+# every file that happens to share the name: a second ``test_language_guard.py`` anywhere in the
+# tree would have been entirely free of this guard, and nothing would have said so. Resolving both
+# sides also makes the key indifferent to how the path arrives, relative from pre-commit or
+# absolute from a manual run, which a repo-relative string comparison would not be.
+_SELF_EXEMPT: frozenset[Path] = frozenset(
+    {
+        Path(__file__).resolve(),
+        _EXCEPTIONS_FILE.resolve(),
+        (Path(__file__).resolve().parents[1] / "tests" / "test_language_guard.py"),
+    }
+)
 
 
 def german_signals(line: str) -> list[str]:
@@ -166,7 +178,7 @@ def main(argv: list[str]) -> int:
     exceptions = load_exceptions()
     all_hits: list[str] = []
     for path in argv[1:]:
-        if Path(path).name in _SELF_EXEMPT:
+        if Path(path).resolve() in _SELF_EXEMPT:
             continue
         all_hits.extend(scan(path, exceptions))
     if all_hits:

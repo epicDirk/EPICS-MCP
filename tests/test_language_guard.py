@@ -124,7 +124,7 @@ def test_the_whole_english_tree_is_quiet() -> None:
         path
         for directory in ("src", "tests", "scripts")
         for path in (_REPO / directory).rglob("*.py")
-        if path.name not in _SELF_EXEMPT
+        if path.resolve() not in _SELF_EXEMPT
     ]
     assert len(sources) > 100, f"only {len(sources)} files scanned, the walk found too little"
 
@@ -169,8 +169,50 @@ def test_the_committed_exceptions_all_still_bite() -> None:
 
 def test_the_guard_skips_the_three_files_that_spell_german_on_purpose() -> None:
     """Named rather than implied: this test, the guard and the exception list are all German by
-    construction, and each would otherwise block its own commit."""
-    assert {"check_language.py", ".language-exceptions", "test_language_guard.py"} == _SELF_EXEMPT
+    construction, and each would otherwise block its own commit.
+
+    The three are named as PATHS and each is asserted to exist: a set of names that no longer point
+    at anything is an exemption for nothing, and it would read exactly like a working one.
+    """
+    expected = {
+        _REPO / "scripts" / "check_language.py",
+        _REPO / "scripts" / ".language-exceptions",
+        _REPO / "tests" / "test_language_guard.py",
+    }
+
+    assert {path.resolve() for path in expected} == _SELF_EXEMPT
+    assert [path for path in expected if not path.exists()] == []
+
+
+def test_a_namesake_elsewhere_is_not_exempt(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The exemption is keyed on the file, not on its name (QA-10).
+
+    Keyed on the bare name, ANY file called ``test_language_guard.py`` was exempt wherever it sat,
+    so a second one, in another package or a vendored tree, would have been silently free of the
+    guard. This is the counter-probe for that: a namesake outside the exempted path is scanned like
+    any other file. Red on the pre-fix code, where ``main`` compared ``Path(path).name``.
+    """
+    namesake = tmp_path / "test_language_guard.py"
+    namesake.write_text("# und noch eine deutsche Zeile\n", encoding="utf-8")
+
+    assert main(["check_language.py", str(namesake)]) == 1
+    assert f"{namesake}:1:" in capsys.readouterr().err
+
+
+def test_the_real_exempt_file_stays_exempt_whatever_the_path_form() -> None:
+    """The other half of QA-10: the three files themselves must stay silent however the path is
+    spelled. pre-commit hands over a repo-relative path, a manual run an absolute one, and a
+    ``rglob`` walk a third form again. Resolving both sides buys that indifference; comparing
+    strings against one canonical spelling would not, and the failure would look like the guard
+    working.
+    """
+    canonical = _REPO / "tests" / "test_language_guard.py"
+    detoured = _REPO / "tests" / ".." / "tests" / "test_language_guard.py"
+
+    assert main(["check_language.py", str(canonical)]) == 0
+    assert main(["check_language.py", str(detoured)]) == 0
 
 
 def test_main_blocks_and_reports_the_location(
