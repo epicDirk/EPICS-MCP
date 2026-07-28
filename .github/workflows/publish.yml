@@ -1,0 +1,93 @@
+name: Publish
+
+# Two triggers, and the difference between them is the point.
+#
+#   * A version tag (`v0.3.0`) is the real release. It is the only path that uploads.
+#   * A manual run is a REHEARSAL and defaults to a dry run: it builds, gates and keeps the
+#     artifacts, and stops before the upload. That is what makes this workflow testable before
+#     anyone has a package-index account, rather than testable only by releasing.
+#
+# The upload itself uses Trusted Publishing (OIDC): the index verifies this repository, this
+# workflow file and this environment, so no API token is ever stored here. That needs a one-off
+# setup on the index side, described in CONTRIBUTING.md under "Releasing".
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and check only, do not upload"
+        type: boolean
+        default: true
+
+# Default to nothing. Each job asks for exactly what it needs, so the OIDC token that can publish
+# exists in one job and nowhere else.
+permissions: {}
+
+jobs:
+  # Build and judge. No credentials of any kind reach this job, which is why it also runs on a
+  # rehearsal: the expensive half of a release is finding out that the artifact was wrong.
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      # CI already runs on the tag push, but nothing makes THIS workflow wait for it, and a release
+      # built from a red tree is exactly the artifact that must not exist. Two minutes here buys
+      # that guarantee inside the workflow that does the uploading.
+      - name: Install dependencies (exactly as uv.lock pins them)
+        run: uv sync --extra dev --frozen
+      - name: Run tests
+        run: uv run pytest tests/ --tb=short
+
+      # `uv build` does NOT clear dist/, and a stale artifact is uploaded just as happily as a
+      # fresh one. Measured on a developer checkout: a three-week-old 0.2.0 wheel was still there,
+      # carrying a direct reference that the current build no longer has.
+      - name: Clear any previous artifacts
+        run: rm -rf dist
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      # The gate reads the BUILT metadata: a direct reference (rejected by the index), a
+      # pre-release version published by accident (a version number burned for good), or a
+      # description that would not render on the project page.
+      - name: Release gate
+        run: uv run python scripts/check_release_ready.py dist/*
+
+      - name: Show what would be published
+        run: ls -l dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+          if-no-files-found: error
+
+  # Upload. Split into its own job so the OIDC permission exists ONLY here, and gated twice: the
+  # tag condition, and the `pypi` environment, which can carry a required reviewer on the index
+  # side. A manual rehearsal never reaches this job.
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') && inputs.dry_run != true
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/epics-pv-mcp
+    permissions:
+      id-token: write # Trusted Publishing; nothing else is needed and nothing else is granted
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
