@@ -24,6 +24,11 @@ from pydantic import BaseModel, ConfigDict
 
 PvRole = Literal["read", "write"]
 
+#: Longest RENDERED scalar value in the report, the trailing ellipsis included. Named rather than
+#: spelled twice, because the two spellings are what drifted: the comparison said 80 and the slice
+#: produced 82 (QA-12).
+_VALUE_CAP = 80
+
 
 class _Model(BaseModel):
     """Frozen, closed value object (deterministic tuples; typos rejected)."""
@@ -245,7 +250,8 @@ def _format_channel_value(value: object) -> str:
 
     A p4p waveform value arrives here as a (potentially multi-thousand-element) list; rendering it
     raw would produce an unreadable line. Summarise an array as ``[N values: a, b, ...]`` and cap a
-    long scalar string to keep the operator-facing report readable.
+    long scalar string at :data:`_VALUE_CAP` characters, ellipsis included, to keep the
+    operator-facing report readable.
     """
     if isinstance(value, (list, tuple)):
         count = len(value)
@@ -254,7 +260,10 @@ def _format_channel_value(value: object) -> str:
         head = ", ".join(str(v) for v in value[:2])
         return f"[{count} values: {head}{', ...' if count > 2 else ''}]"
     text = str(value)
-    return text if len(text) <= 80 else text[:79] + "..."
+    # The cap is on the RENDERED string, ellipsis included: 77 characters plus the three dots. The
+    # earlier `text[:79] + "..."` produced 82 and quietly broke the promise the line above makes
+    # (QA-12), which is the kind of arithmetic no reader re-does and no test was covering.
+    return text if len(text) <= _VALUE_CAP else text[: _VALUE_CAP - 3] + "..."
 
 
 def render_markdown(report: DeviceLookupReport) -> str:

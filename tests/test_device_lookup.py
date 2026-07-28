@@ -6,9 +6,12 @@ tests build all three by hand for full determinism. The wired path (real .bob â†
 read) is covered in ``test_find_device_tool.py``.
 """
 
+import pytest
 from opi_navigation.pv_analysis.lookup import DisplayMatch, PvLookupResult
 
 from epics_pv_mcp.services.device_lookup import (
+    _VALUE_CAP,
+    _format_channel_value,
     build_device_report,
     collect_channels,
     render_markdown,
@@ -364,6 +367,40 @@ def test_render_markdown_deterministic() -> None:
     assert "connected (value: 1)" in markdown
     assert "disconnected (Timeout)" in markdown
     assert render_markdown(report) == markdown  # deterministic
+
+
+@pytest.mark.parametrize("length", [_VALUE_CAP - 1, _VALUE_CAP, _VALUE_CAP + 1, 500])
+def test_a_rendered_scalar_never_exceeds_the_cap(length: int) -> None:
+    """The cap is on the RENDERED string, ellipsis included (QA-12).
+
+    ``_format_channel_value`` had no test at all, and its two spellings of the same number had
+    drifted apart: the comparison admitted 80 characters while the slice emitted 79 plus a
+    three-character ellipsis, so every capped value came out at 82. Nothing was wrong with the
+    output to look at, which is exactly why it survived. Red on the pre-fix code at the two lengths
+    above the cap, measuring 82 against an asserted 80.
+
+    The boundary is swept rather than sampled at one point: a cap this small is normally got wrong
+    by one, and one length would not tell an off-by-one from a working rule.
+    """
+    rendered = _format_channel_value("x" * length)
+
+    assert len(rendered) <= _VALUE_CAP
+    if length <= _VALUE_CAP:
+        assert rendered == "x" * length  # untouched, no ellipsis on a value that fits
+    else:
+        assert rendered.endswith("...")
+        assert len(rendered) == _VALUE_CAP  # a capped value uses the full width, never less
+
+
+def test_a_capped_value_keeps_the_head_of_the_original() -> None:
+    """The counter-direction: a cap that returned a constant, or the tail, would satisfy the
+    length assertions above. What the operator needs is the START of the value."""
+    original = "SIM:PS-01:Cur-RB reads " + "9" * 200
+
+    rendered = _format_channel_value(original)
+
+    assert original.startswith(rendered[:-3])
+    assert rendered.startswith("SIM:PS-01:Cur-RB reads ")
 
 
 def test_render_markdown_summarises_waveform_value() -> None:
