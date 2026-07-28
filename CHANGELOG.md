@@ -9,6 +9,48 @@ carry breaking changes).
 
 (nothing yet)
 
+## [0.4.0] - 2026-07-29
+
+### Changed
+
+- **BREAKING: the import package is now `epics_mcp`** (was `epics_pv_mcp`). `import epics_pv_mcp`
+  stops working; `import epics_mcp` replaces it, one for one, with no other change to the API. This
+  completes the rename begun in 0.3.0, where the distribution, the repository, the server command
+  and the server's MCP identity already became `epics-mcp` and only the import package did not. It
+  is done now rather than later because every release under the old import name grows the set of
+  installations a rename breaks.
+- **BREAKING: the `epics-pv-mcp` console command is removed.** Use `epics-mcp`, which has been the
+  primary command since 0.3.0. The alias existed for installs predating the rename, and there are
+  none: 0.3.0 was this project's first published release of any kind, so no install anywhere can
+  carry that command. The four diagnostic commands (`epics-doctor`, `epics-diagnose`,
+  `epics-crossplane`, `epics-coverage`) are unaffected.
+- **`epics-doctor` exits 1, not 2, on an internal error.** 2 is the usage-error code across these
+  commands and in argparse, so the old value told a wrapper the caller had passed something wrong
+  when the command itself had failed. A genuine usage error (an unknown flag) still exits 2.
+  Note the cost: exit 1 is also "a configured plane hard failed", so the exit code alone no longer
+  separates the two. They differ on the streams: an internal error writes a `doctor:` line to
+  stderr and no report to stdout.
+
+### Fixed
+
+- **The display-aware CLIs tell a broken engine apart from a missing one.** `epics-crossplane` and
+  `epics-coverage` probed for the `opi_navigation` engine with a name lookup only, so an engine
+  that was installed but did not import (typically a missing transitive dependency) passed the
+  check and the command then died with a bare traceback. It now reports the failure with the
+  underlying exception named and exits 1, while a genuinely absent engine keeps its explanation and
+  exit 2. The advice differs too: installing the engine will not fix a broken one.
+- **A long live value in the `find_device` report is capped at 80 characters, not 82**, as its own
+  documentation promised.
+
+### Internal
+
+- The two prose guards no longer leak their exemptions: the language guard's self-exemption is keyed
+  on file paths rather than bare file names, and both guards anchor an exception's path key on a
+  path-component boundary, so a key written for `scripts/x.py` no longer also frees
+  `myscripts/x.py`.
+- The GitHub Actions workflows moved off the deprecated Node 20 runtime (`setup-uv`,
+  `upload-artifact`, `download-artifact`).
+
 ## [0.3.0] - 2026-07-28
 
 ### Added
