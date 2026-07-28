@@ -17,6 +17,7 @@ AND locally, where it is not.
 from __future__ import annotations
 
 import importlib
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -29,6 +30,14 @@ _REPO = Path(__file__).resolve().parents[1]
 _COMMANDS = (
     ("epics_pv_mcp.cli_coverage", "epics-coverage"),
     ("epics_pv_mcp.cli_crossplane", "epics-crossplane"),
+)
+
+#: All four console entry points, for properties every CLI must hold regardless of the engine.
+_ALL_CLI_MODULES = (
+    "epics_pv_mcp.cli_doctor",
+    "epics_pv_mcp.cli_diagnose",
+    "epics_pv_mcp.cli_coverage",
+    "epics_pv_mcp.cli_crossplane",
 )
 
 
@@ -139,3 +148,36 @@ def test_the_module_imports_at_all_without_the_engine(module_name: str, command:
     )
     assert result.returncode == 2, result.stderr[-800:]
     assert command in result.stderr
+
+
+@pytest.mark.parametrize("module_name", _ALL_CLI_MODULES)
+def test_help_survives_a_legacy_encoded_console(module_name: str) -> None:
+    """``--help`` must never die with a bare traceback on a cp1252 console (QA-8).
+
+    Measured on Windows before the fix: ``epics-coverage --help`` and ``epics-crossplane --help``
+    raised ``UnicodeEncodeError`` on the U+2194 arrow in their parser description whenever stdout
+    was not UTF-8 (any redirected or legacy-encoded console), because ``configure_stdout()`` ran
+    AFTER ``parse_args`` and argparse prints the help inside it. The doctor and diagnose help
+    texts are ASCII today, so they pass either way; they are parametrized in anyway so a future
+    non-ASCII character in their help cannot re-open the hole.
+
+    ``PYTHONIOENCODING=cp1252:strict`` forces the legacy stream on every platform, so this runs
+    red-provably on Linux CI too, not only on a Windows console. Exit 0 is the help path; exit 2
+    is the engine refusal that legitimately precedes parsing on a core-only install. Both are
+    fine, a traceback is not.
+    """
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252:strict"}
+
+    result = subprocess.run(
+        [sys.executable, "-m", module_name, "--help"],
+        capture_output=True,
+        text=True,
+        cwd=_REPO,
+        timeout=120,
+        env=env,
+        check=False,
+    )
+
+    assert "UnicodeEncodeError" not in result.stderr, result.stderr[-800:]
+    assert "Traceback" not in result.stderr, result.stderr[-800:]
+    assert result.returncode in (0, 2), result.stderr[-800:]

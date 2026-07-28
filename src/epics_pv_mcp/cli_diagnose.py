@@ -66,6 +66,9 @@ def _render(report: DiagnoseReport) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     """Diagnose a PV connection and print the verdict. Returns 0 (incl. when disconnected)."""
+    # Before the parser (QA-8): argparse prints ``--help`` inside ``parse_args``, so a non-ASCII
+    # character in any help text would die on a cp1252 console if the reconfigure came later.
+    configure_stdout()
     parser = argparse.ArgumentParser(
         description="Diagnose why an EPICS PV is (dis)connected (read-only)."
     )
@@ -91,8 +94,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--alarm", action="store_true", help="corroborate with the Alarm tree")
     parser.add_argument("--json", action="store_true", help="emit the raw report as JSON")
     args = parser.parse_args(argv)
-
-    configure_stdout()
 
     report = asyncio.run(
         diagnose(

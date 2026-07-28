@@ -27,6 +27,10 @@ from epics_pv_mcp.errors import EpicsError
 
 def main(argv: list[str] | None = None) -> int:
     """Run the coverage audit and print a Markdown report. Returns an exit code."""
+    # BEFORE the parser is built (QA-8): argparse prints ``--help`` inside ``parse_args``, and the
+    # parser description carries U+2194, which a cp1252 console cannot encode. With the reconfigure
+    # after parsing, ``--help`` died with a bare UnicodeEncodeError on any non-UTF-8 stdout.
+    configure_stdout()
     unavailable = require_display_engine("epics-coverage")
     if unavailable is not None:
         return unavailable
@@ -89,8 +93,6 @@ def main(argv: list[str] | None = None) -> int:
         help="resolve embedded <file> refs case-insensitively (Windows host); default Linux",
     )
     args = parser.parse_args(argv)
-
-    configure_stdout()
 
     # One request → the SAME orchestrator the MCP tool calls (no duplicated join). Path validation
     # (canonicalize + existence + allowed_roots) happens inside build_coverage_report via

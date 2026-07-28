@@ -157,6 +157,9 @@ def _render(report: DoctorReport) -> str:
 def main(argv: list[str] | None = None) -> int:
     """Run the self-check, print the report. Returns 0 (clean) / 1 (a plane hard-failed) / 2
     (usage or internal error) / 3 (reachable, but an identity probe failed, inconclusive)."""
+    # Before the parser (QA-8): argparse prints ``--help`` inside ``parse_args``, so a non-ASCII
+    # character in any help text would die on a cp1252 console if the reconfigure came later.
+    configure_stdout()
     parser = argparse.ArgumentParser(
         description="Read-only config self-check: is every configured EPICS plane reachable?"
     )
@@ -173,8 +176,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--json", action="store_true", help="emit the raw report as JSON")
     args = parser.parse_args(argv)
-
-    configure_stdout()
 
     try:
         report = asyncio.run(run_doctor(probe_pv=args.probe_pv, timeout=args.timeout))
