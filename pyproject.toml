@@ -11,6 +11,33 @@ license = { text = "MIT" }
 authors = [{ name = "epicDirk" }]
 keywords = ["epics", "mcp", "pvaccess", "channel-access", "p4p", "controls"]
 requires-python = ">=3.12"
+# Trove classifiers: the facets a package index sorts and filters on. Without them the project page
+# renders as an unfinished stub and the index cannot categorise the package at all.
+#
+# Each one is a claim, so each is one this repository can back:
+#   * "4 - Beta" means feature-complete and under test, which is what this is: all five planes and
+#     both write gates are built and covered. It does NOT mean stable, and the instability is
+#     stated where a user looks for it, in CHANGELOG.md ("pre-1.0: minor versions may carry
+#     breaking changes"). Moving this row up or down is a judgement about the project, not a
+#     formality, so it is made here deliberately rather than copied from a template.
+#   * "OS Independent" is measured, not assumed: the suite runs on Windows locally and on Linux in
+#     CI, and p4p ships wheels for both.
+#   * "Typing :: Typed" requires a py.typed marker to be true. It exists and ships in the wheel
+#     (asserted by tests/test_packaging.py's wheel-content check for package data).
+#   * 3.12 and 3.13 are exactly the versions the CI matrix runs. No 3.14 row until one does.
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: System :: Monitoring",
+    "Typing :: Typed",
+]
 dependencies = [
     # Standalone FastMCP (gofastmcp.com) is the server runtime: server.py uses
     # `from fastmcp import FastMCP` and `from fastmcp.exceptions import ToolError`.
@@ -22,7 +49,7 @@ dependencies = [
     # (fastmcp re-exports the low-level types and pulls mcp transitively anyway).
     "mcp>=1.0,<2",
     # pydantic>=2.11: the floor of the core deps (mcp/pydantic-settings) and of the optional
-    # opi_navigation (see [displays]); stated explicitly here so the intent is visible.
+    # opi_navigation (see the `displays` group); stated explicitly here so the intent is visible.
     "pydantic>=2.11,<3",
     "pydantic-settings>=2.0,<3",
     "p4p>=4.2.0,<5",
@@ -77,6 +104,8 @@ Homepage = "https://github.com/epicDirk/EPICS-MCP-Server"
 Repository = "https://github.com/epicDirk/EPICS-MCP-Server"
 Issues = "https://github.com/epicDirk/EPICS-MCP-Server/issues"
 Changelog = "https://github.com/epicDirk/EPICS-MCP-Server/blob/main/CHANGELOG.md"
+# Deployment is the page an outside adopter needs first, so it is what "Documentation" points at.
+Documentation = "https://github.com/epicDirk/EPICS-MCP-Server/blob/main/docs/deployment.md"
 
 [project.scripts]
 epics-pv-mcp = "epics_pv_mcp.server:main"
