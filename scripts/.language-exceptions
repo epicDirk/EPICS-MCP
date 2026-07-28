@@ -19,3 +19,11 @@ tests/test_olog_update.py::.txt"
 # test input, not prose.
 tests/test_safety.py::probe = "SIM:PS-01
 tests/test_olog_write.py::probe = "OLOG_WRITE logbook=probe
+
+# known-limits paragraph 9 documents the guard's own Title-Case false-positive class, so its
+# example proper nouns (von Neumann, Weil, Des Moines) ARE the subject of those lines. The guard
+# blocking its own documentation here is correct behaviour, and these entries are the sanctioned
+# relief the paragraph describes.
+docs/known-limits.md::spelled like a German function word
+docs/known-limits.md::each trip the word signal, because the ALL-CAPS discard
+docs/known-limits.md::The mechanical repair, discarding a lowercase

@@ -178,6 +178,21 @@ What it cannot see, stated because a guard's reach invites over-reading:
   and a site acronym once, measured tree-wide. German prose does not capitalise its function words,
   so the trade is cheap, but it is a hole.
 
+And one class it flags although it should not, known and accepted rather than repaired
+(QA 2026-07-28, measured with `german_signals` on each example): **an English proper noun that is
+spelled like a German function word.** "the von Neumann architecture", "the Weil pairing" and
+"Des Moines" each trip the word signal, because the ALL-CAPS discard does not cover Title-Case.
+The mechanical repair, discarding a lowercase `von` before a capitalised word, would blind the
+guard to most genuine German (German nouns ARE capitalised), so the residual stays and the
+per-line exception file is the intended relief; this very paragraph needed those exceptions, which
+doubles as the end-to-end proof of the mechanism. Two sibling classes from the same audit ARE
+repaired mechanically, because their fix costs no German recall: URL-shaped tokens are blanked
+before any signal (`https://web.mit.edu` carries the German preposition as a host label; a BARE
+hostname without a scheme or `www.` prefix is not URL-shaped and stays a residual), and nine
+English words ending in a watched suffix (`unsung`, `sprung`, `strung`, `hamstrung`,
+`Fahrenheit`, ...) sit in an explicit lookalike stoplist whose entries are pinned to still match
+the suffix rule.
+
 ⛔ The tempting repair, a general language-detection library, is rejected rather than postponed: a
 statistical detector on a 100-column line of technical English with identifiers in it is noisy in
 exactly the direction that makes a commit hook unusable, and the failure would be a false BLOCK,

@@ -28,7 +28,9 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "scripts"))
 
 from check_language import (  # noqa: E402 (needs the sys.path splice above)
+    _ENGLISH_SUFFIX_LOOKALIKES,
     _SELF_EXEMPT,
+    _SUFFIX_RE,
     german_signals,
     is_excepted,
     main,
@@ -77,6 +79,13 @@ def test_each_signal_catches_what_the_others_miss(line: str, expected: list[str]
         "# a read-only client that config parsing hands the resolved URL",
         "# nothing here is German, and this line has to stay quiet",
         "such that the young config is rich in which nothing is flagged",
+        # The QA-5 dictionary audit: English words the suffix rule matched before the lookalike
+        # discard, and a URL whose host label is the German preposition. Each row blocked a
+        # perfectly ordinary English commit until the fix.
+        "# the CLI was hamstrung by its module-level import chain",
+        "# the trap had sprung on unsung code, strung together overnight",
+        "# temperatures arrive in Fahrenheit here, never in Celsius",
+        "# see https://web.mit.edu/paper and www.mit.edu for the source",
     ],
 )
 def test_english_stays_quiet(line: str) -> None:
@@ -85,6 +94,23 @@ def test_english_stays_quiet(line: str) -> None:
     MIT licence six times and the site acronym once, measured over the whole tree.
     """
     assert german_signals(line) == []
+
+
+@pytest.mark.parametrize("word", sorted(_ENGLISH_SUFFIX_LOOKALIKES))
+def test_every_suffix_lookalike_stays_quiet(word: str) -> None:
+    """One row per stoplist entry, so emptying or breaking the discard reddens every word it
+    protected rather than whichever example happens to sit in a sample sentence."""
+    assert german_signals(f"# the {word} case stays English") == []
+
+
+def test_every_suffix_lookalike_is_actually_a_lookalike() -> None:
+    """The stoplist's population anchor (MU): an entry that no longer matches ``_SUFFIX_RE`` is a
+    stale exception that silently widens the discard, so it goes red here instead. This also
+    keeps the list honest against a future suffix change: tightening the regex must shrink the
+    list in the same commit."""
+    stale = sorted(word for word in _ENGLISH_SUFFIX_LOOKALIKES if not _SUFFIX_RE.fullmatch(word))
+
+    assert stale == [], f"stoplist entries the suffix rule would never flag anyway: {stale}"
 
 
 def test_the_whole_english_tree_is_quiet() -> None:

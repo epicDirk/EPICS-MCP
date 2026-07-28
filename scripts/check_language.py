@@ -63,6 +63,23 @@ _GERMAN_SUFFIXES = """
     ieren iert ierte ierten ierung ierungen isch ische ischen ischer
 """.split()  # noqa: SIM905 (prose block, see above)
 
+# English words the suffix rule would otherwise flag (QA-5). The tree probe above answers only
+# "does it collide TODAY"; this list answers "which English words CAN collide": enumerated per
+# suffix over English vocabulary and then verified against ``_SUFFIX_RE`` one by one (a guard test
+# pins that every entry still matches, so a stale entry goes red instead of silently widening).
+# The 'ung' family needs three word characters before the suffix, which is why 'flung'/'swung'
+# pass on their own; 'fahrenheit' is 'fahren' + 'heit' and the likeliest hit in this domain.
+_ENGLISH_SUFFIX_LOOKALIKES = frozenset(
+    """
+    fahrenheit hamstrung overstrung restrung sprung strung underslung unstrung unsung
+""".split()  # noqa: SIM905 (prose block, see above)
+)
+
+# A URL is an address, not prose: ``web.mit.edu`` carries the German preposition ``mit`` as a
+# host label and would block the commit of a legitimate citation (QA-5, measured). URL-shaped
+# tokens are blanked before any signal runs; the prose AROUND a URL is still judged.
+_URL_RE = re.compile(r"\S+://\S+|www\.\S+")
+
 _UMLAUTS = "".join(chr(code) for code in (0xE4, 0xF6, 0xFC, 0xC4, 0xD6, 0xDC, 0xDF))
 
 _WORD_RE = re.compile(
@@ -89,13 +106,20 @@ def german_signals(line: str) -> list[str]:
 
     An ALL-CAPS match is discarded: ``MIT`` (the licence) and site acronyms are not the German
     ``mit``, and that is the only false-positive class the tree-wide measurement produced.
+    Two more discards from the QA's dictionary audit (the tree probe only proves the absence of
+    a collision TODAY): URL-shaped tokens are blanked first, and a suffix match on a word in
+    ``_ENGLISH_SUFFIX_LOOKALIKES`` is not German morphology.
     """
+    prose = _URL_RE.sub(" ", line)
     signals: list[str] = []
-    if any(not match.group(0).isupper() for match in _WORD_RE.finditer(line)):
+    if any(not match.group(0).isupper() for match in _WORD_RE.finditer(prose)):
         signals.append("German function word")
-    if _UMLAUT_RE.search(line):
+    if _UMLAUT_RE.search(prose):
         signals.append("umlaut or eszett")
-    if any(not match.group(0).isupper() for match in _SUFFIX_RE.finditer(line)):
+    if any(
+        not match.group(0).isupper() and match.group(0).lower() not in _ENGLISH_SUFFIX_LOOKALIKES
+        for match in _SUFFIX_RE.finditer(prose)
+    ):
         signals.append("German word formation")
     return signals
 
