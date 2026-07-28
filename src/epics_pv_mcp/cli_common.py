@@ -8,9 +8,56 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import importlib.util
 import io
 import math
 import sys
+
+#: Exit code for a usage error, matching the ``positive_timeout`` posture below and argparse's own.
+_USAGE_ERROR = 2
+
+
+def require_display_engine(command: str) -> int | None:
+    """Return an exit code when the ``opi_navigation`` engine is absent, ``None`` when it is there.
+
+    WHY this exists at all: two of the five console scripts (``epics-crossplane``,
+    ``epics-coverage``) are display-aware and need an engine that is NOT part of the published
+    package. Installed from an index, both used to die on the module-level import chain with a bare
+    ``ModuleNotFoundError`` traceback, which reads as a broken package rather than as a missing
+    optional capability. Measured by installing the built wheel into a clean environment: three of
+    the five entry points worked, two produced a traceback.
+
+    ``server.py`` already had the right posture for the MCP surface (register the display tools only
+    when the engine imports, keep the core server up). This is the same decision for the CLI
+    surface, which had never been given it.
+
+    Returns rather than raising, and the caller returns it in turn, so the exit code stays visible
+    at the entry point instead of being decided inside a helper. A missing optional capability is a
+    USAGE error (2), not a failure of the command (1): nothing went wrong, the command simply
+    cannot apply here.
+    """
+    # find_spec normally answers None for a missing module, but it PROPAGATES whatever a meta-path
+    # finder raises, and a broken or restricted import system is exactly the situation where this
+    # check matters most. An availability probe that crashes instead of answering "unavailable" is
+    # the defect it was meant to prevent, so anything raised here counts as absent.
+    try:
+        found = importlib.util.find_spec("opi_navigation") is not None
+    except Exception:  # noqa: BLE001 (any finder failure means "cannot use it", never a crash)
+        found = False
+    if found:
+        return None
+    sys.stderr.write(
+        f"{command}: needs the opi_navigation display engine, which is not installed.\n"
+        "\n"
+        "This command joins operator-display PVs with the runtime planes, so it cannot\n"
+        "run without that engine. The engine is not part of the published package (it\n"
+        "lives in a separate, private repository), so an install from a package index\n"
+        "will not have it. The other three commands (epics-pv-mcp, epics-doctor,\n"
+        "epics-diagnose) and every non-display MCP tool work without it.\n"
+        "\n"
+        "From a checkout with access: uv sync --extra all --group displays\n"
+    )
+    return _USAGE_ERROR
 
 
 def positive_timeout(value: str) -> float:

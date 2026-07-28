@@ -17,15 +17,24 @@ import argparse
 import sys
 from pathlib import Path
 
-from epics_pv_mcp.cli_common import configure_stdout
+from epics_pv_mcp.cli_common import configure_stdout, require_display_engine
 from epics_pv_mcp.errors import EpicsError
-from epics_pv_mcp.services.crossplane import render_markdown
-from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
-from epics_pv_mcp.services.orchestration import CrossPlaneRequest, run_crossplane
+
+# The opi_navigation-backed imports live INSIDE main(), below the availability check.
+# At module level they make importing this module fail with a ModuleNotFoundError
+# traceback wherever the engine is absent, which is every install from a package index.
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run the cross-plane check and print a Markdown report. Returns an exit code."""
+    unavailable = require_display_engine("epics-crossplane")
+    if unavailable is not None:
+        return unavailable
+
+    from epics_pv_mcp.services.crossplane import render_markdown
+    from epics_pv_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
+    from epics_pv_mcp.services.orchestration import CrossPlaneRequest, run_crossplane
+
     parser = argparse.ArgumentParser(description="Cross-plane PV provenance: Display ↔ e3 ↔ Naming")
     parser.add_argument(
         "--displays",
