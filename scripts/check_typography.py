@@ -77,10 +77,25 @@ def load_exceptions() -> list[tuple[str, str]]:
     return pairs
 
 
+def path_matches(path: str, suffix: str) -> bool:
+    """True when *path* ends with *suffix* at a PATH-COMPONENT boundary (QA-11).
+
+    A bare ``endswith`` compares characters, not path components, so the key
+    ``scripts/guard_audit.py`` also matched ``myscripts/guard_audit.py``: an exception granted to
+    one file silently covered a different one, in a directory nobody had decided about. Anchoring
+    on the separator makes the key mean what a reader takes it to mean. The whole-path case is kept
+    so a key that spells the complete relative path still matches itself.
+
+    Spelled identically in check_language.py; ``tests/test_typography_guard.py`` pins the two
+    against each other so the pair cannot drift apart unnoticed.
+    """
+    posix = Path(path).as_posix()
+    return posix == suffix or posix.endswith("/" + suffix)
+
+
 def is_excepted(path: str, line: str, exceptions: list[tuple[str, str]]) -> bool:
     """True when *line* in *path* is covered by an entry: BOTH path suffix and fragment must hit."""
-    posix = Path(path).as_posix()
-    return any(posix.endswith(suffix) and fragment in line for suffix, fragment in exceptions)
+    return any(path_matches(path, suffix) and fragment in line for suffix, fragment in exceptions)
 
 
 def scan(path: str, exceptions: list[tuple[str, str]]) -> list[str]:

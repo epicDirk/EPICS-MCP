@@ -122,6 +122,55 @@ def test_the_exception_needs_both_halves() -> None:
     assert not is_excepted("src/other.py", PATHSPEC_LINE, exceptions)
 
 
+def test_the_exception_does_not_leak_into_a_neighbouring_directory() -> None:
+    """The key names a PATH, so it must not match a different path that merely ends the same way
+    (QA-11).
+
+    ``endswith`` compares characters, not path components, so the committed key
+    ``scripts/guard_audit.py`` also freed ``myscripts/guard_audit.py``: an exception decided for
+    one file, silently covering another in a directory nobody had looked at. Red on the pre-fix
+    code, where this asserted a match.
+
+    The counter-direction is asserted beside it, because a predicate that matched nothing would
+    also pass the row above: the file the key was written for still has to be freed, and so does
+    the equivalent absolute path a manual run hands over.
+    """
+    exceptions = [("scripts/guard_audit.py", "status --porcelain")]
+
+    assert not is_excepted("myscripts/guard_audit.py", PATHSPEC_LINE, exceptions)
+    assert not is_excepted("src/scripts_guard_audit.py", PATHSPEC_LINE, exceptions)
+    assert is_excepted("scripts/guard_audit.py", PATHSPEC_LINE, exceptions)
+    assert is_excepted("/repo/scripts/guard_audit.py", PATHSPEC_LINE, exceptions)
+
+
+def test_both_guards_anchor_paths_the_same_way() -> None:
+    """The two guards carry this predicate twice, so the pair is pinned rather than trusted.
+
+    They are standalone pre-commit scripts with no shared module between them, and a fix applied to
+    one of two identical copies is the classic half-repair: the tree would look mended while the
+    other guard kept leaking exceptions. Every row below is asserted against BOTH implementations,
+    so a divergence goes red here instead of being discovered by the next audit.
+    """
+    from check_language import path_matches as language_path_matches
+    from check_typography import path_matches as typography_path_matches
+
+    cases = [
+        ("scripts/guard_audit.py", "scripts/guard_audit.py", True),
+        ("/repo/scripts/guard_audit.py", "scripts/guard_audit.py", True),
+        ("myscripts/guard_audit.py", "scripts/guard_audit.py", False),
+        ("scripts/guard_audit.py", "guard_audit.py", True),
+        ("scripts/my_guard_audit.py", "guard_audit.py", False),
+        ("scripts/guard_audit.py", "", False),
+    ]
+
+    measured = [
+        (path, suffix, language_path_matches(path, suffix), typography_path_matches(path, suffix))
+        for path, suffix, _ in cases
+    ]
+
+    assert [(p, s, e, e) for p, s, e in cases] == measured
+
+
 def test_the_exception_frees_the_line_it_names(tmp_path: Path) -> None:
     """End to end through :func:`scan`: the pathspec line survives, a real dash beside it does
     not."""
