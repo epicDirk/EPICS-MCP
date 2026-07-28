@@ -27,7 +27,6 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "scripts"))
 
 from check_typography import (  # noqa: E402 (needs the sys.path splice above)
-    _DOUBLED_HYPHEN,
     _FORBIDDEN,
     is_excepted,
     main,
@@ -38,16 +37,25 @@ EM_DASH = chr(0x2014)
 ELLIPSIS = chr(0x2026)
 GUARD_SOURCE = _REPO / "scripts" / "check_typography.py"
 
+# The doubled hyphen, spelled LOCALLY and not imported from the guard (QA-3): the first version
+# imported ``_DOUBLED_HYPHEN``, which put the guard's own constant on both sides of every
+# comparison, so corrupting it in the guard left this whole module green while the guard silently
+# stopped catching the sequence. Assembled from parts because written out, this line would trip
+# the guard on its own commit.
+DOUBLED_HYPHEN = " " + "--" + " "
+
 # The one real exception, assembled rather than written out: spelled literally, this test file
 # would trip the guard on its own commit. Which it did, on the first attempt, and that is the
 # cheapest end-to-end proof the hook is wired up at all.
-PATHSPEC_LINE = f"git status --porcelain{_DOUBLED_HYPHEN}src/"
+PATHSPEC_LINE = f"git status --porcelain{DOUBLED_HYPHEN}src/"
 
 # Deliberately an INDEPENDENT list, not derived from the guard. Parametrising over ``_FORBIDDEN``
 # itself was the first version and it is a sham guard: deleting a rule deletes its probe, so the
 # suite gets SMALLER and stays green, which is the failure mode CLAUDE.md point 8 is about. Held
 # against the guard's table by :func:`test_the_rule_set_is_exactly_this`, so the two can only
-# diverge loudly.
+# diverge loudly. Every entry is spelled here, none imported: importing one entry from the guard
+# (the doubled hyphen, until QA-3) made that one entry immune to exactly the divergence this list
+# exists to catch, measured by mutating the guard's constant with the suite staying green.
 EXPECTED: tuple[str, ...] = (
     chr(0x2014),  # em dash
     chr(0x2013),  # en dash
@@ -57,7 +65,7 @@ EXPECTED: tuple[str, ...] = (
     chr(0x201D),  # right double quote
     chr(0x201A),  # low single quote
     chr(0x2018),  # left single quote
-    _DOUBLED_HYPHEN,
+    DOUBLED_HYPHEN,
 )
 
 

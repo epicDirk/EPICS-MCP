@@ -48,6 +48,10 @@ MORPHOLOGY = "German word formation"
         ("# mcp bleibt explizit im Vertrag, wir nutzen das Modul direkt", [WORD]),
         # Signal 2 alone: a German word with no function word and no watched suffix.
         ("# Größe: 12 Zeichen, Rest abgeschnitten", [UMLAUT]),
+        # Signal 2 via the ESZETT alone (QA-4): no umlaut, no function word, no watched suffix.
+        # Without this row, dropping 0xDF from the umlaut class left the whole module green,
+        # measured: the only eszett lines in the tree sit behind the casefold exception.
+        ("# Straßenname: XYZ", [UMLAUT]),
         # Signal 3 alone: neither a function word nor an umlaut in sight. This signal found a real
         # line the other two walked past ("ehrlichen"), which is why it is not decoration.
         ("# Die ehrlichen Notes: glob-cap (Adapter)", [MORPHOLOGY]),
