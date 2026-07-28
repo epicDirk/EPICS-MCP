@@ -41,3 +41,12 @@ repos:
         language: system
         pass_filenames: true
         require_serial: true
+      # Language: this repository is written in English. Three independent signals, because the
+      # umlaut grep that once cleared the tree missed 87 of its 156 German lines (measured on the
+      # pre-translation tree, db5a83c) and reported nothing about the miss.
+      - id: language
+        name: English only
+        entry: uv run python scripts/check_language.py
+        language: system
+        pass_filenames: true
+        require_serial: true

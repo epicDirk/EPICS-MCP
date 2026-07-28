@@ -1,0 +1,21 @@
+# Exceptions for scripts/check_language.py. One per line:
+#
+#     <path suffix>::<literal fragment of the offending line>
+#
+# BOTH halves must match, and the key is the line's CONTENT, never its number: a number moves with
+# any edit above it and would rot for a reason that is not a change in the finding. An entry frees
+# the whole line. Blank lines and lines starting with # are ignored.
+#
+# An exception is for a line where the non-English text IS the subject, never for German that
+# nobody got round to translating. Each entry says which.
+
+# The casefold fixture: this pair is the DATA of the test. It is the difference between Python's
+# casefold() and Java's compareToIgnoreCase, so replacing the eszett would delete the measurement.
+src/epics_pv_mcp/services/olog_client.py::casefold() does
+tests/test_olog_update.py::compareToIgnoreCase folds per
+tests/test_olog_update.py::.txt"
+
+# Non-ASCII audit probes: the encoding is the whole point of the probe, so the characters are the
+# test input, not prose.
+tests/test_safety.py::probe = "SIM:PS-01
+tests/test_olog_write.py::probe = "OLOG_WRITE logbook=probe
