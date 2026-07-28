@@ -3053,10 +3053,12 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 63_764 and the full lane
-    72_052; a new tool or an SDK change that inflates the wire could grow that UNNOTICED with an
-    otherwise green suite. This is that guard, now a soft catastrophe-ceiling at 200_000 (see the
-    constant's comment for the raise rationale).
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 63_762 and the full lane
+    72_050 (re-measured 2026-07-28 on both lanes: the previous pair went stale by 2 chars one
+    commit after it was written, when ecd2173 shortened the find_channels docstring, which rides
+    the wire as that tool's description, and did not re-measure); a new tool or an SDK change that
+    inflates the wire could grow that UNNOTICED with an otherwise green suite. This is that guard,
+    now a soft catastrophe-ceiling at 200_000 (see the constant's comment for the raise rationale).
 
     What this guard does NOT catch, stated so nobody relies on it: a LOST
     ``@mcp.tool(output_schema=None)`` opt-out. Dropping it on a ``dict[str, object]`` tool restores
