@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "epics-pv-mcp"
+name = "epics-mcp"
 version = "0.3.0.dev0"
 description = "MCP Server for EPICS PV access via p4p (PVAccess + Channel Access)"
 readme = "README.md"
@@ -69,7 +69,7 @@ dev = [
 # Everything a published install can offer: the dev toolchain. The display-aware tools are NOT an
 # extra, see the `displays` dependency group below.
 all = [
-    "epics-pv-mcp[dev]",
+    "epics-mcp[dev]",
 ]
 
 # Dependency groups (PEP 735) are a LOCAL install surface: unlike an extra, they never reach the
@@ -100,12 +100,19 @@ displays = ["opi-navigation"]
 opi-navigation = { git = "https://github.com/epicDirk/opi-foundry.git", rev = "8fad86766891aeac177050449f73a3a4fbf554cc" }
 
 [project.urls]
-Homepage = "https://github.com/epicDirk/EPICS-MCP-Server"
-Repository = "https://github.com/epicDirk/EPICS-MCP-Server"
-Issues = "https://github.com/epicDirk/EPICS-MCP-Server/issues"
-Changelog = "https://github.com/epicDirk/EPICS-MCP-Server/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/epicDirk/EPICS-MCP"
+Repository = "https://github.com/epicDirk/EPICS-MCP"
+Issues = "https://github.com/epicDirk/EPICS-MCP/issues"
+Changelog = "https://github.com/epicDirk/EPICS-MCP/blob/main/CHANGELOG.md"
 # Deployment is the page an outside adopter needs first, so it is what "Documentation" points at.
-Documentation = "https://github.com/epicDirk/EPICS-MCP-Server/blob/main/docs/deployment.md"
+Documentation = "https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md"
+
+# The import package keeps its historical name: hatchling would otherwise look for a package
+# matching the new distribution name (epics_mcp) and fail. Renaming the import package (and
+# the epics-pv-mcp console script) is a separate, deliberate step, not part of the
+# distribution rename.
+[tool.hatch.build.targets.wheel]
+packages = ["src/epics_pv_mcp"]
 
 [project.scripts]
 epics-pv-mcp = "epics_pv_mcp.server:main"

@@ -503,7 +503,7 @@ wheels = [
 ]
 
 [[package]]
-name = "epics-pv-mcp"
+name = "epics-mcp"
 version = "0.3.0.dev0"
 source = { editable = "." }
 dependencies = [
@@ -540,7 +540,7 @@ displays = [
 
 [package.metadata]
 requires-dist = [
-    { name = "epics-pv-mcp", extras = ["dev"], marker = "extra == 'all'" },
+    { name = "epics-mcp", extras = ["dev"], marker = "extra == 'all'" },
     { name = "fastmcp", specifier = ">=3,<4" },
     { name = "mcp", specifier = ">=1.0,<2" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19" },

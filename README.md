@@ -1,6 +1,6 @@
 # EPICS PV MCP Server
 
-[![CI](https://github.com/epicDirk/EPICS-MCP-Server/actions/workflows/ci.yml/badge.svg)](https://github.com/epicDirk/EPICS-MCP-Server/actions/workflows/ci.yml)
+[![CI](https://github.com/epicDirk/EPICS-MCP/actions/workflows/ci.yml/badge.svg)](https://github.com/epicDirk/EPICS-MCP/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 
@@ -81,21 +81,21 @@ Not on PyPI yet (planned). Install straight from the repository with
 [uv](https://docs.astral.sh/uv/) (recommended):
 
 ```bash
-uv tool install git+https://github.com/epicDirk/EPICS-MCP-Server
+uv tool install git+https://github.com/epicDirk/EPICS-MCP
 ```
 
 or with pip:
 
 ```bash
-pip install git+https://github.com/epicDirk/EPICS-MCP-Server
+pip install git+https://github.com/epicDirk/EPICS-MCP
 ```
 
 From a local checkout, `uv tool install .` and `pip install .` do the same thing.
 
 <!-- Once the first release is published, this replaces the two commands above:
 
-     uv tool install epics-pv-mcp
-     pip install epics-pv-mcp
+     uv tool install epics-mcp
+     pip install epics-mcp
 
      The package is publishable today (built metadata verified clean, release workflow in place);
      what is outstanding is a version bump and a tag. See CONTRIBUTING.md, "Releasing". -->

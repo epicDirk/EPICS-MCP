@@ -4,7 +4,8 @@ These four tools (``validate_pvs``, ``crossplane_check``, ``coverage_audit``,
 ``find_device``) join live EPICS PVs with the *display* plane: the macro-expanded,
 per-instance PV inventory of ``.bob`` operator screens. That inventory comes from the
 ``opi_navigation`` package (the build-once Wedge-0 PV engine), which is an **optional**
-dependency: ``pip install epics-pv-mcp[displays]``.
+dependency: the ``displays`` dependency group (``uv sync --extra all --group displays``), a
+local-checkout surface that never reaches the published package.
 
 Keeping them in their own module lets :mod:`epics_pv_mcp.server` load them lazily via one
 capability probe (``_load_display_registrar``): it skips them silently when the extra is absent

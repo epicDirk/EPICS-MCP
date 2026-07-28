@@ -7,6 +7,13 @@ carry breaking changes).
 
 ## [Unreleased]
 
+### Changed
+
+- **Renamed: the distribution is `epics-mcp`, the repository is `epicDirk/EPICS-MCP`** (before
+  anything was ever published, so nothing breaks for anyone). The old name undersold the server:
+  the PV plane is one of six. The import package (`epics_pv_mcp`) and the five console commands
+  keep their names for now; renaming those is a separate, deliberate step.
+
 ### Added
 
 #### New tools

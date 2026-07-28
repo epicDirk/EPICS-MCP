@@ -14,7 +14,7 @@ authors:
   - family-names: Nordt
     given-names: Dirk
     alias: epicDirk
-repository-code: "https://github.com/epicDirk/EPICS-MCP-Server"
+repository-code: "https://github.com/epicDirk/EPICS-MCP"
 license: MIT
 keywords:
   - EPICS

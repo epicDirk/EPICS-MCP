@@ -101,8 +101,8 @@ the gates.
    the Java live plugin and the CS-Studio MCP have been tested in practice. Until then the engine
    stays a dependency group and the published package does not offer it. The same note sits in
    `pyproject.toml` next to the group, so neither copy is the only one.
-2. Create the account on the index and register a **Trusted Publisher** for `epics-pv-mcp`:
-   repository `epicDirk/EPICS-MCP-Server`, workflow `publish.yml`, environment `pypi`. Trusted
+2. Create the account on the index and register a **Trusted Publisher** for `epics-mcp`:
+   repository `epicDirk/EPICS-MCP`, workflow `publish.yml`, environment `pypi`. Trusted
    Publishing uses OIDC, so no API token is ever stored in this repository.
 3. Run the workflow once manually (`workflow_dispatch`, `dry_run` left at its default `true`). It
    installs, tests, clears `dist/`, builds and gates, and stops before uploading. That rehearsal is

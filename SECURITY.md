@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Report privately through GitHub's
-[private vulnerability reporting](https://github.com/epicDirk/EPICS-MCP-Server/security/advisories/new)
+[private vulnerability reporting](https://github.com/epicDirk/EPICS-MCP/security/advisories/new)
 on this repository. Please do not open a public issue for a suspected vulnerability.
 
 Include what you can: the tool or CLI involved, a configuration that reproduces it (with any
