@@ -1,6 +1,7 @@
 # EPICS PV MCP Server
 
 [![CI](https://github.com/epicDirk/EPICS-MCP/actions/workflows/ci.yml/badge.svg)](https://github.com/epicDirk/EPICS-MCP/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/epics-mcp.svg)](https://pypi.org/project/epics-mcp/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 
@@ -77,28 +78,22 @@ configured.
 
 ## Installation
 
-Not on PyPI yet (planned). Install straight from the repository with
+From [PyPI](https://pypi.org/project/epics-mcp/), with
 [uv](https://docs.astral.sh/uv/) (recommended):
 
 ```bash
-uv tool install git+https://github.com/epicDirk/EPICS-MCP
+uv tool install epics-mcp
 ```
 
 or with pip:
 
 ```bash
-pip install git+https://github.com/epicDirk/EPICS-MCP
+pip install epics-mcp
 ```
 
-From a local checkout, `uv tool install .` and `pip install .` do the same thing.
-
-<!-- Once the first release is published, this replaces the two commands above:
-
-     uv tool install epics-mcp
-     pip install epics-mcp
-
-     The package is publishable today (built metadata verified clean, release workflow in place);
-     what is outstanding is a version bump and a tag. See CONTRIBUTING.md, "Releasing". -->
+For the development version, install straight from the repository
+(`uv tool install git+https://github.com/epicDirk/EPICS-MCP`); from a local checkout,
+`uv tool install .` and `pip install .` do the same thing.
 
 This installs the **core** server: live PV access, diagnosis, and the REST-service planes, plus
 six commands (`epics-mcp` and its pre-rename alias `epics-pv-mcp`, `epics-doctor`, `epics-diagnose`, `epics-crossplane`,
