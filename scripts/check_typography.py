@@ -8,14 +8,15 @@ multi-day sweep. Nothing stopped them coming back, and a sweep nobody guards is 
 repeats.
 
 Why not ruff: RUF001-003 ("ambiguous unicode") sound like they cover this and do not. Probed
-character by character through ``ruff --isolated --select RUF001,RUF002,RUF003``: of the nine
-entries this repository listed in ``allowed-confusables``, ruff recognises exactly THREE, the en
-dash, the typographic apostrophe and the multiplication sign. The em dash, the ellipsis and all
-four curly quotes produce no finding at all, whether in a string, a docstring or a comment; the
-list was carrying four entries that never did anything. The doubled hyphen is plain ASCII and out
-of reach for a confusables check by construction. So ruff guards the en dash inside ``.py`` (a
-second, independent pair of eyes, kept deliberately) and this guard covers every character in
-every text file.
+character by character through ``ruff --isolated --select RUF001,RUF002,RUF003`` (re-measured
+2026-07-28, the first write-up undercounted): of the nine entries this repository once listed in
+``allowed-confusables``, ruff recognises FIVE, the en dash, the typographic apostrophe, the
+multiplication sign and BOTH single curly quotes (U+2018, U+201A). The em dash and the three
+double curly quotes produce no finding at all, whether in a string, a docstring or a comment,
+and the ellipsis (never on that list) is equally silent. The doubled hyphen is plain ASCII and
+out of reach for a confusables check by construction. So ruff is a second, independent pair of
+eyes inside ``.py`` for the en dash and the two single quotes, all three forbidden here anyway,
+and this guard covers every character in every text file.
 
 What is deliberately NOT forbidden, because it earns its place: U+2019, the typographic
 apostrophe, is legitimate inside English prose; and the arrow, the almost-equal sign and the

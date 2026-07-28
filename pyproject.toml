@@ -132,15 +132,17 @@ target-version = "py312"
 select = ["E", "F", "I", "W", "UP", "B", "SIM", "RUF", "PERF", "ANN", "BLE", "T20"]
 # Two characters stay tolerated: the typographic apostrophe, legitimate in English prose, and
 # the multiplication sign, which no ASCII substitute replaces. Everything else was REMOVED
-# from this list, which turns ruff into a second, independent guard for the one character it
+# from this list, which turns ruff into a second, independent guard for the characters it
 # actually knows here.
 #
-# Measured, because the list invites the opposite assumption: probed one character at a time
-# through `ruff --isolated --select RUF001,RUF002,RUF003`, ruff recognises only the en dash,
-# the apostrophe and the multiplication sign. The em dash, the ellipsis and all four curly
-# quotes produce NO finding, in a string, a docstring or a comment alike, so four of the nine
-# entries this list used to carry were no-ops. Removing them buys nothing but honesty; removing
-# the en dash is the one that buys a guard. The characters ruff cannot see are covered by
+# Measured, because the list invites the opposite assumption (re-measured 2026-07-28, the first
+# write-up undercounted): probed one character at a time through
+# `ruff --isolated --select RUF001,RUF002,RUF003`, ruff recognises FIVE of the nine entries this
+# list used to carry: the en dash, the apostrophe, the multiplication sign and both single curly
+# quotes (U+2018, U+201A). The em dash and the three double curly quotes produce NO finding, in
+# a string, a docstring or a comment alike, so those four entries were no-ops. Removing the
+# no-ops buys honesty; removing the en dash and the single quotes buys a guard, since all three
+# are forbidden here. The characters ruff cannot see are covered by
 # scripts/check_typography.py, which reads every text file, not just Python.
 allowed-confusables = ["’", "×"]
 

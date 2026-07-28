@@ -215,11 +215,14 @@ LINE rather than one character on it; with one exception in the file, a narrower
 machinery than the problem deserves.
 
 ⚠️ Worth knowing before assuming ruff covers any of this: of the nine characters `pyproject.toml`
-once listed in `allowed-confusables`, ruff recognises **three** (en dash, apostrophe, multiplication
-sign), probed one at a time through `ruff --isolated --select RUF001,RUF002,RUF003`. The em dash,
-the ellipsis and all four curly quotes produce no finding in a string, a docstring or a comment
-alike, so that list carried four entries that never did anything. Ruff now guards the en dash inside
-`.py` as a second, independent pair of eyes; everything else is this guard's job.
+once listed in `allowed-confusables`, ruff recognises **five** (en dash, apostrophe, multiplication
+sign, and both single curly quotes U+2018/U+201A), probed one at a time through
+`ruff --isolated --select RUF001,RUF002,RUF003` and re-measured 2026-07-28 after the first
+write-up undercounted them as three. The em dash and the three double curly quotes produce no
+finding in a string, a docstring or a comment alike (the ellipsis, never on that list, is equally
+silent), so that list carried four entries that never did anything. Ruff now guards the en dash
+and the two single quotes inside `.py` as a second, independent pair of eyes; everything else is
+this guard's job.
 
 ## 11 · Prose rules rot, and that includes this page
 
