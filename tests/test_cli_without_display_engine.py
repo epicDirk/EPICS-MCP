@@ -86,7 +86,7 @@ def test_the_message_says_what_still_works_and_how_to_get_the_rest(
     require_display_engine("epics-crossplane")
     message = capsys.readouterr().err
 
-    for expected in ("epics-doctor", "epics-diagnose", "epics-pv-mcp", "--group displays"):
+    for expected in ("epics-doctor", "epics-diagnose", "epics-mcp", "--group displays"):
         assert expected in message, f"{expected!r} missing from the refusal"
 
 

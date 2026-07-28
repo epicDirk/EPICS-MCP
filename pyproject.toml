@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "epics-mcp"
-version = "0.3.0.dev0"
+version = "0.3.0"
 description = "MCP Server for EPICS PV access via p4p (PVAccess + Channel Access)"
 readme = "README.md"
 license = { text = "MIT" }
@@ -108,13 +108,15 @@ Changelog = "https://github.com/epicDirk/EPICS-MCP/blob/main/CHANGELOG.md"
 Documentation = "https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md"
 
 # The import package keeps its historical name: hatchling would otherwise look for a package
-# matching the new distribution name (epics_mcp) and fail. Renaming the import package (and
-# the epics-pv-mcp console script) is a separate, deliberate step, not part of the
-# distribution rename.
+# matching the new distribution name (epics_mcp) and fail. Renaming the import package is a
+# separate, deliberate step, not part of the distribution rename.
 [tool.hatch.build.targets.wheel]
 packages = ["src/epics_pv_mcp"]
 
 [project.scripts]
+epics-mcp = "epics_pv_mcp.server:main"
+# The pre-rename spelling stays as an alias so nothing breaks for anyone following older docs;
+# retiring it is part of the deferred import-package rename.
 epics-pv-mcp = "epics_pv_mcp.server:main"
 epics-crossplane = "epics_pv_mcp.cli_crossplane:main"
 epics-coverage = "epics_pv_mcp.cli_coverage:main"

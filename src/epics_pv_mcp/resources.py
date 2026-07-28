@@ -40,7 +40,7 @@ def get_health() -> dict[str, object]:
         pass
 
     return {
-        "server": "epics-pv-mcp",
+        "server": "epics-mcp",
         "version": __version__,
         "status": "ok",
         "provider": cfg.provider,

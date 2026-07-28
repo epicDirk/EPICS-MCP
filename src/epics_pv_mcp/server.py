@@ -172,7 +172,7 @@ _DISPLAY_TOOLS_AVAILABLE = _display_registrar is not None
 
 # Keep in sync with the epics-pv posture in SKILL.md
 mcp = FastMCP(
-    "epics-pv-mcp",
+    "epics-mcp",
     version=__version__,
     instructions=build_instructions(_DISPLAY_TOOLS_AVAILABLE),
     # mask_error_details controls ONLY whether the detail text of a NON-ToolError exception (a

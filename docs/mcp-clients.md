@@ -12,7 +12,7 @@ Add the server to your `.mcp.json` or `claude_desktop_config.json`.
 {
   "mcpServers": {
     "epics-pv": {
-      "command": "epics-pv-mcp",
+      "command": "epics-mcp",
       "env": { "EPICS_MCP_PROVIDER": "pva" }
     }
   }
@@ -25,7 +25,7 @@ Add the server to your `.mcp.json` or `claude_desktop_config.json`.
 {
   "mcpServers": {
     "epics-pv": {
-      "command": "epics-pv-mcp",
+      "command": "epics-mcp",
       "env": {
         "EPICS_MCP_CHANNELFINDER_URL": "http://localhost:8080/ChannelFinder",
         "EPICS_MCP_ARCHIVER_URL": "http://localhost:17665",
@@ -42,7 +42,7 @@ Add the server to your `.mcp.json` or `claude_desktop_config.json`.
 {
   "mcpServers": {
     "epics-pv": {
-      "command": "epics-pv-mcp",
+      "command": "epics-mcp",
       "env": {
         "EPICS_MCP_ALLOW_PV_WRITE": "true",
         "EPICS_MCP_PV_WRITE_PATTERN": "^TEST:.*"

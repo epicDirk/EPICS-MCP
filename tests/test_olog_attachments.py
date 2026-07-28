@@ -115,7 +115,7 @@ class TestMultipartTransport:
             f"{_LOOPBACK}/logs/multipart",
             files,
             5.0,
-            headers={"X-Olog-Client-Info": "epics-pv-mcp"},
+            headers={"X-Olog-Client-Info": "epics-mcp"},
             conn_exc=OlogConnectionError,
             resp_exc=OlogResponseError,
         )

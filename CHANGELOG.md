@@ -7,12 +7,9 @@ carry breaking changes).
 
 ## [Unreleased]
 
-### Changed
+(nothing yet)
 
-- **Renamed: the distribution is `epics-mcp`, the repository is `epicDirk/EPICS-MCP`** (before
-  anything was ever published, so nothing breaks for anyone). The old name undersold the server:
-  the PV plane is one of six. The import package (`epics_pv_mcp`) and the five console commands
-  keep their names for now; renaming those is a separate, deliberate step.
+## [0.3.0] - 2026-07-28
 
 ### Added
 
@@ -101,6 +98,12 @@ carry breaking changes).
 
 ### Changed
 
+- **Renamed: the distribution is `epics-mcp`, the repository is `epicDirk/EPICS-MCP`** (before
+  anything was ever published, so nothing breaks for anyone). The old name undersold the server:
+  the PV plane is one of six. The server command is now `epics-mcp` (the old `epics-pv-mcp`
+  stays as an alias), and the server identifies itself to MCP clients and to the Olog as
+  `epics-mcp`. The import package (`epics_pv_mcp`) and the four `epics-*` diagnostic commands
+  keep their names for now; renaming those is a separate, deliberate step.
 - **BREAKING: tool argument names unified.** The tools carried four different argument names for
   "the PV this tool is about". They are now `pv_name` for a single PV (`monitor_pv` from `name`;
   `is_archived`, `get_pv_history`, `get_archive_info`, `is_alarm_configured` and `get_alarm_history`

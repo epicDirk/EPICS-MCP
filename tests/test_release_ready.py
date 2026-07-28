@@ -41,7 +41,7 @@ def _metadata(
     description: str = "# EPICS PV MCP Server\n\nA real description.\n",
 ) -> str:
     """Build a METADATA block; every parameter is one thing the gate is supposed to notice."""
-    lines = ["Metadata-Version: 2.4", "Name: epics-pv-mcp", f"Version: {version}"]
+    lines = ["Metadata-Version: 2.4", "Name: epics-mcp", f"Version: {version}"]
     if content_type is not None:
         lines.append(f"Description-Content-Type: {content_type}")
     lines.extend(f"Requires-Dist: {requirement}" for requirement in requires)
@@ -207,7 +207,7 @@ def test_a_wheel_is_read_from_its_dist_info(tmp_path: Path) -> None:
         archive.writestr("epics_pv_mcp-0.3.0.dist-info/METADATA", _metadata())
         archive.writestr("epics_pv_mcp/__init__.py", "")
 
-    assert "Name: epics-pv-mcp" in read_metadata(wheel)
+    assert "Name: epics-mcp" in read_metadata(wheel)
     assert main([str(wheel)]) == 0
 
 

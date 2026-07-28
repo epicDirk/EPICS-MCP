@@ -101,7 +101,7 @@ From a local checkout, `uv tool install .` and `pip install .` do the same thing
      what is outstanding is a version bump and a tag. See CONTRIBUTING.md, "Releasing". -->
 
 This installs the **core** server: live PV access, diagnosis, and the REST-service planes, plus
-five commands (`epics-pv-mcp`, `epics-doctor`, `epics-diagnose`, `epics-crossplane`,
+six commands (`epics-mcp` and its pre-rename alias `epics-pv-mcp`, `epics-doctor`, `epics-diagnose`, `epics-crossplane`,
 `epics-coverage`).
 
 The last two are **display-aware** and need the `opi_navigation` engine, which is not part of the
@@ -128,7 +128,7 @@ See [Related and roadmap](#related-and-roadmap).
 2. **Run the server** over stdio:
 
    ```bash
-   epics-pv-mcp
+   epics-mcp
    ```
 
 3. **Wire it into an MCP client**, see [MCP client integration](docs/mcp-clients.md). Then ask

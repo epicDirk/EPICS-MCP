@@ -5,4 +5,4 @@ try:
 
     __version__ = version("epics-mcp")
 except PackageNotFoundError:
-    __version__ = "0.3.0.dev0"
+    __version__ = "0.3.0"

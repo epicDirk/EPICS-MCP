@@ -527,7 +527,7 @@ class TestCreateClient:
         assert captured["params"] is None  # a create sends no query params
         headers = captured["headers"]
         assert isinstance(headers, dict)
-        assert headers["X-Olog-Client-Info"] == "epics-pv-mcp"
+        assert headers["X-Olog-Client-Info"] == "epics-mcp"
         # auth rode on the dedicated WRITE session (where the PUT goes); the read session keeps it
         # too, byte-identical, a silent drop on either would 401 a secured server.
         assert client._write_session.headers.get("authorization") == "Basic dXNlcjpwYXNz"

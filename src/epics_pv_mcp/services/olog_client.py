@@ -182,7 +182,7 @@ DEFAULT_MAX_LOGS = 50
 
 # Static, non-identifying client-info header value (server-side only logged, never persisted). NOT a
 # personal username/hostname, a facility-agnostic constant.
-_CLIENT_INFO = "epics-pv-mcp"
+_CLIENT_INFO = "epics-mcp"
 
 # DS-PRIVACY output allowlist: the only entry fields that may leave whenever the posture redacts
 # (a DECLARED loopback sandbox returns the whole entry, see _expand_log_entry). ``title``/

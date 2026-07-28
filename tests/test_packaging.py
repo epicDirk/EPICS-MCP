@@ -15,7 +15,7 @@ import epics_pv_mcp
 
 def _fallback_version_literals(init_source: str) -> list[str]:
     """Return the string literals assigned to ``__version__`` in ``__init__.py`` (the
-    ``PackageNotFoundError`` fallback). The ``version("epics-pv-mcp")`` call is a Call, not a
+    ``PackageNotFoundError`` fallback). The ``version("epics-mcp")`` call is a Call, not a
     Constant, so only the hardcoded fallback string is collected."""
     literals: list[str] = []
     for node in ast.walk(ast.parse(init_source)):

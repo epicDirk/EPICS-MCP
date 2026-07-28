@@ -20,7 +20,7 @@ def test_health_shape() -> None:
 
 def test_health_values() -> None:
     result = get_health()
-    assert result["server"] == "epics-pv-mcp"
+    assert result["server"] == "epics-mcp"
     assert result["status"] == "ok"
     assert result["write_enabled"] is False
     # REST services are disabled by default (localhost isolation preserved).
@@ -40,7 +40,7 @@ def test_health_version_matches_package_version() -> None:
 def test_low_level_server_version_attribute_exists() -> None:
     """S1-2 early-warning guard: since the standalone-fastmcp migration (6bd12c6), server.py sets
     the handshake version through the PUBLIC constructor:
-    ``FastMCP("epics-pv-mcp", version=__version__)``: which standalone FastMCP mirrors onto the
+    ``FastMCP("epics-mcp", version=__version__)``: which standalone FastMCP mirrors onto the
     PRIVATE low-level attribute ``mcp._mcp_server.version`` (the value that reaches
     ``serverInfo.version`` on the wire, independently confirmed via an ``initialize`` handshake).
     This asserts that private mirror still exists and carries ``__version__``, so a FastMCP upgrade

@@ -52,7 +52,7 @@ def require_display_engine(command: str) -> int | None:
         "This command joins operator-display PVs with the runtime planes, so it cannot\n"
         "run without that engine. The engine is not part of the published package (it\n"
         "lives in a separate, private repository), so an install from a package index\n"
-        "will not have it. The other three commands (epics-pv-mcp, epics-doctor,\n"
+        "will not have it. The other three commands (epics-mcp, epics-doctor,\n"
         "epics-diagnose) and every non-display MCP tool work without it.\n"
         "\n"
         "From a checkout with access: uv sync --extra all --group displays\n"
