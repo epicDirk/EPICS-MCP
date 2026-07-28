@@ -246,5 +246,15 @@ operator guide, or this file.
 ## Gates
 
 `uv run pytest` green (coverage not reduced) + `uv run pre-commit run --all-files` green (ruff,
-ruff-format, mypy --strict, and the no-secrets / no-site-internal guards). Conventional commit prefixes,
-one logical change per commit.
+ruff-format, mypy --strict, the no-secrets / no-site-internal guards, and the two prose guards
+below). Conventional commit prefixes, one logical change per commit.
+
+**English, and ASCII punctuation, both mechanised.** This repository grew out of a German-speaking
+project and carried German comments and an em dash as its default connector for months; removing
+both took a multi-day sweep. `scripts/check_language.py` (three independent signals: function
+words, umlauts, German word formation) and `scripts/check_typography.py` (em/en dash, ellipsis,
+curly quotes, doubled hyphen) make that sweep hard to undo. Translate rather than delete, replace
+the character rather than exempt it; the exception files are for text where the German or the
+character IS the subject. Their honest reach is `docs/known-limits.md` sections 9 and 10. ⚠️ Do not
+assume ruff covers the characters: probed one at a time, it recognises **three** of the nine
+(en dash, apostrophe, multiplication sign) and nothing at all outside `.py`.

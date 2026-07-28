@@ -1,11 +1,13 @@
 # Known limits: what this repository deliberately does NOT guard
 
-**Measured 2026-07-26.** Every figure below is a measurement of the tree at that date, not an
-invariant: this file is markdown, and markdown is unguarded here (that is the first entry). Treat a
-number as "was true when written" and re-measure before building on it.
+**Every entry carries its own measurement date**, and every figure in it is a measurement of the
+tree on that date, not an invariant: this file is markdown, and markdown is unguarded here (that is
+the first entry). Treat a number as "was true when written" and re-measure before building on it.
+Entries 1 to 8 were measured 2026-07-26, entries 9 and 10 on 2026-07-28.
 
-Why the file exists: the two drift guards this repository runs, the prose-counter guard
-(`tests/test_prose_counters.py`, S32) and the sham-guard audit (`scripts/guard_audit.py`, S33), both
+Why the file exists: the drift guards this repository runs, the prose-counter guard
+(`tests/test_prose_counters.py`, S32), the sham-guard audit (`scripts/guard_audit.py`, S33) and the
+language and typography hooks (`scripts/check_language.py`, `scripts/check_typography.py`), each
 attract an obvious next step that turns out, on measurement, to be the wrong one. Without this page
 those measurements live only in commit bodies, which nobody finds again, and the next author pays for
 them a second time. Each entry states the limit, what was measured, and why the tempting repair was
@@ -155,7 +157,56 @@ trusted. Nothing re-runs it: `prose_numbers.py` is deliberately unwatched and "b
 `COLLECTION_NOUNS` member, so no guard can reach either number. The **share** is what carries the ⛔
 decision, and it is not close.
 
-## 9 · Prose rules rot, and that includes this page
+## 9 · The language guard finds German by vocabulary, not by understanding
+
+**Measured 2026-07-28.** `scripts/check_language.py` decides per line, from three independent
+signals: a closed list of German function words with no English homograph, umlauts and the eszett,
+and German word-formation suffixes. Run over the pre-translation tree (`db5a83c`) it reports **156**
+German lines in **21** files.
+
+What it cannot see, stated because a guard's reach invites over-reading:
+
+- **A German sentence built entirely from words none of the three signals know.** The lists are
+  closed by design (one hit blocks a commit, so a wrong entry is expensive), which buys a false-
+  positive rate of zero on the current tree at the cost of an unknown false-negative rate. Nothing
+  measures the latter, and nothing can without a labelled corpus.
+- **Whether English prose is GOOD English.** The guard answers "is this German", never "is this
+  well written". Neither does anything else here.
+- **Any language other than German and English.** The signals are German-specific.
+- **A German word inside an ALL-CAPS run.** Discarded on purpose: the licence name is spelled the
+  same as a German preposition, so without that rule the guard reports the MIT licence six times
+  and a site acronym once, measured tree-wide. German prose does not capitalise its function words,
+  so the trade is cheap, but it is a hole.
+
+⛔ The tempting repair, a general language-detection library, is rejected rather than postponed: a
+statistical detector on a 100-column line of technical English with identifiers in it is noisy in
+exactly the direction that makes a commit hook unusable, and the failure would be a false BLOCK,
+which is worse here than a false pass. The honest position is that this guard makes the 2026-07
+sweep hard to undo, not that it proves the repository is English.
+
+Why this entry is not the sweep's own history: the original umlaut grep declared the tree English
+and had missed **87 of those 156 lines**, which carry no umlaut at all. That is the measurement the
+three-signal design exists to answer, and it is the reason a single-signal guard is not enough.
+
+## 10 · The typography guard forbids a named set, not typography in general
+
+**Measured 2026-07-28.** `scripts/check_typography.py` blocks nine things: the em dash, the en dash,
+the ellipsis, four curly quotes and the doubled hyphen. Against `db5a83c` it reports **3056** lines.
+
+It does **not** know any other typographic character (a minus sign, a non-breaking hyphen, a
+figure dash), and it deliberately tolerates the typographic apostrophe, the arrow and the
+multiplication sign, which carry meaning no ASCII substitute holds. An exception frees the whole
+LINE rather than one character on it; with one exception in the file, a narrower key would be more
+machinery than the problem deserves.
+
+⚠️ Worth knowing before assuming ruff covers any of this: of the nine characters `pyproject.toml`
+once listed in `allowed-confusables`, ruff recognises **three** (en dash, apostrophe, multiplication
+sign), probed one at a time through `ruff --isolated --select RUF001,RUF002,RUF003`. The em dash,
+the ellipsis and all four curly quotes produce no finding in a string, a docstring or a comment
+alike, so that list carried four entries that never did anything. Ruff now guards the en dash inside
+`.py` as a second, independent pair of eyes; everything else is this guard's job.
+
+## 11 · Prose rules rot, and that includes this page
 
 `CLAUDE.md` says it about its own conventions and it is true here: nothing runs a markdown file. The
 guard on this page is the review, plus the fact that every entry names the measurement that produced

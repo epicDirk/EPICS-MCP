@@ -26,8 +26,15 @@ absent, so the core suite stays green. A checkout with `--extra all` runs everyt
 ## Definition of done
 
 - `uv run pytest` green and coverage not reduced.
-- `uv run pre-commit run --all-files` green (ruff, ruff-format, **mypy --strict**, and the
-  no-secrets guard).
+- `uv run pre-commit run --all-files` green (ruff, ruff-format, **mypy --strict**, the no-secrets
+  guard, and the two prose guards below).
+- **English, and plain punctuation.** This repository is written in English, with ASCII
+  punctuation; `scripts/check_language.py` and `scripts/check_typography.py` enforce both on every
+  text file. If a hook blocks you: translate the line rather than deleting the reasoning, and
+  replace the character rather than reaching for the exception file. Exceptions exist for text
+  where the German or the character IS the subject (a casefold fixture, git's pathspec separator),
+  are keyed on a line fragment rather than a line number, and go stale loudly. What the two guards
+  cannot see is written down in [docs/known-limits.md](docs/known-limits.md) sections 9 and 10.
 - New behaviour has a test; new tools/config are documented in `README.md` (the resource
   URIs are drift-checked against the server by a test).
 - New operational knowledge (a service/IOC recipe, an endpoint, an error signature) lands in the
