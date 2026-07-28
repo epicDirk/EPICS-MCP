@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import PVWriteDeniedError, RateLimitError, SafetyConfigError
-from epics_pv_mcp.safety import SafetyLayer, get_safety
+from epics_mcp.config import EpicsConfig
+from epics_mcp.errors import PVWriteDeniedError, RateLimitError, SafetyConfigError
+from epics_mcp.safety import SafetyLayer, get_safety
 
 # E8: constructing a writes-ON SafetyLayer now asserts the process EPICS search env is
 # loopback-only. The autouse env strip (conftest) leaves *_AUTO_ADDR_LIST unset = broadcast ON,
@@ -204,7 +204,7 @@ class TestAuditWrite:
     def test_audit_write_logs_info(
         self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture
     ) -> None:
-        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
             safety.audit_write("TEST:pv", 10.0, 20.0)
 
         # Back-compat: line still starts with PV_WRITE and carries the PV name.
@@ -214,7 +214,7 @@ class TestAuditWrite:
     def test_audit_write_records_event_and_caller(
         self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture
     ) -> None:
-        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
             safety.audit_write("TEST:pv", 10.0, 20.0)
 
         assert "event=ALLOW" in caplog.text
@@ -225,7 +225,7 @@ class TestAuditWrite:
     def test_audit_write_failed_record(
         self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture
     ) -> None:
-        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
             safety.audit_write_failed("TEST:pv", 1, 2, "PV_TIMEOUT")
 
         assert "event=FAILED" in caplog.text
@@ -236,7 +236,7 @@ class TestAuditWrite:
         self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture
     ) -> None:
         """S24: the ATTEMPT record (before the I/O) carries the new value + correlating op."""
-        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
             safety.audit_write_attempt("TEST:pv", 20.0, "w7")
 
         assert "event=ATTEMPT" in caplog.text
@@ -250,7 +250,7 @@ class TestAuditReadback:
     the written + readback values plus the op that correlates it to the same write's ALLOW line."""
 
     def test_readback_ok(self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
             safety.audit_readback("TEST:pv", 20.0, 20.0, True, operation_id="w7")
         assert "event=READBACK_OK" in caplog.text
         assert "written=20.0" in caplog.text
@@ -259,7 +259,7 @@ class TestAuditReadback:
         assert "caller=set_pv_value" in caplog.text
 
     def test_readback_mismatch(self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
             safety.audit_readback("TEST:pv", 20.0, 19.0, False, operation_id="w7")
         assert "event=READBACK_MISMATCH" in caplog.text
 
@@ -267,7 +267,7 @@ class TestAuditReadback:
         self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture
     ) -> None:
         # verified None (readback not obtained) → UNVERIFIED, never OK, never MISMATCH.
-        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
             safety.audit_readback("TEST:pv", 20.0, None, None, operation_id="w7")
         assert "event=READBACK_UNVERIFIED" in caplog.text
         assert "event=READBACK_OK" not in caplog.text
@@ -277,7 +277,7 @@ class TestAuditReadback:
         self, safety: SafetyLayer, caplog: pytest.LogCaptureFixture
     ) -> None:
         """S24: a cancelled-mid-put write is recorded UNKNOWN_PENDING, not FAILED (put may land)."""
-        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
             safety.audit_write_unknown("TEST:pv", 10.0, 20.0, "w7")
 
         assert "event=UNKNOWN_PENDING" in caplog.text
@@ -290,7 +290,7 @@ class TestAuditReadback:
     ) -> None:
         """S24: ALLOW/FAILED accept an op that correlates them with their ATTEMPT line; the default
         ``"-"`` (a direct, non-tool call) keeps the pre-S24 positional call sites green."""
-        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
             safety.audit_write("TEST:pv", 10.0, 20.0, operation_id="w3")
             safety.audit_write("TEST:pv", 10.0, 20.0)  # default op
 
@@ -305,7 +305,7 @@ class TestAuditDeny:
         self, safety_locked: SafetyLayer, caplog: pytest.LogCaptureFixture
     ) -> None:
         with (
-            caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"),
+            caplog.at_level(logging.INFO, logger="epics_mcp.audit"),
             pytest.raises(PVWriteDeniedError),
         ):
             safety_locked.check_write_allowed("X:pv")
@@ -320,7 +320,7 @@ class TestAuditDeny:
             EpicsConfig(allow_pv_write=True, pv_write_pattern=r"^TEST:.*$", write_rate_limit=10)
         )
         with (
-            caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"),
+            caplog.at_level(logging.INFO, logger="epics_mcp.audit"),
             pytest.raises(PVWriteDeniedError),
         ):
             sl.check_write_allowed("OTHER:pv")
@@ -334,7 +334,7 @@ class TestAuditDeny:
         )
         sl.check_write_allowed("TEST:a")  # consumes the single token
         with (
-            caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"),
+            caplog.at_level(logging.INFO, logger="epics_mcp.audit"),
             pytest.raises(RateLimitError),
         ):
             sl.check_write_allowed("TEST:b")
@@ -365,7 +365,7 @@ class TestAuditBoundsDeny:
         sl = SafetyLayer(
             EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
         )
-        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
             sl.audit_bounds_deny("TEST:pv", "130", 0.0, 120.0)
 
         assert "event=BOUNDS_DENY" in caplog.text
@@ -390,7 +390,7 @@ class TestSafetyConfig:
         # first write; it must fail closed, symmetric to the regex validation. The
         # process-global audit logger is cleared so the FileHandler is built at all
         # (otherwise "if not audit.handlers" short-circuits).
-        audit = logging.getLogger("epics_pv_mcp.audit")
+        audit = logging.getLogger("epics_mcp.audit")
         saved = audit.handlers[:]
         audit.handlers.clear()
         try:
@@ -406,7 +406,7 @@ class TestSafetyConfig:
         # SafetyLayer already attached a handler to the process-global audit logger. A later
         # SafetyLayer with a broken audit path must STILL fail closed (regression guard for the
         # `if not audit.handlers` block that used to gate the path validation too).
-        audit = logging.getLogger("epics_pv_mcp.audit")
+        audit = logging.getLogger("epics_mcp.audit")
         saved = audit.handlers[:]
         audit.handlers.clear()
         try:
@@ -420,7 +420,7 @@ class TestSafetyConfig:
     def test_get_safety_singleton_under_threads(self) -> None:
         import threading
 
-        import epics_pv_mcp.safety as safety_mod
+        import epics_mcp.safety as safety_mod
 
         original = safety_mod._safety
         safety_mod._safety = None
@@ -459,7 +459,7 @@ class TestAuditSink:
     def test_audit_file_handler_encodes_utf8(self, tmp_path: Path) -> None:
         # K1 (portable red proof): the FileHandler carries an explicit encoding="utf-8". Without
         # it ``.encoding`` is None (the platform locale), which measures red on every platform.
-        audit = logging.getLogger("epics_pv_mcp.audit")
+        audit = logging.getLogger("epics_mcp.audit")
         saved = audit.handlers[:]
         audit.handlers.clear()
         try:
@@ -477,7 +477,7 @@ class TestAuditSink:
         # K1 (functional evidence): an audit line with non-ASCII characters reaches the file
         # unaltered. Under cp1252 (Windows) it vanishes without encoding="utf-8" (handleError
         # swallows the UnicodeEncodeError). U+03A9 has no cp1252 mapping, so it is a safe trigger.
-        audit = logging.getLogger("epics_pv_mcp.audit")
+        audit = logging.getLogger("epics_mcp.audit")
         saved = audit.handlers[:]
         audit.handlers.clear()
         try:
@@ -498,7 +498,7 @@ class TestAuditSink:
     def test_audit_formatter_stamps_utc(self, tmp_path: Path) -> None:
         # K2: the formatter must convert to time.gmtime (UTC) and end with a literal 'Z'.
         # Framework time stays framework time: no datetime.now() in the logic.
-        audit = logging.getLogger("epics_pv_mcp.audit")
+        audit = logging.getLogger("epics_mcp.audit")
         saved = audit.handlers[:]
         audit.handlers.clear()
         try:
@@ -509,7 +509,7 @@ class TestAuditSink:
             assert formatter is not None
             assert formatter.converter is time.gmtime
             record = logging.LogRecord(
-                "epics_pv_mcp.audit", logging.INFO, __file__, 1, "m", None, None
+                "epics_mcp.audit", logging.INFO, __file__, 1, "m", None, None
             )
             assert formatter.formatTime(record, formatter.datefmt).endswith("Z")
         finally:

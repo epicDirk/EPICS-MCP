@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 from fastmcp.exceptions import ToolError
 
-from epics_pv_mcp.cli_crossplane import main
-from epics_pv_mcp.errors import EpicsError
-from epics_pv_mcp.tools.crossplane import _crossplane_check
+from epics_mcp.cli_crossplane import main
+from epics_mcp.errors import EpicsError
+from epics_mcp.tools.crossplane import _crossplane_check
 
 # Operator-facing root display: a concrete prefixed PV + a macro PV bound by the display's own
 # <macros> scope (so it resolves to DEV-TEST01:Ctrl-EVR-01:Cmd and links to the IOC prefix).
@@ -102,7 +102,7 @@ def test_cli_crossplane_rejects_displays_dir_outside_allowed_roots(
     the shared orchestrator), not just check ``is_dir()``. An EXISTING displays_dir outside the
     allowed root exits 2. Distinct from the missing-dir test (which the old bare Path.is_dir() code
     also returned 2 for), here the dir exists, so only the boundary check produces the exit 2."""
-    import epics_pv_mcp.config as config_module
+    import epics_mcp.config as config_module
 
     displays, st_cmd = _setup(tmp_path)  # both exist, but outside the allowed root
     allowed = tmp_path / "allowed"
@@ -121,7 +121,7 @@ def test_cli_crossplane_channelfinder_without_url_notes_skip(
 ) -> None:
     """CLI --channelfinder threads through (build-once parity); with no URL it prints the honest
     'skipped' note (offline, no network call)."""
-    import epics_pv_mcp.config as config_module
+    import epics_mcp.config as config_module
 
     displays, st_cmd = _setup(tmp_path)
     monkeypatch.delenv("EPICS_MCP_CHANNELFINDER_URL", raising=False)
@@ -249,7 +249,7 @@ async def test_crossplane_tool_rejects_displays_dir_outside_allowed_roots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """G3: an existing displays_dir outside the opt-in allowed_roots is rejected."""
-    import epics_pv_mcp.config as config_module
+    import epics_mcp.config as config_module
 
     displays, st_cmd = _setup(tmp_path)  # both exist, but outside the allowed root
     allowed = tmp_path / "allowed"
@@ -269,7 +269,7 @@ async def test_crossplane_tool_st_cmd_honors_allowed_roots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """G3: the boundary covers st_cmd_path too (displays_dir inside, st_cmd outside)."""
-    import epics_pv_mcp.config as config_module
+    import epics_mcp.config as config_module
 
     proj = tmp_path / "proj"
     displays = proj / "displays"
@@ -292,7 +292,7 @@ async def test_crossplane_tool_module_db_root_honors_allowed_roots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """G3-S2: the boundary also covers module_db_root (e3_db os.walk + read_text)."""
-    import epics_pv_mcp.config as config_module
+    import epics_mcp.config as config_module
 
     proj = tmp_path / "proj"  # displays + st_cmd live here (inside the allowed root)
     displays = proj / "displays"
@@ -371,7 +371,7 @@ async def test_crossplane_tool_pva_prefixed_pv_broken_against_db(tmp_path: Path)
 @pytest.mark.asyncio
 async def test_server_crossplane_converts_error_to_tool_error(tmp_path: Path) -> None:
     """The server wrapper maps EpicsError to ToolError with the error_code tag."""
-    from epics_pv_mcp.display_tools import crossplane_check
+    from epics_mcp.display_tools import crossplane_check
 
     _, st_cmd = _setup(tmp_path)
     with pytest.raises(ToolError, match="INVALID_INPUT"):
@@ -384,7 +384,7 @@ async def test_crossplane_tool_query_channelfinder_without_url_emits_note(
 ) -> None:
     """F5: query_channelfinder=True but EPICS_MCP_CHANNELFINDER_URL unset → honest 'skipped' note,
     cf_unregistered empty, and NO network call (no checker built)."""
-    import epics_pv_mcp.config as config_module
+    import epics_mcp.config as config_module
 
     displays, st_cmd = _setup(tmp_path)
     monkeypatch.delenv("EPICS_MCP_CHANNELFINDER_URL", raising=False)
@@ -406,8 +406,8 @@ async def test_crossplane_tool_query_channelfinder_computes_unregistered(
     """query_channelfinder=True with a configured URL builds the CF checker and computes
     cf_unregistered end-to-end. ChannelFinderClient is stubbed (no network): it registers only
     ...:status, so the linked ...:Cmd (from $(P)Cmd) is cf_unregistered."""
-    import epics_pv_mcp.config as config_module
-    import epics_pv_mcp.services.checkers as checkers_module
+    import epics_mcp.config as config_module
+    import epics_mcp.services.checkers as checkers_module
 
     displays, st_cmd = _setup(tmp_path)
 
@@ -439,8 +439,8 @@ def test_build_cf_checker_passes_configured_max_results(
     Without the env override the default stays 500 (site-safe); the sandbox raises it to 2000 so a
     large device prefix (the full mTCA-EVR-300 set, ~576 channels) does not trip CFRegistryCapped.
     """
-    import epics_pv_mcp.config as config_module
-    from epics_pv_mcp.services.checkers import CFRegistryChecker, build_cf_checker
+    import epics_mcp.config as config_module
+    from epics_mcp.services.checkers import CFRegistryChecker, build_cf_checker
 
     monkeypatch.setenv("EPICS_MCP_CHANNELFINDER_URL", "http://stub:8080/ChannelFinder")
 
@@ -473,8 +473,8 @@ async def test_crossplane_cap_override_changes_withhold_behaviour(
     truncated to *max_results*. cap=2000 ⇒ 600 < cap ⇒ NOT withheld (cf_unregistered computed);
     cap=500 (default) ⇒ 500 >= cap ⇒ CFRegistryCapped ⇒ withheld (cf_capped, cf_unregistered empty).
     """
-    import epics_pv_mcp.config as config_module
-    import epics_pv_mcp.services.checkers as checkers_module
+    import epics_mcp.config as config_module
+    import epics_mcp.services.checkers as checkers_module
 
     displays, st_cmd = _setup(tmp_path)
 

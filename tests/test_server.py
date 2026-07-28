@@ -12,7 +12,7 @@ import pytest
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
-from epics_pv_mcp.errors import PVNotFoundError, PVTimeoutError
+from epics_mcp.errors import PVNotFoundError, PVTimeoutError
 
 _Fn = Callable[..., object]
 
@@ -47,11 +47,11 @@ def _named(name: str) -> _Fn:
 @pytest.mark.asyncio
 async def test_get_pv_value_converts_epics_error_to_tool_error() -> None:
     """Server wrapper must convert EpicsError to ToolError."""
-    from epics_pv_mcp.server import get_pv_value
+    from epics_mcp.server import get_pv_value
 
     with (
         patch(
-            "epics_pv_mcp.tools.read.pv_get",
+            "epics_mcp.tools.read.pv_get",
             new_callable=AsyncMock,
             side_effect=PVNotFoundError("PV 'MISSING:PV' not found"),
         ),
@@ -63,11 +63,11 @@ async def test_get_pv_value_converts_epics_error_to_tool_error() -> None:
 @pytest.mark.asyncio
 async def test_get_pv_value_converts_generic_exception_to_tool_error() -> None:
     """Server wrapper must convert unexpected Exception to ToolError."""
-    from epics_pv_mcp.server import get_pv_value
+    from epics_mcp.server import get_pv_value
 
     with (
         patch(
-            "epics_pv_mcp.tools.read.pv_get",
+            "epics_mcp.tools.read.pv_get",
             new_callable=AsyncMock,
             side_effect=RuntimeError("unexpected"),
         ),
@@ -82,7 +82,7 @@ async def test_get_pv_value_converts_generic_exception_to_tool_error() -> None:
 @pytest.mark.asyncio
 async def test_set_pv_value_converts_write_denied_to_tool_error() -> None:
     """set_pv_value with writes disabled must raise ToolError."""
-    from epics_pv_mcp.server import set_pv_value
+    from epics_mcp.server import set_pv_value
 
     with pytest.raises(ToolError, match="PV_WRITE_DENIED"):
         await set_pv_value("TEST:PV", "42")
@@ -91,11 +91,11 @@ async def test_set_pv_value_converts_write_denied_to_tool_error() -> None:
 @pytest.mark.asyncio
 async def test_monitor_pv_converts_timeout_to_tool_error() -> None:
     """monitor_pv timeout must raise ToolError."""
-    from epics_pv_mcp.server import monitor_pv
+    from epics_mcp.server import monitor_pv
 
     with (
         patch(
-            "epics_pv_mcp.tools.monitor.pv_monitor",
+            "epics_mcp.tools.monitor.pv_monitor",
             new_callable=AsyncMock,
             side_effect=PVTimeoutError("Timeout monitoring PV 'X'"),
         ),
@@ -107,7 +107,7 @@ async def test_monitor_pv_converts_timeout_to_tool_error() -> None:
 def test_server_advertises_write_gate_posture() -> None:
     """N1: the server instructions= must advertise the read-only / write-gate posture
     in the initialize handshake, the one protocol-near place a client learns it."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     assert mcp.instructions and "set_pv_value" in mcp.instructions
 
@@ -116,9 +116,9 @@ def test_server_advertises_write_gate_posture() -> None:
 async def test_lookup_device_name_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """The DS-2 lookup_device_name tool is registered and, with EPICS_MCP_NAMING_URL unset, returns
     a structured enabled:false result and makes no ESS call (no egress by default)."""
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import lookup_device_name
-    from epics_pv_mcp.services import checkers
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import lookup_device_name
+    from epics_mcp.services import checkers
 
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(naming_url=""))
     result = await lookup_device_name("DEV-TEST01:Ctrl-EVR-01")
@@ -130,9 +130,9 @@ async def test_lookup_device_name_disabled_by_default(monkeypatch: pytest.Monkey
 async def test_get_alarm_history_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """The DS-3 get_alarm_history tool is registered and, with EPICS_MCP_ALARM_URL unset, returns a
     structured enabled:false result and makes no network call (disabled by default)."""
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import get_alarm_history
-    from epics_pv_mcp.services import checkers
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import get_alarm_history
+    from epics_mcp.services import checkers
 
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(alarm_url=""))
     result = await get_alarm_history("DEV-TEST01:X", "2026-06-01", "2026-06-02")
@@ -146,11 +146,11 @@ def test_main_validates_write_config_before_run(
     """S22: main() validates the write-safety config at BOOT (eager get_safety()) before mcp.run().
     A misconfig (writes enabled + empty allowlist pattern) must fail loudly at start, not silently
     run with every PV writable. Rot-Beweis against the former ``def main(): mcp.run()``."""
-    import epics_pv_mcp.config as config_module
-    import epics_pv_mcp.safety as safety_module
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.errors import SafetyConfigError
-    from epics_pv_mcp.server import main, mcp
+    import epics_mcp.config as config_module
+    import epics_mcp.safety as safety_module
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.errors import SafetyConfigError
+    from epics_mcp.server import main, mcp
 
     run_called: list[bool] = []
     monkeypatch.setattr(mcp, "run", lambda *args, **kwargs: run_called.append(True))
@@ -185,11 +185,11 @@ def test_main_refuses_write_enabled_without_durable_audit_sink(
     (get_safety falls back to a stderr StreamHandler, no raise). ``loopback_write_env`` pins the E8
     reach so the positive (boot) case builds the safety layer rather than tripping the reach guard.
     """
-    import epics_pv_mcp.config as config_module
-    import epics_pv_mcp.safety as safety_module
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.errors import SafetyConfigError
-    from epics_pv_mcp.server import main, mcp
+    import epics_mcp.config as config_module
+    import epics_mcp.safety as safety_module
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.errors import SafetyConfigError
+    from epics_mcp.server import main, mcp
 
     run_called: list[bool] = []
     monkeypatch.setattr(mcp, "run", lambda *args, **kwargs: run_called.append(True))
@@ -230,17 +230,17 @@ def test_main_boots_read_only_despite_unusable_audit_path(
     deployment (writes off = the default) with a set-but-unwritable EPICS_MCP_AUDIT_LOG_FILE must
     still boot, the audit sink is a write-only concern. Regression guard for the eager get_safety()
     over-reach that promoted the audit-path guard to boot time for read-only deployments."""
-    import epics_pv_mcp.config as config_module
-    import epics_pv_mcp.safety as safety_module
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import main, mcp
+    import epics_mcp.config as config_module
+    import epics_mcp.safety as safety_module
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import main, mcp
 
     run_called: list[bool] = []
     monkeypatch.setattr(mcp, "run", lambda *args, **kwargs: run_called.append(True))
 
     # Clear the process-global audit logger so the FileHandler is actually attempted (mirrors
     # test_safety.py::test_invalid_audit_path_raises_safety_config_error).
-    audit = logging.getLogger("epics_pv_mcp.audit")
+    audit = logging.getLogger("epics_mcp.audit")
     saved_handlers = audit.handlers[:]
     audit.handlers.clear()
     saved_config = config_module._config
@@ -273,13 +273,13 @@ def test_load_display_registrar_degrades_loud_on_broken_extra(
     be importable (this test also runs in a core-only install)."""
     import sys
 
-    import epics_pv_mcp.server as server
+    import epics_mcp.server as server
 
     monkeypatch.setattr(server, "_display_tools_available", lambda: True)
-    # A None entry makes ``from epics_pv_mcp.display_tools import ...`` raise ImportError.
-    monkeypatch.setitem(sys.modules, "epics_pv_mcp.display_tools", None)
+    # A None entry makes ``from epics_mcp.display_tools import ...`` raise ImportError.
+    monkeypatch.setitem(sys.modules, "epics_mcp.display_tools", None)
 
-    with caplog.at_level(logging.ERROR, logger="epics_pv_mcp.server"):
+    with caplog.at_level(logging.ERROR, logger="epics_mcp.server"):
         registrar = server._load_display_registrar()  # must NOT raise
 
     assert registrar is None  # broken extra → no registrar → no over-claim on any surface
@@ -294,11 +294,11 @@ def test_load_display_registrar_skips_when_extra_absent(
     """Guard A positive control 1: a MISSING extra (find_spec None) is the supported core-only
     degrade, return None SILENTLY (no ERROR), symmetric to Guard A's loud degrade on a broken
     extra."""
-    import epics_pv_mcp.server as server
+    import epics_mcp.server as server
 
     monkeypatch.setattr(server, "_display_tools_available", lambda: False)
 
-    with caplog.at_level(logging.ERROR, logger="epics_pv_mcp.server"):
+    with caplog.at_level(logging.ERROR, logger="epics_mcp.server"):
         assert server._load_display_registrar() is None
     assert not [r for r in caplog.records if r.levelno == logging.ERROR], (
         "an absent extra must degrade silently, without an ERROR log"
@@ -316,16 +316,16 @@ def test_load_display_registrar_returns_registrar_when_importable(
     import sys
     import types
 
-    import epics_pv_mcp.server as server
+    import epics_mcp.server as server
 
     def _fake_register(m: object) -> None:
         for name in ("validate_pvs", "crossplane_check", "coverage_audit", "find_device"):
             m.tool()(_named(name))  # type: ignore[attr-defined]
 
-    fake = types.ModuleType("epics_pv_mcp.display_tools")
+    fake = types.ModuleType("epics_mcp.display_tools")
     fake.register_display_tools = _fake_register  # type: ignore[attr-defined]
     monkeypatch.setattr(server, "_display_tools_available", lambda: True)
-    monkeypatch.setitem(sys.modules, "epics_pv_mcp.display_tools", fake)
+    monkeypatch.setitem(sys.modules, "epics_mcp.display_tools", fake)
 
     registrar = server._load_display_registrar()
     assert registrar is not None
@@ -348,8 +348,8 @@ def test_load_display_registrar_returns_real_registrar_when_installed() -> None:
     REAL register_display_tools (identity), and driving that PRODUCTION registrar registers exactly
     the four display tools, real coverage (not the injected fake of 2a), so a dropped/renamed
     production tool fails here. Runs in the local commit gate; skipped in a core-only CI."""
-    import epics_pv_mcp.server as server
-    from epics_pv_mcp.display_tools import register_display_tools
+    import epics_mcp.server as server
+    from epics_mcp.display_tools import register_display_tools
 
     registrar = server._load_display_registrar()
     assert registrar is register_display_tools
@@ -368,7 +368,7 @@ def test_compare_machine_state_wrapper_threads_capability(monkeypatch: pytest.Mo
     the real capability. With display tools unavailable, rendering must not instruct validate_pvs:
     proves server.py actually passes _DISPLAY_TOOLS_AVAILABLE (a forgotten pass-through would leave
     the pure-function Guard B1 green while the live prompt stayed broken)."""
-    import epics_pv_mcp.server as server
+    import epics_mcp.server as server
 
     monkeypatch.setattr(server, "_DISPLAY_TOOLS_AVAILABLE", False)
     result = server.compare_machine_state("MPS:", reference_file="status.bob")
@@ -381,7 +381,7 @@ def test_compare_machine_state_prompt_hides_capability_arg() -> None:
     display_tools_available=True and re-instruct the missing tool."""
     import inspect
 
-    import epics_pv_mcp.server as server
+    import epics_mcp.server as server
 
     params = inspect.signature(server.compare_machine_state).parameters
     assert "display_tools_available" not in params
@@ -391,7 +391,7 @@ def test_build_instructions_omits_display_claims_core_only() -> None:
     """Guard C (S26): the instructions advertise the display-gated capabilities only when
     the extra is available, a core-only install must not over-claim them. Both branches by direct
     call of the pure builder."""
-    from epics_pv_mcp.server import build_instructions
+    from epics_mcp.server import build_instructions
 
     full = build_instructions(True)
     core = build_instructions(False)
@@ -410,7 +410,7 @@ def test_mcp_instructions_wired_to_capability_flag() -> None:
     handshake advertisement follows the flag; a hardcoded build_instructions(True) would diverge
     from this in a core-only install (flag False), the asymmetric gap the pure-function Guard C
     alone cannot close."""
-    from epics_pv_mcp.server import _DISPLAY_TOOLS_AVAILABLE, build_instructions, mcp
+    from epics_mcp.server import _DISPLAY_TOOLS_AVAILABLE, build_instructions, mcp
 
     assert mcp.instructions == build_instructions(_DISPLAY_TOOLS_AVAILABLE)
 
@@ -419,7 +419,7 @@ def test_build_instructions_under_2048_bytes() -> None:
     """MA-1 Commit B: the initialize-handshake instructions must stay a tight header, under 2048
     bytes in BOTH capability branches, so the operator guide (epics-pv://guide) carries the detail
     and MA-2/2b keep head-room for new tool lines. Red at the pre-MA-1 size (3108 / 3003 bytes)."""
-    from epics_pv_mcp.server import build_instructions
+    from epics_mcp.server import build_instructions
 
     assert len(build_instructions(True).encode("utf-8")) < 2048
     assert len(build_instructions(False).encode("utf-8")) < 2048
@@ -440,8 +440,8 @@ async def test_olog_tools_expose_typed_output_schema() -> None:
     Checking the base type of the NULLABLE fields too closes a widening that hides behind
     nullability: ``found: bool | None`` -> ``int | None`` passes mypy (bool ⊆ int) and stays
     an anyOf, so a bare-``type`` check skips it, but it flips the base type boolean -> integer."""
-    from epics_pv_mcp.server import mcp
-    from epics_pv_mcp.services.checkers_olog import (
+    from epics_mcp.server import mcp
+    from epics_mcp.services.checkers_olog import (
         OlogAddAttachmentResult,
         OlogCreateResult,
         OlogDownloadResult,
@@ -709,9 +709,9 @@ async def test_olog_structured_output_conforms_to_its_schema(
     must permit null, which also covers the note/success-only fields of the write + download tools
     without mocking the write gate.
     """
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import mcp
-    from epics_pv_mcp.services import checkers_olog
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import mcp
+    from epics_mcp.services import checkers_olog
 
     # Force the disabled path deterministically (independent of the ambient EPICS_MCP_OLOG_URL).
     monkeypatch.setattr(checkers_olog, "get_config", lambda: EpicsConfig(olog_url=""))
@@ -810,7 +810,7 @@ async def test_archiver_history_exposes_typed_output_schema() -> None:
     ``Literal["ok","empty","withheld"] | None`` and a bare ``str | None`` yield base type "string",
     so dropping the Literal's members leaves this test green. That belongs to
     test_typed_output_schema_enums_declare_their_members, which pins the members themselves."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     schema = tools["get_pv_history"].outputSchema or {}
@@ -846,9 +846,9 @@ async def test_archiver_history_structured_output_conforms_to_its_schema(
     always-present envelope must permit null, extending the check to note (absent only on a success
     path, which the
     disabled path does not exercise)."""
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import mcp
-    from epics_pv_mcp.tools import archiver
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import mcp
+    from epics_mcp.tools import archiver
 
     # Force the disabled path deterministically (independent of the ambient EPICS_MCP_ARCHIVER_URL).
     # get_pv_history resolves get_config in the archiver module's OWN namespace (a plain
@@ -928,7 +928,7 @@ async def test_alarm_configured_exposes_typed_output_schema() -> None:
     (``X | None``). Checking the NULLABLE fields' base type too closes a widening that hides behind
     nullability (e.g. configured: bool | None widened to int | None, mypy-legal since bool ⊆ int,
     anyOf-shaped so a presence check skips it, but boolean -> integer here)."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     schema = tools["is_alarm_configured"].outputSchema or {}
@@ -965,9 +965,9 @@ async def test_alarm_configured_structured_output_conforms_to_its_schema(
     always-present envelope must permit null, extending the check to note (absent only on a success
     path, which the
     disabled path does not exercise)."""
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import mcp
-    from epics_pv_mcp.services import checkers
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import mcp
+    from epics_mcp.services import checkers
 
     # Force the disabled path deterministically (independent of the ambient EPICS_MCP_ALARM_URL).
     # query_alarm_configured resolves get_config in the checkers module's OWN namespace (a plain
@@ -1044,7 +1044,7 @@ async def test_name_lookup_exposes_typed_output_schema() -> None:
     checking the NULLABLE fields' base type closes a widening hidden behind nullability (e.g.
     registered: bool | None widened to int | None, mypy-legal since bool ⊆ int, anyOf-shaped, so
     a presence check skips it, but boolean -> integer here)."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     schema = tools["lookup_device_name"].outputSchema or {}
@@ -1080,9 +1080,9 @@ async def test_name_lookup_structured_output_conforms_to_its_schema(
     always-present envelope must permit null, extending the check to note (absent only on the
     success path, which
     the disabled path does not exercise)."""
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import mcp
-    from epics_pv_mcp.services import checkers
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import mcp
+    from epics_mcp.services import checkers
 
     # Force the disabled path deterministically (independent of the ambient EPICS_MCP_NAMING_URL).
     # Unlike query_alarm_configured, query_naming_lookup does NOT call get_config directly, it
@@ -1161,7 +1161,7 @@ async def test_is_archived_exposes_typed_output_schema() -> None:
     ``object | None`` enrichment fields must advertise NO base type (``None``), a widening to a
     concrete scalar (e.g. one wrongly typed ``str``) would flip _base_type to ``"string"`` and trip
     the assertion."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     schema = tools["is_archived"].outputSchema or {}
@@ -1196,9 +1196,9 @@ async def test_is_archived_structured_output_conforms_to_its_schema(
     null, the direct bug repro. Part B (static): every advertised property outside the
     always-present
     envelope must permit null."""
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import mcp
-    from epics_pv_mcp.services import checkers
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import mcp
+    from epics_mcp.services import checkers
 
     # Force the disabled path deterministically (independent of the ambient EPICS_MCP_ARCHIVER_URL).
     # query_archived resolves get_config in the checkers module's OWN namespace (a plain
@@ -1254,7 +1254,7 @@ async def test_list_archived_pvs_exposes_typed_output_schema() -> None:
     (1) properties are non-empty; (2) they are EXACTLY the 5 mapped fields, completeness both ways
     (mypy --strict guards an undeclared key in a literal; this guards a dropped one); (3) each field
     carries the expected JSON base type via :func:`_base_type`."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     schema = tools["list_archived_pvs"].outputSchema or {}
@@ -1280,9 +1280,9 @@ async def test_list_archived_pvs_structured_output_conforms_to_its_schema(
     (runtime): drive list_archived_pvs on the disabled path via ``mcp.call_tool`` and assert every
     None-valued key permits null. Part B (static): every advertised property outside the
     always-present envelope must permit null (the S29 convention for a sometimes-absent field)."""
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import mcp
-    from epics_pv_mcp.tools import archiver
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import mcp
+    from epics_mcp.tools import archiver
 
     # list_archived_pvs is tool-only: it resolves get_config in tools/archiver's OWN namespace, so
     # patch archiver.get_config, NOT checkers.get_config (that seam is for the shared query_*).
@@ -1339,7 +1339,7 @@ async def test_get_appliance_info_exposes_typed_output_schema() -> None:
     accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype. Checks
     properties non-empty, EXACTLY the 10 mapped fields (completeness both ways), and each field's
     :func:`_base_type`, the 8 object|None topology fields advertise NO base type (None)."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     schema = tools["get_appliance_info"].outputSchema or {}
@@ -1365,9 +1365,9 @@ async def test_get_appliance_info_structured_output_conforms_to_its_schema(
     (runtime): drive get_appliance_info on the disabled path through ``mcp.call_tool`` and assert
     every None-valued key permits null. Part B (static): every advertised property outside the
     always-present envelope must permit null (the S29 convention for a sometimes-absent field)."""
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import mcp
-    from epics_pv_mcp.tools import archiver
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import mcp
+    from epics_mcp.tools import archiver
 
     # tool-only: resolves get_config in tools/archiver's OWN namespace, patch archiver.get_config.
     monkeypatch.setattr(archiver, "get_config", lambda: EpicsConfig(archiver_url=""))
@@ -1444,7 +1444,7 @@ async def test_get_archive_info_exposes_typed_output_schema() -> None:
     accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype. Checks
     properties non-empty, EXACTLY the 30 mapped fields (completeness both ways), and each field's
     :func:`_base_type`, the 26 object|None type-info fields advertise NO base type (None)."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     schema = tools["get_archive_info"].outputSchema or {}
@@ -1472,9 +1472,9 @@ async def test_get_archive_info_structured_output_conforms_to_its_schema(
     on the disabled path and assert every None-valued key (found!) permits null. Part B (static):
     every advertised property outside the always-present envelope must permit null. (Measured:
     standalone FastMCP does not reject the mismatch itself, so this test is the guard.)"""
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import mcp
-    from epics_pv_mcp.tools import archiver
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import mcp
+    from epics_mcp.tools import archiver
 
     # tool-only: resolves get_config in tools/archiver's OWN namespace, patch archiver.get_config.
     monkeypatch.setattr(archiver, "get_config", lambda: EpicsConfig(archiver_url=""))
@@ -1525,7 +1525,7 @@ async def test_list_channel_vocabulary_exposes_typed_output_schema() -> None:
     not the accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype.
     Checks properties non-empty, EXACTLY the 4 mapped fields (completeness both ways), and each
     field's :func:`_base_type`."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     schema = tools["list_channel_vocabulary"].outputSchema or {}
@@ -1551,9 +1551,9 @@ async def test_list_channel_vocabulary_structured_output_conforms_to_its_schema(
     (runtime): drive list_channel_vocabulary on the disabled path via ``mcp.call_tool`` and assert
     every None-valued key permits null. Part B (static): every advertised property outside the
     always-present envelope must permit null (the S29 convention for a sometimes-absent field)."""
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import mcp
-    from epics_pv_mcp.services import checkers
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import mcp
+    from epics_mcp.services import checkers
 
     # shared query_*: resolves get_config in the checkers module's OWN namespace, patch it there.
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(channelfinder_url=""))
@@ -1605,7 +1605,7 @@ async def test_get_alarm_history_exposes_typed_output_schema() -> None:
     accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype. Checks
     properties non-empty, EXACTLY the 8 mapped fields (completeness both ways), and each field's
     :func:`_base_type`."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     schema = tools["get_alarm_history"].outputSchema or {}
@@ -1631,9 +1631,9 @@ async def test_get_alarm_history_structured_output_conforms_to_its_schema(
     (runtime): drive get_alarm_history on the disabled path via ``mcp.call_tool`` and assert every
     None-valued key permits null. Part B (static): every advertised property outside the
     always-present envelope must permit null (the S29 convention for a sometimes-absent field)."""
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import mcp
-    from epics_pv_mcp.services import checkers
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import mcp
+    from epics_mcp.services import checkers
 
     # shared query_*: resolves get_config in the checkers module's OWN namespace, patch it there.
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(alarm_url=""))
@@ -1691,7 +1691,7 @@ async def test_discover_pvs_exposes_typed_output_schema() -> None:
     OVERRIDES the annotation-derived schema (that kwarg, not any post-pass, is what keeps the
     untyped tools schema-less). Checks properties non-empty, EXACTLY the 6 mapped fields
     (completeness both ways), and each field's :func:`_base_type`."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     schema = tools["discover_pvs"].outputSchema or {}
@@ -1742,10 +1742,10 @@ async def test_discover_pvs_structured_output_conforms_to_its_schema(
     vacuously, which is precisely the state the ``output_schema=None`` opt-out produces."""
     from fastmcp import Client
 
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import mcp
-    from epics_pv_mcp.services import checkers
-    from epics_pv_mcp.tools import discover as discover_mod
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import mcp
+    from epics_mcp.services import checkers
+    from epics_mcp.tools import discover as discover_mod
 
     # discover_pvs -> _discover_by_channelfinder -> query_channels, which resolves get_config in
     # the checkers module's OWN namespace, patch it there (NOT tools.discover).
@@ -1866,7 +1866,7 @@ async def test_find_channels_exposes_typed_output_schema() -> None:
     annotation-derived schema (that kwarg, not any post-pass, is what keeps the untyped tools
     schema-less). Checks properties non-empty, EXACTLY the 6 mapped fields (completeness both
     ways), and each field's :func:`_base_type`."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     schema = tools["find_channels"].outputSchema or {}
@@ -1944,8 +1944,8 @@ async def test_find_channels_structured_output_conforms_to_its_schema(
     rather than in a claim)."""
     from fastmcp import Client
 
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import mcp
 
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     properties = (tools["find_channels"].outputSchema or {}).get("properties", {})
@@ -1961,13 +1961,11 @@ async def test_find_channels_structured_output_conforms_to_its_schema(
     # places (checkers gates on the URL, the client resolves the allowlists), and re-patching inside
     # the loop would bind the loop variable.
     holder: dict[str, EpicsConfig] = {"cfg": disabled}
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.get_config", lambda: holder["cfg"])
-    monkeypatch.setattr(
-        "epics_pv_mcp.services.channelfinder_client.get_config", lambda: holder["cfg"]
-    )
+    monkeypatch.setattr("epics_mcp.services.checkers.get_config", lambda: holder["cfg"])
+    monkeypatch.setattr("epics_mcp.services.channelfinder_client.get_config", lambda: holder["cfg"])
     session = Mock()
     monkeypatch.setattr(
-        "epics_pv_mcp.services.channelfinder_client.get_shared_session",
+        "epics_mcp.services.channelfinder_client.get_shared_session",
         lambda **_kwargs: session,
     )
     one_channel: object = [
@@ -2083,7 +2081,7 @@ def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
     import importlib
     import sys
 
-    import epics_pv_mcp.server as server
+    import epics_mcp.server as server
 
     real_find_spec = importlib.util.find_spec
     monkeypatch.setattr(
@@ -2093,8 +2091,8 @@ def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
             object() if name == "opi_navigation" else real_find_spec(name, *a, **k)
         ),
     )
-    # A None entry makes ``from epics_pv_mcp.display_tools import ...`` raise ImportError at reload.
-    monkeypatch.setitem(sys.modules, "epics_pv_mcp.display_tools", None)
+    # A None entry makes ``from epics_mcp.display_tools import ...`` raise ImportError at reload.
+    monkeypatch.setitem(sys.modules, "epics_mcp.display_tools", None)
     try:
         importlib.reload(server)
 
@@ -2275,8 +2273,8 @@ async def test_every_typed_tool_conforms_to_its_schema_over_the_wire(
     return -> the wire half goes red while the in-process sibling test stays green."""
     from fastmcp import Client
 
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import mcp
 
     assert set(_DISABLED_WIRE_ARGS) == _TYPED_OUTPUT_TOOLS, (
         "_DISABLED_WIRE_ARGS is out of step with _TYPED_OUTPUT_TOOLS, missing rows: "
@@ -2297,9 +2295,9 @@ async def test_every_typed_tool_conforms_to_its_schema_over_the_wire(
         channelfinder_url="", archiver_url="", alarm_url="", naming_url="", olog_url=""
     )
     for module_path in (
-        "epics_pv_mcp.services.checkers",
-        "epics_pv_mcp.services.checkers_olog",
-        "epics_pv_mcp.tools.archiver",
+        "epics_mcp.services.checkers",
+        "epics_mcp.services.checkers_olog",
+        "epics_mcp.tools.archiver",
     ):
         monkeypatch.setattr(f"{module_path}.get_config", lambda: disabled)
 
@@ -2370,7 +2368,7 @@ async def test_typed_output_schema_enums_declare_their_members() -> None:
 
     Red-proof: widen tools/archiver.py's ``status`` annotation from ``Literal[...] | None`` to
     ``str | None``."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     discovered: dict[tuple[str, str], frozenset[object]] = {}
@@ -2491,7 +2489,7 @@ async def test_typed_output_schema_arrays_declare_their_element_schema() -> None
     yet, which have no advertised schema to pin.
 
     Red-proof: widen services/checkers.py's ``ChannelVocabularyResult.tags`` to ``list[Any]``."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     discovered: dict[tuple[str, str], dict[str, object] | None] = {}
@@ -2605,16 +2603,16 @@ async def test_search_logbook_payload_path_is_guarded_below_the_client(
     cannot stand in for this test."""
     from fastmcp import Client
 
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import mcp
 
     session = Mock()
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers_olog.get_config",
+        "epics_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://logbook:8080/Olog"),
     )
     monkeypatch.setattr(
-        "epics_pv_mcp.services.olog_client.get_shared_session", lambda **_kwargs: session
+        "epics_mcp.services.olog_client.get_shared_session", lambda **_kwargs: session
     )
 
     async with Client(mcp) as client:
@@ -2683,16 +2681,16 @@ async def test_channel_vocabulary_payload_path_is_guarded_below_the_client(
     cannot stand in for this."""
     from fastmcp import Client
 
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import mcp
 
     session = Mock()
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_mcp.services.checkers.get_config",
         lambda: EpicsConfig(channelfinder_url="http://channelfinder:8080/ChannelFinder"),
     )
     monkeypatch.setattr(
-        "epics_pv_mcp.services.channelfinder_client.get_shared_session",
+        "epics_mcp.services.channelfinder_client.get_shared_session",
         lambda **_kwargs: session,
     )
 
@@ -2816,7 +2814,7 @@ async def test_input_schemas_carry_no_title_annotation() -> None:
     Standalone fastmcp omits them natively, the hand-written post-pass this once guarded was
     deleted in `6bd12c6`. The guard stays: it is what would catch an SDK regression that starts
     emitting them again. Red on the SDK-bundled FastMCP 1.0 code (titles on every node)."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]:
         residual = _schema_nodes_with_title(tool.inputSchema)
@@ -2829,7 +2827,7 @@ async def test_output_schema_fields_carry_no_title_annotation() -> None:
     neither field-level nor the root TypedDict name (the SDK stack carried the latter; the
     ``*_exposes_typed_output_schema`` tests re-anchor identity on the field SET instead). This
     guards that no title noise regrows on the wire."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]:
         if tool.name not in _TYPED_OUTPUT_TOOLS:
@@ -2848,7 +2846,7 @@ async def test_output_schemas_carry_no_null_default() -> None:
     ``total=False`` annotation). Standalone fastmcp omits them natively; the hand-written pass this
     once guarded was deleted in `6bd12c6`, and the guard stays as the SDK-regression net. Red
     against the SDK-bundled FastMCP 1.0 code (every field emitted default:null)."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]:
         if tool.name not in _TYPED_OUTPUT_TOOLS:
@@ -2864,7 +2862,7 @@ async def test_only_real_title_parameters_remain() -> None:
     inputSchemas are the real ``title`` PARAMETER names, one per tool that declares one at the top
     level. Naive count == count of tools with a top-level ``title`` property. Red against the
     SDK-bundled FastMCP 1.0 code, where the annotations inflated the naive count."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
     residual = sum(_count_title_keys(t.inputSchema) for t in tools)
@@ -2894,7 +2892,7 @@ async def test_title_parameter_tools_keep_their_title_property() -> None:
 
     Red proof, executed: add a ``title`` parameter to ``list_tags`` in server.py. Before this
     assertion the node stayed green; with it the node names list_tags as on-the-wire-only."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = {t.name: t for t in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     for name in _TITLE_PARAMETER_TOOLS:
@@ -2922,7 +2920,7 @@ async def test_every_required_arg_exists_in_properties() -> None:
     in ``properties``. A naive title-strip leaves ``title`` in create_log_entry/reply_to_log's
     ``required`` but deletes it from ``properties``, a required arg hidden from the wire while
     pydantic still enforces it. Red on a naive strip."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]:
         schema = tool.inputSchema
@@ -2947,7 +2945,7 @@ async def test_output_schema_typed_only_for_typed_tools() -> None:
     because its ``@mcp.tool(output_schema=None)`` still overrides the annotation. Two sibling tests
     (title-annotation, null-default) assert ``outputSchema is not None`` for set members too, so
     that red-proof trips THREE tests, not one, measured, not assumed."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
     for tool in tools:
@@ -2971,7 +2969,7 @@ async def test_output_schema_typed_only_for_typed_tools() -> None:
 async def test_field_descriptions_survive_the_strip() -> None:
     """MA-Q1: whatever suppresses the ``title`` ANNOTATIONS must not touch field ``description``s:
     the point-of-need semantics the repo DoD requires. Spot-check a distinctive, anchored one."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = {t.name: t for t in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
     name_pattern = tools["find_channels"].inputSchema["properties"]["name_pattern"]
@@ -3006,7 +3004,7 @@ async def test_stripped_tool_still_returns_structured_content(
 
     Red-proof: point ``driven`` at a member of _TYPED_OUTPUT_TOOLS (discover_pvs, args
     ``{"pattern": "SIM:*"}``), the premise assertion fails first, by test node id."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     async def _fake_pv_get(pv_name: str, timeout: float | None = None) -> dict[str, object]:
         return {"pv_name": pv_name, "value": 42, "connected": True}
@@ -3020,7 +3018,7 @@ async def test_stripped_tool_still_returns_structured_content(
         "with a no-network path (_TYPED_OUTPUT_TOOLS lists the ones already taken)"
     )
     # get_pv_value -> _get_pv_value -> pv_get, resolved in the tools.read module's OWN namespace.
-    monkeypatch.setattr("epics_pv_mcp.tools.read.pv_get", _fake_pv_get)
+    monkeypatch.setattr("epics_mcp.tools.read.pv_get", _fake_pv_get)
     structured = cast(
         dict[str, Any],
         (await mcp.call_tool(driven, args)).structured_content,
@@ -3073,7 +3071,7 @@ async def test_tools_list_within_budget() -> None:
     ceiling below the current full-lane payload."""
     from mcp.types import ListToolsResult
 
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
     wire = len(ListToolsResult(tools=tools).model_dump_json(by_alias=True, exclude_none=True))
@@ -3112,7 +3110,7 @@ async def test_destructive_tools_carry_consent_meta_or_are_explicitly_deferred()
     """
     from mcp.types import ListToolsResult
 
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
     offenders = [
@@ -3147,7 +3145,7 @@ async def test_consent_meta_tools_document_the_client_scope() -> None:
 
     Provably red: remove ``requiresUserInteraction`` from set_pv_value's docstring -> goes red.
     """
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     undocumented = [
         t.name
@@ -3218,7 +3216,7 @@ _ANNOTATION_GOLDEN: dict[str, tuple[bool, bool, bool, bool]] = {
 # imported: importing display_tools.py pulls opi_navigation (absent in core-only), which would break
 # collection there, the same reason test_guide_matches_code.py AST-scans it.
 _DISPLAY_TOOLS_SRC = (
-    Path(__file__).resolve().parent.parent / "src" / "epics_pv_mcp" / "display_tools.py"
+    Path(__file__).resolve().parent.parent / "src" / "epics_mcp" / "display_tools.py"
 )
 
 
@@ -3301,7 +3299,7 @@ async def test_every_tool_carries_complete_annotations() -> None:
 
     Provably red: drop a hint kwarg (or annotations=) on one tool in server.py -> offender.
     """
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
     assert len(tools) >= 28, "list_tools() returned < core-lane count, tool registration broke"
@@ -3332,7 +3330,7 @@ async def test_destructive_tools_are_not_marked_read_only() -> None:
 
     Provably red: flip set_pv_value's readOnlyHint to True (destructive stays True) -> offender.
     """
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
     assert len(tools) >= 28, "list_tools() returned < core-lane count, tool registration broke"
@@ -3365,7 +3363,7 @@ async def test_tool_annotations_match_golden_map() -> None:
 
     Provably red: change a golden tuple, flip a live annotation, or rename a tool.
     """
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
     assert len(tools) >= 28, "list_tools() returned < core-lane count, tool registration broke"

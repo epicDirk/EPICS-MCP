@@ -1,11 +1,11 @@
-"""Tests for epics_pv_mcp.tools.info."""
+"""Tests for epics_mcp.tools.info."""
 
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from epics_pv_mcp.errors import PVTimeoutError
-from epics_pv_mcp.tools.info import _get_pv_info
+from epics_mcp.errors import PVTimeoutError
+from epics_mcp.tools.info import _get_pv_info
 
 
 async def test_get_pv_info_success() -> None:
@@ -15,7 +15,7 @@ async def test_get_pv_info_success() -> None:
         "alarm": {"severity": 0, "status": 0},
     }
     with patch(
-        "epics_pv_mcp.tools.info.pv_get",
+        "epics_mcp.tools.info.pv_get",
         new_callable=AsyncMock,
         return_value=mock_return,
     ):
@@ -33,7 +33,7 @@ async def test_get_pv_info_success() -> None:
 async def test_get_pv_info_timeout() -> None:
     with (
         patch(
-            "epics_pv_mcp.tools.info.pv_get",
+            "epics_mcp.tools.info.pv_get",
             new_callable=AsyncMock,
             side_effect=PVTimeoutError("Timeout getting PV 'TEST:PV' after 5.0s"),
         ),

@@ -155,9 +155,9 @@ def test_the_version_expectation_composes_with_the_prerelease_check() -> None:
 def test_the_expect_version_flag_reaches_the_check(tmp_path: Path) -> None:
     """Through ``main``, so the argparse plumbing is proven, not assumed: the same wheel passes
     bare and blocks under a mismatched ``--expect-version``."""
-    wheel = tmp_path / "epics_pv_mcp-0.3.0-py3-none-any.whl"
+    wheel = tmp_path / "epics_mcp-0.3.0-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w") as archive:
-        archive.writestr("epics_pv_mcp-0.3.0.dist-info/METADATA", _metadata())
+        archive.writestr("epics_mcp-0.3.0.dist-info/METADATA", _metadata())
 
     assert main([str(wheel)]) == 0
     assert main(["--expect-version", "0.3.0", str(wheel)]) == 0
@@ -202,10 +202,10 @@ def test_a_wheel_is_read_from_its_dist_info(tmp_path: Path) -> None:
 
     Without this the whole module could pass while the gate never managed to open an artifact.
     """
-    wheel = tmp_path / "epics_pv_mcp-0.3.0-py3-none-any.whl"
+    wheel = tmp_path / "epics_mcp-0.3.0-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w") as archive:
-        archive.writestr("epics_pv_mcp-0.3.0.dist-info/METADATA", _metadata())
-        archive.writestr("epics_pv_mcp/__init__.py", "")
+        archive.writestr("epics_mcp-0.3.0.dist-info/METADATA", _metadata())
+        archive.writestr("epics_mcp/__init__.py", "")
 
     assert "Name: epics-mcp" in read_metadata(wheel)
     assert main([str(wheel)]) == 0

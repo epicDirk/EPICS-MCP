@@ -25,8 +25,8 @@ import os
 
 import pytest
 
-from epics_pv_mcp.services.naming_client import NamingServiceClient
-from epics_pv_mcp.services.naming_identity import probe_naming_identity
+from epics_mcp.services.naming_client import NamingServiceClient
+from epics_mcp.services.naming_identity import probe_naming_identity
 from tests.live_gate import assert_live_available, live_demanded
 
 pytestmark = pytest.mark.live

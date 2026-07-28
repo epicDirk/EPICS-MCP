@@ -96,8 +96,7 @@ For the development version, install straight from the repository
 `uv tool install .` and `pip install .` do the same thing.
 
 This installs the **core** server: live PV access, diagnosis, and the REST-service planes, plus
-six commands (`epics-mcp` and its pre-rename alias `epics-pv-mcp`, `epics-doctor`, `epics-diagnose`, `epics-crossplane`,
-`epics-coverage`).
+five commands (`epics-mcp`, `epics-doctor`, `epics-diagnose`, `epics-crossplane`, `epics-coverage`).
 
 The last two are **display-aware** and need the `opi_navigation` engine, which is not part of the
 package: they refuse with an explanation rather than running. Everything else works without it.

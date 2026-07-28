@@ -29,13 +29,13 @@ from pathlib import Path
 
 import pytest
 
-import epics_pv_mcp.config as config_module
-import epics_pv_mcp.olog_safety as olog_safety_module
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.services._http import basic_auth_header, is_ssl_error
-from epics_pv_mcp.services.checkers import query_olog_create
-from epics_pv_mcp.services.olog_client import AttachmentUpload, OlogClient
-from epics_pv_mcp.services.olog_exceptions import OlogConnectionError
+import epics_mcp.config as config_module
+import epics_mcp.olog_safety as olog_safety_module
+from epics_mcp.config import EpicsConfig
+from epics_mcp.services._http import basic_auth_header, is_ssl_error
+from epics_mcp.services.checkers import query_olog_create
+from epics_mcp.services.olog_client import AttachmentUpload, OlogClient
+from epics_mcp.services.olog_exceptions import OlogConnectionError
 from tests.live_gate import assert_live_available, live_demanded
 
 _PROXY = os.environ.get("OA1C_PROXY_URL")  # e.g. https://olog.localtest.me:8443/Olog

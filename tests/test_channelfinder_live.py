@@ -25,7 +25,7 @@ import os
 
 import pytest
 
-from epics_pv_mcp.services.channelfinder_client import ChannelFinderClient
+from epics_mcp.services.channelfinder_client import ChannelFinderClient
 from tests.live_gate import assert_live_available, live_demanded
 
 pytestmark = pytest.mark.live

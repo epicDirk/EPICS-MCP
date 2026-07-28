@@ -8,17 +8,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-import epics_pv_mcp.config as config_module
-import epics_pv_mcp.safety as safety_module
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import (
+import epics_mcp.config as config_module
+import epics_mcp.safety as safety_module
+from epics_mcp.config import EpicsConfig
+from epics_mcp.errors import (
     PVTimeoutError,
     PVWriteBoundsError,
     PVWriteDeniedError,
     RateLimitError,
 )
-from epics_pv_mcp.safety import SafetyLayer
-from epics_pv_mcp.tools.write import _set_pv_value
+from epics_mcp.safety import SafetyLayer
+from epics_mcp.tools.write import _set_pv_value
 
 # E8: writes-ON SafetyLayer construction asserts the process EPICS search env is loopback-only.
 # The autouse strip leaves *_AUTO_ADDR_LIST unset = broadcast ON, so pin the loopback lane here.
@@ -38,9 +38,9 @@ def _reset_singletons() -> Iterator[None]:
 class TestSetPvValueSuccess:
     """Successful write with safety checks passing."""
 
-    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.get_safety")
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
     async def test_set_pv_value_success(
         self,
         mock_get_safety: MagicMock,
@@ -82,7 +82,7 @@ class TestSetPvValueSuccess:
 class TestSetPvValueDenied:
     """Write denied by safety layer (writes disabled)."""
 
-    @patch("epics_pv_mcp.tools.write.get_safety")
+    @patch("epics_mcp.tools.write.get_safety")
     async def test_set_pv_value_denied(self, mock_get_safety: MagicMock) -> None:
         # Configure safety to deny writes
         cfg = EpicsConfig(allow_pv_write=False)
@@ -96,9 +96,9 @@ class TestSetPvValueDenied:
 class TestSetPvValueRateLimited:
     """Write rejected due to rate limit exhaustion."""
 
-    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.get_safety")
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
     async def test_set_pv_value_rate_limited(
         self,
         mock_get_safety: MagicMock,
@@ -128,9 +128,9 @@ class TestSetPvValueFailed:
     No real PV is touched: pv_put is mocked to raise (AsyncMock side_effect).
     """
 
-    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.get_safety")
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
     async def test_pv_put_failure_audits_and_reraises(
         self,
         mock_get_safety: MagicMock,
@@ -145,7 +145,7 @@ class TestSetPvValueFailed:
         mock_pv_put.side_effect = PVTimeoutError("put timed out")
 
         with (
-            caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"),
+            caplog.at_level(logging.INFO, logger="epics_mcp.audit"),
             pytest.raises(PVTimeoutError),
         ):
             await _set_pv_value("TEST:PV", "2.0")
@@ -156,9 +156,9 @@ class TestSetPvValueFailed:
         assert "event=ALLOW" not in caplog.text
         mock_pv_put.assert_awaited_once_with("TEST:PV", "2.0", None)
 
-    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.get_safety")
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
     async def test_non_epics_error_audited_as_internal(
         self,
         mock_get_safety: MagicMock,
@@ -175,7 +175,7 @@ class TestSetPvValueFailed:
         mock_pv_put.side_effect = ValueError("unexpected boom")
 
         with (
-            caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"),
+            caplog.at_level(logging.INFO, logger="epics_mcp.audit"),
             pytest.raises(ValueError),
         ):
             await _set_pv_value("TEST:PV", "2.0")
@@ -183,9 +183,9 @@ class TestSetPvValueFailed:
         assert "event=FAILED" in caplog.text
         assert "error_code=INTERNAL" in caplog.text
 
-    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.get_safety")
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
     async def test_failed_write_consumes_rate_token(
         self,
         mock_get_safety: MagicMock,
@@ -226,9 +226,9 @@ class TestSetPvValueAuditTrail:
     terminal ALLOW/FAILED/UNKNOWN_PENDING record; a write cancelled mid-``pv_put`` is recorded as
     UNKNOWN_PENDING (never lost, never mislabelled FAILED); the cancellation always propagates."""
 
-    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.get_safety")
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
     async def test_success_emits_attempt_then_allow_same_op(
         self,
         mock_get_safety: MagicMock,
@@ -246,7 +246,7 @@ class TestSetPvValueAuditTrail:
         ]
         mock_pv_put.return_value = None
 
-        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
             await _set_pv_value("TEST:PV", "2.0")
 
         events = _audit_events(caplog)
@@ -255,9 +255,9 @@ class TestSetPvValueAuditTrail:
         ops = {op for _, op in events}
         assert events[0][1] is not None and ops == {events[0][1]}
 
-    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.get_safety")
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
     async def test_failed_put_emits_attempt_then_failed_same_op(
         self,
         mock_get_safety: MagicMock,
@@ -272,7 +272,7 @@ class TestSetPvValueAuditTrail:
         mock_pv_put.side_effect = PVTimeoutError("put timed out")
 
         with (
-            caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"),
+            caplog.at_level(logging.INFO, logger="epics_mcp.audit"),
             pytest.raises(PVTimeoutError),
         ):
             await _set_pv_value("TEST:PV", "2.0")
@@ -281,9 +281,9 @@ class TestSetPvValueAuditTrail:
         assert [e for e, _ in events] == ["ATTEMPT", "FAILED"]
         assert events[0][1] is not None and events[0][1] == events[1][1]
 
-    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.get_safety")
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
     async def test_cancel_mid_put_emits_unknown_pending_and_reraises(
         self,
         mock_get_safety: MagicMock,
@@ -307,7 +307,7 @@ class TestSetPvValueAuditTrail:
 
         mock_pv_put.side_effect = _hang
 
-        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
             task = asyncio.create_task(_set_pv_value("TEST:PV", "2.0"))
             await asyncio.wait_for(put_started.wait(), timeout=2.0)  # ensure we are inside pv_put
             task.cancel()
@@ -331,9 +331,9 @@ class TestSetPvValueReadback:
     loudness is the ``verified`` field plus the ``READBACK_*`` audit event, not an exception.
     """
 
-    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.get_safety")
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
     async def test_mismatch_is_success_with_verified_false(
         self,
         mock_get_safety: MagicMock,
@@ -351,7 +351,7 @@ class TestSetPvValueReadback:
         ]
         mock_pv_put.return_value = None
 
-        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
             result = await _set_pv_value("TEST:PV", "20.0")
 
         # The put succeeded (status success), but verification FAILED, loud via field + audit.
@@ -361,9 +361,9 @@ class TestSetPvValueReadback:
         assert "event=READBACK_MISMATCH" in caplog.text
         assert "event=ALLOW" in caplog.text  # the write itself was still allowed
 
-    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.get_safety")
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
     async def test_readback_timeout_is_not_verifiable_not_an_error(
         self,
         mock_get_safety: MagicMock,
@@ -381,7 +381,7 @@ class TestSetPvValueReadback:
         ]
         mock_pv_put.return_value = None
 
-        with caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"):
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
             result = await _set_pv_value("TEST:PV", "20.0")  # must NOT raise
 
         assert result["status"] == "success"
@@ -389,9 +389,9 @@ class TestSetPvValueReadback:
         assert result["readback"] is None
         assert "event=READBACK_UNVERIFIED" in caplog.text
 
-    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.get_safety")
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
     async def test_readback_value_none_is_not_verifiable(
         self,
         mock_get_safety: MagicMock,
@@ -418,9 +418,9 @@ class TestSetPvValueBounds:
     out-of-range value is REFUSED before the put (never reaches the IOC); a record with no drive
     limits is not bounds-checkable and the write proceeds (fail-open) with an honest note."""
 
-    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.get_safety")
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
     async def test_out_of_range_refused_before_put(
         self,
         mock_get_safety: MagicMock,
@@ -439,7 +439,7 @@ class TestSetPvValueBounds:
         }
 
         with (
-            caplog.at_level(logging.INFO, logger="epics_pv_mcp.audit"),
+            caplog.at_level(logging.INFO, logger="epics_mcp.audit"),
             pytest.raises(PVWriteBoundsError),
         ):
             await _set_pv_value("TEST:PV", "130")
@@ -452,9 +452,9 @@ class TestSetPvValueBounds:
         assert "event=ALLOW" not in caplog.text
         assert "READBACK" not in caplog.text
 
-    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.get_safety")
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
     async def test_in_range_proceeds_no_bounds_note(
         self,
         mock_get_safety: MagicMock,
@@ -477,9 +477,9 @@ class TestSetPvValueBounds:
         assert result["bounds_note"] is None
         mock_pv_put.assert_awaited_once()
 
-    @patch("epics_pv_mcp.tools.write.pv_put", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.pv_get", new_callable=AsyncMock)
-    @patch("epics_pv_mcp.tools.write.get_safety")
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
     async def test_unbounded_record_proceeds_with_bounds_note(
         self,
         mock_get_safety: MagicMock,

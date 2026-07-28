@@ -8,10 +8,10 @@ from typing import Any
 
 import pytest
 
-import epics_pv_mcp.services.epics_client as epics_client
-from epics_pv_mcp.errors import EpicsConnectionError, EpicsError, PVNotFoundError, PVTimeoutError
-from epics_pv_mcp.services.epics_client import _classify_p4p_error, _format_value
-from epics_pv_mcp.tools.info import _get_pv_info
+import epics_mcp.services.epics_client as epics_client
+from epics_mcp.errors import EpicsConnectionError, EpicsError, PVNotFoundError, PVTimeoutError
+from epics_mcp.services.epics_client import _classify_p4p_error, _format_value
+from epics_mcp.tools.info import _get_pv_info
 
 
 def test_classify_not_found() -> None:
@@ -676,9 +676,9 @@ async def test_config_default_timeout_reaches_context(monkeypatch: Any) -> None:
     resolves ``cfg.default_timeout`` → ``ctxt.get`` sees it. Previously a hardcoded 5.0
     in the wrapper shadowed the operator's configured default.
     """
-    import epics_pv_mcp.config as config_module
-    from epics_pv_mcp.config import EpicsConfig
-    from epics_pv_mcp.tools.read import _get_pv_value
+    import epics_mcp.config as config_module
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.tools.read import _get_pv_value
 
     config_module._config = EpicsConfig(default_timeout=0.1)
     try:
@@ -1075,7 +1075,7 @@ def test_extract_nt_matrix_non_integral_dim_is_not_trusted() -> None:
     """A non-integral `dim` (only constructible via fakes, the real wire type is int[])
     must not be int-truncated into a note that misquotes the wire: report flat + the RAW
     dim in the note."""
-    from epics_pv_mcp.services.epics_client import _extract_nt_matrix
+    from epics_mcp.services.epics_client import _extract_nt_matrix
 
     out = _extract_nt_matrix(SimpleNamespace(value=[1.0, 2.0, 3.0], dim=[1.5, 2.0]))
 

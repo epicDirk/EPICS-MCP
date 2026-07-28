@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-import epics_pv_mcp
+import epics_mcp
 
 
 def _fallback_version_literals(init_source: str) -> list[str]:
@@ -34,7 +34,7 @@ def test_version_fallback_matches_pyproject() -> None:
     string that must be hand-synced with ``pyproject [project].version`` on every bump. When a
     source checkout has no installed metadata, that stale literal becomes a silent version lie:
     this test fails the moment the two drift, so a bump can't forget the fallback."""
-    package_init = Path(epics_pv_mcp.__file__)
+    package_init = Path(epics_mcp.__file__)
     repo_root = package_init.resolve().parent.parent.parent  # .../EPICS-MCP-Server
     pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
     declared = pyproject["project"]["version"]
@@ -97,7 +97,7 @@ def test_operator_guide_ships_in_the_wheel(tmp_path: Path) -> None:
     real inclusion guard for E1's ``pip install`` distribution DoD. Skipped only if the build
     TOOLCHAIN/ENVIRONMENT is unavailable (missing uv, timeout, offline resolver signature); a
     build that fails for any other reason is a real packaging defect and FAILS."""
-    repo_root = Path(epics_pv_mcp.__file__).resolve().parent.parent.parent  # .../EPICS-MCP-Server
+    repo_root = Path(epics_mcp.__file__).resolve().parent.parent.parent  # .../EPICS-MCP-Server
     try:
         result = subprocess.run(
             ["uv", "build", "--wheel", "--out-dir", str(tmp_path)],
@@ -122,8 +122,8 @@ def test_operator_guide_ships_in_the_wheel(tmp_path: Path) -> None:
     assert wheels, "uv build produced no wheel"
     with zipfile.ZipFile(wheels[0]) as wheel:
         names = wheel.namelist()
-    assert "epics_pv_mcp/operator_guide.md" in names, (
+    assert "epics_mcp/operator_guide.md" in names, (
         "operator_guide.md missing from the wheel, the guide resource would raise "
         f"FileNotFoundError in a pip-installed server. Package files: "
-        f"{sorted(n for n in names if n.startswith('epics_pv_mcp/'))}"
+        f"{sorted(n for n in names if n.startswith('epics_mcp/'))}"
     )

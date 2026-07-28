@@ -10,9 +10,9 @@ from pathlib import Path
 
 from opi_navigation.pv_analysis.models import DisplayPvInventory, ExpandedPv, PvInventory
 
-from epics_pv_mcp.services.coverage import IndexRow
-from epics_pv_mcp.services.crossplane import JoinPv
-from epics_pv_mcp.services.inventory_adapter import (
+from epics_mcp.services.coverage import IndexRow
+from epics_mcp.services.crossplane import JoinPv
+from epics_mcp.services.inventory_adapter import (
     analyze_display_index,
     analyze_display_pvs,
     inventory_join_pvs,

@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
-_SERVICES = _REPO / "src" / "epics_pv_mcp" / "services"
+_SERVICES = _REPO / "src" / "epics_mcp" / "services"
 _TESTS = _REPO / "tests"
 
 # A red run only proves the guard is OBSERVED if the failure carries the guard's own diagnosis.
@@ -681,7 +681,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     atexit.register(restore_all)
     sys.stderr.write(
         "restore command if this run is killed:\n"
-        f"  git -C {_REPO} status --porcelain -- src/epics_pv_mcp/services/\n"
+        f"  git -C {_REPO} status --porcelain -- src/epics_mcp/services/\n"
     )
 
     results: list[tuple[Target, str, str]] = []

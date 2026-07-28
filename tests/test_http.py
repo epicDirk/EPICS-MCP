@@ -18,9 +18,9 @@ from requests.adapters import HTTPAdapter
 from urllib3.util import parse_url
 from urllib3.util.retry import Retry
 
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import RateLimitError, ReadRateLimitError
-from epics_pv_mcp.services._http import (
+from epics_mcp.config import EpicsConfig
+from epics_mcp.errors import RateLimitError, ReadRateLimitError
+from epics_mcp.services._http import (
     ReadThrottle,
     build_retrying_session,
     build_write_session,
@@ -38,14 +38,14 @@ from epics_pv_mcp.services._http import (
     rest_put_json,
     url_host,
 )
-from epics_pv_mcp.services.archiver_exceptions import (
+from epics_mcp.services.archiver_exceptions import (
     ArchiverConnectionError,
     ArchiverError,
     ArchiverResponseError,
 )
-from epics_pv_mcp.services.channelfinder_client import ChannelFinderClient
-from epics_pv_mcp.services.naming_client import NamingServiceClient
-from epics_pv_mcp.services.rest_exceptions import (
+from epics_mcp.services.channelfinder_client import ChannelFinderClient
+from epics_mcp.services.naming_client import NamingServiceClient
+from epics_mcp.services.rest_exceptions import (
     RestClientError,
     RestConnectionError,
     RestResponseError,
@@ -149,10 +149,10 @@ def test_verify_kwarg_false_disables_and_pins_trust_env() -> None:
 
 def test_verify_resolves_ca_bundle_from_config(monkeypatch: pytest.MonkeyPatch) -> None:
     """With no kwarg the chokepoint reads ITS OWN get_config
-    (epics_pv_mcp.services._http.get_config, NOT checkers.get_config) → ca_bundle path wins and
+    (epics_mcp.services._http.get_config, NOT checkers.get_config) → ca_bundle path wins and
     trust_env is pinned off."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services._http.get_config",
+        "epics_mcp.services._http.get_config",
         lambda: EpicsConfig(ca_bundle="ca.pem"),
     )
     session = build_retrying_session()
@@ -162,7 +162,7 @@ def test_verify_resolves_ca_bundle_from_config(monkeypatch: pytest.MonkeyPatch) 
 
 def test_verify_resolves_tls_verify_false_from_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.services._http.get_config",
+        "epics_mcp.services._http.get_config",
         lambda: EpicsConfig(ca_bundle="", tls_verify=False),
     )
     session = build_retrying_session()
@@ -176,7 +176,7 @@ def test_verify_default_config_verifies_and_keeps_trust_env(
     """The plain default (ca_bundle empty, tls_verify True) verifies against certifi and leaves
     trust_env on, the zero-code REQUESTS_CA_BUNDLE path stays available."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services._http.get_config",
+        "epics_mcp.services._http.get_config",
         lambda: EpicsConfig(ca_bundle="", tls_verify=True),
     )
     session = build_retrying_session()
@@ -224,7 +224,7 @@ def test_channelfinder_client_session_inherits_ca_from_config(
     inherits the configured CA via the build_retrying_session chokepoint. A future refactor that
     constructed its session another way would fail this anti-regression guard."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services._http.get_config",
+        "epics_mcp.services._http.get_config",
         lambda: EpicsConfig(ca_bundle="ca.pem"),
     )
     client = ChannelFinderClient("http://cf", auth_header=None)
@@ -238,7 +238,7 @@ def test_naming_client_session_inherits_ca_from_config(
     """DS-1 acceptance 3(c): the Naming client that diagnose._gather_naming constructs DIRECTLY
     (bypassing the checkers factory) still inherits the CA, the chokepoint covers it too."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services._http.get_config",
+        "epics_mcp.services._http.get_config",
         lambda: EpicsConfig(ca_bundle="ca.pem"),
     )
     client = NamingServiceClient(base_url="http://naming")
@@ -256,7 +256,7 @@ def test_two_clients_reuse_one_session(monkeypatch: pytest.MonkeyPatch) -> None:
     session, the point of the connection-reuse change. RED before K5 (each ``__init__`` built its
     own session, so the two were distinct instances)."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services._http.get_config",
+        "epics_mcp.services._http.get_config",
         lambda: EpicsConfig(),
     )
     first = ChannelFinderClient("http://cf", auth_header=None)
@@ -268,7 +268,7 @@ def test_shared_session_differs_by_auth(monkeypatch: pytest.MonkeyPatch) -> None
     """Different auth headers must NOT collapse onto one session, a client sending a Basic header
     and a no-auth client sharing one session would leak the credential to the wrong host."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services._http.get_config",
+        "epics_mcp.services._http.get_config",
         lambda: EpicsConfig(),
     )
     no_auth = get_shared_session(auth_header=None)
@@ -283,7 +283,7 @@ def test_shared_session_has_pooled_adapter(monkeypatch: pytest.MonkeyPatch) -> N
     fan-out reuses connections instead of discarding one per over-the-limit request (requests'
     default pool_maxsize is 10). Both schemes carry it."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services._http.get_config",
+        "epics_mcp.services._http.get_config",
         lambda: EpicsConfig(),
     )
     session = get_shared_session(auth_header=None)
@@ -299,7 +299,7 @@ def test_shared_session_reresolves_verify_on_config_change(
     """The cache key uses the RESOLVED verify, so a config change selects a DIFFERENT entry rather
     than serving a session built under the old TLS trust, the one correctness trap of caching a
     config-derived object. Same call, two CA bundles → two sessions."""
-    target = "epics_pv_mcp.services._http.get_config"
+    target = "epics_mcp.services._http.get_config"
     monkeypatch.setattr(target, lambda: EpicsConfig(ca_bundle="a.pem"))
     first = get_shared_session(auth_header=None)
     monkeypatch.setattr(target, lambda: EpicsConfig(ca_bundle="b.pem"))
@@ -316,7 +316,7 @@ def test_shared_session_blocks_cookies(monkeypatch: pytest.MonkeyPatch) -> None:
     stateless REST reads, so the shared session blocks all cookie storage via a DefaultCookiePolicy
     with an EMPTY allowed_domains (set_ok is False for every domain). RED before the policy: a fresh
     jar's policy has allowed_domains=None (allow)."""
-    monkeypatch.setattr("epics_pv_mcp.services._http.get_config", lambda: EpicsConfig())
+    monkeypatch.setattr("epics_mcp.services._http.get_config", lambda: EpicsConfig())
     session = get_shared_session(auth_header=None)
     policy = session.cookies._policy
     assert isinstance(policy, DefaultCookiePolicy)
@@ -364,7 +364,7 @@ def test_rest_get_json_connection_error_logs_once_and_raises_conn_exc(
         session, "get", Mock(side_effect=requests.exceptions.ConnectionError("down"))
     )
     with (
-        caplog.at_level(logging.DEBUG, logger="epics_pv_mcp.services._http"),
+        caplog.at_level(logging.DEBUG, logger="epics_mcp.services._http"),
         pytest.raises(ArchiverConnectionError),
     ):
         rest_get_json(
@@ -615,7 +615,7 @@ def test_rest_get_json_throttled_over_limit(monkeypatch: pytest.MonkeyPatch) -> 
     DENIED with ``ReadRateLimitError``, protecting the facility from an unthrottled read burst. RED
     before the chokepoint is wired (rest_get_json ignored the throttle → the 3rd read passed)."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services._http.get_config",
+        "epics_mcp.services._http.get_config",
         lambda: EpicsConfig(read_rate_limit=2),
     )
     reset_read_throttle()
@@ -652,7 +652,7 @@ def test_rest_get_json_unthrottled_by_default(monkeypatch: pytest.MonkeyPatch) -
     """Default ``read_rate_limit=0`` → the throttle is disabled → any number of reads pass. The
     posture is opt-in, so a facility's existing read behaviour is unchanged until an operator sets
     it."""
-    monkeypatch.setattr("epics_pv_mcp.services._http.get_config", lambda: EpicsConfig())
+    monkeypatch.setattr("epics_mcp.services._http.get_config", lambda: EpicsConfig())
     reset_read_throttle()
     session = Mock()
     session.get.return_value = _resp({"ok": True})
@@ -673,7 +673,7 @@ def test_rest_get_bytes_shares_the_read_throttle(monkeypatch: pytest.MonkeyPatch
     too, not just ``rest_get_json``. With the single token already spent, ``rest_get_bytes`` raises
     before it ever issues the request."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services._http.get_config",
+        "epics_mcp.services._http.get_config",
         lambda: EpicsConfig(read_rate_limit=1),
     )
     reset_read_throttle()

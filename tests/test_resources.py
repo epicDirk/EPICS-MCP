@@ -1,6 +1,6 @@
-"""Tests for epics_pv_mcp.resources."""
+"""Tests for epics_mcp.resources."""
 
-from epics_pv_mcp.resources import get_epics_config, get_health
+from epics_mcp.resources import get_epics_config, get_health
 
 
 def test_health_shape() -> None:
@@ -32,7 +32,7 @@ def test_health_values() -> None:
 def test_health_version_matches_package_version() -> None:
     """S1-2: the health resource must report the real package ``__version__`` (locks the wiring:
     the old shape test only checked the key was present, not its value)."""
-    from epics_pv_mcp import __version__
+    from epics_mcp import __version__
 
     assert get_health()["version"] == __version__
 
@@ -47,8 +47,8 @@ def test_low_level_server_version_attribute_exists() -> None:
     that stops mirroring the constructor version turns a silently-unset handshake version into a
     loud test failure. (The old code reached into ``_mcp_server`` directly to SET the version; that
     private-write path is gone, the constructor arg replaced it.)"""
-    from epics_pv_mcp import __version__
-    from epics_pv_mcp.server import mcp
+    from epics_mcp import __version__
+    from epics_mcp.server import mcp
 
     low_level = getattr(mcp, "_mcp_server", None)
     assert low_level is not None, (

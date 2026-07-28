@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import epics_pv_mcp.config as config_module
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import EpicsError
-from epics_pv_mcp.tools.read import _get_pv_value, _get_pvs
+import epics_mcp.config as config_module
+from epics_mcp.config import EpicsConfig
+from epics_mcp.errors import EpicsError
+from epics_mcp.tools.read import _get_pv_value, _get_pvs
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +22,7 @@ def _reset_config() -> Iterator[None]:
 class TestGetPvValue:
     """Single PV read via _get_pv_value."""
 
-    @patch("epics_pv_mcp.tools.read.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.read.pv_get", new_callable=AsyncMock)
     async def test_get_pv_value_returns_result(self, mock_pv_get: AsyncMock) -> None:
         mock_pv_get.return_value = {
             "pv_name": "TEST:PV",
@@ -37,7 +37,7 @@ class TestGetPvValue:
         assert result["pv_name"] == "TEST:PV"
         assert result["value"] == 42.0
 
-    @patch("epics_pv_mcp.tools.read.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.read.pv_get", new_callable=AsyncMock)
     async def test_get_pv_value_custom_timeout(self, mock_pv_get: AsyncMock) -> None:
         mock_pv_get.return_value = {"pv_name": "X:PV", "value": 1.0}
 
@@ -49,7 +49,7 @@ class TestGetPvValue:
 class TestGetPvs:
     """Batch PV read via _get_pvs."""
 
-    @patch("epics_pv_mcp.tools.read.pv_get_batch", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.read.pv_get_batch", new_callable=AsyncMock)
     async def test_get_pvs_success(self, mock_batch: AsyncMock) -> None:
         mock_batch.return_value = {
             "results": [
@@ -82,7 +82,7 @@ class TestGetPvs:
 
         assert exc_info.value.error_code == "BATCH_TOO_LARGE"
 
-    @patch("epics_pv_mcp.tools.read.pv_get_batch", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.read.pv_get_batch", new_callable=AsyncMock)
     async def test_get_pvs_at_batch_limit(self, mock_batch: AsyncMock) -> None:
         """Exactly max_batch_size PVs should be accepted."""
         mock_batch.return_value = {"results": [], "errors": []}

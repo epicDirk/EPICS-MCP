@@ -1,6 +1,6 @@
 """Tests for MCP prompts."""
 
-from epics_pv_mcp.prompts import compare_machine_state, diagnose_pv
+from epics_mcp.prompts import compare_machine_state, diagnose_pv
 
 
 def test_diagnose_pv_contains_pv_name() -> None:

@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from epics_pv_mcp import cli_diagnose
-from epics_pv_mcp.services.diagnose import (
+from epics_mcp import cli_diagnose
+from epics_mcp.services.diagnose import (
     AlarmEvidence,
     ArchiverEvidence,
     ChannelFinderEvidence,
@@ -118,7 +118,7 @@ def test_render_consulted_naming_and_alarm_lines() -> None:
 def test_main_returns_0_and_threads_the_plane_flags(capsys: pytest.CaptureFixture[str]) -> None:
     """main returns 0 and passes each CLI flag through to diagnose() (spy on the awaited kwargs)."""
     spy = AsyncMock(return_value=_report())
-    with patch("epics_pv_mcp.cli_diagnose.diagnose", spy):
+    with patch("epics_mcp.cli_diagnose.diagnose", spy):
         rc = cli_diagnose.main(
             ["SYS:PV", "--naming", "--archiver", "--alarm", "--no-channelfinder"]
         )
@@ -142,14 +142,14 @@ def test_main_exit_0_even_when_pv_disconnected(capsys: pytest.CaptureFixture[str
         confidence="likely",
         live=LiveEvidence(connected=False, error_code="PV_TIMEOUT"),
     )
-    with patch("epics_pv_mcp.cli_diagnose.diagnose", AsyncMock(return_value=disconnected)):
+    with patch("epics_mcp.cli_diagnose.diagnose", AsyncMock(return_value=disconnected)):
         rc = cli_diagnose.main(["SYS:PV"])
     assert rc == 0
     assert "disconnected" in capsys.readouterr().out
 
 
 def test_main_json_mode_emits_valid_json(capsys: pytest.CaptureFixture[str]) -> None:
-    with patch("epics_pv_mcp.cli_diagnose.diagnose", AsyncMock(return_value=_report())):
+    with patch("epics_mcp.cli_diagnose.diagnose", AsyncMock(return_value=_report())):
         rc = cli_diagnose.main(["SYS:PV", "--json"])
     out = capsys.readouterr().out
     assert rc == 0

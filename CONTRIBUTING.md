@@ -41,7 +41,7 @@ when the package is absent, so the core suite stays green.
 - New behaviour has a test; new tools/config are documented in `README.md` (the resource
   URIs are drift-checked against the server by a test).
 - New operational knowledge (a service/IOC recipe, an endpoint, an error signature) lands in the
-  operator guide (`src/epics_pv_mcp/operator_guide.md`), not just a commit body. See the Knowledge
+  operator guide (`src/epics_mcp/operator_guide.md`), not just a commit body. See the Knowledge
   Persistence Policy in `CLAUDE.md`. A new tool must appear in the guide's tool inventory and any new
   `EPICS_MCP_*` var must be mentioned there; both are drift-checked by `test_guide_matches_code.py`.
 - A new **write** surface additionally satisfies all six points of the
@@ -113,7 +113,7 @@ the gates.
 **Every release:**
 
 1. Bump `[project].version` in `pyproject.toml` **and** the hardcoded fallback in
-   `src/epics_pv_mcp/__init__.py`. This is not optional bookkeeping: with no installed metadata
+   `src/epics_mcp/__init__.py`. This is not optional bookkeeping: with no installed metadata
    (a source checkout) the stale literal becomes a silent version lie, and
    `tests/test_packaging.py::test_version_fallback_matches_pyproject` goes red if they drift.
 2. Close the `[Unreleased]` section in `CHANGELOG.md` under the new version.

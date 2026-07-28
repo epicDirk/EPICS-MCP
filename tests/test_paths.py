@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-import epics_pv_mcp.config as config_module
-from epics_pv_mcp.errors import EpicsError
-from epics_pv_mcp.paths import resolve_user_path
+import epics_mcp.config as config_module
+from epics_mcp.errors import EpicsError
+from epics_mcp.paths import resolve_user_path
 
 
 @pytest.fixture(autouse=True)
@@ -116,7 +116,7 @@ def test_allowed_roots_resolved_once_per_value(
 ) -> None:
     """S2-7: _allowed_roots caches the (filesystem-stat) Path.resolve of each root on the raw
     string, so repeated resolve_user_path calls don't re-stat the roots (config is immutable)."""
-    from epics_pv_mcp.paths import _allowed_roots, _resolve_roots
+    from epics_mcp.paths import _allowed_roots, _resolve_roots
 
     _resolve_roots.cache_clear()
     monkeypatch.setenv("EPICS_MCP_ALLOWED_ROOTS", str(tmp_path))

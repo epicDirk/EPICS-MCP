@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from epics_pv_mcp.resources import get_guide
+from epics_mcp.resources import get_guide
 
 _ROOT = Path(__file__).resolve().parent.parent  # .../EPICS-MCP-Server
 
@@ -189,7 +189,7 @@ def _tracked_text_files() -> list[Path]:
 
 # The operator guide lives under src/ but is a knowledge file (prose), so it is scanned by the PV
 # detector even though the rest of src/ (code + docstring examples) is not.
-_DOC_GUIDE_REL = "src/epics_pv_mcp/operator_guide.md"
+_DOC_GUIDE_REL = "src/epics_mcp/operator_guide.md"
 _DOC_SUFFIXES = {".md", ".rst", ".example", ".txt"}
 
 
@@ -211,7 +211,7 @@ def _tracked_doc_files() -> list[Path]:
 
 def test_knowledge_files_are_facility_agnostic() -> None:
     files = _tracked_text_files()
-    guide = _ROOT / "src" / "epics_pv_mcp" / "operator_guide.md"
+    guide = _ROOT / "src" / "epics_mcp" / "operator_guide.md"
     assert guide in files, "the guide must exist and be scanned"
 
     problems: list[str] = []

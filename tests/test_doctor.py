@@ -17,10 +17,10 @@ from unittest.mock import Mock
 import pytest
 import requests
 
-from epics_pv_mcp import cli_doctor
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import EpicsError
-from epics_pv_mcp.services.doctor import (
+from epics_mcp import cli_doctor
+from epics_mcp.config import EpicsConfig
+from epics_mcp.errors import EpicsError
+from epics_mcp.services.doctor import (
     _FAILING_STATUSES,
     _INCONCLUSIVE_STATUSES,
     _NON_FAILING_STATUSES,
@@ -38,13 +38,13 @@ from epics_pv_mcp.services.doctor import (
     _safe,
     run_doctor,
 )
-from epics_pv_mcp.services.olog_client import OlogClient
+from epics_mcp.services.olog_client import OlogClient
 
 
 def _set_config(monkeypatch: pytest.MonkeyPatch, **kwargs: object) -> EpicsConfig:
     """Point doctor's config read at a fresh EpicsConfig with the given fields."""
     cfg = EpicsConfig(**kwargs)  # type: ignore[arg-type]
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.get_config", lambda: cfg)
+    monkeypatch.setattr("epics_mcp.services.doctor.get_config", lambda: cfg)
     return cfg
 
 
@@ -145,22 +145,22 @@ def _identity_never_touches_the_network(monkeypatch: pytest.MonkeyPatch) -> None
     # line existed: test_archiver_api_error_is_reachable_not_unreachable spent 12.1s of the suite's
     # 17s resolving a fake hostname, passing, silently, over the network. A hermetic test that is
     # merely slow is how "no network" rots.
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.rest_get_json", lambda *_a, **_k: {})
-    monkeypatch.setattr("epics_pv_mcp.services.doctor._identify", _identified)
+    monkeypatch.setattr("epics_mcp.services.doctor.rest_get_json", lambda *_a, **_k: {})
+    monkeypatch.setattr("epics_mcp.services.doctor._identify", _identified)
     monkeypatch.setattr(
-        "epics_pv_mcp.services.doctor._identify_alarm",
+        "epics_mcp.services.doctor._identify_alarm",
         lambda *_a, **_k: _identified("alarm"),
     )
     monkeypatch.setattr(
-        "epics_pv_mcp.services.doctor._identify_archiver",
+        "epics_mcp.services.doctor._identify_archiver",
         lambda *_a, **_k: _identified("archiver"),
     )
     monkeypatch.setattr(
-        "epics_pv_mcp.services.doctor._identify_naming",
+        "epics_mcp.services.doctor._identify_naming",
         lambda *_a, **_k: _identified("naming"),
     )
     monkeypatch.setattr(
-        "epics_pv_mcp.services.doctor._identify_retrieval_plane",
+        "epics_mcp.services.doctor._identify_retrieval_plane",
         lambda *_a, **_k: _identified("archiver_retrieval"),
     )
 
@@ -176,7 +176,7 @@ async def test_all_disabled_is_ok_and_makes_no_network(monkeypatch: pytest.Monke
         "NamingServiceClient",
         "OlogClient",
     ):
-        monkeypatch.setattr(f"epics_pv_mcp.services.doctor.{name}", boom)
+        monkeypatch.setattr(f"epics_mcp.services.doctor.{name}", boom)
     report = await run_doctor()
     assert report.ok is True
     assert {p.plane for p in report.planes} == {
@@ -200,7 +200,7 @@ async def test_all_disabled_is_ok_and_makes_no_network(monkeypatch: pytest.Monke
 
 async def test_reachable_plane_is_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, channelfinder_url="http://cf:8080/ChannelFinder")
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.ChannelFinderClient", _OkClient)
+    monkeypatch.setattr("epics_mcp.services.doctor.ChannelFinderClient", _OkClient)
     report = await run_doctor()
     cf = _plane(report, "channelfinder")
     assert (cf.status, cf.reachable, cf.ca_ok) == ("ok", True, True)
@@ -218,7 +218,7 @@ async def test_reachable_plane_is_ok(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _payload(monkeypatch: pytest.MonkeyPatch, value: object) -> None:
     """Make the identity probe's GET return *value* (no network)."""
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.rest_get_json", lambda *a, **k: value)
+    monkeypatch.setattr("epics_mcp.services.doctor.rest_get_json", lambda *a, **k: value)
 
 
 def _raises(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
@@ -227,7 +227,7 @@ def _raises(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
     def _boom(*_a: object, **_k: object) -> object:
         raise exc
 
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.rest_get_json", _boom)
+    monkeypatch.setattr("epics_mcp.services.doctor.rest_get_json", _boom)
 
 
 def test_identity_exact_name_is_ok(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -584,11 +584,11 @@ async def test_alarm_backend_down_flows_through_run_doctor_to_exit_one(
     'ok', report.ok True), the exact pre-MA-2b(e) blind-HEAD behaviour the change removes.
     """
     _set_config(monkeypatch, alarm_url="http://alarm.example")
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.AlarmClient", _OkClient)
+    monkeypatch.setattr("epics_mcp.services.doctor.AlarmClient", _OkClient)
     # Restore the REAL probe + a GET / body over the autouse stubs so the real chain runs.
-    monkeypatch.setattr("epics_pv_mcp.services.doctor._identify_alarm", _identify_alarm)
+    monkeypatch.setattr("epics_mcp.services.doctor._identify_alarm", _identify_alarm)
     monkeypatch.setattr(
-        "epics_pv_mcp.services.doctor.rest_get_json",
+        "epics_mcp.services.doctor.rest_get_json",
         lambda *_a, **_k: {
             "name": "Alarm logging Service",
             "elastic": {"status": "Failed to connect to elastic boom"},
@@ -646,7 +646,7 @@ async def test_every_rest_plane_is_actually_identity_probed(
     "every configured plane answered AS ITSELF". Only this assertion notices.
     """
     _set_config(monkeypatch, **{url_field: "http://service.example/x"})
-    monkeypatch.setattr(f"epics_pv_mcp.services.doctor.{client_name}", _OkClient)
+    monkeypatch.setattr(f"epics_mcp.services.doctor.{client_name}", _OkClient)
     report = await run_doctor()
     checked = _plane(report, plane)
     assert checked.identified is True, (
@@ -664,8 +664,8 @@ async def test_retrieval_falls_back_to_the_archiver_url_like_the_client_does(
     this check exists to remove, only wearing a more reassuring word.
     """
     _set_config(monkeypatch, archiver_url="http://arch.example:17665")  # retrieval URL empty
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.ArchiverClient", _OkClient)
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.rest_get_json", lambda *a, **k: {})
+    monkeypatch.setattr("epics_mcp.services.doctor.ArchiverClient", _OkClient)
+    monkeypatch.setattr("epics_mcp.services.doctor.rest_get_json", lambda *a, **k: {})
     report = await run_doctor()
     retrieval = _plane(report, "archiver_retrieval")
     assert retrieval.status != "disabled", "retrieval is live via fallback, not reported as off"
@@ -690,7 +690,7 @@ async def test_retrieval_url_without_archiver_url_is_a_config_error(
     """
     _set_config(monkeypatch, archiver_retrieval_url="http://arch.example:17668")
     boom = Mock(side_effect=AssertionError("dead config must not be probed"))
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.rest_get_json", boom)
+    monkeypatch.setattr("epics_mcp.services.doctor.rest_get_json", boom)
     report = await run_doctor()
     retrieval = _plane(report, "archiver_retrieval")
     assert retrieval.status == "config_error"
@@ -714,7 +714,7 @@ async def test_retrieval_plane_is_actually_identity_probed(
     other test green; only this assertion notices (``identified`` stays None).
     """
     _set_config(monkeypatch, archiver_url="http://arch.example:17665")
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.ArchiverClient", _OkClient)
+    monkeypatch.setattr("epics_mcp.services.doctor.ArchiverClient", _OkClient)
     report = await run_doctor()
     retrieval = _plane(report, "archiver_retrieval")
     assert retrieval.identified is True, (
@@ -742,9 +742,9 @@ async def test_unverified_plane_does_not_fail_but_is_reported(
     turning "cannot prove it" into a hard failure would be the very overclaim we keep finding.
     """
     _set_config(monkeypatch, channelfinder_url="http://cf.example/ChannelFinder")
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.ChannelFinderClient", _OkClient)
+    monkeypatch.setattr("epics_mcp.services.doctor.ChannelFinderClient", _OkClient)
     monkeypatch.setattr(
-        "epics_pv_mcp.services.doctor._identify",
+        "epics_mcp.services.doctor._identify",
         lambda plane, *_a, **_k: PlaneCheck(
             plane=plane,
             configured=True,
@@ -776,9 +776,9 @@ async def test_inconclusive_plane_keeps_ok_and_is_reported(
     old line) flips ``ok`` to False here, which would collapse exit 3 into exit 1. Pins the union.
     """
     _set_config(monkeypatch, channelfinder_url="http://cf.example/ChannelFinder")
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.ChannelFinderClient", _OkClient)
+    monkeypatch.setattr("epics_mcp.services.doctor.ChannelFinderClient", _OkClient)
     monkeypatch.setattr(
-        "epics_pv_mcp.services.doctor._identify",
+        "epics_mcp.services.doctor._identify",
         lambda plane, *_a, **_k: PlaneCheck(
             plane=plane,
             configured=True,
@@ -801,7 +801,7 @@ async def test_inconclusive_plane_keeps_ok_and_is_reported(
 async def test_ca_error_plane_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, channelfinder_url="http://cf")
     monkeypatch.setattr(
-        "epics_pv_mcp.services.doctor.ChannelFinderClient",
+        "epics_mcp.services.doctor.ChannelFinderClient",
         _cause_client(requests.exceptions.SSLError("self-signed")),
     )
     report = await run_doctor()
@@ -818,7 +818,7 @@ async def test_archiver_api_error_is_reachable_not_unreachable(
     _set_config(monkeypatch, archiver_url="http://arch:17665")
     http_err = requests.exceptions.HTTPError("404")
     http_err.response = Mock(status_code=404)
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.ArchiverClient", _cause_client(http_err))
+    monkeypatch.setattr("epics_mcp.services.doctor.ArchiverClient", _cause_client(http_err))
     report = await run_doctor()
     arch = _plane(report, "archiver")
     assert arch.status == "api_error"
@@ -829,7 +829,7 @@ async def test_archiver_api_error_is_reachable_not_unreachable(
 async def test_unreachable_plane_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, alarm_url="http://alarm:8081")
     monkeypatch.setattr(
-        "epics_pv_mcp.services.doctor.AlarmClient",
+        "epics_mcp.services.doctor.AlarmClient",
         _cause_client(requests.exceptions.ConnectionError("refused")),
     )
     report = await run_doctor()
@@ -894,7 +894,7 @@ async def test_live_plane_info_only_makes_no_live_call(monkeypatch: pytest.Monke
     """Without --probe-pv the live plane is INFO-only and pv_get is NEVER called."""
     _set_config(monkeypatch)
     pv_get = Mock(side_effect=AssertionError("pv_get must not be called without --probe-pv"))
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.pv_get", pv_get)
+    monkeypatch.setattr("epics_mcp.services.doctor.pv_get", pv_get)
     report = await run_doctor()  # no probe_pv
     live = _plane(report, "live")
     assert live.status == "info"
@@ -910,7 +910,7 @@ async def test_live_plane_probe_connected(monkeypatch: pytest.MonkeyPatch) -> No
     async def _ok(pv_name: str, timeout: float) -> dict[str, object]:
         return {"value": 1, "alarm": {"severity_text": "NO_ALARM"}}
 
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.pv_get", _ok)
+    monkeypatch.setattr("epics_mcp.services.doctor.pv_get", _ok)
     report = await run_doctor(probe_pv="SIM:PS-01:Cur-RB")
     live = _plane(report, "live")
     assert live.status == "ok"
@@ -924,7 +924,7 @@ async def test_live_plane_probe_disconnected_fails(monkeypatch: pytest.MonkeyPat
     async def _down(pv_name: str, timeout: float) -> dict[str, object]:
         raise EpicsError("timeout", error_code="PV_TIMEOUT")
 
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.pv_get", _down)
+    monkeypatch.setattr("epics_mcp.services.doctor.pv_get", _down)
     report = await run_doctor(probe_pv="SIM:PS-01:Cur-RB")
     live = _plane(report, "live")
     assert live.status == "disconnected"
@@ -942,7 +942,7 @@ async def test_live_plane_probe_generic_exception_disconnected(
     async def _boom(pv_name: str, timeout: float) -> dict[str, object]:
         raise ValueError("boom")
 
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.pv_get", _boom)
+    monkeypatch.setattr("epics_mcp.services.doctor.pv_get", _boom)
     report = await run_doctor(probe_pv="SIM:PS-01:Cur-RB")
     live = _plane(report, "live")
     assert live.status == "disconnected"
@@ -1087,7 +1087,7 @@ def test_cli_failing_plane_exits_one(
 ) -> None:
     _set_config(monkeypatch, alarm_url="http://alarm:8081")
     monkeypatch.setattr(
-        "epics_pv_mcp.services.doctor.AlarmClient",
+        "epics_mcp.services.doctor.AlarmClient",
         _cause_client(requests.exceptions.ConnectionError("refused")),
     )
     code = cli_doctor.main([])
@@ -1113,7 +1113,7 @@ def test_cli_render_glyphs_and_privacy_block(
     """The human render shows per-status glyphs and the privacy block incl. the empty-owner line."""
     _set_config(monkeypatch, alarm_url="http://alarm:8081", channelfinder_safe_owner_accounts="")
     monkeypatch.setattr(
-        "epics_pv_mcp.services.doctor.AlarmClient",
+        "epics_mcp.services.doctor.AlarmClient",
         _cause_client(requests.exceptions.ConnectionError("refused")),
     )
     code = cli_doctor.main([])
@@ -1156,9 +1156,9 @@ def test_cli_inconclusive_exits_three(
     ALSO catches the FLAW-B trap: if the ok-line were left unchanged, ok=False → this exits 1.
     """
     _set_config(monkeypatch, channelfinder_url="http://cf.example/ChannelFinder")
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.ChannelFinderClient", _OkClient)
+    monkeypatch.setattr("epics_mcp.services.doctor.ChannelFinderClient", _OkClient)
     monkeypatch.setattr(
-        "epics_pv_mcp.services.doctor._identify",
+        "epics_mcp.services.doctor._identify",
         lambda plane, *_a, **_k: PlaneCheck(
             plane=plane,
             configured=True,
@@ -1190,13 +1190,13 @@ def test_failing_dominates_inconclusive(
         channelfinder_url="http://cf.example/ChannelFinder",
         alarm_url="http://alarm:8081",
     )
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.ChannelFinderClient", _OkClient)
+    monkeypatch.setattr("epics_mcp.services.doctor.ChannelFinderClient", _OkClient)
     monkeypatch.setattr(
-        "epics_pv_mcp.services.doctor.AlarmClient",
+        "epics_mcp.services.doctor.AlarmClient",
         _cause_client(requests.exceptions.ConnectionError("refused")),  # alarm HARD-fails
     )
     monkeypatch.setattr(
-        "epics_pv_mcp.services.doctor._identify",
+        "epics_mcp.services.doctor._identify",
         lambda plane, *_a, **_k: PlaneCheck(
             plane=plane,
             configured=True,
@@ -1274,7 +1274,7 @@ def test_cli_verdict_counts_the_identity_verified_planes(
 ) -> None:
     """The strong sentence is earned by actual identifications and says how many there were."""
     _set_config(monkeypatch, channelfinder_url="http://cf.example/ChannelFinder")
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.ChannelFinderClient", _OkClient)
+    monkeypatch.setattr("epics_mcp.services.doctor.ChannelFinderClient", _OkClient)
     code = cli_doctor.main([])
     out = capsys.readouterr().out
     assert code == 0
@@ -1289,7 +1289,7 @@ async def test_identified_planes_is_the_positive_signal(monkeypatch: pytest.Monk
     first S18 fix, which had closed the vacuous truth only on the human-rendered verdict line).
     """
     _set_config(monkeypatch, channelfinder_url="http://cf.example/ChannelFinder")
-    monkeypatch.setattr("epics_pv_mcp.services.doctor.ChannelFinderClient", _OkClient)
+    monkeypatch.setattr("epics_mcp.services.doctor.ChannelFinderClient", _OkClient)
     report = await run_doctor()
     assert report.identified_planes == ["channelfinder"]
     assert report.verification_complete is True
@@ -1316,7 +1316,7 @@ def test_cli_reports_full_olog_freetext_for_a_declared_sandbox(
     """
     _set_config(monkeypatch, olog_url="http://localhost:8080/Olog", olog_assume_test_data=True)
     monkeypatch.setattr(
-        "epics_pv_mcp.services.doctor.OlogClient",
+        "epics_mcp.services.doctor.OlogClient",
         _cause_client(requests.exceptions.ConnectionError("refused")),
     )
     cli_doctor.main([])
@@ -1345,7 +1345,7 @@ def test_cli_epicserror_exits_one_not_the_usage_code(monkeypatch: pytest.MonkeyP
     async def _boom(**kwargs: object) -> DoctorReport:
         raise EpicsError("internal", error_code="INTERNAL")
 
-    monkeypatch.setattr("epics_pv_mcp.cli_doctor.run_doctor", _boom)
+    monkeypatch.setattr("epics_mcp.cli_doctor.run_doctor", _boom)
 
     assert cli_doctor.main([]) == 1
 
@@ -1371,7 +1371,7 @@ def test_cli_epicserror_is_distinguishable_from_a_failed_plane(
     assert cli_doctor.main([]) == 1
     plane = capsys.readouterr()
 
-    monkeypatch.setattr("epics_pv_mcp.cli_doctor.run_doctor", _boom)
+    monkeypatch.setattr("epics_mcp.cli_doctor.run_doctor", _boom)
     assert cli_doctor.main([]) == 1
     internal = capsys.readouterr()
 

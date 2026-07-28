@@ -9,7 +9,7 @@ read) is covered in ``test_find_device_tool.py``.
 import pytest
 from opi_navigation.pv_analysis.lookup import DisplayMatch, PvLookupResult
 
-from epics_pv_mcp.services.device_lookup import (
+from epics_mcp.services.device_lookup import (
     _VALUE_CAP,
     _format_channel_value,
     build_device_report,

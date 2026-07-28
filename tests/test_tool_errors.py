@@ -10,8 +10,8 @@ import logging
 import pytest
 from fastmcp.exceptions import ToolError
 
-from epics_pv_mcp.errors import EpicsError, PVNotFoundError
-from epics_pv_mcp.tool_errors import translate_epics_errors
+from epics_mcp.errors import EpicsError, PVNotFoundError
+from epics_mcp.tool_errors import translate_epics_errors
 
 
 async def test_epics_error_becomes_tool_error_with_code() -> None:
@@ -27,7 +27,7 @@ async def test_bounds_error_renders_its_own_code() -> None:
     """O2: PVWriteBoundsError subclasses PVWriteDeniedError but must render its OWN error_code
     (PV_WRITE_OUT_OF_BOUNDS), not the parent's PV_WRITE_DENIED. The __init__ override is the
     trap this pins."""
-    from epics_pv_mcp.errors import PVWriteBoundsError
+    from epics_mcp.errors import PVWriteBoundsError
 
     @translate_epics_errors
     async def boom() -> str:
@@ -52,7 +52,7 @@ async def test_generic_exception_is_confined_to_the_class_name_and_logged(
         raise ValueError(secret)
 
     with (
-        caplog.at_level(logging.ERROR, logger="epics_pv_mcp.tool_errors"),
+        caplog.at_level(logging.ERROR, logger="epics_mcp.tool_errors"),
         pytest.raises(ToolError) as exc_info,
     ):
         await boom()

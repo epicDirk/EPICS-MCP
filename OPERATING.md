@@ -5,7 +5,7 @@ The operational cookbook for this server, covering the service landscape, the no
 `.FIELD` read path, the Naming `/rest` gotcha) and the error signatures that tell you which tool to
 reach for, lives in **one** source file:
 
-**[`src/epics_pv_mcp/operator_guide.md`](src/epics_pv_mcp/operator_guide.md)**
+**[`src/epics_mcp/operator_guide.md`](src/epics_mcp/operator_guide.md)**
 
 That single source is shipped inside the package and served to an AI assistant verbatim as the
 `epics-pv://guide` MCP resource, so the knowledge travels with the server: no external skill or

@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from epics_pv_mcp.cli_coverage import main
-from epics_pv_mcp.errors import EpicsError
-from epics_pv_mcp.tools.coverage_audit import _coverage_audit
+from epics_mcp.cli_coverage import main
+from epics_mcp.errors import EpicsError
+from epics_mcp.tools.coverage_audit import _coverage_audit
 
 # Operator-facing display: a concrete prefixed PV + a macro PV bound by the display's own <macros>
 # scope (so it resolves to DEV-TEST01:Ctrl-EVR-01:Cmd) → the index carries both.
@@ -65,11 +65,11 @@ async def test_coverage_tool_cf_stubbed_matrix(
     """With ChannelFinder wired (stubbed), the cross-matrix computes: status is cf_and_display,
     the registered-but-unshown 'extra' is a cf_only blind-spot, the shown-but-unregistered 'Cmd'
     is display_only."""
-    import epics_pv_mcp.config as config_module
+    import epics_mcp.config as config_module
 
     displays = _setup(tmp_path)
     monkeypatch.setenv("EPICS_MCP_CHANNELFINDER_URL", "http://cf")
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _StubCFClient)
+    monkeypatch.setattr("epics_mcp.services.checkers.ChannelFinderClient", _StubCFClient)
     config_module._config = None
     try:
         result = await _coverage_audit(
@@ -133,7 +133,7 @@ async def test_coverage_passes_canonical_displays_dir_to_walker(
     raw = str(tmp_path / "sub" / ".." / "displays")  # non-canonical → resolves to tmp_path/displays
     assert Path(raw) != Path(raw).resolve()  # guard: the fixture is genuinely non-canonical
     with patch(
-        "epics_pv_mcp.services.orchestration.analyze_display_index", return_value=([], (), 0)
+        "epics_mcp.services.orchestration.analyze_display_index", return_value=([], (), 0)
     ) as walker:
         await _coverage_audit(raw)
     assert walker.call_args.args[0] == Path(raw).resolve()
@@ -152,7 +152,7 @@ def test_cli_coverage_rejects_displays_dir_outside_allowed_roots(
     """S4-4 CLI boundary lock: the CLI must honor EPICS_MCP_ALLOWED_ROOTS (via resolve_user_path in
     the shared orchestrator). An EXISTING displays_dir outside the allowed root exits 2, the case
     the pre-remediation bare Path.is_dir() short-circuit would have let through (it returns 0)."""
-    import epics_pv_mcp.config as config_module
+    import epics_mcp.config as config_module
 
     displays = _setup(tmp_path)  # exists, but outside the allowed root
     allowed = tmp_path / "allowed"

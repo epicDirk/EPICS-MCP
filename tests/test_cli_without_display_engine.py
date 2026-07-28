@@ -24,20 +24,20 @@ from pathlib import Path
 
 import pytest
 
-from epics_pv_mcp.cli_common import _report_engine_absent, require_display_engine
+from epics_mcp.cli_common import _report_engine_absent, require_display_engine
 
 _REPO = Path(__file__).resolve().parents[1]
 _COMMANDS = (
-    ("epics_pv_mcp.cli_coverage", "epics-coverage"),
-    ("epics_pv_mcp.cli_crossplane", "epics-crossplane"),
+    ("epics_mcp.cli_coverage", "epics-coverage"),
+    ("epics_mcp.cli_crossplane", "epics-crossplane"),
 )
 
 #: All four console entry points, for properties every CLI must hold regardless of the engine.
 _ALL_CLI_MODULES = (
-    "epics_pv_mcp.cli_doctor",
-    "epics_pv_mcp.cli_diagnose",
-    "epics_pv_mcp.cli_coverage",
-    "epics_pv_mcp.cli_crossplane",
+    "epics_mcp.cli_doctor",
+    "epics_mcp.cli_diagnose",
+    "epics_mcp.cli_coverage",
+    "epics_mcp.cli_crossplane",
 )
 
 

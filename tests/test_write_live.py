@@ -30,9 +30,9 @@ import os
 
 import pytest
 
-from epics_pv_mcp.errors import PVWriteBoundsError
-from epics_pv_mcp.services.epics_client import pv_get
-from epics_pv_mcp.tools.write import _set_pv_value
+from epics_mcp.errors import PVWriteBoundsError
+from epics_mcp.services.epics_client import pv_get
+from epics_mcp.tools.write import _set_pv_value
 from tests.live_gate import assert_live_available, live_demanded
 
 # The autouse conftest fixture ``_isolate_epics_search_env`` strips the EPICS search env so posture

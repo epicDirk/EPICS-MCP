@@ -5,20 +5,20 @@ from unittest.mock import Mock
 import pytest
 import requests
 
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
-from epics_pv_mcp.services._http import http_status, is_ssl_error
-from epics_pv_mcp.services._time_window import TimeWindowFormatError
-from epics_pv_mcp.services.alarm_time import normalize_alarm_time
-from epics_pv_mcp.services.archiver_client import ArchiverClient, HistoryResult, Sample
-from epics_pv_mcp.services.archiver_exceptions import (
+from epics_mcp.config import EpicsConfig
+from epics_mcp.errors import EpicsConnectionError, EpicsError
+from epics_mcp.services._http import http_status, is_ssl_error
+from epics_mcp.services._time_window import TimeWindowFormatError
+from epics_mcp.services.alarm_time import normalize_alarm_time
+from epics_mcp.services.archiver_client import ArchiverClient, HistoryResult, Sample
+from epics_mcp.services.archiver_exceptions import (
     ArchiverConnectionError,
     ArchiverError,
     ArchiverResponseError,
 )
-from epics_pv_mcp.services.archiver_time import normalize_archiver_time
-from epics_pv_mcp.services.checkers import _archiver_error_code
-from epics_pv_mcp.tools.archiver import (
+from epics_mcp.services.archiver_time import normalize_archiver_time
+from epics_mcp.services.checkers import _archiver_error_code
+from epics_mcp.tools.archiver import (
     _DISABLED_NOTE,
     _get_appliance_info,
     _get_archive_info,
@@ -731,13 +731,13 @@ def test_get_archive_status_surfaces_connection_cluster_and_drops_unknown(
 async def test_is_archived_tool_disabled_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     # Gating + client construction live in services/checkers.query_archived (M9); patch there.
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config", lambda: EpicsConfig(archiver_url="")
+        "epics_mcp.services.checkers.get_config", lambda: EpicsConfig(archiver_url="")
     )
 
     def _boom(*args: object, **kwargs: object) -> ArchiverClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.ArchiverClient", _boom)
+    monkeypatch.setattr("epics_mcp.services.checkers.ArchiverClient", _boom)
     result = await _is_archived("X")
     assert result["enabled"] is False
     assert result["archived"] is None
@@ -745,14 +745,12 @@ async def test_is_archived_tool_disabled_no_network(monkeypatch: pytest.MonkeyPa
 
 @pytest.mark.asyncio
 async def test_get_pv_history_tool_disabled_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="")
-    )
+    monkeypatch.setattr("epics_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url=""))
 
     def _boom(*args: object, **kwargs: object) -> ArchiverClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _boom)
+    monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _boom)
     result = await _get_pv_history("X", _T0, _T1)
     assert result["enabled"] is False
     assert result["total"] == 0
@@ -760,14 +758,12 @@ async def test_get_pv_history_tool_disabled_no_network(monkeypatch: pytest.Monke
 
 @pytest.mark.asyncio
 async def test_get_archive_info_tool_disabled_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="")
-    )
+    monkeypatch.setattr("epics_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url=""))
 
     def _boom(*args: object, **kwargs: object) -> ArchiverClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _boom)
+    monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _boom)
     result = await _get_archive_info("X")
     assert result["enabled"] is False
     # found is None (NOT checked) when disabled, a disabled plane must never masquerade as a
@@ -778,7 +774,7 @@ async def test_get_archive_info_tool_disabled_no_network(monkeypatch: pytest.Mon
 @pytest.mark.asyncio
 async def test_is_archived_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_mcp.services.checkers.get_config",
         lambda: EpicsConfig(archiver_url="http://arch"),
     )
 
@@ -796,7 +792,7 @@ async def test_is_archived_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None
                 "connection_loss_regain_count": "3",
             }
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.ArchiverClient", _Fake)
+    monkeypatch.setattr("epics_mcp.services.checkers.ArchiverClient", _Fake)
     result = await _is_archived("X")
     assert result["enabled"] is True
     assert result["archived"] is True
@@ -810,7 +806,7 @@ async def test_is_archived_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None
 async def test_get_pv_history_tool_passes_retrieval_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """_get_pv_history must construct ArchiverClient with the configured retrieval URL."""
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config",
+        "epics_mcp.tools.archiver.get_config",
         lambda: EpicsConfig(
             archiver_url="http://arch:17665",
             archiver_retrieval_url="http://arch:17668",
@@ -835,7 +831,7 @@ async def test_get_pv_history_tool_passes_retrieval_url(monkeypatch: pytest.Monk
                 withheld_reason=None,
             )
 
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _Fake)
     result = await _get_pv_history("X", _T0, _T1)
     assert result["enabled"] is True
     assert captured["base_url"] == "http://arch:17665"
@@ -848,7 +844,7 @@ async def test_get_pv_history_tool_surfaces_meta_and_status(
 ) -> None:
     """DS-4A: the tool surfaces the meta block (EGU/PREC); DS-4B: it surfaces status/withheld."""
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config",
+        "epics_mcp.tools.archiver.get_config",
         lambda: EpicsConfig(archiver_url="http://arch"),
     )
 
@@ -868,7 +864,7 @@ async def test_get_pv_history_tool_surfaces_meta_and_status(
                 withheld_reason=None,
             )
 
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _Fake)
     result = await _get_pv_history("X", _T0, _T1)
     assert result["enabled"] is True
     assert result["total"] == 1
@@ -881,7 +877,7 @@ async def test_get_pv_history_tool_surfaces_meta_and_status(
 async def test_get_pv_history_tool_surfaces_withheld(monkeypatch: pytest.MonkeyPatch) -> None:
     """DS-4B: a withheld client result surfaces status + withheld_reason + note at the tool."""
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config",
+        "epics_mcp.tools.archiver.get_config",
         lambda: EpicsConfig(archiver_url="http://arch"),
     )
 
@@ -901,7 +897,7 @@ async def test_get_pv_history_tool_surfaces_withheld(monkeypatch: pytest.MonkeyP
                 withheld_reason="unexpected_payload",
             )
 
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _Fake)
     result = await _get_pv_history("X", _T0, _T1)
     assert result["status"] == "withheld"
     assert result["withheld_reason"] == "unexpected_payload"
@@ -913,7 +909,7 @@ async def test_get_pv_history_tool_surfaces_withheld(monkeypatch: pytest.MonkeyP
 async def test_get_archive_info_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """_get_archive_info builds the client (MGMT base) and surfaces the projected type info."""
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config",
+        "epics_mcp.tools.archiver.get_config",
         lambda: EpicsConfig(archiver_url="http://arch:17665"),
     )
 
@@ -929,7 +925,7 @@ async def test_get_archive_info_tool_enabled(monkeypatch: pytest.MonkeyPatch) ->
                 "data_stores": ["pb://localhost?name=STS"],
             }
 
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _Fake)
     result = await _get_archive_info("X")
     assert result["enabled"] is True
     assert result["pv"] == "X"
@@ -945,14 +941,12 @@ async def test_get_appliance_info_tool_disabled_no_network(
 ) -> None:
     """Disabled (EPICS_MCP_ARCHIVER_URL unset) → {enabled:false, note} and NO client construction.
     The shape has no ``found``/``pv`` key: getApplianceInfo has no PV present/absent duality."""
-    monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="")
-    )
+    monkeypatch.setattr("epics_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url=""))
 
     def _boom(*args: object, **kwargs: object) -> ArchiverClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _boom)
+    monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _boom)
     result = await _get_appliance_info()
     assert result == {"enabled": False, "note": _DISABLED_NOTE}
 
@@ -962,7 +956,7 @@ async def test_get_appliance_info_tool_enabled(monkeypatch: pytest.MonkeyPatch) 
     """_get_appliance_info builds the client (MGMT base) and surfaces the projected body under
     enabled:true, exact-equality pins the {enabled, **projection} shape (no pv, no found)."""
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config",
+        "epics_mcp.tools.archiver.get_config",
         lambda: EpicsConfig(archiver_url="http://archiver:17665"),
     )
 
@@ -977,7 +971,7 @@ async def test_get_appliance_info_tool_enabled(monkeypatch: pytest.MonkeyPatch) 
                 "version": "Archiver Appliance 2.2.1",
             }
 
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _Fake)
     result = await _get_appliance_info()
     assert result == {
         "enabled": True,
@@ -1146,7 +1140,7 @@ def test_coerce_pv_names_non_string_item_raises(payload: object) -> None:
 @pytest.mark.asyncio
 async def test_list_archived_pvs_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config",
+        "epics_mcp.tools.archiver.get_config",
         lambda: EpicsConfig(archiver_url="http://arch:17665"),
     )
 
@@ -1159,7 +1153,7 @@ async def test_list_archived_pvs_tool_enabled(monkeypatch: pytest.MonkeyPatch) -
         ) -> tuple[list[str], bool]:
             return (["A:PV1", "A:PV2"], False)
 
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _Fake)
     result = await _list_archived_pvs()
     assert result["enabled"] is True
     assert result["pvs"] == ["A:PV1", "A:PV2"]
@@ -1170,7 +1164,7 @@ async def test_list_archived_pvs_tool_enabled(monkeypatch: pytest.MonkeyPatch) -
 @pytest.mark.asyncio
 async def test_list_archived_pvs_this_appliance_variant(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config",
+        "epics_mcp.tools.archiver.get_config",
         lambda: EpicsConfig(archiver_url="http://arch"),
     )
 
@@ -1186,7 +1180,7 @@ async def test_list_archived_pvs_this_appliance_variant(monkeypatch: pytest.Monk
         def get_pvs_for_this_appliance(self, limit: int = 5000) -> tuple[list[str], bool]:
             return (["M:PV1"], True)
 
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _Fake)
     result = await _list_archived_pvs(this_appliance=True)
     assert result["pvs"] == ["M:PV1"]
     assert result["capped"] is True
@@ -1194,14 +1188,12 @@ async def test_list_archived_pvs_this_appliance_variant(monkeypatch: pytest.Monk
 
 @pytest.mark.asyncio
 async def test_list_archived_pvs_tool_disabled_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="")
-    )
+    monkeypatch.setattr("epics_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url=""))
 
     def _boom(*args: object, **kwargs: object) -> ArchiverClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _boom)
+    monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _boom)
     result = await _list_archived_pvs()
     assert result["enabled"] is False
     assert result["pvs"] == []
@@ -1214,7 +1206,7 @@ async def test_list_archived_pvs_forwards_pattern_and_limit(
 ) -> None:
     """The tool forwards pattern + limit to the client's get_all_pvs (the tool→client wire)."""
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
+        "epics_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
     )
     captured: dict[str, object] = {}
 
@@ -1229,7 +1221,7 @@ async def test_list_archived_pvs_forwards_pattern_and_limit(
             captured["limit"] = limit
             return (["X"], False)
 
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _Fake)
     await _list_archived_pvs(pattern="DEV-TEST01:*", limit=7)
     assert captured == {"pattern": "DEV-TEST01:*", "limit": 7}
 
@@ -1325,15 +1317,13 @@ async def test_get_pv_history_served_error_is_not_a_connection_error(
 ) -> None:
     """THE regression: a served 500 must not claim the appliance is unreachable."""
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
+        "epics_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
     )
     http_error = requests.exceptions.HTTPError("500")
     http_error.response = Mock(status_code=500)
     served = ArchiverResponseError("Request failed")
     served.__cause__ = http_error
-    monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.ArchiverClient", _history_client_raising(served)
-    )
+    monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _history_client_raising(served))
     with pytest.raises(EpicsError) as excinfo:
         await _get_pv_history("X", _T0, _T1)
     assert excinfo.value.error_code == "ARCHIVER_HTTP_500"
@@ -1348,10 +1338,10 @@ async def test_get_pv_history_bad_time_is_not_a_connection_error(
 ) -> None:
     """A window this plane cannot read is a bad ARGUMENT, nothing was ever sent."""
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
+        "epics_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
     )
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.ArchiverClient",
+        "epics_mcp.tools.archiver.ArchiverClient",
         _history_client_raising(TimeWindowFormatError("start='7 days': only an absolute time")),
     )
     with pytest.raises(EpicsError) as excinfo:
@@ -1366,10 +1356,10 @@ async def test_get_pv_history_connection_failure_still_maps_to_connection_error(
 ) -> None:
     """Counter-test: the split must not over-reach, a real outage stays a connection error."""
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
+        "epics_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
     )
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.ArchiverClient",
+        "epics_mcp.tools.archiver.ArchiverClient",
         _history_client_raising(ArchiverConnectionError("no route to host")),
     )
     with pytest.raises(EpicsConnectionError) as excinfo:
@@ -1405,9 +1395,9 @@ async def test_list_archived_pvs_refuses_pattern_with_this_appliance(
     full, plausible list of the WRONG PVs behind a capped=true that reads as a fair truncation.
     """
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
+        "epics_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
     )
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _NoClient)
+    monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _NoClient)
     with pytest.raises(EpicsError) as excinfo:
         await _list_archived_pvs(pattern="DEV-TEST01:*", this_appliance=True, limit=9)
     assert excinfo.value.error_code == "INVALID_ARGUMENT"
@@ -1423,7 +1413,7 @@ async def test_list_archived_pvs_refusal_fires_even_when_disabled(
     Pins the ordering: a caller testing without an archiver still learns the call is wrong instead
     of getting a friendly enabled:false that hides it until production.
     """
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig())
+    monkeypatch.setattr("epics_mcp.tools.archiver.get_config", lambda: EpicsConfig())
     with pytest.raises(EpicsError) as excinfo:
         await _list_archived_pvs(pattern="DEV-TEST01:*", this_appliance=True)
     assert excinfo.value.error_code == "INVALID_ARGUMENT"
@@ -1436,7 +1426,7 @@ async def test_list_archived_pvs_empty_pattern_with_this_appliance_is_fine(
     """pattern="" means 'no pattern' on both paths (the client's own `if pattern:` convention), so
     it must NOT trip the refusal."""
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
+        "epics_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
     )
     captured: dict[str, object] = {}
 
@@ -1448,7 +1438,7 @@ async def test_list_archived_pvs_empty_pattern_with_this_appliance_is_fine(
             captured["limit"] = limit
             return (["M"], False)
 
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _Fake)
     result = await _list_archived_pvs(pattern="", this_appliance=True, limit=9)
     assert result["pvs"] == ["M"]
     assert captured == {"limit": 9}
@@ -1458,7 +1448,7 @@ async def test_list_archived_pvs_empty_pattern_with_this_appliance_is_fine(
 async def test_list_archived_pvs_maps_archiver_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """A client ArchiverError surfaces as EpicsConnectionError with the 'Archiver: ' prefix."""
     monkeypatch.setattr(
-        "epics_pv_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
+        "epics_mcp.tools.archiver.get_config", lambda: EpicsConfig(archiver_url="http://arch")
     )
 
     class _Fake:
@@ -1470,6 +1460,6 @@ async def test_list_archived_pvs_maps_archiver_error(monkeypatch: pytest.MonkeyP
         ) -> tuple[list[str], bool]:
             raise ArchiverConnectionError("boom")
 
-    monkeypatch.setattr("epics_pv_mcp.tools.archiver.ArchiverClient", _Fake)
+    monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _Fake)
     with pytest.raises(EpicsConnectionError, match="Archiver:"):
         await _list_archived_pvs()

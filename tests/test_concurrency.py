@@ -13,9 +13,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.services import _concurrency
-from epics_pv_mcp.services._concurrency import get_monitor_executor, reset_monitor_executor
+from epics_mcp.config import EpicsConfig
+from epics_mcp.services import _concurrency
+from epics_mcp.services._concurrency import get_monitor_executor, reset_monitor_executor
 
 
 def test_monitor_executor_is_a_singleton(monkeypatch: pytest.MonkeyPatch) -> None:

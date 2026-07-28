@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-import epics_pv_mcp.services.e3_db as e3_db
-from epics_pv_mcp.services.e3_db import (
+import epics_mcp.services.e3_db as e3_db
+from epics_mcp.services.e3_db import (
     StCmdInfo,
     _strip_line_comment,
     ioc_db_pvs,

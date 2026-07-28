@@ -12,9 +12,9 @@ import asyncio
 
 import pytest
 
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import EpicsConnectionError, PVTimeoutError
-from epics_pv_mcp.services.diagnose import (
+from epics_mcp.config import EpicsConfig
+from epics_mcp.errors import EpicsConnectionError, PVTimeoutError
+from epics_mcp.services.diagnose import (
     AlarmEvidence,
     ArchiverEvidence,
     ChannelFinderEvidence,
@@ -25,8 +25,8 @@ from epics_pv_mcp.services.diagnose import (
     derive_cause,
     diagnose,
 )
-from epics_pv_mcp.services.naming_client import NameStatus
-from epics_pv_mcp.services.naming_exceptions import NamingServiceConnectionError
+from epics_mcp.services.naming_client import NameStatus
+from epics_mcp.services.naming_exceptions import NamingServiceConnectionError
 
 # --- evidence builders ---
 
@@ -291,7 +291,7 @@ def test_every_branch_stays_within_the_cause_enum() -> None:
 
 
 def _patch(monkeypatch: pytest.MonkeyPatch, name: str, value: object) -> None:
-    monkeypatch.setattr(f"epics_pv_mcp.services.diagnose.{name}", value)
+    monkeypatch.setattr(f"epics_mcp.services.diagnose.{name}", value)
 
 
 @pytest.mark.asyncio
@@ -472,7 +472,7 @@ def test_crossplane_naming_gated_on_config(monkeypatch: pytest.MonkeyPatch) -> N
     """QA-delta 3 (updated): crossplane tool + CLI now honour the naming_url gate too, the client
     has NO built-in ESS prod default. Requested but naming_url unset → no client (no egress); set →
     a client bound to the configured URL."""
-    from epics_pv_mcp.services import checkers
+    from epics_mcp.services import checkers
 
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(naming_url=""))
     assert checkers.build_naming_client(True) is None  # requested, unset → withheld (no egress)
@@ -619,9 +619,9 @@ def test_check_defaults_anchored_to_constants_not_stray_literals() -> None:
     import ast
     from pathlib import Path
 
-    import epics_pv_mcp.server as server_module
-    import epics_pv_mcp.services.diagnose as diagnose_module
-    import epics_pv_mcp.tools.diagnose_connection as tool_module
+    import epics_mcp.server as server_module
+    import epics_mcp.services.diagnose as diagnose_module
+    import epics_mcp.tools.diagnose_connection as tool_module
 
     checks = ("check_channelfinder", "check_naming", "check_archiver", "check_alarm")
     sites = [
@@ -664,8 +664,8 @@ def test_cli_diagnose_defaults_match_the_check_constants(monkeypatch: pytest.Mon
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
-    import epics_pv_mcp.cli_diagnose as cli_diagnose
-    from epics_pv_mcp.services.diagnose import (
+    import epics_mcp.cli_diagnose as cli_diagnose
+    from epics_mcp.services.diagnose import (
         DEFAULT_CHECK_ALARM,
         DEFAULT_CHECK_ARCHIVER,
         DEFAULT_CHECK_CHANNELFINDER,

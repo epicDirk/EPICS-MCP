@@ -1,4 +1,4 @@
-"""Tests for the pure readback-verification core (:mod:`epics_pv_mcp.readback`).
+"""Tests for the pure readback-verification core (:mod:`epics_mcp.readback`).
 
 No network, no clock, no env, :func:`verify_readback` is a total function over (written string,
 readback dict, tolerance). These cover the four verdict classes (ok / mismatch / not-verifiable /
@@ -11,7 +11,7 @@ the comparison or replaces the tolerance with ``inf``, a guard that cannot go re
 
 from __future__ import annotations
 
-from epics_pv_mcp.readback import ReadbackVerification, verify_readback
+from epics_mcp.readback import ReadbackVerification, verify_readback
 
 _EPS = 1e-6
 

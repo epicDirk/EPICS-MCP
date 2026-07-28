@@ -12,20 +12,20 @@ from unittest.mock import Mock
 
 import pytest
 
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
-from epics_pv_mcp.services import checkers, checkers_olog
-from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
-from epics_pv_mcp.services.archiver_exceptions import ArchiverConnectionError
-from epics_pv_mcp.services.channelfinder_exceptions import (
+from epics_mcp.config import EpicsConfig
+from epics_mcp.errors import EpicsConnectionError, EpicsError
+from epics_mcp.services import checkers, checkers_olog
+from epics_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
+from epics_mcp.services.archiver_exceptions import ArchiverConnectionError
+from epics_mcp.services.channelfinder_exceptions import (
     ChannelFinderConnectionError,
     ChannelFinderResponseError,
 )
-from epics_pv_mcp.services.naming_exceptions import (
+from epics_mcp.services.naming_exceptions import (
     NamingServiceConnectionError,
     NamingServiceResponseError,
 )
-from epics_pv_mcp.services.olog_exceptions import OlogResponseError
+from epics_mcp.services.olog_exceptions import OlogResponseError
 
 # --- MA-1 split contract: the Olog surface lives in checkers_olog, re-exported by checkers ---
 

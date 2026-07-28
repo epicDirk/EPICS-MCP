@@ -5,10 +5,10 @@ from unittest.mock import Mock
 import pytest
 import requests
 
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
-from epics_pv_mcp.services._http import is_ssl_error
-from epics_pv_mcp.services.channelfinder_client import (
+from epics_mcp.config import EpicsConfig
+from epics_mcp.errors import EpicsConnectionError, EpicsError
+from epics_mcp.services._http import is_ssl_error
+from epics_mcp.services.channelfinder_client import (
     _SAFE_OWNER_ACCOUNTS,
     _SAFE_PROPERTY_NAMES,
     ChannelFinderClient,
@@ -18,12 +18,12 @@ from epics_pv_mcp.services.channelfinder_client import (
     resolve_safe_owner_accounts,
     resolve_safe_property_names,
 )
-from epics_pv_mcp.services.channelfinder_exceptions import (
+from epics_mcp.services.channelfinder_exceptions import (
     ChannelFinderConnectionError,
     ChannelFinderResponseError,
 )
-from epics_pv_mcp.services.checkers import _CF_DISABLED_NOTE
-from epics_pv_mcp.tools.channelfinder import _find_channels, _list_channel_vocabulary
+from epics_mcp.services.checkers import _CF_DISABLED_NOTE
+from epics_mcp.tools.channelfinder import _find_channels, _list_channel_vocabulary
 
 
 def _resp(payload: object, *, ok: bool = True) -> Mock:
@@ -174,7 +174,7 @@ def test_resolve_allowlist_three_way() -> None:
 def test_safe_owner_accounts_override(monkeypatch: pytest.MonkeyPatch) -> None:
     """A facility override swaps the kept owner: the site account is kept, ESS default redacted."""
     cfg = EpicsConfig(channelfinder_safe_owner_accounts="ops_svc")
-    monkeypatch.setattr("epics_pv_mcp.services.channelfinder_client.get_config", lambda: cfg)
+    monkeypatch.setattr("epics_mcp.services.channelfinder_client.get_config", lambda: cfg)
     client = ChannelFinderClient("http://cf")
     payload = [
         {"name": "SYS:PV1", "owner": "ops_svc", "properties": []},
@@ -189,7 +189,7 @@ def test_safe_owner_accounts_override(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_safe_property_names_override(monkeypatch: pytest.MonkeyPatch) -> None:
     """A facility override swaps the surfaced technical properties; the ESS default is dropped."""
     cfg = EpicsConfig(channelfinder_safe_property_names="siteProp")
-    monkeypatch.setattr("epics_pv_mcp.services.channelfinder_client.get_config", lambda: cfg)
+    monkeypatch.setattr("epics_mcp.services.channelfinder_client.get_config", lambda: cfg)
     client = ChannelFinderClient("http://cf")
     payload = [
         {
@@ -210,7 +210,7 @@ def test_safe_property_names_override(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_safe_allowlists_empty_redacts_everything(monkeypatch: pytest.MonkeyPatch) -> None:
     """An explicitly EMPTY allowlist redacts ALL owners and ALL properties (maximal privacy)."""
     cfg = EpicsConfig(channelfinder_safe_owner_accounts="", channelfinder_safe_property_names="")
-    monkeypatch.setattr("epics_pv_mcp.services.channelfinder_client.get_config", lambda: cfg)
+    monkeypatch.setattr("epics_mcp.services.channelfinder_client.get_config", lambda: cfg)
     client = ChannelFinderClient("http://cf")
     payload = [
         {
@@ -323,14 +323,14 @@ async def test_tool_disabled_makes_no_network_call(monkeypatch: pytest.MonkeyPat
     a thin delegator, so config/client are patched there.
     """
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_mcp.services.checkers.get_config",
         lambda: EpicsConfig(channelfinder_url=""),
     )
 
     def _boom(*args: object, **kwargs: object) -> ChannelFinderClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _boom)
+    monkeypatch.setattr("epics_mcp.services.checkers.ChannelFinderClient", _boom)
     result = await _find_channels("X")
     assert result["enabled"] is False
     assert result["channels"] == []
@@ -340,7 +340,7 @@ async def test_tool_disabled_makes_no_network_call(monkeypatch: pytest.MonkeyPat
 @pytest.mark.asyncio
 async def test_tool_enabled_returns_channels(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_mcp.services.checkers.get_config",
         lambda: EpicsConfig(channelfinder_url="http://cf"),
     )
 
@@ -360,7 +360,7 @@ async def test_tool_enabled_returns_channels(monkeypatch: pytest.MonkeyPatch) ->
                 )
             ]
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _Fake)
+    monkeypatch.setattr("epics_mcp.services.checkers.ChannelFinderClient", _Fake)
     result = await _find_channels("P*")
     assert result["enabled"] is True
     assert result["total"] == 1
@@ -390,10 +390,10 @@ async def test_find_channels_capped_is_honest_at_the_boundary(
     """S8-6: exactly max_results real channels → capped False; max_results+1 → capped True. The tool
     fetches max_results+1 and truncates, so 'capped' is an honest '> max_results', not '>='."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_mcp.services.checkers.get_config",
         lambda: EpicsConfig(channelfinder_url="http://cf"),
     )
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _BoundedCFClient)
+    monkeypatch.setattr("epics_mcp.services.checkers.ChannelFinderClient", _BoundedCFClient)
 
     _BoundedCFClient.available = 3  # exactly the cap → NOT capped (the off-by-one case)
     result = await _find_channels("X*", max_results=3)
@@ -639,7 +639,7 @@ async def test_tool_no_filter_passes_no_extra_kwargs(monkeypatch: pytest.MonkeyP
     """The No-Filter path must call find_channels with NO filter kwargs, this is why the 4 fixed-
     signature doubles stay green. A double WITHOUT **kwargs proves it (a TypeError would fail)."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_mcp.services.checkers.get_config",
         lambda: EpicsConfig(channelfinder_url="http://cf"),
     )
 
@@ -649,7 +649,7 @@ async def test_tool_no_filter_passes_no_extra_kwargs(monkeypatch: pytest.MonkeyP
         def find_channels(self, name_pattern: str, max_results: int = 500) -> list[ChannelInfo]:
             return []
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _StrictNoKwargs)
+    monkeypatch.setattr("epics_mcp.services.checkers.ChannelFinderClient", _StrictNoKwargs)
     result = await _find_channels("X*")  # must not raise TypeError
     assert result["enabled"] is True
 
@@ -657,7 +657,7 @@ async def test_tool_no_filter_passes_no_extra_kwargs(monkeypatch: pytest.MonkeyP
 @pytest.mark.asyncio
 async def test_tool_forwards_set_filters(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_mcp.services.checkers.get_config",
         lambda: EpicsConfig(channelfinder_url="http://cf"),
     )
     captured: dict[str, object] = {}
@@ -671,7 +671,7 @@ async def test_tool_forwards_set_filters(monkeypatch: pytest.MonkeyPatch) -> Non
             captured.update(filters)
             return []
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _Capture)
+    monkeypatch.setattr("epics_mcp.services.checkers.ChannelFinderClient", _Capture)
     await _find_channels("X*", has_properties={"pvStatus": "Active"}, lacks_tags=["x"])
     assert captured == {"has_properties": {"pvStatus": "Active"}, "lacks_tags": ["x"]}
 
@@ -680,7 +680,7 @@ async def test_tool_forwards_set_filters(monkeypatch: pytest.MonkeyPatch) -> Non
 async def test_tool_count_only_returns_match_count(monkeypatch: pytest.MonkeyPatch) -> None:
     """count_only returns a DISTINCT {enabled, match_count}, never overloads total, no capped."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_mcp.services.checkers.get_config",
         lambda: EpicsConfig(channelfinder_url="http://cf"),
     )
 
@@ -690,7 +690,7 @@ async def test_tool_count_only_returns_match_count(monkeypatch: pytest.MonkeyPat
         def count_channels(self, name_pattern: str, **filters: object) -> int:
             return 42
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _CountFake)
+    monkeypatch.setattr("epics_mcp.services.checkers.ChannelFinderClient", _CountFake)
     result = await _find_channels("X*", count_only=True)
     assert result == {"enabled": True, "match_count": 42}
 
@@ -699,8 +699,8 @@ async def test_tool_count_only_returns_match_count(monkeypatch: pytest.MonkeyPat
 async def test_tool_maps_bad_filter_to_invalid_input(monkeypatch: pytest.MonkeyPatch) -> None:
     """A gate/guard ValueError surfaces as EpicsError(INVALID_INPUT), before any network call."""
     cfg = EpicsConfig(channelfinder_url="http://cf")  # default allowlist → accessGroup rejected
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.get_config", lambda: cfg)
-    monkeypatch.setattr("epics_pv_mcp.services.channelfinder_client.get_config", lambda: cfg)
+    monkeypatch.setattr("epics_mcp.services.checkers.get_config", lambda: cfg)
+    monkeypatch.setattr("epics_mcp.services.channelfinder_client.get_config", lambda: cfg)
     with pytest.raises(EpicsError) as excinfo:
         await _find_channels("X*", has_properties={"accessGroup": "x"})
     assert excinfo.value.error_code == "INVALID_INPUT"
@@ -720,14 +720,14 @@ async def test_tool_count_disabled_makes_no_call(monkeypatch: pytest.MonkeyPatch
     through to the client and ``_boom`` fires.
     """
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_mcp.services.checkers.get_config",
         lambda: EpicsConfig(channelfinder_url=""),
     )
 
     def _boom(*args: object, **kwargs: object) -> ChannelFinderClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _boom)
+    monkeypatch.setattr("epics_mcp.services.checkers.ChannelFinderClient", _boom)
     result = await _find_channels("X*", count_only=True)
     assert result["enabled"] is False
     assert result["match_count"] == 0
@@ -802,14 +802,14 @@ async def test_vocabulary_disabled_makes_no_network_call(monkeypatch: pytest.Mon
     """With no URL configured, the tool returns enabled=false with empty vocab + a note, and never
     constructs a client (gate lives in services/checkers.query_channel_vocabulary)."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_mcp.services.checkers.get_config",
         lambda: EpicsConfig(channelfinder_url=""),
     )
 
     def _boom(*args: object, **kwargs: object) -> ChannelFinderClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _boom)
+    monkeypatch.setattr("epics_mcp.services.checkers.ChannelFinderClient", _boom)
     result = await _list_channel_vocabulary()
     # Exact shape: enabled=false + empty vocab + the disabled note, and NO unexpected keys.
     assert result == {"enabled": False, "properties": [], "tags": [], "note": _CF_DISABLED_NOTE}
@@ -819,7 +819,7 @@ async def test_vocabulary_disabled_makes_no_network_call(monkeypatch: pytest.Mon
 async def test_vocabulary_enabled_returns_names(monkeypatch: pytest.MonkeyPatch) -> None:
     """The enabled path returns the property + tag NAME lists the client produced."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_mcp.services.checkers.get_config",
         lambda: EpicsConfig(channelfinder_url="http://cf"),
     )
 
@@ -833,7 +833,7 @@ async def test_vocabulary_enabled_returns_names(monkeypatch: pytest.MonkeyPatch)
         def list_tags(self) -> list[str]:
             return ["archived", "sim"]
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _Fake)
+    monkeypatch.setattr("epics_mcp.services.checkers.ChannelFinderClient", _Fake)
     result = await _list_channel_vocabulary()
     assert result["enabled"] is True
     assert result["properties"] == ["iocName", "pvStatus"]
@@ -848,7 +848,7 @@ async def test_vocabulary_enabled_empty_is_not_disabled(monkeypatch: pytest.Monk
     ``enabled = bool(properties or tags)``). Empty is genuinely reachable: a configured CF whose
     allowlisted-property intersection is empty and which has no tags."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config",
+        "epics_mcp.services.checkers.get_config",
         lambda: EpicsConfig(channelfinder_url="http://cf"),
     )
 
@@ -862,6 +862,6 @@ async def test_vocabulary_enabled_empty_is_not_disabled(monkeypatch: pytest.Monk
         def list_tags(self) -> list[str]:
             return []
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.ChannelFinderClient", _Empty)
+    monkeypatch.setattr("epics_mcp.services.checkers.ChannelFinderClient", _Empty)
     result = await _list_channel_vocabulary()
     assert result == {"enabled": True, "properties": [], "tags": []}  # no note, enabled distinct

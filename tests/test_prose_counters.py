@@ -59,7 +59,7 @@ from tests import test_server as ts
 from tests.prose_numbers import ProseBlock, ProseSite, iter_blocks, iter_sites, parse_count
 
 _TESTS = Path(__file__).resolve().parent
-_SRC = _TESTS.parent / "src" / "epics_pv_mcp"
+_SRC = _TESTS.parent / "src" / "epics_mcp"
 
 # The files whose prose is watched. `checkers_olog.py` is named by the roadmap entry; the next
 # three carry sentences that DUPLICATE a number watched in test_server.py, and a duplicate nobody

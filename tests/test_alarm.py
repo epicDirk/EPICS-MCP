@@ -5,12 +5,12 @@ from unittest.mock import Mock
 import pytest
 import requests
 
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.services._time_window import TimeWindowFormatError
-from epics_pv_mcp.services.alarm_client import AlarmClient
-from epics_pv_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
-from epics_pv_mcp.services.redact import FREETEXT_WITHHELD
-from epics_pv_mcp.tools.alarm import _get_alarm_history, _is_alarm_configured
+from epics_mcp.config import EpicsConfig
+from epics_mcp.services._time_window import TimeWindowFormatError
+from epics_mcp.services.alarm_client import AlarmClient
+from epics_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
+from epics_mcp.services.redact import FREETEXT_WITHHELD
+from epics_mcp.tools.alarm import _get_alarm_history, _is_alarm_configured
 
 
 def _resp(payload: object, *, ok: bool = True) -> Mock:
@@ -316,14 +316,12 @@ async def test_is_alarm_configured_tool_disabled_no_network(
 ) -> None:
     # Gating + client construction moved to services/checkers.query_alarm_configured (M9);
     # _is_alarm_configured is a thin delegator, so config/client are patched there.
-    monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config", lambda: EpicsConfig(alarm_url="")
-    )
+    monkeypatch.setattr("epics_mcp.services.checkers.get_config", lambda: EpicsConfig(alarm_url=""))
 
     def _boom(*args: object, **kwargs: object) -> AlarmClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.AlarmClient", _boom)
+    monkeypatch.setattr("epics_mcp.services.checkers.AlarmClient", _boom)
     result = await _is_alarm_configured("X", "Accelerator")
     assert result["enabled"] is False
     assert result["configured"] is None
@@ -332,7 +330,7 @@ async def test_is_alarm_configured_tool_disabled_no_network(
 @pytest.mark.asyncio
 async def test_is_alarm_configured_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config", lambda: EpicsConfig(alarm_url="http://alarm")
+        "epics_mcp.services.checkers.get_config", lambda: EpicsConfig(alarm_url="http://alarm")
     )
 
     class _Fake:
@@ -344,7 +342,7 @@ async def test_is_alarm_configured_tool_enabled(monkeypatch: pytest.MonkeyPatch)
         ) -> tuple[bool, dict[str, object]]:
             return True, {"config": f"config:/{config_name}/C/{pv}"}
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.AlarmClient", _Fake)
+    monkeypatch.setattr("epics_mcp.services.checkers.AlarmClient", _Fake)
     result = await _is_alarm_configured("X", "Accelerator")
     assert result["enabled"] is True
     assert result["configured"] is True
@@ -523,14 +521,12 @@ def test_get_alarm_history_connection_error(monkeypatch: pytest.MonkeyPatch) -> 
 async def test_get_alarm_history_tool_disabled_no_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config", lambda: EpicsConfig(alarm_url="")
-    )
+    monkeypatch.setattr("epics_mcp.services.checkers.get_config", lambda: EpicsConfig(alarm_url=""))
 
     def _boom(*args: object, **kwargs: object) -> AlarmClient:
         raise AssertionError("client must not be constructed when disabled")
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.AlarmClient", _boom)
+    monkeypatch.setattr("epics_mcp.services.checkers.AlarmClient", _boom)
     result = await _get_alarm_history("X", "2026-06-01", "2026-06-02")
     assert result["enabled"] is False
     assert result["events"] == []
@@ -539,7 +535,7 @@ async def test_get_alarm_history_tool_disabled_no_network(
 @pytest.mark.asyncio
 async def test_get_alarm_history_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "epics_pv_mcp.services.checkers.get_config", lambda: EpicsConfig(alarm_url="http://alarm")
+        "epics_mcp.services.checkers.get_config", lambda: EpicsConfig(alarm_url="http://alarm")
     )
 
     class _Fake:
@@ -551,7 +547,7 @@ async def test_get_alarm_history_tool_enabled(monkeypatch: pytest.MonkeyPatch) -
         ) -> tuple[list[dict[str, object]], bool]:
             return [{"severity": "MAJOR", "pv": pv}], True
 
-    monkeypatch.setattr("epics_pv_mcp.services.checkers.AlarmClient", _Fake)
+    monkeypatch.setattr("epics_mcp.services.checkers.AlarmClient", _Fake)
     result = await _get_alarm_history("X", "2026-06-01", "2026-06-02")
     assert result["enabled"] is True
     assert result["total"] == 1
@@ -587,7 +583,7 @@ async def test_is_alarm_configured_tool_requires_config_name() -> None:
     """MA-2b(d): the alarm tree is a REQUIRED tool parameter, no silent 'Accelerator' default that
     matches nothing at a real facility (is_alarm_configured would else always withhold). Mutant
     (a default restored) -> config_name drops out of the schema's 'required' -> this fails."""
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
     tool = next(t for t in tools if t.name == "is_alarm_configured")
@@ -601,7 +597,7 @@ async def test_query_alarm_configured_without_tree_withholds_no_guess(
 ) -> None:
     """MA-2b(d): with no tree named, query_alarm_configured withholds honestly instead of probing a
     guessed default tree, the AlarmClient must NOT even be constructed (no network for a guess)."""
-    from epics_pv_mcp.services import checkers
+    from epics_mcp.services import checkers
 
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(alarm_url="http://alarm"))
 
@@ -674,7 +670,7 @@ async def test_get_alarm_history_tool_severity_and_command_are_enums() -> None:
     server and broaden). Mutant (free str) -> the enum vanishes from the schema -> this fails."""
     import json
 
-    from epics_pv_mcp.server import mcp
+    from epics_mcp.server import mcp
 
     tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
     tool = next(t for t in tools if t.name == "get_alarm_history")

@@ -2,7 +2,7 @@
 
 These exercise the WIRED path: a real operator .bob over the macro-aware ``opi_navigation``
 inventory → ``find_displays`` → channel collection → live read → report. The p4p batch read is
-mocked AT THE find_device IMPORT SITE (``epics_pv_mcp.tools.find_device.pv_get_batch``) with a
+mocked AT THE find_device IMPORT SITE (``epics_mcp.tools.find_device.pv_get_batch``) with a
 hand-built ``{results, errors}``, no real IOC, no shared p4p fake. ChannelFinder is disabled by
 default (no URL), so source IOC is honestly absent. The pure merge is in ``test_device_lookup.py``.
 """
@@ -13,8 +13,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from epics_pv_mcp.errors import EpicsConnectionError, EpicsError
-from epics_pv_mcp.tools.find_device import _find_device
+from epics_mcp.errors import EpicsConnectionError, EpicsError
+from epics_mcp.tools.find_device import _find_device
 
 # Operator-facing root display: one read channel (pva://-prefixed) + one write channel (bare), both
 # sharing the device prefix the query targets.
@@ -38,7 +38,7 @@ def _displays(tmp_path: Path) -> Path:
 
 
 @pytest.mark.asyncio
-@patch("epics_pv_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
+@patch("epics_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
 async def test_find_device_tool_screens_live_and_disabled_cf(
     mock_batch: AsyncMock, tmp_path: Path
 ) -> None:
@@ -78,8 +78,8 @@ async def test_find_device_tool_screens_live_and_disabled_cf(
 
 
 @pytest.mark.asyncio
-@patch("epics_pv_mcp.tools.find_device.get_config", return_value=SimpleNamespace(max_batch_size=1))
-@patch("epics_pv_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
+@patch("epics_mcp.tools.find_device.get_config", return_value=SimpleNamespace(max_batch_size=1))
+@patch("epics_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
 async def test_find_device_tool_live_capped(
     mock_batch: AsyncMock, _mock_cfg: object, tmp_path: Path
 ) -> None:
@@ -118,7 +118,7 @@ async def test_find_device_tool_rejects_displays_dir_outside_allowed_roots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """G3: an existing displays_dir outside the opt-in allowed_roots is rejected."""
-    import epics_pv_mcp.config as config_module
+    import epics_mcp.config as config_module
 
     displays = _displays(tmp_path)  # exists, but outside the allowed root below
     allowed = tmp_path / "allowed"
@@ -138,15 +138,15 @@ async def test_server_find_device_maps_error_to_tool_error(tmp_path: Path) -> No
     """The server wrapper maps EpicsError to ToolError with the error_code tag."""
     from fastmcp.exceptions import ToolError
 
-    from epics_pv_mcp.display_tools import find_device
+    from epics_mcp.display_tools import find_device
 
     with pytest.raises(ToolError, match="INVALID_INPUT"):
         await find_device("DEV-TEST01", str(tmp_path / "nope"))
 
 
 @pytest.mark.asyncio
-@patch("epics_pv_mcp.tools.find_device.query_channels", new_callable=AsyncMock)
-@patch("epics_pv_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
+@patch("epics_mcp.tools.find_device.query_channels", new_callable=AsyncMock)
+@patch("epics_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
 async def test_find_device_tool_channelfinder_enabled_substring(
     mock_batch: AsyncMock, mock_cf: AsyncMock, tmp_path: Path
 ) -> None:
@@ -176,8 +176,8 @@ async def test_find_device_tool_channelfinder_enabled_substring(
 
 
 @pytest.mark.asyncio
-@patch("epics_pv_mcp.tools.find_device.query_channels", new_callable=AsyncMock)
-@patch("epics_pv_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
+@patch("epics_mcp.tools.find_device.query_channels", new_callable=AsyncMock)
+@patch("epics_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
 async def test_find_device_tool_channelfinder_unreachable_degrades(
     mock_batch: AsyncMock, mock_cf: AsyncMock, tmp_path: Path
 ) -> None:
@@ -194,8 +194,8 @@ async def test_find_device_tool_channelfinder_unreachable_degrades(
 
 
 @pytest.mark.asyncio
-@patch("epics_pv_mcp.tools.find_device.query_channels", new_callable=AsyncMock)
-@patch("epics_pv_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
+@patch("epics_mcp.tools.find_device.query_channels", new_callable=AsyncMock)
+@patch("epics_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
 async def test_find_device_tool_channelfinder_non_epics_error_degrades(
     mock_batch: AsyncMock, mock_cf: AsyncMock, tmp_path: Path
 ) -> None:
@@ -216,7 +216,7 @@ async def test_find_device_tool_channelfinder_non_epics_error_degrades(
     ("match", "query"),
     [("exact", _STATUS), ("prefix", "DEV-TEST01:Ctrl-EVR-01"), ("substring", "EVR")],
 )
-@patch("epics_pv_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
+@patch("epics_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
 async def test_find_device_tool_match_modes(
     mock_batch: AsyncMock, match: str, query: str, tmp_path: Path
 ) -> None:
@@ -231,7 +231,7 @@ async def test_find_device_tool_match_modes(
 
 
 @pytest.mark.asyncio
-@patch("epics_pv_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
+@patch("epics_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
 async def test_find_device_live_read_contract_error_degrades(
     mock_batch: AsyncMock, tmp_path: Path
 ) -> None:

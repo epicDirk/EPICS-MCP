@@ -17,10 +17,10 @@ import ast
 import re
 from pathlib import Path
 
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.resources import get_guide
+from epics_mcp.config import EpicsConfig
+from epics_mcp.resources import get_guide
 
-_SRC = Path(__file__).resolve().parent.parent / "src" / "epics_pv_mcp"
+_SRC = Path(__file__).resolve().parent.parent / "src" / "epics_mcp"
 _SERVER = _SRC / "server.py"
 _DISPLAY_TOOLS = _SRC / "display_tools.py"
 

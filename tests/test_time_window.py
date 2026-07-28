@@ -13,14 +13,14 @@ from datetime import UTC, datetime
 
 import pytest
 
-from epics_pv_mcp.services._time_window import (
+from epics_mcp.services._time_window import (
     TimeWindowFormatError,
     classify_time_value,
     format_iso_z,
     require_absolute_time,
 )
-from epics_pv_mcp.services.alarm_time import normalize_alarm_time
-from epics_pv_mcp.services.olog_time import OLOG_WIRE_TZ, normalize_olog_time
+from epics_mcp.services.alarm_time import normalize_alarm_time
+from epics_mcp.services.olog_time import OLOG_WIRE_TZ, normalize_olog_time
 
 
 def _classify(value: str) -> datetime | None:
@@ -109,7 +109,7 @@ class TestRejected:
         """Must not be a per-plane RestClientError: checkers maps those to 'cannot reach it',
         which is a lie, nothing was sent. Pinned so the class is not 'tidied' into a
         *_exceptions module."""
-        from epics_pv_mcp.services.rest_exceptions import RestClientError
+        from epics_mcp.services.rest_exceptions import RestClientError
 
         with pytest.raises(TimeWindowFormatError) as excinfo:
             _classify("garbage")

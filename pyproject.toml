@@ -107,21 +107,19 @@ Changelog = "https://github.com/epicDirk/EPICS-MCP/blob/main/CHANGELOG.md"
 # Deployment is the page an outside adopter needs first, so it is what "Documentation" points at.
 Documentation = "https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md"
 
-# The import package keeps its historical name: hatchling would otherwise look for a package
-# matching the new distribution name (epics_mcp) and fail. Renaming the import package is a
-# separate, deliberate step, not part of the distribution rename.
+# The import package now matches the distribution name, so hatchling would find src/epics_mcp on
+# its own. The section stays explicit anyway: a src-layout package found by convention is found
+# silently, and the day a second package or a data directory appears here, an implicit rule decides
+# what ships without anyone having written it down.
 [tool.hatch.build.targets.wheel]
-packages = ["src/epics_pv_mcp"]
+packages = ["src/epics_mcp"]
 
 [project.scripts]
-epics-mcp = "epics_pv_mcp.server:main"
-# The pre-rename spelling stays as an alias so nothing breaks for anyone following older docs;
-# retiring it is part of the deferred import-package rename.
-epics-pv-mcp = "epics_pv_mcp.server:main"
-epics-crossplane = "epics_pv_mcp.cli_crossplane:main"
-epics-coverage = "epics_pv_mcp.cli_coverage:main"
-epics-diagnose = "epics_pv_mcp.cli_diagnose:main"
-epics-doctor = "epics_pv_mcp.cli_doctor:main"
+epics-mcp = "epics_mcp.server:main"
+epics-crossplane = "epics_mcp.cli_crossplane:main"
+epics-coverage = "epics_mcp.cli_coverage:main"
+epics-diagnose = "epics_mcp.cli_diagnose:main"
+epics-doctor = "epics_mcp.cli_doctor:main"
 
 # No [tool.hatch.metadata] allow-direct-references any more: it existed solely for the
 # opi-navigation git requirement, which is now a dependency group with its source in

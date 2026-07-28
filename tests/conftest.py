@@ -9,11 +9,11 @@ from typing import Protocol
 
 import pytest
 
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import RateLimitError
-from epics_pv_mcp.safety import SafetyLayer
-from epics_pv_mcp.services._concurrency import reset_monitor_executor
-from epics_pv_mcp.services._http import clear_shared_sessions, reset_read_throttle
+from epics_mcp.config import EpicsConfig
+from epics_mcp.errors import RateLimitError
+from epics_mcp.safety import SafetyLayer
+from epics_mcp.services._concurrency import reset_monitor_executor
+from epics_mcp.services._http import clear_shared_sessions, reset_read_throttle
 
 # The display-aware tools and their opi_navigation-coupled tests need the optional
 # `[displays]` extra. When opi_navigation is not installed (a standalone core install),

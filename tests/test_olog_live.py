@@ -24,11 +24,11 @@ from typing import Any
 
 import pytest
 
-from epics_pv_mcp.services._http import basic_auth_header
-from epics_pv_mcp.services._time_window import TimeWindowFormatError
-from epics_pv_mcp.services.olog_client import OlogClient
-from epics_pv_mcp.services.olog_exceptions import OlogError, OlogFilterValueError
-from epics_pv_mcp.services.redact import FREETEXT_WITHHELD
+from epics_mcp.services._http import basic_auth_header
+from epics_mcp.services._time_window import TimeWindowFormatError
+from epics_mcp.services.olog_client import OlogClient
+from epics_mcp.services.olog_exceptions import OlogError, OlogFilterValueError
+from epics_mcp.services.redact import FREETEXT_WITHHELD
 from tests.live_gate import assert_live_available, live_demanded
 
 pytestmark = pytest.mark.live

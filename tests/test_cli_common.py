@@ -1,4 +1,4 @@
-"""Tests for epics_pv_mcp.cli_common (shared CLI plumbing)."""
+"""Tests for epics_mcp.cli_common (shared CLI plumbing)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import argparse
 
 import pytest
 
-from epics_pv_mcp.cli_common import positive_timeout
+from epics_mcp.cli_common import positive_timeout
 
 
 def test_positive_timeout_accepts_a_positive_number() -> None:

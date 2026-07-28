@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from epics_pv_mcp.services.coverage import IndexRow, audit_coverage
-from epics_pv_mcp.services.crossplane import CFRegistryCapped
+from epics_mcp.services.coverage import IndexRow, audit_coverage
+from epics_mcp.services.crossplane import CFRegistryCapped
 
 
 def _row(pv: str, *, displays: tuple[str, ...] = ("d.bob",), role: str = "read") -> IndexRow:

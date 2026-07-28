@@ -6,20 +6,20 @@ from unittest.mock import Mock
 import pytest
 import requests
 
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import RateLimitError
-from epics_pv_mcp.services._http import reset_read_throttle
-from epics_pv_mcp.services.naming_client import NamingServiceClient
-from epics_pv_mcp.services.naming_exceptions import (
+from epics_mcp.config import EpicsConfig
+from epics_mcp.errors import RateLimitError
+from epics_mcp.services._http import reset_read_throttle
+from epics_mcp.services.naming_client import NamingServiceClient
+from epics_mcp.services.naming_exceptions import (
     NamingServiceConnectionError,
     NamingServiceNotFound,
     NamingServiceResponseError,
 )
-from epics_pv_mcp.services.naming_identity import (
+from epics_mcp.services.naming_identity import (
     NAMING_SWAGGER_TITLE,
     probe_naming_identity,
 )
-from epics_pv_mcp.services.rest_exceptions import RestConnectionError, RestResponseError
+from epics_mcp.services.rest_exceptions import RestConnectionError, RestResponseError
 
 
 def _resp(payload: object, *, status: int = 200) -> Mock:
@@ -63,7 +63,7 @@ def _stub_identity(
     else:
         title = NAMING_SWAGGER_TITLE if verified else "Some other API"
         seam = Mock(return_value={"info": {"title": title}})
-    monkeypatch.setattr("epics_pv_mcp.services.naming_identity.rest_get_json", seam)
+    monkeypatch.setattr("epics_mcp.services.naming_identity.rest_get_json", seam)
     return seam
 
 
@@ -245,7 +245,7 @@ def _probe_seam(
     """Seam the probe's ``rest_get_json`` to return *result* or raise *raises* (independent of the
     deviceNames GET)."""
     seam = Mock(side_effect=raises) if raises is not None else Mock(return_value=result)
-    monkeypatch.setattr("epics_pv_mcp.services.naming_identity.rest_get_json", seam)
+    monkeypatch.setattr("epics_mcp.services.naming_identity.rest_get_json", seam)
 
 
 def test_probe_verified_on_matching_title(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -309,7 +309,7 @@ def test_probe_failed_on_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
     session = Mock()
     session.get = Mock(return_value=redirect)
     monkeypatch.setattr(
-        "epics_pv_mcp.services.naming_identity.build_retrying_session",
+        "epics_mcp.services.naming_identity.build_retrying_session",
         Mock(return_value=session),
     )
     assert probe_naming_identity("http://naming.example") == "probe_failed"
@@ -381,7 +381,7 @@ def test_doctor_and_client_share_one_swagger_title() -> None:
     """S13 single-source: epics-doctor's naming plane and the naming identity probe resolve the SAME
     swagger-title constant (imported from naming_identity), so the two identity surfaces cannot
     drift, a title reword is a ONE-line change in one module."""
-    from epics_pv_mcp.services import doctor, naming_identity
+    from epics_mcp.services import doctor, naming_identity
 
     # Read via __dict__: the constant is imported into doctor's namespace (not re-exported), and
     # the point is that doctor resolves the SAME object as naming_identity (drift = a new object).
@@ -426,7 +426,7 @@ def test_naming_lookup_consumes_the_read_throttle(monkeypatch: pytest.MonkeyPatc
     Naming" would be a false promise. With ``read_rate_limit=2`` the 3rd DISTINCT lookup is denied.
     RED before naming was wired to the throttle (the 3rd lookup went straight through)."""
     monkeypatch.setattr(
-        "epics_pv_mcp.services._http.get_config",
+        "epics_mcp.services._http.get_config",
         lambda: EpicsConfig(read_rate_limit=2),
     )
     reset_read_throttle()

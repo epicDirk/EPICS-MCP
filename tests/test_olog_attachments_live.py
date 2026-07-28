@@ -15,8 +15,8 @@ import uuid
 
 import pytest
 
-from epics_pv_mcp.services._http import basic_auth_header
-from epics_pv_mcp.services.olog_client import AttachmentUpload, OlogClient
+from epics_mcp.services._http import basic_auth_header
+from epics_mcp.services.olog_client import AttachmentUpload, OlogClient
 from tests.live_gate import assert_live_available, live_demanded
 
 _URL = os.environ.get("EPICS_MCP_OLOG_URL")
@@ -120,7 +120,7 @@ def test_attachment_round_trip_is_byte_identical(client: OlogClient) -> None:
 def test_download_is_withheld_without_the_flag() -> None:
     """The privacy posture, live: a client WITHOUT the opt-in flag refuses to hand back bytes even
     against the same declared sandbox, the flag, not the URL alone, unlocks byte egress."""
-    from epics_pv_mcp.services.olog_exceptions import OlogAttachmentDownloadDenied
+    from epics_mcp.services.olog_exceptions import OlogAttachmentDownloadDenied
 
     assert _URL is not None
     no_flag = OlogClient(_URL, timeout=15.0, assume_test_data=True, allow_attachment_download=False)

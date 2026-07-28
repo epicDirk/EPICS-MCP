@@ -102,28 +102,28 @@ from typing import Protocol
 
 import pytest
 
-import epics_pv_mcp.config as config_module
-import epics_pv_mcp.olog_safety as olog_safety_module
-import epics_pv_mcp.safety as safety_module
-import epics_pv_mcp.services.checkers_olog as checkers_olog
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import (
+import epics_mcp.config as config_module
+import epics_mcp.olog_safety as olog_safety_module
+import epics_mcp.safety as safety_module
+import epics_mcp.services.checkers_olog as checkers_olog
+from epics_mcp.config import EpicsConfig
+from epics_mcp.errors import (
     EpicsError,
     OlogWholeModeRequiredError,
     OlogWriteDeniedError,
     PVWriteDeniedError,
     RateLimitError,
 )
-from epics_pv_mcp.olog_safety import OlogWriteGate
-from epics_pv_mcp.safety import SafetyLayer
+from epics_mcp.olog_safety import OlogWriteGate
+from epics_mcp.safety import SafetyLayer
 
 # A writes-ON SafetyLayer asserts its EPICS search reach at construction (E8). The autouse env
 # strip in conftest leaves *_AUTO_ADDR_LIST unset, which is parser-faithfully "broadcast ON", so
 # without the loopback lane every writes-on build below would raise SafetyConfigError instead.
 pytestmark = pytest.mark.usefixtures("loopback_write_env")
 
-_PV_AUDIT_LOGGER = "epics_pv_mcp.audit"
-_OLOG_AUDIT_LOGGER = "epics_pv_mcp.olog_audit"
+_PV_AUDIT_LOGGER = "epics_mcp.audit"
+_OLOG_AUDIT_LOGGER = "epics_mcp.olog_audit"
 _AUDIT_DENY = "_audit_deny"
 
 # Synthetic placeholders only (facility-agnostic guard): a made-up power-supply setpoint and a
@@ -619,14 +619,14 @@ _TOOLS_DIR = _GATE_PACKAGE_DIR / "tools"
 #: The flat packages ABOVE the gates, as ``(directory, package name)``. The package name is carried
 #: along because a RELATIVE import (``from ..errors import X``) can only be resolved against it.
 _SCANNED_PACKAGES: tuple[tuple[Path, str], ...] = (
-    (_SERVICES_DIR, "epics_pv_mcp.services"),
-    (_TOOLS_DIR, "epics_pv_mcp.tools"),
+    (_SERVICES_DIR, "epics_mcp.services"),
+    (_TOOLS_DIR, "epics_mcp.tools"),
 )
 
 # The modules that DEFINE this repo's coded exceptions. Two conventions coexist and both are read:
 # ``errors.py`` sets ``error_code`` in the CONSTRUCTOR, ``*_exceptions.py`` as a ClassVar.
 _EXCEPTION_MODULE_NAMES: tuple[str, ...] = (
-    "epics_pv_mcp.errors",
+    "epics_mcp.errors",
     *(
         f"{package}.{path.stem}"
         for directory, package in _SCANNED_PACKAGES
@@ -706,8 +706,8 @@ def _absolute_module(node: ast.ImportFrom, package: str) -> str | None:
 def _module_aliases(tree: ast.Module) -> dict[str, str]:
     """``spelled prefix -> absolute module`` for every plain ``import`` in this module.
 
-    Covers both ``import epics_pv_mcp.errors as errs`` (prefix ``errs``) and the un-aliased
-    ``import epics_pv_mcp.errors`` (prefix ``epics_pv_mcp.errors``), so an attribute-style raise can
+    Covers both ``import epics_mcp.errors as errs`` (prefix ``errs``) and the un-aliased
+    ``import epics_mcp.errors`` (prefix ``epics_mcp.errors``), so an attribute-style raise can
     be resolved back to its defining module.
     """
     return {
@@ -947,7 +947,7 @@ def test_no_pre_gate_refusal_carries_a_gate_error_code() -> None:
       out of static reach. Those propagate an already-classified code rather than minting one:
       but note that a *constructed* literal (``"OLOG_" + "WRITE_DENIED"``) would mint one and is
       equally invisible here. Static analysis buys the common shapes, not every shape.
-    * A star-import (``from epics_pv_mcp.errors import *``) and a factory (``raise make_denial()``)
+    * A star-import (``from epics_mcp.errors import *``) and a factory (``raise make_denial()``)
       both hide the name this scan resolves.
     * It proves the CODE axis of point 4 only. The AUDIT axis, that these refusals write no line,
       is a deliberate scope decision documented at the raise sites, and is pinned behaviourally by

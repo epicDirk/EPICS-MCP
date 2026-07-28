@@ -1,4 +1,4 @@
-"""Tests for the pure value-bounds core (:mod:`epics_pv_mcp.bounds`).
+"""Tests for the pure value-bounds core (:mod:`epics_mcp.bounds`).
 
 No network, no clock, no env, :func:`check_value_in_bounds` is a total function over (written
 string, readback dict). These cover the three verdict classes (in-range / out-of-range / not
@@ -11,7 +11,7 @@ or widens the limits to infinity, a guard that cannot go red is the defect.
 
 from __future__ import annotations
 
-from epics_pv_mcp.bounds import BoundsVerdict, check_value_in_bounds
+from epics_mcp.bounds import BoundsVerdict, check_value_in_bounds
 
 _LIMITS = {"limit_low": 0.0, "limit_high": 120.0, "min_step": 0.0}
 

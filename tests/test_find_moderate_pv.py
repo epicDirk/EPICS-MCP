@@ -33,7 +33,7 @@ from typing import Literal
 
 import pytest
 
-from epics_pv_mcp.find_moderate_pv import (
+from epics_mcp.find_moderate_pv import (
     RateEntry,
     _parse_args,
     classify_history,
@@ -44,8 +44,8 @@ from epics_pv_mcp.find_moderate_pv import (
     walk_candidates,
     window_epoch_bounds,
 )
-from epics_pv_mcp.services.archiver_client import HistoryResult, Sample
-from epics_pv_mcp.services.archiver_exceptions import (
+from epics_mcp.services.archiver_client import HistoryResult, Sample
+from epics_mcp.services.archiver_exceptions import (
     ArchiverConnectionError,
     ArchiverResponseError,
 )

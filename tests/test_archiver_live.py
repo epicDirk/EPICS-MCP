@@ -20,8 +20,8 @@ from datetime import datetime
 
 import pytest
 
-from epics_pv_mcp.services._time_window import TimeWindowFormatError
-from epics_pv_mcp.services.archiver_client import ArchiverClient, HistoryResult, Sample
+from epics_mcp.services._time_window import TimeWindowFormatError
+from epics_mcp.services.archiver_client import ArchiverClient, HistoryResult, Sample
 from tests.live_gate import assert_live_available, live_demanded
 
 pytestmark = pytest.mark.live

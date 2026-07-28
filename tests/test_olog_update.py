@@ -27,20 +27,20 @@ from typing import Any, ClassVar
 
 import pytest
 
-import epics_pv_mcp.config as config_module
-import epics_pv_mcp.olog_safety as olog_safety_module
-import epics_pv_mcp.services.checkers_olog as checkers_module
-import epics_pv_mcp.services.olog_client as olog_client_module
-from epics_pv_mcp.config import EpicsConfig
-from epics_pv_mcp.errors import EpicsError, OlogWriteDeniedError
-from epics_pv_mcp.services import _http
-from epics_pv_mcp.services.checkers import query_olog_update
-from epics_pv_mcp.services.olog_client import (
+import epics_mcp.config as config_module
+import epics_mcp.olog_safety as olog_safety_module
+import epics_mcp.services.checkers_olog as checkers_module
+import epics_mcp.services.olog_client as olog_client_module
+from epics_mcp.config import EpicsConfig
+from epics_mcp.errors import EpicsError, OlogWriteDeniedError
+from epics_mcp.services import _http
+from epics_mcp.services.checkers import query_olog_update
+from epics_mcp.services.olog_client import (
     OlogClient,
     attachment_round_trip,
     unroundtrippable_attachment_filenames,
 )
-from epics_pv_mcp.services.olog_exceptions import (
+from epics_mcp.services.olog_exceptions import (
     OlogAttachmentDownloadDenied,
     OlogConnectionError,
     OlogResponseError,
@@ -48,7 +48,7 @@ from epics_pv_mcp.services.olog_exceptions import (
     OlogWholeModeRequired,
 )
 
-_AUDIT_LOGGER = "epics_pv_mcp.olog_audit"
+_AUDIT_LOGGER = "epics_mcp.olog_audit"
 _LOOPBACK = "http://localhost:8080/Olog"
 
 # A canonical raw (whole-mode) entry: every field the destructive update would otherwise wipe.

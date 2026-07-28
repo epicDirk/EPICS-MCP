@@ -1,6 +1,6 @@
 """Tests for the DS-PRIVACY redaction utilities (services/redact.py)."""
 
-from epics_pv_mcp.services.redact import (
+from epics_mcp.services.redact import (
     FREETEXT_WITHHELD,
     project_allowlist,
     redact_record,

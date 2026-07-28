@@ -1,8 +1,8 @@
-"""Tests for epics_pv_mcp.tools.monitor."""
+"""Tests for epics_mcp.tools.monitor."""
 
 from unittest.mock import AsyncMock, patch
 
-from epics_pv_mcp.tools.monitor import _monitor_pv
+from epics_mcp.tools.monitor import _monitor_pv
 
 
 async def test_monitor_success() -> None:
@@ -11,7 +11,7 @@ async def test_monitor_success() -> None:
         {"pv_name": "TEST:PV", "value": 2.0},
     ]
     with patch(
-        "epics_pv_mcp.tools.monitor.pv_monitor",
+        "epics_mcp.tools.monitor.pv_monitor",
         new_callable=AsyncMock,
         return_value=(mock_events, False),
     ):
@@ -26,7 +26,7 @@ async def test_monitor_success() -> None:
 async def test_monitor_clamped_duration() -> None:
     """Duration exceeding max_monitor_duration (60.0) should be clamped."""
     mock_monitor = AsyncMock(return_value=([], False))
-    with patch("epics_pv_mcp.tools.monitor.pv_monitor", mock_monitor):
+    with patch("epics_mcp.tools.monitor.pv_monitor", mock_monitor):
         await _monitor_pv("TEST:PV", 999.0, 100)
 
     # Default max_monitor_duration is 60.0
@@ -40,7 +40,7 @@ async def test_monitor_truncated() -> None:
     tool must pass (events, truncated) straight through."""
     mock_events = [{"pv_name": "TEST:PV", "value": float(i)} for i in range(100)]
     with patch(
-        "epics_pv_mcp.tools.monitor.pv_monitor",
+        "epics_mcp.tools.monitor.pv_monitor",
         new_callable=AsyncMock,
         return_value=(mock_events, True),
     ):

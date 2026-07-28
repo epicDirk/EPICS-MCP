@@ -91,12 +91,12 @@ from pathlib import Path
 
 import pytest
 
-import epics_pv_mcp.config as config_module
-import epics_pv_mcp.olog_safety as olog_safety_module
-from epics_pv_mcp.errors import OlogWriteDeniedError
-from epics_pv_mcp.services._http import basic_auth_header
-from epics_pv_mcp.services.checkers_olog import query_olog_add_attachment, query_olog_update
-from epics_pv_mcp.services.olog_client import OlogClient
+import epics_mcp.config as config_module
+import epics_mcp.olog_safety as olog_safety_module
+from epics_mcp.errors import OlogWriteDeniedError
+from epics_mcp.services._http import basic_auth_header
+from epics_mcp.services.checkers_olog import query_olog_add_attachment, query_olog_update
+from epics_mcp.services.olog_client import OlogClient
 from tests.live_gate import assert_live_available, live_demanded
 
 _URL = os.environ.get("EPICS_MCP_OLOG_URL")

@@ -1,9 +1,9 @@
-"""Tests for epics_pv_mcp.tools.discover."""
+"""Tests for epics_mcp.tools.discover."""
 
 from unittest.mock import AsyncMock, patch
 
-from epics_pv_mcp.errors import EpicsConnectionError, PVNotFoundError, PVTimeoutError
-from epics_pv_mcp.tools.discover import _discover_pvs
+from epics_mcp.errors import EpicsConnectionError, PVNotFoundError, PVTimeoutError
+from epics_mcp.tools.discover import _discover_pvs
 
 
 async def test_discover_wildcard() -> None:
@@ -17,7 +17,7 @@ async def test_discover_wildcard() -> None:
 
 async def test_discover_concrete_found() -> None:
     with patch(
-        "epics_pv_mcp.tools.discover.pv_get",
+        "epics_mcp.tools.discover.pv_get",
         new_callable=AsyncMock,
         return_value={"pv_name": "TEST:PV", "value": 42.0},
     ):
@@ -32,7 +32,7 @@ async def test_discover_concrete_found() -> None:
 
 async def test_discover_concrete_not_found() -> None:
     with patch(
-        "epics_pv_mcp.tools.discover.pv_get",
+        "epics_mcp.tools.discover.pv_get",
         new_callable=AsyncMock,
         side_effect=PVNotFoundError("PV 'MISSING:PV' not found"),
     ):
@@ -47,7 +47,7 @@ async def test_discover_concrete_not_found() -> None:
 async def test_discover_concrete_timeout_is_distinct_from_not_found() -> None:
     """S3-5: a timeout (IOC down / network) reports status 'timeout', NOT 'not_found'."""
     with patch(
-        "epics_pv_mcp.tools.discover.pv_get",
+        "epics_mcp.tools.discover.pv_get",
         new_callable=AsyncMock,
         side_effect=PVTimeoutError("Timeout getting PV 'SLOW:PV'"),
     ):
@@ -60,7 +60,7 @@ async def test_discover_concrete_timeout_is_distinct_from_not_found() -> None:
 async def test_discover_concrete_connection_error_is_status_error() -> None:
     """S3-5: a connection error reports status 'error', distinct from 'not_found'/'timeout'."""
     with patch(
-        "epics_pv_mcp.tools.discover.pv_get",
+        "epics_mcp.tools.discover.pv_get",
         new_callable=AsyncMock,
         side_effect=EpicsConnectionError("broken pipe"),
     ):
@@ -90,7 +90,7 @@ async def test_discover_wildcard_delegates_to_channelfinder() -> None:
         {"name": "SIM:PS-02:Cur-RB", "ioc_name": "sim-ioc", "host_name": "simhost"},
     ]
     with patch(
-        "epics_pv_mcp.tools.discover.query_channels",
+        "epics_mcp.tools.discover.query_channels",
         new_callable=AsyncMock,
         return_value=_cf_result(channels),
     ):
@@ -109,7 +109,7 @@ async def test_discover_wildcard_carries_channelfinder_cap() -> None:
     """MA-2: the CF ``capped`` flag (registry truncated) is carried through, not dropped."""
     channels: list[dict[str, object]] = [{"name": "SIM:A", "ioc_name": None, "host_name": None}]
     with patch(
-        "epics_pv_mcp.tools.discover.query_channels",
+        "epics_mcp.tools.discover.query_channels",
         new_callable=AsyncMock,
         return_value=_cf_result(channels, capped=True),
     ):
@@ -122,7 +122,7 @@ async def test_discover_wildcard_cf_disabled_keeps_honest_stub() -> None:
     """MA-2: with ChannelFinder NOT configured, the wildcard branch keeps today's honest stub
     (empty + a note naming ChannelFinder), never a bare empty that reads as 'no such PV'."""
     with patch(
-        "epics_pv_mcp.tools.discover.query_channels",
+        "epics_mcp.tools.discover.query_channels",
         new_callable=AsyncMock,
         return_value={"enabled": False, "channels": [], "total": 0, "note": "cf disabled"},
     ):

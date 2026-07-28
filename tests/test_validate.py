@@ -1,12 +1,12 @@
-"""Tests for epics_pv_mcp.tools.validate."""
+"""Tests for epics_mcp.tools.validate."""
 
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from epics_pv_mcp.errors import EpicsError
-from epics_pv_mcp.tools.validate import _validate_pvs
+from epics_mcp.errors import EpicsError
+from epics_mcp.tools.validate import _validate_pvs
 
 # An operator-facing parent that embeds a fragment and binds its $(PRP) macro; the
 # fragment's PV is templated on $(PRP), so its resolved value is LIFTED to the parent
@@ -39,7 +39,7 @@ async def test_validate_pvs_all_connected() -> None:
     async def fake_batch(names: list[str], timeout: float | None = None) -> dict[str, object]:
         return {"results": [{"pv_name": n, "value": 1} for n in names], "errors": []}
 
-    with patch("epics_pv_mcp.tools.validate.pv_get_batch", side_effect=fake_batch):
+    with patch("epics_mcp.tools.validate.pv_get_batch", side_effect=fake_batch):
         result = await _validate_pvs(pvs=["PV:1", "PV:2"])
 
     assert result["connected"] == 2
@@ -55,7 +55,7 @@ async def test_validate_pvs_mixed() -> None:
             "errors": [{"pv_name": n, "error": "Timeout"} for n in names if n != "PV:1"],
         }
 
-    with patch("epics_pv_mcp.tools.validate.pv_get_batch", side_effect=fake_batch):
+    with patch("epics_mcp.tools.validate.pv_get_batch", side_effect=fake_batch):
         result = await _validate_pvs(pvs=["PV:1", "PV:2"])
 
     assert result["connected"] == 1
@@ -67,8 +67,8 @@ async def test_validate_pvs_chunks_by_max_batch_size() -> None:
     pv_get_batch once per chunk and accumulate connected/disconnected ACROSS chunks. All existing
     tests pass ≤2 PVs (one iteration), so the loop body was never exercised for >1 chunk. Here 5
     PVs at max_batch_size=2 → 3 chunks [2,2,1]; PV:2 and PV:4 disconnect → connected 3, disc. 2."""
-    import epics_pv_mcp.config as config_module
-    from epics_pv_mcp.config import EpicsConfig
+    import epics_mcp.config as config_module
+    from epics_mcp.config import EpicsConfig
 
     async def fake_batch(names: list[str], timeout: float | None = None) -> dict[str, object]:
         return {
@@ -79,7 +79,7 @@ async def test_validate_pvs_chunks_by_max_batch_size() -> None:
     mock = AsyncMock(side_effect=fake_batch)
     config_module._config = EpicsConfig(max_batch_size=2)
     try:
-        with patch("epics_pv_mcp.tools.validate.pv_get_batch", mock):
+        with patch("epics_mcp.tools.validate.pv_get_batch", mock):
             result = await _validate_pvs(pvs=["PV:1", "PV:2", "PV:3", "PV:4", "PV:5"])
     finally:
         config_module._config = None
@@ -106,7 +106,7 @@ async def test_validate_pvs_preserves_input_order() -> None:
             "errors": [{"pv_name": n, "error": "Timeout"} for n in names if n == "PV:B"],
         }
 
-    with patch("epics_pv_mcp.tools.validate.pv_get_batch", side_effect=fake_batch):
+    with patch("epics_mcp.tools.validate.pv_get_batch", side_effect=fake_batch):
         result = await _validate_pvs(pvs=["PV:A", "PV:B", "PV:C"])
 
     pvs = result["pvs"]
@@ -135,7 +135,7 @@ async def test_validate_pvs_file_path_fragment_resolves_via_origin_file(tmp_path
     mock = AsyncMock(
         return_value={"results": [{"pv_name": "DEV-TEST01:Spu01:Val", "value": 1}], "errors": []}
     )
-    with patch("epics_pv_mcp.tools.validate.pv_get_batch", mock):
+    with patch("epics_mcp.tools.validate.pv_get_batch", mock):
         result = await _validate_pvs(file_path=str(fragment), displays_dir=str(root))
 
     assert result["total"] == 1
@@ -174,7 +174,7 @@ async def test_validate_pvs_file_path_outside_allowed_roots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """G3: file_path mode honors the opt-in allowed_roots boundary too."""
-    import epics_pv_mcp.config as config_module
+    import epics_mcp.config as config_module
 
     root, fragment = _dataset(tmp_path)  # fragment is inside root, but outside `allowed`
     allowed = tmp_path / "allowed"
@@ -196,7 +196,7 @@ async def test_validate_pvs_file_path_without_displays_dir_walks_parent(tmp_path
     async def fake_batch(names: list[str], timeout: float | None = None) -> dict[str, object]:
         return {"results": [{"pv_name": n, "value": 1} for n in names], "errors": []}
 
-    with patch("epics_pv_mcp.tools.validate.pv_get_batch", side_effect=fake_batch):
+    with patch("epics_mcp.tools.validate.pv_get_batch", side_effect=fake_batch):
         # The parent display 'overview.bob' is operator-facing in root; querying it
         # without displays_dir uses file.parent (== root) as the walked root.
         result = await _validate_pvs(file_path=str(root / "overview.bob"))
@@ -208,7 +208,7 @@ async def test_validate_pvs_no_displays_dir_honors_allowed_roots(
 ) -> None:
     """G3: even in file_path-only mode (displays_dir=None) the allowed_roots boundary
     is enforced, a file_path outside the allowed roots is rejected before any walk."""
-    import epics_pv_mcp.config as config_module
+    import epics_mcp.config as config_module
 
     _, fragment = _dataset(tmp_path)
     allowed = tmp_path / "allowed"
@@ -264,8 +264,8 @@ async def test_validate_pvs_file_path_context_capped_note(tmp_path: Path) -> Non
         return_value={"results": [{"pv_name": "SYSX:X", "value": 1}], "errors": []}
     )
     with (
-        patch("epics_pv_mcp.tools.validate.analyze_pv_inventory", return_value=fake),
-        patch("epics_pv_mcp.tools.validate.pv_get_batch", mock_batch),
+        patch("epics_mcp.tools.validate.analyze_pv_inventory", return_value=fake),
+        patch("epics_mcp.tools.validate.pv_get_batch", mock_batch),
     ):
         result = await _validate_pvs(file_path=str(frag), displays_dir=str(root))
 

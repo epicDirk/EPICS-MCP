@@ -22,7 +22,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 # The page that owns the resource table. If it moves again, move this constant with it; the
 # test then keeps working without being weakened.
 _OWNING_DOC = _ROOT / "docs" / "tools.md"
-_SERVER = _ROOT / "src" / "epics_pv_mcp" / "server.py"
+_SERVER = _ROOT / "src" / "epics_mcp" / "server.py"
 
 _URI = re.compile(r"epics-pv://[a-z]+")
 _RESOURCE = re.compile(r'@mcp\.resource\("(epics-pv://[a-z]+)"\)')

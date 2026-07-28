@@ -40,9 +40,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from epics_pv_mcp.prompts import compare_machine_state, diagnose_pv
-from epics_pv_mcp.resources import get_guide
-from epics_pv_mcp.server import _DISPLAY_TOOLS_AVAILABLE, mcp
+from epics_mcp.prompts import compare_machine_state, diagnose_pv
+from epics_mcp.resources import get_guide
+from epics_mcp.server import _DISPLAY_TOOLS_AVAILABLE, mcp
 
 _README = Path(__file__).resolve().parent.parent / "README.md"
 

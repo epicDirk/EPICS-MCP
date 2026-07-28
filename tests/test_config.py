@@ -5,8 +5,8 @@ import warnings
 import pytest
 from pydantic import ValidationError
 
-import epics_pv_mcp.config as config_module
-from epics_pv_mcp.config import EpicsConfig, get_config
+import epics_mcp.config as config_module
+from epics_mcp.config import EpicsConfig, get_config
 
 
 class TestEpicsConfigDefaults:

@@ -1,10 +1,10 @@
-"""Unit tests for the EPICS client search-reach parser (E8, epics_pv_mcp.epics_address)."""
+"""Unit tests for the EPICS client search-reach parser (E8, epics_mcp.epics_address)."""
 
 from typing import ClassVar
 
 import pytest
 
-from epics_pv_mcp.epics_address import (
+from epics_mcp.epics_address import (
     auto_addr_search_disabled,
     is_loopback_host,
     parse_address_list,

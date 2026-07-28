@@ -7,15 +7,15 @@ operator-facing/fragment-seed filter, is covered in ``test_inventory_adapter.py`
 end-to-end path (real .bob → resolved → linked) in ``test_crossplane_tool.py``.
 """
 
-from epics_pv_mcp.services.crossplane import (
+from epics_mcp.services.crossplane import (
     CFRegistryCapped,
     JoinPv,
     crossplane_check,
     render_markdown,
 )
-from epics_pv_mcp.services.e3_db import StCmdInfo
-from epics_pv_mcp.services.naming_client import NameStatus
-from epics_pv_mcp.services.naming_exceptions import NamingServiceResponseError
+from epics_mcp.services.e3_db import StCmdInfo
+from epics_mcp.services.naming_client import NameStatus
+from epics_mcp.services.naming_exceptions import NamingServiceResponseError
 
 
 class _FakeNaming:

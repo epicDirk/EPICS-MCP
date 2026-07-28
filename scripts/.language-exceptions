@@ -11,7 +11,7 @@
 
 # The casefold fixture: this pair is the DATA of the test. It is the difference between Python's
 # casefold() and Java's compareToIgnoreCase, so replacing the eszett would delete the measurement.
-src/epics_pv_mcp/services/olog_client.py::casefold() does
+src/epics_mcp/services/olog_client.py::casefold() does
 tests/test_olog_update.py::compareToIgnoreCase folds per
 tests/test_olog_update.py::.txt"
 
