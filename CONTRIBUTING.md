@@ -8,20 +8,23 @@ PRs are welcome.
 The gate chain is [uv](https://docs.astral.sh/uv/)-based:
 
 ```bash
-uv sync --extra all --frozen              # full local install (dev tools + display extra)
-uv run pytest                             # run the test suite
-uv run pytest --cov=src --cov-branch      # with coverage
-uv run pre-commit run --all-files         # ruff check + ruff format + mypy --strict + guards
+uv sync --extra all --group displays --frozen  # full local install (toolchain + display engine)
+uv run pytest                                  # run the test suite
+uv run pytest --cov=src --cov-branch           # with coverage
+uv run pre-commit run --all-files              # ruff + format + mypy --strict + guards
 ```
 
-**Two extras:** `dev` is the core toolchain (pytest, ruff, mypy, pre-commit); `all` adds the
-`[displays]` extra, which pulls the `opi_navigation` PV engine so the display-aware tools and
-their tests run. Use `--extra all` locally for the full suite.
+**Extras vs group.** `dev` and `all` are published extras and carry the toolchain. The
+`opi_navigation` PV engine, which the display-aware tools need, is a **dependency group**
+(`--group displays`), not an extra, and the distinction is load-bearing: a group never reaches
+the published metadata. The engine lives in a private repository, so an outside user cannot
+install it by any route; as an extra it both advertised a promise nobody could keep and, being
+a direct git reference, made the package unpublishable, which is the single thing PyPI refuses
+outright.
 
-CI runs `uv sync --extra dev --frozen` (**not** `all`): `opi_navigation` lives in a private
-repository the public-fork CI can't clone, so CI tests exactly the standalone core a public
-user gets. The `opi_navigation`-coupled test modules skip themselves when the package is
-absent, so the core suite stays green. A checkout with `--extra all` runs everything.
+CI runs `uv sync --extra dev --frozen` and passes no `--group`, so it tests exactly the
+standalone core a public user gets. The `opi_navigation`-coupled test modules skip themselves
+when the package is absent, so the core suite stays green.
 
 ## Definition of done
 

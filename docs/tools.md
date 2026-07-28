@@ -51,7 +51,9 @@ The full surface: 32 MCP tools grouped by plane, four standalone command-line to
 | `list_log_attachments` | Phoebus Olog: list one entry's attachments (id + fileMetadataDescription; filename **whole-mode only**, since it is author free text; 404 → found:false) | `EPICS_MCP_OLOG_URL` |
 | `download_log_attachment` | Phoebus Olog: download one attachment's raw **bytes** by (log_id + filename) or GridFS id, to a workspace `output_path` or `as_base64`. **Withheld** unless whole-mode **AND** `EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD` (bytes bypass the entry redaction) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD` |
 
-**Display-aware** (require the optional `[displays]` extra)
+**Display-aware** (require the `opi_navigation` engine, which is **not** installable from
+PyPI: it lives in a private repository and is wired in as the local `displays` dependency
+group. These four tools are therefore unavailable in a published install today.)
 
 | Tool | Description |
 |------|-------------|
@@ -68,12 +70,13 @@ MCP client involved:
 ```bash
 epics-doctor                                            # read-only config self-check (all planes)
 epics-diagnose   TEST:Temperature                       # connection diagnosis
-epics-crossplane --displays <project-root> <st.cmd>     # display ↔ IOC ↔ Naming (needs [displays])
-epics-coverage   --displays <project-root> --scope DEV: # coverage matrix (needs [displays])
+epics-crossplane --displays <project-root> <st.cmd>     # display ↔ IOC ↔ Naming (needs opi_navigation)
+epics-coverage   --displays <project-root> --scope DEV: # coverage matrix (needs opi_navigation)
 ```
 
 `epics-doctor` and `epics-diagnose` are part of the core install; `epics-crossplane` and
-`epics-coverage` need the `[displays]` extra. All are read-only.
+`epics-coverage` need the `opi_navigation` engine, which a published install cannot obtain
+(see above). All are read-only.
 
 `epics-diagnose`/`epics-crossplane`/`epics-coverage` exit `0` even on a negative finding (a
 disconnect / a broken link is a result, not a crash). **`epics-doctor` is the deliberate exception**

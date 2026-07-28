@@ -186,6 +186,13 @@ carry breaking changes).
 
 ### Removed
 
+- **The `[displays]` extra.** `pip install epics-pv-mcp[displays]` no longer resolves. The extra
+  pointed at the `opi_navigation` PV engine, which lives in a private repository, so no outside
+  user could ever install it: the extra advertised a capability it could not deliver. The engine is
+  now wired in as a local dependency group (`uv sync --group displays`), which keeps it working in
+  a checkout that has access while keeping it out of the published package. The four display-aware
+  tools (`validate_pvs`, `crossplane_check`, `coverage_audit`, `find_device`) are unaffected where
+  the engine is present, and register themselves only when it is, exactly as before.
 - **The post-registration schema-pruning pass** (`_prune_tool_schemas` and three helpers, roughly 130
   lines) is gone. Standalone `fastmcp` emits the lean schemas natively, so the pass had nothing left
   to do. The one remaining need, dropping an accept-all `outputSchema`, is now the public

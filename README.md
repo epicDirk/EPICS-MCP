@@ -182,16 +182,17 @@ share a port, so leave `ARCHIVER_RETRIEVAL_URL` empty; in a split or clustered d
 The gate chain is [uv](https://docs.astral.sh/uv/)-based:
 
 ```bash
-uv sync --extra all --frozen              # full local install (dev tools + display extra)
-uv run pytest                             # test suite
-uv run pytest --cov=src --cov-branch      # with coverage
-uv run pre-commit run --all-files         # ruff check + ruff format + mypy --strict + guards
+uv sync --extra all --group displays --frozen  # full local install (toolchain + display engine)
+uv run pytest                                  # test suite
+uv run pytest --cov=src --cov-branch           # with coverage
+uv run pre-commit run --all-files              # ruff + format + mypy --strict + guards
 ```
 
-The `dev` extra is the core toolchain; `all` adds the `[displays]` extra (the `opi_navigation`
-PV engine) so the display-aware tools and their tests run. CI installs `--extra dev` only,
-because `opi_navigation` is privately hosted: CI therefore tests the standalone core a public
-user gets, and the `opi_navigation`-coupled test modules self-skip when it is absent.
+`dev` and `all` are the toolchain extras. The `opi_navigation` PV engine is a separate
+**dependency group** (`--group displays`), because it lives in a private repository: a group
+stays out of the published package, where an unreachable dependency would be a promise nobody
+can keep. CI passes no `--group`, so it tests the standalone core a public user gets, and the
+`opi_navigation`-coupled test modules self-skip when it is absent.
 
 Live tests that need a running EPICS stack are opt-in and skip by default. See
 [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -199,8 +200,14 @@ Live tests that need a running EPICS stack are opt-in and skip by default. See
 ## Related and roadmap
 
 The display-aware tools join live PVs with the *display* plane, the macro-expanded PV inventory
-of `.bob` operator screens, through the optional `[displays]` extra, which pulls the
-`opi_navigation` PV engine. The core PV server installs and runs fully **without** it.
+of `.bob` operator screens, through the `opi_navigation` PV engine. The core PV server installs
+and runs fully **without** them.
+
+⚠️ **Those four tools are not available in a published install today.** `opi_navigation` lives
+in a private repository, so it is reachable only from a checkout that has access, and it is
+wired in as a local dependency group rather than advertised as an extra. Opening it up is
+planned once the Java live plugin and the CS-Studio MCP have been tested in practice; until
+then this says so plainly rather than offering an install command that cannot work.
 
 A dedicated **CS-Studio / Phoebus MCP** that complements these tools is in the works and will be
 released separately.

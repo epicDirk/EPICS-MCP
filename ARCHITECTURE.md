@@ -34,8 +34,8 @@ network and deterministic by construction.
 - **`server.py`** is the MCP entry point. It declares the tool, resource and prompt surface and
   delegates. Nothing here talks to EPICS directly.
 - **`display_tools.py`** holds the four display-aware tools, registered by `server.py` only when
-  the optional `opi_navigation` engine (`[displays]`) is importable, so the core server installs
-  and runs standalone.
+  the `opi_navigation` engine is importable, so the core server installs and runs standalone.
+  That engine is a LOCAL dependency group, not a published extra: see `pyproject.toml`.
 - **`tools/`** are thin MCP adapters. They translate arguments and shape results.
 - **`services/`** is the substance: the p4p client (`epics_client.py`), the REST clients
   (`*_client.py`), and the pure analysis cores.

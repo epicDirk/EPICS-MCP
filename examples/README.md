@@ -35,7 +35,8 @@ assistant to `get_pv_value("TEST:Temperature")`.
 `TEST:Temperature`. It demonstrates the **display-aware** tools:
 
 ```bash
-# needs the optional [displays] extra: pip install epics-pv-mcp[displays]
+# needs the opi_navigation engine, which is NOT available from PyPI (private repository);
+# from a checkout that has it: uv sync --extra all --group displays
 epics-crossplane --displays . <path-to-st.cmd>
 ```
 

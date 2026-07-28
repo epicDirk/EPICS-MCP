@@ -31,16 +31,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Display-aware tools (validate_pvs / crossplane_check / coverage_audit / find_device) join live PVs
-# with the macro-expanded per-instance PV inventory from the opi_navigation PV engine: ONE engine,
-# never a macro-blind reimplementation. SHA-pinned like the sibling phoebus MCP
-# (cs-studio-phoebus-mcp); a bump moves the pin and `uv lock` together (CI runs `uv sync --frozen`).
-# OPTIONAL, so the core server (PV read/write/monitor/diagnose plus the REST planes) installs
-# standalone WITHOUT this privately hosted package; the four tools register only when it is present
-# (server.py: try/except ImportError around register_display_tools).
-displays = [
-    "opi-navigation @ git+https://github.com/epicDirk/opi-foundry.git@8fad86766891aeac177050449f73a3a4fbf554cc",
-]
 dev = [
     "pytest>=9.0",
     "pytest-asyncio>=1.3",
@@ -48,16 +38,39 @@ dev = [
     "ruff>=0.15",
     "mypy>=1.19",
     "pre-commit>=4.0",
-    # NB: `dev` does NOT pull `[displays]`. CI runs `uv sync --extra dev` on the PUBLIC fork, where
-    # the private `opi-navigation` git dependency cannot be cloned (the default GITHUB_TOKEN is
-    # repo-local), so CI tests exactly the standalone core a public user gets (conftest.py skips the
-    # 6 display test modules when opi_navigation is absent). For the FULL local suite incl. the
-    # display-aware tools, use the `all` extra below (`uv sync --extra all`).
 ]
-# Everything for a full local run: the dev toolchain plus the opi_navigation-backed display tools.
+# Everything a published install can offer: the dev toolchain. The display-aware tools are NOT an
+# extra, see the `displays` dependency group below.
 all = [
-    "epics-pv-mcp[dev,displays]",
+    "epics-pv-mcp[dev]",
 ]
+
+# Dependency groups (PEP 735) are a LOCAL install surface: unlike an extra, they never reach the
+# published metadata. That is exactly why the display dependency lives here.
+#
+# The display-aware tools (validate_pvs / crossplane_check / coverage_audit / find_device) join live
+# PVs with the macro-expanded per-instance PV inventory from the opi_navigation PV engine: ONE
+# engine, never a macro-blind reimplementation. That engine lives in a PRIVATE repository, so an
+# outside user cannot install it by any route, and advertising it as an extra told them otherwise.
+# It was an extra until 2026-07-28, and a direct git reference in published metadata is also the one
+# thing PyPI rejects outright, so the same move unblocks publishing and stops the false promise.
+#
+# ⏳ REVISIT once the Java live plugin and the CS-Studio MCP have been tested in practice
+# (maintainer decision, 2026-07-28). The answer to "should outside users get the display tools" is
+# "not yet", not "no"; the release checklist in CONTRIBUTING.md carries the same note, so the
+# condition does not live only here.
+#
+# Local full run: `uv sync --extra all --group displays`. CI deliberately does NOT pass --group, so
+# it tests exactly the standalone core a public user gets (conftest.py skips the 6 display test
+# modules when opi_navigation is absent).
+[dependency-groups]
+displays = ["opi-navigation"]
+
+# The git pin lives here rather than in the requirement itself: tool.uv.sources is resolution-time
+# information and is NOT part of the built distribution's metadata. A bump moves this rev and
+# `uv lock` together (CI runs `uv sync --frozen`).
+[tool.uv.sources]
+opi-navigation = { git = "https://github.com/epicDirk/opi-foundry.git", rev = "8fad86766891aeac177050449f73a3a4fbf554cc" }
 
 [project.urls]
 Homepage = "https://github.com/epicDirk/EPICS-MCP-Server"
@@ -72,11 +85,10 @@ epics-coverage = "epics_pv_mcp.cli_coverage:main"
 epics-diagnose = "epics_pv_mcp.cli_diagnose:main"
 epics-doctor = "epics_pv_mcp.cli_doctor:main"
 
-# The opi-navigation git direct reference needs this flag under hatchling; without it the
-# metadata build fails with "Dependency ... cannot be a direct reference". Mirrors
-# cs-studio-phoebus-mcp.
-[tool.hatch.metadata]
-allow-direct-references = true
+# No [tool.hatch.metadata] allow-direct-references any more: it existed solely for the
+# opi-navigation git requirement, which is now a dependency group with its source in
+# [tool.uv.sources] and therefore never reaches the built metadata. Leaving the flag would leave
+# standing permission for the one thing that blocks publishing, with nothing using it.
 
 [tool.ruff]
 line-length = 100

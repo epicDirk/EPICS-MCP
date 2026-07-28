@@ -231,9 +231,12 @@ including, for a server-decided parameter, its **probed** semantics or an explic
 
 ## Build-once
 
-The display-aware tools depend on `opi_navigation` via the optional `[displays]` extra, pinned by SHA in
-`pyproject.toml`. Changes internal to this server do **not** bump that pin; only a change that needs a
-newer `opi_navigation` does (then move the pin and the lockfile together).
+The display-aware tools depend on `opi_navigation` via the `displays` **dependency group** (PEP
+735), whose git rev is pinned in `[tool.uv.sources]`. A group is deliberate: unlike an extra it
+never reaches the published metadata, so the private engine neither blocks a PyPI upload nor is
+advertised to users who cannot install it. Changes internal to this server do **not** bump that
+pin; only a change that needs a newer `opi_navigation` does (then move the pin and the lockfile
+together).
 
 ## What is NOT persistence
 
