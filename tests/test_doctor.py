@@ -1331,11 +1331,49 @@ def test_cli_bad_arg_exits_two() -> None:
     assert excinfo.value.code == 2
 
 
-def test_cli_epicserror_exits_two(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A genuine internal EpicsError during the run maps to exit 2 (not a crash)."""
+def test_cli_epicserror_exits_one_not_the_usage_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A genuine internal EpicsError is a COMMAND failure (exit 1), never a usage error (QA-15).
+
+    It used to return 2, the code ``cli_common._USAGE_ERROR`` and argparse both reserve for "the
+    caller passed something wrong". A wrapper acting on that told the operator to check their
+    arguments while the command itself had broken. The test above (``--nonsense``) is the real
+    usage error and still exits 2, so the two codes now mean two different things.
+
+    Red on the pre-fix code: measured 2 against an asserted 1.
+    """
 
     async def _boom(**kwargs: object) -> DoctorReport:
         raise EpicsError("internal", error_code="INTERNAL")
 
     monkeypatch.setattr("epics_pv_mcp.cli_doctor.run_doctor", _boom)
-    assert cli_doctor.main([]) == 2
+
+    assert cli_doctor.main([]) == 1
+
+
+def test_cli_epicserror_is_distinguishable_from_a_failed_plane(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The named cost of QA-15, made executable rather than left as a comment.
+
+    Exit 1 is now shared by an internal error and a hard-failed plane, so the exit code alone no
+    longer separates them. What DOES separate them is asserted here: the internal path writes a
+    ``doctor:`` line to stderr and produces no report on stdout, the plane path produces the report
+    and stays silent on stderr. A reader of the trade-off comment can check it instead of trusting
+    it.
+    """
+
+    async def _boom(**kwargs: object) -> DoctorReport:
+        raise EpicsError("internal", error_code="INTERNAL")
+
+    # The plane path first, while run_doctor is still the real one: S18(b)'s dead
+    # retrieval-without-archiver pair is a hard-failed plane, exit 1.
+    _set_config(monkeypatch, archiver_retrieval_url="http://arch.example:17668")
+    assert cli_doctor.main([]) == 1
+    plane = capsys.readouterr()
+
+    monkeypatch.setattr("epics_pv_mcp.cli_doctor.run_doctor", _boom)
+    assert cli_doctor.main([]) == 1
+    internal = capsys.readouterr()
+
+    assert plane.out != "" and plane.err == ""  # a report, nothing on stderr
+    assert internal.out == "" and internal.err.startswith("doctor: ")  # the inverse, exactly

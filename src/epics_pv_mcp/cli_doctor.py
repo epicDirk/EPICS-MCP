@@ -180,8 +180,18 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report = asyncio.run(run_doctor(probe_pv=args.probe_pv, timeout=args.timeout))
     except EpicsError as exc:  # gatherers are total, so this is only a genuine internal error
+        # Exit 1, the command-failed code (QA-15). This used to return 2, which
+        # ``cli_common._USAGE_ERROR`` and argparse both define as a USAGE error: the caller was
+        # told it had passed something wrong when the command itself had broken.
+        #
+        # Named trade-off, taken deliberately: 1 is also the code for "a configured plane hard
+        # failed", so a script can no longer tell an internal error from a genuine negative
+        # finding by exit code alone. That is the lesser evil. The two are distinguishable on
+        # stderr (this branch is the only one that writes a ``doctor:`` line, and it is the only
+        # path that produces NO report on stdout), whereas the old value collided with a
+        # convention the other three CLIs share and argparse enforces from outside this file.
         sys.stderr.write(f"doctor: {exc}\n")
-        return 2
+        return 1
 
     if args.json:
         sys.stdout.write(json.dumps(report.model_dump(mode="json"), indent=2) + "\n")
