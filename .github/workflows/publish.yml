@@ -34,8 +34,11 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
+      # v7, not the newest release: setup-uv publishes v8.x and v9.x, but has NOT published a
+      # floating `v8` or `v9` major tag (measured, both fail to resolve), so `@v9` would break this
+      # workflow outright. v7 is the newest major that resolves AND runs on node24.
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           python-version: "3.12"
@@ -78,7 +81,7 @@ jobs:
       - name: Show what would be published
         run: ls -l dist/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: distributions
           path: dist/
@@ -97,7 +100,12 @@ jobs:
     permissions:
       id-token: write # Trusted Publishing; nothing else is needed and nothing else is granted
     steps:
-      - uses: actions/download-artifact@v4
+      # NOT covered by a rehearsal: this job is gated on a tag AND on dry_run being false, so a
+      # manual dry run never reaches this step. Its Node-20 deprecation therefore never appeared
+      # in either dry-run log, and this bump is the one change here that a rehearsal cannot prove.
+      # It is made anyway, because the alternative is leaving a runner-cut landmine in the single
+      # job that publishes, which runs once, at release time, and cannot be re-run.
+      - uses: actions/download-artifact@v8
         with:
           name: distributions
           path: dist/
