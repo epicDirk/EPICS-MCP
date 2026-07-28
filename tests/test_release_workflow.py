@@ -45,9 +45,14 @@ def test_the_upload_is_gated_on_a_tag_and_on_not_being_a_dry_run() -> None:
     That rehearsal is only safe while BOTH halves of the condition survive: a tag ref, and an
     explicit non-dry-run. Losing either one turns a rehearsal into a release.
     """
-    conditions = [line for line in _lines() if line.strip().startswith("if:")]
+    conditions = [
+        line
+        for line in _lines()
+        if line.strip().startswith("if:") and "dry_run" in line  # the publish job's condition;
+        # the two release-gate steps carry their own tag-vs-rehearsal conditions since QA-16
+    ]
 
-    assert len(conditions) == 1, f"expected exactly one job condition, found: {conditions}"
+    assert len(conditions) == 1, f"expected exactly one upload condition, found: {conditions}"
     condition = conditions[0]
     assert "refs/tags/v" in condition, condition
     assert "dry_run" in condition, condition

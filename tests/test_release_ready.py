@@ -124,6 +124,46 @@ def test_a_prerelease_version_is_refused_but_can_be_allowed() -> None:
     assert allowed == []
 
 
+def test_a_version_mismatch_with_the_tag_is_refused() -> None:
+    """QA-2: the workflow builds whatever ``pyproject.toml`` says, so a ``v0.3.0`` tag pushed
+    against a tree still at ``0.4.0`` would upload the WRONG version under that tag, and an index
+    never lets either number be reused. The expected version is exact-match; the reason has to
+    name both numbers, because the reader's first question is which side is wrong."""
+    reasons = check(_metadata(version="0.4.0"), allow_prerelease=False, expect_version="0.3.0")
+
+    assert len(reasons) == 1, reasons
+    assert "mismatch" in reasons[0]
+    assert "'0.3.0'" in reasons[0] and "'0.4.0'" in reasons[0]
+
+
+def test_a_version_matching_the_tag_passes() -> None:
+    """The counter-direction: a gate that refused every expected version would block every real
+    release and still pass the row above."""
+    assert check(_metadata(version="0.3.0"), allow_prerelease=False, expect_version="0.3.0") == []
+
+
+def test_the_version_expectation_composes_with_the_prerelease_check() -> None:
+    """Both findings must surface together: ``--allow-prerelease`` must not smuggle a mismatched
+    version past the tag pin, and the mismatch must not hide the pre-release reason either."""
+    reasons = check(_metadata(version="0.4.0.dev0"), allow_prerelease=False, expect_version="0.3.0")
+    assert len(reasons) == 2, reasons
+
+    allowed = check(_metadata(version="0.4.0.dev0"), allow_prerelease=True, expect_version="0.3.0")
+    assert len(allowed) == 1 and "mismatch" in allowed[0]
+
+
+def test_the_expect_version_flag_reaches_the_check(tmp_path: Path) -> None:
+    """Through ``main``, so the argparse plumbing is proven, not assumed: the same wheel passes
+    bare and blocks under a mismatched ``--expect-version``."""
+    wheel = tmp_path / "epics_pv_mcp-0.3.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("epics_pv_mcp-0.3.0.dist-info/METADATA", _metadata())
+
+    assert main([str(wheel)]) == 0
+    assert main(["--expect-version", "0.3.0", str(wheel)]) == 0
+    assert main(["--expect-version", "9.9.9", str(wheel)]) == 1
+
+
 @pytest.mark.parametrize(
     ("kwargs", "fragment"),
     [

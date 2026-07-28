@@ -59,9 +59,21 @@ jobs:
 
       # The gate reads the BUILT metadata: a direct reference (rejected by the index), a
       # pre-release version published by accident (a version number burned for good), or a
-      # description that would not render on the project page.
-      - name: Release gate
-        run: uv run python scripts/check_release_ready.py dist/*
+      # description that would not render on the project page. Two shapes of the same gate
+      # (QA-2 + QA-16):
+      #
+      #   * A REHEARSAL runs between releases, where the working version is always a .dev one, so
+      #     it tolerates exactly that; without the flag the rehearsal could never go green and the
+      #     steps behind the gate (including the artifact upload) would stay unrehearsed forever.
+      #   * A TAG run stays strict AND pins the tag to the built version: the build uses whatever
+      #     pyproject.toml says, so a tag pushed against an unbumped tree would otherwise publish
+      #     the wrong version under that tag, and an index never lets either number be reused.
+      - name: Release gate (rehearsal, tolerates the working .dev version)
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        run: uv run python scripts/check_release_ready.py --allow-prerelease dist/*
+      - name: Release gate (tag, strict, and the tag must match the built version)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: uv run python scripts/check_release_ready.py --expect-version "${GITHUB_REF_NAME#v}" dist/*
 
       - name: Show what would be published
         run: ls -l dist/

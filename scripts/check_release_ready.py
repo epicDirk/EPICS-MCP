@@ -90,8 +90,15 @@ def is_prerelease(version: str) -> bool:
     return bool(_PRERELEASE_RE.search(version))
 
 
-def check(metadata: str, *, allow_prerelease: bool) -> list[str]:
-    """Return one reason string per finding; empty means the artifact may be published."""
+def check(metadata: str, *, allow_prerelease: bool, expect_version: str | None = None) -> list[str]:
+    """Return one reason string per finding; empty means the artifact may be published.
+
+    *expect_version* is the tag-derived version the caller is about to publish under (QA-2): the
+    workflow builds whatever ``pyproject.toml`` says, so a tag pushed against a tree whose version
+    was never bumped would upload the WRONG version under that tag, and an index never lets either
+    number be reused. Exact string match against the built metadata, which hatchling normalises,
+    so the caller strips the ``v`` prefix and nothing else.
+    """
     headers = Parser().parsestr(metadata)
     reasons: list[str] = []
 
@@ -106,6 +113,13 @@ def check(metadata: str, *, allow_prerelease: bool) -> list[str]:
             )
 
     version = headers.get("Version", "")
+    if expect_version is not None and version != expect_version:
+        reasons.append(
+            f"version mismatch: the tag says {expect_version!r} but the built metadata says "
+            f"{version!r}. Publishing would burn the wrong version number for good (an index "
+            "never allows reuse). Bump [project].version and the __init__.py fallback so the "
+            "tree matches the tag"
+        )
     if not allow_prerelease and is_prerelease(version):
         reasons.append(
             f"version {version!r} is a pre-release. Publishing it burns that version number for "
@@ -138,6 +152,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="permit a .dev/a/b/rc version (a deliberate pre-release upload)",
     )
+    parser.add_argument(
+        "--expect-version",
+        default=None,
+        metavar="X.Y.Z",
+        help="require the built metadata Version to equal this exactly (the release workflow "
+        "passes the tag with its leading 'v' stripped, so a tag on an unbumped tree blocks "
+        "instead of publishing the wrong version)",
+    )
     args = parser.parse_args(argv)
 
     findings: list[str] = []
@@ -149,7 +171,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             continue
         findings.extend(
             f"{artifact.name}: {reason}"
-            for reason in check(metadata, allow_prerelease=args.allow_prerelease)
+            for reason in check(
+                metadata,
+                allow_prerelease=args.allow_prerelease,
+                expect_version=args.expect_version,
+            )
         )
 
     if findings:
