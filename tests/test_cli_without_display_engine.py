@@ -150,6 +150,68 @@ def test_the_module_imports_at_all_without_the_engine(module_name: str, command:
     assert command in result.stderr
 
 
+def test_an_installed_but_broken_engine_is_not_reported_as_missing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An engine that is PRESENT and does not import is a failure, not a missing capability (QA-14).
+
+    The probe used to be ``find_spec`` alone. A half-installed engine (a missing transitive
+    dependency is the everyday case) passed that check, and the command then died in its own import
+    line with a bare traceback: exactly the outcome this helper exists to prevent, one step further
+    along. ``server.py`` had the right posture for the MCP surface already, logging the failure loud
+    and keeping the core up; the CLI surface had never been given it.
+
+    Red on the pre-fix code twice over: it returned ``None`` (the caller proceeded straight into the
+    traceback), so both the exit code and the message assertion fail.
+    """
+    real_import_module = importlib.import_module
+
+    def _import_module(name: str, package: str | None = None) -> object:
+        if name == "opi_navigation":
+            raise ImportError("No module named 'numpy'")
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", _import_module)
+
+    code = require_display_engine("epics-coverage")
+    message = capsys.readouterr().err
+
+    assert code == 1, "an installed engine that will not load is a command failure, not usage"
+    assert "installed but failed to load" in message
+    assert "No module named 'numpy'" in message  # the actual cause, not a guess about it
+    assert "which is not installed" not in message  # NOT the absent message
+
+
+def test_the_absent_and_broken_messages_do_not_share_their_advice(
+    engine_absent: None, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The two refusals must give DIFFERENT advice, which is the whole point of telling them apart.
+
+    Without this the fix could satisfy the test above by printing a second message that still ends
+    in "install the engine", advice that cannot help a reader whose engine is already installed.
+    The absent case keeps the install instruction and the list of commands that still work; the
+    broken case must say that installing will not help.
+    """
+    require_display_engine("epics-coverage")
+    absent = capsys.readouterr().err
+
+    monkeypatch.undo()  # drop the engine_absent fake, then break the import instead
+    monkeypatch.setattr(
+        importlib,
+        "import_module",
+        lambda name, package=None: (_ for _ in ()).throw(ImportError("broken")),
+    )
+    require_display_engine("epics-coverage")
+    # Whitespace-normalized: these messages are hand-wrapped for a terminal, so a phrase that
+    # happens to straddle a line break is not a missing phrase.
+    broken = " ".join(capsys.readouterr().err.split())
+
+    assert "--group displays" in absent
+    assert "epics-doctor" in absent  # what still works
+    assert "installing the engine will not help" in broken
+    assert "which is not installed" not in broken
+
+
 @pytest.mark.parametrize("module_name", _ALL_CLI_MODULES)
 def test_help_survives_a_legacy_encoded_console(module_name: str) -> None:
     """``--help`` must never die with a bare traceback on a cp1252 console (QA-8).
