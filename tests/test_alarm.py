@@ -73,7 +73,7 @@ def test_is_alarm_configured_withholds_authored_freetext(monkeypatch: pytest.Mon
     ``..._drops_config_msg_person_data``); this only guards the hypothetical flat shape."""
     client = AlarmClient("http://alarm:8081")
     raw = {
-        "config": "config:/Accelerator/Vacuum/Vac-VVMC-01:Pos-R",
+        "config": "config:/Accelerator/Vacuum/SIM:Vac-Vlv-01:Pos-R",
         "enabled": True,
         "latching": True,
         "description": "Valve position alarm",
@@ -85,14 +85,14 @@ def test_is_alarm_configured_withholds_authored_freetext(monkeypatch: pytest.Mon
         "host": "ws-ctrl-042",
     }
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([raw])))
-    _, detail = client.is_alarm_configured("Vac-VVMC-01:Pos-R", config_name="Accelerator")
+    _, detail = client.is_alarm_configured("SIM:Vac-Vlv-01:Pos-R", config_name="Accelerator")
     # authored free-text values are withheld, no person can leak inside the prose / a mailto action
     for field in ("description", "guidance", "displays", "commands", "actions"):
         assert detail[field] == FREETEXT_WITHHELD, field
     # technical fields pass through; audit metadata is gone
     assert detail["enabled"] is True
     assert detail["latching"] is True
-    assert detail["config"] == "config:/Accelerator/Vacuum/Vac-VVMC-01:Pos-R"
+    assert detail["config"] == "config:/Accelerator/Vacuum/SIM:Vac-Vlv-01:Pos-R"
     assert "user" not in detail
     assert "host" not in detail
 
@@ -106,7 +106,7 @@ def test_is_alarm_configured_drops_config_msg_person_data(monkeypatch: pytest.Mo
     three person-bearing fields are absent and only the technical fields remain."""
     client = AlarmClient("http://alarm:8081")
     raw = {
-        "config": "config:/Accelerator/Vacuum/Vac-VVMC-01:Pos-R",
+        "config": "config:/Accelerator/Vacuum/SIM:Vac-Vlv-01:Pos-R",
         "user": "eng.smith",
         "host": "ws-ctrl-042",
         "enabled": True,
@@ -114,9 +114,9 @@ def test_is_alarm_configured_drops_config_msg_person_data(monkeypatch: pytest.Mo
         "message_time": 1746093720000,
     }
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([raw])))
-    _, detail = client.is_alarm_configured("Vac-VVMC-01:Pos-R", config_name="Accelerator")
+    _, detail = client.is_alarm_configured("SIM:Vac-Vlv-01:Pos-R", config_name="Accelerator")
     assert detail == {
-        "config": "config:/Accelerator/Vacuum/Vac-VVMC-01:Pos-R",
+        "config": "config:/Accelerator/Vacuum/SIM:Vac-Vlv-01:Pos-R",
         "enabled": True,
         "message_time": 1746093720000,
     }

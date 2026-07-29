@@ -106,7 +106,7 @@ _PERSON_RE = re.compile(r"\bDirk\b|\bNordt\b", re.IGNORECASE)
 # sanctioned 'SIM:PS-01:Cur-RB' placeholder (it would otherwise re-anchor on 'PS-01'). Three
 # structural gates keep it off non-PV text: (1) a digit must appear SOMEWHERE in the device path, a
 # real ESS numeric index sits either in the Section-Subsection head ('PS-01:...') OR in a later
-# device segment ('ISrc-CS:ISS-Magtr-01:...'); this alone excludes 'NTScalar:Value'. (2) The
+# device segment ('QAB-ZZ:Diag-BPM-09:...'); this alone excludes 'NTScalar:Value'. (2) The
 # [A-Z]-led head never anchors on a digit-led ISO-8601 timestamp. (3) The head needs >=1 hyphenated
 # segment (the ESS Sec-Sub## shape), which is what excludes bare ALLCAPS enums like 'MODE1:AUTO'.
 _PV_RE = re.compile(
