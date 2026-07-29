@@ -26,7 +26,7 @@ def compare_machine_state(
 
     ``display_tools_available`` is keyword-only and REQUIRED (no default): the caller MUST state
     whether the display-gated ``validate_pvs`` tool is registered (S26/N05). A core-only install
-    (no ``[displays]`` extra) must not be told to call ``validate_pvs``, that would be an
+    (no ``displays`` group) must not be told to call ``validate_pvs``, that would be an
     impossible plan. A default here would fail OPEN: if the server wrapper forgot to thread the
     real capability, the prompt would silently re-instruct the missing tool. Required → a mis-wired
     wrapper is a loud TypeError in a test, not a silent regression.

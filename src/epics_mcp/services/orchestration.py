@@ -8,7 +8,7 @@ coverage pair) is gone, drift can no longer make the CLI serve a different repor
 
 **Why here and not in the pure cores** (:mod:`~.crossplane`, :mod:`~.coverage`): the orchestration
 pulls the macro-aware PV inventory (``analyze_display_pvs`` / ``analyze_display_index`` →
-``opi_navigation`` via :mod:`~.inventory_adapter`), so it is part of the optional ``[displays]``
+``opi_navigation`` via :mod:`~.inventory_adapter`), so it is part of the optional ``displays``
 surface. The pure cores stay ``opi_navigation``-free (offline-testable) and receive
 already-translated rows. This module is imported ONLY by the two display tools and the two CLIs,
 never by the core server, a standalone install without ``opi_navigation`` never reaches it.

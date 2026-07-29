@@ -41,7 +41,7 @@ def _report_engine_absent(command: str) -> int:
         "will not have it. The other three commands (epics-mcp, epics-doctor,\n"
         "epics-diagnose) and every non-display MCP tool work without it.\n"
         "\n"
-        "From a checkout with access: uv sync --extra all --group displays\n"
+        "From a checkout with access: uv sync --extra dev --group displays\n"
     )
     return _USAGE_ERROR
 
@@ -59,7 +59,7 @@ def _report_engine_broken(command: str, exc: BaseException) -> int:
         "\n"
         "This is not a missing optional capability, so installing the engine will not\n"
         "help. Most often a broken or partially-installed environment: re-sync it with\n"
-        "uv sync --extra all --group displays, and if that does not clear it, the\n"
+        "uv sync --extra dev --group displays, and if that does not clear it, the\n"
         "message above is the failure to report.\n"
     )
     return _COMMAND_FAILED

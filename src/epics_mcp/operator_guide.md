@@ -71,7 +71,7 @@ For the canonical plane→source→tools table and the safety/network posture, s
 The core tools always register. The four **display-aware** tools register only when the optional
 `opi_navigation` engine is installed (the `displays` dependency group, a local-checkout
 surface that never reaches the published package); on a core-only install they
-are simply absent, that is an unmet optional extra, not a bug.
+are simply absent, that is an unmet optional dependency group, not a bug.
 
 <!-- BEGIN:tool-inventory (drift-guarded against @mcp.tool registrations, see tests/test_guide_matches_code.py) -->
 **Core, live PV + REST planes:**

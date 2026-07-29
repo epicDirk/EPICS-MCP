@@ -66,11 +66,11 @@ dev = [
     "mypy>=1.19",
     "pre-commit>=4.0",
 ]
-# Everything a published install can offer: the dev toolchain. The display-aware tools are NOT an
-# extra, see the `displays` dependency group below.
-all = [
-    "epics-mcp[dev]",
-]
+# There is deliberately no `all` extra, and it is absent rather than merely unused. Until 0.4.0 it
+# existed and resolved to exactly `epics-mcp[dev]`, so `pip install epics-mcp[all]` promised a
+# reader everything the package can do and delivered the developer toolchain. The display-aware
+# tools are not an extra either, see the `displays` dependency group below, so there is nothing an
+# `all` could honestly gather.
 
 # Dependency groups (PEP 735) are a LOCAL install surface: unlike an extra, they never reach the
 # published metadata. That is exactly why the display dependency lives here.
@@ -87,7 +87,7 @@ all = [
 # "not yet", not "no"; the release checklist in CONTRIBUTING.md carries the same note, so the
 # condition does not live only here.
 #
-# Local full run: `uv sync --extra all --group displays`. CI deliberately does NOT pass --group, so
+# Local full run: `uv sync --extra dev --group displays`. CI deliberately does NOT pass --group, so
 # it tests exactly the standalone core a public user gets (conftest.py skips the 6 display test
 # modules when opi_navigation is absent).
 [dependency-groups]
@@ -170,7 +170,7 @@ init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
 
-# p4p ships no type stubs. opi_navigation IS typed (py.typed) but optional ([displays]) and absent
+# p4p ships no type stubs. opi_navigation IS typed (py.typed) but optional (the displays group) and
 # on the public-fork CI (private git dependency), so the override lets mypy swallow
 # `import-not-found` there and its symbols become Any. LOCALLY this is a no-op: with
 # opi_navigation installed mypy keeps using its real types and the display surface stays fully
@@ -188,7 +188,7 @@ module = [
 ignore_missing_imports = true
 
 # The display-coupled TEST modules carry `# type: ignore[arg-type]` comments that suppress arg-type
-# errors against opi_navigation's REAL types (fully checked when [displays] is installed locally). On
+# errors against opi_navigation's REAL types (fully checked with the displays group installed). On
 # the public-fork CI opi_navigation is absent → its symbols become Any (override above) → those
 # ignores become UNUSED and mypy --strict's warn_unused_ignores would fail the lint job. Relax ONLY
 # that one check for ONLY these modules (they are also pytest-skipped without opi_navigation via

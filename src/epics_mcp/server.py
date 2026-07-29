@@ -81,7 +81,7 @@ logger = logging.getLogger(__name__)
 
 
 def _display_tools_available() -> bool:
-    """True iff the optional ``[displays]`` extra is installed (its sole package is opi_navigation).
+    """True iff the optional ``displays`` group is installed (its sole package is opi_navigation).
 
     ``find_spec`` has no import side effects, so this is safe to call before the server is built and
     again at registration time. It is the exact signal ``tests/conftest.py`` uses to gate the
@@ -94,7 +94,7 @@ def build_instructions(display_tools_available: bool) -> str:
     """Render the server ``instructions`` from the actual capability set (S26/N06).
 
     The display-gated capabilities (validate_pvs / crossplane_check / find_device) are advertised
-    only when the ``[displays]`` extra is installed, so a core-only install does not over-claim
+    only when the ``displays`` group is installed, so a core-only install does not over-claim
     them. A pure function of the flag → both branches are directly testable without a reimport.
     """
     display_clause = (
@@ -137,18 +137,18 @@ def build_instructions(display_tools_available: bool) -> str:
 
 
 def _load_display_registrar() -> Callable[[FastMCP], None] | None:
-    """Load the display-tool registrar iff the optional ``[displays]`` extra is installed AND
+    """Load the display-tool registrar iff the optional ``displays`` group is installed AND
     imports cleanly. Returns the registrar (run once the server is built) or ``None``, the ONE
     capability truth every surface derives from (tool registration, the ``instructions`` string,
     and the ``compare_machine_state`` prompt), so they can never diverge (S26/N06).
 
     Degrade-loud posture:
-    - A MISSING extra (``find_spec`` None) is the supported core-only state, return None silently
+    - A MISSING group (``find_spec`` None) is the supported core-only state, return None silently
       so the core PV server installs and starts standalone.
-    - An INSTALLED extra that fails to import (broken transitive dep, corrupt module, ...) is a
+    - An INSTALLED group that fails to import (broken transitive dep, corrupt module, ...) is a
       BROKEN deployment, not a missing one: log ERROR with the correct attribution and return None,
       so the core PV server stays up AND no surface over-claims display tools that did not register.
-      The catch is broad on purpose, an OPTIONAL extra must never crash the core server, while the
+      The catch is broad on purpose, an OPTIONAL group must never crash the core server, while the
       ERROR + exc_info keep the failure loud (the former broad ``except ImportError`` logged INFO
       "not installed", mis-attributing an internal import failure as a missing package).
     """
@@ -156,10 +156,10 @@ def _load_display_registrar() -> Callable[[FastMCP], None] | None:
         return None
     try:
         from epics_mcp.display_tools import register_display_tools
-    except Exception:  # an optional extra must never crash core, logged loud just below
+    except Exception:  # an optional group must never crash core, logged loud just below
         logger.error(
             "opi_navigation is installed but the display tools failed to load "
-            "(broken [displays] extra); core PV tools remain available.",
+            "(broken displays dependency group); core PV tools remain available.",
             exc_info=True,
         )
         return None

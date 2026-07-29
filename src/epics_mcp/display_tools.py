@@ -1,17 +1,17 @@
-"""Display-aware MCP tools, the optional ``[displays]`` tool group.
+"""Display-aware MCP tools, the optional ``displays`` tool group.
 
 These four tools (``validate_pvs``, ``crossplane_check``, ``coverage_audit``,
 ``find_device``) join live EPICS PVs with the *display* plane: the macro-expanded,
 per-instance PV inventory of ``.bob`` operator screens. That inventory comes from the
 ``opi_navigation`` package (the build-once Wedge-0 PV engine), which is an **optional**
-dependency: the ``displays`` dependency group (``uv sync --extra all --group displays``), a
+dependency: the ``displays`` dependency group (``uv sync --extra dev --group displays``), a
 local-checkout surface that never reaches the published package.
 
 Keeping them in their own module lets :mod:`epics_mcp.server` load them lazily via one
-capability probe (``_load_display_registrar``): it skips them silently when the extra is absent
+capability probe (``_load_display_registrar``): it skips them silently when the group is absent
 (``find_spec`` gate), so the core PV server (read/write/monitor/discover/diagnose + the REST
 planes) installs and starts standalone, for any EPICS user who does not have the display layer,
-and it degrades loud (an ERROR log, core tools kept) if an *installed* extra fails to import.
+and it degrades loud (an ERROR log, core tools kept) if an *installed* group fails to import.
 
 A dedicated CS-Studio / Phoebus MCP that complements these tools is in the works.
 """
@@ -246,14 +246,14 @@ def register_display_tools(mcp: FastMCP) -> None:
     """Register the four display-aware tools on *mcp*.
 
     Called from :mod:`epics_mcp.server` only after ``_load_display_registrar`` has confirmed the
-    optional ``[displays]`` extra is installed and imports cleanly (the single capability truth), so
+    optional ``displays`` group is installed and imports cleanly (the single capability truth), so
     the core server installs and starts standalone without it.
     """
     # ``output_schema=None`` is the explicit opt-out that keeps an information-empty accept-all
     # schema off the wire, these four still return ``dict[str, object]``. It is NOT a claim that
     # they are unsuitable for typing: they are simply the four S29 has not reached, and they are
     # absent from the core lane, so a typed shape here would only ever be advertised on a
-    # [displays] install. Typing one means DELETING its kwarg here (``None`` overrides the
+    # displays-group install. Typing one means DELETING its kwarg here (``None`` overrides the
     # annotation-derived schema) and adding it to the conformance whitelist. Whether they get typed
     # at all is an open product question, deliberately recorded here rather than in a status file.
     mcp.tool(annotations=_READONLY, output_schema=None)(validate_pvs)

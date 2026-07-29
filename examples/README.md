@@ -36,12 +36,12 @@ assistant to `get_pv_value("TEST:Temperature")`.
 
 ```bash
 # needs the opi_navigation engine, which is NOT available from PyPI (private repository);
-# from a checkout that has it: uv sync --extra all --group displays
+# from a checkout that has it: uv sync --extra dev --group displays
 epics-crossplane --displays . <path-to-st.cmd>
 ```
 
 or `validate_pvs(file_path="examples/sample_display.bob")` from an MCP client.
 
-> The `.bob`-handling comes from the `opi_navigation` library (the optional `[displays]`
-> extra), **not** from any Claude skill; the server itself runs standalone. If you don't
+> The `.bob`-handling comes from the `opi_navigation` library (the optional `displays`
+> dependency group), **not** from any Claude skill; the server itself runs standalone. If you don't
 > use Phoebus/CS-Studio, ignore this example; the core PV tools need none of it.

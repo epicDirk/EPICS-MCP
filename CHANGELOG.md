@@ -24,6 +24,11 @@ carry breaking changes).
   none: 0.3.0 was this project's first published release of any kind, so no install anywhere can
   carry that command. The four diagnostic commands (`epics-doctor`, `epics-diagnose`,
   `epics-crossplane`, `epics-coverage`) are unaffected.
+- **BREAKING: the `all` extra is removed.** `pip install epics-mcp[all]` no longer resolves; use
+  `epics-mcp[dev]`, which is what `all` contained. It was exactly `epics-mcp[dev]`, so it promised a
+  reader everything the package can do and delivered the developer toolchain, and the display-aware
+  tools it seemed to imply are not an extra at all but a local dependency group. `dev` is now the
+  only extra. Nothing else changes: no dependency is added or dropped by this.
 - **The product is called EPICS MCP.** The prose name was still "EPICS PV MCP Server" in 19 places,
   including the README H1 (which is the project page title on the index), the `CITATION.cff` title
   that published work cites, and the first line of the operator guide that ships in the wheel. The

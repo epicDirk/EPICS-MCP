@@ -189,13 +189,13 @@ share a port, so leave `ARCHIVER_RETRIEVAL_URL` empty; in a split or clustered d
 The gate chain is [uv](https://docs.astral.sh/uv/)-based:
 
 ```bash
-uv sync --extra all --group displays --frozen  # full local install (toolchain + display engine)
+uv sync --extra dev --group displays --frozen  # full local install (toolchain + display engine)
 uv run pytest                                  # test suite
 uv run pytest --cov=src --cov-branch           # with coverage
 uv run pre-commit run --all-files              # ruff + format + mypy --strict + guards
 ```
 
-`dev` and `all` are the toolchain extras. The `opi_navigation` PV engine is a separate
+`dev` is the only extra, and it is the toolchain. The `opi_navigation` PV engine is a separate
 **dependency group** (`--group displays`), because it lives in a private repository: a group
 stays out of the published package, where an unreachable dependency would be a promise nobody
 can keep. CI passes no `--group`, so it tests the standalone core a public user gets, and the

@@ -8,13 +8,13 @@ PRs are welcome.
 The gate chain is [uv](https://docs.astral.sh/uv/)-based:
 
 ```bash
-uv sync --extra all --group displays --frozen  # full local install (toolchain + display engine)
+uv sync --extra dev --group displays --frozen  # full local install (toolchain + display engine)
 uv run pytest                                  # run the test suite
 uv run pytest --cov=src --cov-branch           # with coverage
 uv run pre-commit run --all-files              # ruff + format + mypy --strict + guards
 ```
 
-**Extras vs group.** `dev` and `all` are published extras and carry the toolchain. The
+**Extra vs group.** `dev` is the only published extra and carries the toolchain. The
 `opi_navigation` PV engine, which the display-aware tools need, is a **dependency group**
 (`--group displays`), not an extra, and the distinction is load-bearing: a group never reaches
 the published metadata. The engine lives in a private repository, so an outside user cannot
