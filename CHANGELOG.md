@@ -66,6 +66,12 @@ carry breaking changes).
   the mgmt port with no error to explain it.
 - **`.env.example` names all four tools the Olog write gate covers**, not two. It was the only
   place that understated the gate's reach.
+- **Every link on the PyPI project page now goes somewhere.** The README is the `long_description`,
+  and on that page there is no repository around it, so its relative targets resolved against
+  pypi.org and landed nowhere; measured on the rendered page, all of them. They are absolute GitHub
+  URLs now, pinned to `main` so the page always points at current documentation. Anchors were
+  already fine there (the index rewrites them) and are untouched. The link guard follows the new
+  spelling rather than skipping it as a URL, so a renamed page still fails the build.
 - **The Naming-Service modules describe their own origin correctly, and no longer ship a developer
   path.** Both called themselves "vendored" from pvValidator, which is GPL-3.0-only while this
   package is MIT, so the wording asserted a licence problem that does not exist: measured with

@@ -46,6 +46,24 @@ _LINK_TARGET = re.compile(r"\]\(\s*([^)\s]+?)\s*\)")
 # Targets this guard does not own. Anchors and URLs are argued in the module docstring.
 _SKIPPED_PREFIXES = ("http://", "https://", "//", "#", "mailto:")
 
+# README.md is the PyPI long_description, where a relative target has no repository around it and
+# resolves against pypi.org (QA-30). Those links are absolute, and this is the shape they take.
+# They are URLs, so the skip list above would drop them and the most-read page in the project would
+# become the one page this guard does not check. Instead they are recognised, reduced to their
+# repository path and resolved from the repository ROOT, so a rename still goes red.
+_CANONICAL_PREFIXES = (
+    "https://github.com/epicDirk/EPICS-MCP/blob/main/",
+    "https://github.com/epicDirk/EPICS-MCP/tree/main/",
+)
+
+
+def _repo_relative(target: str) -> str | None:
+    """The repository path a canonical GitHub URL points at, or ``None`` if it is not one."""
+    for prefix in _CANONICAL_PREFIXES:
+        if target.startswith(prefix):
+            return target[len(prefix) :]
+    return None
+
 
 def _tracked_paths() -> frozenset[str]:
     """Every tracked path, exactly as git spells it, forward slashes and original case."""
@@ -58,34 +76,43 @@ def _tracked_paths() -> frozenset[str]:
     return frozenset(line.strip() for line in listing.splitlines() if line.strip())
 
 
-def _relative_link_targets() -> list[tuple[str, int, str]]:
-    """``(file, line number, target)`` for every relative link target in a tracked ``.md``."""
+def _relative_link_targets() -> list[tuple[str, int, str, str]]:
+    """``(file, line number, target, base)`` for every checkable link target in a tracked ``.md``.
+
+    *base* is what the target resolves against, and it is a SEPARATE slot from *file* on purpose.
+    A canonical GitHub URL is repository-root-relative, so its base is ``""`` while its file stays
+    the document that carries it: collapsing the two would resolve correctly and then report the
+    finding against no file at all.
+    """
     tracked = _tracked_paths()
-    found: list[tuple[str, int, str]] = []
+    found: list[tuple[str, int, str, str]] = []
     for path in sorted(p for p in tracked if p.endswith(".md")):
         text = (_REPO / path).read_text(encoding="utf-8")
         for lineno, line in enumerate(text.splitlines(), start=1):
             for target in _LINK_TARGET.findall(line):
-                if target.startswith(_SKIPPED_PREFIXES):
-                    continue
-                found.append((path, lineno, target))
+                if _repo_relative(target) is not None:
+                    found.append((path, lineno, target, ""))
+                elif not target.startswith(_SKIPPED_PREFIXES):
+                    found.append((path, lineno, target, path))
     return found
 
 
-def _resolves(source_file: str, target: str, tracked: frozenset[str]) -> bool:
-    """Does *target*, read relative to *source_file*, name something git tracks?
+def _resolves(base: str, target: str, tracked: frozenset[str]) -> bool:
+    """Does *target*, read relative to *base*, name something git tracks?
 
     ``posixpath.normpath`` rather than ``PurePosixPath``: the latter does NOT collapse ``..``
     (deliberately, since ``..`` is symlink-dependent), so building the path with it leaves
     ``docs/../README.md``, which matches no tracked entry. Measured while writing this guard: that
     mistake reported 11 of the 45 real targets as dead.
     """
+    # A canonical GitHub URL carries the repository path directly; everything else is as written.
+    target = _repo_relative(target) or target
     # A trailing "#anchor" narrows a target inside a page; the page itself is what must exist.
     file_part = target.split("#", 1)[0]
     if not file_part:
         return True  # a pure "#anchor" target, out of scope (see the module docstring)
 
-    resolved = posixpath.normpath(posixpath.join(posixpath.dirname(source_file), file_part))
+    resolved = posixpath.normpath(posixpath.join(posixpath.dirname(base), file_part))
     if resolved in tracked:
         return True
     # A directory target ("examples/") is tracked only through its contents, never by name.
@@ -97,8 +124,8 @@ def test_every_relative_link_target_is_a_tracked_file() -> None:
     tracked = _tracked_paths()
     dead = [
         f"{source}:{lineno} -> {target}"
-        for source, lineno, target in _relative_link_targets()
-        if not _resolves(source, target, tracked)
+        for source, lineno, target, base in _relative_link_targets()
+        if not _resolves(base, target, tracked)
     ]
     assert not dead, "documentation links with no tracked target:\n  " + "\n  ".join(dead)
 
@@ -136,28 +163,75 @@ def test_the_extractor_sees_the_nested_image_link() -> None:
     ``test_resolution_rejects_what_it_should``.
     """
     targets = _relative_link_targets()
-    readme = {(lineno, target) for source, lineno, target in targets if source == "README.md"}
+    readme = {(lineno, target) for source, lineno, target, _ in targets if source == "README.md"}
 
-    # The badge row: [![License: MIT](https://img.shields.io/...)](LICENSE)
-    assert (5, "LICENSE") in readme, (
+    # The badge row: [![License: MIT](https://img.shields.io/...)](<canonical URL for LICENSE>)
+    assert (5, _CANONICAL_PREFIXES[0] + "LICENSE") in readme, (
         "the target of an image-inside-link was not extracted; README.md's badge row carries one"
     )
 
 
+def test_the_readme_carries_no_bare_relative_link() -> None:
+    """QA-30: on the PyPI project page there is no repository around the README, so a relative
+    target resolves against pypi.org and lands nowhere. Measured on the rendered page before the
+    fix: every relative target was dead there, while the absolute sidebar links caught the reader.
+
+    This pins the INVARIANT rather than a count. A count ("at least twenty absolute targets") stays
+    green when someone turns exactly one link back, which is the way this regresses.
+
+    The operator guide is checked too, and for the same reason rather than for symmetry: it ships
+    inside the wheel and is served as the ``epics-pv://guide`` resource, so it is the second surface
+    with no repository around it. It carries no link today; the point is that a future one cannot
+    slip in relative, which the sibling guard would happily accept.
+
+    Honest limit: this checks the SPELLING of a link, not whether the page renders it. Whether
+    PyPI's renderer follows these URLs is not measurable from this tree.
+    """
+    surfaces = {"README.md", "src/epics_mcp/operator_guide.md"}
+    bare = [
+        f"{source}:{lineno} -> {target}"
+        for source, lineno, target, base in _relative_link_targets()
+        if source in surfaces and base != ""
+    ]
+    assert not bare, (
+        "a target on a surface that ships without its repository must be an absolute "
+        "GitHub URL, an anchor or a foreign URL:\n  " + "\n  ".join(bare)
+    )
+
+
 @pytest.mark.parametrize(
-    ("target", "reason"),
+    ("target", "expected", "reason"),
     [
-        ("docs/no-such-page.md", "a plain dead target"),
-        ("readme.md", "a target that differs from the tracked path only in case"),
-        ("docs/", "a directory that IS tracked through its contents, so this one must resolve"),
+        ("docs/no-such-page.md", False, "a plain dead target"),
+        ("readme.md", False, "a target that differs from the tracked path only in case"),
+        ("docs/", True, "a directory that IS tracked through its contents, so this one resolves"),
+        (
+            "https://github.com/epicDirk/EPICS-MCP/blob/main/docs/tools.md",
+            True,
+            "a canonical URL is resolved through to its repository path, not skipped as a URL",
+        ),
+        (
+            "https://github.com/epicDirk/EPICS-MCP/blob/main/docs/no-such-page.md",
+            False,
+            "a canonical URL whose repository path is dead must still be caught",
+        ),
+        (
+            "https://github.com/epicDirk/EPICS-MCP/blob/main/Docs/tools.md",
+            False,
+            "case folding does not save a canonical URL either",
+        ),
     ],
 )
-def test_resolution_rejects_what_it_should(target: str, reason: str) -> None:
+def test_resolution_rejects_what_it_should(target: str, expected: bool, reason: str) -> None:
     """The resolver's own behaviour, without touching a file.
 
-    The case row is the one that matters most, and it is the one a disk-based check would get
+    The case rows are the ones that matter most, and they are what a disk-based check would get
     wrong: ``readme.md`` exists on a Windows filesystem and is not a tracked path.
+
+    ``expected`` is explicit rather than derived from the target's shape. It used to be
+    ``target.endswith("/")``, which happened to describe the first three rows and cannot describe a
+    canonical URL that must resolve.
     """
     tracked = _tracked_paths()
-    resolved = _resolves("README.md", target, tracked)
-    assert resolved is target.endswith("/"), f"{target}: {reason}"
+    base = "" if _repo_relative(target) is not None else "README.md"
+    assert _resolves(base, target, tracked) is expected, f"{target}: {reason}"

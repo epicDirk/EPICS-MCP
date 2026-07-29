@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/epicDirk/EPICS-MCP/actions/workflows/ci.yml/badge.svg)](https://github.com/epicDirk/EPICS-MCP/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/epics-mcp.svg)](https://pypi.org/project/epics-mcp/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/epicDirk/EPICS-MCP/blob/main/LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 
 Ask an AI assistant about your EPICS control system. What is this PV reading right now? Why is
@@ -28,11 +28,11 @@ package ships `py.typed`. The CI badge above reports the current state of both g
 ## Where to start
 
 **I want to try it, and I have no control system.** Follow [Quick start](#quick-start) below. A
-`softIocPVA` and the sample database in [`examples/`](examples/) give you a working PV in about
+`softIocPVA` and the sample database in [`examples/`](https://github.com/epicDirk/EPICS-MCP/tree/main/examples/) give you a working PV in about
 five minutes; no facility, no ChannelFinder, no archiver.
 
 **I want to point it at my facility.** Read the
-[deployment guide](docs/deployment.md). It walks through the variables plane by plane, the CA-bundle
+[deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md). It walks through the variables plane by plane, the CA-bundle
 recipe for internal HTTPS, and the documented assumptions. Then run `epics-doctor`, which probes
 every configured plane read-only and tells you what your instance actually reaches.
 
@@ -46,12 +46,12 @@ server: the address lists, `EPICS_PVA_NAME_SERVERS` (TCP unicast, not subnet-bou
 auto-address search, which EPICS defaults to **ON**. Even an empty environment broadcasts PV
 searches into the local subnets. The optional REST services stay off until their URLs are set.
 Do not assume isolation from this document. Run `epics-doctor` to see what an instance actually
-reaches, and read [Safety and network posture](docs/safety.md).
+reaches, and read [Safety and network posture](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/safety.md).
 
 ## The planes it sees
 
 The server joins several *planes* of an EPICS installation, and everything it reports is framed
-in these terms. Full descriptions are in [the tool reference](docs/tools.md).
+in these terms. Full descriptions are in [the tool reference](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/tools.md).
 
 | Plane | Source | Tools |
 |-------|--------|-------|
@@ -116,7 +116,7 @@ See [Related and roadmap](#related-and-roadmap).
    softIocPVA -d test.db
    ```
 
-   A ready-to-run version lives in [`examples/`](examples/). `softIocPVA` ships with EPICS Base
+   A ready-to-run version lives in [`examples/`](https://github.com/epicDirk/EPICS-MCP/tree/main/examples/). `softIocPVA` ships with EPICS Base
    and is **not** installed by this package.
 
 2. **Run the server** over stdio:
@@ -129,7 +129,7 @@ See [Related and roadmap](#related-and-roadmap).
    version (the one a bug report asks for). The server itself is configured through
    `EPICS_MCP_*` environment variables, not through options.
 
-3. **Wire it into an MCP client**, see [MCP client integration](docs/mcp-clients.md). Then ask
+3. **Wire it into an MCP client**, see [MCP client integration](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/mcp-clients.md). Then ask
    the assistant to read `TEST:Temperature`, or skip the assistant entirely:
 
    ```bash
@@ -138,23 +138,23 @@ See [Related and roadmap](#related-and-roadmap).
 
 To reach a real control system, set the address list in the launcher's environment, for example
 `EPICS_PVA_ADDR_LIST=<gateway-or-ioc-host>`, and then follow the
-[deployment guide](docs/deployment.md).
+[deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md).
 
 ## Documentation
 
 | Page | What it answers |
 |------|-----------------|
-| [Tools, CLIs, resources and prompts](docs/tools.md) | What can it actually do? Every tool by plane, the standalone CLIs, the resources and prompts |
-| [Configuration](docs/configuration.md) | Every `EPICS_MCP_*` variable, including TLS trust and the EPICS network block |
-| [Safety and network posture](docs/safety.md) | What is gated, what is audited, what decides network reach |
-| [MCP client integration](docs/mcp-clients.md) | Ready-to-paste `.mcp.json` blocks |
-| [Deployment guide](docs/deployment.md) | Bringing it up in **your** facility, plane by plane, with `epics-doctor` |
-| [Operating guide](OPERATING.md) | The operational cookbook: service landscape, recipes, error signatures. Also served to an assistant as `epics-pv://guide` |
-| [Architecture](ARCHITECTURE.md) | The `server → tools → services → clients` layering and the plane model |
-| [Security policy](SECURITY.md) | Reporting a vulnerability, and an honest statement of what the write gates are **not** |
-| [Contributing](CONTRIBUTING.md) | Dev setup, the gate chain, Definition of Done |
-| [Known limits](docs/known-limits.md) | What is deliberately **not** guarded, dated and measured, including the tempting repairs that were probed and rejected |
-| [Changelog](CHANGELOG.md) | Release history |
+| [Tools, CLIs, resources and prompts](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/tools.md) | What can it actually do? Every tool by plane, the standalone CLIs, the resources and prompts |
+| [Configuration](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/configuration.md) | Every `EPICS_MCP_*` variable, including TLS trust and the EPICS network block |
+| [Safety and network posture](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/safety.md) | What is gated, what is audited, what decides network reach |
+| [MCP client integration](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/mcp-clients.md) | Ready-to-paste `.mcp.json` blocks |
+| [Deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md) | Bringing it up in **your** facility, plane by plane, with `epics-doctor` |
+| [Operating guide](https://github.com/epicDirk/EPICS-MCP/blob/main/OPERATING.md) | The operational cookbook: service landscape, recipes, error signatures. Also served to an assistant as `epics-pv://guide` |
+| [Architecture](https://github.com/epicDirk/EPICS-MCP/blob/main/ARCHITECTURE.md) | The `server → tools → services → clients` layering and the plane model |
+| [Security policy](https://github.com/epicDirk/EPICS-MCP/blob/main/SECURITY.md) | Reporting a vulnerability, and an honest statement of what the write gates are **not** |
+| [Contributing](https://github.com/epicDirk/EPICS-MCP/blob/main/CONTRIBUTING.md) | Dev setup, the gate chain, Definition of Done |
+| [Known limits](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/known-limits.md) | What is deliberately **not** guarded, dated and measured, including the tempting repairs that were probed and rejected |
+| [Changelog](https://github.com/epicDirk/EPICS-MCP/blob/main/CHANGELOG.md) | Release history |
 
 ## Built at a facility, designed to be facility-agnostic
 
@@ -165,7 +165,7 @@ compensates for were measured against those services, not read off a specificati
 No site is hard-coded. Every service URL and network setting is an `EPICS_MCP_*` environment
 variable, so deploying elsewhere means setting those variables, not changing code. Two defaults
 carry a site-specific value (the ChannelFinder privacy allowlists), both documented as overridable
-in the [deployment guide](docs/deployment.md).
+in the [deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md).
 
 ## Compatibility
 
@@ -205,7 +205,7 @@ can keep. CI passes no `--group`, so it tests the standalone core a public user 
 `opi_navigation`-coupled test modules self-skip when it is absent.
 
 Live tests that need a running EPICS stack are opt-in and skip by default. See
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](https://github.com/epicDirk/EPICS-MCP/blob/main/CONTRIBUTING.md).
 
 ## Related and roadmap
 
@@ -224,7 +224,7 @@ released separately.
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](https://github.com/epicDirk/EPICS-MCP/blob/main/LICENSE).
 
 ## Credits
 
@@ -237,4 +237,4 @@ by epicDirk.
 The Naming-Service client was written for this repository and follows the API shape of the client
 in pvValidator (GPL-3.0-only); it carries none of that code, and pvValidator is not a dependency.
 The measurement behind that statement is recorded in
-[known limits](docs/known-limits.md), entry 11.
+[known limits](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/known-limits.md), entry 11.
