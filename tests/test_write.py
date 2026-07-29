@@ -447,6 +447,11 @@ class TestSetPvValueBounds:
         # The put NEVER happened: the value never reached the IOC.
         mock_pv_put.assert_not_awaited()
         assert "event=BOUNDS_DENY" in caplog.text
+        # QA-39: a pre-dispatch refusal carries NO op= token, and the operator guide says so. The
+        # id is issued when a write is dispatched, and this one never was, so the line stands
+        # alone. Pinned here because the guide previously promised an op correlation that the two
+        # refusals cannot honour. Red-provable by adding op=%s to audit_bounds_deny.
+        assert _audit_events(caplog) == [("BOUNDS_DENY", None)]
         # A refused-before-put write emits no ATTEMPT/ALLOW/READBACK.
         assert "event=ATTEMPT" not in caplog.text
         assert "event=ALLOW" not in caplog.text

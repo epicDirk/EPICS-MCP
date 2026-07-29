@@ -66,6 +66,14 @@ carry breaking changes).
   the mgmt port with no error to explain it.
 - **`.env.example` names all four tools the Olog write gate covers**, not two. It was the only
   place that understated the gate's reach.
+- **The operator guide no longer promises an `op=` correlation the refusals cannot honour, and its
+  Olog separator table is right about `+`.** The write-posture section said every stage of a
+  `set_pv_value` write is `op`-correlated; the id is issued when a write is dispatched, so the two
+  pre-dispatch refusals (`DENY`, `BOUNDS_DENY`) carry none, and a reader correlating an audit trail
+  by `op` would have looked for a token that is never written. The filter table listed a
+  separators-only value as dropped for `level` as well, while the same page explains ten lines lower
+  that `+` splits only `title` and is an ordinary level. The guide ships in the wheel and is served
+  as the `epics-pv://guide` resource, so both were wrong at the point of use.
 - **The start conditions of the PV write gate are now listed completely wherever they are listed at
   all.** The tool description, the server instructions, the configuration reference and the
   deployment guide each enumerated what a write-enabled server needs and left out the loopback-only

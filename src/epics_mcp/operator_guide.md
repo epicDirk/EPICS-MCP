@@ -51,9 +51,12 @@ operational knowledge (see the Knowledge Persistence Policy in `CLAUDE.md`).
   the ChannelFinder/Alarm/Olog/Naming reachability self-checks are HTTP HEADs and bypass the
   throttle entirely, but the ARCHIVER's is not, it is a real GET of `/mgmt/bpl/getApplianceInfo`
   (it needs a 2xx to tell "reachable" from "wrong endpoint"), so it spends a token like any other
-  read and `epics-doctor` can be denied on a tight limit; and a multi-GET tool like
-  `coverage_audit` spends ~2 tokens per PV, so set the limit ABOVE that fan-out or the tool aborts
-  mid-run with a loud `READ_RATE_LIMIT_EXCEEDED` (never a silent partial result).
+  read and `epics-doctor` can be denied on a tight limit; and a multi-GET tool such as
+  `coverage_audit` or `crossplane_check` spends several tokens per audited PV, growing with the
+  runtime planes it was asked for, so size the limit from the audited set and the planes requested
+  rather than from a fixed figure, or the tool aborts mid-run with a loud
+  `READ_RATE_LIMIT_EXCEEDED` (never a silent partial result). For `coverage_audit` the audited set
+  is ChannelFinder UNION the display PVs, which is not the display PV count.
 
 ## The planes
 
@@ -142,7 +145,7 @@ Measured behaviour of the filters, 2026-07-19:
 | known / matching | filters as named, case-insensitive | filters as named, case-insensitive |
 | **unknown** | **200 + 0 hits, no error** | **200 + 0 hits, no error** |
 | empty string `""` | matches **nothing** (0 hits) | **dropped** → unfiltered result |
-| separators only (`","`, `"+"`) | **dropped** → unfiltered result | **dropped** → unfiltered result |
+| separators only (`","`, `";"`, `"\|"`; for `title` also `"+"`) | **dropped** → unfiltered result | **dropped** → unfiltered result |
 | several values | OR over `,` `;` `\|` | AND over whitespace-separated words |
 | quoted `"a b"` | phrase (also for values with a space) | phrase, in order |
 | wildcard `*` | **honoured** (`Inf*` matches `Info`) | **honoured** |
@@ -200,9 +203,11 @@ ESS-spec-pending anyway (see above), so this is a known, bounded gap, not an acc
 
 ### PV write posture (`set_pv_value`): the audit trail
 
-A `set_pv_value` write leaves a `PV_WRITE` audit line at each stage, correlated by an `op=<id>` token.
-A write-enabled server **refuses to start** unless `EPICS_MCP_AUDIT_LOG_FILE` names a durable path, an
-ephemeral stderr audit would lose this trail on restart. The stages, each `op`-correlated:
+A `set_pv_value` write leaves a `PV_WRITE` audit line at each stage. A write-enabled server
+**refuses to start** unless `EPICS_MCP_AUDIT_LOG_FILE` names a durable path, an ephemeral stderr
+audit would lose this trail on restart. The `op=<id>` token that correlates the lines is issued when
+a write is dispatched, so the two refusals below carry **no** `op=`: they happen before any
+operation exists, and each is a single self-contained line. The stages:
 
 - `event=DENY`: the gate refused it (writes off / not in the allowlist / rate limit); nothing was sent.
 - `event=BOUNDS_DENY`: the value gate (O2) refused it: the PV is in the allowlist but the written
@@ -228,9 +233,10 @@ ephemeral stderr audit would lose this trail on restart. The stages, each `op`-c
   `math.isclose`. The same verdict rides back in the tool result (`verified` true/false/null plus
   `readback`/`tolerance`/`note`), so a silent wrong-write cannot hide.
 
-Every terminal line shares the `op=<id>` of its `ATTEMPT` (the `READBACK_*` line too), so an interrupted
-or misverified write is never a silent gap in the trail. (A direct, non-tool call to the audit helpers
-logs `op=-`.)
+Every terminal line **of a dispatched write** shares the `op=<id>` of its `ATTEMPT` (the
+`READBACK_*` line too), so an interrupted or misverified write is never a silent gap in the trail.
+The two pre-dispatch refusals (`DENY`, `BOUNDS_DENY`) are outside that correlation, as noted above.
+(A direct, non-tool call to the audit helpers logs `op=-`.)
 
 ### Olog write posture (all four write tools)
 

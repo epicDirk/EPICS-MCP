@@ -314,6 +314,10 @@ class TestAuditDeny:
         assert "error_code=PV_WRITE_DENIED" in caplog.text
         # Negative: a denied write must never emit an ALLOW record.
         assert "event=ALLOW" not in caplog.text
+        # QA-39: the gate refusal carries NO op= token, matching what the operator guide states.
+        # The id is issued on dispatch and nothing was dispatched. Red-provable by adding op=%s
+        # to _audit_deny.
+        assert "op=" not in caplog.text
 
     def test_pattern_mismatch_emits_deny(self, caplog: pytest.LogCaptureFixture) -> None:
         sl = SafetyLayer(
