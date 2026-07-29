@@ -90,10 +90,20 @@ _EXCLUDED_NAMES = {"LICENSE", "CITATION.cff"}
 # The username arms accept '.' and '-' in the name (jane.doe, first-last would otherwise slip \w),
 # and any on-site *.lu.se subdomain is caught, not only the two-label bare form (a multi-label
 # subdomain host slipped the old pattern). The \b keeps 'value.lu.set'/'menu.lu.select' clean.
+#
+# The last arm is a Windows DRIVE path: it leaks the developer's machine layout even when no user
+# name appears in it, and the \Users\ arm above does not see it (QA-29, where a shipped module
+# docstring carried one for two months). A word character must FOLLOW the separator, which keeps
+# an EPICS DB fixture value like record(bo, "c:\\") clean, and the lookbehind keeps a PV paste
+# form like pva://SEC-SUB:Dev-01 clean (the scheme's 'a:' is preceded by a word character).
+# Deliberately ONE segment, not two: requiring a trailing separator would let 'D:/toolrepo' and
+# 'D:\toolrepo' through, and those leak just as much. Use a POSIX-style placeholder in docs
+# instead of a real Windows example path.
 _SITE_RE = re.compile(
     r"esss?\.lu\.se|\.esss?\b|\.ess\.eu|\.tn\b|\blinac-\d+|\balarm-logger-\d+|\bidmz-|-gw-tn"
     r"|\.lu\.se\b"
-    r"|\\Users\\|/home/[\w.-]+/|/Users/[\w.-]+/",
+    r"|\\Users\\|/home/[\w.-]+/|/Users/[\w.-]+/"
+    r"|(?<!\w)[A-Za-z]:[\\/][\w.-]+",
     re.IGNORECASE,
 )
 # Personal names (case-insensitive): decisions must be attributed impersonally in committed docs.
@@ -252,6 +262,34 @@ def test_no_epics_sandbox_fiction() -> None:
         "EPICS_SANDBOX is a non-existent gate (no Python reads it); the real live opt-in is the "
         f"per-plane EPICS_MCP_* URL/fixture vars. It must not appear in tracked files: {offenders}"
     )
+
+
+def test_denylist_flags_a_windows_drive_path_and_passes_look_alikes() -> None:
+    """QA-29: a local drive path leaks the developer's machine layout, and the ``\\Users\\`` arm
+    never saw one that carries no user name. A shipped module docstring named its source as such a
+    path and survived two months of review plus a full QA pass.
+
+    Every fixture here is INVENTED (see the sibling PV test for the same rule): the offending
+    string was a real local path, so pinning it verbatim would commit the leak into the guard
+    meant to remove it.
+
+    The benign side pins why the arm is written the way it is: a word character must follow the
+    separator, and the lookbehind must reject a URL scheme."""
+    for leak in (
+        "D:/toolrepo/pkg/mod.py",
+        "C:\\dev\\repo\\x.py",
+        "E:/toolrepo",  # a single segment leaks too, so no trailing separator is required
+    ):
+        assert _SITE_RE.search(leak), f"denylist must flag drive path {leak!r}"
+
+    for benign in (
+        'record(bo, "c:\\\\")',  # EPICS DB fixture value: separator, then no word character
+        "pva://SEC-SUB:Dev-01",  # PV paste form: the scheme's 'a:' is preceded by a word character
+        "pvas://SEC-SUB:Dev-01",
+        "http://naming:8080/rest",
+        "https://example.invalid/x",
+    ):
+        assert not _SITE_RE.search(benign), f"denylist must pass {benign!r}"
 
 
 def test_pv_detector_flags_realistic_names_and_passes_synthetic() -> None:

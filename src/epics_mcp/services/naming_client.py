@@ -1,11 +1,12 @@
 """Client for the ESS Naming Service REST API (read-only).
 
-Vendored and slimmed from pvValidator's ``pvValidatorUtils/naming_client.py`` (Alfio
-Rizzo, ESS) so this repo stays standalone, pvValidator itself is Linux/SWIG-only and
-cannot be imported on Windows, but its Naming-Service client is pure Python (``requests``
-+ stdlib). The "Did you mean?"/confusable helpers (which pull in pvValidator's ``rules``) and the
-parts/mnemonic validators (dead code with a fail-open trap, removed in S13) are intentionally
-dropped; only the one read-only call the cross-plane check needs is kept. Endpoint (GET):
+Written for this repository. It follows the API shape of the Naming-Service client in pvValidator
+(GPL-3.0-only) and carries none of its code: this repo stays standalone, and pvValidator itself is
+Linux/SWIG-only and cannot be imported on Windows, while the one call needed here is pure Python
+(``requests`` + stdlib). The "Did you mean?"/confusable helpers (which need that project's
+``rules``) and the parts/mnemonic validators (dead code with a fail-open trap, removed in S13) are
+deliberately absent; only the one read-only call the cross-plane check needs is kept. Endpoint
+(GET):
 
   GET /rest/deviceNames/{name}, check if an ESS device name is registered + status
 """

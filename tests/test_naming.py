@@ -1,4 +1,4 @@
-"""Offline tests for the vendored ESS Naming-Service client (mocked HTTP)."""
+"""Offline tests for the ESS Naming-Service client (mocked HTTP)."""
 
 import json
 from unittest.mock import Mock

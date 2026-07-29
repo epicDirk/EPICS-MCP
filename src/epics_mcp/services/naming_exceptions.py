@@ -1,12 +1,13 @@
 """Exceptions for the ESS Naming Service client.
 
-Vendored (slimmed) from pvValidator's ``pvValidatorUtils/exceptions.py``, only the
-two Naming-Service errors the cross-plane check needs, so this repo stays standalone
-(no pvValidator/SWIG dependency). Source: ``D:/pvValidator/.../exceptions.py``.
+The base error names follow pvValidator's ``exceptions.py``; none of its code is used and it is
+not a dependency here (that project is GPL-3.0-only and Linux/SWIG-only, this repo stays
+standalone).
 
-Derives from the shared :mod:`epics_mcp.services.rest_exceptions` roots like the other three
-REST planes (so ``except RestClientError`` catches every plane, ``except NamingServiceError`` just
-this one).
+All four classes derive from the shared :mod:`epics_mcp.services.rest_exceptions` roots like the
+other three REST planes (so ``except RestClientError`` catches every plane, ``except
+NamingServiceError`` just this one). :class:`NamingServiceNotFound` is this repository's own, added
+for S13.
 """
 
 from epics_mcp.services.rest_exceptions import (

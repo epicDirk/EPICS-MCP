@@ -3,7 +3,7 @@
 **Every entry carries its own measurement date**, and every figure in it is a measurement of the
 tree on that date, not an invariant: this file is markdown, and markdown is unguarded here (that is
 the first entry). Treat a number as "was true when written" and re-measure before building on it.
-Entries 1 to 8 were measured 2026-07-26, entries 9 and 10 on 2026-07-28.
+Entries 1 to 8 were measured 2026-07-26, entries 9 and 10 on 2026-07-28, entry 11 on 2026-07-29.
 
 Why the file exists: the drift guards this repository runs, the prose-counter guard
 (`tests/test_prose_counters.py`, S32), the sham-guard audit (`scripts/guard_audit.py`, S33) and the
@@ -240,7 +240,33 @@ silent), so that list carried four entries that never did anything. Ruff now gua
 and the two single quotes inside `.py` as a second, independent pair of eyes; everything else is
 this guard's job.
 
-## 11 · Prose rules rot, and that includes this page
+## 11 · The Naming-Service client's provenance is a measurement, not an opinion
+
+Measured 2026-07-29. `services/naming_client.py` and `services/naming_exceptions.py` used to
+describe themselves as "vendored" from pvValidator, an unrelated validation tool that is
+**GPL-3.0-only** while this package is MIT. Read on its own, that self-description states a licence
+problem. It was wrong, and the correction is recorded here because a future reader will otherwise
+have to re-derive it from scratch, or worse, act on the wording.
+
+What was measured, on the upstream checkout and on this tree:
+
+- **No contiguous block of code is shared.** Longest identical run of lines, `difflib` over the
+  whole files: `naming_client.py` **four lines, two of them non-blank**, and those two are
+  `import requests` and `from urllib.parse import quote as url_quote`. `naming_exceptions.py`
+  **two lines, one non-blank**, and that one is `"""`.
+- The remaining shared lines are class and method signatures the REST endpoint dictates
+  (`class NamingServiceClient:`, `def names_url(self) -> str:`), which is API shape, not code.
+- The exceptions module is not "slimmed from" anything: upstream derives its errors from its own
+  root, ours derive from `services/rest_exceptions.py` like the other three REST planes, and
+  `NamingServiceNotFound` exists only here (added for S13).
+
+The honest limit: this measurement compares two files at one point in time. It says nothing about
+what a court would say, and it is not a licence review. It is enough to establish that the modules
+were mis-described, which is what the wording now reflects: they follow the API shape of that
+client and carry none of its code. Attribution lives in the README credits, where this repository
+already records origin.
+
+## 12 · Prose rules rot, and that includes this page
 
 `CLAUDE.md` says it about its own conventions and it is true here: nothing runs a markdown file. The
 guard on this page is the review, plus the fact that every entry names the measurement that produced

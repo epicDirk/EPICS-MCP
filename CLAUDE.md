@@ -71,7 +71,8 @@ filesystem path carrying a username. Use synthetic placeholders instead (`SIM:PS
 Transcribe operationally-learned facts **by hand into agnostic form**: never paste raw output, error
 strings (they embed the full request URL), or notes from a live session into a committed file. This is
 enforced by `test_guide.py`'s `test_knowledge_files_are_facility_agnostic` over the committed knowledge
-files: a site/username/person **denylist** repo-wide, plus a **structural device-PV-name detector**
+files: a site/username/person/local-drive-path **denylist** repo-wide, plus a **structural
+device-PV-name detector**
 over the prose/knowledge surface (docs + the operator guide) that flags anything ESS-PV-shaped which
 is not a declared synthetic placeholder. Do not rely on the local commit hook alone: its site patterns
 come from a git-ignored file and are **absent on a fresh CI / public-fork checkout**, so the committed

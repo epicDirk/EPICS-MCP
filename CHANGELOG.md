@@ -66,6 +66,15 @@ carry breaking changes).
   the mgmt port with no error to explain it.
 - **`.env.example` names all four tools the Olog write gate covers**, not two. It was the only
   place that understated the gate's reach.
+- **The Naming-Service modules describe their own origin correctly, and no longer ship a developer
+  path.** Both called themselves "vendored" from pvValidator, which is GPL-3.0-only while this
+  package is MIT, so the wording asserted a licence problem that does not exist: measured with
+  `difflib` over the whole files, the longest identical run of lines is four (two of them non-blank,
+  both imports), and the shared remainder is signatures the REST endpoint dictates. They now say
+  they follow that client's API shape and carry none of its code, the measurement is recorded in
+  the known limits, and attribution sits in the README credits. One of the two also carried an
+  absolute path from the author's machine into the published wheel; that string is gone, and the
+  repo-wide facility guard now rejects a local drive path so it cannot come back.
 - **The operator guide no longer promises an `op=` correlation the refusals cannot honour, and its
   Olog separator table is right about `+`.** The write-posture section said every stage of a
   `set_pv_value` write is `op`-correlated; the id is issued when a write is dispatched, so the two

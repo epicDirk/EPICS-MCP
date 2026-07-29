@@ -233,3 +233,8 @@ Independently developed EPICS MCP server, originally seeded from
 rewritten on [FastMCP](https://github.com/jlowin/fastmcp) and the p4p library, with a
 write-safety layer, batch operations, PV monitoring, cross-plane provenance, and OPI validation
 by epicDirk.
+
+The Naming-Service client was written for this repository and follows the API shape of the client
+in pvValidator (GPL-3.0-only); it carries none of that code, and pvValidator is not a dependency.
+The measurement behind that statement is recorded in
+[known limits](docs/known-limits.md), entry 11.
