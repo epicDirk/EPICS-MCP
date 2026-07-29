@@ -119,22 +119,28 @@ def test_the_link_population_is_not_empty() -> None:
     )
 
 
-def test_the_extractor_sees_nested_and_directory_targets() -> None:
-    """The two shapes a naive pattern misses, pinned to the real lines that carry them.
+def test_the_extractor_sees_the_nested_image_link() -> None:
+    """The one shape a naive pattern misses, pinned to the LINE that carries it.
 
     Without this, someone simplifying ``_LINK_TARGET`` to the textbook ``\\[[^]]*\\]\\(([^)]+)\\)``
-    would silently stop covering both, and every other test here would stay green.
+    would silently stop seeing it, and every other test here would stay green.
+
+    The line number is load-bearing and the earlier value-only form was not. Measured: under the
+    textbook pattern the badge row yields only the image URL (which this guard skips as a URL),
+    while the real pattern also yields ``LICENSE``. But README.md carries a second, ordinary
+    ``[LICENSE](LICENSE)`` further down that BOTH patterns see, so asserting merely that some
+    ``LICENSE`` target exists passes under either one. That is a guard which cannot go red.
+
+    The directory shape is not asserted here. It is not a shape the textbook pattern misses (both
+    extract ``examples/`` identically), it is a RESOLVER case, and it is covered as one in
+    ``test_resolution_rejects_what_it_should``.
     """
     targets = _relative_link_targets()
     readme = {(lineno, target) for source, lineno, target in targets if source == "README.md"}
 
     # The badge row: [![License: MIT](https://img.shields.io/...)](LICENSE)
-    assert any(target == "LICENSE" for _, target in readme), (
+    assert (5, "LICENSE") in readme, (
         "the target of an image-inside-link was not extracted; README.md's badge row carries one"
-    )
-    # A directory target, which is tracked only through its contents.
-    assert any(target == "examples/" for _, target in readme), (
-        "a directory target was not extracted; README.md links to examples/"
     )
 
 
