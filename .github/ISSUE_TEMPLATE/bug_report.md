@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report incorrect behaviour in the EPICS PV MCP server, a tool, or a CLI
+about: Report incorrect behaviour in the EPICS MCP server, a tool, or a CLI
 title: "[bug] "
 labels: bug
 ---

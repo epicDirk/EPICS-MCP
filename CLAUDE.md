@@ -1,4 +1,4 @@
-# CLAUDE.md: EPICS PV MCP Server
+# CLAUDE.md: EPICS MCP
 
 Guidance for an AI assistant (Claude Code and similar) working **in this repository**. It applies to
 every session here, including a fresh one with no other skill or project folder loaded; this repo is

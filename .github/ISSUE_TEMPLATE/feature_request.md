@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest a tool, CLI, or capability for the EPICS PV MCP server
+about: Suggest a tool, CLI, or capability for the EPICS MCP server
 title: "[feature] "
 labels: enhancement
 ---

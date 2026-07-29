@@ -1,4 +1,4 @@
-"""Shared fixtures for EPICS PV MCP tests."""
+"""Shared fixtures for EPICS MCP tests."""
 
 import collections
 import importlib.util

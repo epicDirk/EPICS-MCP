@@ -1,4 +1,4 @@
-"""Configuration for the EPICS PV MCP Server, loaded from environment variables."""
+"""Configuration for the EPICS MCP server, loaded from environment variables."""
 
 import os
 import threading

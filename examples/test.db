@@ -1,9 +1,9 @@
-# Minimal EPICS database for the EPICS PV MCP quick start.
+# Minimal EPICS database for the EPICS MCP quick start.
 # Serve over PVAccess with:  softIocPVA -d test.db
 # Then:                      epics-diagnose TEST:Temperature
 
 record(ai, "TEST:Temperature") {
-    field(DESC, "Example scalar for the EPICS PV MCP quick start")
+    field(DESC, "Example scalar for the EPICS MCP quick start")
     field(VAL, "21.5")
     field(EGU, "C")
     field(PREC, "1")

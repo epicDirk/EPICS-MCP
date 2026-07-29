@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software in published work, please cite it as below."
-title: "EPICS PV MCP Server"
+title: "EPICS MCP"
 abstract: >-
   A read-only Model Context Protocol (MCP) server that gives an AI assistant
   diagnosable access to an EPICS control system: live process-variable values

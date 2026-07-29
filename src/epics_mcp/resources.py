@@ -1,4 +1,4 @@
-"""MCP Resources for the EPICS PV MCP Server."""
+"""MCP Resources for the EPICS MCP server."""
 
 import importlib.resources
 import sys

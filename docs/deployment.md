@@ -1,4 +1,4 @@
-# Deploying the EPICS PV MCP server in your facility
+# Deploying the EPICS MCP server in your facility
 
 This server is **facility-agnostic by design**: every service URL and network setting is an
 `EPICS_MCP_*` environment variable, never a hard-coded site. Deploying it in a new facility means

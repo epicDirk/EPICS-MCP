@@ -1,4 +1,4 @@
-"""Machine-readable error hierarchy for the EPICS PV MCP Server."""
+"""Machine-readable error hierarchy for the EPICS MCP server."""
 
 
 class EpicsError(Exception):

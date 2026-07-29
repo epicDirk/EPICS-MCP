@@ -1,4 +1,4 @@
-"""EPICS PV MCP Server, main entry point."""
+"""EPICS MCP server, main entry point."""
 
 import importlib.util
 import logging

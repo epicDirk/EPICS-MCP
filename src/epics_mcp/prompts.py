@@ -1,4 +1,4 @@
-"""MCP Prompts for the EPICS PV MCP Server."""
+"""MCP Prompts for the EPICS MCP server."""
 
 
 def diagnose_pv(pv_name: str) -> str:

@@ -1,4 +1,4 @@
-# EPICS PV MCP: Operator Guide (`epics-pv://guide`)
+# EPICS MCP: Operator Guide (`epics-pv://guide`)
 
 The operational cookbook for this MCP server: the service landscape, the tricks that are not
 obvious from the tool signatures, and the error signatures that tell you which tool to reach for.

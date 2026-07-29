@@ -1,4 +1,4 @@
-# EPICS PV MCP Server
+# EPICS MCP
 
 [![CI](https://github.com/epicDirk/EPICS-MCP/actions/workflows/ci.yml/badge.svg)](https://github.com/epicDirk/EPICS-MCP/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/epics-mcp.svg)](https://pypi.org/project/epics-mcp/)
@@ -225,7 +225,7 @@ MIT, see [LICENSE](LICENSE).
 
 ## Credits
 
-Independently developed EPICS PV MCP server, originally seeded from
+Independently developed EPICS MCP server, originally seeded from
 [Jacky1-Jiang/EPICS-MCP-Server](https://github.com/Jacky1-Jiang/EPICS-MCP-Server) (MIT) and since
 rewritten on [FastMCP](https://github.com/jlowin/fastmcp) and the p4p library, with a
 write-safety layer, batch operations, PV monitoring, cross-plane provenance, and OPI validation

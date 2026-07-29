@@ -24,6 +24,12 @@ carry breaking changes).
   none: 0.3.0 was this project's first published release of any kind, so no install anywhere can
   carry that command. The four diagnostic commands (`epics-doctor`, `epics-diagnose`,
   `epics-crossplane`, `epics-coverage`) are unaffected.
+- **The product is called EPICS MCP.** The prose name was still "EPICS PV MCP Server" in 19 places,
+  including the README H1 (which is the project page title on the index), the `CITATION.cff` title
+  that published work cites, and the first line of the operator guide that ships in the wheel. The
+  rename to `epics-mcp` in 0.3.0 was made because the PV plane is one of six, so a title saying PV
+  contradicted its own reason. Nothing user-facing behaves differently; the distribution, the
+  commands, the import package and the MCP identity are unchanged.
 - **`epics-doctor` exits 1, not 2, on an internal error.** 2 is the usage-error code across these
   commands and in argparse, so the old value told a wrapper the caller had passed something wrong
   when the command itself had failed. A genuine usage error (an unknown flag) still exits 2.
