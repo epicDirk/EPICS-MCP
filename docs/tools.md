@@ -91,7 +91,8 @@ endpoint. Exit 3 is not a hard failure (the plane's tool endpoints may work) but
 all-clear either. A service that ANSWERS with a *different* known service's name is reported
 `unverified` (exit 0) with the found name in the detail, not a failure, because a path-based
 reverse proxy can serve the real API behind a base URL that names another service (measured). Run
-it first in a new facility to confirm your `.env` (see `docs/deployment.md`).
+it first in a new facility to confirm the environment your launcher hands the server (see
+`docs/deployment.md`).
 
 Each plane is also asked to **name itself**, because reachable is not identified: the transport probe
 counts any HTTP response as reachable, so a URL aimed at the wrong host can look alive (measured: a

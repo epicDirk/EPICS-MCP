@@ -412,8 +412,9 @@ redaction is set to. A disabled plane (empty `*_URL`) is reported honestly, neve
 `2` = a usage error,
 `3` = INCONCLUSIVE, a plane is reachable but its identity probe FAILED (a served non-2xx like a
 401/404, a transport error, or a refused redirect): not a hard failure, but not a silent all-clear
-either. Run it first in a new facility to confirm the `.env`; add `--probe-pv NAME` to also pass/fail
-the live PVA plane against a real PV. Full deployment/config guide: `docs/deployment.md`.
+either. Run it first in a new facility to confirm the environment the launcher handed this process
+(there is no `.env` file: configuration is read from `os.environ`); add `--probe-pv NAME` to also
+pass/fail the live PVA plane against a real PV. Full deployment/config guide: `docs/deployment.md`.
 
 **Reachable is not identified: read the `?` and `!` lines.** The transport probe is a HEAD and
 counts *any* HTTP response as reachable, so a URL pointing at the wrong host can look alive:

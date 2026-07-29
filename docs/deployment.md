@@ -6,13 +6,17 @@ setting those variables for *your* services, with no code change. This guide wal
 `epics-doctor` confirms it for you.
 
 > **Config lives in the environment (the 12-factor equivalent of a CS-Studio `.ini`).** Set the
-> variables in your MCP client's `.mcp.json` `env` block, or in a server-local `.env` file (see
-> `.env.example` for the commented template). There is no separate config-file format to learn.
+> variables in whatever LAUNCHES the server: the `env` block of your MCP client's `.mcp.json`, a
+> systemd unit's `Environment=` / `EnvironmentFile=`, a container spec, or your shell.
+> `.env.example` is a commented REFERENCE of every recognised variable, not a file the server
+> loads. There is no separate config-file format to learn.
 
 ## 1. Quick start
 
-1. Copy `.env.example` to `.env` and set the URLs for the services you have (all are optional: an
-   unset URL disables that plane, with no network call).
+1. Open `.env.example` and copy the lines you need into your launcher, setting the URLs for the
+   services you have (all are optional: an unset URL disables that plane, with no network call).
+   Nothing on disk named `.env` is ever read: the server takes its configuration from the process
+   environment, so a variable that does not reach the process has no effect and says nothing.
 2. If any HTTPS service uses an internal CA, set up the CA bundle (section 3).
 3. Run the self-check:
 
