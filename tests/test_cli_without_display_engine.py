@@ -24,7 +24,11 @@ from pathlib import Path
 
 import pytest
 
-from epics_mcp.cli_common import _report_engine_absent, require_display_engine
+from epics_mcp.cli_common import (
+    _ENGINE_ENTRY_POINT,
+    _report_engine_absent,
+    require_display_engine,
+)
 
 _REPO = Path(__file__).resolve().parents[1]
 _COMMANDS = (
@@ -158,6 +162,39 @@ def engine_present_but_broken(monkeypatch: pytest.MonkeyPatch) -> None:
     present) and fail in CI (engine absent, so the absent branch answered first and the import
     probe was never reached), which is the environment dependence this module's header warns about,
     reintroduced. The everyday cause of this state is a missing transitive dependency.
+
+    The import half is keyed on ``_ENGINE_ENTRY_POINT`` rather than on a literal module name, so
+    moving the probe deeper into the engine cannot silently stop this fixture from biting.
+    """
+    real_find_spec = importlib.util.find_spec
+    real_import_module = importlib.import_module
+
+    def _find_spec(name: str, package: str | None = None) -> object | None:
+        if name == "opi_navigation":
+            return object()  # only tested for "is not None"
+        return real_find_spec(name, package)
+
+    def _import_module(name: str, package: str | None = None) -> object:
+        if name == _ENGINE_ENTRY_POINT:
+            raise ImportError("No module named 'numpy'")
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(importlib.util, "find_spec", _find_spec)
+    monkeypatch.setattr(importlib, "import_module", _import_module)
+
+
+@pytest.fixture
+def engine_top_package_fine_entry_point_broken(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The state a top-package probe cannot see: the package imports, its entry point does not.
+
+    This is not a hypothetical. Measured on the real engine: ``opi_navigation/__init__.py`` is a
+    docstring with no imports in it, so ``import opi_navigation`` executes nothing that a missing
+    transitive dependency could break. An engine in exactly this state answered "usable" to the
+    old probe, and the caller then met the bare ModuleNotFoundError.
+
+    BOTH halves faked, for the reason the fixture above states: the engine is present in this
+    checkout and absent in CI, and a test that asks the environment passes in one and fails in the
+    other. Here the top-package import is faked to SUCCEED, which is the whole point.
     """
     real_find_spec = importlib.util.find_spec
     real_import_module = importlib.import_module
@@ -169,11 +206,51 @@ def engine_present_but_broken(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def _import_module(name: str, package: str | None = None) -> object:
         if name == "opi_navigation":
-            raise ImportError("No module named 'numpy'")
+            return object()  # the docstring-only top package: nothing to fail
+        if name == _ENGINE_ENTRY_POINT:
+            raise ModuleNotFoundError("No module named 'pydantic'")
         return real_import_module(name, package)
 
     monkeypatch.setattr(importlib.util, "find_spec", _find_spec)
     monkeypatch.setattr(importlib, "import_module", _import_module)
+
+
+def test_a_broken_entry_point_behind_a_healthy_top_package_is_reported(
+    engine_top_package_fine_entry_point_broken: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Probing the TOP package proves a directory exists, not that the engine works (QA-14b).
+
+    The top package of this engine is a docstring, so it cannot fail, so a probe that stopped there
+    could only ever answer "usable". Falsified by shadowing the installed engine with a
+    docstring-only package whose submodule imported a missing module: the helper returned None and
+    the caller raised ModuleNotFoundError, which is the outcome the helper exists to prevent.
+
+    Red on the pre-fix probe, which imported ``opi_navigation`` alone: it returned None and wrote
+    nothing, so both assertions below fail.
+    """
+    code = require_display_engine("epics-coverage")
+    message = capsys.readouterr().err
+
+    assert code == 1, "an engine whose entry point will not import is broken, not usable"
+    assert "No module named 'pydantic'" in message  # the real cause, named
+
+
+def test_the_probe_targets_the_module_the_adapter_actually_imports() -> None:
+    """The entry point is only meaningful while it is the module the engine is really used through.
+
+    ``services/inventory_adapter.py`` states that it is the sole importer of the engine, and the
+    probe's affordability argument rests on that being true: one name, not a list of every
+    submodule some CLI happens to need. If the adapter moves to a different module, this goes red
+    instead of the probe quietly guarding the wrong door.
+    """
+    adapter = (_REPO / "src" / "epics_mcp" / "services" / "inventory_adapter.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert f"from {_ENGINE_ENTRY_POINT} import" in adapter, (
+        f"the adapter no longer imports {_ENGINE_ENTRY_POINT}, so the availability probe is "
+        "guarding a module the engine is not reached through any more"
+    )
 
 
 def test_an_installed_but_broken_engine_is_not_reported_as_missing(

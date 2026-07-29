@@ -22,6 +22,13 @@ _USAGE_ERROR = 2
 #: import is something broken (1). QA-14.
 _COMMAND_FAILED = 1
 
+#: The engine module whose import decides "usable", NOT the top package. The top package is a
+#: docstring with no imports, so importing it proves only that a directory of that name exists;
+#: measured, an engine with a missing transitive dependency passed a top-package probe and then
+#: failed in the caller. This is the module ``services/inventory_adapter.py`` imports, and that
+#: file is the only importer of the engine, so one name is enough to make the probe mean something.
+_ENGINE_ENTRY_POINT = "opi_navigation.pv_analysis"
+
 
 def _report_engine_absent(command: str) -> int:
     """The optional capability is not installed: say what still works and how to get the rest."""
@@ -83,11 +90,21 @@ def require_display_engine(command: str) -> int | None:
       failed, with the exception named.
     * usable: ``None``.
 
-    Honest limit: the import probe loads the TOP package. A command reaching into a submodule that
-    alone is broken still meets that failure in the caller. Importing every submodule each CLI
-    happens to need would put this helper's knowledge of them here, which is worse; the common
-    broken-install case (a missing transitive dependency, a package half-written to disk) does
-    surface in the top-level import, and that is what this covers.
+    The probe imports :data:`_ENGINE_ENTRY_POINT`, not the bare top package, and that distinction
+    is the whole value of the check. Measured: this engine's ``__init__.py`` is a docstring with no
+    imports in it, so importing the top package executes nothing that a missing transitive
+    dependency could break. A probe that stopped there answered "usable" for an engine whose
+    submodule could not load, and the caller then met the bare ``ModuleNotFoundError`` this helper
+    exists to prevent.
+
+    Naming ONE submodule is affordable here because there is only one to name:
+    ``services/inventory_adapter.py`` states, and is the only module that does it, that it is the
+    sole importer of the engine, and it imports ``opi_navigation.pv_analysis``. So this does not
+    accumulate a list of every submodule some CLI happens to need, which would indeed be worse.
+
+    Honest limit that remains: a submodule OUTSIDE the probed entry point could still be broken
+    alone, and that failure would surface in the caller. Closing that would mean importing the
+    engine exhaustively, which is not what an availability check is for.
 
     Returns rather than raising, and the caller returns it in turn, so the exit code stays visible
     at the entry point instead of being decided inside a helper.
@@ -106,9 +123,10 @@ def require_display_engine(command: str) -> int | None:
     if not found:
         return _report_engine_absent(command)
     # Found is not the same as usable, and the difference used to surface as a traceback in the
-    # caller. The import is cached, so doing it here costs the caller nothing.
+    # caller. The import is cached, so doing it here costs the caller nothing. It is the ENTRY
+    # POINT that is imported, not the top package: the top package is a docstring and cannot fail.
     try:
-        importlib.import_module("opi_navigation")
+        importlib.import_module(_ENGINE_ENTRY_POINT)
     except Exception as exc:  # noqa: BLE001 (an installed-but-broken engine is a reportable failure)
         return _report_engine_broken(command, exc)
     return None
