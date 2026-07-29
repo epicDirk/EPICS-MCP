@@ -3,7 +3,11 @@
     "epics-pv": {
       "command": "epics-mcp",
       "env": {
-        "EPICS_MCP_PROVIDER": "pva"
+        "EPICS_MCP_PROVIDER": "pva",
+        "EPICS_PVA_AUTO_ADDR_LIST": "NO",
+        "EPICS_CA_AUTO_ADDR_LIST": "NO",
+        "EPICS_PVA_ADDR_LIST": "127.0.0.1",
+        "EPICS_CA_ADDR_LIST": "127.0.0.1"
       }
     }
   }

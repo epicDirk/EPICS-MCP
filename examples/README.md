@@ -26,8 +26,17 @@ assistant to `get_pv_value("TEST:Temperature")`.
 
 ## 2. MCP client config
 
-[`mcp.json`](mcp.json) is a ready-to-use, read-only, localhost configuration. Drop its
-`mcpServers` entry into your `.mcp.json` or `claude_desktop_config.json`.
+[`mcp.json`](mcp.json) is a ready-to-use, read-only configuration, confined to localhost to match
+the local `softIocPVA` above. Drop its `mcpServers` entry into your `.mcp.json` or
+`claude_desktop_config.json`.
+
+The confinement is the four `EPICS_*ADDR_LIST` settings, not the absence of configuration: EPICS
+defaults the auto-address search to **ON**, so leaving them out would broadcast PV searches into
+your local subnets. Drop them when you point this at a real IOC.
+
+`epics-doctor` reports this as `search paths: EPICS_PVA_ADDR_LIST (127.0.0.1); ...` rather than
+`localhost-isolated`, and that is correct: it reserves the latter for a server that searches
+**nowhere at all** (no list set, auto search off), which would not find the `softIocPVA` above.
 
 ## 3. A sample display (optional, only if you use Phoebus / CS-Studio)
 

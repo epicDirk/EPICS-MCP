@@ -16,9 +16,11 @@ What tool, CLI flag, resource, or plane would help, and roughly what it should r
 ## Read-only / safety note
 
 This server reads by default and mutates only through a gate: `set_pv_value` is triple-gated, and
-the Olog logbook writes sit behind their own separate gate. It reaches nothing until a launcher
-configures the EPICS address lists / service URLs. If your request involves writes or reaching a
-non-local endpoint, please say so explicitly and describe the safety posture you expect.
+the Olog logbook writes sit behind their own separate gate. The REST planes stay dark until a
+launcher sets their `*_URL`; the PV plane does not, because EPICS defaults the auto-address search
+to ON, so an unconfigured launcher still broadcasts PV searches into the local subnets. If your
+request involves writes or reaching a non-local endpoint, please say so explicitly and describe the
+safety posture you expect.
 
 ## Alternatives considered
 
