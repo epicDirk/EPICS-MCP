@@ -71,10 +71,14 @@ def test_check_reports_a_deviating_pin_by_name_and_exits_one(
     assert "COVERAGE_CORE=ctrace" not in reported
 
 
-def test_check_with_a_database_compares_all_four_pins(
+def test_check_with_a_database_compares_the_coverage_pins_too(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The expensive half is exercised too, and it did not need the expensive input to be.
+
+    Named for WHICH pins it reaches, not for how many there are. It used to say "all four", which
+    QA-19 turned into a false claim the moment the services-side pins joined the cheap pair: a test
+    name is an assertion like any other, and a count in one is a figure nothing derives.
 
     The first version of this module skipped it, arguing that a coverage map costs a full ctrace
     suite run. That conflates RECORDING a real map with driving the code that CONSUMES one. Left
@@ -277,3 +281,101 @@ def test_reporting_mode_still_demands_a_database(capsys: pytest.CaptureFixture[s
         guard_audit.main(["guard_audit.py", "sham"])
     assert exit_info.value.code == 2
     assert "the following arguments are required: --coverage-db" in capsys.readouterr().err
+
+
+def _services_holding(only: int, into: Path) -> Path:
+    """A stand-in services directory carrying the FIRST *only* real client modules, verbatim.
+
+    Copies rather than synthesises, so the guard sites in it are the repository's own and the
+    figures the audit derives from them are real ones, just fewer.
+    """
+    kept = guard_audit.client_modules()[:only]
+    assert len(kept) == only, (
+        f"the real services directory holds {len(guard_audit.client_modules())} client modules, "
+        f"so a stand-in of {only} cannot be built; this test's arithmetic assumes it can"
+    )
+    into.mkdir()
+    for path in kept:
+        (into / path.name).write_bytes(path.read_bytes())
+    return into
+
+
+def test_check_notices_a_services_side_that_shrank(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """QA-19: what the audit AUDITS is a claim, and it is now compared like one.
+
+    Every figure ``--check`` compared before this was read off the TEST tree, through
+    ``claiming_tests()``. Nothing it compared could disagree with ``_SERVICES``, so an audit
+    pointed at a services directory that had shrunk or moved printed "all agree with the recorded
+    audit" and exited 0 while auditing a fraction of the code it names. That is the sham this whole
+    file exists to make impossible, inside the tool itself.
+
+    Red on the pre-fix tool: with only the two test-side pins recorded, the run below exits 0.
+    """
+    monkeypatch.setattr(guard_audit, "_SERVICES", _services_holding(2, tmp_path / "shrunken"))
+
+    assert guard_audit.main(_ARGV) == 1
+    reported = capsys.readouterr().err
+    assert "PIN DEVIATION" in reported
+    # Both halves of the services side, each with the figure actually measured off the stand-in.
+    # Asserting only that the pin's NAME appears would also be satisfied by the "NOT checked here"
+    # list, which prints every pin nothing measured. The two sections are told apart by their
+    # shape, "name: pinned N, measured M" against "name (pinned N): reason", so the whole line is
+    # what is asserted here.
+    measured_targets = len(guard_audit.enumerate_targets())
+    assert measured_targets < guard_audit.PINNED[guard_audit.GUARD_TARGETS], (
+        "the stand-in must carry fewer guard sites than the real tree, or this proves nothing"
+    )
+    for name, measured in (
+        (guard_audit.CLIENT_MODULES, 2),
+        (guard_audit.GUARD_TARGETS, measured_targets),
+    ):
+        line = f"{name}: pinned {guard_audit.PINNED[name]}, measured {measured}"
+        assert line in reported, f"the deviating pin must name both figures: {line!r}"
+    # The CHEAP recipe, because a population is re-measured in a second.
+    assert "COVERAGE_CORE=ctrace" not in reported
+
+
+def test_check_refuses_an_empty_services_side_rather_than_agreeing(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An empty population is a broken path, not different code, and it says so in its own words.
+
+    The pins above already make emptiness DEVIATE. That is not enough on its own: a deviation
+    reports "the recorded audit describes different code now" and sends the reader to re-judge a
+    verdict and re-record figures, which for a path that resolves to nothing is the wrong
+    instruction and would bake a zero into the pins. So emptiness is refused before any comparison,
+    and the exit code separates it (2, the code a blind map already uses) from a real deviation (1).
+    """
+    empty = tmp_path / "no-services"
+    empty.mkdir()
+    monkeypatch.setattr(guard_audit, "_SERVICES", empty)
+
+    assert guard_audit.main(_ARGV) == 2
+    reported = capsys.readouterr().err
+    assert "REFUSING TO AUDIT" in reported
+    assert "no *_client.py under" in reported
+    assert "all agree" not in reported, "an empty population must never read as agreement"
+    assert "PIN DEVIATION" not in reported, "nothing was compared, so nothing may be reported as it"
+
+
+def test_sweep_refuses_an_empty_services_side_before_it_opens_the_map(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Direction A has the same hole, and it is the quieter one.
+
+    A sweep with nothing to mutate finds nothing unobserved and prints an empty result table, which
+    reads as a clean bill of health for every guard in the repository. The refusal sits BEFORE
+    ``load_coverage_map`` so it is reached without a database at all: the path handed in below does
+    not exist, and a run that got as far as opening it would fail for the wrong reason.
+    """
+    empty = tmp_path / "no-services"
+    empty.mkdir()
+    monkeypatch.setattr(guard_audit, "_SERVICES", empty)
+
+    argv = ["guard_audit.py", "sweep", "--coverage-db", str(tmp_path / "absent")]
+    assert guard_audit.main(argv) == 2
+    reported = capsys.readouterr().err
+    assert "REFUSING TO SWEEP" in reported
+    assert "empty coverage map" not in reported, "the map must not have been opened at all"

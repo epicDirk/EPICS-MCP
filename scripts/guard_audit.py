@@ -334,8 +334,21 @@ DOUBLES = "tests installing a client class double in their own body"
 EDGE_VOCABULARY = "of those, carrying payload vocabulary"
 NOT_EXECUTING = "of those, never executing a client-edge line"
 SHAM_CANDIDATES = "and claiming something about the ANSWERED payload"
+# The SERVICES side of the audit, and the reason it is pinned at all (QA-19). Every figure above
+# is read off the TEST tree, so ``sham --check`` without a database compared nothing that
+# ``_SERVICES`` controls. An audit pointed at a services directory that had shrunk, or moved,
+# therefore printed "all agree with the recorded audit" and exited 0 while auditing a fraction of
+# the code, or none of it: the two figures it did compare cannot disagree with the services side.
+# A population is a claim like any other, so it is recorded like one.
+CLIENT_MODULES = "client modules whose edges this audit covers"
+GUARD_TARGETS = "mutable guard sites the audit can address in them"
 
-PINNED_AST: dict[str, int] = {DOUBLES: 103, EDGE_VOCABULARY: 21}
+PINNED_AST: dict[str, int] = {
+    DOUBLES: 103,
+    EDGE_VOCABULARY: 21,
+    CLIENT_MODULES: 6,
+    GUARD_TARGETS: 93,
+}
 PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 103, SHAM_CANDIDATES: 21}
 PINNED: dict[str, int] = {**PINNED_AST, **PINNED_COVERAGE}
 
@@ -450,12 +463,38 @@ def cmd_targets(_args: argparse.Namespace) -> int:
 
 
 def population() -> dict[str, int]:
-    """The two figures direction B can state WITHOUT a coverage map, from this file's AST alone."""
+    """The four figures direction B can state WITHOUT a coverage map, from the ASTs alone.
+
+    Two describe the TEST side (which tests install a client double) and two the SERVICES side
+    (what there is to audit at all). Both halves are needed, and only the first half existed:
+    with the test-side pair alone, ``--check`` compared nothing that ``_SERVICES`` controls and so
+    could not contradict an audit pointed at a services directory that had shrunk or moved.
+    """
     claiming = claiming_tests()
     return {
         DOUBLES: sum(len(entries) for entries in claiming.values()),
         EDGE_VOCABULARY: sum(1 for entries in claiming.values() for _n, edge in entries if edge),
+        CLIENT_MODULES: len(client_modules()),
+        GUARD_TARGETS: len(enumerate_targets()),
     }
+
+
+def services_side_anchor() -> str | None:
+    """Name the way the SERVICES side can be broken rather than merely different, else ``None``.
+
+    The pins above already make a SHRUNKEN population deviate, which is what QA-19 asked for. An
+    EMPTY one deviates as well, but a deviation says "the recorded audit describes different code
+    now" and sends the reader to re-judge a verdict and re-record figures. For a path that resolves
+    to nothing that is exactly the wrong instruction: no code changed, the tool lost its subject.
+    So emptiness is refused in its own words BEFORE any comparison, the same shape the caller of
+    ``load_coverage_map`` already uses for a blind map.
+    """
+    modules = client_modules()
+    if not modules:
+        return f"no *_client.py under {_SERVICES}"
+    if not enumerate_targets():
+        return f"{len(modules)} client module(s) under {_SERVICES}, but not one guard site in them"
+    return None
 
 
 def _compare(measured: dict[str, int]) -> int:
@@ -506,6 +545,10 @@ def _compare(measured: dict[str, int]) -> int:
 
 def cmd_sham(args: argparse.Namespace) -> int:
     """Direction B: tests that claim a client-edge guard but never execute one."""
+    broken = services_side_anchor()
+    if broken is not None:
+        sys.stderr.write(f"REFUSING TO AUDIT: {broken}. The audit anchor broke.\n")
+        return 2
     # The AST half runs FIRST and unconditionally. It needs no coverage map, and putting it after
     # the map would make ``--check`` without a database dereference a missing path and die with a
     # TypeError, i.e. exit 1, indistinguishable from "a pin deviates", which is the one thing exit 1
@@ -648,6 +691,12 @@ def classify(exit_code: int, output: str, expected_passed: int) -> str:
 
 def cmd_sweep(args: argparse.Namespace) -> int:
     """Direction A: mutate each guard in both polarities and record what, if anything, notices."""
+    # Before the map, because it is the cheaper and the more fundamental brokenness: a sweep with
+    # nothing to mutate finds nothing unobserved and reads as a clean bill of health.
+    broken = services_side_anchor()
+    if broken is not None:
+        sys.stderr.write(f"REFUSING TO SWEEP: {broken}. The audit anchor broke.\n")
+        return 2
     covering = load_coverage_map(Path(args.coverage_db))
     if not covering:
         sys.stderr.write("empty coverage map: refusing to sweep against a blind map\n")
