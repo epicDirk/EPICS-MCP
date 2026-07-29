@@ -1,7 +1,8 @@
 """CLI for the read-only config self-check (``epics-doctor``).
 
 Probes every CONFIGURED plane (a transport probe, refined on success by an identity probe, up to
-two requests for a healthy plane; retries on a 5xx add more) and prints whether it is reachable,
+two requests for a healthy plane, THREE on the archiver, whose identified appliance is also asked
+whether it is ingesting; retries on a 5xx add more) and prints whether it is reachable,
 whether the CA bundle works, whether the service **identifies itself as the one that URL is
 supposed to point at**, and what the ChannelFinder privacy redaction is set to, the ``flutter
 doctor`` of this server. Read-only, it probes, never writes, and it touches exactly the planes
@@ -10,8 +11,9 @@ that are CONFIGURED (a disabled plane makes no network call).
 Exit code (a DELIBERATE convention, unlike the other CLIs where a finding is exit 0, doctor is
 a scriptable pass/fail):
 
-* ``0``: nothing failed and no identity probe failed (healthy, honestly disabled/info-only, or
-  reachable with its identity ``unverified``, a 2xx that just could not be named);
+* ``0``: nothing failed and no identity probe failed (healthy, honestly disabled/info-only,
+  reachable with its identity ``unverified``, a 2xx that just could not be named, or ``no_ingest``,
+  identity proven but the service is not doing its job, which is a finding and not a failure);
 * ``1``: a configured plane HARD-failed (unreachable / ca_error / api_error / config_error /
   backend_down / probe-disconnect);
 * ``2``: a usage error (bad arguments, or an internal EpicsError);
@@ -26,9 +28,11 @@ The exit code relates to ``--json`` as: ``0`` = ``ok`` ∧ no ``inconclusive_ide
 ⚠️ Exit ``0`` means "nothing failed", NOT "everything was confirmed": a plane can be reachable with
 its identity unverified and still exit 0 (that is honest, not healthy, see ``doctor.py``). A
 machine reader must therefore look at ``verification_complete`` / ``unverified_planes`` /
-``inconclusive_identity_planes`` in ``--json``, not only at the exit code, and for POSITIVE
-confirmation assert ``identified_planes`` is non-empty (``verification_complete`` is vacuously true
-on an empty config).
+``inconclusive_identity_planes`` / ``degraded_planes`` in ``--json``, not only at the exit code,
+and for POSITIVE confirmation assert ``identified_planes`` is non-empty (``verification_complete``
+is vacuously true on an empty config). ``degraded_planes`` is the one none of the others covers: a
+plane there proved its identity and is measurably not doing its job, so it appears IN
+``identified_planes``, leaves ``ok`` and ``verification_complete`` True, and exits 0.
 
 Usage::
 
@@ -47,15 +51,18 @@ from epics_mcp.cli_common import configure_stdout, positive_timeout
 from epics_mcp.errors import EpicsError
 from epics_mcp.services.doctor import DoctorReport, run_doctor
 
-#: One glyph per status for the human-readable render (deterministic). ``unverified`` and
-#: ``identity_probe_failed`` get their own marks rather than borrowing ✓ or ✗: they are neither
-#: "confirmed" nor "broken", and the whole point of those states is that both were being conflated:
-#: ``?`` = answered 2xx but not nameable (exit 0), ``!`` = the identity probe failed (exit 3).
+#: One glyph per status for the human-readable render (deterministic). Three statuses get their
+#: own marks rather than borrowing ✓ or ✗, because none of them is "confirmed" or "broken", and
+#: each was previously conflated with one of those: ``?`` = answered 2xx but not nameable (exit 0),
+#: ``!`` = the identity probe failed (exit 3), ``~`` = identity IS proven and the service is
+#: reachable, but it is not doing its job (exit 0, the archiver that archives nothing). ``~`` is
+#: deliberately not ``?``: that one means "we could not tell what this is", and here we can.
 _STATUS_MARK = {
     "ok": "✓",
     "disabled": "·",
     "info": "i",
     "unverified": "?",
+    "no_ingest": "~",
     "identity_probe_failed": "!",
     "config_error": "✗",
     "ca_error": "✗",
@@ -127,6 +134,19 @@ def _render(report: DoctorReport) -> str:
             f"INCONCLUSIVE, {n} identity probe(s) FAILED (reachable, but the identity endpoint "
             f"did not return a usable response): {planes}{also}. Not a confirmed failure, but not "
             "confirmed healthy, see the '!' lines above."
+        )
+    elif report.degraded_planes:
+        # A degraded plane is exit 0 and leaves verification_complete True, so without this branch
+        # the run would print the tool's STRONGEST confirmation ("answered AS ITSELF") directly
+        # under a "~" line saying the appliance archives nothing. That is the S4 lie in a new
+        # costume: the sentence would be literally true (it did answer as itself) and would still
+        # tell the operator the opposite of what the report above says. The verdict word changes;
+        # the exit code does not (_exit_category is untouched, this stays "clean" -> 0).
+        planes = ", ".join(report.degraded_planes)
+        n = len(report.degraded_planes)
+        verdict = (
+            f"OK, nothing failed, but {n} plane(s) proved their identity and are NOT doing their "
+            f"job: {planes}. Reachable and confirmed is not working; see the '~' lines above."
         )
     elif report.verification_complete:
         # verification_complete is "no plane unverified or inconclusive", vacuously true when

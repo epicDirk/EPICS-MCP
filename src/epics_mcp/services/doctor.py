@@ -1,7 +1,8 @@
 """Read-only config self-check ("doctor"), is this deployment wired up correctly? (E2)
 
 ``run_doctor`` probes every CONFIGURED plane read-only, a transport probe, refined on success by
-an identity probe, so a healthy plane answers up to TWO requests, and reports whether it is
+an identity probe, so a healthy plane answers up to TWO requests (THREE on the archiver, whose
+identified appliance is also asked whether it is actually ingesting), and reports whether it is
 reachable, whether the CA bundle works, whether the service **identifies itself as the service we
 configured**, and what the ChannelFinder privacy redaction is set to. It is the ``flutter doctor``
 of this server: a new user in a fresh facility runs ``epics-doctor`` and gets an immediate "is my
@@ -73,6 +74,7 @@ PlaneStatus = Literal[
     "disabled",
     "info",
     "unverified",
+    "no_ingest",
     "identity_probe_failed",
     "config_error",
     "ca_error",
@@ -99,7 +101,18 @@ PlaneStatus = Literal[
 #: (a served non-2xx, a transport error, a refused redirect) is NOT here, it is
 #: ``identity_probe_failed``, which the exit code notices. It is all reported honestly, and
 #: ``DoctorReport.verification_complete`` tells a machine reader identity was not established.
-_NON_FAILING_STATUSES: frozenset[str] = frozenset({"ok", "disabled", "info", "unverified"})
+#:
+#: ``no_ingest`` is here by an explicit product decision, not by default: an archiver appliance
+#: that is reachable, named itself, and is archiving NOTHING is a real finding, but it is not a
+#: broken configuration. A site that has just stood an appliance up, or paused every channel,
+#: is in exactly this state legitimately, and a hard failure would make ``epics-doctor`` cry wolf
+#: in every CI job that runs it. It is reported honestly instead: its own glyph, its own verdict
+#: line, and its own report field (``degraded_planes``), so nothing about it is silent, while the
+#: exit code stays 0 for every existing caller. Contrast ``backend_down``, which IS a failure: an
+#: alarm logger with a dead Elasticsearch cannot serve its tools at all.
+_NON_FAILING_STATUSES: frozenset[str] = frozenset(
+    {"ok", "disabled", "info", "unverified", "no_ingest"}
+)
 
 #: Reachable, but the identity probe itself FAILED, a served non-2xx (401/404/5xx), a transport
 #: error, or a refused redirect on the identity endpoint, as opposed to ``unverified``, where the
@@ -124,6 +137,16 @@ _INCONCLUSIVE_STATUSES: frozenset[str] = frozenset({"identity_probe_failed"})
 _FAILING_STATUSES: frozenset[str] = frozenset(
     {"config_error", "ca_error", "api_error", "unreachable", "disconnected", "backend_down"}
 )
+
+#: Not a failure (exit 0), but not healthy either: the plane answered, PROVED its identity, and is
+#: measurably not doing its job. A strict subset of :data:`_NON_FAILING_STATUSES`, surfaced in its
+#: own report field (``degraded_planes``) for one measured reason: every signal this tool's own
+#: documentation tells scripts to read stays clean for such a plane. ``ok`` is True,
+#: ``verification_complete`` is True, ``unverified_planes`` and ``inconclusive_identity_planes`` are
+#: empty, and ``identified_planes`` even lists it, since its identity IS proven. Without a field of
+#: its own a machine reader would have to walk ``planes[].status``, which no documentation asks for.
+#: A set rather than an equality test so a future degraded status is carried automatically.
+_DEGRADED_STATUSES: frozenset[str] = frozenset({"no_ingest"})
 
 
 class _Model(BaseModel):
@@ -172,8 +195,9 @@ class DoctorReport(_Model):
     #: True iff no configured plane HARD-FAILED (nothing in ``_FAILING_STATUSES``). Note what this
     #: does NOT say: a plane can be reachable with its identity ``unverified`` (still exit 0) OR its
     #: identity probe ``identity_probe_failed`` (exit 3) and still leave ``ok`` True, ``ok`` alone
-    #: does not map to the exit code. Read ``inconclusive_identity_planes`` (exit 3 driver) and
-    #: ``verification_complete`` before treating this as "everything is confirmed".
+    #: does not map to the exit code. Read ``inconclusive_identity_planes`` (exit 3 driver),
+    #: ``degraded_planes`` (proven, reachable, not doing its job) and ``verification_complete``
+    #: before treating this as "everything is confirmed".
     ok: bool
     #: True iff no configured plane was left ``unverified`` AND none had its identity probe fail
     #: (``inconclusive_identity_planes`` empty). ⚠️ This is NOT "every configured plane's identity
@@ -185,7 +209,16 @@ class DoctorReport(_Model):
     #: "everything is confirmed", exactly the conflation this whole check exists to remove.
     #: ⚠️ Vacuously True when nothing ran an identity probe at all (e.g. an empty config), a reader
     #: wanting POSITIVE confirmation asserts ``identified_planes`` is non-empty, not this flag.
+    #: ⚠️ It says nothing about whether an identified plane WORKS: a plane in ``degraded_planes``
+    #: proved its identity, so it leaves this flag True while being measurably broken at its job.
     verification_complete: bool
+    #: The planes that answered, PROVED their identity, and are measurably NOT DOING THEIR JOB, e.g.
+    #: an archiver appliance holding channels with none connected (empty when none). Honest, not a
+    #: failure: ``ok`` stays True and the exit code stays 0, deliberately, because such a state is
+    #: legitimate on a freshly commissioned site. ⚠️ No other field shows it. A degraded plane is
+    #: NOT in ``unverified_planes`` (its identity is proven) and IS in ``identified_planes``, so
+    #: neither of those substitutes for reading this one.
+    degraded_planes: list[str]
     #: The planes that ANSWERED 2xx but could not prove their identity, anonymous, an unreadable
     #: body, or a foreign name (empty when none). Honest, not a failure → exit 0.
     unverified_planes: list[str]
@@ -197,6 +230,9 @@ class DoctorReport(_Model):
     #: The planes that PROVED their identity, the positive counterpart to ``unverified_planes``.
     #: Empty on an empty config, which is how a machine reader tells "everything was confirmed"
     #: from "nothing ran at all" (``verification_complete`` is vacuously True in both).
+    #: ⚠️ "Identified" is not "healthy": a plane in ``degraded_planes`` is listed HERE too, because
+    #: it did name itself. Reading this list alone would count a non-archiving archiver as
+    #: positively confirmed.
     identified_planes: list[str]
 
 
@@ -517,6 +553,176 @@ async def _check_channelfinder(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
     return await _run_probe("channelfinder", _run, _id)
 
 
+#: The exact ``status`` an appliance reports when all three of its own webapps answered. Measured
+#: in the appliance source (``ApplianceMetrics.java``): the field is set to this literal only when
+#: engine AND etl AND retrieval replied, and to a ``"Stopped - <what>"`` string otherwise. The
+#: match is EXACT for the same reason the service names are: anything that is not this sentinel is,
+#: by construction, a failure string. Live n=17 (1 sandbox + 16 production rows): all ``"Working"``.
+_ARCHIVER_WORKING = "Working"
+
+#: Floor for the ingest probe's timeout. ``getApplianceMetrics`` is not a cheap read: the appliance
+#: fans out to three internal requests PER cluster member, which measured 7.3 s against a 16-member
+#: production cluster versus 0.03 s for ``getApplianceInfo``. At the plane's configured timeout
+#: (5.0 s by default) a perfectly healthy cluster would always land in "not measured".
+_ARCHIVER_METRICS_MIN_TIMEOUT = 15.0
+
+
+def _archiver_verdict(identity: str, note: str, *, ingesting: bool) -> PlaneCheck:
+    """The archiver plane's final verdict. Identity is proven either way, only ingest differs.
+
+    ``identified`` stays True in both branches, the same call ``_backend_down`` makes: the appliance
+    DID name itself, what is in question is whether it archives. The identity therefore stays in the
+    detail line in both branches, because it is this plane's identifying evidence.
+    """
+    return PlaneCheck(
+        plane="archiver",
+        configured=True,
+        reachable=True,
+        ca_ok=True,
+        status="ok" if ingesting else "no_ingest",
+        identified=True,
+        detail=f"appliance identity: {identity}; {note}",
+    )
+
+
+def _archiver_metrics_row(payload: object, identity: str) -> dict[str, object] | None:
+    """Pick the ``getApplianceMetrics`` row belonging to the appliance we just identified.
+
+    The body is a LIST, one row per cluster member, and a multi-member cluster is the PRODUCTION
+    NORM rather than the exception (measured 2026-07-29: 16 rows against the configured production
+    cluster, 1 against the local sandbox). Every row names itself in ``instance``, carrying exactly
+    the ``identity`` that ``getApplianceInfo`` reported (verified on both, n=2).
+
+    Matched by NAME, never by position, and that holds for a single-row body too: a lone row from a
+    FOREIGN appliance would otherwise be read as ours, which is the same confusion the identity
+    probe's ``allow_redirects=False`` rules out one layer up. No unambiguous match returns ``None``,
+    which the caller maps to "not measured", never to a finding.
+    """
+    if not isinstance(payload, list):
+        return None
+    matches = [row for row in payload if isinstance(row, dict) and row.get("instance") == identity]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _archiver_count(row: dict[str, object], field: str) -> int | None:
+    """Read one COUNT field of a metrics row as an int; ``None`` when it is not readable.
+
+    Every value in this payload is a string, but they are not all the same KIND of string: the
+    count fields are plain digit runs (``pvCount="234527"``), while the rate fields are LOCALE
+    formatted (``eventRate="15,431.54"``, measured on all 16 production rows; the appliance builds
+    them with a grouping ``DecimalFormat``). Only counts are parsed here. Rates are quoted verbatim
+    and never parsed, because ``float("15,431.54")`` raises and there is nothing to gain by it.
+    """
+    raw = row.get(field)
+    if isinstance(raw, bool) or not isinstance(raw, (str, int)):
+        return None
+    try:
+        return int(str(raw).strip())
+    except ValueError:
+        return None
+
+
+def _archiver_figures(row: dict[str, object]) -> str:
+    """The ingest figures of one metrics row, for the detail line.
+
+    A missing field is named as ``absent`` rather than dropped: an ABSENT connection count is
+    itself the engine-failure signal (the counts are produced by the engine webapp and merged in
+    by mgmt, so a failed merge makes them vanish while ``pvCount`` survives), and a detail line
+    that silently omitted them would hide exactly the state the operator needs to see.
+    """
+    parts = [
+        f"{field}={value if value is not None else 'absent'}"
+        for field, value in (
+            (name, _archiver_count(row, name))
+            for name in ("pvCount", "connectedPVCount", "disconnectedPVCount")
+        )
+    ]
+    rate = row.get("eventRate")
+    parts.append(f"eventRate={rate}" if isinstance(rate, str) else "eventRate=absent")
+    return ", ".join(parts)
+
+
+def _archiver_ingest_verdict(
+    base_url: str, auth_header: str | None, timeout: float, identity: str
+) -> PlaneCheck:
+    """Ask the identified appliance whether it is actually INGESTING, and build the final verdict.
+
+    Why this exists: ``getApplianceInfo`` proves that an Archiver appliance is answering, and
+    nothing more. An appliance whose engine has never spoken to its IOCs answers it exactly like a
+    healthy one, so ``epics-doctor`` printed ``ok`` for a deployment that was archiving nothing.
+    That is a WIRING fault, the very class this tool exists to catch. Measured on the local sandbox
+    (2026-07-29): identity ``appliance0`` while all five archived PVs carried
+    ``lastEvent: "Never"``, ``connectionFirstEstablished: "Never"`` and ``eventRate: 0.0``.
+
+    Two signals, either one is enough:
+
+    * ``pvCount > 0`` with ``connectedPVCount == 0``, the appliance holds channels and has none
+      connected. The threshold is exactly zero, not a ratio: on the production cluster
+      ``disconnectedPVCount`` sits between 111 and 8939 in NORMAL operation (16/16 rows, all
+      reporting ``"Working"``), so any percentage threshold would fire there permanently.
+    * ``status`` present and not :data:`_ARCHIVER_WORKING`, the appliance's own report that one of
+      its webapps is down. This is the worse fault and it is INVISIBLE to the counts: when the
+      engine webapp fails to answer, mgmt cannot merge its numbers, so the connection counts vanish
+      from the row entirely while ``pvCount`` survives, and the payload is still served as HTTP 200.
+      Without this arm the guard could never fire in the worst state an archiver can be in.
+
+    ``eventRate`` is deliberately NOT a condition, only context in the detail. It is too small a
+    signal for slowly scanned PVs, and too large a one because the appliance accumulates it as a
+    running mean that does not drop to zero when connections are lost.
+
+    TOTAL, like the identity fetch before it: any failure to reach, read or match the metrics
+    leaves the plane ``ok``. Two reasons. This REFINES a verdict that already stands, so an older
+    appliance without this route must not fail a plane whose identity is proven. And on a real
+    cluster this is the branch that actually fires, since the route fans out to three internal
+    requests per member and can legitimately time out. What a failure does NOT do is pass silently:
+    the reason travels in ``detail``, so "measured and ingesting" is never indistinguishable from
+    "never measured".
+
+    Scope, stated because a cluster invites the wrong reading: these figures describe the member
+    named by *identity* ONLY. A cluster is retrieval-aware, so a query to one member returns data
+    physically owned by another, but ingest is per member. The detail line says so.
+    """
+    payload = _fetch_beacon(
+        f"{base_url}/mgmt/bpl/getApplianceMetrics",
+        auth_header,
+        max(timeout, _ARCHIVER_METRICS_MIN_TIMEOUT),
+        retries=0,
+    )
+    if isinstance(payload, Exception):
+        return _archiver_verdict(
+            identity, f"ingest not measured: {_safe(str(payload))}", ingesting=True
+        )
+    row = _archiver_metrics_row(payload, identity)
+    if row is None:
+        return _archiver_verdict(
+            identity,
+            "ingest not measured: getApplianceMetrics returned no unambiguous row for this "
+            "appliance",
+            ingesting=True,
+        )
+
+    figures = f"{_archiver_figures(row)} (this member only)"
+    status = row.get("status")
+    if isinstance(status, str) and status.strip() and status != _ARCHIVER_WORKING:
+        return _archiver_verdict(
+            identity,
+            f"the appliance reports status={status.strip()!r}, so one of its own webapps is down "
+            f"and it is not archiving: {figures}",
+            ingesting=False,
+        )
+
+    held = _archiver_count(row, "pvCount")
+    connected = _archiver_count(row, "connectedPVCount")
+    if held is not None and connected is not None and held > 0 and connected == 0:
+        return _archiver_verdict(
+            identity,
+            f"it holds {held} PV(s) and has none connected, so nothing is being archived: "
+            f"{figures}",
+            ingesting=False,
+        )
+    return _archiver_verdict(identity, f"ingesting: {figures}", ingesting=True)
+
+
 def _identify_archiver(base_url: str, auth_header: str | None, timeout: float) -> PlaneCheck:
     """The appliance names itself in ``getApplianceInfo``, but only if we look at the body.
 
@@ -524,6 +730,11 @@ def _identify_archiver(base_url: str, auth_header: str | None, timeout: float) -
     ``/mgmt/bpl/getApplianceInfo`` (stronger than the HEAD planes), yet it DISCARDS the payload:
     an empty ``{}`` passes. The appliance's own ``identity`` field is what turns "something served
     JSON here" into "an Archiver appliance served it", so it is checked rather than assumed.
+
+    Once the appliance IS named, :func:`_archiver_ingest_verdict` asks whether it is actually
+    archiving, the way the alarm plane reads ``elastic.status`` out of its beacon. The difference
+    from the alarm case, and the reason it costs something: that answer lives on a SECOND route,
+    so a healthy archiver plane now answers three requests rather than two.
 
     The fetch goes through :func:`_fetch_beacon` like every other identity probe. This plane used
     to build its own session inline, which made that function's "the one place every identity
@@ -540,15 +751,7 @@ def _identify_archiver(base_url: str, auth_header: str | None, timeout: float) -
             "transport reachable, but getApplianceInfo carries no 'identity', this may not be an "
             "Archiver appliance MGMT endpoint",
         )
-    return PlaneCheck(
-        plane="archiver",
-        configured=True,
-        reachable=True,
-        ca_ok=True,
-        status="ok",
-        identified=True,
-        detail=f"appliance identity: {identity}",
-    )
+    return _archiver_ingest_verdict(base_url, auth_header, timeout, identity)
 
 
 async def _check_archiver(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
@@ -900,9 +1103,10 @@ async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = Non
     disabled plane makes NO network call, and no plane is touched unless its URL (or the EPICS
     address list, for ``probe_pv``) points there, which, on a configured deployment, may well be a
     real facility. ``ok`` is True iff no configured plane HARD-FAILED, a disabled/info plane never
-    fails the check, and neither does an ``unverified`` (exit 0) nor an ``identity_probe_failed``
-    (exit 3) one, so read ``inconclusive_identity_planes`` and ``verification_complete`` alongside
-    ``ok`` before concluding that everything was confirmed.
+    fails the check, and neither does an ``unverified`` (exit 0), an ``identity_probe_failed``
+    (exit 3) nor a ``no_ingest`` (exit 0) one, so read ``inconclusive_identity_planes``,
+    ``degraded_planes`` and ``verification_complete`` alongside ``ok`` before concluding that
+    everything was confirmed.
     """
     cfg = get_config()
     probe_timeout = timeout if timeout is not None else cfg.diagnose_timeout
@@ -925,11 +1129,16 @@ async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = Non
     ok = all(plane.status in _NON_FAILING_STATUSES | _INCONCLUSIVE_STATUSES for plane in planes)
     unverified = [plane.plane for plane in planes if plane.status == "unverified"]
     inconclusive = [plane.plane for plane in planes if plane.status in _INCONCLUSIVE_STATUSES]
+    # Degraded planes deliberately do NOT touch ``ok`` or ``verification_complete``: they are exit
+    # 0 by product decision (see _DEGRADED_STATUSES). Their own list is the ONLY signal a machine
+    # reader gets, which is exactly why it exists.
+    degraded = [plane.plane for plane in planes if plane.status in _DEGRADED_STATUSES]
     return DoctorReport(
         planes=planes,
         privacy=_privacy_report(cfg),
         ok=ok,
         verification_complete=not unverified and not inconclusive,
+        degraded_planes=degraded,
         unverified_planes=unverified,
         inconclusive_identity_planes=inconclusive,
         identified_planes=[plane.plane for plane in planes if plane.identified],

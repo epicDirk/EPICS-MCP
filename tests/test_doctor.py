@@ -21,6 +21,7 @@ from epics_mcp import cli_doctor
 from epics_mcp.config import EpicsConfig
 from epics_mcp.errors import EpicsError
 from epics_mcp.services.doctor import (
+    _DEGRADED_STATUSES,
     _FAILING_STATUSES,
     _INCONCLUSIVE_STATUSES,
     _NON_FAILING_STATUSES,
@@ -39,6 +40,7 @@ from epics_mcp.services.doctor import (
     run_doctor,
 )
 from epics_mcp.services.olog_client import OlogClient
+from epics_mcp.services.rest_exceptions import RestConnectionError
 
 
 def _set_config(monkeypatch: pytest.MonkeyPatch, **kwargs: object) -> EpicsConfig:
@@ -356,16 +358,285 @@ def test_identity_unreadable_2xx_raw_valueerror_stays_unverified(
     assert check.status in _NON_FAILING_STATUSES
 
 
+# --- the archiver plane: identity, then INGEST (QA-35) ---
+#
+# WHY A SECOND SEAM HELPER: _payload above is `lambda *a, **k: value`, so it answers EVERY address
+# with the same body. That was harmless while a plane made ONE request. The archiver now makes two
+# over this same seam (getApplianceInfo, then getApplianceMetrics), and under _payload a probe that
+# asked the WRONG route would still be handed the right-looking body and stay green. CLAUDE.md
+# records that exact shape as a measured sham guard: faking at the right seam still does not say the
+# right ADDRESS was requested (pointing list_tags at the properties URL left the whole suite green).
+# So the address is recorded and asserted on its own.
+
+_INFO_ROUTE = "/mgmt/bpl/getApplianceInfo"
+_METRICS_ROUTE = "/mgmt/bpl/getApplianceMetrics"
+
+
+class _RoutedGet:
+    """A URL-keyed stand-in for ``rest_get_json`` that RECORDS what was asked for, and how.
+
+    Routes are matched by URL suffix. A mapped value that is an ``Exception`` is raised, so a single
+    route can fail while the other answers, which is the only way to exercise "the metrics call
+    failed" (``_raises`` cannot: it fails the FIRST request, so the plane never reaches the ingest
+    probe at all and the test would measure ``identity_probe_failed`` instead).
+
+    An unknown URL returns ``None`` rather than raising, deliberately: the production code is TOTAL
+    by design and would swallow the exception, producing the same verdict as a wrong CONDITION and
+    hiding which of the two broke.
+    """
+
+    def __init__(self, routes: dict[str, object]) -> None:
+        self._routes = routes
+        self.urls: list[str] = []
+        self.kwargs: list[dict[str, object]] = []
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        url = str(args[1])
+        self.urls.append(url)
+        self.kwargs.append(dict(kwargs))
+        for suffix, value in self._routes.items():
+            if url.endswith(suffix):
+                if isinstance(value, Exception):
+                    raise value
+                return value
+        return None
+
+    def asked_for(self, suffix: str) -> bool:
+        """Was a route ending in *suffix* actually requested? The address assertion."""
+        return any(url.endswith(suffix) for url in self.urls)
+
+
+def _routed(monkeypatch: pytest.MonkeyPatch, routes: dict[str, object]) -> _RoutedGet:
+    """Install a URL-keyed ``rest_get_json`` and hand back the recorder."""
+    fake = _RoutedGet(routes)
+    monkeypatch.setattr("epics_mcp.services.doctor.rest_get_json", fake)
+    return fake
+
+
+def _metrics_row(**overrides: object) -> dict[str, object]:
+    """One ``getApplianceMetrics`` row in the REAL shape: every value a string.
+
+    Field values follow the live payload measured 2026-07-29 (sandbox + a 16-member production
+    cluster): counts are plain digit runs, ``eventRate`` is LOCALE formatted on a busy appliance
+    (``"15,431.54"``), and ``status`` is ``"Working"`` when all three internal webapps answered.
+    """
+    row: dict[str, object] = {
+        "instance": "appliance0",
+        "pvCount": "5",
+        "connectedPVCount": "5",
+        "disconnectedPVCount": "0",
+        "eventRate": "1.5",
+        "status": "Working",
+    }
+    row.update(overrides)
+    return row
+
+
+def _archiver_check(monkeypatch: pytest.MonkeyPatch, metrics: object, **info: object) -> PlaneCheck:
+    """Drive the REAL _identify_archiver over a routed seam, metrics route serving *metrics*."""
+    identity: dict[str, object] = {"identity": "appliance0"}
+    identity.update(info)
+    _routed(monkeypatch, {_INFO_ROUTE: identity, _METRICS_ROUTE: metrics})
+    return _identify_archiver("http://arch.example:17665", None, 5.0)
+
+
 def test_archiver_identity_requires_the_identity_field(monkeypatch: pytest.MonkeyPatch) -> None:
     """check_connectivity accepts ANY parseable 2xx JSON, an empty {} passes it. The appliance's
-    own 'identity' field is what makes it an Archiver rather than "something served JSON here"."""
-    _payload(monkeypatch, {})
+    own 'identity' field is what makes it an Archiver rather than "something served JSON here".
+
+    Uses the ROUTED seam, not _payload: since the ingest probe exists, _payload would hand the
+    getApplianceInfo body to the metrics call as well, so this test would silently exercise the
+    "no unambiguous row" branch while claiming to be about identity only.
+    """
+    _routed(monkeypatch, {_INFO_ROUTE: {}})
     assert _identify_archiver("http://arch.example:17665", None, 5.0).status == "unverified"
 
-    _payload(monkeypatch, {"identity": "appliance0", "engineURL": "http://arch.example:17666"})
-    check = _identify_archiver("http://arch.example:17665", None, 5.0)
+    check = _archiver_check(monkeypatch, [_metrics_row()], engineURL="http://arch.example:17666")
     assert (check.status, check.identified) == ("ok", True)
     assert "appliance0" in (check.detail or "")
+
+
+def test_archiver_holding_pvs_with_none_connected_is_no_ingest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The QA-35 case, live-measured on the local sandbox: the appliance names itself, and archives
+    nothing. Identity stays PROVEN, the plane is not a failure, and the reason is in the detail.
+
+    Red-proof (pre-change code): _identify_archiver returned a bare ok PlaneCheck for exactly this
+    body, which is the false all-clear this change removes. Mutants that survive the healthy case
+    but die here: none, this is the positive case. See the mutant table in the sibling tests.
+    """
+    check = _archiver_check(
+        monkeypatch,
+        [_metrics_row(pvCount="5", connectedPVCount="0", disconnectedPVCount="5", eventRate="0")],
+    )
+    assert check.status == "no_ingest"
+    assert check.identified is True  # identity WAS established; the failure is the ingest
+    assert check.status in _NON_FAILING_STATUSES  # exit 0, by product decision
+    detail = check.detail or ""
+    assert "appliance0" in detail  # the identifying evidence survives the finding
+    assert "pvCount=5" in detail and "connectedPVCount=0" in detail and "eventRate=0" in detail
+
+
+@pytest.mark.parametrize(
+    ("row", "why"),
+    [
+        pytest.param(_metrics_row(), "every PV connected", id="healthy"),
+        pytest.param(
+            _metrics_row(pvCount="0", connectedPVCount="0", disconnectedPVCount="0"),
+            "an empty or fully paused appliance holds no channels, which is not a fault",
+            id="empty-appliance",
+        ),
+        pytest.param(
+            _metrics_row(pvCount="5", connectedPVCount="3", disconnectedPVCount="2"),
+            "PARTIAL connectivity is not no_ingest: production runs with 111..8939 disconnected",
+            id="partial-connectivity",
+        ),
+    ],
+)
+def test_archiver_ok_cases(
+    monkeypatch: pytest.MonkeyPatch, row: dict[str, object], why: str
+) -> None:
+    """The three shapes that must NOT be reported as no_ingest.
+
+    Red-proof (mutants killed here, each measured to SURVIVE without this case):
+    ``connectedPVCount == 0`` -> ``< pvCount`` and a signal taken from ``disconnectedPVCount > 0``
+    both die on "partial-connectivity"; ``pvCount > 0`` -> ``>= 0`` dies on "empty-appliance"
+    (which is why that fixture carries an explicit connectedPVCount, without it the row never
+    reaches the condition at all); ``and`` -> ``or`` dies on "healthy". Under the first two the
+    tool would have reported ALL 16 production appliances as no_ingest.
+    """
+    check = _archiver_check(monkeypatch, [row])
+    assert check.status == "ok", why
+    assert check.identified is True
+
+
+def test_archiver_engine_down_is_no_ingest_though_the_counts_are_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The WORST archiver state, and the counts cannot see it.
+
+    The connection counts are produced by the engine webapp and merged in by mgmt over HTTP. When
+    that merge fails the counts VANISH from the row while pvCount survives, the appliance sets its
+    own ``status`` to a "Stopped - ..." string, and it still serves HTTP 200. Without the status
+    arm the guard could never fire in the state it matters most.
+
+    Red-proof (mutation): drop the status arm and this goes green-as-``ok``, because the absent
+    counts land in the "not measured" branch.
+    """
+    check = _archiver_check(
+        monkeypatch,
+        [{"instance": "appliance0", "pvCount": "5", "status": "Stopped - engine "}],
+    )
+    assert check.status == "no_ingest"
+    detail = check.detail or ""
+    assert "Stopped - engine" in detail
+    assert "connectedPVCount=absent" in detail  # named as absent, never silently omitted
+
+
+def test_archiver_picks_its_own_row_out_of_a_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A multi-member body is the PRODUCTION NORM (16 rows measured), not an exception.
+
+    The row is matched by ``instance`` against the identity that getApplianceInfo just reported
+    (n=2: on the sandbox, and on a real 16-member cluster where the reported identity hit exactly
+    one of the sixteen rows). Here OUR member is starved while the neighbours are healthy, so a
+    positional read of the body would report ok.
+    """
+    cluster: list[object] = [
+        _metrics_row(instance=f"appliance{n}", eventRate="15,431.54") for n in range(1, 17)
+    ]
+    cluster.insert(
+        7, _metrics_row(instance="appliance0", connectedPVCount="0", disconnectedPVCount="5")
+    )
+    check = _archiver_check(monkeypatch, cluster)
+    assert check.status == "no_ingest"
+    assert "this member only" in (check.detail or "")  # the scope is stated, not implied
+
+
+def test_archiver_locale_formatted_rate_never_escapes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``eventRate`` is quoted, never parsed. On production it is locale formatted ("15,431.54"),
+    and ``float()`` on that raises a ValueError that NOTHING in the call chain catches: _run_probe
+    calls the identify callable outside its try block and cli_doctor.main catches only EpicsError,
+    so it would surface as a raw traceback with no exit-code convention.
+
+    Red-proof (mutation): parse eventRate with float() and this raises instead of returning.
+    """
+    check = _archiver_check(monkeypatch, [_metrics_row(eventRate="15,431.79")])
+    assert check.status == "ok"
+    assert "eventRate=15,431.79" in (check.detail or "")
+
+
+@pytest.mark.parametrize(
+    ("metrics", "expected_note"),
+    [
+        pytest.param(
+            RestConnectionError("archiver timed out"), "ingest not measured", id="request-failed"
+        ),
+        pytest.param(
+            [_metrics_row(instance="somebody-else")], "no unambiguous row", id="foreign-row"
+        ),
+        pytest.param(
+            [_metrics_row(instance="appliance0"), _metrics_row(instance="appliance0")],
+            "no unambiguous row",
+            id="ambiguous-rows",
+        ),
+        pytest.param({"pvCount": "5"}, "no unambiguous row", id="not-a-list"),
+    ],
+)
+def test_archiver_unmeasurable_ingest_stays_ok_but_leaves_a_trace(
+    monkeypatch: pytest.MonkeyPatch, metrics: object, expected_note: str
+) -> None:
+    """Every way of NOT getting an answer leaves the plane ok, and says so in the detail.
+
+    ok, because this REFINES a verdict that already stands: an older appliance without the route,
+    or a cluster that timed out, must not fail a plane whose identity is proven. But never SILENTLY
+    ok: without the note, "measured and ingesting" would be indistinguishable from "never measured",
+    and on a real cluster the not-measured branch is the one that actually fires.
+
+    Red-proof (mutation): return the plain identity detail here and the assertion on the note fails.
+    """
+    check = _archiver_check(monkeypatch, metrics)
+    assert check.status == "ok"
+    assert check.identified is True
+    detail = check.detail or ""
+    assert "appliance0" in detail  # identity is still the evidence
+    assert expected_note in detail
+
+
+def test_archiver_asks_the_metrics_route_and_refuses_redirects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ADDRESS assertion, and the redirect posture, on their own.
+
+    A faked seam serves every endpoint the same body, so the result slot proves nothing about which
+    URL was requested (CLAUDE.md, evidence discipline: a route pointed at the wrong address left a
+    whole suite green). ``allow_redirects=False`` matters for the same reason it does on the
+    identity fetch: the RESPONDING host is the whole point, and a redirect would let another host
+    answer for the appliance we just identified.
+
+    Red-proof (mutation): point the ingest probe at getApplianceInfo and ``asked_for`` goes False;
+    drop the allow_redirects kwarg and the kwargs assertion fails.
+    """
+    fake = _routed(
+        monkeypatch,
+        {_INFO_ROUTE: {"identity": "appliance0"}, _METRICS_ROUTE: [_metrics_row()]},
+    )
+    _identify_archiver("http://arch.example:17665", None, 5.0)
+    assert fake.asked_for(_METRICS_ROUTE), "the ingest probe must request getApplianceMetrics"
+    assert all(kw.get("allow_redirects") is False for kw in fake.kwargs)
+
+
+def test_no_ingest_is_exit_zero_by_decision() -> None:
+    """The exit CLASS is a product decision, and it is pinned here because nothing else pins it.
+
+    Measured: with ``no_ingest`` moved into _FAILING_STATUSES (exit 1), the three guards one would
+    expect to notice all stay GREEN, test_unknown_status_fails_closed included (it only reacts to
+    the set growing). This assertion and the report-level one in the wiring lock are the whole
+    mechanical record that a non-ingesting archiver must not fail a doctor run.
+    """
+    assert "no_ingest" in _NON_FAILING_STATUSES
+    assert "no_ingest" not in _FAILING_STATUSES
+    assert _DEGRADED_STATUSES <= _NON_FAILING_STATUSES  # degraded is a strict subset, never failing
 
 
 def test_naming_identifies_via_its_swagger_contract(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -600,14 +871,88 @@ async def test_alarm_backend_down_flows_through_run_doctor_to_exit_one(
     assert report.ok is False  # backend_down ∈ _FAILING_STATUSES → exit 1
 
 
+def _wire_starved_archiver(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Configure the archiver plane and route its two GETs at an appliance that archives nothing.
+
+    Shared by the report-level lock and its CLI twin below (they are split only because
+    ``cli_doctor.main`` calls ``asyncio.run``, which cannot run inside an async test).
+    """
+    _set_config(monkeypatch, archiver_url="http://arch.example:17665")
+    monkeypatch.setattr("epics_mcp.services.doctor.ArchiverClient", _OkClient)
+    # Restore the REAL probe over the autouse stub, then route the two GETs it makes.
+    monkeypatch.setattr("epics_mcp.services.doctor._identify_archiver", _identify_archiver)
+    _routed(
+        monkeypatch,
+        {
+            _INFO_ROUTE: {"identity": "appliance0"},
+            _METRICS_ROUTE: [_metrics_row(connectedPVCount="0", disconnectedPVCount="5")],
+        },
+    )
+
+
+def test_no_ingest_reaches_the_cli_without_the_confirmation_sentence(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The CLI half of the wiring lock: a starved archiver prints its own glyph, drops the
+    strongest confirmation sentence, and still exits 0.
+
+    Red-proof (mutation): delete the degraded branch in _render and "AS ITSELF" is printed directly
+    under the "~ archiver" line. Move no_ingest into _FAILING_STATUSES and the exit code becomes 1.
+    """
+    _wire_starved_archiver(monkeypatch)
+    assert cli_doctor.main([]) == 0  # the decision: a starved archiver never fails a doctor run
+    out = capsys.readouterr().out
+    assert "~ archiver" in out
+    assert "AS ITSELF" not in out  # the strongest confirmation must not sit under a "~" line
+    assert "NOT doing their job" in out
+
+
+async def test_no_ingest_flows_through_run_doctor_to_the_report_and_exit_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end WIRING lock for QA-35, the archiver twin of the alarm one above.
+
+    It pins the whole chain at once because each link is invisible on its own: the autouse fixture
+    stubs _identify_archiver to a plain identified=True, so reverting the ingest call inside
+    _identify_archiver would be unobservable to every unit test above. Restoring the REAL probe
+    plus a routed seam over that stub is the only way to see it.
+
+    Four things are pinned here, and NOTHING else pins them together:
+      1. the plane arrives in the report as no_ingest with identity still proven;
+      2. it is listed in degraded_planes, the ONLY machine-readable trace it leaves;
+      3. ok / verification_complete stay True and the process exit stays 0, the product decision;
+      4. it is ALSO in identified_planes, which is why a script reading that list alone would
+         count a non-archiving appliance as positively confirmed.
+
+    Red-proof (mutation): drop the _archiver_ingest_verdict call from _identify_archiver and the
+    plane arrives as plain ok, failing 1 and 2. Move no_ingest into _FAILING_STATUSES and 3 fails.
+    """
+    _wire_starved_archiver(monkeypatch)
+
+    report = await run_doctor()
+    archiver = _plane(report, "archiver")
+    assert (archiver.status, archiver.identified) == ("no_ingest", True)
+    assert report.degraded_planes == ["archiver"]
+    assert report.ok is True and report.verification_complete is True
+    assert report.unverified_planes == []
+    assert "archiver" in report.identified_planes  # identified is not healthy
+
+
 def test_unknown_status_fails_closed() -> None:
     """The allowlist is the point: a new or mistyped status must FAIL, not slip through as exit 0.
 
     With the previous failure DENYLIST, a typo like "wrong-service" was simply absent from it and
     therefore counted as healthy, fail-open, in the one tool whose job is to catch bad config.
+
+    ⚠️ Note what this pin does and does NOT do. It goes red when the set GROWS, i.e. on a correct
+    build that classifies a new status here, so it is a deliberate hand-updated record of a product
+    decision, NOT a guard against forgetting to classify. Forgetting is caught by
+    ``test_status_partition_is_total_and_disjoint``; putting a status in the WRONG set is caught by
+    neither, which is why the exit class of ``no_ingest`` is pinned separately (see
+    ``test_no_ingest_is_exit_zero_by_decision``).
     """
     assert "wrong-service" not in _NON_FAILING_STATUSES  # the typo'd twin of a former status
-    assert {"ok", "disabled", "info", "unverified"} == _NON_FAILING_STATUSES
+    assert {"ok", "disabled", "info", "unverified", "no_ingest"} == _NON_FAILING_STATUSES
 
 
 def test_status_partition_is_total_and_disjoint() -> None:
@@ -1224,13 +1569,19 @@ def test_render_and_exit_agree() -> None:
     )
 
     def _mk(
-        *, ok: bool, inconclusive: list[str], complete: bool, identified: list[str]
+        *,
+        ok: bool,
+        inconclusive: list[str],
+        complete: bool,
+        identified: list[str],
+        degraded: list[str] | None = None,
     ) -> DoctorReport:
         return DoctorReport(
             planes=[],
             privacy=privacy,
             ok=ok,
             verification_complete=complete,
+            degraded_planes=degraded or [],
             unverified_planes=[],
             inconclusive_identity_planes=inconclusive,
             identified_planes=identified,
@@ -1249,6 +1600,19 @@ def test_render_and_exit_agree() -> None:
         assert cli_doctor._exit_category(report) == category
         assert word in cli_doctor._render(report)
         assert cli_doctor._EXIT_CODE[cli_doctor._exit_category(report)] == code
+
+    # A degraded plane is "clean" for the exit code AND must not wear the strongest confirmation
+    # sentence. Both halves matter: the verdict line changes, the category (and so the exit code)
+    # does not. Red-proof (mutation): delete the degraded branch in _render and "AS ITSELF" is
+    # printed for a plane the report itself lists as not doing its job.
+    degraded = _mk(
+        ok=True, inconclusive=[], complete=True, identified=["archiver"], degraded=["archiver"]
+    )
+    assert cli_doctor._exit_category(degraded) == "clean"
+    assert cli_doctor._EXIT_CODE["clean"] == 0
+    rendered = cli_doctor._render(degraded)
+    assert "AS ITSELF" not in rendered
+    assert "NOT doing their job" in rendered and "archiver" in rendered
 
 
 def test_cli_verdict_with_nothing_configured_claims_no_identity(
