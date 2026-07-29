@@ -19,7 +19,8 @@ rejected rather than merely postponed.
 
 The prose-counter guard reads Python comments and docstrings. It does not read `.md` files.
 
-Measured: **38** size-naming phrases across **10** tracked markdown files (the detector's own
+Measured 2026-07-26, and left as a dated measurement rather than restated as a live one, for the
+reason this very section gives: **38** size-naming phrases across **10** tracked markdown files (the detector's own
 vocabulary: a number paired with one of `prose_numbers.COLLECTION_NOUNS`, or the `N of the M`
 shape). **12 of those sit in `CHANGELOG.md` and `CLAUDE.md`**, and that is where the exemptions
 would live: a changelog entry that said "22 schemas" in a past release must keep saying it. This page
@@ -39,9 +40,24 @@ re-measure before quoting it.
 
 Why no guard: it would need roughly twenty "historical, not derivable" rows, precisely the
 construction `tests/test_prose_counters.py` already rejected, in writing, for its own two files ("a
-blanket exemption wearing a table's clothes"). The one load-bearing markdown figure that has
-demonstrably drifted is the README's test count, and a test cannot count the passes of the run it is
-part of. **That figure belongs on a release checklist, not in the gate.** Tracked as work item S41.
+blanket exemption wearing a table's clothes"). The one load-bearing markdown figure that had
+demonstrably drifted was the README's test count, and a test cannot count the passes of the run it
+is part of.
+
+**Resolved in 0.4.0 by removing the figure rather than guarding it (S41, QA-20).** It went stale
+twice in a single day, and the honest reason is that it is not one number: CI runs the standalone
+core on Linux, a local checkout with the display engine runs more, and Windows adds path tests, so
+any single figure printed in the README is wrong in at least one of those environments. A guard
+would have had to ask which environment it was running in, which is green locally and red in CI.
+The README now states the shape of the claim and points at the CI badge for the live answer.
+
+The tool count in the README and on `docs/tools.md` went the same way, for a weaker but sufficient
+reason: both pages LIST the tools a few lines further down, so the count added nothing a reader
+could not see, while being the half nothing re-measures. ⚠️ Do not read that as "the list is
+guarded": measured, only the operator guide's inventory block is compared to the registrations
+(`test_guide_matches_code`), and on `docs/tools.md` only the RESOURCE URIs are
+(`test_readme_resources`). Its tool table is unchecked, which is a second inventory of the same
+thing with only one of them guarded, and is recorded as such rather than implied away.
 
 ## 2 · A number is guarded only where a sentence states it
 

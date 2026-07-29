@@ -19,12 +19,10 @@ ChannelFinder by hand.
 > pin a version if you depend on it. The released version is the one the PyPI badge above shows;
 > it is deliberately not restated here, because a version spelled twice is a version that drifts.
 
-**Maturity.** 1497 tests pass on a standalone install with no EPICS infrastructure at all, and that is
-the figure CI reports, on Linux; a Windows run shows three more, which are path tests that only
-apply there. With every extra installed it is 1576 (measured on Windows; CI does not install the
-extras, so no CI log states this one). A further 65 exercise a live stack and skip without one.
-`mypy --strict` covers `src`, `tests` and `scripts`, and the package ships `py.typed`. Both gates
-run in CI on every push, against Python 3.12 and 3.13.
+**Maturity.** The full test suite passes on a standalone install with no EPICS infrastructure at
+all, and that is what CI runs on every push, against Python 3.12 and 3.13; the live-stack tests are
+opt-in and skip without a stack. `mypy --strict` covers `src`, `tests` and `scripts`, and the
+package ships `py.typed`. The CI badge above reports the current state of both gates.
 
 ## Where to start
 
@@ -141,7 +139,7 @@ To reach a real control system, set the address list in the launcher's environme
 
 | Page | What it answers |
 |------|-----------------|
-| [Tools, CLIs, resources and prompts](docs/tools.md) | What can it actually do? All 32 tools by plane, the four standalone CLIs, the resources and prompts |
+| [Tools, CLIs, resources and prompts](docs/tools.md) | What can it actually do? Every tool by plane, the standalone CLIs, the resources and prompts |
 | [Configuration](docs/configuration.md) | Every `EPICS_MCP_*` variable, including TLS trust and the EPICS network block |
 | [Safety and network posture](docs/safety.md) | What is gated, what is audited, what decides network reach |
 | [MCP client integration](docs/mcp-clients.md) | Ready-to-paste `.mcp.json` blocks |

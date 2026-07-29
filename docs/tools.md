@@ -1,6 +1,6 @@
 # Tools, CLIs, resources and prompts
 
-The full surface: 32 MCP tools grouped by plane, four standalone command-line tools that need no MCP client, and the resources and prompts the server exposes.
+The full surface: every MCP tool grouped by plane, the standalone command-line tools that need no MCP client, and the resources and prompts the server exposes.
 
 [Back to the README](../README.md)
 
