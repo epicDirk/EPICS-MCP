@@ -94,21 +94,22 @@ Publishing fails expensively and exactly once: a package index never lets a vers
 reused, so a wrong upload cannot be withdrawn, only superseded. Hence the order below, and hence
 the gates.
 
-**One-off, before the first release ever happens:**
+**Already done, kept because the reasoning still binds:**
 
-1. Decide the display question. The four display-aware tools depend on `opi_navigation`, which is
-   in a private repository. The current answer is **not yet**, with a named condition: revisit once
-   the Java live plugin and the CS-Studio MCP have been tested in practice. Until then the engine
-   stays a dependency group and the published package does not offer it. The same note sits in
+1. The display question. The four display-aware tools depend on `opi_navigation`, which is in a
+   private repository. The current answer is **not yet**, with a named condition: revisit once the
+   Java live plugin and the CS-Studio MCP have been tested in practice. Until then the engine stays
+   a dependency group and the published package does not offer it. The same note sits in
    `pyproject.toml` next to the group, so neither copy is the only one.
-2. Create the account on the index and register a **Trusted Publisher** for `epics-mcp`:
-   repository `epicDirk/EPICS-MCP`, workflow `publish.yml`, environment `pypi`. Trusted
-   Publishing uses OIDC, so no API token is ever stored in this repository.
-3. Run the workflow once manually (`workflow_dispatch`, `dry_run` left at its default `true`). It
-   installs, tests, clears `dist/`, builds and gates, and stops before uploading. That rehearsal is
-   the point of the manual trigger: it is the only way to test a release workflow without
-   releasing. ⚠️ **Still outstanding**: the workflow has never run, because it cannot until it is
-   pushed. Everything it does has been replayed by hand locally, which is not the same thing.
+2. The **Trusted Publisher** for `epics-mcp` is registered: repository `epicDirk/EPICS-MCP`,
+   workflow `publish.yml`, environment `pypi`. Trusted Publishing uses OIDC, so no API token is
+   ever stored in this repository. It is proven end to end: the `v0.3.0` tag published 0.3.0
+   through it (run 30402266430).
+3. The rehearsal path works too. `workflow_dispatch` with `dry_run` at its default `true` installs,
+   tests, clears `dist/`, builds and gates, and stops before uploading; it is the only way to
+   exercise a release workflow without releasing. ⚠️ **One step has still never executed**: the
+   rehearsal skips the publish job, so `download-artifact` has never run. The upload path is
+   therefore proven by the real 0.3.0 release, not by a rehearsal.
 
 **Every release:**
 
@@ -121,9 +122,11 @@ the gates.
    scripts/check_release_ready.py dist/*`. The gate reads the BUILT metadata, never
    `pyproject.toml`, because the two can differ; it refuses a direct reference, a pre-release
    version, and a description that would not render.
-4. Tag `vX.Y.Z` and push the tag. That is what triggers the upload.
-5. Afterwards: swap the install command in `README.md` (the replacement text is already there,
-   commented out) and add the index badge.
+4. Tag `vX.Y.Z` and push the tag. That is what triggers the upload, and it is the irreversible
+   step: from here the version number is spent whatever happens next.
+5. Afterwards: check that the index page renders and that a clean install of the new version
+   imports and runs its commands. The README install command and the index badge are already
+   pointing at the published package since 0.3.0, so there is nothing to swap.
 
 **Two traps, both measured here rather than imagined:**
 

@@ -4,7 +4,7 @@ The full surface: every MCP tool grouped by plane, the standalone command-line t
 
 [Back to the README](../README.md)
 
-**On this page:** [Tools](#tools) · [Command-line tools (no AI needed)](#command-line-tools-no-ai-needed) · [Resources & Prompts](#resources-prompts)
+**On this page:** [Tools](#tools) · [Command-line tools (no AI needed)](#command-line-tools-no-ai-needed) · [Resources & Prompts](#resources--prompts)
 
 ## Tools
 
@@ -70,7 +70,7 @@ MCP client involved:
 ```bash
 epics-doctor                                            # read-only config self-check (all planes)
 epics-diagnose   TEST:Temperature                       # connection diagnosis
-epics-crossplane --displays <project-root> <st.cmd>     # display ↔ IOC ↔ Naming (needs opi_navigation)
+epics-crossplane --displays <project-root> --st-cmd <st.cmd>     # display ↔ IOC ↔ Naming (needs opi_navigation)
 epics-coverage   --displays <project-root> --scope DEV: # coverage matrix (needs opi_navigation)
 ```
 

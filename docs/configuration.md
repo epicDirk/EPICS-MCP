@@ -4,7 +4,7 @@ Every setting is an environment variable with the `EPICS_MCP_` prefix. [`.env.ex
 
 [Back to the README](../README.md)
 
-**On this page:** [Core / p4p](#core-p4p) · [Write safety](#write-safety-all-writes-blocked-unless-enabled) · [Path boundary](#path-boundary) · [TLS trust for the HTTPS REST planes](#tls-trust-for-the-https-rest-planes) · [Optional REST services](#optional-rest-services-emptyunset-url-disabled-no-client-no-network-call) · [EPICS network](#epics-network-standard-epics-env-controls-what-the-server-can-reach)
+**On this page:** [Core / p4p](#core--p4p) · [Write safety](#write-safety-all-writes-blocked-unless-enabled) · [Path boundary](#path-boundary) · [TLS trust for the HTTPS REST planes](#tls-trust-for-the-https-rest-planes) · [Optional REST services](#optional-rest-services-emptyunset-url--disabled-no-client-no-network-call) · [EPICS network](#epics-network-standard-epics-env-controls-what-the-server-can-reach)
 
 ## Core / p4p
 

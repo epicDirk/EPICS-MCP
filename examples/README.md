@@ -46,7 +46,7 @@ your local subnets. Drop them when you point this at a real IOC.
 ```bash
 # needs the opi_navigation engine, which is NOT available from PyPI (private repository);
 # from a checkout that has it: uv sync --extra dev --group displays
-epics-crossplane --displays . <path-to-st.cmd>
+epics-crossplane --displays . --st-cmd <path-to-st.cmd>
 ```
 
 or `validate_pvs(file_path="examples/sample_display.bob")` from an MCP client.
