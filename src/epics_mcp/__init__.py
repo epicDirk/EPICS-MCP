@@ -1,4 +1,4 @@
-"""EPICS MCP: PV access via p4p (PVAccess + Channel Access)."""
+"""EPICS MCP: live PV values, connection diagnosis, and cross-plane provenance."""
 
 try:
     from importlib.metadata import PackageNotFoundError, version
