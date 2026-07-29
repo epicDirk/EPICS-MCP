@@ -170,10 +170,15 @@ _DEGRADED_STATUSES: frozenset[str] = frozenset({"no_ingest"})
 #:   voices, "not a broken configuration" at the status sets above and "a WIRING fault" at the
 #:   ingest verdict below. Both are true of different things, and neither makes it a variable
 #:   settable here.
+#: ⚠️ No remedy refers to a POSITION ("named above", "printed above"). Measured on the rendered
+#: output: an ``unreachable`` observation ends in a urllib3 exception several hundred characters
+#: long, and the remedy is appended after it on the SAME line, so "above" pointed backwards across
+#: all of that at a variable name the reader had long lost. Each remedy names what it means, or
+#: describes it, and stands on its own.
 _REMEDY: dict[str, str] = {
     "config_error": (
-        "Change the configuration named above; nothing was probed here, the configuration itself "
-        "is the finding."
+        "Change the configuration this finding names; nothing was probed here, the configuration "
+        "itself is the finding."
     ),
     "ca_error": (
         "Set EPICS_MCP_CA_BUNDLE to a PEM that trusts this host, combining your internal CA roots "
@@ -181,19 +186,21 @@ _REMEDY: dict[str, str] = {
     ),
     "api_error": (
         "Check the URL names the right service AND the right webapp, for an Archiver Appliance the "
-        "mgmt port and not retrieval, and that the service itself is healthy."
+        "mgmt port and not retrieval. A service that answers every attempt with a 5xx is up and "
+        "erroring instead, and then the URL is right and the service is what needs looking at."
     ),
     "unreachable": (
-        "Check that the host and port the variable above names are up and reachable from here. "
-        "The variables are listed per plane in docs/deployment.md."
+        "Check that the host and port in the URL this plane reads are right, and that the service "
+        "there is up and reachable from here. The variable to edit is named at the start of this "
+        "finding, and all of them are listed per plane in docs/deployment.md."
     ),
     "disconnected": (
-        "Check the PV name, that its IOC is running, and that the search path printed above can "
-        "reach it."
+        "Check the PV name, that its IOC is running, and that the EPICS search path this finding "
+        "reports can reach it."
     ),
     "backend_down": (
-        "Repair the backend named above or disable this plane. The configuration here is not the "
-        "cause: the plane answered and proved its identity."
+        "Repair the backend this finding names, or disable this plane. The configuration here is "
+        "not the cause: the plane answered and proved its identity."
     ),
     "identity_probe_failed": (
         "Check the URL is the service ROOT rather than a sub-path, and that its info endpoint is "

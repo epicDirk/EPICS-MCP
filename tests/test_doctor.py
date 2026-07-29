@@ -1790,6 +1790,16 @@ def test_every_problem_status_names_a_remedy() -> None:
             f"the remedy for {status} opens with {remedy.split()[0]!r}, which is not one of "
             f"{sorted(_REMEDY_IMPERATIVES)}: a remedy tells the reader what to DO"
         )
+        # No positional reference. Measured on the rendered output: an unreachable detail ends in a
+        # urllib3 exception several hundred characters long and the remedy follows on the SAME line,
+        # so "named above" pointed back across all of it at something the reader had lost. Red on
+        # the first wording of four of these seven entries.
+        for positional in (" above", " below"):
+            assert positional not in remedy, (
+                f"the remedy for {status} refers to a position ({positional.strip()!r}); it is "
+                "appended to a detail that can be hundreds of characters long, so it has to name "
+                "or describe what it means"
+            )
 
 
 def test_a_healthy_status_gets_no_remedy_appended() -> None:
