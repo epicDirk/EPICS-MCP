@@ -99,12 +99,17 @@ counts any HTTP response as reachable, so a URL aimed at the wrong host can look
 ChannelFinder URL pointing at a dead container read `✓ ok` because an unrelated service on that port
 answered 401). A plane that ANSWERED (2xx) but cannot prove what it is reports `unverified` (`?`),
 honest, **not** healthy, exit `0`; a plane whose identity probe FAILED reports `identity_probe_failed`
-(`!`): reachable but suspect, exit `3`. ⚠️ Exit `0` therefore means "nothing failed", **not**
+(`!`): reachable but suspect, exit `3`. And identified is not working: a plane that proved its
+identity and is measurably not doing its job reports `no_ingest` (`~`), exit `0` (an Archiver
+appliance holding channels with none connected, or reporting one of its own webapps stopped).
+⚠️ Exit `0` therefore means "nothing failed", **not**
 "everything confirmed": a script must read `verification_complete` / `unverified_planes` /
-`inconclusive_identity_planes` from `--json` rather than the exit code alone (a failed probe lands in
-`inconclusive_identity_planes`, **not** `unverified_planes`), and for **positive** confirmation
+`inconclusive_identity_planes` / `degraded_planes` from `--json` rather than the exit code alone (a
+failed probe lands in `inconclusive_identity_planes`, **not** `unverified_planes`; a degraded one in
+`degraded_planes` and in NEITHER of those), and for **positive** confirmation
 assert `identified_planes` is non-empty, because `verification_complete` is vacuously true on an
-empty config (nothing probed ≠ everything confirmed).
+empty config (nothing probed ≠ everything confirmed). ⚠️ `identified_planes` also lists a degraded
+plane, since its identity IS proven, so it alone never means healthy.
 
 ## Resources & Prompts
 

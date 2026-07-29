@@ -38,14 +38,22 @@ setting those variables for *your* services, with no code change. This guide wal
    names another service, measured), but the name is your first clue if the config IS wrong. Fix
    anything `epics-doctor` flags, then you are done; no need to ask us.
 
-   ⚠️ Read the `?` (`unverified`, exit `0`) and `!` (`identity_probe_failed`, exit `3`) lines before
+   ⚠️ Read the `?` (`unverified`, exit `0`), `!` (`identity_probe_failed`, exit `3`) and `~`
+   (`no_ingest`, exit `0`) lines before
    calling it done. `?` = "answered 2xx, but could not prove what it is": honest, not healthy. `!` =
    "reachable, but the identity probe FAILED (401/404/redirect/...)": suspect, not a silent pass.
+   `~` = "proved what it is, and is not doing its job": an Archiver appliance holding channels with
+   none connected, or reporting one of its own webapps stopped. It is exit `0` on purpose, because
+   a freshly commissioned appliance is legitimately in that state, but it is a finding and worth
+   chasing before you call a deployment done.
    Every plane has its own identity beacon (see the operator guide). Scripting this? Read
-   `verification_complete` / `unverified_planes` / `inconclusive_identity_planes` from `--json` (a
-   failed probe lands in `inconclusive_identity_planes`, not `unverified_planes`); the exit code
+   `verification_complete` / `unverified_planes` / `inconclusive_identity_planes` /
+   `degraded_planes` from `--json` (a
+   failed probe lands in `inconclusive_identity_planes`, not `unverified_planes`; a degraded one in
+   `degraded_planes` and in neither of those); the exit code
    alone says "nothing failed", not "everything confirmed", and for positive confirmation assert
-   `identified_planes` is non-empty (`verification_complete` is vacuously true on an empty config).
+   `identified_planes` is non-empty (`verification_complete` is vacuously true on an empty config,
+   and a degraded plane is listed there too, since its identity IS proven).
 
 ## 2. The variables, by plane
 

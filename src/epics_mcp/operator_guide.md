@@ -51,7 +51,9 @@ operational knowledge (see the Knowledge Persistence Policy in `CLAUDE.md`).
   the ChannelFinder/Alarm/Olog/Naming reachability self-checks are HTTP HEADs and bypass the
   throttle entirely, but the ARCHIVER's is not, it is a real GET of `/mgmt/bpl/getApplianceInfo`
   (it needs a 2xx to tell "reachable" from "wrong endpoint"), so it spends a token like any other
-  read and `epics-doctor` can be denied on a tight limit; and a multi-GET tool such as
+  read and `epics-doctor` can be denied on a tight limit. That archiver plane now spends **three**
+  tokens per run, not two: `check_connectivity`, the identity beacon, and the ingest probe
+  (`getApplianceMetrics`) that the identity beacon leads to. And a multi-GET tool such as
   `coverage_audit` or `crossplane_check` spends several tokens per audited PV, growing with the
   runtime planes it was asked for, so size the limit from the audited set and the planes requested
   rather than from a fixed figure, or the tool aborts mid-run with a loud
@@ -412,7 +414,8 @@ yields a complete-looking list of the wrong population.
 ### Verify a deployment's config: `epics-doctor`
 The `epics-doctor` CLI (core install) is a read-only self-check: it probes every CONFIGURED plane
 (a transport probe, refined on success by an identity probe, up to two requests for a healthy
-plane; retries on a 5xx add more) and
+plane, THREE on the archiver, whose identified appliance is also asked whether it is actually
+ingesting; retries on a 5xx add more) and
 reports, per plane, whether it is reachable, whether the CA bundle works, whether the
 service **identifies itself as the one that URL should point at**, and what the ChannelFinder
 redaction is set to. A disabled plane (empty `*_URL`) is reported honestly, never a failure. Exit
@@ -425,7 +428,8 @@ either. Run it first in a new facility to confirm the environment the launcher h
 (there is no `.env` file: configuration is read from `os.environ`); add `--probe-pv NAME` to also
 pass/fail the live PVA plane against a real PV. Full deployment/config guide: `docs/deployment.md`.
 
-**Reachable is not identified: read the `?` and `!` lines.** The transport probe is a HEAD and
+**Reachable is not identified, and identified is not working: read the `?`, `!` and `~` lines.**
+The transport probe is a HEAD and
 counts *any* HTTP response as reachable, so a URL pointing at the wrong host can look alive:
 measured, a ChannelFinder URL aimed at a dead container reported `✓ ok` because an unrelated service
 on that port answered `401` (blanket auth answers 401 for every path, so the status said nothing
@@ -440,6 +444,7 @@ also asked to **name itself**:
 | `!` | `identity_probe_failed` | reachable, but the identity probe FAILED (a served non-2xx like a `401` auth wall or `404`, a transport error, or a refused redirect on the identity endpoint). Reachable but suspect, **not** a hard failure (the plane's tool endpoints may work), **not** a silent all-clear either: exit `3` (INCONCLUSIVE) |
 | `✗` | `config_error` | the configuration is self-contradictory, no probe is even attempted (e.g. `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` set while `EPICS_MCP_ARCHIVER_URL` is empty, every archiver tool gates on the latter, so that retrieval URL is never used). Exit `1` |
 | `✗` | `backend_down` | reachable AND the service named itself, but a backend it depends on is measurably down, the alarm logger reports its Elasticsearch as not `Connected`, so its search/history tools will fail. The blind HEAD used to hide this as `ok`; unlike `unverified`, identity IS proven here and the service reports its OWN backend broken. Exit `1` |
+| `~` | `no_ingest` | reachable, identity PROVEN, and the service is measurably not doing its job: an Archiver appliance holding channels with **none** connected, or reporting one of its own webapps stopped. The wiring fault this tool exists to catch, and the blind identity probe used to hide it as `ok`. Exit stays `0` on purpose (a freshly commissioned or fully paused appliance is legitimately in this state, and a hard failure would cry wolf in every CI job), so it is surfaced instead: this glyph, its own verdict line, and `degraded_planes` in `--json`. Not `?`: that means "we could not tell what this is", and here we can |
 
 `unverified` is not a failure on purpose: that a healthy service answers its beacon anonymously is
 measured at one site, and making that a hard failure everywhere would be an overclaim. The same
@@ -454,7 +459,7 @@ Each plane has its own beacon, because they do not share one:
 | Plane | Beacon | Identified by |
 |---|---|---|
 | ChannelFinder / Olog / Alarm | `GET <base-url>` | exact `name` ("ChannelFinder Service", ...) |
-| Archiver (MGMT) | `GET /mgmt/bpl/getApplianceInfo` | the `identity` field |
+| Archiver (MGMT) | `GET /mgmt/bpl/getApplianceInfo`, then `GET /mgmt/bpl/getApplianceMetrics` | the `identity` field, then whether that appliance is INGESTING |
 | Archiver (retrieval) | `GET /retrieval/bpl/getVersion` | the product name in `version` |
 | Naming | `GET /rest/swagger.json` | `info.title` |
 
@@ -462,17 +467,35 @@ Each plane has its own beacon, because they do not share one:
 Probing the latter on the retrieval port 404s and tells you nothing, that mistake is exactly how an
 earlier pass concluded retrieval had no beacon at all.
 
+The archiver is the one plane with a SECOND question, because naming itself proves too little there:
+an appliance whose engine has never spoken to its IOCs answers `getApplianceInfo` exactly like a
+healthy one. `getApplianceMetrics` is parameterless and appliance-wide, and the row whose `instance`
+matches the reported `identity` carries `pvCount` / `connectedPVCount` / `eventRate` directly. Two
+things make it a finding (`~` `no_ingest`): channels held with **none** connected, or the appliance's
+own `status` reporting a stopped webapp, which is the worse fault and is invisible in the counts
+(when the engine webapp does not reply, mgmt cannot merge its numbers, so they vanish from the row
+while `pvCount` survives, and the payload is still served as HTTP `200`). Any failure to reach, read
+or match the metrics leaves the plane `ok` with the reason in the detail, never a claimed fault.
+⚠️ The figures are for **that member only**. A cluster is retrieval-aware (see below), so a query to
+one member returns data owned by another, but ingest is per member.
+
 The Naming `/rest/swagger.json` beacon is single-sourced (title + path in `services/naming_identity`)
 and now backs **two** surfaces: epics-doctor's naming plane AND `lookup_device_name`'s S13
 definitive-negative gate (a 204/404 is trusted only after this beacon confirms the responder, see
 "not found vs not registered" below).
 
 Scripting against this? Exit `0` means "nothing failed", **not** "everything confirmed", read
-`verification_complete` / `unverified_planes` / `inconclusive_identity_planes` from `--json`, never
-the exit code alone. A FAILED identity probe lands in `inconclusive_identity_planes` (exit `3`), NOT
+`verification_complete` / `unverified_planes` / `inconclusive_identity_planes` / `degraded_planes`
+from `--json`, never the exit code alone. A FAILED identity probe lands in
+`inconclusive_identity_planes` (exit `3`), NOT
 in `unverified_planes` (exit `0`), a script hunting identity problems must read both. And for
 **positive** confirmation assert `identified_planes` is non-empty: `verification_complete` is
 vacuously true on an empty config, so it alone cannot tell "all confirmed" from "nothing ran".
+⚠️ `degraded_planes` is the one none of the others covers, and it is the one that would be missed
+by a script written against this list before it existed: a plane there PROVED its identity and is
+measurably not doing its job, so it appears **in** `identified_planes`, leaves `ok` and
+`verification_complete` `True`, stays out of `unverified_planes`, and exits `0`. Reading
+`identified_planes` alone would count a non-archiving appliance as positively confirmed.
 
 ### Retrieval-cluster-aware appliances
 An Archiver Appliance may run as an **N-member failover cluster**. Such a cluster is retrieval-aware: a

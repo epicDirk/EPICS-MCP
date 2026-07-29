@@ -57,8 +57,8 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   comprehension filters, where the tool builds no whole-condition target, for those "unobserved"
   means "this CONJUNCT is unobserved", the rest of the condition still stood during the mutant.
 
-Honest scope, because the numbers invite over-reading: measured WITHOUT the live lane (the nine
-``*_live`` modules, 65 skipped), which is exactly where a guard meets a real payload. And a
+Honest scope, because the numbers invite over-reading: measured WITHOUT the live lane (the ten
+``*_live`` modules, 66 skipped), which is exactly where a guard meets a real payload. And a
 surviving mutant is not by itself a defect, it can equally be an equivalent mutant or a guard
 masked by its neighbour. ``channelfinder_client.py:91`` is the measured example of the latter:
 disable the list check and the loop iterates a dict, whose keys the item check at :98 rejects

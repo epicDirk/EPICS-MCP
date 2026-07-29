@@ -7,7 +7,38 @@ carry breaking changes).
 
 ## [Unreleased]
 
-(nothing yet)
+### Added
+
+- **`epics-doctor` notices an Archiver appliance that is not ingesting.** `getApplianceInfo` proves
+  that an appliance is answering and nothing more: one whose engine has never spoken to its IOCs
+  answers it exactly like a healthy one, so the doctor printed `ok` for a deployment that was
+  archiving nothing. That is a wiring fault, the class this tool exists to catch. The identified
+  appliance is now also asked `getApplianceMetrics`, and two things make it a finding: channels held
+  with **none** connected, or the appliance's own `status` reporting a stopped webapp. The second is
+  the worse fault and is invisible in the counts, because when the engine webapp does not reply,
+  mgmt cannot merge its numbers and they vanish from the row while `pvCount` survives, with the
+  payload still served as HTTP 200.
+- **New plane status `no_ingest` (`~`), exit `0`.** Deliberately not a failure: a freshly
+  commissioned or fully paused appliance is legitimately in this state, and failing the run would
+  make `epics-doctor` cry wolf in every CI job that calls it. It is not silent either, and that is
+  what the next entry is for.
+- **New `--json` field `degraded_planes`.** The planes that proved their identity and are measurably
+  not doing their job. It exists because every other signal stays clean for such a plane: `ok` and
+  `verification_complete` remain `true`, `unverified_planes` and `inconclusive_identity_planes`
+  remain empty, and `identified_planes` even lists it, since its identity IS proven. A script
+  written against the documented field list would otherwise read a non-archiving archiver as
+  positively confirmed. Purely additive; no existing field changes meaning and no exit code moves.
+
+### Changed
+
+- The archiver plane now issues **three** requests on a healthy run rather than two, and the ingest
+  probe uses a single attempt with a 15 s floor instead of the shared retrying session. urllib3
+  applies the timeout per attempt, and this route fans out to three internal requests per cluster
+  member: measured against a 16-member cluster it answers in 7.3 s but takes 23.3 s to fail under
+  the default 3-retry policy, which would have made the check blind there while slowing every run.
+- The archiver identity probe goes through the same shared beacon fetcher as every other plane. It
+  was the one plane building its request inline, which already made that helper's "the one place
+  every identity probe issues its request" contract untrue.
 
 ## [0.4.0] - 2026-07-29
 
