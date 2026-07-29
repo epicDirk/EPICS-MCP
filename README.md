@@ -12,7 +12,8 @@ over [p4p](https://mdavidsaver.github.io/p4p/), so an assistant can answer those
 operator would, instead of you clicking through CS-Studio, the Archiver Appliance UI and
 ChannelFinder by hand.
 
-**Read-only by default.** Writing is off unless you turn it on, twice, with an allowlist.
+**Read-only by default.** `set_pv_value` is triple-gated: an env switch, a required regex
+allowlist, and a rate limit. Logbook writes sit behind their own separate gate.
 
 > **Project status: work in progress (pre-1.0).** Under active development;
 > the tool surface and APIs may still change. Semantic-versioning pre-1.0 caveats apply, so
@@ -179,7 +180,7 @@ to building from source, which needs a compiler and is not something this projec
 **Services.** Exercised against a local EPICS stack: an **e3** test IOC (PVAccess), an **EPICS
 Archiver Appliance** (single- or multi-instance), **ChannelFinder**, and the **Phoebus Alarm**
 server and logger. Archiver topology note: in a single-JVM appliance the MGMT and retrieval webapps
-share a port, so leave `ARCHIVER_RETRIEVAL_URL` empty; in a split or clustered deployment MGMT
+share a port, so leave `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` empty; in a split deployment MGMT
 (`:17665`) and retrieval (`:17668`) are separate ports.
 
 ## Development
