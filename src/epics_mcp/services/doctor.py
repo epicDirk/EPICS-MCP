@@ -286,7 +286,9 @@ def _safe(text: str) -> str:
     return _URL_CREDENTIALS.sub(r"\g<scheme>***@", text)
 
 
-def _fetch_beacon(url: str, auth_header: str | None, timeout: float) -> object | Exception:
+def _fetch_beacon(
+    url: str, auth_header: str | None, timeout: float, *, retries: int = 3
+) -> object | Exception:
     """GET *url* and return the parsed body, or the Exception that stopped us. Never raises.
 
     The one place every identity probe issues its request, so the redirect posture and the
@@ -296,8 +298,16 @@ def _fetch_beacon(url: str, auth_header: str | None, timeout: float) -> object |
     another host answer for the one we configured, which is exactly the confusion being ruled out.
     Note a caller only ever sees a 2xx body: ``rest_get_json`` raises on a non-2xx BEFORE parsing,
     so an auth wall or a 404 can never reach a payload check.
+
+    ``retries`` is passed through to ``build_retrying_session`` so a caller can ask for its "one
+    attempt, long timeout" shape (``retries=0``). It matters because urllib3 applies the timeout
+    PER ATTEMPT: a retrying session's worst case is about 4x the timeout plus backoff, with no
+    wall-clock deadline (measured on the archiver ingest probe: 23.3 s against a route that
+    answers in 7.3 s). That is the wrong trade for a probe whose failure is mapped to a
+    non-verdict anyway, so it buys nothing and only costs wall-clock. The default is unchanged,
+    so every existing caller keeps the retrying session.
     """
-    session = build_retrying_session(auth_header=auth_header)
+    session = build_retrying_session(auth_header=auth_header, retries=retries)
     try:
         return rest_get_json(
             session,
@@ -514,20 +524,14 @@ def _identify_archiver(base_url: str, auth_header: str | None, timeout: float) -
     ``/mgmt/bpl/getApplianceInfo`` (stronger than the HEAD planes), yet it DISCARDS the payload:
     an empty ``{}`` passes. The appliance's own ``identity`` field is what turns "something served
     JSON here" into "an Archiver appliance served it", so it is checked rather than assumed.
+
+    The fetch goes through :func:`_fetch_beacon` like every other identity probe. This plane used
+    to build its own session inline, which made that function's "the one place every identity
+    probe issues its request" claim untrue; a second inline GET would have made it plainly false.
     """
-    session = build_retrying_session(auth_header=auth_header)
-    try:
-        payload = rest_get_json(
-            session,
-            f"{base_url}/mgmt/bpl/getApplianceInfo",
-            None,
-            timeout,
-            conn_exc=RestConnectionError,
-            resp_exc=RestResponseError,
-            allow_redirects=False,
-        )
-    except Exception as exc:  # noqa: BLE001 (TOTAL: any failure → classified, never raises)
-        return _identity_fetch_failure("archiver", exc)
+    payload = _fetch_beacon(f"{base_url}/mgmt/bpl/getApplianceInfo", auth_header, timeout)
+    if isinstance(payload, Exception):
+        return _identity_fetch_failure("archiver", payload)
 
     identity = payload.get("identity") if isinstance(payload, dict) else None
     if not isinstance(identity, str) or not identity.strip():
