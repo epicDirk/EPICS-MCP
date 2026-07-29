@@ -31,6 +31,7 @@ from epics_mcp.services.doctor import (
     PlaneCheck,
     PlaneStatus,
     PrivacyReport,
+    _check_retrieval_plane,
     _classify_failure,
     _identify,
     _identify_alarm,
@@ -1055,6 +1056,55 @@ async def test_retrieval_falls_back_to_the_archiver_url_like_the_client_does(
     retrieval = _plane(report, "archiver_retrieval")
     assert retrieval.status != "disabled", "retrieval is live via fallback, not reported as off"
     assert retrieval.configured is True
+
+
+@pytest.mark.parametrize(
+    ("retrieval_url", "expected_var"),
+    [
+        pytest.param("", "EPICS_MCP_ARCHIVER_URL", id="single-jvm-fallback"),
+        pytest.param(
+            "http://arch.example:17668",
+            "EPICS_MCP_ARCHIVER_RETRIEVAL_URL",
+            id="split-port-deployment",
+        ),
+    ],
+)
+async def test_unreachable_retrieval_names_the_variable_the_url_came_from(
+    monkeypatch: pytest.MonkeyPatch, retrieval_url: str, expected_var: str
+) -> None:
+    """C1: the retrieval plane reads its URL from EITHER variable, so the remedy has to name the one
+    that actually carried the failing URL.
+
+    This is the plane where naming the wrong one is most likely to be believed: an operator who
+    followed the split-port instructions in docs/deployment.md set
+    EPICS_MCP_ARCHIVER_RETRIEVAL_URL, and being told to check EPICS_MCP_ARCHIVER_URL sends them to a
+    URL that did not fail. Both rows are here because the fallback case must KEEP naming the mgmt
+    variable, which is the one that carried the URL there; a fix in either direction alone is wrong.
+
+    Faked at the TRANSPORT seam (``rest_get_json``, which this plane's own probe calls) rather than
+    by doubling a client class, and calling the plane check directly rather than through
+    ``run_doctor``. Both for the same reason: this asserts what ``_check_retrieval_plane`` passes as
+    ``url_var``, so every other plane is noise, and a class-level double would additionally be the
+    seam this repository's own audit counts and pins.
+
+    Red-proof: pinning ``url_var`` to either variable unconditionally fails one of these two rows
+    (measured on the pre-fix code, which named the mgmt variable always: the split-port row failed).
+    """
+    cfg = _set_config(
+        monkeypatch, archiver_url="http://arch.example:17665", archiver_retrieval_url=retrieval_url
+    )
+    monkeypatch.setattr(
+        "epics_mcp.services.doctor.rest_get_json",
+        Mock(side_effect=RestConnectionError("refused")),
+    )
+
+    check = await _check_retrieval_plane(cfg, 5.0)
+
+    assert check.status == "unreachable"
+    assert expected_var in (check.detail or ""), (
+        f"the remedy must name {expected_var}, the variable that carried the failing URL: "
+        f"{check.detail!r}"
+    )
 
 
 async def test_retrieval_url_without_archiver_url_is_a_config_error(

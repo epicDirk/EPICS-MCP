@@ -920,9 +920,20 @@ async def _check_retrieval_plane(cfg: EpicsConfig, timeout: float) -> PlaneCheck
     call: the config itself is the finding, and an ``ok`` line next to it would only muddy what
     the operator has to change.
     """
-    # The RESOLVED variable for this plane: retrieval falls back to the mgmt URL below, so the one
-    # an operator has to edit is the mgmt one either way.
-    url_var = "EPICS_MCP_ARCHIVER_URL"
+    # The variable the PROBED url actually came from, which is not always the mgmt one: the split
+    # deployment docs/deployment.md documents (retrieval on its own Tomcat) sets
+    # EPICS_MCP_ARCHIVER_RETRIEVAL_URL, and an unreachable probe there has to name THAT variable.
+    # Naming the mgmt one unconditionally would send exactly the operator who followed the
+    # split-port instructions to edit a URL that is not the one that failed.
+    #
+    # The disabled exit below keeps EPICS_MCP_ARCHIVER_URL deliberately: it is reached only when
+    # BOTH are empty, and the mgmt one is what enables the plane at all (the retrieval var alone is
+    # the config_error above, never a working plane).
+    url_var = (
+        "EPICS_MCP_ARCHIVER_RETRIEVAL_URL"
+        if cfg.archiver_retrieval_url
+        else "EPICS_MCP_ARCHIVER_URL"
+    )
     if cfg.archiver_retrieval_url and not cfg.archiver_url:
         return PlaneCheck(
             plane="archiver_retrieval",
