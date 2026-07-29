@@ -14,6 +14,8 @@ import io
 import math
 import sys
 
+from epics_mcp import __version__
+
 #: Exit code for a usage error, matching the ``positive_timeout`` posture below and argparse's own.
 _USAGE_ERROR = 2
 
@@ -149,6 +151,27 @@ def positive_timeout(value: str) -> float:
     if not (seconds > 0 and math.isfinite(seconds)):
         raise argparse.ArgumentTypeError(f"must be a finite number > 0 seconds, got {value!r}")
     return seconds
+
+
+def add_version_argument(parser: argparse.ArgumentParser) -> None:
+    """Give *parser* the ``--version`` action every console script of this package shares.
+
+    ONE home, so the five console scripts cannot drift apart. The flag used to exist on
+    ``epics-mcp`` alone (the bug-report template asks reporters for that version) and the other four
+    had no way to answer the same question. Copying the line into each was the alternative, and then
+    the version source, the ``%(prog)s`` prefix and the exit code would each be free to differ per
+    command, which is what ``tests/test_cli_version.py`` now pins across the whole set.
+
+    ``%(prog)s`` resolves to the parser's OWN pinned ``prog``, so the line names the command the
+    reader typed instead of an interpreter path (QA-41), which also means the five outputs differ by
+    that first token by design: what has to agree is the version after it.
+
+    ``action="version"`` prints inside ``parse_args`` and raises ``SystemExit(0)``, so the console
+    has to be reconfigured BEFORE the parser is built (QA-8), exactly as every entry point already
+    does. On the two display-aware commands the engine check runs earlier still, so there this flag
+    answers only where the engine is installed (a known limit, ticket QA-42).
+    """
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
 
 def configure_stdout() -> None:

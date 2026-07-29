@@ -47,7 +47,7 @@ import json
 import sys
 from typing import Literal
 
-from epics_mcp.cli_common import configure_stdout, positive_timeout
+from epics_mcp.cli_common import add_version_argument, configure_stdout, positive_timeout
 from epics_mcp.errors import EpicsError
 from epics_mcp.services.doctor import DoctorReport, run_doctor
 
@@ -186,6 +186,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="epics-doctor",
         description="Read-only config self-check: is every configured EPICS plane reachable?",
     )
+    add_version_argument(parser)
     parser.add_argument(
         "--probe-pv",
         default=None,

@@ -19,7 +19,7 @@ import asyncio
 import json
 import sys
 
-from epics_mcp.cli_common import configure_stdout, positive_timeout
+from epics_mcp.cli_common import add_version_argument, configure_stdout, positive_timeout
 from epics_mcp.services.diagnose import DiagnoseReport, diagnose
 
 
@@ -75,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="epics-diagnose",
         description="Diagnose why an EPICS PV is (dis)connected (read-only).",
     )
+    add_version_argument(parser)
     parser.add_argument("pv_name", help="the PV to diagnose")
     parser.add_argument(
         "--timeout",

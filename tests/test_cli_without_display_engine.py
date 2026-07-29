@@ -113,6 +113,32 @@ def test_main_refuses_cleanly_with_the_engine_faked_away(
 
 
 @pytest.mark.parametrize(("module_name", "command"), _COMMANDS)
+def test_version_is_engine_gated_on_the_display_clis(
+    module_name: str, command: str, engine_absent: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """QA-46 met QA-42 here, and this pins the seam between them.
+
+    ``--version`` was added to all five console commands, but on these two the availability check
+    runs BEFORE the parser is built, and the parser cannot be built without the engine anyway: its
+    help text and a default read ``DEFAULT_PV_CONTEXT_CAP`` from ``services/inventory_adapter``,
+    the sole importer of the engine. So on a core-only install (which is what CI is) the flag is
+    unreachable here, and ``tests/test_cli_version.py`` asserts exactly this outcome for that
+    environment.
+
+    Faked rather than environment-dependent, so the limit is provable in a checkout that HAS the
+    engine too. ⚠️ Should QA-42 ever move argument handling ahead of the check, this test goes red
+    on purpose: that is the signal to update it and the note in ``test_cli_version.py`` together,
+    instead of leaving a stale claim about what a published install can do.
+    """
+    module = importlib.import_module(module_name)
+
+    code = module.main(["--version"])
+
+    assert code == 2, f"{command} --version should refuse with a usage error, not answer"
+    assert command in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("module_name", "command"), _COMMANDS)
 def test_the_module_imports_at_all_without_the_engine(module_name: str, command: str) -> None:
     """The actual regression, and the one a fake cannot show: the module-level import chain.
 

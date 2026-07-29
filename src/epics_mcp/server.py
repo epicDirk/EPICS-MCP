@@ -11,7 +11,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from epics_mcp import __version__
-from epics_mcp.cli_common import configure_stdout
+from epics_mcp.cli_common import add_version_argument, configure_stdout
 from epics_mcp.config import get_config
 from epics_mcp.errors import SafetyConfigError
 from epics_mcp.prompts import compare_machine_state as _compare_machine_state
@@ -1697,7 +1697,10 @@ def main(argv: Sequence[str] | None = None) -> None:
             "configure it through EPICS_MCP_* environment variables (see .env.example)."
         ),
     )
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    # Through the shared helper since QA-46, which gave the same flag to the four diagnostic
+    # commands. The line lived here first and was the only one of its kind; one home means the
+    # version source and the prog prefix cannot differ between the console scripts.
+    add_version_argument(parser)
     parser.parse_args(argv)
 
     config = get_config()

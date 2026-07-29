@@ -17,7 +17,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from epics_mcp.cli_common import configure_stdout, require_display_engine
+from epics_mcp.cli_common import add_version_argument, configure_stdout, require_display_engine
 from epics_mcp.errors import EpicsError
 
 # The opi_navigation-backed imports live INSIDE main(), below the availability check.
@@ -45,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
         prog="epics-crossplane",
         description="Cross-plane PV provenance: Display ↔ e3 ↔ Naming",
     )
+    # Reachable only where the display engine is installed, as in cli_coverage (QA-42).
+    add_version_argument(parser)
     parser.add_argument(
         "--displays",
         required=True,

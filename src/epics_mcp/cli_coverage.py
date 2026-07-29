@@ -17,7 +17,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from epics_mcp.cli_common import configure_stdout, require_display_engine
+from epics_mcp.cli_common import add_version_argument, configure_stdout, require_display_engine
 from epics_mcp.errors import EpicsError
 
 # The opi_navigation-backed imports live INSIDE main(), below the availability check.
@@ -45,6 +45,9 @@ def main(argv: list[str] | None = None) -> int:
         prog="epics-coverage",
         description="Cross-plane coverage audit: Display ↔ ChannelFinder ↔ Archiver ↔ Alarm",
     )
+    # Reachable only where the display engine is installed: the availability check above returns
+    # before this parser exists (QA-42 tracks that, and test_cli_without_display_engine pins it).
+    add_version_argument(parser)
     parser.add_argument(
         "--displays",
         required=True,
