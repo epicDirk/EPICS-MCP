@@ -78,6 +78,17 @@ epics-coverage   --displays <project-root> --scope DEV: # coverage matrix (needs
 `epics-coverage` need the `opi_navigation` engine, which a published install cannot obtain
 (see above). All are read-only.
 
+All five commands answer `--version` with their own name and the package version. ⚠️ On
+`epics-crossplane` and `epics-coverage` the engine check runs before the arguments are parsed, so on a
+core-only install those two report the missing engine instead (exit `2`); the three core commands
+answer everywhere.
+
+Every `epics-doctor` line that reports a PROBLEM also says what to change: the observation (the HTTP
+code, the variable that could not be reached, the appliance figures) and then the remedy for that
+status. The honest-but-not-healthy states are deliberately left without one, because there is nothing
+here to set: `unverified` already carries the specific clue it measured, and `no_ingest` is a fault
+inside the appliance, not in this configuration.
+
 `epics-diagnose`/`epics-crossplane`/`epics-coverage` exit `0` even on a negative finding (a
 disconnect / a broken link is a result, not a crash). **`epics-doctor` is the deliberate exception**
 It is a scriptable pass/fail, so it exits `0` when nothing failed and no identity probe failed,

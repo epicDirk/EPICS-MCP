@@ -272,3 +272,17 @@ already records origin.
 guard on this page is the review, plus the fact that every entry names the measurement that produced
 it, so a reader can re-run it instead of trusting it. Where an entry has a work item, the work item
 is the durable half; where it does not, the entry IS the decision.
+
+## 13 · A remedy is checked for being PRESENT, not for being right
+
+`epics-doctor` appends a remedy to every status that reports a problem, and
+`test_every_problem_status_names_a_remedy` proves that each of them has one, that it is not empty, and
+that it opens with an imperative. None of that says the advice is CORRECT, or still correct: a remedy
+naming a variable that gets renamed, or pointing at a section of `docs/deployment.md` that moves, goes
+stale in silence. Two of the seven texts are backed by that file (the CA bundle and the per-plane
+variables), the other five by the probe that produces the status, and nothing re-checks either link.
+
+Measured: the guard survives replacing any remedy with a different, equally imperative sentence, and
+no test reads a documentation path out of a Python string (`tests/test_doc_links.py` scans tracked
+markdown only). Deliberate: a guard over the WORDING would pin prose that has to be free to improve,
+which is the trade this page's first entry already describes. The check is the review.

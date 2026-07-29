@@ -38,6 +38,11 @@ setting those variables for *your* services, with no code change. This guide wal
    names another service, measured), but the name is your first clue if the config IS wrong. Fix
    anything `epics-doctor` flags, then you are done; no need to ask us.
 
+   Each line that reports a problem carries its own remedy: what was observed, then what to change
+   about it. So the common cases need no lookup here, and the sections below are for when you want
+   the reasoning behind one. The `?` and `~` lines are the exception, honest states with nothing to
+   set, and they say what they measured instead.
+
    ⚠️ Read the `?` (`unverified`, exit `0`), `!` (`identity_probe_failed`, exit `3`) and `~`
    (`no_ingest`, exit `0`) lines before
    calling it done. `?` = "answered 2xx, but could not prove what it is": honest, not healthy. `!` =

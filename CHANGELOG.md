@@ -9,6 +9,23 @@ carry breaking changes).
 
 ### Added
 
+- **Every `epics-doctor` line that reports a problem now names its remedy.** Three statuses already
+  did (`ca_error` named the CA bundle variable, `api_error` the mgmt/retrieval mix-up, `config_error`
+  the variable to set) and four did not: `unreachable` printed only the transport error,
+  `backend_down` named the consequence rather than the fix, and `disconnected` and
+  `identity_probe_failed` said nothing about what to do. The remedies now live in one table keyed by
+  status, appended to the observation and never replacing it, so `--json` readers get them in the same
+  `detail` field. An `unreachable` plane also names the variable it reads its URL from, which is the
+  one case where the reader cannot tell from the message which of the seven to look at. `unverified`
+  and `no_ingest` deliberately stay without one: the first already carries the specific clue it
+  measured, and the second is a fault inside the appliance, not in this configuration.
+- **`--version` on all five console commands** (`epics-mcp` had it; `epics-doctor`,
+  `epics-diagnose`, `epics-coverage` and `epics-crossplane` did not), from one shared helper, so the
+  version source and the command-name prefix cannot drift apart. Each prints its own name and the
+  package version. Note: on the two display-aware commands the engine check still runs before the
+  arguments are parsed, so on a core-only install those two report the missing engine instead; that
+  limit is pinned by a test rather than left to be rediscovered.
+
 - **`epics-doctor` notices an Archiver appliance that is not ingesting.** `getApplianceInfo` proves
   that an appliance is answering and nothing more: one whose engine has never spoken to its IOCs
   answers it exactly like a healthy one, so the doctor printed `ok` for a deployment that was
