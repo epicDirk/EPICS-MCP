@@ -123,8 +123,8 @@ def build_instructions(display_tools_available: bool) -> str:
         "The PV-mutating tool set_pv_value is gated OFF by default and additionally requires "
         "EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, a rate limit and an audit log, a "
         "separate gate from the Olog one, and it stays off. "
-        "A write-enabled server needs a durable EPICS_MCP_AUDIT_LOG_FILE (else it refuses to "
-        "start) and refuses an out-of-range value before the put. "
+        "A write-enabled server needs a durable EPICS_MCP_AUDIT_LOG_FILE AND a loopback-only "
+        "reach (else it refuses to start) and refuses an out-of-range value before the put. "
         "After a sanctioned write it reads the value back and returns a structured result "
         "(verified/readback/tolerance) plus a READBACK audit event, so a wrong or not-landed value "
         "is surfaced, not silently accepted. "
@@ -274,8 +274,9 @@ async def set_pv_value(
     """Set a PV value. Requires EPICS_MCP_ALLOW_PV_WRITE=true.
 
     Protected by safety layer: environment gate, regex allowlist, rate-limit (10/min default),
-    and audit logging to a durable path (EPICS_MCP_AUDIT_LOG_FILE, a write-enabled server refuses
-    to start without one), the load-bearing, client-independent guard.
+    audit logging to a durable path (EPICS_MCP_AUDIT_LOG_FILE) and a loopback-only EPICS client
+    search reach; a write-enabled server refuses to start without either of the last two. The
+    load-bearing, client-independent guard.
 
     Value bounds (always-on, pre-put): the written value is checked against the record's OWN drive
     limits (control DRVL/DRVH, read on the pre-read). An out-of-range value is denied with

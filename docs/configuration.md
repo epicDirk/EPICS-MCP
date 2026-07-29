@@ -27,6 +27,7 @@ Every setting is an environment variable with the `EPICS_MCP_` prefix. [`.env.ex
 | `EPICS_MCP_WRITE_RATE_LIMIT` | `10` | Max writes per minute (≥ 1) |
 | `EPICS_MCP_READ_RATE_LIMIT` | `0` | Max REST reads per 60 s (0 = disabled, opt-in); over the limit the shared GET chokepoint raises rather than blocks |
 | `EPICS_MCP_AUDIT_LOG_FILE` | _(empty)_ | Audit log path; empty = stderr (ephemeral). **Required** when a write gate is on: a write-enabled server refuses to start without a durable path |
+| _(no variable of ours)_ | | **A loopback-only EPICS search reach is the third start condition for PV writes.** Enabling `EPICS_MCP_ALLOW_PV_WRITE` while the EPICS search path can reach beyond loopback refuses the start, so the network posture and the write gate are not independent settings. The variables are in the EPICS network table at the end of this page; the Olog write gate has its own conditions and is not affected |
 | `EPICS_MCP_READBACK_TOLERANCE` | `1e-06` | Fallback tolerance for the always-on post-write readback verification (feeds both `math.isclose` axes); used only when the record has no usable `control.min_step` (≥ 0) |
 
 ## Path boundary
@@ -91,4 +92,5 @@ searches explicitly disabled. Run `epics-doctor` to see what your instance actua
 | `EPICS_PVA_NAME_SERVERS` | _(unset)_ | PVAccess name servers (TCP unicast, **not** subnet-bound) |
 | `EPICS_CA_ADDR_LIST` | _(unset)_ | Channel Access address list |
 | `EPICS_CA_AUTO_ADDR_LIST` | `YES` (EPICS default when unset) | Subnet broadcast for Channel Access. Set `NO` to disable |
+| `EPICS_CA_NAME_SERVERS` | _(unset)_ | Channel Access name servers (TCP unicast, **not** subnet-bound) |
 

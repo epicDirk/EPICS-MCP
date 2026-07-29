@@ -64,8 +64,10 @@ Network posture: PV reach is decided by the launcher's EPICS search-path env: ad
 servers, and the auto-addr search, which defaults to **ON** (subnet broadcast) when unset; a
 genuinely localhost-isolated instance needs every list unset **and** `*_AUTO_ADDR_LIST=NO`. The REST
 planes stay off until their `*_URL` is set. Writes are gated off by default
-(`EPICS_MCP_ALLOW_PV_WRITE=false`) and additionally need a regex allowlist, a rate limit and an audit
-log.
+(`EPICS_MCP_ALLOW_PV_WRITE=false`) and additionally need a regex allowlist, a rate limit, an audit
+log and a loopback-only EPICS search reach. That last one is why the network posture above and the
+write gate are not independent settings: writes on plus a reach beyond loopback is a start-time
+refusal, not a warning.
 
 ## 3. TLS / CA bundle (the common first-deploy snag)
 

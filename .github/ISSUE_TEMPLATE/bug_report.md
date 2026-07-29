@@ -30,5 +30,5 @@ What you expected instead.
 ## Logs / output
 
 Paste the error, the tool output, or a relevant `logger` line (redact any hostnames/PVs you
-consider sensitive). Note: this is a read-only server, so please do not paste secrets or
-`Authorization` header values.
+consider sensitive). Please do not paste secrets or `Authorization` header values: the REST planes
+each take an `EPICS_MCP_*_AUTH` credential, and an error string can carry the request URL.

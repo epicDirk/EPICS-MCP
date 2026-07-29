@@ -66,6 +66,17 @@ carry breaking changes).
   the mgmt port with no error to explain it.
 - **`.env.example` names all four tools the Olog write gate covers**, not two. It was the only
   place that understated the gate's reach.
+- **The start conditions of the PV write gate are now listed completely wherever they are listed at
+  all.** The tool description, the server instructions, the configuration reference and the
+  deployment guide each enumerated what a write-enabled server needs and left out the loopback-only
+  search reach, while other places state it. An enumeration that stops one item short reads as
+  complete, so an operator learned that the network posture and the write gate were independent
+  settings, when in fact writes on plus a reach beyond loopback is a start-time refusal. The
+  configuration reference also gained the `EPICS_CA_NAME_SERVERS` row: it takes part in that check
+  but was missing from the EPICS network table.
+- **The bug report template no longer calls this an unqualified read-only server.** It can write,
+  behind gates; the reason not to paste credentials is that each REST plane takes an
+  `EPICS_MCP_*_AUTH` value and an error string can carry the request URL.
 - **`epics-mcp --help` prints help, and `--version` prints the version.** `epics-mcp` accepted no
   options at all, so `--help` reached the stdio transport instead of a parser: the command appeared
   to succeed, printed nothing and exited 0, because a server started on a closed stdin ends at once.
