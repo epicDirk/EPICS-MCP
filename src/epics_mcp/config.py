@@ -12,9 +12,12 @@ from pydantic_settings import BaseSettings
 class UnknownEpicsEnvVarWarning(UserWarning):
     """An ``EPICS_MCP_*`` environment variable matched no ``EpicsConfig`` field and was ignored.
 
-    pydantic-settings' default ``extra="ignore"`` DROPS an unknown ``EPICS_MCP_FOO`` without a
-    trace, so a typo (e.g. ``EPICS_MCP_CHANNELFINDR_URL`` for ``...CHANNELFINDER_URL``) silently
-    leaves the real setting at its default. This warning surfaces the likely typo. It subclasses
+    An unknown ``EPICS_MCP_FOO`` never reaches the model, and ``extra`` is not what drops it: the
+    env source asks, per DECLARED field, for that field's own env name, so a name no field asks for
+    is never read. (Measured on pydantic-settings 2.14.2: the effective ``extra`` of this class is
+    ``"forbid"``, so a stray CONSTRUCTOR keyword does raise; a stray env var does not.) A typo
+    (e.g. ``EPICS_MCP_CHANNELFINDR_URL`` for ``...CHANNELFINDER_URL``) therefore silently leaves
+    the real setting at its default. This warning surfaces the likely typo. It subclasses
     ``UserWarning`` so a deployment can filter or escalate it.
     """
 
@@ -222,8 +225,10 @@ class EpicsConfig(BaseSettings):
     def _warn_on_unknown_env_vars(self) -> Self:
         """Warn (never fail) for an ``EPICS_MCP_*`` env var that maps to no config field.
 
-        ``env_prefix`` + the default ``extra="ignore"`` means an unknown var is dropped silently,
-        so a typo would never surface. This scans the process environment once per construction and
+        The env source only ever asks for the env names the DECLARED fields carry, so an unknown
+        var is dropped before ``extra`` is consulted and a typo would never surface (the mechanism,
+        and why ``extra`` is not what drops it, is at :class:`UnknownEpicsEnvVarWarning`). This
+        scans the process environment once per construction and
         warns for each ``EPICS_MCP_`` key whose stripped, lowercased remainder is neither a declared
         field nor a reserved test-harness name. A warning, not a ``ValidationError``, an unknown
         var is a likely mistake but not provably fatal (it may belong to a different tool sharing

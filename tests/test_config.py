@@ -144,10 +144,11 @@ class TestEpicsConfigValidation:
 
 
 class TestUnknownEnvVarGuard:
-    """R2: pydantic-settings drops an unknown ``EPICS_MCP_*`` var silently (extra=ignore default),
-    so a typo like ``EPICS_MCP_CHANNELFINDR_URL`` leaves the real setting at its default with no
-    hint. The guard warns on the likely typo; a correct var and a reserved test-harness var stay
-    quiet."""
+    """R2: pydantic-settings drops an unknown ``EPICS_MCP_*`` var silently (the env source asks
+    only for the env names the declared fields carry, so the stray key is never offered to the
+    model), so a typo like ``EPICS_MCP_CHANNELFINDR_URL`` leaves the real setting at its default
+    with no hint. The guard warns on the likely typo; a correct var and a reserved test-harness var
+    stay quiet."""
 
     def test_unknown_var_warns(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("EPICS_MCP_CHANNELFINDR_URL", "x")  # typo of CHANNELFINDER_URL
