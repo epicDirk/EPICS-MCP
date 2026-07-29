@@ -10,7 +10,9 @@ identity probe that FAILED, S12).
 
 from __future__ import annotations
 
+import ast
 import json
+from pathlib import Path
 from typing import get_args
 from unittest.mock import Mock
 
@@ -20,6 +22,7 @@ import requests
 from epics_mcp import cli_doctor
 from epics_mcp.config import EpicsConfig
 from epics_mcp.errors import EpicsError
+from epics_mcp.services import doctor
 from epics_mcp.services.doctor import (
     _DEGRADED_STATUSES,
     _FAILING_STATUSES,
@@ -1800,6 +1803,41 @@ def test_every_problem_status_names_a_remedy() -> None:
                 "appended to a detail that can be hundreds of characters long, so it has to name "
                 "or describe what it means"
             )
+
+
+def test_config_error_has_exactly_one_construction_site() -> None:
+    """The ``config_error`` remedy says "the empty variable this finding names", and that phrase
+    only resolves while every site producing this status names exactly one empty variable.
+
+    Unlike the other six, this remedy points INTO its observation instead of standing alone, because
+    the variable to set is site knowledge a status-keyed table cannot hold. That is affordable at
+    one site and a wrong instruction at a second one shaped differently (two conflicting values,
+    say), so the count is pinned rather than left to be noticed.
+
+    ⚠️ Honest limit: this counts CONSTRUCTIONS, not call sites. Move the construction into a helper
+    the way ``_backend_down`` is one, call it twice, and this stays at 1 while two sites exist. It
+    is kept anyway because it catches the realistic route (a second inline ``PlaneCheck``), and the
+    blind spot is named here rather than discovered later.
+
+    Red-proof: add a second inline ``PlaneCheck(status="config_error")`` anywhere in the module.
+    """
+    tree = ast.parse(Path(doctor.__file__).read_text(encoding="utf-8"))
+
+    sites = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for keyword in node.keywords
+        if keyword.arg == "status"
+        and isinstance(keyword.value, ast.Constant)
+        and keyword.value.value == "config_error"
+    ]
+
+    assert len(sites) == 1, (
+        f"{len(sites)} sites construct a config_error PlaneCheck (lines "
+        f"{[node.lineno for node in sites]}); the status-wide remedy names 'the empty variable "
+        "this finding names', which a differently shaped second site would not provide"
+    )
 
 
 def test_a_healthy_status_gets_no_remedy_appended() -> None:

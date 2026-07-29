@@ -177,7 +177,7 @@ _DEGRADED_STATUSES: frozenset[str] = frozenset({"no_ingest"})
 #: describes it, and stands on its own.
 _REMEDY: dict[str, str] = {
     "config_error": (
-        "Change the configuration this finding names; nothing was probed here, the configuration "
+        "Set the empty variable this finding names; nothing was probed here, the configuration "
         "itself is the finding."
     ),
     "ca_error": (
@@ -202,8 +202,12 @@ _REMEDY: dict[str, str] = {
         "Repair the backend this finding names, or disable this plane. The configuration here is "
         "not the cause: the plane answered and proved its identity."
     ),
+    # The third cause is the one this status was BUILT for (S4, see _INCONCLUSIVE_STATUSES above):
+    # a URL at a dead container whose neighbour answered 401. Naming only the sub-path and the auth
+    # wall sends exactly that operator to configure authentication on a host that is not theirs.
     "identity_probe_failed": (
-        "Check the URL is the service ROOT rather than a sub-path, and that its info endpoint is "
+        "Check the URL is the service ROOT rather than a sub-path, that it reaches the host you "
+        "mean rather than a neighbour answering for a dead one, and that its info endpoint is "
         "not behind authentication. The tool endpoints of this plane may still work."
     ),
 }
@@ -946,11 +950,19 @@ async def _check_retrieval_plane(cfg: EpicsConfig, timeout: float) -> PlaneCheck
             plane="archiver_retrieval",
             configured=True,
             status="config_error",
+            # Observation only, no imperative: the remedy is the table's half, and this used to say
+            # "Set EPICS_MCP_ARCHIVER_URL" itself, so the rendered line carried the instruction
+            # twice. What the table cannot know is WHICH variable, so the observation names it and
+            # the remedy points at it, the construction the unreachable remedy already uses. That
+            # remedy reads "the empty variable this finding names", which is unambiguous only while
+            # exactly one variable here is reported empty and only while this is the sole
+            # config_error site: test_config_error_has_exactly_one_construction_site pins the
+            # latter.
             detail=_with_remedy(
                 "config_error",
-                "EPICS_MCP_ARCHIVER_RETRIEVAL_URL is set but EPICS_MCP_ARCHIVER_URL is empty, "
-                "every archiver tool gates on EPICS_MCP_ARCHIVER_URL, so this retrieval URL is "
-                "never used. Set EPICS_MCP_ARCHIVER_URL (the MGMT webapp URL).",
+                "EPICS_MCP_ARCHIVER_RETRIEVAL_URL is set but EPICS_MCP_ARCHIVER_URL (the MGMT "
+                "webapp URL) is empty, every archiver tool gates on EPICS_MCP_ARCHIVER_URL, so "
+                "this retrieval URL is never used.",
             ),
         )
     url = cfg.archiver_retrieval_url or cfg.archiver_url
