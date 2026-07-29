@@ -109,5 +109,12 @@ jobs:
         with:
           name: distributions
           path: dist/
+          # Stated, not inherited. Measured against the action.yml at v8: `digest-mismatch` takes
+          # ignore/info/warn/error and already defaults to error, so this changes nothing today.
+          # It is written out because the value is a safety decision (a corrupted artifact must
+          # stop the release rather than reach the index) sitting in the one job that runs once,
+          # at release time, and cannot be re-run. An inherited default can move in a v8.x; a
+          # stated one cannot move without someone editing this line.
+          digest-mismatch: error
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

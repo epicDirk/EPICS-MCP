@@ -144,3 +144,112 @@ def test_the_tests_run_in_the_same_workflow_that_publishes() -> None:
         "the publish workflow must run the suite itself; a green CI run on the same commit is a "
         "separate workflow this one does not depend on"
     )
+
+
+def test_every_action_reference_is_pinned_in_order() -> None:
+    """QA-23: nothing here read the ``uses:`` lines at all, and they are the release's supply chain.
+
+    Pinned as the exact ordered list rather than checked one by one, so an action ADDED to this
+    workflow is a conscious edit of this test too. The set matters beyond version drift: this
+    workflow's own comment records that ``astral-sh/setup-uv`` publishes v8.x and v9.x but no
+    floating major tag for either, so a routine bump to ``@v9`` would not resolve and would break
+    the release outright.
+    """
+    refs = [
+        line.strip().split("uses:", 1)[1].strip()
+        for line in _lines()
+        if "uses:" in line and not line.strip().startswith("#")
+    ]
+
+    assert refs == [
+        "actions/checkout@v5",
+        "astral-sh/setup-uv@v7",
+        "actions/upload-artifact@v7",
+        "actions/download-artifact@v8",
+        "pypa/gh-action-pypi-publish@release/v1",
+    ], f"the action set or its versions changed, decide consciously: {refs}"
+
+
+def _artifact_step_name(lines: list[str], action: str) -> str:
+    """The ``name:`` the step using *action* passes, bound to that step by position.
+
+    Deliberately NOT "collect every name: and hope two of them agree". This file carries a dozen
+    ``name:`` lines, and the publish job's ``environment: name: pypi`` sits BETWEEN the two
+    artifact steps, so a whole-file reader would compare the wrong pair.
+
+    The step ends at the first line indented no deeper than its own dash. Delimiting on the next
+    step's dash instead is not enough, and this test caught that on its first run: the upload is
+    the LAST step of the build job, so a dash-delimited scan ran past the job boundary and reached
+    exactly the ``environment: name: pypi`` this docstring warns about.
+
+    Exactly one ``name:`` is required inside the step. The two artifact steps are the only ones
+    here without a step-level name, so adding one after ``uses:`` (the ordinary future edit) goes
+    red HERE rather than quietly supplying the wrong value.
+    """
+    uses = [i for i, line in enumerate(lines) if f"uses: {action}@" in line]
+    assert len(uses) == 1, f"expected exactly one step using {action}, found lines {uses}"
+    start = uses[0]
+    dash_indent = len(lines[start]) - len(lines[start].lstrip())
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if not lines[i].strip():
+            continue
+        if len(lines[i]) - len(lines[i].lstrip()) <= dash_indent:
+            end = i
+            break
+    names = [line.strip() for line in lines[start:end] if line.strip().startswith("name:")]
+    assert len(names) == 1, (
+        f"expected exactly one name: inside the {action} step, found {names}. A step-level name "
+        "written after uses: has to be moved above it, or this binding reads the wrong line"
+    )
+    return names[0].removeprefix("name:").strip()
+
+
+def test_the_artifact_is_downloaded_under_the_name_it_was_uploaded_with() -> None:
+    """The two jobs are joined by a STRING, and nothing compared the two ends of it.
+
+    ``upload-artifact`` names the artifact; ``download-artifact`` asks for that name. A typo in
+    either one leaves the publish job with an empty ``dist/`` in the single job that runs once, at
+    release time. Nothing else notices: the upload succeeds, the download of a missing name is the
+    failure, and the rehearsal path never reaches the download step at all.
+    """
+    lines = _lines()
+    uploaded = _artifact_step_name(lines, "actions/upload-artifact")
+    downloaded = _artifact_step_name(lines, "actions/download-artifact")
+
+    assert uploaded == downloaded, (
+        f"the publish job asks for {downloaded!r} but the build job uploads {uploaded!r}; the "
+        "download would find nothing and the release would ship an empty dist/"
+    )
+    assert uploaded == "distributions", (
+        f"the artifact name changed to {uploaded!r}; harmless in itself, but this test is the only "
+        "thing tying the two jobs together, so the change is made consciously here"
+    )
+
+
+def test_the_download_states_its_digest_behaviour_instead_of_inheriting_it() -> None:
+    """A safety default in the job that cannot be re-run is written down, not inherited.
+
+    Measured against ``actions/download-artifact``'s own ``action.yml`` at v8: ``digest-mismatch``
+    accepts ignore/info/warn/error and defaults to ``error``. Stating it changes nothing today and
+    keeps a later v8.x from changing it silently, in the one step whose failure mode is a
+    corrupted artifact reaching a package index that never lets a version be reused.
+    """
+    lines = _lines()
+    start = next(i for i, line in enumerate(lines) if "uses: actions/download-artifact@" in line)
+    dash_indent = len(lines[start]) - len(lines[start].lstrip())
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if not lines[i].strip():
+            continue
+        if len(lines[i]) - len(lines[i].lstrip()) <= dash_indent:
+            end = i
+            break
+    stated = [
+        line.strip() for line in lines[start:end] if line.strip().startswith("digest-mismatch")
+    ]
+
+    assert stated == ["digest-mismatch: error"], (
+        f"the download step must state digest-mismatch, found {stated}. Anything but 'error' lets "
+        "a corrupted artifact through to the upload"
+    )
