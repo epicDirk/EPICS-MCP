@@ -48,9 +48,12 @@ operational knowledge (see the Knowledge Persistence Policy in `CLAUDE.md`).
   blocked, a blocking wait there would hold a worker thread and reintroduce the monitor starvation
   above. Turn it on to protect a production facility from an unthrottled read burst. It bounds only
   the REST planes (ChannelFinder/Archiver/Alarm/Naming/Olog), not live p4p PV reads. Two caveats:
-  reachability self-checks use HTTP HEAD and are exempt (a single probe, not a burst); and a
-  multi-GET tool like `coverage_audit` spends ~2 tokens per PV, so set the limit ABOVE that fan-out
-  or the tool aborts mid-run with a loud `RATE_LIMIT_EXCEEDED` (never a silent partial result).
+  the ChannelFinder/Alarm/Olog/Naming reachability self-checks are HTTP HEADs and bypass the
+  throttle entirely, but the ARCHIVER's is not, it is a real GET of `/mgmt/bpl/getApplianceInfo`
+  (it needs a 2xx to tell "reachable" from "wrong endpoint"), so it spends a token like any other
+  read and `epics-doctor` can be denied on a tight limit; and a multi-GET tool like
+  `coverage_audit` spends ~2 tokens per PV, so set the limit ABOVE that fan-out or the tool aborts
+  mid-run with a loud `READ_RATE_LIMIT_EXCEEDED` (never a silent partial result).
 
 ## The planes
 
@@ -82,7 +85,7 @@ are simply absent, that is an unmet optional dependency group, not a bug.
 `create_log_entry` · `reply_to_log` · `update_log_entry` · `add_log_attachment` ·
 `list_log_attachments` · `download_log_attachment`
 
-**Optional `[displays]`, cross-plane with the operator-screen PV inventory:**
+**Optional `displays` dependency group, cross-plane with the operator-screen PV inventory:**
 `validate_pvs` · `crossplane_check` · `coverage_audit` · `find_device`
 <!-- END:tool-inventory -->
 
