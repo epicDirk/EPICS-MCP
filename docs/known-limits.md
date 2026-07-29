@@ -1,9 +1,24 @@
 # Known limits: what this repository deliberately does NOT guard
 
+**What an entry IS:** a measured limit of a guard this repository runs, plus the tempting repair that
+was probed and REJECTED rather than merely postponed. **What it is NOT:** a work journal, a QA
+history, or scheduling. Those live in a maintainer backlog outside this repository, and every entry
+here has to read without it. The rule is stated rather than assumed because the sibling case is on
+record: `CHANGELOG.md` drifted into a 763-line work journal once, because no rule claimed it. A
+bracketed `S` or `QA` mark is therefore provenance and never an instruction; each entry names its own
+open work in words.
+
 **Every entry carries its own measurement date**, and every figure in it is a measurement of the
 tree on that date, not an invariant: this file is markdown, and markdown is unguarded here (that is
 the first entry). Treat a number as "was true when written" and re-measure before building on it.
-Entries 1 to 8 were measured 2026-07-26, entries 9 and 10 on 2026-07-28, entry 11 on 2026-07-29.
+Entries 1 to 8 were measured 2026-07-26, entries 9 and 10 on 2026-07-28, entry 11 on 2026-07-29 and
+entry 13 on 2026-07-30; entry 12 states a property of this page and measures nothing.
+
+One consequence of that is applied here rather than only described: where a figure exists to
+establish a SHARE and no guard can re-run it, the share is what this page states, together with the
+rule to re-derive it. Of the figures re-measured on 2026-07-30, exactly the two in that class had
+drifted (entries 1 and 8); every one that a guard does re-run still agreed, which is the whole of
+the argument for stating a share instead.
 
 Why the file exists: the drift guards this repository runs, the prose-counter guard
 (`tests/test_prose_counters.py`, S32), the sham-guard audit (`scripts/guard_audit.py`, S33) and the
@@ -19,24 +34,27 @@ rejected rather than merely postponed.
 
 The prose-counter guard reads Python comments and docstrings. It does not read `.md` files.
 
-Measured 2026-07-26, and left as a dated measurement rather than restated as a live one, for the
-reason this very section gives: **38** size-naming phrases across **10** tracked markdown files (the detector's own
-vocabulary: a number paired with one of `prose_numbers.COLLECTION_NOUNS`, or the `N of the M`
-shape). **12 of those sit in `CHANGELOG.md` and `CLAUDE.md`**, and that is where the exemptions
-would live: a changelog entry that said "22 schemas" in a past release must keep saying it. This page
-is in its own census, and is one of the ten files.
+Measured 2026-07-26 and re-measured 2026-07-30, when it had drifted in both halves. What this entry
+states is therefore the shape and not the count: size-naming phrases are spread across the tracked
+markdown files (the detector's own vocabulary: a number paired with one of
+`prose_numbers.COLLECTION_NOUNS`, or the `N of the M` shape), and **the largest share of them sits in
+`CHANGELOG.md` and `CLAUDE.md`**, which is where the exemptions would live: a changelog entry that
+said "22 schemas" in a past release must keep saying it. Re-derive it with that vocabulary over
+`git ls-files "*.md"`. This page is in its own census and is one of those files, so its own edits
+move the answer, which is the second reason not to print one.
 
-Read the twelve rather than trusting the label, because they are not uniform: the `CHANGELOG.md`
+Read that share rather than trusting the label, because it is not uniform: the `CHANGELOG.md`
 release lines and `CLAUDE.md`'s dated coverage measurement are deliberately historical, but at least
-two are neither historical nor claims: a numbered-list ordinal the detector paired with a following
-noun, and a live epistemic maxim in the evidence-discipline section. Two of the twelve are therefore
-detector reach rather than exemption candidates, which nudges the "roughly twenty" estimate below
-DOWN and is itself an argument for the release-checklist route.
+two of them are neither historical nor claims: a numbered-list ordinal the detector paired with a
+following noun, and a live epistemic maxim in the evidence-discipline section. Those are detector
+reach rather than exemption candidates, which nudges the "roughly twenty" estimate below DOWN and is
+itself an argument for the release-checklist route.
 
-⚠️ Those three figures were first written as 32 / 9 / 11: the count of the tree BEFORE the last two
-commits of the batch that added this page, and before the page itself existed. Corrected. They are
-the clearest illustration of the header above: nothing re-runs a number in a markdown file, so
-re-measure before quoting it.
+⚠️ The figures this entry used to print were first taken from the tree BEFORE the last two commits of
+the batch that added this page, and before the page itself existed. They were corrected once, and had
+drifted again within four days, measured on a tree where every figure a guard re-runs still agreed.
+That is the clearest illustration of the header above, and the reason the rule to re-derive them
+outlived them: nothing re-runs a number in a markdown file.
 
 Why no guard: it would need roughly twenty "historical, not derivable" rows, precisely the
 construction `tests/test_prose_counters.py` already rejected, in writing, for its own two files ("a
@@ -74,7 +92,9 @@ repetitive: the rows are not duplicates, they are the other sentences.
 
 What is **still** unguarded, and this is the honest residue rather than a hypothetical: there is no
 COMPLETENESS pin over that docstring. A figure added to it next month ships unwatched, exactly as
-these four did. Work item S42. Separately, three sentences in that same file stated a superseded
+these four did. Open: that docstring needs a completeness pin over its FINDINGS, the shape
+`test_prose_counters` already has, so a figure added to it cannot ship unwatched (S42). Separately,
+three sentences in that same file stated a superseded
 `PINNED_COVERAGE` pair in the present tense for a day; the repair was to stop repeating a pinned
 figure at all, rather than to correct the copies: a second copy of a guarded number is an unguarded
 number.
@@ -90,7 +110,7 @@ ANSWER, spelled in digits and in words. Measured on 79 claims:
 
 Widening the regex does not close this; a different mechanism does, and `_Claim.reads` (entry 4) is
 the first half of it. Deciding whether `reads` is enough, or whether the remaining three holes need
-their own construct, is work item S38.
+their own construct, is open (S38).
 
 ## 4 · `_Claim.reads` proves provenance, not meaning and not dependence
 
@@ -106,7 +126,8 @@ it does not establish, all stated in the `_Claim` docstring as well so they cann
    apart from "some file under `src` was parsed". Tightening it needs a third recorder over the
    index's keys. The module-attribute half IS checked for equality in both directions.
 
-The stand-in measures the tracer now makes VISIBLE rather than fixed are work item S36: visible
+The stand-in measures the tracer now makes VISIBLE rather than fixed are still open, and bindable
+one by one (S36): visible
 because each one's declaration says what it actually reads.
 
 ## 5 · The origin of a coverage map cannot be verified
@@ -134,7 +155,8 @@ measured.
 
 This is a declared blind spot, not an unknown one, and widening the population is a feature rather
 than a repair: it forces a fresh `COVERAGE_CORE=ctrace` recording, because the coverage-dependent
-pins are stated about the current population. Work item S40.
+pins are stated about the current population. Open: widen the audited population to helper- and
+fixture-installed doubles, which forces that re-recording with it (S40).
 
 ## 7 · That a human read the candidate list cannot be proven
 
@@ -149,29 +171,33 @@ could describe is in `PINNED`), and exit code 2 is shared by two distinct outcom
 coverage map, and an absent map *together with* a pin mismatch. Both are accepted as they are.
 
 ⚠️ This entry named `classify` instead of `_compare` when it was written. `classify` has no such
-branch in any revision; the workspace roadmap's own note had it right, and the page mis-transcribed
-it on the way in. A page of limits that sends a reader to the wrong function costs exactly what the
+branch in any revision; the note this entry was transcribed from had it right, and the page
+mis-transcribed it on the way in. A page of limits that sends a reader to the wrong function costs exactly what the
 limit was meant to save.
 
 ## 8 · The prose detector's own reading behaviour is barely pinned
 
 `tests/prose_numbers.py` has no test module of its own. Its sentence-boundary look-ahead is, measured
 three times running, without effect on the currently watched prose, so both of its recorded repairs
-could be reverted with nothing going red. Work item S37.
+could be reverted with nothing going red. Open: `prose_numbers.py` needs a test module of its own,
+written over SYNTHETIC prose, because the watched tree cannot tell the behaviours apart (S37).
 
 ⛔ One specific tempting repair is measured to be **wrong**: making the boundary class case-sensitive.
 Counting a boundary as `[.;:]` + whitespace + a letter, inside the comment runs and docstring
-paragraphs the detector actually reads across the five watched files, **669 of 1300** are followed by
-a lower-case word, just over half. A capital-only rule stops recognising those and re-introduces the
-cross-sentence pairing the look-ahead exists to prevent. The class in the code now says "any letter",
-which is what it always did under `re.IGNORECASE`.
+paragraphs the detector actually reads across the five watched files, **just over half** are followed
+by a lower-case word: an identifier, a quoted term, a continued clause. A capital-only rule stops
+recognising those and re-introduces the cross-sentence pairing the look-ahead exists to prevent. The
+class in the code now says "any letter", which is what it always did under `re.IGNORECASE`.
 
-⚠️ This pair of figures was first written here as "666 of about 1440": the previous commit's tree,
-stale on arrival, in two files, under the header above that promises a measurement of the tree at the
-stated date. It is corrected and the method is now stated so it can be re-derived rather than
-trusted. Nothing re-runs it: `prose_numbers.py` is deliberately unwatched and "boundaries" is not a
-`COLLECTION_NOUNS` member, so no guard can reach either number. The **share** is what carries the ⛔
-decision, and it is not close.
+⚠️ The **share** is what carries that decision, and the share is all this entry states, because the
+absolute pair it used to print could not survive: written first from the previous commit's tree, in
+two files, under a header that promises a measurement of the tree at the stated date; corrected; and
+drifted again inside four days, while the share moved by around a point. Nothing re-runs it, by
+construction: `prose_numbers.py` is deliberately unwatched and "boundaries" is not a
+`COLLECTION_NOUNS` member, so no guard can reach such a number. Re-derive the share with the rule
+above over the blocks `iter_blocks` returns for the watched files. ⚠️ Count the LETTER, not any
+non-space: a terminator plus whitespace plus any non-space is a different, larger denominator, and
+the retired pair had silently mixed the two rules.
 
 ## 9 · The language guard finds German by vocabulary, not by understanding
 
@@ -270,8 +296,9 @@ already records origin.
 
 `CLAUDE.md` says it about its own conventions and it is true here: nothing runs a markdown file. The
 guard on this page is the review, plus the fact that every entry names the measurement that produced
-it, so a reader can re-run it instead of trusting it. Where an entry has a work item, the work item
-is the durable half; where it does not, the entry IS the decision.
+it, so a reader can re-run it instead of trusting it. The MEASUREMENT is the durable half of an entry,
+and a backlog mark beside it is only scheduling: where an entry has open work, the words name it, and
+where it has none, the entry IS the decision.
 
 ## 13 · A remedy is checked for being PRESENT, not for being right
 

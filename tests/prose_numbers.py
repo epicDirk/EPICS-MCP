@@ -123,24 +123,28 @@ _NUMBER = rf"(?<![-\w.])(?<!\d\.)(?:\d[\d_]*|{_alternation(_WORD_VALUES)})\b"
 #
 # ⛔ DO NOT "fix" this by requiring a capital. Counting a boundary as ``[.;:]`` + whitespace + a
 # letter, inside the comment runs and docstring paragraphs this module reads across the five watched
-# files, 669 of 1300 boundaries are followed by a lower-case word (an identifier, a quoted term, a
-# continued clause). A capital-only rule stops recognising just over half of them, which is the
+# files, JUST OVER HALF of the boundaries are followed by a lower-case word (an identifier, a quoted
+# term, a continued clause). A capital-only rule stops recognising that half, which is the
 # mechanism that re-introduces the cross-sentence pairing this look-ahead exists to prevent, the
 # defect the module docstring records.
 #
 # ⚠️ HONESTLY SCOPED, because the sentence above is about a MECHANISM and not about an effect: on
 # today's watched prose a truly case-sensitive class is INERT. Measured all three ways, any
-# letter, literal ``[A-Z]`` under ``re.IGNORECASE``, and ``[A-Z]`` forced case-sensitive, and all
-# three find the same 96 sites and the same 90 keys. So nothing goes red if someone makes the
-# change; the risk is prospective, and that this reading behaviour is barely pinned at all is
-# recorded as its own limit (``docs/known-limits.md`` §8). Swapping ``[A-Z]`` for the honest class
-# was verified the same way and also changes nothing.
+# letter, literal ``[A-Z]`` under ``re.IGNORECASE``, and ``[A-Z]`` forced case-sensitive with
+# ``(?-i:[A-Z])``, and all three find an IDENTICAL set of sites and keys. So nothing goes red if
+# someone makes the change; the risk is prospective, and that this reading behaviour is barely
+# pinned at all is recorded as its own limit (``docs/known-limits.md`` §8). Swapping ``[A-Z]`` for
+# the honest class was verified the same way and also changes nothing.
 #
-# The pair of numbers is a measurement of one tree and nothing re-runs it. It was first written as
-# "666 of about 1440": the 666 was the PREVIOUS commit's tree, and the 1440 was never this rule's
-# denominator on any tree, 1456 is what you get counting a terminator plus whitespace plus ANY
-# non-space, so the old pair silently mixed two counting rules. The share carries the decision; the
-# rule is stated above so the next reader re-derives it instead of trusting it.
+# ⚠️ A BARE ``[A-Z]`` CANNOT EVEN ASK THE QUESTION: under ``re.IGNORECASE`` it matches lower case
+# too, so the only honest mutant, and the only red-proof for a test over this rule, is the SCOPED
+# ``(?-i:[A-Z])``. Measured: it pairs "we counted 7. both tools agree" across the stop, which the
+# shipped class refuses.
+#
+# The SHARE, not a pair of absolutes, is what carries the decision. An absolute pair lived here
+# twice and rotted twice, because nothing re-runs it: this module is deliberately unwatched. And
+# count the LETTER, not any non-space: a terminator plus whitespace plus ANY non-space is a
+# different, larger denominator, which is how the retired pair silently mixed two counting rules.
 _BREAK = r"(?![.;:]\s+[^\W\d_])"
 
 # A number, at most two intervening words, then one of the closed nouns.
