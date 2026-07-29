@@ -40,7 +40,10 @@ def main(argv: list[str] | None = None) -> int:
     from epics_mcp.services.orchestration import CoverageRequest, build_coverage_report
 
     parser = argparse.ArgumentParser(
-        description="Cross-plane coverage audit: Display ↔ ChannelFinder ↔ Archiver ↔ Alarm"
+        # prog pinned: argparse's default is interpreter dependent and prints an absolute console
+        # script path on 3.14 (QA-41). Same reason at every entry point of this package.
+        prog="epics-coverage",
+        description="Cross-plane coverage audit: Display ↔ ChannelFinder ↔ Archiver ↔ Alarm",
     )
     parser.add_argument(
         "--displays",

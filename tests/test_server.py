@@ -165,7 +165,7 @@ def test_main_validates_write_config_before_run(
         )
         safety_module._safety = None
         with pytest.raises(SafetyConfigError):
-            main()
+            main([])
         # The boot validation must fire BEFORE mcp.run(), the server never starts serving.
         assert not run_called
     finally:
@@ -201,14 +201,14 @@ def test_main_refuses_write_enabled_without_durable_audit_sink(
         config_module._config = EpicsConfig(allow_pv_write=True, pv_write_pattern=".*")
         safety_module._safety = None
         with pytest.raises(SafetyConfigError):
-            main()
+            main([])
         assert not run_called
 
         # The Olog write gate alone (PV write OFF) must trip the SAME check, shared sink.
         config_module._config = EpicsConfig(allow_olog_write=True)
         safety_module._safety = None
         with pytest.raises(SafetyConfigError):
-            main()
+            main([])
         assert not run_called
 
         # With a durable audit path set, the write-enabled instance boots.
@@ -216,7 +216,7 @@ def test_main_refuses_write_enabled_without_durable_audit_sink(
             allow_pv_write=True, pv_write_pattern=".*", audit_log_file=str(tmp_path / "audit.log")
         )
         safety_module._safety = None
-        main()
+        main([])
         assert run_called == [True]
     finally:
         config_module._config = saved_config
@@ -250,13 +250,116 @@ def test_main_boots_read_only_despite_unusable_audit_path(
             allow_pv_write=False, audit_log_file=str(tmp_path / "nope" / "audit.log")
         )
         safety_module._safety = None
-        main()  # must NOT raise, a read-only deploy boots despite the unusable (unused) audit path
+        # Must NOT raise: a read-only deploy boots despite the unusable (unused) audit path.
+        main([])
         assert run_called == [True]
     finally:
         audit.handlers.clear()
         audit.handlers.extend(saved_handlers)
         config_module._config = saved_config
         safety_module._safety = saved_safety
+
+
+# --- QA-41: the entry point answers --help instead of starting the server ----------------------
+
+
+def test_main_help_prints_usage_and_does_not_start_the_server(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``epics-mcp --help`` must print usage and exit cleanly. Before QA-41 ``main()`` took no argv
+    at all, so the option reached the MCP transport instead of a parser and the command "succeeded"
+    by starting a server that ends on stdin EOF: exit 0, no output, no hint that the flag was never
+    understood.
+
+    The asserted usage prefix also pins ``prog``: argparse derives it from the interpreter
+    otherwise, and that derivation differs across the versions this package supports.
+    """
+    from epics_mcp.server import main, mcp
+
+    run_called: list[bool] = []
+    monkeypatch.setattr(mcp, "run", lambda *args, **kwargs: run_called.append(True))
+
+    with pytest.raises(SystemExit) as exc:
+        main(["--help"])
+
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.startswith("usage: epics-mcp")
+    assert not run_called  # help is not a way to start the server
+
+
+def test_main_help_answers_even_when_the_write_config_would_refuse_the_boot(
+    monkeypatch: pytest.MonkeyPatch, loopback_write_env: None
+) -> None:
+    """The parser must sit AHEAD of ``get_config()``. A write-enabled instance without a durable
+    audit sink refuses to boot (``SafetyConfigError``), and on such an install asking for help is
+    exactly what an operator does next. If the parser sat after the config validation, the one
+    command that explains the usage would be the one command they cannot run.
+
+    Rot-Beweis: move the parser below the audit-sink check and this raises SafetyConfigError
+    instead of SystemExit.
+    """
+    import epics_mcp.config as config_module
+    import epics_mcp.safety as safety_module
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.server import main, mcp
+
+    monkeypatch.setattr(mcp, "run", lambda *args, **kwargs: None)
+    saved_config = config_module._config
+    saved_safety = safety_module._safety
+    try:
+        # PV writes ON with no audit path: main([]) refuses this config at boot (pinned above).
+        config_module._config = EpicsConfig(allow_pv_write=True, pv_write_pattern=".*")
+        safety_module._safety = None
+        with pytest.raises(SystemExit) as exc:
+            main(["--help"])
+        assert exc.value.code == 0
+    finally:
+        config_module._config = saved_config
+        safety_module._safety = saved_safety
+
+
+def test_main_version_prints_the_installed_version(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--version`` prints the package version. The bug report template asks a reporter for the
+    ``epics-mcp`` version, and until QA-41 no command line answered that question."""
+    from epics_mcp import __version__
+    from epics_mcp.server import main, mcp
+
+    monkeypatch.setattr(mcp, "run", lambda *args, **kwargs: None)
+
+    with pytest.raises(SystemExit) as exc:
+        main(["--version"])
+
+    assert exc.value.code == 0
+    assert __version__ in capsys.readouterr().out
+
+
+def test_main_rejects_an_unknown_option(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unrecognised option is a usage error (exit 2), not a silently started server."""
+    from epics_mcp.server import main, mcp
+
+    run_called: list[bool] = []
+    monkeypatch.setattr(mcp, "run", lambda *args, **kwargs: run_called.append(True))
+
+    with pytest.raises(SystemExit) as exc:
+        main(["--no-such-option"])
+
+    assert exc.value.code == 2
+    assert not run_called
+
+
+def test_main_with_an_empty_argv_still_serves(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The argv-taking signature must not change the no-argument behaviour: an explicit empty list
+    is the normal MCP client start (a client launches the server with no options at all)."""
+    from epics_mcp.server import main, mcp
+
+    run_called: list[bool] = []
+    monkeypatch.setattr(mcp, "run", lambda *args, **kwargs: run_called.append(True))
+
+    main([])
+
+    assert run_called == [True]
 
 
 # --- S26 / N05+N06: core-only + installed-but-broken consistency ------------------------------

@@ -66,6 +66,13 @@ carry breaking changes).
   the mgmt port with no error to explain it.
 - **`.env.example` names all four tools the Olog write gate covers**, not two. It was the only
   place that understated the gate's reach.
+- **`epics-mcp --help` prints help, and `--version` prints the version.** `epics-mcp` accepted no
+  options at all, so `--help` reached the stdio transport instead of a parser: the command appeared
+  to succeed, printed nothing and exited 0, because a server started on a closed stdin ends at once.
+  An unknown option is now a usage error (exit 2). `--version` answers the question the bug report
+  template asks, which no command line could answer before. The usage line of all five commands is
+  also pinned to the command's own name; on Python 3.14 argparse derived it from the interpreter and
+  printed the absolute path of the installed script instead.
 
 ### Internal
 

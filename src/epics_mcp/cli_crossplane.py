@@ -39,7 +39,12 @@ def main(argv: list[str] | None = None) -> int:
     from epics_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
     from epics_mcp.services.orchestration import CrossPlaneRequest, run_crossplane
 
-    parser = argparse.ArgumentParser(description="Cross-plane PV provenance: Display ↔ e3 ↔ Naming")
+    parser = argparse.ArgumentParser(
+        # prog pinned: argparse's default is interpreter dependent and prints an absolute console
+        # script path on 3.14 (QA-41). Same reason at every entry point of this package.
+        prog="epics-crossplane",
+        description="Cross-plane PV provenance: Display ↔ e3 ↔ Naming",
+    )
     parser.add_argument(
         "--displays",
         required=True,

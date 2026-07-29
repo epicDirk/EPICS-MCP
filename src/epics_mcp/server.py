@@ -1,8 +1,9 @@
 """EPICS MCP server, main entry point."""
 
+import argparse
 import importlib.util
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Annotated, Literal
 
 from fastmcp import FastMCP
@@ -10,6 +11,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from epics_mcp import __version__
+from epics_mcp.cli_common import configure_stdout
 from epics_mcp.config import get_config
 from epics_mcp.errors import SafetyConfigError
 from epics_mcp.prompts import compare_machine_state as _compare_machine_state
@@ -1666,13 +1668,37 @@ def compare_machine_state(pv_prefix: str, reference_file: str = "") -> str:
     )
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     """Entry point for the MCP server.
 
-    Validates the write-safety config at boot (fail-fast) whenever a write gate is enabled, the
-    postures where the pattern / rate-limit / audit-sink config is used. A read-only deploy (every
-    write gate off, the default) skips all of it, so a stray audit path is harmless there.
+    Parses the command line FIRST, then validates the write-safety config at boot (fail-fast)
+    whenever a write gate is enabled, the postures where the pattern / rate-limit / audit-sink
+    config is used. A read-only deploy (every write gate off, the default) skips all of it, so a
+    stray audit path is harmless there.
+
+    The order matters (QA-41): a write-enabled install without a durable audit sink refuses to
+    boot, and asking for help is exactly what an operator does next. A parser placed after that
+    check would make the one command that explains the usage the one command they cannot run.
+    An MCP client starts this with no options at all, which parses to an empty namespace and falls
+    through to the transport unchanged.
     """
+    # Before the parser (QA-8), as in the diagnostic CLIs: argparse prints ``--help`` inside
+    # ``parse_args``, so a non-ASCII character in any help text would die on a cp1252 console if
+    # the reconfigure came later. It is a no-op on a stream already UTF-8 (see cli_common).
+    configure_stdout()
+    parser = argparse.ArgumentParser(
+        # prog is pinned because argparse's default is interpreter dependent: 3.12/3.13 use
+        # basename(sys.argv[0]), 3.14 derives it from __main__.__spec__ and prints an absolute
+        # path for a console script. A fixed prog is the only answer stable across requires-python.
+        prog="epics-mcp",
+        description=(
+            "Run the EPICS MCP server on stdio. Started by an MCP client, not usually by hand; "
+            "configure it through EPICS_MCP_* environment variables (see .env.example)."
+        ),
+    )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.parse_args(argv)
+
     config = get_config()
     # A write-enabled instance whose audit sink is ephemeral stderr (no EPICS_MCP_AUDIT_LOG_FILE)
     # loses every ATTEMPT/ALLOW/DENY/READBACK/BOUNDS_DENY record on restart, the one trail meant to

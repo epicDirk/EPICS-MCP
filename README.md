@@ -125,6 +125,10 @@ See [Related and roadmap](#related-and-roadmap).
    epics-mcp
    ```
 
+   `epics-mcp --help` explains the invocation and `epics-mcp --version` prints the installed
+   version (the one a bug report asks for). The server itself is configured through
+   `EPICS_MCP_*` environment variables, not through options.
+
 3. **Wire it into an MCP client**, see [MCP client integration](docs/mcp-clients.md). Then ask
    the assistant to read `TEST:Temperature`, or skip the assistant entirely:
 

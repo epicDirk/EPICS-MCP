@@ -161,7 +161,10 @@ def main(argv: list[str] | None = None) -> int:
     # character in any help text would die on a cp1252 console if the reconfigure came later.
     configure_stdout()
     parser = argparse.ArgumentParser(
-        description="Read-only config self-check: is every configured EPICS plane reachable?"
+        # prog pinned: argparse's default is interpreter dependent and prints an absolute console
+        # script path on 3.14 (QA-41). Same reason at every entry point of this package.
+        prog="epics-doctor",
+        description="Read-only config self-check: is every configured EPICS plane reachable?",
     )
     parser.add_argument(
         "--probe-pv",
