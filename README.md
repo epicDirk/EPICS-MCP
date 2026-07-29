@@ -14,13 +14,14 @@ ChannelFinder by hand.
 
 **Read-only by default.** Writing is off unless you turn it on, twice, with an allowlist.
 
-> **Project status: work in progress (pre-1.0, `0.3.0.dev0`).** Under active development;
+> **Project status: work in progress (pre-1.0).** Under active development;
 > the tool surface and APIs may still change. Semantic-versioning pre-1.0 caveats apply, so
-> pin a version if you depend on it.
+> pin a version if you depend on it. The released version is the one the PyPI badge above shows;
+> it is deliberately not restated here, because a version spelled twice is a version that drifts.
 
-**Maturity.** 1401 tests pass on a standalone install with no EPICS infrastructure at all, and that is
-the figure CI reports, on Linux, and a Windows run shows one more because a single path test is
-Windows-only. With every extra installed it is 1474 (measured on Windows; CI does not install the
+**Maturity.** 1497 tests pass on a standalone install with no EPICS infrastructure at all, and that is
+the figure CI reports, on Linux; a Windows run shows three more, which are path tests that only
+apply there. With every extra installed it is 1576 (measured on Windows; CI does not install the
 extras, so no CI log states this one). A further 65 exercise a live stack and skip without one.
 `mypy --strict` covers `src`, `tests` and `scripts`, and the package ships `py.typed`. Both gates
 run in CI on every push, against Python 3.12 and 3.13.

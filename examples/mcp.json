@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "epics-pv": {
-      "command": "epics-pv-mcp",
+      "command": "epics-mcp",
       "env": {
         "EPICS_MCP_PROVIDER": "pva"
       }

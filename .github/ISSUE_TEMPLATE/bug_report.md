@@ -21,7 +21,7 @@ What you expected instead.
 
 ## Environment
 
-- `epics-pv-mcp` version (or commit):
+- `epics-mcp` version (or commit):
 - Python version:
 - OS:
 - Which REST planes are enabled (ChannelFinder / Archiver / Alarm / Naming, via their `*_URL`)?
