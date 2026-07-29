@@ -20,10 +20,12 @@ carry breaking changes).
   is done now rather than later because every release under the old import name grows the set of
   installations a rename breaks.
 - **BREAKING: the `epics-pv-mcp` console command is removed.** Use `epics-mcp`, which has been the
-  primary command since 0.3.0. The alias existed for installs predating the rename, and there are
-  none: 0.3.0 was this project's first published release of any kind, so no install anywhere can
-  carry that command. The four diagnostic commands (`epics-doctor`, `epics-diagnose`,
-  `epics-crossplane`, `epics-coverage`) are unaffected.
+  primary command since 0.3.0. The alias was added in 0.3.0 for anyone following pre-rename docs,
+  and 0.3.0 shipped it: every installation of that release carries `epics-pv-mcp`, so upgrading to
+  0.4.0 removes a command that works today. Check your wrapper scripts and MCP client configs for
+  it. Nothing older is affected, because 0.3.0 was this project's first published release of any
+  kind. The four diagnostic commands (`epics-doctor`, `epics-diagnose`, `epics-crossplane`,
+  `epics-coverage`) are unaffected.
 - **BREAKING: the `all` extra is removed.** `pip install epics-mcp[all]` no longer resolves; use
   `epics-mcp[dev]`, which is what `all` contained. It was exactly `epics-mcp[dev]`, so it promised a
   reader everything the package can do and delivered the developer toolchain, and the display-aware
@@ -52,6 +54,18 @@ carry breaking changes).
   exit 2. The advice differs too: installing the engine will not fix a broken one.
 - **A long live value in the `find_device` report is capped at 80 characters, not 82**, as its own
   documentation promised.
+- **The ready-to-paste write-enabled MCP client block now starts.** As shipped it omitted
+  `EPICS_MCP_AUDIT_LOG_FILE` and the loopback reach settings, both of which a write-enabled server
+  refuses to start without, so a reader who pasted it saw only "server not connected".
+- **The setup instructions no longer describe a `.env` file.** Four places told adopters to copy
+  `.env.example` to `.env`, or to run `epics-doctor` to confirm one. Nothing in the server ever
+  loads a dotenv file; configuration is read from the process environment, and a variable that does
+  not reach the process is dropped silently. `.env.example` is a reference to copy lines OUT of.
+- **`EPICS_MCP_ARCHIVER_RETRIEVAL_URL` is spelled with its prefix in the README.** The unprefixed
+  form does not bind, so a split-appliance operator who followed it got history requests sent to
+  the mgmt port with no error to explain it.
+- **`.env.example` names all four tools the Olog write gate covers**, not two. It was the only
+  place that understated the gate's reach.
 
 ### Internal
 
