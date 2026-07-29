@@ -7,7 +7,7 @@ can differ. Measured here, on this repository: the ``[displays]`` extra produced
 references in the metadata, not one, because the ``all`` extra resolved ``displays`` transitively.
 Reading the source would have found one and called it done.
 
-Three checks, in the order a failure costs:
+Four checks, in the order a failure costs:
 
 1. **No direct reference.** A ``Requires-Dist`` carrying ``@ <url>`` makes the upload fail outright;
    it is the one thing PyPI refuses categorically. This repository had exactly that until the
@@ -19,6 +19,13 @@ Three checks, in the order a failure costs:
 3. **A description that renders.** The long description is the project page. If its content type is
    missing or its body is empty, the page renders as raw text or as nothing, and there is no second
    chance for a published file.
+4. **One build, one distribution.** The three checks above judge an artifact ALONE, so a leftover
+   file beside a fresh one is invisible unless it happens to fail on its own merits. ``uv build``
+   does not clear ``dist/``, and the usual invocation is a shell glob over the whole directory, so
+   both builds arrive together and an upload takes both. Measured in this checkout: ``dist/`` held
+   ``epics-pv-mcp 0.3.0.dev0`` beside a 0.4.0 tree, a pre-rename name on a pre-release version. The
+   tag path already blocks that through ``--expect-version``; the REHEARSAL path
+   (``--allow-prerelease``, no expected version) is where it passes, which is the gap this closes.
 
 Exit 1 blocks, and every finding is printed as ``artifact: reason`` on stderr, mirroring the other
 two guards in ``scripts/``. This is deliberately NOT a pre-commit hook: it needs an artifact, which
@@ -141,6 +148,45 @@ def check(metadata: str, *, allow_prerelease: bool, expect_version: str | None =
     return reasons
 
 
+def _normalised_name(name: str) -> str:
+    """PEP 503 name normalisation, so one distribution spelled two ways is not a finding.
+
+    A wheel filename uses ``epics_mcp`` while the metadata field says ``epics-mcp``, and a backend
+    is free to emit either into ``Name``. Comparing raw strings would report a build against itself.
+    """
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def check_one_build(artifacts: Sequence[tuple[str, str]]) -> list[str]:
+    """Refuse a set of artifacts that did not all come from ONE build of ONE distribution.
+
+    Takes ``(filename, metadata)`` pairs, because the finding is about the SET: every other check
+    here judges an artifact alone and therefore cannot see a leftover sitting beside a fresh one.
+    A single artifact, or a wheel and an sdist of the same build, yields nothing.
+    """
+    builds: dict[tuple[str, str], list[str]] = {}
+    labels: dict[tuple[str, str], str] = {}
+    for filename, metadata in artifacts:
+        headers = Parser().parsestr(metadata)
+        raw_name = headers.get("Name", "")
+        version = headers.get("Version", "")
+        key = (_normalised_name(raw_name), version)
+        builds.setdefault(key, []).append(filename)
+        # The RAW spelling is what the reader has to recognise on disk, so the message carries it
+        # even though the comparison above is normalised.
+        labels[key] = f"{raw_name} {version}"
+    if len(builds) < 2:
+        return []
+    detail = "; ".join(
+        f"{labels[key]} ({', '.join(sorted(files))})" for key, files in sorted(builds.items())
+    )
+    return [
+        f"these artifacts are not one build: {detail}. uv build does not clear dist/, so an older "
+        "build stays behind and a dist/* glob hands it to the upload as well. Run: "
+        "rm -rf dist && uv build"
+    ]
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Check every artifact named on the command line; return 1 if any of them must not ship."""
     parser = argparse.ArgumentParser(
@@ -163,12 +209,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     findings: list[str] = []
+    readable: list[tuple[str, str]] = []
     for artifact in args.artifacts:
         try:
             metadata = read_metadata(artifact)
         except (OSError, ValueError, zipfile.BadZipFile, tarfile.TarError) as exc:
             findings.append(f"{artifact.name}: unreadable ({exc})")
             continue
+        readable.append((artifact.name, metadata))
         findings.extend(
             f"{artifact.name}: {reason}"
             for reason in check(
@@ -177,6 +225,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 expect_version=args.expect_version,
             )
         )
+    # Unprefixed: this finding belongs to the SET, and naming one artifact would point at whichever
+    # file the loop happened to see first rather than at the pair that disagrees.
+    findings.extend(check_one_build(readable))
 
     if findings:
         sys.stderr.write("Blocked: this distribution must not be published.\n")

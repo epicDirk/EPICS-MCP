@@ -9,9 +9,14 @@ minutes and needs a toolchain, so a build-driven test would be skipped in exactl
 that most need the check. And a build can only ever produce the metadata this repository happens to
 have TODAY, which cannot exercise the pre-release row or the empty-description row at all.
 
-The one case a build DOES prove better is covered separately, at the bottom: the gate is pointed at
-the repository's own artifacts when they exist, so a real METADATA that the synthetic ones failed to
-model still gets seen.
+Honest limit, corrected here because the sentence that stood in its place claimed a test that does
+not exist anywhere in this repository (grepped for it: no test module reads ``dist/``). Nothing
+points the gate at the repository's OWN built artifacts, so a real ``METADATA`` shape the synthetic
+blocks below fail to model is not seen by this module. That gap is deliberate rather than merely
+open: such a test would have to ask whether ``dist/`` happens to exist on the machine running it,
+which is green on a fresh checkout and red on a developer's, the "reads the environment instead of
+faking it" shape this repository treats as a defect. The real artifacts are checked by the release
+runbook and by the publish workflow, which build them first.
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ sys.path.insert(0, str(_REPO / "scripts"))
 
 from check_release_ready import (  # noqa: E402 (needs the sys.path splice above)
     check,
+    check_one_build,
     is_prerelease,
     main,
     read_metadata,
@@ -35,13 +41,14 @@ from check_release_ready import (  # noqa: E402 (needs the sys.path splice above
 
 def _metadata(
     *,
+    name: str = "epics-mcp",
     version: str = "0.3.0",
     requires: tuple[str, ...] = ("fastmcp<4,>=3",),
     content_type: str | None = "text/markdown",
     description: str = "# EPICS PV MCP Server\n\nA real description.\n",
 ) -> str:
     """Build a METADATA block; every parameter is one thing the gate is supposed to notice."""
-    lines = ["Metadata-Version: 2.4", "Name: epics-mcp", f"Version: {version}"]
+    lines = ["Metadata-Version: 2.4", f"Name: {name}", f"Version: {version}"]
     if content_type is not None:
         lines.append(f"Description-Content-Type: {content_type}")
     lines.extend(f"Requires-Dist: {requirement}" for requirement in requires)
@@ -230,3 +237,74 @@ def test_every_artifact_is_checked_not_just_the_first(tmp_path: Path) -> None:
 
     assert main([str(good)]) == 0, "the clean artifact alone must pass"
     assert main([str(good), str(stale)]) == 1, "a stale artifact behind a clean one must block"
+
+
+def _wheel(path: Path, metadata: str) -> Path:
+    """A minimal but real wheel carrying *metadata*, so the gate opens an archive, not a string."""
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(f"{path.stem.split('-py3')[0]}.dist-info/METADATA", metadata)
+    return path
+
+
+def test_one_build_passes_however_many_artifacts_it_has() -> None:
+    """The counter-direction, and it has to come first.
+
+    A set check that refused every multi-artifact run would satisfy the red proof below while
+    blocking every real release: a build produces a wheel AND an sdist, and they are handed to the
+    gate together by the ``dist/*`` glob the runbook prescribes.
+    """
+    one_build = [("epics_mcp-0.4.0-py3-none-any.whl", _metadata(version="0.4.0"))]
+    assert check_one_build(one_build) == [], "a single artifact cannot disagree with itself"
+    one_build.append(("epics_mcp-0.4.0.tar.gz", _metadata(version="0.4.0")))
+    assert check_one_build(one_build) == [], "a wheel and its sdist are one build"
+
+
+def test_a_name_spelled_two_ways_is_still_one_build() -> None:
+    """``epics_mcp`` and ``epics-mcp`` are the same distribution (PEP 503), and a backend may emit
+    either into ``Name``. Comparing raw strings would report a build against itself, which is the
+    false positive that would get this check disabled the first time it fired."""
+    assert (
+        check_one_build(
+            [
+                ("a.whl", _metadata(name="epics_mcp", version="0.4.0")),
+                ("b.tar.gz", _metadata(name="epics-mcp", version="0.4.0")),
+            ]
+        )
+        == []
+    )
+
+
+def test_a_leftover_build_beside_a_fresh_one_is_refused(tmp_path: Path) -> None:
+    """QA-21, and the case the existing set test does NOT cover.
+
+    ``test_every_artifact_is_checked_not_just_the_first`` uses a stale artifact that carries a
+    direct reference, so it blocks on its own merits. The real leftover in this checkout did not:
+    ``epics-pv-mcp 0.3.0.dev0``, a pre-rename name on a pre-release version, individually clean of
+    everything the three per-artifact checks look at. On the TAG path ``--expect-version`` already
+    catches it. The REHEARSAL path passes no expected version and allows pre-releases, and that is
+    where it went through. Both artifacts below are individually clean, so nothing but the set
+    check can refuse them.
+    """
+    fresh = _wheel(tmp_path / "epics_mcp-0.4.0-py3-none-any.whl", _metadata(version="0.4.0"))
+    leftover = _wheel(
+        tmp_path / "epics_pv_mcp-0.3.0.dev0-py3-none-any.whl",
+        _metadata(name="epics-pv-mcp", version="0.3.0.dev0"),
+    )
+    rehearsal = ["--allow-prerelease"]
+
+    assert main([*rehearsal, str(fresh)]) == 0, "the fresh artifact alone must pass"
+    assert main([*rehearsal, str(leftover)]) == 0, (
+        "and so must the leftover ALONE, or this test proves the wrong thing: it is clean on every "
+        "per-artifact check, which is exactly why only a set check can see it"
+    )
+    assert main([*rehearsal, str(fresh), str(leftover)]) == 1
+
+    reasons = check_one_build(
+        [(fresh.name, read_metadata(fresh)), (leftover.name, read_metadata(leftover))]
+    )
+    assert len(reasons) == 1, reasons
+    # Both builds named with the spelling a reader will see on disk, plus the way out.
+    assert "epics-mcp 0.4.0" in reasons[0]
+    assert "epics-pv-mcp 0.3.0.dev0" in reasons[0]
+    assert leftover.name in reasons[0], "the file to delete has to be named"
+    assert "rm -rf dist" in reasons[0]
