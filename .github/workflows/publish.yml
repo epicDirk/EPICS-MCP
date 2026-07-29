@@ -118,3 +118,34 @@ jobs:
           digest-mismatch: error
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  # The GitHub release. A tag and a release are two different objects, and only the tag was ever
+  # created: 0.3.0 shipped to the index while the repository's Releases page kept showing 0.2.0 as
+  # "Latest", so the two public faces of the same project told different stories for a month. The
+  # tag is what publishes; this job makes the release page agree with it.
+  #
+  # LAST, and depending on the upload: a release announcing a version that failed to upload would
+  # be the same disagreement pointing the other way. It needs no `if:` of its own, because a job
+  # whose `needs` was skipped is skipped too, so the rehearsal path stops here exactly as it stops
+  # at the upload.
+  #
+  # Body from CHANGELOG.md rather than `--generate-notes`: the generated form lists commit
+  # subjects, which would describe a release by its plumbing while ignoring the changelog this
+  # project maintains. The slicer is stdlib-only, so this job needs no uv and no dependency install.
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create a release; the OIDC token stays in the publish job
+    steps:
+      - uses: actions/checkout@v5
+      - name: Create the release from the changelog section
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/changelog_section.py "${GITHUB_REF_NAME}" > release-notes.md
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md \
+            --verify-tag \
+            --latest

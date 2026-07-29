@@ -167,7 +167,64 @@ def test_every_action_reference_is_pinned_in_order() -> None:
         "actions/upload-artifact@v7",
         "actions/download-artifact@v8",
         "pypa/gh-action-pypi-publish@release/v1",
+        # The github-release job's own checkout, added consciously: it needs CHANGELOG.md and the
+        # slicer script. Everything else that job does is `gh`, which is preinstalled on the runner,
+        # so no THIRD-PARTY action joined the release's supply chain here.
+        "actions/checkout@v5",
     ], f"the action set or its versions changed, decide consciously: {refs}"
+
+
+def test_the_github_release_follows_the_upload_and_cannot_publish() -> None:
+    """The release job must sit AFTER the upload and hold no publishing credential.
+
+    Two properties, and they fail in opposite directions. Announcing a version whose upload failed
+    is the same disagreement between the two public faces of this project that the job exists to
+    remove, only pointing the other way; and a `contents: write` job is the one place a careless
+    edit could quietly grant itself more than it needs.
+
+    It deliberately carries NO `if:` of its own: a job whose `needs` was skipped is skipped too, so
+    the rehearsal path stops here exactly as it stops at the upload. That is also why the two
+    condition tests above still see a single dry-run condition. Adding an `if:` here would make
+    those tests red, which is the intended prompt to think about it.
+
+    Red-proof (mutation): change `needs: publish` to `needs: build` and the ordering assertion
+    fails; add `id-token: write` here and
+    test_only_the_publish_job_may_request_the_publishing_token fails.
+    """
+    lines = _lines()
+    publish_at = next(i for i, line in enumerate(lines) if line.rstrip() == "  publish:")
+    release_at = next(i for i, line in enumerate(lines) if line.rstrip() == "  github-release:")
+    needs = [i for i, line in enumerate(lines) if line.strip() == "needs: publish"]
+
+    assert publish_at < release_at, "the release job must be declared after the upload job"
+    assert len(needs) == 1 and release_at < needs[0], (
+        f"the release job must declare `needs: publish`, found the line at {needs}"
+    )
+    grants = [
+        line.split("#", 1)[0].strip()  # the trailing comment is documentation, not a grant
+        for line in lines[release_at:]
+        if line.strip().startswith(("id-token", "contents"))
+    ]
+    assert grants == ["contents: write"], (
+        f"the release job may create a release and nothing more, found {grants}"
+    )
+
+
+def test_the_release_body_comes_from_the_changelog() -> None:
+    """`--generate-notes` would list commit subjects and ignore the changelog this project keeps.
+
+    Pinned on both halves: the slicer is invoked, and its output is what `gh` is handed. Asserting
+    only the first would stay green if the notes file were built and then not used.
+
+    Read over the LIVE lines only, never the whole file. This test's first version asserted
+    ``"--generate-notes" not in text`` and went red on the workflow comment explaining why that
+    flag is not used, which is the same comment-blindness the gate tests above record twice.
+    """
+    live = "\n".join(line for line in _lines() if not line.strip().startswith("#"))
+    assert "scripts/changelog_section.py" in live, "the release body must come from the changelog"
+    assert "--notes-file release-notes.md" in live
+    assert "--generate-notes" not in live, "commit subjects would replace the maintained changelog"
+    assert "--verify-tag" in live, "a release must not be created for a tag that does not exist"
 
 
 def _artifact_step_name(lines: list[str], action: str) -> str:

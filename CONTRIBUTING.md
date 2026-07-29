@@ -126,9 +126,12 @@ the gates.
    step: from here the version number is spent whatever happens next.
 5. Afterwards: check that the index page renders and that a clean install of the new version
    imports and runs its commands. The README install command and the index badge are already
-   pointing at the published package since 0.3.0, so there is nothing to swap.
+   pointing at the published package since 0.3.0, so there is nothing to swap. The **GitHub
+   release** needs no hand step: the workflow's third job creates it after a successful upload,
+   with the body sliced out of `CHANGELOG.md` by `scripts/changelog_section.py`. Check it appeared;
+   if the section was missing the job fails loudly rather than publishing an empty release.
 
-**Two traps, both measured here rather than imagined:**
+**Three traps, all measured here rather than imagined:**
 
 - `uv build` does **not** clear `dist/`. A three-week-old artifact was still sitting there during
   this work, carrying a dependency reference the current build no longer has, and `dist/*` would
@@ -138,6 +141,10 @@ the gates.
   clean environment and running all five console scripts found two that died on their import chain
   with a bare traceback. Do that check by hand whenever an entry point or an optional dependency
   changes; no unit test replaces it.
+- **The `v` in the tag is load-bearing, and this repository's own history proves it can be
+  forgotten.** `publish.yml` triggers on `v*`; the 0.2.0 tag is named `0.2.0`, without one. A tag
+  pushed as `0.4.0` would therefore start nothing at all: no build, no upload, no release, and no
+  error either, because nothing ran to fail. Tag `vX.Y.Z`.
 
 ## Live / sandbox tests
 
