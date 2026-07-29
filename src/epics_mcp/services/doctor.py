@@ -148,6 +148,80 @@ _FAILING_STATUSES: frozenset[str] = frozenset(
 #: A set rather than an equality test so a future degraded status is carried automatically.
 _DEGRADED_STATUSES: frozenset[str] = frozenset({"no_ingest"})
 
+#: One remedy per status that reports a PROBLEM: what the operator has to CHANGE. Keyed by status
+#: and STATIC, because the remedy follows from the status; everything that varies per call (the
+#: HTTP code, the exception, the appliance figures, the variable a plane reads) belongs in
+#: ``detail``, which each site writes itself. :func:`_with_remedy` appends this to that
+#: observation and never replaces it: a reader needs both what was seen and what to do about it.
+#: Every entry opens with an imperative from :data:`_REMEDY_IMPERATIVES`, which is what
+#: ``test_every_problem_status_names_a_remedy`` can check; a table of empty strings would satisfy
+#: a bare set comparison AND every containment assertion built on it, while changing the output by
+#: not one character.
+#:
+#: Two statuses are deliberately absent, and neither omission is an oversight:
+#:
+#: * ``unverified`` CAN be a misconfiguration, and four sites say so themselves ("if the config
+#:   IS wrong, the name here is the clue", "may not be an Archiver appliance MGMT endpoint", "may
+#:   not be the retrieval webapp", "may not be the Naming Service"). Each already carries a remedy
+#:   for the SPECIFIC thing it measured, which a status-wide sentence could only dilute. The
+#:   exclusion is about precision, not about the state being harmless.
+#: * ``no_ingest`` is not an ``EPICS_MCP_*`` problem at all: the appliance is reachable and named
+#:   itself, and the wiring that is missing sits INSIDE it. This file describes that state in two
+#:   voices, "not a broken configuration" at the status sets above and "a WIRING fault" at the
+#:   ingest verdict below. Both are true of different things, and neither makes it a variable
+#:   settable here.
+_REMEDY: dict[str, str] = {
+    "config_error": (
+        "Change the configuration named above; nothing was probed here, the configuration itself "
+        "is the finding."
+    ),
+    "ca_error": (
+        "Set EPICS_MCP_CA_BUNDLE to a PEM that trusts this host, combining your internal CA roots "
+        "with the public ones when planes present different trust roots. See docs/deployment.md."
+    ),
+    "api_error": (
+        "Check the URL names the right service AND the right webapp, for an Archiver Appliance the "
+        "mgmt port and not retrieval, and that the service itself is healthy."
+    ),
+    "unreachable": (
+        "Check that the host and port the variable above names are up and reachable from here. "
+        "The variables are listed per plane in docs/deployment.md."
+    ),
+    "disconnected": (
+        "Check the PV name, that its IOC is running, and that the search path printed above can "
+        "reach it."
+    ),
+    "backend_down": (
+        "Repair the backend named above or disable this plane. The configuration here is not the "
+        "cause: the plane answered and proved its identity."
+    ),
+    "identity_probe_failed": (
+        "Check the URL is the service ROOT rather than a sub-path, and that its info endpoint is "
+        "not behind authentication. The tool endpoints of this plane may still work."
+    ),
+}
+
+#: The verbs a remedy may open with. A remedy has to tell the reader to DO something, and this is
+#: the cheapest mechanical form of that: it goes red on an empty entry and on a description that
+#: merely restates the finding ("The host is unreachable."), which is the failure mode a length
+#: check misses.
+_REMEDY_IMPERATIVES: frozenset[str] = frozenset({"Change", "Check", "Repair", "Set"})
+
+
+def _with_remedy(status: PlaneStatus, detail: str) -> str:
+    """Append the remedy for a PROBLEM *status* to *detail*; return *detail* unchanged when none.
+
+    ONE seam, so the two halves of a problem report cannot drift apart. A status with no entry
+    (``ok``, ``unverified``, ``no_ingest``, ``disabled``, ``info``) comes back byte-identical, which
+    is what makes this safe to call from a site that handles several statuses at once, and what
+    ``test_a_healthy_status_gets_no_remedy_appended`` pins.
+
+    Joined with a space rather than a newline on purpose: ``cli_doctor._render`` prints ``detail``
+    as one indented line, so a newline here would break that indentation for every problem report.
+    """
+    remedy = _REMEDY.get(status)
+    return f"{detail} {remedy}" if remedy else detail
+
 
 class _Model(BaseModel):
     """Frozen, closed value object (deterministic; unknown fields rejected)."""
@@ -236,32 +310,37 @@ class DoctorReport(_Model):
     identified_planes: list[str]
 
 
-def _classify_failure(exc: Exception) -> tuple[bool | None, bool | None, PlaneStatus, str]:
+def _classify_failure(
+    exc: Exception, url_var: str
+) -> tuple[bool | None, bool | None, PlaneStatus, str]:
     """Map a failed connectivity probe to ``(reachable, ca_ok, status, detail)``.
 
-    Three buckets, keyed off the chained cause:
+    FOUR buckets, keyed off the chained cause (this said "three" for as long as the retry bucket
+    existed, and a remedy guard parametrized over statuses rather than over these returns would have
+    inherited that miscount: two of them are ``api_error``):
 
     * a TLS/CA failure (:func:`is_ssl_error`) → ``ca_error`` (reachable False, ca_ok False);
     * a *served* non-2xx (:func:`http_status` gives a code) → ``api_error``, the host answered, so
       transport + CA are fine (reachable True, ca_ok True), but the endpoint is wrong / erroring;
+    * a retry-exhausted 5xx (:func:`is_retry_error`) → ``api_error`` as well, for the same reason;
     * anything else (a transport failure, no chained HTTP response) → ``unreachable``.
+
+    *url_var* is the environment variable this plane reads its URL from, named in the observation so
+    the reader knows WHICH of the seven to edit. It is threaded from the caller rather than looked
+    up here: each ``_check_*`` already holds that literal once (it passes the same one to
+    :func:`_disabled`), and a second table keyed by plane would be a copy free to drift from it.
+    ``ca_error`` leaves it out deliberately: its remedy is about the CA bundle, not about this
+    URL.
     """
     if is_ssl_error(exc):
-        return (
-            False,
-            False,
-            "ca_error",
-            "TLS/CA verification failed, set EPICS_MCP_CA_BUNDLE to a PEM that trusts this host "
-            "(combine internal + public CA roots when planes differ). See docs/deployment.md.",
-        )
+        return (False, False, "ca_error", _with_remedy("ca_error", "TLS/CA verification failed."))
     code = http_status(exc)
     if code is not None:
         return (
             True,
             True,
             "api_error",
-            f"reachable, but the service returned HTTP {code}, check the URL points at the right "
-            "service/webapp (e.g. the Archiver mgmt port, not retrieval).",
+            _with_remedy("api_error", f"reachable, but {url_var} returned HTTP {code}."),
         )
     if is_retry_error(exc):
         # A retry-exhausted 502/503/504: the host answered (repeatedly, with a 5xx), so it is
@@ -270,10 +349,18 @@ def _classify_failure(exc: Exception) -> tuple[bool | None, bool | None, PlaneSt
             True,
             True,
             "api_error",
-            "reachable, but the service kept returning a retryable 5xx (502/503/504) until the "
-            "retry budget was exhausted, the service is up but erroring. Check its health.",
+            _with_remedy(
+                "api_error",
+                f"reachable, but {url_var} kept returning a retryable 5xx (502/503/504) until the "
+                "retry budget was exhausted, so the service is up but erroring.",
+            ),
         )
-    return (False, None, "unreachable", f"could not reach the service: {_safe(str(exc))}")
+    return (
+        False,
+        None,
+        "unreachable",
+        _with_remedy("unreachable", f"could not reach the service at {url_var}: {_safe(str(exc))}"),
+    )
 
 
 #: The ``name`` each Phoebus-family service reports at its base URL, measured (they answer
@@ -443,7 +530,9 @@ def _identity_probe_failed(plane: str, detail: str) -> PlaneCheck:
         ca_ok=True,
         status="identity_probe_failed",
         identified=False,
-        detail=detail,
+        # Appended INSIDE the constructor, not at its five call sites: every identity probe reaches
+        # this status through here, so there is no site left that could forget the remedy.
+        detail=_with_remedy("identity_probe_failed", detail),
     )
 
 
@@ -460,7 +549,8 @@ def _backend_down(plane: str, detail: str) -> PlaneCheck:
         ca_ok=True,
         status="backend_down",
         identified=True,
-        detail=detail,
+        # Inside the constructor, for the reason given at _identity_probe_failed.
+        detail=_with_remedy("backend_down", detail),
     )
 
 
@@ -507,7 +597,9 @@ def _disabled(plane: str, env_var: str) -> PlaneCheck:
     )
 
 
-async def _run_probe(plane: str, run: object, identify: object = None) -> PlaneCheck:
+async def _run_probe(
+    plane: str, run: object, identify: object = None, *, url_var: str
+) -> PlaneCheck:
     """Run a sync ``check_connectivity`` off the event loop; classify success/failure. TOTAL.
 
     On success the verdict is REFINED by *identify* when the plane has an identity probe. Without
@@ -520,7 +612,7 @@ async def _run_probe(plane: str, run: object, identify: object = None) -> PlaneC
     try:
         await asyncio.to_thread(run)  # type: ignore[arg-type]
     except Exception as exc:  # noqa: BLE001 (TOTAL: any failure → classified PlaneCheck, never raises)
-        reachable, ca_ok, status, detail = _classify_failure(exc)
+        reachable, ca_ok, status, detail = _classify_failure(exc, url_var)
         return PlaneCheck(
             plane=plane,
             configured=True,
@@ -537,8 +629,12 @@ async def _run_probe(plane: str, run: object, identify: object = None) -> PlaneC
 
 
 async def _check_channelfinder(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
+    # Bound once and used by BOTH exits (disabled here, named in the unreachable observation via
+    # _run_probe). Same shape in every _check_* below, so each variable name lives in exactly one
+    # place per plane and a rename cannot leave half of them behind.
+    url_var = "EPICS_MCP_CHANNELFINDER_URL"
     if not cfg.channelfinder_url:
-        return _disabled("channelfinder", "EPICS_MCP_CHANNELFINDER_URL")
+        return _disabled("channelfinder", url_var)
 
     def _run() -> None:
         ChannelFinderClient(
@@ -550,7 +646,7 @@ async def _check_channelfinder(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
             "channelfinder", cfg.channelfinder_url, cfg.channelfinder_auth or None, timeout
         )
 
-    return await _run_probe("channelfinder", _run, _id)
+    return await _run_probe("channelfinder", _run, _id, url_var=url_var)
 
 
 #: The exact ``status`` an appliance reports when all three of its own webapps answered. Measured
@@ -755,8 +851,9 @@ def _identify_archiver(base_url: str, auth_header: str | None, timeout: float) -
 
 
 async def _check_archiver(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
+    url_var = "EPICS_MCP_ARCHIVER_URL"
     if not cfg.archiver_url:
-        return _disabled("archiver", "EPICS_MCP_ARCHIVER_URL")
+        return _disabled("archiver", url_var)
 
     def _run() -> None:
         ArchiverClient(
@@ -766,7 +863,7 @@ async def _check_archiver(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
     def _id() -> PlaneCheck:
         return _identify_archiver(cfg.archiver_url, cfg.archiver_auth or None, timeout)
 
-    return await _run_probe("archiver", _run, _id)
+    return await _run_probe("archiver", _run, _id, url_var=url_var)
 
 
 def _identify_retrieval_plane(base_url: str, auth_header: str | None, timeout: float) -> PlaneCheck:
@@ -823,20 +920,24 @@ async def _check_retrieval_plane(cfg: EpicsConfig, timeout: float) -> PlaneCheck
     call: the config itself is the finding, and an ``ok`` line next to it would only muddy what
     the operator has to change.
     """
+    # The RESOLVED variable for this plane: retrieval falls back to the mgmt URL below, so the one
+    # an operator has to edit is the mgmt one either way.
+    url_var = "EPICS_MCP_ARCHIVER_URL"
     if cfg.archiver_retrieval_url and not cfg.archiver_url:
         return PlaneCheck(
             plane="archiver_retrieval",
             configured=True,
             status="config_error",
-            detail=(
+            detail=_with_remedy(
+                "config_error",
                 "EPICS_MCP_ARCHIVER_RETRIEVAL_URL is set but EPICS_MCP_ARCHIVER_URL is empty, "
                 "every archiver tool gates on EPICS_MCP_ARCHIVER_URL, so this retrieval URL is "
-                "never used. Set EPICS_MCP_ARCHIVER_URL (the MGMT webapp URL)."
+                "never used. Set EPICS_MCP_ARCHIVER_URL (the MGMT webapp URL).",
             ),
         )
     url = cfg.archiver_retrieval_url or cfg.archiver_url
     if not url:
-        return _disabled("archiver_retrieval", "EPICS_MCP_ARCHIVER_URL")
+        return _disabled("archiver_retrieval", url_var)
 
     def _run() -> None:
         # Probe RETRIEVAL's own endpoint, and through rest_get_json so the failure arrives with its
@@ -863,7 +964,7 @@ async def _check_retrieval_plane(cfg: EpicsConfig, timeout: float) -> PlaneCheck
     def _id() -> PlaneCheck:
         return _identify_retrieval_plane(url, cfg.archiver_auth or None, timeout)
 
-    return await _run_probe("archiver_retrieval", _run, _id)
+    return await _run_probe("archiver_retrieval", _run, _id, url_var=url_var)
 
 
 #: The exact ``elastic.status`` the Alarm Logger reports when its Elasticsearch is healthy (measured
@@ -910,8 +1011,9 @@ def _identify_alarm(base_url: str, auth_header: str | None, timeout: float) -> P
 
 
 async def _check_alarm(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
+    url_var = "EPICS_MCP_ALARM_URL"
     if not cfg.alarm_url:
-        return _disabled("alarm", "EPICS_MCP_ALARM_URL")
+        return _disabled("alarm", url_var)
 
     def _run() -> None:
         AlarmClient(
@@ -921,7 +1023,7 @@ async def _check_alarm(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
     def _id() -> PlaneCheck:
         return _identify_alarm(cfg.alarm_url, cfg.alarm_auth or None, timeout)
 
-    return await _run_probe("alarm", _run, _id)
+    return await _run_probe("alarm", _run, _id, url_var=url_var)
 
 
 def _identify_naming(base_url: str, timeout: float) -> PlaneCheck:
@@ -960,8 +1062,9 @@ def _identify_naming(base_url: str, timeout: float) -> PlaneCheck:
 
 
 async def _check_naming(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
+    url_var = "EPICS_MCP_NAMING_URL"
     if not cfg.naming_url:
-        return _disabled("naming", "EPICS_MCP_NAMING_URL")
+        return _disabled("naming", url_var)
 
     def _run() -> None:
         NamingServiceClient(base_url=cfg.naming_url, timeout=timeout).check_connectivity()
@@ -969,12 +1072,13 @@ async def _check_naming(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
     def _id() -> PlaneCheck:
         return _identify_naming(cfg.naming_url, timeout)
 
-    return await _run_probe("naming", _run, _id)
+    return await _run_probe("naming", _run, _id, url_var=url_var)
 
 
 async def _check_olog(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
+    url_var = "EPICS_MCP_OLOG_URL"
     if not cfg.olog_url:
-        return _disabled("olog", "EPICS_MCP_OLOG_URL")
+        return _disabled("olog", url_var)
 
     def _run() -> None:
         OlogClient(
@@ -984,7 +1088,7 @@ async def _check_olog(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
     def _id() -> PlaneCheck:
         return _identify("olog", cfg.olog_url, cfg.olog_auth or None, timeout)
 
-    return await _run_probe("olog", _run, _id)
+    return await _run_probe("olog", _run, _id, url_var=url_var)
 
 
 # The EPICS client-search env vars, i.e. every way a PV search can leave this host. The list
@@ -1062,7 +1166,10 @@ async def _check_live(cfg: EpicsConfig, probe_pv: str | None, timeout: float) ->
         configured=True,
         reachable=False,
         status="disconnected",
-        detail=f"{base}; {probe_pv} did NOT connect ({error_code or 'internal error'}).",
+        detail=_with_remedy(
+            "disconnected",
+            f"{base}; {probe_pv} did NOT connect ({error_code or 'internal error'}).",
+        ),
     )
 
 

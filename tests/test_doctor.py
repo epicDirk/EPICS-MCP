@@ -25,6 +25,8 @@ from epics_mcp.services.doctor import (
     _FAILING_STATUSES,
     _INCONCLUSIVE_STATUSES,
     _NON_FAILING_STATUSES,
+    _REMEDY,
+    _REMEDY_IMPERATIVES,
     DoctorReport,
     PlaneCheck,
     PlaneStatus,
@@ -37,6 +39,7 @@ from epics_mcp.services.doctor import (
     _identify_retrieval_plane,
     _privacy_report,
     _safe,
+    _with_remedy,
     run_doctor,
 )
 from epics_mcp.services.olog_client import OlogClient
@@ -80,12 +83,22 @@ def _plane(report: DoctorReport, name: str) -> PlaneCheck:
 # --- _classify_failure (the 3-bucket core) ---
 
 
+#: The variable a probed plane reads its URL from, as ``_run_probe`` threads it in. Passed
+#: explicitly by the four tests below so the observation half of each detail is checked with a
+#: KNOWN name in it.
+_PROBE_VAR = "EPICS_MCP_CHANNELFINDER_URL"
+
+
 def test_classify_ssl_error_is_ca_error() -> None:
     exc = RuntimeError("x")
     exc.__cause__ = requests.exceptions.SSLError("bad cert")
-    reachable, ca_ok, status, detail = _classify_failure(exc)
+    reachable, ca_ok, status, detail = _classify_failure(exc, _PROBE_VAR)
     assert (reachable, ca_ok, status) == (False, False, "ca_error")
     assert "CA_BUNDLE" in detail
+    # C1: the remedy reached the message. NOT a second spelling of the assertion above: CA_BUNDLE
+    # lives in the remedy now, so this is what tells a reader whether the whole entry arrived or
+    # only the variable name a hand-written string happened to keep.
+    assert _REMEDY["ca_error"] in detail
 
 
 def test_classify_served_non2xx_is_api_error_reachable() -> None:
@@ -94,30 +107,44 @@ def test_classify_served_non2xx_is_api_error_reachable() -> None:
     http_err.response = Mock(status_code=404)
     exc = RuntimeError("x")
     exc.__cause__ = http_err
-    reachable, ca_ok, status, detail = _classify_failure(exc)
+    reachable, ca_ok, status, detail = _classify_failure(exc, _PROBE_VAR)
     assert (reachable, ca_ok, status) == (True, True, "api_error")
     assert "404" in detail
+    assert _PROBE_VAR in detail  # WHICH variable served the 404, not just that something did
     # the actionable payload: the mgmt/retrieval hint distinguishes api_error from unreachable.
     assert "mgmt" in detail
     assert "not retrieval" in detail
+    assert _REMEDY["api_error"] in detail  # C1
 
 
 def test_classify_retry_error_is_api_error() -> None:
     """A retry-exhausted 502/503/504 (chained RetryError, no .response) is api_error (reachable),
-    NOT unreachable: the host answered repeatedly with a 5xx."""
+    NOT unreachable: the host answered repeatedly with a 5xx.
+
+    C1 red-proof note: this is the SECOND api_error return, and a remedy guard parametrized over
+    statuses would have covered only the first (one row per status). Dropping ``_with_remedy`` from
+    this branch alone leaves every other assertion in this file green, so the remedy assertion below
+    is the only thing standing between that mutant and a clean suite.
+    """
     exc = RuntimeError("x")
     exc.__cause__ = requests.exceptions.RetryError("too many 503 error responses")
-    reachable, ca_ok, status, detail = _classify_failure(exc)
+    reachable, ca_ok, status, detail = _classify_failure(exc, _PROBE_VAR)
     assert (reachable, ca_ok, status) == (True, True, "api_error")
     assert "5xx" in detail
+    assert _PROBE_VAR in detail
+    assert _REMEDY["api_error"] in detail  # C1
 
 
 def test_classify_transport_failure_is_unreachable() -> None:
     exc = RuntimeError("x")
     exc.__cause__ = requests.exceptions.ConnectionError("refused")
-    reachable, ca_ok, status, detail = _classify_failure(exc)
+    reachable, ca_ok, status, detail = _classify_failure(exc, _PROBE_VAR)
     assert (reachable, ca_ok, status) == (False, None, "unreachable")
     assert "could not reach" in detail
+    # C1: an unreachable plane is the one case where the reader cannot guess which of the seven
+    # variables to look at, so the name is part of the finding, not only of the remedy.
+    assert _PROBE_VAR in detail
+    assert _REMEDY["unreachable"] in detail
 
 
 # --- run_doctor: disabled / reachable / failing planes ---
@@ -255,6 +282,9 @@ def test_identity_of_a_different_known_service_is_unverified_with_the_name(
     assert "Olog Service" in (check.detail or "")
     assert "ChannelFinder Service" in (check.detail or "")
     assert "the name of the olog service" in (check.detail or "")  # the plane mapping survives
+    # C1, on the OUTPUT: this state carries a remedy of its OWN ("if the config IS wrong, the name
+    # here is the clue"), so none of the status-wide ones may be pasted on top of it.
+    assert not any(remedy in (check.detail or "") for remedy in _REMEDY.values())
     assert check.status in _NON_FAILING_STATUSES  # honest doubt, exit 0
     # And the vocabulary itself is gone: a re-added dead Literal value (paired with its glyph)
     # would survive every functional test, since nothing emits it anymore.
@@ -318,6 +348,10 @@ def test_identity_failed_probe_is_identity_probe_failed(
     assert (check.status, check.identified) == ("identity_probe_failed", False)
     assert check.status in _INCONCLUSIVE_STATUSES
     assert check.status not in _NON_FAILING_STATUSES  # NOT a silent all-clear
+    # C1: through the REAL constructor, which is where the remedy is appended. This is the seam the
+    # run_doctor test for this status cannot reach: that one patches _identify to return a
+    # hand-built PlaneCheck, so it never executes _identity_probe_failed at all.
+    assert _REMEDY["identity_probe_failed"] in (check.detail or "")
 
 
 def test_identity_unreadable_2xx_body_stays_unverified(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -476,6 +510,9 @@ def test_archiver_holding_pvs_with_none_connected_is_no_ingest(
     detail = check.detail or ""
     assert "appliance0" in detail  # the identifying evidence survives the finding
     assert "pvCount=5" in detail and "connectedPVCount=0" in detail and "eventRate=0" in detail
+    # C1, on the OUTPUT: a freshly commissioned appliance is legitimately in this state, and the
+    # wiring that is missing sits inside it, so no EPICS_MCP_* advice belongs here.
+    assert not any(remedy in detail for remedy in _REMEDY.values())
 
 
 @pytest.mark.parametrize(
@@ -737,6 +774,9 @@ def test_alarm_elastic_down_is_backend_down(monkeypatch: pytest.MonkeyPatch) -> 
     assert check.identified is True  # identity WAS established; the failure is the backend
     assert check.status in _FAILING_STATUSES  # exit 1
     assert "Failed to connect to elastic boom" in (check.detail or "")
+    # C1: the observation names the dead backend, the remedy says what to do about it. Both halves,
+    # because "elastic is down" alone leaves the reader to guess whether the config is at fault.
+    assert _REMEDY["backend_down"] in (check.detail or "")
 
 
 def test_alarm_elastic_connected_is_ok(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1042,6 +1082,9 @@ async def test_retrieval_url_without_archiver_url_is_a_config_error(
     assert retrieval.configured is True
     assert "EPICS_MCP_ARCHIVER_URL" in (retrieval.detail or "")
     assert retrieval.status not in _NON_FAILING_STATUSES  # it must drive exit 1
+    # C1: the one status reached without any network call, so its remedy also has to say that no
+    # probe result is coming; the inline PlaneCheck here is the only site that produces it.
+    assert _REMEDY["config_error"] in (retrieval.detail or "")
     assert report.ok is False
     # The archiver plane itself stays honestly disabled, the ERROR is the inconsistent pair.
     assert _plane(report, "archiver").status == "disabled"
@@ -1275,6 +1318,9 @@ async def test_live_plane_probe_disconnected_fails(monkeypatch: pytest.MonkeyPat
     assert live.status == "disconnected"
     assert live.reachable is False
     assert report.ok is False
+    # C1: the live plane has no URL variable, so its remedy points at the three things that CAN be
+    # wrong (name, IOC, search path) instead of at a setting.
+    assert _REMEDY["disconnected"] in (live.detail or "")
 
 
 async def test_live_plane_probe_generic_exception_disconnected(
@@ -1668,6 +1714,55 @@ def test_every_plane_status_has_a_render_mark() -> None:
     ``config_error`` was being added).
     """
     assert set(get_args(PlaneStatus)) == set(cli_doctor._STATUS_MARK)
+
+
+def test_every_problem_status_names_a_remedy() -> None:
+    """C1: a status that reports a PROBLEM must say what to change, not only what happened.
+
+    Sibling of the render-mark guard above, and it borrows the same fail-closed property from
+    ``test_status_partition_is_total_and_disjoint``: the two sets compared here tile
+    ``PlaneStatus``, so a NEW failing status that nobody gave a remedy goes red here rather than
+    shipping a finding the reader cannot act on.
+
+    The second half is not decoration. Set equality alone is satisfied by ``{s: "" for s in ...}``,
+    and so is every ``_REMEDY[...] in detail`` assertion in this file, because the empty string is
+    in everything: the table could be gutted and the whole suite would stay green while the output
+    lost every remedy. Requiring an opening imperative also rejects the softer failure, an entry
+    that restates the finding ("The host is unreachable.") instead of directing the reader.
+
+    Red-proof: delete an entry, set one to "", or reword one to open with a noun.
+    """
+    assert set(_REMEDY) == _FAILING_STATUSES | _INCONCLUSIVE_STATUSES
+
+    for status, remedy in sorted(_REMEDY.items()):
+        assert remedy.strip(), f"{status} carries an empty remedy, which asserts nothing anywhere"
+        assert remedy.split()[0] in _REMEDY_IMPERATIVES, (
+            f"the remedy for {status} opens with {remedy.split()[0]!r}, which is not one of "
+            f"{sorted(_REMEDY_IMPERATIVES)}: a remedy tells the reader what to DO"
+        )
+
+
+def test_a_healthy_status_gets_no_remedy_appended() -> None:
+    """C1, the other direction: ``_with_remedy`` returns the observation UNCHANGED where there is no
+    remedy, byte for byte.
+
+    Stated as an identity rather than as "no remedy is present", which would be a tautology over the
+    table membership the guard above already pins. This form catches what that one cannot: a
+    ``_REMEDY.get(status, "")`` reached through a formatting path that appends a separator anyway,
+    or a well-meant catch-all default added later. Both would decorate an honest state
+    (``no_ingest``, ``unverified``) with advice it must not carry.
+    """
+    observation = "appliance identity: appliance0; it holds 5 PV(s), all connected"
+    # Spelled out so the statuses are LITERALS (``_with_remedy`` takes a ``PlaneStatus``, and a
+    # ``str`` off the frozenset is an arg-type error under --strict), then pinned RELATIONALLY
+    # against the set, so this list cannot quietly fall behind it.
+    healthy: tuple[PlaneStatus, ...] = ("ok", "disabled", "info", "unverified", "no_ingest")
+    assert set(healthy) == _NON_FAILING_STATUSES, "this list drifted from the honest-state set"
+
+    for status in healthy:
+        assert _with_remedy(status, observation) == observation, (
+            f"{status} is an honest state, not a problem, and must not be given advice"
+        )
 
 
 def test_cli_reports_full_olog_freetext_for_a_declared_sandbox(
