@@ -34,6 +34,7 @@ from __future__ import annotations
 import ast
 import re
 import subprocess
+from collections import Counter
 from collections.abc import Mapping
 from itertools import pairwise
 from pathlib import Path
@@ -478,9 +479,25 @@ def test_the_shipped_glyph_legend_carries_the_marks_the_cli_prints() -> None:
     glyph reaches a reader who has no repository around it to check against, and the only thing
     between the two was a hand comparison somebody had to remember to make.
 
-    Red-proof: delete a row, insert one, change a Mark cell, break a marker, unbacktick a cell.
+    Comparing the rows as a SET is what this guard is for, and it is also what an exact duplicate
+    row hides: two identical rows collapse to one member and agree with the CLI individually, so
+    the legend could list a status twice and stay green in both halves. Measured, that is the only
+    duplicate shape that gets through: a copy carrying a DIFFERENT mark is already caught by the
+    mark comparison below. The rows are therefore counted before they are reduced, the same shape
+    as the count kept beside the tiling guard's set comparison and for the same reason. What it
+    costs a reader is a legend that says the same thing twice, which is why this was carried as
+    cosmetic rather than as a defect.
+
+    Red-proof: delete a row, insert one, change a Mark cell, break a marker, unbacktick a cell,
+    duplicate a row EXACTLY.
+
     """
     rows = _glyph_rows()
+    repeated = sorted(status for status, seen in Counter(s for _, s in rows).items() if seen > 1)
+    assert not repeated, (
+        f"the shipped glyph legend carries more than one row for {repeated}. A reader sees two "
+        "rows that can disagree, and reducing the rows to a set below would hide it."
+    )
     documented = {status for _, status in rows}
     assert documented == _IN_THE_GLYPH_TABLE, (
         "the shipped glyph legend drifted from its declaration: "
