@@ -61,8 +61,9 @@ var that is not in `EpicsConfig`, and it fails if a registered tool is **missing
 adding a tool without documenting it is a red test, not a silent omission. The same file holds the
 shipped **status legend** against the code (QA-47): a new `PlaneStatus` is red until it is sorted into
 one of three declared guide-location buckets, and every glyph paired with a status name, in the guide
-or in `docs/`, must be the one `cli_doctor` renders. What that half deliberately does not check is
-dated in `docs/known-limits.md`.
+or on any tracked `docs/*.md` page, must be the one `cli_doctor` renders. The page list is derived
+from `git ls-files` rather than declared, so a new documentation page is covered the day it is added.
+What that half deliberately does not check is dated in `docs/known-limits.md`.
 
 ## Facility-agnostic guardrail (hard)
 

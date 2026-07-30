@@ -13,8 +13,8 @@ Three surfaces, each anchored on a marked region rather than on a line number:
 * every ``EPICS_MCP_*`` mention, against ``EpicsConfig``;
 * the status legend and the statuses named in the prose above it, against ``PlaneStatus`` and
   ``cli_doctor._STATUS_MARK`` (QA-47). This one reaches beyond the guide: a glyph paired with a
-  status name is also checked on ``docs/tools.md`` and ``docs/deployment.md``, because a second
-  copy of a guarded fact is an unguarded fact.
+  status name is also checked on every TRACKED ``docs/*.md`` page, because a second copy of a
+  guarded number is an unguarded number.
 
 What is still deliberately outside: the free-form Archiver MGMT verbs (``getAllPVs`` /
 ``getPVsForThisAppliance``) are manual REST recipes with no implementing tool, so they are
@@ -27,10 +27,13 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess
 from collections.abc import Mapping
 from itertools import pairwise
 from pathlib import Path
 from typing import get_args
+
+import pytest
 
 from epics_mcp import cli_doctor
 from epics_mcp.config import EpicsConfig
@@ -230,10 +233,53 @@ _CODE_SPAN_RE = re.compile(r"`([^`]*)`")
 #: written next to a mark that is CONTRASTED with it rather than paired to it, as in "the ``ok``
 #: versus ``?`` distinction". That form is recorded in ``docs/known-limits.md`` section 14.
 _GLYPH_CHARACTERS = frozenset("✓✗?!~·i")
-# The prose surfaces that re-state a pairing the legend already carries. They do NOT ship in the
-# wheel, unlike the guide, but a wrong glyph in them misleads a reader just the same and the cost
-# of covering them is one path each.
-_DOC_SURFACES = ("docs/tools.md", "docs/deployment.md")
+# The surfaces a pairing is EXPECTED on, and therefore the only ones carrying a per-surface floor.
+# Every other tracked docs page is READ, but not required to contain anything: measured, the other
+# five carry no pairing at all today, so a floor over all of them would be red on the first day.
+#
+# These three stay LITERAL names on purpose, and the floor below is on the INPUT rather than on the
+# output. Without it this scan would be a regression rather than an improvement: today a renamed
+# docs/tools.md is a loud FileNotFoundError, whereas a page list derived from git would simply stop
+# containing it, and the page would drop out of the scan together with its floor, because the floor
+# lives inside the loop over the pages that ARE there.
+_PAIRING_EXPECTED = ("the shipped guide", "docs/tools.md", "docs/deployment.md")
+
+
+def _tracked_doc_pages() -> tuple[str, ...]:
+    """Every tracked ``docs/*.md`` page, spelled the way git spells it.
+
+    Resolved against ``git ls-files``, NEVER against the disk, and that is a portability fact
+    rather than a preference: Windows folds case in the filesystem and Linux does not, so a
+    disk-based population is green on the author's machine and red on the runner, the worst
+    direction for a guard to be wrong in. The sibling guard ``tests/test_doc_links.py`` carries the
+    measurement behind that rule. The pathspec matches across ``/`` (checked: ``src/*.py`` returns
+    the files under ``src/epics_mcp/``), so a page in a subdirectory is covered too; the
+    non-recursive trap belongs to ``Path.glob``, not to a git pathspec.
+
+    Its own population rather than a helper borrowed from a sibling module, which is the shape
+    ``tests/test_product_name.py`` argues for on the same question: a shared helper carries the
+    sibling's exclusions, and inheriting them silently narrows a scan meant to be exhaustive here.
+
+    Error discipline taken from ``tests/test_guide.py``: ONLY a missing git binary may skip. A git
+    call that ran and FAILED has to fail loudly, because a silent skip there switches the scan off
+    in exactly the environment drift it should be reporting.
+    """
+    try:
+        listing = subprocess.run(
+            ["git", "-C", str(_ROOT), "ls-files", "docs/*.md"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout
+    except FileNotFoundError as exc:  # pragma: no cover - environment without git
+        pytest.skip(f"git binary unavailable, cannot enumerate the docs pages: {exc}")
+    except subprocess.SubprocessError as exc:  # pragma: no cover - broken git environment
+        pytest.fail(
+            f"git ls-files failed ({exc}), so the glyph scan did NOT read docs/; fix the git "
+            "environment (ownership/repo state) instead of letting the scan shrink in silence"
+        )
+    return tuple(sorted(line.strip() for line in listing.splitlines() if line.strip()))
 
 
 def _guide_region(pattern: re.Pattern[str], name: str) -> str:
@@ -443,22 +489,40 @@ def test_every_glyph_status_pairing_in_the_docs_agrees_with_the_render_marks() -
     on the shipped guide alone, four such pairings stand OUTSIDE the legend, one of them split
     across a line break.
 
-    Derived rather than declared, deliberately: there is no list to keep in step. Every backticked
-    pairing found on any of these surfaces has to agree with ``_STATUS_MARK``, so a prose copy that
-    drifts goes red without anybody having had to register it first.
+    Derived rather than declared on BOTH axes, deliberately: there is no list of pairings to keep
+    in step, and there is no list of pages either. The population is every tracked ``docs/*.md``
+    page plus the shipped guide, so a new documentation page is covered the day it is added rather
+    than the day somebody remembers to register it. It used to be a hard-wired pair, which left
+    five of the seven tracked pages unguarded and made ``CLAUDE.md``'s "in the guide or in docs/"
+    an overstatement.
 
-    The floor is per surface rather than a total: a file the scan reads as empty is the way this
-    goes vacuous, and it is a different failure from a file that has drifted.
+    The floor is per surface rather than a total, because a file the scan reads as empty is a
+    different failure from a file that has drifted, and a total hides the first inside the second.
+    It applies to the three surfaces a pairing is EXPECTED on, not to all of them: measured, the
+    other five tracked pages carry no pairing today, so a floor over every page would be red on the
+    first day.
 
-    Red-proof: change a mark next to a status name anywhere on these three surfaces.
+    Reach, stated rather than implied: the floor covers 3 of the 8 surfaces that are read. On the
+    guide it is satisfied by the six legend rows that
+    ``test_the_shipped_glyph_legend_carries_the_marks_the_cli_prints`` compares anyway, so it adds
+    nothing there beyond what that guard already holds. The five unfloored pages are read without
+    one, which catches a GLOBAL extraction break and not a page-specific one.
+
+    Red-proof: change a mark next to a status name on any tracked page; rename ``docs/tools.md``.
     """
     surfaces = {"the shipped guide": get_guide()} | {
-        rel: (_ROOT / rel).read_text(encoding="utf-8") for rel in _DOC_SURFACES
+        rel: (_ROOT / rel).read_text(encoding="utf-8") for rel in _tracked_doc_pages()
     }
+    absent = sorted(set(_PAIRING_EXPECTED) - set(surfaces))
+    assert not absent, (
+        f"a surface this scan expects pairings on is not in the population: {absent}. If the page "
+        "was renamed, move the name here as well; do not let it drop out of the scan, because its "
+        "floor would leave with it and the loss would be silent."
+    )
     mismatched: list[str] = []
     for where, text in surfaces.items():
         pairings = _glyph_status_pairings(text, cli_doctor._STATUS_MARK)
-        assert pairings, (
+        assert pairings or where not in _PAIRING_EXPECTED, (
             f"{where} yielded no glyph/status pairing at all, so the scan is not reading what it "
             "claims to: either the extraction broke or the file stopped documenting the statuses"
         )
