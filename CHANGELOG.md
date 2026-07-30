@@ -56,6 +56,13 @@ carry breaking changes).
 - The archiver identity probe goes through the same shared beacon fetcher as every other plane. It
   was the one plane building its request inline, which already made that helper's "the one place
   every identity probe issues its request" contract untrue.
+- **`epics-doctor`'s `config_error` line now names the variable to set at its START, and the
+  remedy points at that position.** Measured against the last published release: 0.3.0 ended the
+  observation with "Set EPICS_MCP_ARCHIVER_URL (the MGMT webapp URL)", the remedy table then took
+  that instruction over, and it now reads "Set the variable named at the start of this finding",
+  the construction `unreachable` already used. This matters beyond wording because `detail` is the
+  field `--json` readers are told to use, so a consumer matching the older text will not find it.
+  The position is guarded; the wording deliberately is not.
 
 ## [0.4.0] - 2026-07-29
 
