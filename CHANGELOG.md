@@ -7,6 +7,8 @@ carry breaking changes).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-30
+
 ### Added
 
 - **Every `epics-doctor` line that reports a problem now names its remedy.** Three statuses already
@@ -63,11 +65,6 @@ carry breaking changes).
   the construction `unreachable` already used. This matters beyond wording because `detail` is the
   field `--json` readers are told to use, so a consumer matching the older text will not find it.
   The position is guarded; the wording deliberately is not.
-
-## [0.4.0] - 2026-07-29
-
-### Changed
-
 - **BREAKING: the import package is now `epics_mcp`** (was `epics_pv_mcp`). `import epics_pv_mcp`
   stops working; `import epics_mcp` replaces it, one for one, with no other change to the API. This
   completes the rename begun in 0.3.0, where the distribution, the repository, the server command
@@ -107,6 +104,14 @@ carry breaking changes).
   check and the command then died with a bare traceback. It now reports the failure with the
   underlying exception named and exits 1, while a genuinely absent engine keeps its explanation and
   exit 2. The advice differs too: installing the engine will not fix a broken one.
+- **The core server no longer dies over an OPTIONAL capability.** The display-capability probe called
+  `importlib.util.find_spec` bare, and it runs at module level, so an import hook that RAISES for
+  `opi_navigation` took the whole `epics_mcp.server` import down: exit 1 with a traceback, on a
+  server whose PV tools never needed the display engine at all. The probe now answers instead of
+  propagating. A module a finder reports as genuinely absent is the supported core-only state and
+  stays silent, as before; a finder that could not answer is a different claim and is logged loud
+  rather than wearing the "not installed" message. The sibling CLIs already behaved this way, so one
+  package was answering the same question two ways.
 - **A long live value in the `find_device` report is capped at 80 characters, not 82**, as its own
   documentation promised.
 - **The ready-to-paste write-enabled MCP client block now starts.** As shipped it omitted
