@@ -206,6 +206,16 @@ _GLYPH_ROW_RE = re.compile(r"^\|?\s*`([^`]+)`\s*\|\s*`([a-z_]+)`\s*\|")
 #: FORM rather than by a literal prefix, so re-spacing it or adding alignment colons stays legal.
 _SEPARATOR_RE = re.compile(r"^\|?[\s|:-]+$")
 _BACKTICKED_RE = re.compile(r"`([^`\s]+)`")
+#: A backticked lower-case identifier, the shape every status name is written in. Used for the
+#: REVERSE direction of the location guard: not "is this declared status still named there" but
+#: "is every name written there still a status".
+_LOWERCASE_TOKEN_RE = re.compile(r"`([a-z][a-z0-9_]*)`")
+#: Tokens in the guide's status prose that are backticked and lower-case but are NOT plane statuses.
+#: EMPTY today, and that emptiness is the promise: the shipped guide says the statuses named in that
+#: paragraph are drift-guarded, and an allowlist that is needed on day one would be an excuse rather
+#: than a guard. A legitimate new non-status word there is DECLARED here, which the failure message
+#: says in as many words; the repair is to declare it, never to delete the check.
+_NOT_A_STATUS_IN_THE_PROSE: frozenset[str] = frozenset()
 #: EVERY code span of a line, including the whitespace-free ones. Matching them ALL and filtering
 #: afterwards is what keeps the backtick pairing honest, see ``_glyph_status_pairings``.
 _CODE_SPAN_RE = re.compile(r"`([^`]*)`")
@@ -646,8 +656,26 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
     case-insensitively the guide already carries ``Disabled`` and ``Info`` in those foreign senses,
     and this test would be red on the day it was written.
 
-    Red-proof: unbacktick a prose status name; write a declared-absent one into a region.
+    A THIRD direction makes the shipped guide's own promise true. That paragraph is introduced by a
+    marker reading "the plane statuses named outside the legend below are drift-guarded against
+    PlaneStatus", and the two halves above did not deliver it. Measured for each of the three
+    statuses whose only home is that paragraph: removing one from ``PlaneStatus``, from
+    ``_STATUS_MARK`` and from its bucket, while the sentence naming it stays in the guide, was GREEN
+    in all four guards. That is the likely path rather than an exotic one, because the tiling guard
+    FORCES the bucket to be cleared in the same edit. So every backticked lower-case token in the
+    prose region has to be a plane status. (A status that also has a legend row is caught by the
+    legend guard as well; these three were caught by nothing.)
+
+    Only the prose region, not the legend. The legend region carries ``degraded_planes`` and
+    ``name``, so extending this half there would need two allowlist entries on the first day, and an
+    allowlist that is needed immediately is an excuse rather than a promise. What this direction
+    does NOT catch, and what therefore stays in ``docs/known-limits.md``: a status name outside both
+    regions, one written without backticks, and one written with a capital.
+
+    Red-proof: unbacktick a prose status name; write a declared-absent one into a region; remove a
+    status from ``PlaneStatus`` and its bucket while the guide goes on naming it.
     """
+    statuses = set(get_args(PlaneStatus))
     legend = _guide_region(_GLYPH_TABLE_RE, "status-glyphs")
     prose = _guide_region(_STATUS_PROSE_RE, "status-prose")
     missing = sorted(status for status in _IN_THE_STATUS_PROSE if f"`{status}`" not in prose)
@@ -664,4 +692,11 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
         f"declared as named NOWHERE in the shipped guide, but now named in it: {surfaced}. If the "
         "status really is documented as an epics-doctor status, move it to the bucket for the "
         "region it stands in; do not move it because a DIFFERENT namespace borrowed the word."
+    )
+    named = set(_LOWERCASE_TOKEN_RE.findall(prose)) - _NOT_A_STATUS_IN_THE_PROSE
+    unknown = sorted(named - statuses)
+    assert not unknown, (
+        f"the guide's status prose names {unknown} as if epics-doctor printed them, but they are "
+        "not PlaneStatus values. If the status was removed, the sentence has to go with it; if the "
+        "token was never a status, declare it in _NOT_A_STATUS_IN_THE_PROSE."
     )
