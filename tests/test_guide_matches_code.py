@@ -213,10 +213,18 @@ _GLYPH_ROW_RE = re.compile(r"^\|?\s*`([^`]+)`\s*\|\s*`([a-z_]+)`\s*\|")
 #: FORM rather than by a literal prefix, so re-spacing it or adding alignment colons stays legal.
 _SEPARATOR_RE = re.compile(r"^\|?[\s|:-]+$")
 _BACKTICKED_RE = re.compile(r"`([^`\s]+)`")
-#: A backticked lower-case identifier, the shape every status name is written in. Used for the
-#: REVERSE direction of the location guard: not "is this declared status still named there" but
-#: "is every name written there still a status".
-_LOWERCASE_TOKEN_RE = re.compile(r"`([a-z][a-z0-9_]*)`")
+#: A lower-case identifier, the shape every status name is written in. Applied to the TEXT of an
+#: already-extracted code span (``_code_spans``), never to the raw markdown. Used for the REVERSE
+#: direction of the location guard: not "is this declared status still named there" but "is every
+#: name written there still a status".
+#:
+#: It carried its own backticks once, and that was a defect in both directions, because a regex
+#: cannot tell an opening backtick from a closing one. Measured on
+#: ``see `--json`ok`detail` here``: the backticked form read ``ok``, which is PROSE between two
+#: spans, and missed ``detail``, which is a real span, so a genuine non-status token stayed
+#: invisible (a false green) while an invented one reddened. Extracting the spans first cannot
+#: have that failure: it consumes each span whole.
+_LOWERCASE_TOKEN_RE = re.compile(r"[a-z][a-z0-9_]*")
 #: Tokens in the guide's status prose that are backticked and lower-case but are NOT plane statuses.
 #: EMPTY today, and that emptiness is the promise: the shipped guide says the statuses named in that
 #: paragraph are drift-guarded, and an allowlist that is needed on day one would be an excuse rather
@@ -303,6 +311,29 @@ def _guide_region(pattern: re.Pattern[str], name: str) -> str:
     match = pattern.search(get_guide())
     assert match, f"the guide's {name} markers were not found, the drift anchor broke"
     return match.group(1)
+
+
+def _code_spans(text: str) -> list[str]:
+    """The TEXT of every code span, in reading order, duplicates kept.
+
+    The one place in this file that decides what a code span is. Both readers of markdown here go
+    through it: the second pass of ``_glyph_status_pairings`` and the location guard's reverse
+    direction. They used to disagree, the pairing pass consuming whole spans while the reverse
+    direction matched a backtick-delimited pattern, and a pattern cannot tell an opening backtick
+    from a closing one. What that cost is measured in ``_LOWERCASE_TOKEN_RE``.
+
+    A line with an ODD number of backticks is skipped, because markdown pairing cannot be read from
+    it and these surfaces carry code spans that run across a line break. Measured, twenty such lines
+    across the eight scanned surfaces, none carrying a pairing, and NONE inside either marked region
+    of the guide, so the filter changes no result today and makes the assumption loud instead of
+    lucky.
+    """
+    spans: list[str] = []
+    for line in text.splitlines():
+        if line.count("`") % 2:
+            continue
+        spans += _CODE_SPAN_RE.findall(line)
+    return spans
 
 
 def _glyph_rows() -> list[tuple[str, str]]:
@@ -405,10 +436,9 @@ def _glyph_status_pairings(text: str, marks: Mapping[str, str]) -> list[tuple[st
     over the whole codepoint range, the difference is empty in both directions), so two tokens
     already prove whitespace stood between them and a second condition would be unreachable code.
 
-    A line with an ODD number of backticks is skipped, because markdown pairing cannot be read from
-    it and the surfaces carry multi-line code spans. Measured, 20 such lines across them, none
-    carrying a pairing, so the filter changes no result today and makes the assumption loud instead
-    of lucky.
+    Both the span extraction and the odd-backtick skip live in ``_code_spans``, which is also what
+    the location guard's reverse direction reads, so the two cannot drift apart on the question of
+    what a code span is.
 
     The STATUS half is looked up in ``marks``; the MARK half is tested against the declared
     ``_GLYPH_CHARACTERS``, and the asymmetry is the point (see that constant). ``marks`` arrives as
@@ -425,16 +455,13 @@ def _glyph_status_pairings(text: str, marks: Mapping[str, str]) -> list[tuple[st
             for status, mark in ((left.group(1), right.group(1)), (right.group(1), left.group(1))):
                 if status in marks and mark in _GLYPH_CHARACTERS:
                     pairings.append((status, mark))
-    for line in text.splitlines():
-        if line.count("`") % 2:
+    for span in _code_spans(text):
+        tokens = span.split()
+        if len(tokens) != 2:
             continue
-        for span in _CODE_SPAN_RE.finditer(line):
-            tokens = span.group(1).split()
-            if len(tokens) != 2:
-                continue
-            for status, mark in ((tokens[0], tokens[1]), (tokens[1], tokens[0])):
-                if status in marks and mark in _GLYPH_CHARACTERS:
-                    pairings.append((status, mark))
+        for status, mark in ((tokens[0], tokens[1]), (tokens[1], tokens[0])):
+            if status in marks and mark in _GLYPH_CHARACTERS:
+                pairings.append((status, mark))
     return pairings
 
 
@@ -662,6 +689,37 @@ def test_a_pairing_inside_one_code_span_is_read() -> None:
     )
 
 
+def test_a_span_behind_another_span_is_read_and_the_prose_between_them_is_not() -> None:
+    """One property with two faces: what is a code span is decided by CONSUMING spans, never by a
+    pattern that carries its own backticks.
+
+    A pattern cannot tell an opening backtick from a closing one, so it can re-anchor on a closing
+    backtick and read the prose that follows as if it were a span. Both faces are the same defect
+    and both are pinned here, because on the tree today neither can fire: measured, the guide's two
+    marked regions contain no adjacent spans at all, so nothing would go red if this regressed.
+
+    * a real span that FOLLOWS another span was invisible, which is a false GREEN: a genuine
+      non-status token could stand in the guarded paragraph and the reverse direction would not
+      report it;
+    * the prose BETWEEN two spans was read as one, which is a false RED whose obvious repair is to
+      move the word into a "named" bucket, and that repair is green while retiring the measured gap
+      the bucket exists to record.
+
+    Red-proof: give ``_LOWERCASE_TOKEN_RE`` its backticks back and match it against the region
+    instead of against extracted spans. Measured on this input, that variant inverts BOTH
+    assertions below at once.
+    """
+    found = _code_spans("see `--json`ok`detail` here")
+    assert "detail" in found, (
+        f"a code span standing directly behind another one was not read: {found}. A backticked "
+        "pattern re-anchors on the closing backtick and loses it; extract the spans instead."
+    )
+    assert "ok" not in found, (
+        f"prose standing BETWEEN two code spans was read as a span: {found}. Only text a pair of "
+        "backticks encloses is a span."
+    )
+
+
 def test_the_declared_status_locations_still_describe_the_guide() -> None:
     """The two location buckets are held against the two marked regions, in both directions: a
     status declared as named in the prose has to be named there, and a status declared as named
@@ -676,11 +734,17 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
     Confining both halves to the marked regions costs a false negative (a status documented in a
     third place goes unnoticed) and buys the absence of a false positive with a green wrong repair.
 
-    The match is an exact, CASE-SENSITIVE backticked token. It is fixed here so the behaviour is
-    defined, NOT because case-insensitivity would break this guard: measured, the guide's
-    ``Disabled`` and ``Info`` both stand OUTSIDE the two marked regions, so a case-insensitive
-    match confined to the regions is green as well. The case rule was what the rejected WHOLE-FILE
-    variant needed, and it was carried over here with a justification that no longer applied.
+    All three halves compare against the TEXT of an extracted code span (``_code_spans``), never
+    against the raw markdown. A substring test over the region reads a name that is not a span at
+    all: measured, writing ``empty `*_URL`info`0`)`` into the prose made the negative half report
+    ``info`` as newly named, where ``info`` is plain prose between two spans, and the repair that
+    message steers to was GREEN in exactly that state, retiring the gap the bucket records.
+
+    The comparison is exact and CASE-SENSITIVE. That is fixed here so the behaviour is defined, NOT
+    because case-insensitivity would break this guard: measured, the guide's ``Disabled`` and
+    ``Info`` both stand OUTSIDE the two marked regions, so a case-insensitive match confined to the
+    regions is green as well. The case rule was what the rejected WHOLE-FILE variant needed, and it
+    was carried over here with a justification that no longer applied.
 
     A THIRD direction makes the shipped guide's own promise true. That paragraph is introduced by a
     marker reading "the plane statuses named outside the legend below are drift-guarded against
@@ -688,9 +752,9 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
     statuses whose only home is that paragraph: removing one from ``PlaneStatus``, from
     ``_STATUS_MARK`` and from its bucket, while the sentence naming it stays in the guide, was GREEN
     in all four guards. That is the likely path rather than an exotic one, because the tiling guard
-    FORCES the bucket to be cleared in the same edit. So every backticked lower-case token in the
-    prose region has to be a plane status. (A status that also has a legend row is caught by the
-    legend guard as well; these three were caught by nothing.)
+    FORCES the bucket to be cleared in the same edit. So every lower-case identifier written as a
+    code span in the prose region has to be a plane status. (A status that also has a legend row is
+    caught by the legend guard as well; these three were caught by nothing.)
 
     Only the prose region, not the legend. The legend region carries ``degraded_planes`` and
     ``name``, so extending this half there would need two allowlist entries on the first day, and an
@@ -702,25 +766,23 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
     status from ``PlaneStatus`` and its bucket while the guide goes on naming it.
     """
     statuses = set(get_args(PlaneStatus))
-    legend = _guide_region(_GLYPH_TABLE_RE, "status-glyphs")
-    prose = _guide_region(_STATUS_PROSE_RE, "status-prose")
-    missing = sorted(status for status in _IN_THE_STATUS_PROSE if f"`{status}`" not in prose)
+    legend = set(_code_spans(_guide_region(_GLYPH_TABLE_RE, "status-glyphs")))
+    prose = set(_code_spans(_guide_region(_STATUS_PROSE_RE, "status-prose")))
+    missing = sorted(status for status in _IN_THE_STATUS_PROSE if status not in prose)
     assert not missing, (
         f"declared as named in the guide's status prose, but not found there: {missing}. Either "
         "the mention moved out of the marked region, or the bucket needs to say so."
     )
     surfaced = sorted(
-        status
-        for status in _NOT_NAMED_IN_THE_GUIDE
-        if f"`{status}`" in prose or f"`{status}`" in legend
+        status for status in _NOT_NAMED_IN_THE_GUIDE if status in prose or status in legend
     )
     assert not surfaced, (
         f"declared as named NOWHERE in the shipped guide, but now named in it: {surfaced}. If the "
         "status really is documented as an epics-doctor status, move it to the bucket for the "
         "region it stands in; do not move it because a DIFFERENT namespace borrowed the word."
     )
-    named = set(_LOWERCASE_TOKEN_RE.findall(prose)) - _NOT_A_STATUS_IN_THE_PROSE
-    unknown = sorted(named - statuses)
+    named = {span for span in prose if _LOWERCASE_TOKEN_RE.fullmatch(span)}
+    unknown = sorted(named - _NOT_A_STATUS_IN_THE_PROSE - statuses)
     assert not unknown, (
         f"the guide's status prose names {unknown} as if epics-doctor printed them, but they are "
         "not PlaneStatus values. If the status was removed, the sentence has to go with it; if the "
