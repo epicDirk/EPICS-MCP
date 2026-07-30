@@ -177,8 +177,8 @@ _DEGRADED_STATUSES: frozenset[str] = frozenset({"no_ingest"})
 #: describes it, and stands on its own.
 _REMEDY: dict[str, str] = {
     "config_error": (
-        "Set the empty variable this finding names; nothing was probed here, the configuration "
-        "itself is the finding."
+        "Set the variable named at the start of this finding; nothing was probed here, the "
+        "configuration itself is the finding."
     ),
     "ca_error": (
         "Set EPICS_MCP_CA_BUNDLE to a PEM that trusts this host, combining your internal CA roots "
@@ -954,16 +954,22 @@ async def _check_retrieval_plane(cfg: EpicsConfig, timeout: float) -> PlaneCheck
             # Observation only, no imperative: the remedy is the table's half, and this used to say
             # "Set EPICS_MCP_ARCHIVER_URL" itself, so the rendered line carried the instruction
             # twice. What the table cannot know is WHICH variable, so the observation names it and
-            # the remedy points at it, the construction the unreachable remedy already uses. That
-            # remedy reads "the empty variable this finding names", which is unambiguous only while
-            # exactly one variable here is reported empty and only while this is the sole
-            # config_error site: test_config_error_has_exactly_one_construction_site pins the
-            # latter.
+            # the remedy points at it, the construction the unreachable remedy already uses.
+            #
+            # The variable to SET therefore LEADS the observation, because that remedy reads "the
+            # variable named at the start of this finding". The reference is positional, which is
+            # what makes it checkable: an earlier version pointed at "the empty variable this
+            # finding names", a claim about a PROPERTY that nothing re-ran, and a one-word edit
+            # here made the sentence report two of them as empty while every test stayed green.
+            # The position is pinned instead, for this status and for unreachable, by
+            # test_the_first_variable_a_finding_names_is_the_one_to_edit; that this stays the sole
+            # site producing the status is pinned by
+            # test_config_error_has_exactly_one_construction_site.
             detail=_with_remedy(
                 "config_error",
-                "EPICS_MCP_ARCHIVER_RETRIEVAL_URL is set but EPICS_MCP_ARCHIVER_URL (the MGMT "
-                "webapp URL) is empty, every archiver tool gates on EPICS_MCP_ARCHIVER_URL, so "
-                "this retrieval URL is never used.",
+                "EPICS_MCP_ARCHIVER_URL (the MGMT webapp URL) is empty while "
+                "EPICS_MCP_ARCHIVER_RETRIEVAL_URL is set, and every archiver tool gates on "
+                "EPICS_MCP_ARCHIVER_URL, so this retrieval URL is never used.",
             ),
         )
     url = cfg.archiver_retrieval_url or cfg.archiver_url

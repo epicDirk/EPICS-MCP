@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from pathlib import Path
 from typing import get_args
 from unittest.mock import Mock
@@ -1806,13 +1807,21 @@ def test_every_problem_status_names_a_remedy() -> None:
 
 
 def test_config_error_has_exactly_one_construction_site() -> None:
-    """The ``config_error`` remedy says "the empty variable this finding names", and that phrase
-    only resolves while every site producing this status names exactly one empty variable.
+    """The ``config_error`` remedy says "the variable named at the start of this finding", and a
+    positional reference is only affordable while ONE site produces this status.
 
     Unlike the other six, this remedy points INTO its observation instead of standing alone, because
     the variable to set is site knowledge a status-keyed table cannot hold. That is affordable at
     one site and a wrong instruction at a second one shaped differently (two conflicting values,
     say), so the count is pinned rather than left to be noticed.
+
+    What this does NOT check is that the observation actually LEADS with the variable to set. That
+    is the claim the remedy makes, and it is pinned on the rendered detail by
+    ``test_the_first_variable_a_finding_names_is_the_one_to_edit``. The two are halves of one
+    contract, and saying so here is the point: an earlier version of this docstring rested the
+    remedy on "the empty variable this finding names", implying that emptiness semantics were
+    covered by the count below. They never were, and a one-word edit to the observation proved it
+    while every assertion in the suite stayed green.
 
     ⚠️ Honest limit: this counts CONSTRUCTIONS, not call sites. Move the construction into a helper
     the way ``_backend_down`` is one, call it twice, and this stays at 1 while two sites exist. It
@@ -1835,8 +1844,108 @@ def test_config_error_has_exactly_one_construction_site() -> None:
 
     assert len(sites) == 1, (
         f"{len(sites)} sites construct a config_error PlaneCheck (lines "
-        f"{[node.lineno for node in sites]}); the status-wide remedy names 'the empty variable "
-        "this finding names', which a differently shaped second site would not provide"
+        f"{[node.lineno for node in sites]}); the status-wide remedy points at 'the variable "
+        "named at the start of this finding', which a differently shaped second site would not "
+        "provide"
+    )
+
+
+#: The wording both positional remedies share. Pinned as MEMBERSHIP, not as prose: the guard below
+#: has to cover every status that makes this promise, and a set comparison is what notices a third
+#: one joining. What the sentence says beyond that stays free (docs/known-limits.md section 13).
+_POSITIONAL_PROMISE = "named at the start of this finding"
+
+
+@pytest.mark.parametrize(
+    ("status", "archiver_url", "retrieval_url", "expected_var", "expected_var_is_empty"),
+    [
+        pytest.param(
+            "config_error",
+            "",
+            "http://arch.example:17668",
+            "EPICS_MCP_ARCHIVER_URL",
+            True,
+            id="config_error",
+        ),
+        pytest.param(
+            "unreachable",
+            "http://arch.example:17665",
+            "http://arch.example:17668",
+            "EPICS_MCP_ARCHIVER_RETRIEVAL_URL",
+            False,
+            id="unreachable",
+        ),
+    ],
+)
+async def test_the_first_variable_a_finding_names_is_the_one_to_edit(
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    archiver_url: str,
+    retrieval_url: str,
+    expected_var: str,
+    expected_var_is_empty: bool,
+) -> None:
+    """Two remedies tell the reader that the variable to edit is "named at the start of this
+    finding". That is a claim about the ORDER of the rendered detail, so it is checked there.
+
+    Why this guard exists as well as the site count above: the count pins how MANY sites produce
+    ``config_error``, which is not the claim the remedy makes. Measured on the predecessor wording
+    ("the empty variable this finding names"), a one-word edit to the observation made it report two
+    variables as empty and no assertion anywhere noticed. A positional claim can be checked without
+    pinning prose, which is why the wording moved onto one.
+
+    Both rows run through ``_check_retrieval_plane`` on purpose: it is the one plane that reaches
+    BOTH statuses, and the only one where the variable genuinely varies (mgmt vs. split-port), so a
+    row that passes for the wrong reason has nowhere to hide. Faked at the TRANSPORT seam
+    (``rest_get_json``) rather than by doubling a client class, for the reason recorded at
+    ``test_unreachable_retrieval_names_the_variable_the_url_came_from``.
+
+    The name is not compared against a literal alone: it is cross-checked against the config that
+    produced the finding, so the test cannot drift into asserting a fixture string. For
+    ``config_error`` the variable it names must really be the EMPTY one; for ``unreachable`` it must
+    really be the one that carried the URL that failed.
+
+    ⚠️ What this does NOT catch: swapping the observation's predicate ("is empty" for "is set")
+    leaves it green. Deliberate. The variable to edit is still the first one named, so what the
+    operator DOES stays right and only the descriptive clause would be wrong, and a guard over that
+    clause would pin prose that section 13 of docs/known-limits.md keeps free.
+
+    Red-proof, per row: restoring the old observation order fails ``config_error``; passing a
+    different name as ``url_var`` fails ``unreachable``; copying the promise into a third
+    ``_REMEDY`` entry fails the membership assertion.
+    """
+    promise_makers = {name for name, text in _REMEDY.items() if _POSITIONAL_PROMISE in text}
+    assert promise_makers == {"config_error", "unreachable"}, (
+        f"these statuses promise the reader a POSITION: {sorted(promise_makers)}, but this guard "
+        "checks config_error and unreachable. A status that makes the promise without being "
+        "checked here is exactly the gap this pair of guards exists to close"
+    )
+
+    cfg = _set_config(monkeypatch, archiver_url=archiver_url, archiver_retrieval_url=retrieval_url)
+    monkeypatch.setattr(
+        "epics_mcp.services.doctor.rest_get_json",
+        Mock(side_effect=RestConnectionError("refused")),
+    )
+
+    check = await _check_retrieval_plane(cfg, 5.0)
+    detail = check.detail or ""
+    named = re.findall(r"EPICS_MCP_[A-Z_]+", detail)
+
+    assert check.status == status, f"expected {status}, got {check.status}: {detail!r}"
+    assert named, f"a {status} finding names no EPICS_MCP_* variable at all: {detail!r}"
+    assert named[0] == expected_var, (
+        f"the remedy for {status} points at the variable 'named at the start of this finding', but "
+        f"the first one named is {named[0]}, not {expected_var}: {detail!r}"
+    )
+
+    # The cross-check: the name is only right if the CONFIG agrees about what it is.
+    values = {
+        "EPICS_MCP_ARCHIVER_URL": cfg.archiver_url,
+        "EPICS_MCP_ARCHIVER_RETRIEVAL_URL": cfg.archiver_retrieval_url,
+    }
+    assert (values[expected_var] == "") is expected_var_is_empty, (
+        f"{expected_var} is {values[expected_var]!r} in the config that produced this {status}, "
+        "which is not the role this row asserts it plays"
     )
 
 
