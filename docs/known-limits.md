@@ -335,19 +335,27 @@ which is the trade this page's first entry already describes. The check is the r
 
 ## 14 · The shipped status legend is guarded by name, glyph and set, not by what it says
 
-Measured 2026-07-30, and rewritten the same day after a QA of this guard found six places where it
-checked less than it promised. `tests/test_guide_matches_code.py` holds the operator guide's status
-legend against `PlaneStatus` and `cli_doctor._STATUS_MARK`: every status is sorted into one of
-three declared buckets (named in the legend, named in the prose paragraph above it, named in
-neither) and the three buckets are compared with `PlaneStatus` as SETS rather than as three sizes,
-with the count kept beside the comparison for the double-listing case; the legend's Status and Mark
-cells are held against the code in both directions and its rows are counted before they are
-reduced; every backticked glyph and status pairing on the guide and on every tracked `docs/` page
-has to agree with the mark the CLI prints; and every backticked lower-case token in the guide's
-status paragraph has to be a plane status. The buckets are typed `frozenset[PlaneStatus]`, so a
-name that no longer exists is a `mypy --strict` error naming the offending literal as well as a red
-test. Every pairing on the tree today agrees, and the guard re-checks that on every run. What
-follows is what it does NOT do, and one thing it records.
+Measured 2026-07-30. Written after a QA of this guard found six places where it checked less than it
+promised, and rewritten the same day after a QA of THAT repair found four more.
+`tests/test_guide_matches_code.py` holds the operator guide's status legend against `PlaneStatus`
+and `cli_doctor._STATUS_MARK`. Every status is sorted into one of three declared buckets (named in
+the legend, named in the prose paragraph above it, named in neither), and the buckets are compared
+with `PlaneStatus` as SETS, with a double-listing count beside the comparison because set equality
+alone cannot see a repeated member. The legend's Status and Mark cells are held against the code in
+both directions, its rows are counted before they are reduced, and its delimiter row is held against
+the rule a renderer applies rather than against a character class. Every glyph and status pairing on
+the guide and on every tracked `docs/` page has to agree with the mark the CLI prints. Every
+lower-case identifier written as a code span in the guide's status paragraph has to be a plane
+status. The buckets are typed `frozenset[PlaneStatus]`, so a name that no longer exists is a
+`mypy --strict` error naming the offending literal as well as a red test. Every pairing on the tree
+today agrees, and the guard re-checks that on every run.
+
+Each behaviour the two rounds bought carries a pin on constructed input, so a later revert goes red
+instead of going quietly green: measured, before those pins, reverting the set comparison, the
+optional leading pipe, the reverse direction or the duplicate count left every guard in the file
+green. One exception, named rather than implied: the page population is derived from `git ls-files`
+and is exercised on the tree, not pinned. What follows is what the guard does NOT do, and one thing
+it records.
 
 **The Meaning column is not read.** A row may describe its own status wrongly and stay green,
 measured by giving one row another row's meaning and by replacing a meaning with nonsense: all four
@@ -357,57 +365,63 @@ pair of code tokens.
 
 **The location buckets are checked inside two marked regions, not across the file.** The whole-file
 search was written first and then rejected on measurement, and the argument rests on TWO of the
-three declared-absent names rather than three. `Disabled` (guide line 647) is an alarm
-configuration command value and `Info` (line 153) is an Olog level, both capitalised, so a
-case-INSENSITIVE whole-file search reddens on them. `disconnected` carries none of that weight:
-it is the `State` of `diagnose_connection` in the code, but the guide writes it only as plain
-prose about PV connections and never as a code span, in either case, so no whole-file search over
-spans sees it. Two are enough: a whole-file search reddens on an edit that documented something
-else, and the
-obvious repair for that red, moving the status into a "named" bucket, is fully GREEN while retiring
-the gap the bucket exists to record. The price paid instead is a false negative: a status
-documented in some third place goes unnoticed. The match is case-sensitive so that the behaviour is
-stated rather than left to the implementer, and NOT because the region-scoped guard needs it:
-case-insensitively, still confined to the two regions, it stays green, because the capitalised
-words carrying those foreign senses both stand outside the regions. Case-insensitivity is what
-would have reddened the rejected whole-file search.
+three declared-absent names rather than three. `Disabled` (guide line 647) is an alarm configuration
+command value and `Info` (line 153) is an Olog level, both capitalised, so only a case-INSENSITIVE
+whole-file search reddens on them. The third name carries none of that weight: it is the `State` of
+`diagnose_connection` in the code, but the guide writes it only as plain prose about PV connections
+and never as a code span, in either case mode, so no whole-file search over spans sees it. Two are
+enough. A whole-file search reddens on an edit that documented something else, and the obvious
+repair for that red, moving the status into a "named" bucket, is fully GREEN while retiring the gap
+the bucket exists to record. The price paid instead is a false negative: a status documented in some
+third place goes unnoticed. The match is case-sensitive so that the behaviour is stated rather than
+left to the implementer, and NOT because the region-scoped guard needs it: case-insensitively, still
+confined to the two regions, it stays green, because the capitalised words carrying those foreign
+senses both stand outside the regions.
 
 **A bucket says where a status NAME appears, not whether the concept is explained, and not that it
 appears only there.** The guide describes a disabled plane, an empty URL variable reported honestly
 and never a failure, without ever using the status name, so that status counts as unnamed here. And
 two statuses that have a legend row are named in the prose region as well, which no bucket denies
-and nothing requires. They are READ, by the reverse direction below, which is why removing either
-from `PlaneStatus` reddens; what no guard states is that the prose region has to keep naming them.
+and nothing requires. They ARE read, by the reverse direction below, which is why removing either
+from `PlaneStatus` reddens; what no guard states is that the prose has to keep naming them.
 
 **A pairing needs both halves side by side.** A sentence naming glyphs alone, as the guide does
-where it tells a reader which lines to read, carries no status name and is outside the scan. Side
-by side means one of exactly two written forms: two backticked tokens in the same block, separated
-by at most three characters none of which is a word character, or exactly two whitespace-separated
-tokens inside ONE backticked span. Blocks are separated by a blank line on purpose, because folding
-the whole file into one line would let a paragraph ending on a status name pair with the next one
-beginning on a mark; measured, both variants read the same pairings on the tree today, so the
-stricter one is free. Two forms it does not read: a status and a mark more than three characters
-apart, and either half written without backticks.
+where it tells a reader which lines to read, carries no status name and is outside the scan. Side by
+side means one of exactly two written forms: two backticked tokens in the same block, separated by
+at most three characters none of which is a word character, or exactly two whitespace-separated
+tokens inside ONE backticked span. ⚠️ Those three characters are counted AFTER every run of
+whitespace collapses to one, so a line break with any indentation behind it counts as one character
+and only a blank line separates two blocks. Counting the raw text gives the wrong answer in both
+directions. Blocks are separated by a blank line on purpose, because folding the whole file into one
+line would let a paragraph ending on a status name pair with the next one beginning on a mark;
+measured, both variants read the same pairings on the tree today, so the stricter one is free. Two
+forms it does not read: a status and a mark further apart than that, and either half written without
+backticks.
 
 **Marks are recognised through a DECLARED character class, not through the current mark mapping.**
 That looks weaker and is stronger. A mark the CLI has RETIRED is no longer a member of the mapping,
 so a scan keyed on its values stops seeing the stale documentation copies at the exact moment they
 become stale, which is the one drift direction this scan exists for. Measured by retiring one mark:
 the value-keyed rule read fewer pairings than exist and reported NONE of the stale ones, the
-declared class reported every one. What it costs is one shape of false red that the value-keyed
-rule already produced: a status name written TIGHTLY against a mark it is being CONTRASTED with
-rather than paired to: a status name, a slash, and the mark, with nothing else between them.
-Only that tight spelling, though, and it was measured rather than assumed. The sentence this
-entry used to cite, "the `ok` versus `?` distinction", reads as nothing at all, its gap being
-eight characters against a limit of three, and so do `vs` and `, not`. Two more open rules were
-built and rejected because each adds false reds the declared
-class does not: "a single character that is not a digit" reads a yes/no support column, a
-placeholder letter and the dash of an empty table cell as marks, and "not alphanumeric or a current
-mark" still reads that dash. The forbidden green repair is named here because it is the cheapest
-one: putting the membership test back is exactly the blindness above. Only a property pin on
-constructed input sees that revert; the floor holding every printed mark against the class stays
-vacuously green under it, because the class still covers every current mark. A floor over the FORM
-of a rule cannot see the rule being reverted.
+declared class reported every one. What it costs is one shape of false red that the value-keyed rule
+already produced, a status name written TIGHTLY against a mark it is being contrasted with rather
+than paired to: the name, a slash, and the mark, with nothing else between them. Only that tight
+spelling, and that was measured rather than assumed. The sentence this entry used to cite, the one
+about an "ok versus question-mark distinction", reads as nothing at all, its gap being eight
+characters against a limit of three, and the same holds for the "vs" and comma spellings. Two more
+open rules were built and rejected because each adds false reds the declared class does not: "a
+single character that is not a digit" reads a yes/no support column, a placeholder letter and the
+dash of an empty table cell as marks, and "not alphanumeric or a current mark" still reads that
+dash.
+
+Naming the forbidden repair protects the spelling that was named, and there were two. Putting the
+membership test back into the scan is caught by a property pin. Writing the CLASS as a view of the
+mapping buys the identical blindness, was green in every guard here, and no runtime check can see
+it: a derived constant is built at import time from a mapping that still holds every current mark,
+so the two are equal until a mark is retired, which is the one moment nobody is looking. That one is
+therefore held on the SOURCE, by an assertion that the assigned expression reads no name at all. A
+floor over the FORM of the rule sees neither: it stays vacuously green under both, because the class
+still covers every current mark.
 
 **The per-surface floor detects an EMPTY read, not an almost-empty one, and it covers three of the
 eight surfaces read.** A file that stops documenting all but one of its pairings passes. On the
@@ -420,50 +434,83 @@ the floor, which is green and retires it. The other tracked `docs/` pages are re
 deliberately: most of them document no status at all, so requiring one of each would be red on the
 day it was written. A global extraction break is therefore caught, a page-specific one is not.
 
-**What the status paragraph's reverse direction does not see.** Every backticked lower-case token
-in that paragraph has to be a plane status, which is what makes the marker printed above it true:
-before that, a status removed from `PlaneStatus` and from its bucket while the sentence naming it
-stayed in the guide was green in all four guards, and the tiling guard FORCES that bucket removal
-in the same edit. It does not see a status name outside both marked regions, one written without
-backticks, or one written with a capital. The allowlist for tokens in that paragraph that are not
-statuses is EMPTY today, and that emptiness is the promise; a legitimate new non-status word there
-reddens and has to be DECLARED, which the failure message says in as many words.
+⚠️ The tuple naming those three surfaces is read TWICE, as a floor on the input and as a floor on
+each page's output, so removing a name from it is never the small edit it looks like. When a page
+legitimately stops documenting statuses its output floor reddens, and deleting its name is the
+repair that message invites; measured, that also retires the input floor, so a later rename of the
+same page drops it out of the scan silently. The entry for the guide itself can only ever satisfy
+the input floor, never fail it, the guide being put into the population unconditionally.
 
-**A line carrying an odd number of backticks is skipped by the code-span pass.** Markdown pairing
-cannot be read from it, and these documents carry code spans that run across a line break.
-Measured, twenty such lines across the surfaces read, none of them carrying a pairing, so the
-filter changes no result today; it is there to make the assumption loud rather than lucky.
+**A page is covered the day it is TRACKED, not the day it is written.** The population comes from
+`git ls-files`, which reads the index, so a documentation page sitting unstaged in the working tree
+is not read at all and a wrong glyph in it passes the local run until the `git add`. Measured both
+ways in a throwaway repository. CI runs on the committed tree, so what this costs is the run before
+staging. A page tracked but absent from the working tree, or one that is not decodable as UTF-8,
+fails loudly with the interpreter's own error rather than with this guard's message.
 
-**Inside the legend markers, every non-blank line after the separator is treated as a table row.**
-The region is read positionally, which is what lets a legal edit through (a row without its leading
-pipe, alignment colons, a renamed header column) while a row that lost its backticks still fails
-loudly. The cost is that a prose note written between the markers reddens the parse floor.
-Measured, the region carries exactly a header, a separator and its rows and nothing else. The
-repair is to put the note OUTSIDE the markers, which is green and loses nothing, so this is not the
-class of trap the entries above describe.
+**What the status paragraph's reverse direction does not see.** Every lower-case identifier written
+as a code span in that paragraph has to be a plane status, which is what makes the marker printed
+above it true: before that, a status removed from `PlaneStatus` and from its bucket while the
+sentence naming it stayed in the guide was green in all four guards, and the tiling guard FORCES
+that bucket removal in the same edit. It does not see a status name outside both marked regions, one
+written without backticks, or one written with a capital. The allowlist for tokens in that paragraph
+that are not statuses is EMPTY today, and that emptiness is the promise; a legitimate new non-status
+word there reddens and has to be DECLARED, which the failure message says in as many words. That
+instruction costs something only because every entry has to earn its place: an entry the paragraph
+does not write is reported, or declaring and deleting would be the same move at different prices.
 
-**The ORDER of the two operations in the code-span pass is not held by any test.** Every span of a
-line is matched first and the token filter applied afterwards; the shorter spelling, one regex
-requiring whitespace inside the span, skips a whitespace-free span and re-anchors on its closing
-backtick, so prose BETWEEN two spans is read as a span. Measured on a documentation page, that
-variant invents dozens of such fragments, several of them exactly two tokens long. It produces no
-false red today, and that was measured rather than assumed: both spellings yield an identical
-pairing list on this tree, and they still do when the mark test is widened. What keeps those
-fragments harmless is the two-token filter, not the mark class. So the order is defence in depth
-against a future document that puts a status name and a mark on either side of such a fragment, no
-test can go red on it, and it is written here for the reader who would simplify it away. The
-two-token filter is a conservative narrowing in the same sense: the separator forms that motivated
-it are false reds only under an open mark rule, and relaxing it changes no result on this tree.
+**Both readers of markdown agree on what a code span is, and that was not always so.** The pairing
+scan consumed whole spans while the reverse direction matched a pattern carrying its own backticks,
+and a pattern cannot tell an opening backtick from a closing one. Measured, it read the prose
+BETWEEN two adjacent spans as if it were one, and missed the real span behind it. Both faces are
+pinned now. Neither could fire on the tree: the guide's two marked regions carry no adjacent spans
+at all.
+
+**A line carrying an odd number of backticks is skipped.** Markdown pairing cannot be read from it,
+and these documents carry code spans that run across a line break. Measured, twenty such lines
+across the surfaces read, none of them carrying a pairing and none inside either marked region, so
+the filter changes no result today; it is there to make the assumption loud rather than lucky. Its
+reach is per line: a line of even parity that begins inside an unclosed run is read out of phase.
+
+**The legend is read positionally, and its delimiter row is held against the renderer's rule.**
+Inside the markers the first non-blank line is the header, the second the delimiter, and every line
+after that has to parse at the header's width. That is what lets a legal edit through (a row without
+its leading pipe, alignment colons, a renamed header column) while a row that lost its backticks
+still fails loudly. The delimiter is checked as GFM checks it, same cell count as the header and
+every cell dashes with optional colons, because a character class over the whole line accepts five
+spellings under which the shipped legend renders as NO TABLE AT ALL, a wall of literal pipes for a
+reader who has no repository around it, while the parser here went on reading every row and every
+guard stayed green. A blank line between two rows does the same and is rejected for the same reason.
+⚠️ This is not a markdown parser. It holds the delimiter rule, the blank-line rule and the row
+width, which is what the measured breakages violate; the rest of the GFM table grammar stays
+outside. A renderer was probed and rejected on two grounds: it would make a guard's verdict depend
+on a third-party version, and the only one in the tree today arrives transitively rather than
+declared. The cost of reading positionally is unchanged: a prose note written between the markers
+reddens the parse floor, and the repair is to put the note outside them.
+
+**The ORDER of the two operations in the code-span pass is now pinned, the two-token filter is
+not.** Every span is matched first and the token filter applied afterwards; the shorter spelling,
+one regex requiring whitespace inside the span, skips a whitespace-free span and re-anchors on its
+closing backtick, so prose between two spans is read as a span. Measured on a documentation page,
+that variant invents dozens of such fragments, several of them exactly two tokens long. It produces
+no false red today, and that was measured rather than assumed: both spellings yield an identical
+pairing list on this tree. What keeps those fragments harmless is the two-token filter, not the mark
+class, and THAT is the part no test can redden: it is a conservative narrowing whose motivating
+separator forms are false reds only under an open mark rule, and relaxing it changes no result here.
+It is written down for the reader who would simplify it away.
 
 **This page is itself a scanned surface.** Since the scan reads every tracked `docs/` page, an
-illustration here must not put a single-character code span within three non-word characters of a
-backticked status name, and must not put a status name and a single-character token inside one code
-span. For a value borrowed from another namespace, prefer prose to code formatting.
+illustration here must not put a single-character code span within three characters of a backticked
+status name, counting a whole run of whitespace as one and remembering that only a blank line ends
+the block, and must not put a status name and a single-character token inside one code span. For a
+value borrowed from another namespace, prefer prose to code formatting. This is not theoretical: the
+first draft of the rewrite above put a contrasted pair into a live code span and the scan went red
+on it, one paragraph below this one.
 
 **The gap those buckets record, written out here because a backlog is not a home for it.**
 `disabled`, `info` and `disconnected` are never named by their status name anywhere in the shipped
-guide, and two of the marks, the middle dot and the letter i, have no legend in it at all. That is
-a measurement and not a decision: the legend deliberately carries the identity-near statuses, but
+guide, and two of the marks, the middle dot and the letter i, have no legend in it at all. That is a
+measurement and not a decision: the legend deliberately carries the identity-near statuses, but
 nobody decided that these three should be invisible to a reader who has only the shipped document.
 Re-derive it by searching the guide for each `PlaneStatus` value as a backticked token. The
 declaration in the test file states today's answer, and it goes red the moment one of them is
