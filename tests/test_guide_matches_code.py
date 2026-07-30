@@ -35,7 +35,7 @@ import ast
 import re
 import subprocess
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from itertools import pairwise
 from pathlib import Path
 from typing import get_args
@@ -374,6 +374,30 @@ def _prose_token_findings(
     return dead, sorted(named - allowlist - statuses)
 
 
+def _tiling_findings(
+    buckets: Sequence[frozenset[str]], statuses: set[str]
+) -> tuple[list[str], list[str], int]:
+    """``(only_in_buckets, only_in_statuses, double_listed)`` for the guide-location partition.
+
+    The set differences and the double-listing count, together and taking their world as
+    arguments, so the property below can be pinned on constructed input. Three equal cardinalities
+    are blind to a RENAME, which is cardinality-neutral, and set equality alone is blind to a
+    DOUBLE listing, so both halves have to be returned and both have to be asserted.
+    """
+    union = set().union(*buckets)
+    return sorted(union - statuses), sorted(statuses - union), sum(map(len, buckets)) - len(union)
+
+
+def _repeated_statuses(rows: Sequence[tuple[str, str]]) -> list[str]:
+    """Statuses a legend lists more than once, before the rows are reduced to a set.
+
+    Reducing to a set is what the caller does and what an exact duplicate row survives: two equal
+    rows collapse to one member and agree with the CLI individually. Counting first is the only
+    place that sees it.
+    """
+    return sorted(status for status, seen in Counter(s for _, s in rows).items() if seen > 1)
+
+
 def _row_cells(line: str) -> list[str]:
     """The cells of one GFM table row: the pipe-separated parts, outer pipes dropped.
 
@@ -578,14 +602,11 @@ def test_the_guide_status_buckets_tile_plane_status() -> None:
     buckets = (_IN_THE_GLYPH_TABLE, _IN_THE_STATUS_PROSE, _NOT_NAMED_IN_THE_GUIDE)
     statuses = set(get_args(PlaneStatus))
     assert statuses, "PlaneStatus yielded no values, the Literal anchor broke"
-    declared = sum(len(bucket) for bucket in buckets)
-    union: set[PlaneStatus] = set().union(*buckets)
-    assert union == statuses and declared == len(union), (
-        f"the guide-location buckets no longer tile PlaneStatus: declared={declared} "
-        f"distinct={len(union)} statuses={len(statuses)}; "
-        f"only-in-buckets={sorted(union - statuses)} "
-        f"only-in-PlaneStatus={sorted(statuses - union)} "
-        "(a declared count above the distinct one means a status is listed in two buckets)"
+    only_in_buckets, only_in_plane_status, double_listed = _tiling_findings(buckets, statuses)
+    assert not (only_in_buckets or only_in_plane_status or double_listed), (
+        f"the guide-location buckets no longer tile PlaneStatus: "
+        f"only-in-buckets={only_in_buckets} only-in-PlaneStatus={only_in_plane_status} "
+        f"listed-in-two-buckets={double_listed}"
     )
 
 
@@ -612,7 +633,7 @@ def test_the_shipped_glyph_legend_carries_the_marks_the_cli_prints() -> None:
 
     """
     rows = _glyph_rows()
-    repeated = sorted(status for status, seen in Counter(s for _, s in rows).items() if seen > 1)
+    repeated = _repeated_statuses(rows)
     assert not repeated, (
         f"the shipped glyph legend carries more than one row for {repeated}. A reader sees two "
         "rows that can disagree, and reducing the rows to a set below would hide it."
@@ -822,6 +843,112 @@ def test_a_blank_line_inside_the_legend_is_rejected() -> None:
         "blank lines around the table were rejected; they are the marker padding every marked "
         "region carries and have to stay legal."
     )
+
+
+def test_a_renamed_status_is_reported_though_the_three_counts_still_agree() -> None:
+    """The property QA-50's first step bought: the buckets are compared as SETS.
+
+    A rename is cardinality-neutral, so three equal sizes cannot see it. Measured on the tree,
+    renaming any of the twelve statuses while leaving the buckets alone was green under the old
+    count-only assertion, all twelve times, and for the three named in neither region it was green
+    in every other guard in this file too.
+
+    The second assertion is the control that turns the first into a finding rather than a
+    demonstration: on the SAME input the retired three-count form is satisfied. Without it, "the
+    set comparison reddens" would only say the set comparison works.
+
+    Red-proof: compare ``declared == len(union) == len(statuses)`` again.
+    """
+    buckets = (frozenset({"ok"}), frozenset({"ca_error"}), frozenset({"info"}))
+    only_in_buckets, only_in_statuses, double_listed = _tiling_findings(
+        buckets, {"ok", "ca_error", "info_renamed"}
+    )
+    assert (only_in_buckets, only_in_statuses, double_listed) == (["info"], ["info_renamed"], 0), (
+        f"a renamed status was not reported: only-in-buckets={only_in_buckets} "
+        f"only-in-statuses={only_in_statuses} double-listed={double_listed}"
+    )
+    assert sum(map(len, buckets)) == len(set().union(*buckets)) == 3, (
+        "control: the retired three-count form is satisfied by this input, which is what made a "
+        "rename invisible and what the set comparison exists to repair"
+    )
+    _, _, doubled = _tiling_findings((frozenset({"ok"}), frozenset({"ok"})), {"ok"})
+    assert doubled == 1, "a status listed in two buckets was not reported; set equality hides it"
+
+
+def test_a_legend_row_listed_twice_is_reported() -> None:
+    """The property QA-50's last step bought: the rows are counted before they are reduced.
+
+    Two identical rows collapse to one set member and agree with the CLI individually, so a legend
+    could list a status twice and stay green in both halves of its guard. The two assertions below
+    are the control: on the same rows the set comparison and the mark comparison, which are the
+    whole of that guard, are both satisfied.
+
+    Red-proof: compare ``{status for _, status in rows}`` without counting first.
+    """
+    rows = [("✓", "ok"), ("✓", "ok"), ("~", "no_ingest")]
+    assert _repeated_statuses(rows) == ["ok"], (
+        f"a status listed twice in the legend was not reported: {_repeated_statuses(rows)}"
+    )
+    marks = {"ok": "✓", "no_ingest": "~"}
+    assert {status for _, status in rows} == set(marks), (
+        "control: the set comparison is satisfied by the duplicate, which is why it hides it"
+    )
+    assert not [s for m, s in rows if m != marks[s]], (
+        "control: the mark comparison is satisfied as well, both rows being identical"
+    )
+
+
+def test_a_row_without_its_leading_pipe_is_read_not_dropped() -> None:
+    """The property QA-50's fifth step bought: a legal GFM row without its leading pipe is a row.
+
+    The old filter kept only lines beginning with a pipe, so such a row left the comparison in
+    silence and the caller then reported its status as undocumented: the documentation-gap message
+    the floor exists to prevent, on a table that was complete.
+
+    The second assertion is the control, and it is what makes this a defect rather than a
+    preference: the retired filter keeps ONE of the two rows on the same input, and says nothing.
+
+    Red-proof: require the leading pipe in ``_GLYPH_ROW_RE`` again.
+    """
+    region = _legend_fixture().replace("| `~` | `no_ingest`", "`~` | `no_ingest`")
+    rows = _table_rows(region, "fixture legend")
+    assert [status for _, status in rows] == ["ok", "no_ingest"], (
+        f"a row without its leading pipe was not read: {rows}. GFM does not require the outer "
+        "pipes and such a row renders identically."
+    )
+    kept = [
+        line
+        for line in region.splitlines()
+        if line.startswith("|") and not line.startswith(("| Mark ", "|--"))
+    ]
+    assert len(kept) == 1, (
+        f"control: the retired prefix filter was expected to keep exactly one of the two rows, "
+        f"kept {len(kept)}. That silent drop is what this pin records."
+    )
+
+
+def test_a_prose_token_that_is_not_a_status_is_reported() -> None:
+    """The property QA-50's seventh step bought: the status paragraph's reverse direction exists.
+
+    Before it, a status removed from ``PlaneStatus``, from ``_STATUS_MARK`` and from its bucket,
+    while the sentence naming it stayed in the guide, was GREEN in all four guards, and the tiling
+    guard FORCES that bucket removal in the same edit, so the path is the likely one rather than an
+    exotic one. Measured on the tree afterwards, the direction catches three of the six statuses
+    named outside the legend; the other three are named in neither region and are still held by the
+    set comparison alone.
+
+    The second assertion is the control: a token that IS a status must pass, or the direction would
+    just be a ban on writing anything.
+
+    Red-proof: return an empty ``unknown`` from ``_prose_token_findings``.
+    """
+    _, unknown = _prose_token_findings({"ok", "detail"}, {"ok"}, frozenset())
+    assert unknown == ["detail"], (
+        f"a lower-case token the paragraph names as if the CLI printed it was not reported: "
+        f"{unknown}. That is the promise the shipped marker above the paragraph makes."
+    )
+    _, unknown = _prose_token_findings({"ok", "ca_error"}, {"ok", "ca_error"}, frozenset())
+    assert not unknown, f"control: real statuses were reported as unknown: {unknown}"
 
 
 def test_a_retired_mark_is_still_read_as_a_pairing() -> None:
