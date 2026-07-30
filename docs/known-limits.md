@@ -335,27 +335,47 @@ which is the trade this page's first entry already describes. The check is the r
 
 ## 14 · The shipped status legend is guarded by name, glyph and set, not by what it says
 
-Measured 2026-07-30. Written after a QA of this guard found six places where it checked less than it
-promised, and rewritten the same day after a QA of THAT repair found four more.
+Measured 2026-07-31. This entry has now been rewritten three times, once per QA round: the first
+round found six places where the guard checked less than it promised, the second found four more,
+and the third found that three of the second round's own pins held a helper rather than the guard
+that calls it, plus two behaviours in the guard itself. Each rewrite is dated against the state that
+followed it, because a guard's honest limits are the one thing that cannot be written in advance.
 `tests/test_guide_matches_code.py` holds the operator guide's status legend against `PlaneStatus`
 and `cli_doctor._STATUS_MARK`. Every status is sorted into one of three declared buckets (named in
 the legend, named in the prose paragraph above it, named in neither), and the buckets are compared
 with `PlaneStatus` as SETS, with a double-listing count beside the comparison because set equality
 alone cannot see a repeated member. The legend's Status and Mark cells are held against the code in
-both directions, its rows are counted before they are reduced, and its delimiter row is held against
-the rule a renderer applies rather than against a character class. Every glyph and status pairing on
+both directions, its rows are counted before they are reduced, and its delimiter row, its
+indentation and its row widths are held against the rules a renderer applies rather than against a
+character class. Every glyph and status pairing on
 the guide and on every tracked `docs/` page has to agree with the mark the CLI prints. Every
 lower-case identifier written as a code span in the guide's status paragraph has to be a plane
 status. The buckets are typed `frozenset[PlaneStatus]`, so a name that no longer exists is a
 `mypy --strict` error naming the offending literal as well as a red test. Every pairing on the tree
 today agrees, and the guard re-checks that on every run.
 
-Each behaviour the two rounds bought carries a pin on constructed input, so a later revert goes red
-instead of going quietly green: measured, before those pins, reverting the set comparison, the
-optional leading pipe, the reverse direction or the duplicate count left every guard in the file
-green. One exception, named rather than implied: the page population is derived from `git ls-files`
-and is exercised on the tree, not pinned. What follows is what the guard does NOT do, and one thing
-it records.
+What holds a behaviour here, and where that stops. A pin on constructed input holds a FUNCTION; it
+does not hold that a guard still calls it, and the difference was measured rather than reasoned.
+The second round pinned the set comparison, the reverse direction and the duplicate count by
+pinning the helper each had been extracted into. Reverting any of the three AT THE GUARD, with the
+helper and its pin untouched, then left all 1702 tests green: the helper went on being correct and
+nobody asked it anything. Only the optional leading pipe reddened, because that behaviour lives
+inside the reader the guard itself calls. Each of the three therefore has a second pin that runs
+the GUARD on a world doctored for one line, and with those in place each revert reddens exactly one
+pin.
+
+What is held on constructed input today: the declared mark class, the whitespace-run folding, the
+code-span pass, the consuming span reader, the allowlist floor, the delimiter rule, the blank-line
+rule, the indentation limit, the row width, the odd-backtick filter, the order of the two
+operations in the span pass, and the three guard wirings above.
+
+Three things are NOT held, named rather than implied. The page population is derived from
+`git ls-files` and is exercised on the tree only. The two-token filter in the span pass cannot be
+reddened by any input, and the paragraph on it below says why. And no gate in this repository sees
+a pin being DELETED: pytest reports an emptied test body as passed and the lint rules here carry no
+flake8-pytest checks, so every pin above protects a revert of the code and none protects itself.
+
+What follows is what the guard does NOT do, and one thing it records.
 
 **The Meaning column is not read.** A row may describe its own status wrongly and stay green,
 measured by giving one row another row's meaning and by replacing a meaning with nonsense: all four
@@ -453,11 +473,23 @@ as a code span in that paragraph has to be a plane status, which is what makes t
 above it true: before that, a status removed from `PlaneStatus` and from its bucket while the
 sentence naming it stayed in the guide was green in all four guards, and the tiling guard FORCES
 that bucket removal in the same edit. It does not see a status name outside both marked regions, one
-written without backticks, or one written with a capital. The allowlist for tokens in that paragraph
+written without backticks, one written with a capital, or one written as a code span that runs
+across a LINE BREAK, which the odd-backtick filter below drops before this direction ever sees it.
+The allowlist for tokens in that paragraph
 that are not statuses is EMPTY today, and that emptiness is the promise; a legitimate new non-status
 word there reddens and has to be DECLARED, which the failure message says in as many words. That
 instruction costs something only because every entry has to earn its place: an entry the paragraph
 does not write is reported, or declaring and deleting would be the same move at different prices.
+
+⚠️ PADDING inside a code span used to be a fourth blind spot and is not one any more, which is
+worth recording because the repair is easy to mistake for tidiness. This direction compares against
+what a READER sees, and CommonMark removes one leading and one trailing space from a span when both
+are present, so a padded span and its unpadded twin render as the same word. Measured before the
+repair, against the real prose region: the unpadded spelling was reported and all four padded ones
+were green, which made two typed spaces a cheaper way out of this check than the allowlist entry
+its own failure message asks for. The span is stripped at the comparison point now. It is NOT
+normalised in the shared span reader, deliberately: the pairing pass splits its tokens anyway and
+never had the defect, so the reader goes on saying what the markdown literally holds.
 
 **Both readers of markdown agree on what a code span is, and that was not always so.** The pairing
 scan consumed whole spans while the reverse direction matched a pattern carrying its own backticks,
@@ -466,11 +498,17 @@ BETWEEN two adjacent spans as if it were one, and missed the real span behind it
 pinned now. Neither could fire on the tree: the guide's two marked regions carry no adjacent spans
 at all.
 
-**A line carrying an odd number of backticks is skipped.** Markdown pairing cannot be read from it,
-and these documents carry code spans that run across a line break. Measured, twenty such lines
-across the surfaces read, none of them carrying a pairing and none inside either marked region, so
-the filter changes no result today; it is there to make the assumption loud rather than lucky. Its
-reach is per line: a line of even parity that begins inside an unclosed run is read out of phase.
+**A line carrying an odd number of backticks is skipped BY THE SPAN READER.** Markdown pairing
+cannot be read from it, and these documents carry code spans that run across a line break. The
+qualifier is load-bearing and was lost from this entry for one round: the filter lives in the shared
+span reader, so it covers the code-span pass and the reverse direction, and NOT the neighbour pass,
+which folds whole blocks and has no notion of a line. Measured, an odd-parity line carrying two
+backticked tokens three characters apart is read as a pairing by that pass today. Measured too,
+twenty such lines across the surfaces read, none of them carrying a pairing and none inside either
+marked region, so the filter changes no result on this tree: 22 pairings with it and 22 without,
+which is why it is held on constructed input instead. Its reach is per line: a line of even parity
+that begins inside an unclosed run is read out of phase, and can be read as a pairing that a reader
+sees only as literal backticks inside a longer span.
 
 **The legend is read positionally, and its delimiter row is held against the renderer's rule.**
 Inside the markers the first non-blank line is the header, the second the delimiter, and every line
@@ -481,23 +519,49 @@ every cell dashes with optional colons, because a character class over the whole
 spellings under which the shipped legend renders as NO TABLE AT ALL, a wall of literal pipes for a
 reader who has no repository around it, while the parser here went on reading every row and every
 guard stayed green. A blank line between two rows does the same and is rejected for the same reason.
-⚠️ This is not a markdown parser. It holds the delimiter rule, the blank-line rule and the row
-width, which is what the measured breakages violate; the rest of the GFM table grammar stays
-outside. A renderer was probed and rejected on two grounds: it would make a guard's verdict depend
-on a third-party version, and the only one in the tree today arrives transitively rather than
-declared. The cost of reading positionally is unchanged: a prose note written between the markers
-reddens the parse floor, and the repair is to put the note outside them.
 
-**The ORDER of the two operations in the code-span pass is now pinned, the two-token filter is
-not.** Every span is matched first and the token filter applied afterwards; the shorter spelling,
-one regex requiring whitespace inside the span, skips a whitespace-free span and re-anchors on its
-closing backtick, so prose between two spans is read as a span. Measured on a documentation page,
-that variant invents dozens of such fragments, several of them exactly two tokens long. It produces
-no false red today, and that was measured rather than assumed: both spellings yield an identical
-pairing list on this tree. What keeps those fragments harmless is the two-token filter, not the mark
-class, and THAT is the part no test can redden: it is a conservative narrowing whose motivating
-separator forms are false reds only under an open mark rule, and relaxing it changes no result here.
-It is written down for the reader who would simplify it away.
+⚠️ INDENTATION was a sixth such spelling and the entry above missed it for a round, while claiming
+to hold the rule a renderer applies. Four spaces or a tab make GFM read a line as an indented code
+block, so the table ends there or never starts. Measured with a renderer on the shipped shape:
+indenting the HEADER by four spaces gives a reader zero table rows, and so does indenting the
+DELIMITER, or using a tab for either, while this parser read every row and every guard stayed
+green. Four false greens, and the mirror case was a false RED: a table indented by one to three
+spaces renders perfectly and was rejected, and only in the spelling that kept its leading pipe.
+Both directions are held now, by a line check over every line of the block, header and delimiter
+included, because those two never reach the row pattern and because a pattern whose optional pipe
+is followed by a whitespace class cannot reject indentation in the pipe-less spelling at all.
+Cross-checked against a renderer over 56 cases, two spellings by four placements by seven
+indentations: no divergence. Named and rejected, because it is the cheapest repair and turns the
+guard around: DEDENTING the region before parsing would make a legend that renders as no table
+read happily, turning a correct red into a false green.
+
+⚠️ This is not a markdown parser. It holds the delimiter rule, the blank-line rule, the indentation
+limit and the row width, which is what the measured breakages violate; the rest of the GFM table
+grammar stays outside. A renderer was probed and rejected on two grounds: it would make a guard's
+verdict depend on a third-party version, and the only one in the tree today arrives transitively
+rather than declared. The cost of reading positionally is unchanged: a prose note written between
+the markers reddens the parse floor, and the repair is to put the note outside them.
+
+**The ORDER of the two operations in the code-span pass is pinned, the two-token filter is not.**
+Every span is matched first and the token filter applied afterwards; the shorter spelling, one regex
+requiring whitespace inside the span, skips a whitespace-free span and re-anchors on its closing
+backtick, so prose between two spans is read as a span. Measured on a documentation page, that
+variant invents dozens of such fragments, several of them exactly two tokens long. It produces no
+false red today, and that was measured rather than assumed: both spellings yield an identical
+pairing list on this tree.
+
+⚠️ This entry got its own subject wrong twice in three rounds, which is why it now names the pin.
+It first said the order was held by no test, which was true. It then said the order was pinned,
+because both markdown readers had been put on one span extractor and THAT extractor was pinned; but
+the shorter spelling simply stops calling the extractor, so the pin could not see it, and the
+revert left all 1702 tests green. The order is held now by a pin on an input where the two spellings
+DISAGREE, with the reverted spelling asserted first so the emptiness is a statement about the rule
+rather than about an extractor that has stopped reading.
+
+What keeps those invented fragments harmless is the two-token filter, not the mark class, and THAT
+is the part no test can redden: it is a conservative narrowing whose motivating separator forms are
+false reds only under an open mark rule, and relaxing it changes no result here. It is written down
+for the reader who would simplify it away.
 
 **This page is itself a scanned surface.** Since the scan reads every tracked `docs/` page, an
 illustration here must not put a single-character code span within three characters of a backticked

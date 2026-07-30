@@ -590,8 +590,11 @@ def _glyph_status_pairings(text: str, marks: Mapping[str, str]) -> list[tuple[st
     today. What actually keeps those fragments harmless is the two-token filter below, NOT the
     declared mark class. The order earns its place as defence in depth: a future document that puts
     a status name and a declared mark on either side of such a fragment WOULD be read as a pairing
-    that nobody wrote. Because the two spellings agree today, no test can go red on this, which is
-    why it is written here and recorded in ``docs/known-limits.md`` section 14 rather than pinned.
+    that nobody wrote. Because the two spellings agree on this TREE, no tree-driven guard can go
+    red on it, which is why the property is held on CONSTRUCTED input instead, by
+    ``test_the_span_pass_matches_every_span_before_it_filters_on_tokens``. That pin was written
+    after the sentence here claimed for one round that section 14 recorded the order rather than
+    holding it; the recording alone had left the shorter spelling green in all 1702 tests.
 
     Exactly two tokens, so the pass reads only spans that are NOTHING BUT a status and a mark. A
     longer span is prose in code formatting, and its first two words are not thereby written as a
@@ -1203,9 +1206,13 @@ def test_a_pairing_inside_one_code_span_is_read() -> None:
     a span.
 
     Red-proof: delete the code-span pass. Narrowing its regex to the whitespace-inside spelling is
-    NOT a red-proof for this pin and was measured rather than assumed: that variant still matches
+    NOT a red-proof for THIS pin and was measured rather than assumed: that variant still matches
     this input, and on the whole tree it yields a byte-identical pairing list. The order of
-    operations it breaks is therefore recorded in ``docs/known-limits.md`` section 14, not pinned.
+    operations it breaks has its own pin,
+    ``test_the_span_pass_matches_every_span_before_it_filters_on_tokens``, on an input where the
+    two spellings disagree. Until that one existed the order was recorded in
+    ``docs/known-limits.md`` section 14 and held by nothing, and the entry there said so for one
+    round and then said the opposite for one round; both are now the same statement.
     """
     found = _glyph_status_pairings("reported `✓ ok` for a dead container", cli_doctor._STATUS_MARK)
     assert ("ok", "✓") in found, (
