@@ -208,7 +208,14 @@ _STATUS_PROSE_RE = re.compile(
 # (``docs/known-limits.md`` section 13 rejects exactly that for the sibling remedy guard).
 #: The leading pipe is OPTIONAL, because GFM does not require it and a row without one renders
 #: identically. Reading it as mandatory dropped such a row in silence, see ``_glyph_rows``.
-_GLYPH_ROW_RE = re.compile(r"^\|?\s*`([^`]+)`\s*\|\s*`([a-z_]+)`\s*\|")
+#:
+#: The ``{0,3}`` only ACCEPTS the indentation GFM allows; it does not reject the indentation GFM
+#: forbids, and saying otherwise would be a claim this pattern cannot keep. Without a leading pipe
+#: the ``\s*`` behind the optional bar swallows any amount of indentation, measured on four and
+#: eight spaces and on a tab, and the pipe-less spelling is the one QA-50 deliberately legalised.
+#: The rejecting half is therefore a line check inside ``_table_rows``, where it also covers the
+#: header and the delimiter, which never reach this pattern at all.
+_GLYPH_ROW_RE = re.compile(r"^ {0,3}\|?\s*`([^`]+)`\s*\|\s*`([a-z_]+)`\s*\|")
 #: One cell of a GFM delimiter row: dashes, with optional alignment colons. Applied per cell and
 #: alongside a width comparison against the header, because that pair IS the rule a renderer
 #: applies. A character class over the whole line looks like the same test and is not: it accepts
@@ -463,21 +470,32 @@ def _table_rows(region: str, where: str) -> list[tuple[str, str]]:
     Since the guide is package data served to a reader who has no repository around it, a legend
     that stopped being a legend is the failure this whole file exists to prevent.
 
-    What that check is NOT: a markdown parser. It holds the delimiter rule and the blank-line rule,
-    which are what the measured breakages violate, and no more. The rest of the GFM table grammar
-    stays outside, dated in ``docs/known-limits.md`` section 14. A renderer was probed and rejected
-    for two reasons: it would make a guard's verdict depend on a third-party version, and the only
-    one already in the tree arrives transitively rather than declared.
+    ⚠️ INDENTATION is a fifth way to break the render, and it was the one this check missed while
+    claiming to hold the renderer's rule. Four spaces or a tab make GFM read a line as an indented
+    code block, so the table ends there or never starts. Measured with a renderer on the shipped
+    shape: indenting the HEADER by four spaces, or the DELIMITER, gives zero table rows for a
+    reader, and the parser here read every row and stayed green, because both ``body`` and
+    ``_row_cells`` strip. The mirror case was a false RED: a table indented by one to three spaces
+    renders perfectly and was rejected, and only in the spelling that KEPT its leading pipe, since
+    the pattern anchored that pipe at column zero. Both directions are held now, and the rejecting
+    half is a line check here rather than a prefix in ``_GLYPH_ROW_RE``, because a pattern whose
+    optional bar is followed by ``\\s*`` cannot reject indentation in the pipe-less spelling at all.
+
+    What that check is NOT: a markdown parser. It holds the delimiter rule, the blank-line rule and
+    the indentation limit, which are what the measured breakages violate, and no more. The rest of
+    the GFM table grammar stays outside, dated in ``docs/known-limits.md`` section 14. A renderer
+    was probed and rejected for two reasons: it would make a guard's verdict depend on a third-party
+    version, and the only one already in the tree arrives transitively rather than declared.
 
     Floors, all BEFORE any caller compares sets, the ordering
     ``test_guide_tool_inventory_matches_registrations`` already uses. A floor placed after a
     comparison is dead code: the comparison fails first and reports a documentation gap where in
     truth the anchor broke. They are: the markers were found (in ``_guide_region``), the region
-    carries a header AND a delimiter AND at least one row, no blank line splits the table, the
-    delimiter is one GFM accepts for that header, and every remaining line parses at the declared
-    width. The size floor is a single assertion on purpose, because it already covers both the
-    emptied table and the table with no rows left; a separate ``assert rows`` after it would be
-    unreachable.
+    carries a header AND a delimiter AND at least one row, no blank line splits the table, no line
+    is indented past the margin GFM allows, the delimiter is one GFM accepts for that header, and
+    every remaining line parses at the declared width. The size floor is a single assertion on
+    purpose, because it already covers both the emptied table and the table with no rows left; a
+    separate ``assert rows`` after it would be unreachable.
     """
     lines = region.splitlines()
     body = [line for line in lines if line.strip()]
@@ -491,6 +509,19 @@ def _table_rows(region: str, where: str) -> list[tuple[str, str]]:
         f"a blank line stands inside the {where}, at offset {split[0] - filled[0] + 1} of the "
         "table. GFM ends a table there, so everything below it renders as literal pipes while "
         "this parser goes on reading rows. Remove the blank line or move it outside the markers."
+    )
+    # BEFORE _row_cells, which strips unconditionally and would erase the evidence. Every line of
+    # the block is checked, header and delimiter included: those two never reach _GLYPH_ROW_RE, and
+    # measured with a renderer, indenting EITHER of them by four spaces or a tab makes the legend
+    # render as no table at all while this parser went on reading every row and stayed green.
+    over_indented = [
+        line for line in body if line.startswith("\t") or len(line) - len(line.lstrip(" ")) >= 4
+    ]
+    assert not over_indented, (
+        f"a line of the {where} is indented by four spaces or a tab: {over_indented[0]!r}. GFM "
+        "reads that as an indented code block rather than as part of a table, so the whole legend "
+        "renders as literal text for a reader while this parser goes on reading rows. Up to three "
+        "spaces are legal and are read; move the line back inside that margin."
     )
     header, delimiter, *rest = body
     width = len(_row_cells(header))
@@ -877,6 +908,55 @@ def test_a_blank_line_inside_the_legend_is_rejected() -> None:
         "blank lines around the table were rejected; they are the marker padding every marked "
         "region carries and have to stay legal."
     )
+
+
+def _indented_legend(*, head: str = "", delim: str = "", body: str = "") -> str:
+    """A legend whose header, delimiter and rows can be indented independently."""
+    rows = ["| `✓` | `ok` | the service named itself |", "| `~` | `no_ingest` | not ingesting |"]
+    header = head + "| Mark | Status | Meaning |"
+    return "\n".join(["", header, delim + "|---|---|---|", *[body + row for row in rows], ""])
+
+
+def test_indentation_is_held_against_the_margin_gfm_allows() -> None:
+    """The property this step bought: the indentation limit is part of the renderer's rule, and it
+    is checked on EVERY line of the block rather than on the rows alone.
+
+    Both directions were measured with a real CommonMark renderer against the shipped shape, and
+    both were wrong before this step. Indenting the HEADER by four spaces, or the DELIMITER, makes
+    the renderer produce NO table at all, zero rows for somebody reading the shipped guide, while
+    this parser read every row and every guard stayed green: a false GREEN of exactly the class the
+    delimiter rule was written to close. Indenting the whole table by one to three spaces renders
+    perfectly and was REJECTED, and only in the spelling that kept its leading pipe: a false RED on
+    legal markdown, in the pipe-less spelling QA-50 went out of its way to legalise.
+
+    Why the check is here and not a prefix in ``_GLYPH_ROW_RE``, which would look like the same
+    test: the header and the delimiter never reach that pattern, and in the pipe-less spelling the
+    ``\\s*`` behind its optional bar swallows any indentation, measured on four and eight spaces
+    and on a tab. A prefix can widen what is ACCEPTED; only a line check can reject.
+
+    Rejected on the way, and named so nobody reaches for it: DEDENTING the region before parsing.
+    It is the cheapest repair and it turns this guard around. A legend indented by four spaces
+    throughout renders as no table, and a dedent would make this parser read it happily, so a
+    correct red becomes a false green.
+
+    Red-proof: delete the ``over_indented`` check, and the first ``pytest.raises`` below fails.
+    """
+    for pad in ("", " ", "  ", "   "):
+        rows = _table_rows(_indented_legend(head=pad, delim=pad, body=pad), "fixture legend")
+        assert [status for _, status in rows] == ["ok", "no_ingest"], (
+            f"an indentation of {len(pad)} space(s) was rejected or misread: {rows}. GFM allows up "
+            "to three and renders the table unchanged."
+        )
+    no_pipe = _indented_legend(head="  ", delim="  ", body="  ").replace("  | `", "  `")
+    read = [status for _, status in _table_rows(no_pipe, "fixture legend")]
+    assert read == ["ok", "no_ingest"], (
+        f"an indented row WITHOUT its leading pipe was rejected, read {read}. That spelling is "
+        "legal GFM and was deliberately legalised here; the limit must not take it back."
+    )
+    for kind in ("head", "delim", "body"):
+        for pad in ("    ", "        ", "\t"):
+            with pytest.raises(AssertionError, match="indented by four spaces or a tab"):
+                _table_rows(_indented_legend(**{kind: pad}), "fixture legend")
 
 
 def test_a_renamed_status_is_reported_though_the_three_counts_still_agree() -> None:
