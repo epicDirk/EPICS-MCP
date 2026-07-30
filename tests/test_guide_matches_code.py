@@ -274,8 +274,12 @@ _CODE_SPAN_RE = re.compile(r"`([^`]*)`")
 #: * "not alphanumeric OR a current mark" still reads that ``-``.
 #:
 #: What the declared class does NOT repair, because the current rule misreads it too: a status name
-#: written next to a mark that is CONTRASTED with it rather than paired to it, as in "the ``ok``
-#: versus ``?`` distinction". That form is recorded in ``docs/known-limits.md`` section 14.
+#: written TIGHTLY against a mark it is CONTRASTED with rather than paired to, as in ```ok`/`?```,
+#: which reads as the pairing nobody wrote. The example this comment used to give, "the ``ok``
+#: versus ``?`` distinction", does NOT exhibit it and was measured rather than assumed: the gap
+#: there is eight characters, well past the limit of three, so that sentence and its siblings
+#: (``vs``, ``, not``) read as nothing at all. The form is recorded in ``docs/known-limits.md``
+#: section 14.
 _GLYPH_CHARACTERS = frozenset("✓✗?!~·i")
 # The surfaces a pairing is EXPECTED on, and therefore the only ones carrying a per-surface floor.
 # Every other tracked docs page is READ, but not required to contain anything: measured, the other
@@ -680,10 +684,13 @@ def test_every_glyph_status_pairing_in_the_docs_agrees_with_the_render_marks() -
 
     Derived rather than declared on BOTH axes, deliberately: there is no list of pairings to keep
     in step, and there is no list of pages either. The population is every tracked ``docs/*.md``
-    page plus the shipped guide, so a new documentation page is covered the day it is added rather
-    than the day somebody remembers to register it. It used to be a hard-wired pair, which left
-    five of the seven tracked pages unguarded and made ``CLAUDE.md``'s "in the guide or in docs/"
-    an overstatement.
+    page plus the shipped guide, so a new documentation page is covered the day it is TRACKED
+    rather than the day somebody remembers to register it. Tracked, not written: ``git ls-files``
+    reads the index, so a page sitting in the working tree with a wrong glyph in it passes, and
+    reddens on the ``git add``. Measured in a throwaway repository, both halves. CI runs on the
+    committed tree, so what that costs is the local run before staging. It used to be a hard-wired
+    pair, which left five of the seven tracked pages unguarded and made ``CLAUDE.md``'s "in the
+    guide or in docs/" an overstatement.
 
     The floor is per surface rather than a total, because a file the scan reads as empty is a
     different failure from a file that has drifted, and a total hides the first inside the second.
@@ -1099,13 +1106,17 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
     NOWHERE must not turn up in either region.
 
     The negative half is why the guide carries two marked regions instead of one. Searching the
-    WHOLE guide was probed and rejected: measured, ``disabled``, ``info`` and ``disconnected`` are
-    ordinary words there in three foreign senses (an Olog level, an alarm config value, and
-    ``diagnose_connection``'s own ``State``, which the guide already code-formats a sibling of), so
-    a whole-file search reddens on an edit that documented something else entirely, and the obvious
-    repair for that red is fully GREEN while quietly retiring the gap this bucket exists to record.
-    Confining both halves to the marked regions costs a false negative (a status documented in a
-    third place goes unnoticed) and buys the absence of a false positive with a green wrong repair.
+    WHOLE guide was probed and rejected, and the argument rests on TWO of the three declared-absent
+    names rather than three, which was re-measured rather than repeated: ``Disabled`` at guide line
+    647 is an alarm ``command`` value and ``Info`` at line 153 is an Olog level, both capitalised,
+    so only a case-INSENSITIVE whole-file search reddens on them. ``disconnected`` carries none of
+    that weight: it appears in the guide as plain prose about PV connections, never as a code span,
+    so a whole-file search over spans never sees it in either case mode. Two names are enough,
+    because a whole-file search reddens on an edit that documented something else entirely, and the
+    obvious repair for that red is fully GREEN while quietly retiring the gap this bucket exists to
+    record. Confining both halves to the marked regions costs a false negative (a status documented
+    in a third place goes unnoticed) and buys the absence of a false positive with a green wrong
+    repair.
 
     All three halves compare against the TEXT of an extracted code span (``_code_spans``), never
     against the raw markdown. A substring test over the region reads a name that is not a span at

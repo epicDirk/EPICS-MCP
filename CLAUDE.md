@@ -62,8 +62,10 @@ adding a tool without documenting it is a red test, not a silent omission. The s
 shipped **status legend** against the code (QA-47): a new `PlaneStatus` is red until it is sorted into
 one of three declared guide-location buckets, and every glyph paired with a status name, in the guide
 or on any tracked `docs/*.md` page, must be the one `cli_doctor` renders. The page list is derived
-from `git ls-files` rather than declared, so a new documentation page is covered the day it is added.
-What that half deliberately does not check is dated in `docs/known-limits.md`.
+from `git ls-files` rather than declared, so a new documentation page is covered the day it is
+**tracked**: a page still unstaged in the working tree is not read at all, and a wrong glyph in it
+passes locally until the `git add`. What that half deliberately does not check is dated in
+`docs/known-limits.md`.
 
 ## Facility-agnostic guardrail (hard)
 

@@ -356,10 +356,14 @@ texts: a guard over the wording pins prose that has to stay free to improve. Wha
 pair of code tokens.
 
 **The location buckets are checked inside two marked regions, not across the file.** The whole-file
-search was written first and then rejected on measurement: `disabled`, `info` and `disconnected`
-are ordinary words in that document in three FOREIGN senses (an alarm configuration command value,
-an Olog level, and the `State` of `diagnose_connection`, whose siblings the guide already
-code-formats). A whole-file search reddens on an edit that documented something else, and the
+search was written first and then rejected on measurement, and the argument rests on TWO of the
+three declared-absent names rather than three. `Disabled` (guide line 647) is an alarm
+configuration command value and `Info` (line 153) is an Olog level, both capitalised, so a
+case-INSENSITIVE whole-file search reddens on them. `disconnected` carries none of that weight:
+it is the `State` of `diagnose_connection` in the code, but the guide writes it only as plain
+prose about PV connections and never as a code span, in either case, so no whole-file search over
+spans sees it. Two are enough: a whole-file search reddens on an edit that documented something
+else, and the
 obvious repair for that red, moving the status into a "named" bucket, is fully GREEN while retiring
 the gap the bucket exists to record. The price paid instead is a false negative: a status
 documented in some third place goes unnoticed. The match is case-sensitive so that the behaviour is
@@ -372,7 +376,8 @@ would have reddened the rejected whole-file search.
 appears only there.** The guide describes a disabled plane, an empty URL variable reported honestly
 and never a failure, without ever using the status name, so that status counts as unnamed here. And
 two statuses that have a legend row are named in the prose region as well, which no bucket denies
-and no guard reads.
+and nothing requires. They are READ, by the reverse direction below, which is why removing either
+from `PlaneStatus` reddens; what no guard states is that the prose region has to keep naming them.
 
 **A pairing needs both halves side by side.** A sentence naming glyphs alone, as the guide does
 where it tells a reader which lines to read, carries no status name and is outside the scan. Side
@@ -390,8 +395,12 @@ so a scan keyed on its values stops seeing the stale documentation copies at the
 become stale, which is the one drift direction this scan exists for. Measured by retiring one mark:
 the value-keyed rule read fewer pairings than exist and reported NONE of the stale ones, the
 declared class reported every one. What it costs is one shape of false red that the value-keyed
-rule already produced: a status name written next to a mark it is being CONTRASTED with rather than
-paired to. Two more open rules were built and rejected because each adds false reds the declared
+rule already produced: a status name written TIGHTLY against a mark it is being CONTRASTED with
+rather than paired to: a status name, a slash, and the mark, with nothing else between them.
+Only that tight spelling, though, and it was measured rather than assumed. The sentence this
+entry used to cite, "the `ok` versus `?` distinction", reads as nothing at all, its gap being
+eight characters against a limit of three, and so do `vs` and `, not`. Two more open rules were
+built and rejected because each adds false reds the declared
 class does not: "a single character that is not a digit" reads a yes/no support column, a
 placeholder letter and the dash of an empty table cell as marks, and "not alphanumeric or a current
 mark" still reads that dash. The forbidden green repair is named here because it is the cheapest
