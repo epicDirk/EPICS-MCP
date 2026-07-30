@@ -16,7 +16,7 @@ carry breaking changes).
   `identity_probe_failed` said nothing about what to do. The remedies now live in one table keyed by
   status, appended to the observation and never replacing it, so `--json` readers get them in the same
   `detail` field. An `unreachable` plane also names the variable it reads its URL from, which is the
-  one case where the reader cannot tell from the message which of the seven to look at. `unverified`
+  one case where the reader cannot tell from the message which variable to look at. `unverified`
   and `no_ingest` deliberately stay without one: the first already carries the specific clue it
   measured, and the second is a fault inside the appliance, not in this configuration.
 - **`--version` on all five console commands** (`epics-mcp` had it; `epics-doctor`,

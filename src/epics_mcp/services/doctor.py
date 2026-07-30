@@ -337,7 +337,7 @@ def _classify_failure(
     * anything else (a transport failure, no chained HTTP response) → ``unreachable``.
 
     *url_var* is the environment variable this plane reads its URL from, named in the observation so
-    the reader knows WHICH of the seven to edit. It is threaded from the caller rather than looked
+    the reader knows WHICH variable to edit. It is threaded from the caller rather than looked
     up here: each ``_check_*`` already holds that literal once (it passes the same one to
     :func:`_disabled`), and a second table keyed by plane would be a copy free to drift from it.
     ``ca_error`` leaves it out deliberately: its remedy is about the CA bundle, not about this
@@ -641,8 +641,9 @@ async def _run_probe(
 
 async def _check_channelfinder(cfg: EpicsConfig, timeout: float) -> PlaneCheck:
     # Bound once and used by BOTH exits (disabled here, named in the unreachable observation via
-    # _run_probe). Same shape in every _check_* below, so each variable name lives in exactly one
-    # place per plane and a rename cannot leave half of them behind.
+    # _run_probe), so a rename touches one line instead of two. Every other _check_* below shares
+    # this shape except _check_retrieval_plane, whose variable depends on which URL was probed and
+    # whose config_error message names both by hand.
     url_var = "EPICS_MCP_CHANNELFINDER_URL"
     if not cfg.channelfinder_url:
         return _disabled("channelfinder", url_var)
