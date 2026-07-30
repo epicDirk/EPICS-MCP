@@ -173,8 +173,8 @@ coverage map, and an absent map *together with* a pin mismatch. Both are accepte
 
 ⚠️ This entry named `classify` instead of `_compare` when it was written. `classify` has no such
 branch in any revision; the note this entry was transcribed from had it right, and the page
-mis-transcribed it on the way in. A page of limits that sends a reader to the wrong function costs exactly what the
-limit was meant to save.
+mis-transcribed it on the way in. A page of limits that sends a reader to the wrong function costs
+exactly what the limit was meant to save.
 
 ## 8 · The prose detector's reading behaviour is pinned on constructed input only
 
