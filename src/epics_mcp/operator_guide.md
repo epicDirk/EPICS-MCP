@@ -426,12 +426,17 @@ redaction is set to. A disabled plane (empty `*_URL`) is reported honestly, neve
 401/404, a transport error, or a refused redirect): not a hard failure, but not a silent all-clear
 either. Run it first in a new facility to confirm the environment the launcher handed this process
 (there is no `.env` file: configuration is read from `os.environ`); add `--probe-pv NAME` to also
-pass/fail the live PVA plane against a real PV. Full deployment/config guide: `docs/deployment.md`.
+pass/fail the live PVA plane against a real PV. Full deployment/config guide:
+[docs/deployment.md](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md).
 
 Every line that reports a PROBLEM also carries its remedy, appended to the observation and never
-replacing it, so a `--json` reader gets both from the same `detail` field. The honest-but-not-healthy
-states (`?` and `~`) deliberately carry none: there is nothing to set. What the guard behind this
-proves is that a remedy is PRESENT and imperative, not that it is right (`docs/known-limits.md`).
+replacing it, so a `--json` reader gets both from the same `detail` field. That includes
+`identity_probe_failed` (`!`), which is inconclusive rather than failing and carries one anyway.
+The honest-but-not-healthy states do not, because there is nothing here to act on: `unverified`
+(`?`) already reports the specific clue it measured, and `no_ingest` (`~`) is a fault inside the
+appliance, not in this configuration. What the guard behind this proves is that a remedy is PRESENT
+and imperative, not that it is right
+([docs/known-limits.md](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/known-limits.md)).
 
 **Reachable is not identified, and identified is not working: read the `?`, `!` and `~` lines.**
 The transport probe is a HEAD and

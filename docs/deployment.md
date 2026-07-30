@@ -40,8 +40,9 @@ setting those variables for *your* services, with no code change. This guide wal
 
    Each line that reports a problem carries its own remedy: what was observed, then what to change
    about it. So the common cases need no lookup here, and the sections below are for when you want
-   the reasoning behind one. The `?` and `~` lines are the exception, honest states with nothing to
-   set, and they say what they measured instead.
+   the reasoning behind one. `!` (`identity_probe_failed`) carries one too, being inconclusive
+   rather than healthy. The exceptions are `?` (`unverified`) and `~` (`no_ingest`), honest states
+   with nothing to set, and they say what they measured instead.
 
    ⚠️ Read the `?` (`unverified`, exit `0`), `!` (`identity_probe_failed`, exit `3`) and `~`
    (`no_ingest`, exit `0`) lines before

@@ -181,8 +181,9 @@ def test_the_readme_carries_no_bare_relative_link() -> None:
 
     The operator guide is checked too, and for the same reason rather than for symmetry: it ships
     inside the wheel and is served as the ``epics-pv://guide`` resource, so it is the second surface
-    with no repository around it. It carries no link today; the point is that a future one cannot
-    slip in relative, which the sibling guard would happily accept.
+    with no repository around it. It carried no link at all until its two ``docs/`` pointers became
+    absolute, which is what made this arm of the guard stop being vacuous; the point is that a
+    future one cannot slip in relative, which the sibling guard would happily accept.
 
     Honest limit: this checks the SPELLING of a link, not whether the page renders it. Whether
     PyPI's renderer follows these URLs is not measurable from this tree.
