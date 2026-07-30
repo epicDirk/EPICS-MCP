@@ -51,12 +51,13 @@ from epics_mcp.cli_common import add_version_argument, configure_stdout, positiv
 from epics_mcp.errors import EpicsError
 from epics_mcp.services.doctor import DoctorReport, run_doctor
 
-#: One glyph per status for the human-readable render (deterministic). Three statuses get their
-#: own marks rather than borrowing ✓ or ✗, because none of them is "confirmed" or "broken", and
-#: each was previously conflated with one of those: ``?`` = answered 2xx but not nameable (exit 0),
-#: ``!`` = the identity probe failed (exit 3), ``~`` = identity IS proven and the service is
-#: reachable, but it is not doing its job (exit 0, the archiver that archives nothing). ``~`` is
-#: deliberately not ``?``: that one means "we could not tell what this is", and here we can.
+#: One glyph per status for the human-readable render (deterministic). A status gets a mark of
+#: its own rather than borrowing ✓ or ✗ when it is neither "confirmed" nor "broken". The marks
+#: glossed here are the ones that used to be conflated with a ✓ or a ✗, which is why each of
+#: them exists: ``?`` = answered 2xx but not nameable (exit 0), ``!`` = the identity probe
+#: failed (exit 3), ``~`` = identity IS proven and the service is reachable, but it is not
+#: doing its job (exit 0, the archiver that archives nothing). ``~`` is deliberately not
+#: ``?``: that one means "we could not tell what this is", and here we can.
 _STATUS_MARK = {
     "ok": "✓",
     "disabled": "·",
