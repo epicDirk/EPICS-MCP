@@ -52,12 +52,18 @@ from epics_mcp.errors import EpicsError
 from epics_mcp.services.doctor import DoctorReport, run_doctor
 
 #: One glyph per status for the human-readable render (deterministic). A status gets a mark of
-#: its own rather than borrowing ✓ or ✗ when it is neither "confirmed" nor "broken". The marks
-#: glossed here are the ones that used to be conflated with a ✓ or a ✗, which is why each of
-#: them exists: ``?`` = answered 2xx but not nameable (exit 0), ``!`` = the identity probe
-#: failed (exit 3), ``~`` = identity IS proven and the service is reachable, but it is not
-#: doing its job (exit 0, the archiver that archives nothing). ``~`` is deliberately not
-#: ``?``: that one means "we could not tell what this is", and here we can.
+#: its own rather than borrowing ✓ or ✗ when it is neither "confirmed" nor "broken": ``?`` =
+#: answered 2xx but not nameable (exit 0), ``!`` = the identity probe failed (exit 3), ``~`` =
+#: identity IS proven and the service is reachable, but it is not doing its job (exit 0, the
+#: archiver that archives nothing). ``~`` is deliberately not ``?``: that one means "we could
+#: not tell what this is", and here we can.
+#:
+#: What each mark REPLACED, stated per mark because the earlier wording put them in one bucket
+#: and that bucket was measured wrong: ``?`` and ``~`` used to be reported as ``ok`` (``✓``),
+#: while ``!`` stood as ``unverified`` (``?``) until the identity probe learned to tell a served
+#: non-2xx from an unreadable body. ``·`` and ``i`` were never conflated with anything: they
+#: have carried their own marks since the first version of this CLI. No count is given here on
+#: purpose; the mapping below is the enumeration, and a figure beside it can only drift.
 _STATUS_MARK = {
     "ok": "✓",
     "disabled": "·",
