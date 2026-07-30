@@ -169,15 +169,22 @@ def test_every_level_parameter_points_at_list_log_levels() -> None:
 # is an editorial choice, and only an explicit partition lets the tiling test below prove the three
 # buckets cover ``PlaneStatus`` exactly: the same shape, and the same reason, as the three sets
 # ``test_status_partition_is_total_and_disjoint`` tiles.
-_IN_THE_GLYPH_TABLE: frozenset[str] = frozenset(
+#
+# Typed on ``PlaneStatus`` rather than on ``str``, and the LITERAL element type is the point of the
+# annotation: it is what turns a dead or misspelled bucket entry into a mypy error naming the
+# offending literal, which the tiling test below cannot do on its own (a typo and a rename look
+# alike to it). Keep each bucket a literal set of constants. Widening them back to
+# ``frozenset[str]`` is the cheap green repair that silently takes the lint away, and a bucket built
+# from a comprehension is a mypy error whose cheapest repair is to delete the annotation.
+_IN_THE_GLYPH_TABLE: frozenset[PlaneStatus] = frozenset(
     {"ok", "unverified", "identity_probe_failed", "config_error", "backend_down", "no_ingest"}
 )
-_IN_THE_STATUS_PROSE: frozenset[str] = frozenset({"ca_error", "api_error", "unreachable"})
+_IN_THE_STATUS_PROSE: frozenset[PlaneStatus] = frozenset({"ca_error", "api_error", "unreachable"})
 # A MEASURED GAP, not a decision (2026-07-30): the shipped guide never names these three by their
 # status name, and their marks have no legend in it at all. Declared here so the gap is
 # machine-visible and cannot go stale in silence, rather than living only in a backlog; documenting
 # any of them inside a marked region reddens the location test below, which is the point.
-_NOT_NAMED_IN_THE_GUIDE: frozenset[str] = frozenset({"disabled", "info", "disconnected"})
+_NOT_NAMED_IN_THE_GUIDE: frozenset[PlaneStatus] = frozenset({"disabled", "info", "disconnected"})
 
 _GLYPH_TABLE_RE = re.compile(
     r"<!-- BEGIN:status-glyphs.*?-->(.*?)<!-- END:status-glyphs -->", re.DOTALL
@@ -256,18 +263,24 @@ def test_the_guide_status_buckets_tile_plane_status() -> None:
     decides where it is written down, and that is the whole of QA-47: the legend ships inside the
     wheel as ``epics-pv://guide``, and a status missing from it used to be invisible.
 
-    Counted rather than compared pair by pair: sum-of-sizes == size-of-union == PlaneStatus reddens
-    on a DOUBLE-LISTING as well as on a missing or an unknown status, where three ``isdisjoint``
-    calls plus a union assertion would each need their own mutant.
+    The union is compared as a SET, and the count stands BESIDE it rather than in place of it. Three
+    equal cardinalities are blind to a RENAME, because a rename is cardinality-neutral: measured on
+    this tree, renaming a status in ``PlaneStatus`` and ``_STATUS_MARK`` while leaving the buckets
+    alone was green here for all twelve statuses, and for the six named outside the legend it was
+    green in every other guard in this file too, so the buckets would go on naming a status that no
+    longer exists. ``declared == len(union)`` is kept alongside for the DOUBLE-LISTING case, which
+    set equality alone cannot see. The message below already printed both set differences, and that
+    was the tell: a message that prints a set difference states a claim the assertion has to make.
 
-    Red-proof: add a Literal value without bucketing it, drop one from a bucket, or list one twice.
+    Red-proof: rename a status without moving its bucket entry, add a Literal value without
+    bucketing it, drop one from a bucket, or list one twice.
     """
     buckets = (_IN_THE_GLYPH_TABLE, _IN_THE_STATUS_PROSE, _NOT_NAMED_IN_THE_GUIDE)
     statuses = set(get_args(PlaneStatus))
     assert statuses, "PlaneStatus yielded no values, the Literal anchor broke"
     declared = sum(len(bucket) for bucket in buckets)
-    union = set().union(*buckets)
-    assert declared == len(union) == len(statuses), (
+    union: set[PlaneStatus] = set().union(*buckets)
+    assert union == statuses and declared == len(union), (
         f"the guide-location buckets no longer tile PlaneStatus: declared={declared} "
         f"distinct={len(union)} statuses={len(statuses)}; "
         f"only-in-buckets={sorted(union - statuses)} "
