@@ -7,14 +7,20 @@ when the session trusts it. This binds the guide's tool-inventory section to the
 registrations and its ``EPICS_MCP_*`` mentions to ``EpicsConfig``: the same anti-drift pattern the
 repo already uses for README resource URIs.
 
-Three surfaces, each anchored on a marked region rather than on a line number:
+Three surfaces. ONE of them is anchored on a marked region rather than on a line number, and the
+other two read the whole guide on purpose, which is worth saying because the opposite used to be
+claimed here:
 
-* the tool inventory, against the registrations;
-* every ``EPICS_MCP_*`` mention, against ``EpicsConfig``;
+* the tool inventory, against the registrations. This one IS anchored on markers;
+* every ``EPICS_MCP_*`` mention, against ``EpicsConfig``. Whole file: measured, the guide mentions
+  those variables on 35 lines and NONE of them falls inside the inventory markers, so an anchored
+  scan would read no mention at all;
 * the status legend and the statuses named in the prose above it, against ``PlaneStatus`` and
-  ``cli_doctor._STATUS_MARK`` (QA-47). This one reaches beyond the guide: a glyph paired with a
-  status name is also checked on every TRACKED ``docs/*.md`` page, because a second copy of a
-  guarded number is an unguarded number.
+  ``cli_doctor._STATUS_MARK`` (QA-47). Two of its four guards are anchored on markers; the pairing
+  scan reads the whole text, and that is what catches a SECOND, drifting copy of the marked region,
+  which the anchored guards cannot see because ``re.search`` returns the first match. It also
+  reaches beyond the guide: a glyph paired with a status name is checked on every TRACKED
+  ``docs/*.md`` page too, because a second copy of a guarded number is an unguarded number.
 
 What is still deliberately outside: the free-form Archiver MGMT verbs (``getAllPVs`` /
 ``getPVsForThisAppliance``) are manual REST recipes with no implementing tool, so they are
@@ -495,9 +501,10 @@ def test_the_shipped_glyph_legend_carries_the_marks_the_cli_prints() -> None:
 
 def test_every_glyph_status_pairing_in_the_docs_agrees_with_the_render_marks() -> None:
     """A status is paired with its glyph in more places than the legend, and a second copy of a
-    guarded fact is an unguarded fact (``docs/known-limits.md`` says it in those words). Measured
-    on the shipped guide alone, four such pairings stand OUTSIDE the legend, one of them split
-    across a line break.
+    guarded number is an unguarded number, which is what ``docs/known-limits.md`` says in those
+    words. On the shipped guide alone, such pairings stand OUTSIDE the legend, one of them split
+    across a line break and one written inside a single code span. No count is given: it moved
+    twice while this scan was being repaired, and a figure beside a derived set can only drift.
 
     Derived rather than declared on BOTH axes, deliberately: there is no list of pairings to keep
     in step, and there is no list of pages either. The population is every tracked ``docs/*.md``
@@ -652,9 +659,11 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
     Confining both halves to the marked regions costs a false negative (a status documented in a
     third place goes unnoticed) and buys the absence of a false positive with a green wrong repair.
 
-    The match is an exact, CASE-SENSITIVE backticked token, stated rather than left to the reader:
-    case-insensitively the guide already carries ``Disabled`` and ``Info`` in those foreign senses,
-    and this test would be red on the day it was written.
+    The match is an exact, CASE-SENSITIVE backticked token. It is fixed here so the behaviour is
+    defined, NOT because case-insensitivity would break this guard: measured, the guide's
+    ``Disabled`` and ``Info`` both stand OUTSIDE the two marked regions, so a case-insensitive
+    match confined to the regions is green as well. The case rule was what the rejected WHOLE-FILE
+    variant needed, and it was carried over here with a justification that no longer applied.
 
     A THIRD direction makes the shipped guide's own promise true. That paragraph is introduced by a
     marker reading "the plane statuses named outside the legend below are drift-guarded against
