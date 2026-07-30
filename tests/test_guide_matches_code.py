@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import ast
 import re
+from collections.abc import Mapping
 from itertools import pairwise
 from pathlib import Path
 from typing import get_args
@@ -197,6 +198,30 @@ _STATUS_PROSE_RE = re.compile(
 # (``docs/known-limits.md`` section 13 rejects exactly that for the sibling remedy guard).
 _GLYPH_ROW_RE = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*`([a-z_]+)`\s*\|")
 _BACKTICKED_RE = re.compile(r"`([^`\s]+)`")
+#: The characters this project uses as epics-doctor marks. DECLARED rather than derived from
+#: ``_STATUS_MARK.values()`` on purpose: a mark RETIRED from the mapping has to stay recognisable,
+#: or the scan stops seeing the stale documentation copies at the exact moment they become stale.
+#: Measured on this tree by retiring ``~``: the derived rule went on reading fewer pairings than
+#: exist and reported NONE of the stale ones, while the declared class reports every one. The set
+#: only grows, and ``test_the_glyph_class_covers_every_mark_the_cli_prints`` reddens if a mark is
+#: added to the CLI without being added here.
+#:
+#: Do NOT replace this with ``token in marks.values()``: that IS the blindness above, and it is also
+#: the cheapest green repair, so it is named here rather than left to be rediscovered. Only the
+#: property pin ``test_a_retired_mark_is_still_read_as_a_pairing`` sees that revert; a floor over
+#: the FORM of the rule stays vacuously green under it.
+#:
+#: Two more open rules were built, measured and rejected. Both buy the same stale pairings, and both
+#: pay for them with false reds on correct FUTURE prose that the declared class does not produce:
+#:
+#: * "a single character that is not a digit" reads a ``Y``/``N`` support column, a placeholder
+#:   ``x`` and the ``-`` of an empty table cell as marks.
+#: * "not alphanumeric OR a current mark" still reads that ``-``.
+#:
+#: What the declared class does NOT repair, because the current rule misreads it too: a status name
+#: written next to a mark that is CONTRASTED with it rather than paired to it, as in "the ``ok``
+#: versus ``?`` distinction". That form is recorded in ``docs/known-limits.md`` section 14.
+_GLYPH_CHARACTERS = frozenset("✓✗?!~·i")
 # The prose surfaces that re-state a pairing the legend already carries. They do NOT ship in the
 # wheel, unlike the guide, but a wrong glyph in them misleads a reader just the same and the cost
 # of covering them is one path each.
@@ -232,7 +257,7 @@ def _glyph_rows() -> list[tuple[str, str]]:
     return rows
 
 
-def _glyph_status_pairings(text: str) -> list[tuple[str, str]]:
+def _glyph_status_pairings(text: str, marks: Mapping[str, str]) -> list[tuple[str, str]]:
     """Every ``(status, mark)`` the text sets side by side, in either order.
 
     Consecutive backticked tokens separated by at most three characters, none of them a word
@@ -242,17 +267,21 @@ def _glyph_status_pairings(text: str) -> list[tuple[str, str]]:
     splits one such pairing across a line break. Pairs are read from OVERLAPPING neighbours rather
     than by scanning left to right and consuming: a non-consuming scan is what makes
     ``exit `3`) and `~``` stop hiding the pairing on either side of it.
+
+    The STATUS half is looked up in ``marks``; the MARK half is tested against the declared
+    ``_GLYPH_CHARACTERS``, and the asymmetry is the point (see that constant). ``marks`` arrives as
+    a parameter rather than as a module lookup so both halves can be pinned on constructed input
+    without monkeypatching a module, which is also this project's "no hidden state, inject it" rule.
     """
     folded = " ".join(text.splitlines())
     tokens = list(_BACKTICKED_RE.finditer(folded))
-    glyphs = set(cli_doctor._STATUS_MARK.values())
     pairings: list[tuple[str, str]] = []
     for left, right in pairwise(tokens):
         gap = folded[left.end() : right.start()]
         if len(gap) > 3 or re.search(r"\w", gap):
             continue
         for status, mark in ((left.group(1), right.group(1)), (right.group(1), left.group(1))):
-            if status in cli_doctor._STATUS_MARK and mark in glyphs:
+            if status in marks and mark in _GLYPH_CHARACTERS:
                 pairings.append((status, mark))
     return pairings
 
@@ -339,7 +368,7 @@ def test_every_glyph_status_pairing_in_the_docs_agrees_with_the_render_marks() -
     }
     mismatched: list[str] = []
     for where, text in surfaces.items():
-        pairings = _glyph_status_pairings(text)
+        pairings = _glyph_status_pairings(text, cli_doctor._STATUS_MARK)
         assert pairings, (
             f"{where} yielded no glyph/status pairing at all, so the scan is not reading what it "
             "claims to: either the extraction broke or the file stopped documenting the statuses"
@@ -353,6 +382,55 @@ def test_every_glyph_status_pairing_in_the_docs_agrees_with_the_render_marks() -
     assert not mismatched, (
         "a documented glyph disagrees with the one epics-doctor renders:\n  "
         + "\n  ".join(mismatched)
+    )
+
+
+# --- the extractor's own properties, pinned on constructed input --------------------------------
+#
+# These read no repository file at all. The guard above proves the extractor works on the tree as it
+# stands TODAY; the pins below prove the PROPERTIES it was changed to have, so a later revert goes
+# red here instead of going quietly green over prose nobody re-measures.
+
+
+def test_the_glyph_class_covers_every_mark_the_cli_prints() -> None:
+    """A floor on the FORM of the rule: the declared class may never be narrower than the marks it
+    has to recognise.
+
+    This is the price a declared class charges, and it is worth stating what it does and does not
+    buy. It catches a NEW mark that nobody added to ``_GLYPH_CHARACTERS``, which is the one failure
+    mode a derived rule cannot have. It deliberately does NOT catch the reverse of QA-50 (rewiring
+    the mark test back to the mapping's values): the class would still cover every current mark, so
+    this floor stays VACUOUSLY green under that edit. That is the pin below, not this.
+
+    Red-proof: add a mark to ``_STATUS_MARK`` without adding its character here.
+    """
+    missing = sorted(set(cli_doctor._STATUS_MARK.values()) - _GLYPH_CHARACTERS)
+    assert not missing, (
+        f"epics-doctor prints marks the pairing scan cannot recognise: {missing}. Add them to "
+        "_GLYPH_CHARACTERS; that set only ever grows, because a retired mark has to stay readable."
+    )
+
+
+def test_a_retired_mark_is_still_read_as_a_pairing() -> None:
+    """The property QA-50 bought: a mark the CLI has STOPPED printing is still read as a mark, so
+    the documentation copies that still show it are found at the moment they go stale.
+
+    Constructed input rather than the tree, deliberately: on the real files this property is
+    invisible, because no mark has been retired yet. Testing the mark half against
+    ``marks.values()`` reads a retired glyph as ordinary prose, and every stale copy drops out of
+    the scan in silence. That is the defect, and it is invisible to the floor above.
+
+    Red-proof: put ``mark in marks.values()`` back into ``_glyph_status_pairings``.
+    """
+    retired = {**cli_doctor._STATUS_MARK, "no_ingest": "%"}
+    assert "~" not in retired.values(), (
+        "this pin no longer retires a mark, so it proves nothing: some other status now carries "
+        "the glyph the fixture withdraws. Withdraw one that is unique to a single status."
+    )
+    found = _glyph_status_pairings("the appliance is `no_ingest` (`~`)", retired)
+    assert ("no_ingest", "~") in found, (
+        f"a documentation copy still showing a RETIRED mark was not read as a pairing: {found}. "
+        "The mark half has to be tested against _GLYPH_CHARACTERS, never against marks.values()."
     )
 
 
