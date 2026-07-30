@@ -198,6 +198,9 @@ _STATUS_PROSE_RE = re.compile(
 # (``docs/known-limits.md`` section 13 rejects exactly that for the sibling remedy guard).
 _GLYPH_ROW_RE = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*`([a-z_]+)`\s*\|")
 _BACKTICKED_RE = re.compile(r"`([^`\s]+)`")
+#: EVERY code span of a line, including the whitespace-free ones. Matching them ALL and filtering
+#: afterwards is what keeps the backtick pairing honest, see ``_glyph_status_pairings``.
+_CODE_SPAN_RE = re.compile(r"`([^`]*)`")
 #: The characters this project uses as epics-doctor marks. DECLARED rather than derived from
 #: ``_STATUS_MARK.values()`` on purpose: a mark RETIRED from the mapping has to stay recognisable,
 #: or the scan stops seeing the stale documentation copies at the exact moment they become stale.
@@ -277,6 +280,44 @@ def _glyph_status_pairings(text: str, marks: Mapping[str, str]) -> list[tuple[st
     next one BEGINNING on a mark. Measured, both variants read the same pairings on this tree
     today, so the stricter one is free and closes that class of false red before it can appear.
 
+    A SECOND pass reads the other written form: a single code span holding exactly two tokens, one
+    a status and the other a mark, as in ```✓ ok```. That form exists twice on these surfaces and
+    was unreachable for the pass above, whose token regex forbids whitespace inside a span.
+
+    The ORDER of the two regex operations in that pass is deliberate. Every span of the line is
+    matched FIRST and the token filter applied AFTER. The shorter spelling, one regex that requires
+    whitespace INSIDE the span, skips a whitespace-free span and then re-anchors on that span's
+    CLOSING backtick, so the prose BETWEEN two code spans is read as a span itself. Measured on
+    ``docs/tools.md``, that variant invents dozens of such fragments, several of them exactly two
+    tokens long (``) and``, ``, so``, ``need the``).
+
+    Its honest reach, measured rather than asserted, because the tempting claim overstates it: on
+    this tree the two spellings produce the IDENTICAL pairing list, and they still do when the mark
+    test is widened to any single character, so nothing here is being rescued from a false red
+    today. What actually keeps those fragments harmless is the two-token filter below, NOT the
+    declared mark class. The order earns its place as defence in depth: a future document that puts
+    a status name and a declared mark on either side of such a fragment WOULD be read as a pairing
+    that nobody wrote. Because the two spellings agree today, no test can go red on this, which is
+    why it is written here and recorded in ``docs/known-limits.md`` section 14 rather than pinned.
+
+    Exactly two tokens, so the pass reads only spans that are NOTHING BUT a status and a mark. A
+    longer span is prose in code formatting, and its first two words are not thereby written as a
+    pair. Stated honestly, because the tempting justification does not survive: the separator forms
+    that motivated this filter (```ok | unverified```, ```ok / unverified```,
+    ```ok - confirmed```) are false reds only under an OPEN mark rule; measured under the declared
+    mark class they read as nothing either way, and relaxing the filter changes no result on this
+    tree at all. It is a conservative narrowing, not a fix for an observed false red.
+
+    There is no separate whitespace test, and its absence is deliberate rather than an oversight:
+    ``str.split()`` and ``re`` treat the identical 29 Unicode characters as whitespace (checked
+    over the whole codepoint range, the difference is empty in both directions), so two tokens
+    already prove whitespace stood between them and a second condition would be unreachable code.
+
+    A line with an ODD number of backticks is skipped, because markdown pairing cannot be read from
+    it and the surfaces carry multi-line code spans. Measured, 20 such lines across them, none
+    carrying a pairing, so the filter changes no result today and makes the assumption loud instead
+    of lucky.
+
     The STATUS half is looked up in ``marks``; the MARK half is tested against the declared
     ``_GLYPH_CHARACTERS``, and the asymmetry is the point (see that constant). ``marks`` arrives as
     a parameter rather than as a module lookup so both halves can be pinned on constructed input
@@ -290,6 +331,16 @@ def _glyph_status_pairings(text: str, marks: Mapping[str, str]) -> list[tuple[st
             if len(gap) > 3 or re.search(r"\w", gap):
                 continue
             for status, mark in ((left.group(1), right.group(1)), (right.group(1), left.group(1))):
+                if status in marks and mark in _GLYPH_CHARACTERS:
+                    pairings.append((status, mark))
+    for line in text.splitlines():
+        if line.count("`") % 2:
+            continue
+        for span in _CODE_SPAN_RE.finditer(line):
+            tokens = span.group(1).split()
+            if len(tokens) != 2:
+                continue
+            for status, mark in ((tokens[0], tokens[1]), (tokens[1], tokens[0])):
                 if status in marks and mark in _GLYPH_CHARACTERS:
                     pairings.append((status, mark))
     return pairings
@@ -460,6 +511,27 @@ def test_a_pairing_survives_an_indented_line_break() -> None:
     assert ("no_ingest", "~") in found, (
         f"a pairing split across an INDENTED line break was not read: {found}. Whitespace RUNS "
         "have to collapse to one space before the gap is measured, not just the newline."
+    )
+
+
+def test_a_pairing_inside_one_code_span_is_read() -> None:
+    """The property step 4 bought: a status and its mark written inside a SINGLE code span are read
+    as a pairing.
+
+    Constructed input, for the same reason as the two pins above: once the pass works, the two real
+    occurrences read as ordinary pairings and nothing would go red if it were removed. The
+    neighbour pass cannot reach this form at all, because its token regex forbids whitespace inside
+    a span.
+
+    Red-proof: delete the code-span pass. Narrowing its regex to the whitespace-inside spelling is
+    NOT a red-proof for this pin and was measured rather than assumed: that variant still matches
+    this input, and on the whole tree it yields a byte-identical pairing list. The order of
+    operations it breaks is therefore recorded in ``docs/known-limits.md`` section 14, not pinned.
+    """
+    found = _glyph_status_pairings("reported `✓ ok` for a dead container", cli_doctor._STATUS_MARK)
+    assert ("ok", "✓") in found, (
+        f"a status and its mark inside ONE code span were not read as a pairing: {found}. The span "
+        "pass has to match every span first and filter on the token count afterwards."
     )
 
 
