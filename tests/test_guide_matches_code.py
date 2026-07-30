@@ -263,26 +263,35 @@ def _glyph_status_pairings(text: str, marks: Mapping[str, str]) -> list[tuple[st
     Consecutive backticked tokens separated by at most three characters, none of them a word
     character: ```no_ingest` (`~`)``, ```!`
     `identity_probe_failed``` and the legend's own ``| `~` |
-    `no_ingest` |``. Newlines are folded to spaces first, because the guide already
-    splits one such pairing across a line break. Pairs are read from OVERLAPPING neighbours rather
+    `no_ingest` |``. Pairs are read from OVERLAPPING neighbours rather
     than by scanning left to right and consuming: a non-consuming scan is what makes
     ``exit `3`) and `~``` stop hiding the pairing on either side of it.
+
+    Whitespace is collapsed PER BLOCK, blocks being split on a blank line. Collapsing whole RUNS of
+    whitespace rather than newlines alone is what carries a pairing over an INDENTED line break:
+    measured, ``docs/deployment.md`` splits one across exactly that, and joining the lines with a
+    single space still left the indentation in the gap, pushing it past three characters. The
+    sibling pairings in the same sentence were read while that one was dropped, which is the worst
+    shape of a gap: silent and selective. Per block rather than over the whole text, because
+    flattening the file into one line would let a paragraph ENDING on a status name pair with the
+    next one BEGINNING on a mark. Measured, both variants read the same pairings on this tree
+    today, so the stricter one is free and closes that class of false red before it can appear.
 
     The STATUS half is looked up in ``marks``; the MARK half is tested against the declared
     ``_GLYPH_CHARACTERS``, and the asymmetry is the point (see that constant). ``marks`` arrives as
     a parameter rather than as a module lookup so both halves can be pinned on constructed input
     without monkeypatching a module, which is also this project's "no hidden state, inject it" rule.
     """
-    folded = " ".join(text.splitlines())
-    tokens = list(_BACKTICKED_RE.finditer(folded))
     pairings: list[tuple[str, str]] = []
-    for left, right in pairwise(tokens):
-        gap = folded[left.end() : right.start()]
-        if len(gap) > 3 or re.search(r"\w", gap):
-            continue
-        for status, mark in ((left.group(1), right.group(1)), (right.group(1), left.group(1))):
-            if status in marks and mark in _GLYPH_CHARACTERS:
-                pairings.append((status, mark))
+    for block in re.split(r"\n[ \t]*\n", text):
+        folded = re.sub(r"\s+", " ", block)
+        for left, right in pairwise(list(_BACKTICKED_RE.finditer(folded))):
+            gap = folded[left.end() : right.start()]
+            if len(gap) > 3 or re.search(r"\w", gap):
+                continue
+            for status, mark in ((left.group(1), right.group(1)), (right.group(1), left.group(1))):
+                if status in marks and mark in _GLYPH_CHARACTERS:
+                    pairings.append((status, mark))
     return pairings
 
 
@@ -431,6 +440,26 @@ def test_a_retired_mark_is_still_read_as_a_pairing() -> None:
     assert ("no_ingest", "~") in found, (
         f"a documentation copy still showing a RETIRED mark was not read as a pairing: {found}. "
         "The mark half has to be tested against _GLYPH_CHARACTERS, never against marks.values()."
+    )
+
+
+def test_a_pairing_survives_an_indented_line_break() -> None:
+    """The property step 3 bought: a pairing split across a line break is read even when the
+    continuation line is INDENTED.
+
+    Constructed input, because on the tree this reads as an ordinary pairing once it works, so
+    nothing here would go red if the folding regressed. Folding line breaks alone leaves the
+    indentation standing in the gap, which pushes it past the three-character limit while the
+    sibling pairings in the same sentence are still read. That is what ``docs/deployment.md`` does.
+
+    Red-proof: fold with ``" ".join(text.splitlines())`` instead of collapsing whitespace runs.
+    """
+    found = _glyph_status_pairings(
+        "the honest states are `~`\n    (`no_ingest`, exit `0`) and more", cli_doctor._STATUS_MARK
+    )
+    assert ("no_ingest", "~") in found, (
+        f"a pairing split across an INDENTED line break was not read: {found}. Whitespace RUNS "
+        "have to collapse to one space before the gap is measured, not just the newline."
     )
 
 
