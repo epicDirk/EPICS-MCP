@@ -959,6 +959,91 @@ def test_indentation_is_held_against_the_margin_gfm_allows() -> None:
                 _table_rows(_indented_legend(**{kind: pad}), "fixture legend")
 
 
+def test_a_row_whose_cell_count_drifts_from_the_header_is_rejected() -> None:
+    """The third of the three rules this parser holds, and the one nothing pinned.
+
+    The delimiter rule and the blank-line rule each got a pin when they were built; the row width
+    was written in the same step and left unheld, which measured as a silent revert: deleting the
+    width assertion left every test in the file green, because ``_legend_fixture`` and the shipped
+    legend both carry rows of the declared width, so the assertion never fires on the tree.
+
+    Both directions are checked, because GFM pads a short row and truncates a long one, so either
+    drift makes the rendered table stop matching the one this guard compares.
+
+    Red-proof: delete the width assertion inside the row loop of ``_table_rows``.
+    """
+    for row, cells in (("| `~` | `no_ingest` |", 2), ("| `~` | `no_ingest` | a | b |", 4)):
+        region = _legend_fixture().replace("| `~` | `no_ingest` | not ingesting |", row)
+        with pytest.raises(AssertionError, match=f"has {cells} cells against the header's 3"):
+            _table_rows(region, "fixture legend")
+    kept = [status for _, status in _table_rows(_legend_fixture(), "fixture legend")]
+    assert kept == ["ok", "no_ingest"], (
+        f"control: rows OF the declared width were rejected, read {kept}. Without this half the "
+        "cheapest way to pass the two assertions above would be to reject every row."
+    )
+
+
+def test_a_line_of_odd_backtick_parity_is_skipped_by_the_span_pass() -> None:
+    """The property behind the odd-parity filter, which was documented and never held.
+
+    Markdown pairing cannot be read from a line whose backticks do not pair, and these documents
+    carry code spans that run across a line break. Measured on the tree the filter changes no
+    result today (22 pairings with it and 22 without), so nothing here goes red if it is deleted:
+    exactly the case a pin on constructed input exists for.
+
+    The second assertion is the control that turns this into a property rather than a ban: the same
+    line at EVEN parity is read, so the filter is about pairing and not about the content.
+
+    Red-proof: delete the parity check in ``_code_spans``.
+    """
+    odd = "reported `✓ ok` for a dead container`"
+    assert odd.count("`") % 2, "this fixture lost its odd parity, so it pins nothing"
+    assert _glyph_status_pairings(odd, cli_doctor._STATUS_MARK) == [], (
+        "a line whose backticks do not pair was read as a pairing. Markdown cannot say which of "
+        "them opens a span, so the line is skipped rather than guessed at."
+    )
+    even = odd[:-1]
+    assert ("ok", "✓") in _glyph_status_pairings(even, cli_doctor._STATUS_MARK), (
+        "control: the same line at even parity was NOT read, so the assertion above passes for the "
+        "wrong reason and would survive the span pass being deleted outright."
+    )
+
+
+def test_the_span_pass_matches_every_span_before_it_filters_on_tokens() -> None:
+    """The property step 4 of the previous round bought, recorded as unpinnable and pinned here.
+
+    The pass matches EVERY span of the text first and applies the two-token filter afterwards. The
+    shorter spelling, one regex requiring whitespace inside the span, skips a whitespace-free span
+    and re-anchors on its closing backtick, so the prose BETWEEN two spans is read as a span. Both
+    spellings agree on this tree, which is why no tree-driven guard can see the difference, and why
+    ``docs/known-limits.md`` carried the property as merely written down.
+
+    The first assertion is the control and it is what makes the second one a finding: on this
+    input the reverted spelling DOES invent the pairing, so the emptiness below is a statement
+    about the rule rather than about an extractor that has quietly stopped reading. The third
+    assertion is the non-empty floor this file requires beside any emptiness check.
+
+    Red-proof: replace ``_code_spans(text)`` in the span pass with
+    ``re.findall(r"`([^`]*\\s[^`]*)`", text)``.
+    """
+    text = "`x`ok ✓`y`"
+    invented = [span.split() for span in re.findall(r"`([^`]*\s[^`]*)`", text)]
+    assert invented == [["ok", "✓"]], (
+        f"control: the shorter spelling was expected to read the prose between two spans as a span "
+        f"of exactly two tokens on this input, it read {invented}. Without that this pin proves "
+        "nothing about the order of the two operations."
+    )
+    assert _glyph_status_pairings(text, cli_doctor._STATUS_MARK) == [], (
+        "prose standing between two code spans was read as a pairing. Every span has to be matched "
+        "first and the token filter applied to what came out, never the other way round."
+    )
+    written = "`x` `✓ ok` `y`"
+    assert ("ok", "✓") in _glyph_status_pairings(written, cli_doctor._STATUS_MARK), (
+        "floor: a pairing written inside ONE span is no longer read at all, so the emptiness above "
+        "would pass for a span pass that had been deleted rather than reordered."
+    )
+
+
 def test_a_renamed_status_is_reported_though_the_three_counts_still_agree() -> None:
     """The property QA-50's first step bought: the buckets are compared as SETS.
 
