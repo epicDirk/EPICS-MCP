@@ -1297,3 +1297,80 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
         "not PlaneStatus values. If the status was removed, the sentence has to go with it; if the "
         "token was never a status, declare it in _NOT_A_STATUS_IN_THE_PROSE."
     )
+
+
+# --- the WIRING, pinned by running a guard on a doctored world -----------------------------------
+#
+# The pins above hold the HELPERS on constructed input, and that is not the same as holding the
+# guards. Measured against real pytest: reverting the set comparison, the reverse direction or the
+# duplicate count AT THE GUARD, while leaving the helper and its pin in place, left all 1702 tests
+# green, which is exactly what the pins were built to prevent. The helper goes on being correct and
+# nobody asks it anything. Only reverting the leading-pipe rule reddened, and only because that
+# behaviour lives inside the reader the guard itself calls.
+#
+# So these three run the GUARD, on a world doctored for one line, and require its own message. They
+# patch a module global rather than injecting, which is the opposite of what the helpers above do,
+# and the difference is not a lapse: a helper takes its world as arguments and can be handed a
+# fixture, while a guard takes none, so there is nothing to inject. Patching the source is the only
+# way to ask a guard a question. Keep them; simplifying them back into helper pins reopens the seam
+# they were written to close.
+#
+# What they do NOT cover, stated so the next reader does not have to measure it: their own removal.
+# No gate in this repository sees a deleted test, and an emptied test body is reported as passed by
+# pytest and ignored by ruff, whose rule set here carries no flake8-pytest checks.
+
+
+def test_the_legend_guard_reports_a_duplicate_row_itself(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The duplicate count is still ASKED FOR by the legend guard.
+
+    ``test_a_legend_row_listed_twice_is_reported`` proves ``_repeated_statuses`` finds a repeat;
+    this proves the guard still calls it. Measured before this pin: replacing the guard's
+    ``repeated = _repeated_statuses(rows)`` with an empty list left every test in the suite green,
+    including that pin, so the property was documented rather than held.
+
+    Red-proof: drop the two ``repeated`` lines from
+    ``test_the_shipped_glyph_legend_carries_the_marks_the_cli_prints``.
+    """
+    doubled = [("✓", "ok"), ("✓", "ok"), ("~", "no_ingest")]
+    monkeypatch.setitem(globals(), "_glyph_rows", lambda: doubled)
+    with pytest.raises(AssertionError, match="more than one row"):
+        test_the_shipped_glyph_legend_carries_the_marks_the_cli_prints()
+
+
+def test_the_tiling_guard_reports_a_rename_itself(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The SET comparison is still ASKED FOR by the tiling guard.
+
+    ``test_a_renamed_status_is_reported_though_the_three_counts_still_agree`` proves
+    ``_tiling_findings`` reports a rename; this proves the guard still asserts on what it returns.
+    Measured before this pin: putting the retired three-count form back into the guard, while the
+    helper and its pin stayed untouched, left all 1702 tests green.
+
+    Red-proof: assert ``sum(map(len, buckets)) == len(union) == len(statuses)`` in the guard again.
+    """
+    renamed = frozenset({"ok_renamed" if s == "ok" else s for s in _IN_THE_GLYPH_TABLE})
+    monkeypatch.setitem(globals(), "_IN_THE_GLYPH_TABLE", renamed)
+    with pytest.raises(AssertionError, match="no longer tile PlaneStatus"):
+        test_the_guide_status_buckets_tile_plane_status()
+
+
+def test_the_location_guard_reports_an_unknown_prose_token_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reverse direction is still ASKED FOR by the location guard.
+
+    ``test_a_prose_token_that_is_not_a_status_is_reported`` proves ``_prose_token_findings`` reports
+    a stranger; this proves the guard still asks it about the shipped prose. Measured before this
+    pin: dropping the call from the guard left all 1702 tests green.
+
+    The doctored world is the real guide with one sentence added inside the marked prose region, so
+    the pin exercises the same extraction path the guard uses, markers and all.
+
+    Red-proof: drop the ``_prose_token_findings`` call from
+    ``test_the_declared_status_locations_still_describe_the_guide``.
+    """
+    end = "<!-- END:status-prose -->"
+    doctored = get_guide().replace(end, "\nThe `nonesuch` field is printed too.\n\n" + end, 1)
+    assert doctored != get_guide(), "the status-prose end marker moved, this pin patched nothing"
+    monkeypatch.setitem(globals(), "get_guide", lambda: doctored)
+    with pytest.raises(AssertionError, match="as if epics-doctor printed them"):
+        test_the_declared_status_locations_still_describe_the_guide()
