@@ -196,7 +196,12 @@ _STATUS_PROSE_RE = re.compile(
 # ``| `<mark>` | `<status>` | ...``: the two cells this file compares. The Meaning column is
 # deliberately not captured, a guard over it would pin prose that has to stay free to improve
 # (``docs/known-limits.md`` section 13 rejects exactly that for the sibling remedy guard).
-_GLYPH_ROW_RE = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*`([a-z_]+)`\s*\|")
+#: The leading pipe is OPTIONAL, because GFM does not require it and a row without one renders
+#: identically. Reading it as mandatory dropped such a row in silence, see ``_glyph_rows``.
+_GLYPH_ROW_RE = re.compile(r"^\|?\s*`([^`]+)`\s*\|\s*`([a-z_]+)`\s*\|")
+#: A separator row: pipes, dashes, alignment colons and spaces, and nothing else. Recognised by its
+#: FORM rather than by a literal prefix, so re-spacing it or adding alignment colons stays legal.
+_SEPARATOR_RE = re.compile(r"^\|?[\s|:-]+$")
 _BACKTICKED_RE = re.compile(r"`([^`\s]+)`")
 #: EVERY code span of a line, including the whitespace-free ones. Matching them ALL and filtering
 #: afterwards is what keeps the backtick pairing honest, see ``_glyph_status_pairings``.
@@ -238,17 +243,42 @@ def _guide_region(pattern: re.Pattern[str], name: str) -> str:
 
 
 def _glyph_rows() -> list[tuple[str, str]]:
-    """The ``(mark, status)`` cells of the shipped legend: every row, or a red test.
+    """The ``(mark, status)`` cells of the shipped legend, read the way markdown defines a table.
 
-    Both floors sit BEFORE any caller compares sets, the ordering
-    ``test_guide_tool_inventory_matches_registrations`` already uses (its anchor assertions run
-    before its set equality). Either floor placed after a comparison is dead code: the comparison
-    fails first and reports a documentation gap where in truth the anchor broke.
+    POSITIONAL rather than by literal prefix: inside the marked region the first non-blank line is
+    the header, the second is the separator, and every line after that has to parse. The old filter
+    kept only lines beginning with a pipe and skipped the two it recognised by their opening text,
+    so it decided what a table row is from its spelling rather than from its place. A legal GFM row
+    WITHOUT a leading pipe therefore dropped out in silence, and the caller then reported the
+    status as undocumented: the exact documentation-gap message this floor exists to prevent, on a
+    table that was complete.
+
+    Measured, four legal and render-identical edits are now read instead of reddening: a row with
+    no leading pipe, a separator respelled as ``| --- | --- | --- |``, alignment colons in the
+    separator, and a renamed header column. Everything that is red today for a real reason stays
+    red.
+
+    Three floors, all BEFORE any caller compares sets, the ordering
+    ``test_guide_tool_inventory_matches_registrations`` already uses. A floor placed after a
+    comparison is dead code: the comparison fails first and reports a documentation gap where in
+    truth the anchor broke. The floors are: the markers were found (in ``_guide_region``), the
+    region carries a header AND a separator AND at least one row, and every remaining line parses.
+    The second one is a single assertion on purpose, because it already covers both the emptied
+    table and the table with no rows left; a separate ``assert rows`` after it would be unreachable.
     """
+    region = _guide_region(_GLYPH_TABLE_RE, "status-glyphs")
+    body = [line for line in region.splitlines() if line.strip()]
+    assert len(body) >= 3, (
+        f"the shipped glyph legend has {len(body)} non-blank lines, so it cannot carry a header, a "
+        "separator and at least one row: the table anchor broke."
+    )
+    header, separator, *rest = body
+    assert _SEPARATOR_RE.match(separator), (
+        f"the second line of the shipped glyph legend is not a separator row: {separator!r} (the "
+        f"header read {header!r}). The table anchor broke."
+    )
     rows: list[tuple[str, str]] = []
-    for line in _guide_region(_GLYPH_TABLE_RE, "status-glyphs").splitlines():
-        if not line.startswith("|") or line.startswith(("| Mark ", "|--")):
-            continue
+    for line in rest:
         match = _GLYPH_ROW_RE.match(line)
         assert match, (
             "a row of the shipped glyph legend does not parse as `mark` | `status` | ...: "
@@ -256,7 +286,6 @@ def _glyph_rows() -> list[tuple[str, str]]:
             "guard would check less than it claims to."
         )
         rows.append((match.group(1), match.group(2)))
-    assert rows, "the shipped glyph legend parsed no rows at all, the table anchor broke"
     return rows
 
 
