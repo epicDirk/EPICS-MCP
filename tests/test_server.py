@@ -3,6 +3,8 @@
 import ast
 import importlib.util
 import logging
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict, cast
@@ -405,6 +407,58 @@ def test_load_display_registrar_skips_when_extra_absent(
         assert server._load_display_registrar() is None
     assert not [r for r in caplog.records if r.levelno == logging.ERROR], (
         "an absent extra must degrade silently, without an ERROR log"
+    )
+
+
+def test_the_server_module_imports_under_a_finder_that_raises() -> None:
+    """Guard A positive control 3: the availability probe must ANSWER, never crash.
+
+    ``_display_tools_available`` is reached at MODULE level through ``_load_display_registrar``, and
+    ``find_spec`` propagates whatever a meta-path finder raises. So a restricted or broken import
+    system used to take ``import epics_mcp.server`` down with a traceback, killing the core PV
+    server over an OPTIONAL capability, while the display-aware CLIs degraded cleanly because
+    ``cli_common.require_display_engine`` had been given this treatment first (QA-14). The same
+    question was being answered two ways in one package.
+
+    Faking ``find_spec`` inside this process proves nothing about a line that already ran at import
+    time, so this runs a SUBPROCESS whose import system raises for that package. The blocker is the
+    one ``tests/test_cli_without_display_engine.py`` already uses, pointed at the server instead.
+
+    Asserted from the outside, because the claim is that nothing propagates: the import survives, no
+    ModuleNotFoundError reaches stderr, and the server settles into the core-only state rather than
+    advertising a capability it could not register.
+
+    Red-proof: remove the try/except from ``_display_tools_available`` and this dies with
+    ModuleNotFoundError raised out of server.py through ``_load_display_registrar``.
+    """
+    blocker = (
+        "import sys\n"
+        "class _Blocker:\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name.split('.')[0] == 'opi_navigation':\n"
+        '            raise ModuleNotFoundError(f"No module named {name!r}")\n'
+        "        return None\n"
+        "sys.meta_path.insert(0, _Blocker())\n"
+        "import epics_mcp.server as m\n"
+        "print(m._DISPLAY_TOOLS_AVAILABLE)\n"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", blocker],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).resolve().parents[1],
+        timeout=120,
+        check=False,
+    )
+
+    assert "ModuleNotFoundError" not in result.stderr, (
+        f"the server still dies on its import chain under a raising finder:\n{result.stderr[-800:]}"
+    )
+    assert result.returncode == 0, result.stderr[-800:]
+    assert result.stdout.strip() == "False", (
+        "the server must settle into the core-only state instead of advertising the display group: "
+        f"stdout={result.stdout!r}"
     )
 
 

@@ -85,11 +85,34 @@ logger = logging.getLogger(__name__)
 def _display_tools_available() -> bool:
     """True iff the optional ``displays`` group is installed (its sole package is opi_navigation).
 
-    ``find_spec`` has no import side effects, so this is safe to call before the server is built and
-    again at registration time. It is the exact signal ``tests/conftest.py`` uses to gate the
-    display-tool tests, one capability truth, reused.
+    ``find_spec`` has no import side effects, but it is NOT total: it propagates whatever a
+    meta-path finder raises, and this call runs at MODULE level through _load_display_registrar,
+    so an unhandled raise here took the whole core server down with a traceback. Measured before
+    this guard existed: under a finder that raises for opi_navigation, ``import epics_mcp.server``
+    died, while the display-aware CLIs degraded cleanly, because cli_common.require_display_engine
+    had already been given this treatment (QA-14). The same question was being answered two ways.
+
+    So the answer is total now, with the mapping that function measured: a ModuleNotFoundError from
+    a finder still means the module is not there, which is the supported core-only state and stays
+    silent; anything else is a finder that could not answer, which is not the same claim and is
+    logged loud rather than reported as "not installed". Either way an optional group must never
+    crash the core.
+
+    ``tests/conftest.py`` gates its display-coupled modules on the same expression, spelled out
+    there rather than imported from here, so this function is not on that path.
     """
-    return importlib.util.find_spec("opi_navigation") is not None
+    try:
+        return importlib.util.find_spec("opi_navigation") is not None
+    except ModuleNotFoundError:
+        # A finder saying "no such module" IS the absent answer, not a failure to answer.
+        return False
+    except Exception:  # an optional group must never crash core, logged loud just below
+        logger.error(
+            "the opi_navigation availability probe failed (a meta-path finder could not answer); "
+            "treating the display group as unavailable, core PV tools remain available.",
+            exc_info=True,
+        )
+        return False
 
 
 def build_instructions(display_tools_available: bool) -> str:
