@@ -42,8 +42,10 @@ when the package is absent, so the core suite stays green.
   URIs are drift-checked against the server by a test).
 - New operational knowledge (a service/IOC recipe, an endpoint, an error signature) lands in the
   operator guide (`src/epics_mcp/operator_guide.md`), not just a commit body. See the Knowledge
-  Persistence Policy in `CLAUDE.md`. A new tool must appear in the guide's tool inventory and any new
-  `EPICS_MCP_*` var must be mentioned there; both are drift-checked by `test_guide_matches_code.py`.
+  Persistence Policy in `CLAUDE.md`. A new tool must appear in the guide's tool inventory, any new
+  `EPICS_MCP_*` var must be mentioned there, and a new `epics-doctor` plane status must be sorted
+  into one of the guide-location buckets (the legend, the prose above it, or neither, with the
+  glyph the CLI prints); all three are drift-checked by `test_guide_matches_code.py`.
 - A new **write** surface additionally satisfies all six points of the
   [write-gate contract](docs/write-gate-contract.md)
   and registers every one of its deny paths in `tests/test_write_gate_contract.py::DENY_PATHS`, each

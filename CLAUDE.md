@@ -58,7 +58,11 @@ in any session working here, and that is the growth mechanism.
 Two of these tiers are **drift-guarded**, not just prose (prose conventions are the category that rots):
 `test_guide_matches_code.py` fails if the guide names a tool that is not registered or an `EPICS_MCP_*`
 var that is not in `EpicsConfig`, and it fails if a registered tool is **missing** from the guide, so
-adding a tool without documenting it is a red test, not a silent omission.
+adding a tool without documenting it is a red test, not a silent omission. The same file holds the
+shipped **status legend** against the code (QA-47): a new `PlaneStatus` is red until it is sorted into
+one of three declared guide-location buckets, and every glyph paired with a status name, in the guide
+or in `docs/`, must be the one `cli_doctor` renders. What that half deliberately does not check is
+dated in `docs/known-limits.md`.
 
 ## Facility-agnostic guardrail (hard)
 
