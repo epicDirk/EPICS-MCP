@@ -125,9 +125,11 @@ See [Related and roadmap](#related-and-roadmap).
    epics-mcp
    ```
 
-   `epics-mcp --help` explains the invocation and `epics-mcp --version` prints the installed
-   version (the one a bug report asks for). The server itself is configured through
-   `EPICS_MCP_*` environment variables, not through options.
+   `epics-mcp --help` explains the invocation, and each of the five commands answers
+   `--version` with its own name and the installed version (the one a bug report asks for).
+   On a core-only install `epics-crossplane` and `epics-coverage` report the missing display
+   engine instead, since that check runs before their arguments are parsed. The server itself
+   is configured through `EPICS_MCP_*` environment variables, not through options.
 
 3. **Wire it into an MCP client**, see [MCP client integration](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/mcp-clients.md). Then ask
    the assistant to read `TEST:Temperature`, or skip the assistant entirely:

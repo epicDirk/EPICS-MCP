@@ -428,6 +428,11 @@ either. Run it first in a new facility to confirm the environment the launcher h
 (there is no `.env` file: configuration is read from `os.environ`); add `--probe-pv NAME` to also
 pass/fail the live PVA plane against a real PV. Full deployment/config guide: `docs/deployment.md`.
 
+Every line that reports a PROBLEM also carries its remedy, appended to the observation and never
+replacing it, so a `--json` reader gets both from the same `detail` field. The honest-but-not-healthy
+states (`?` and `~`) deliberately carry none: there is nothing to set. What the guard behind this
+proves is that a remedy is PRESENT and imperative, not that it is right (`docs/known-limits.md`).
+
 **Reachable is not identified, and identified is not working: read the `?`, `!` and `~` lines.**
 The transport probe is a HEAD and
 counts *any* HTTP response as reachable, so a URL pointing at the wrong host can look alive:
