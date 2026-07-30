@@ -209,9 +209,11 @@ _STATUS_PROSE_RE = re.compile(
 #: The leading pipe is OPTIONAL, because GFM does not require it and a row without one renders
 #: identically. Reading it as mandatory dropped such a row in silence, see ``_glyph_rows``.
 _GLYPH_ROW_RE = re.compile(r"^\|?\s*`([^`]+)`\s*\|\s*`([a-z_]+)`\s*\|")
-#: A separator row: pipes, dashes, alignment colons and spaces, and nothing else. Recognised by its
-#: FORM rather than by a literal prefix, so re-spacing it or adding alignment colons stays legal.
-_SEPARATOR_RE = re.compile(r"^\|?[\s|:-]+$")
+#: One cell of a GFM delimiter row: dashes, with optional alignment colons. Applied per cell and
+#: alongside a width comparison against the header, because that pair IS the rule a renderer
+#: applies. A character class over the whole line looks like the same test and is not: it accepts
+#: five spellings under which the legend renders as no table at all (see ``_table_rows``).
+_DELIMITER_CELL_RE = re.compile(r":?-+:?")
 _BACKTICKED_RE = re.compile(r"`([^`\s]+)`")
 #: A lower-case identifier, the shape every status name is written in. Applied to the TEXT of an
 #: already-extracted code span (``_code_spans``), never to the raw markdown. Used for the REVERSE
@@ -372,51 +374,105 @@ def _prose_token_findings(
     return dead, sorted(named - allowlist - statuses)
 
 
-def _glyph_rows() -> list[tuple[str, str]]:
-    """The ``(mark, status)`` cells of the shipped legend, read the way markdown defines a table.
+def _row_cells(line: str) -> list[str]:
+    """The cells of one GFM table row: the pipe-separated parts, outer pipes dropped.
 
-    POSITIONAL rather than by literal prefix: inside the marked region the first non-blank line is
-    the header, the second is the separator, and every line after that has to parse. The old filter
-    kept only lines beginning with a pipe and skipped the two it recognised by their opening text,
-    so it decided what a table row is from its spelling rather than from its place. A legal GFM row
-    WITHOUT a leading pipe therefore dropped out in silence, and the caller then reported the
-    status as undocumented: the exact documentation-gap message this floor exists to prevent, on a
-    table that was complete.
+    The outer pipes are OPTIONAL in GFM and a row without them renders identically, so they are
+    stripped rather than required. An escaped ``\\|`` inside a cell would be miscounted here;
+    measured, no row of the shipped legend carries one, and a row that grew one would fail the
+    width comparison loudly rather than quietly.
+    """
+    stripped = line.strip()
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|"):
+        stripped = stripped[:-1]
+    return [cell.strip() for cell in stripped.split("|")]
 
-    Measured, four legal and render-identical edits are now read instead of reddening: a row with
-    no leading pipe, a separator respelled as ``| --- | --- | --- |``, alignment colons in the
-    separator, and a renamed header column. Everything that is red today for a real reason stays
+
+def _table_rows(region: str, where: str) -> list[tuple[str, str]]:
+    """The ``(mark, status)`` cells of a legend region, read the way markdown defines a table.
+
+    POSITIONAL rather than by literal prefix: the first non-blank line is the header, the second is
+    the delimiter, and every line after that has to parse. The old filter kept only lines beginning
+    with a pipe and skipped the two it recognised by their opening text, so it decided what a table
+    row is from its spelling rather than from its place. A legal GFM row WITHOUT a leading pipe
+    therefore dropped out in silence, and the caller then reported the status as undocumented: the
+    exact documentation-gap message this floor exists to prevent, on a table that was complete.
+
+    Measured, four legal and render-identical edits are read instead of reddening: a row with no
+    leading pipe, a delimiter respelled as ``| --- | --- | --- |``, alignment colons in the
+    delimiter, and a renamed header column. Everything that is red today for a real reason stays
     red.
 
-    Three floors, all BEFORE any caller compares sets, the ordering
+    ⚠️ The delimiter is held against the rule the RENDERER applies, not against a character class,
+    and that distinction was a measured hole rather than a refinement. GFM makes a table only when
+    the delimiter row has the SAME number of cells as the header and every cell is dashes with
+    optional alignment colons. A class of "pipes, dashes, colons and spaces" accepts five spellings
+    that fail that rule, and under each of them the shipped legend renders as NO TABLE AT ALL,
+    a wall of literal pipes for every human reader, while this parser went on reading six rows and
+    all four guards stayed green: one cell too few, a bare ``|``, ``| | |``, ``|:|:|:|``, and a
+    plain ``---``. The same holds for a BLANK LINE between two rows, which ends the table in GFM.
+    Since the guide is package data served to a reader who has no repository around it, a legend
+    that stopped being a legend is the failure this whole file exists to prevent.
+
+    What that check is NOT: a markdown parser. It holds the delimiter rule and the blank-line rule,
+    which are what the measured breakages violate, and no more. The rest of the GFM table grammar
+    stays outside, dated in ``docs/known-limits.md`` section 14. A renderer was probed and rejected
+    for two reasons: it would make a guard's verdict depend on a third-party version, and the only
+    one already in the tree arrives transitively rather than declared.
+
+    Floors, all BEFORE any caller compares sets, the ordering
     ``test_guide_tool_inventory_matches_registrations`` already uses. A floor placed after a
     comparison is dead code: the comparison fails first and reports a documentation gap where in
-    truth the anchor broke. The floors are: the markers were found (in ``_guide_region``), the
-    region carries a header AND a separator AND at least one row, and every remaining line parses.
-    The second one is a single assertion on purpose, because it already covers both the emptied
-    table and the table with no rows left; a separate ``assert rows`` after it would be unreachable.
+    truth the anchor broke. They are: the markers were found (in ``_guide_region``), the region
+    carries a header AND a delimiter AND at least one row, no blank line splits the table, the
+    delimiter is one GFM accepts for that header, and every remaining line parses at the declared
+    width. The size floor is a single assertion on purpose, because it already covers both the
+    emptied table and the table with no rows left; a separate ``assert rows`` after it would be
+    unreachable.
     """
-    region = _guide_region(_GLYPH_TABLE_RE, "status-glyphs")
-    body = [line for line in region.splitlines() if line.strip()]
+    lines = region.splitlines()
+    body = [line for line in lines if line.strip()]
     assert len(body) >= 3, (
-        f"the shipped glyph legend has {len(body)} non-blank lines, so it cannot carry a header, a "
-        "separator and at least one row: the table anchor broke."
+        f"the {where} has {len(body)} non-blank lines, so it cannot carry a header, a delimiter "
+        "and at least one row: the table anchor broke."
     )
-    header, separator, *rest = body
-    assert _SEPARATOR_RE.match(separator), (
-        f"the second line of the shipped glyph legend is not a separator row: {separator!r} (the "
-        f"header read {header!r}). The table anchor broke."
+    filled = [i for i, line in enumerate(lines) if line.strip()]
+    split = [i for i in range(filled[0], filled[-1]) if not lines[i].strip()]
+    assert not split, (
+        f"a blank line stands inside the {where}, at offset {split[0] - filled[0] + 1} of the "
+        "table. GFM ends a table there, so everything below it renders as literal pipes while "
+        "this parser goes on reading rows. Remove the blank line or move it outside the markers."
+    )
+    header, delimiter, *rest = body
+    width = len(_row_cells(header))
+    cells = _row_cells(delimiter)
+    assert len(cells) == width and all(_DELIMITER_CELL_RE.fullmatch(c) for c in cells), (
+        f"the second line of the {where} is not a delimiter row GFM accepts: {delimiter!r} has "
+        f"{len(cells)} cell(s) against the header's {width} (header {header!r}). Without a "
+        "matching delimiter the whole block renders as text, not as a table."
     )
     rows: list[tuple[str, str]] = []
     for line in rest:
         match = _GLYPH_ROW_RE.match(line)
         assert match, (
-            "a row of the shipped glyph legend does not parse as `mark` | `status` | ...: "
-            f"{line!r}. Without this floor it would drop out of the comparison in silence and the "
-            "guard would check less than it claims to."
+            f"a row of the {where} does not parse as `mark` | `status` | ...: {line!r}. Without "
+            "this floor it would drop out of the comparison in silence and the guard would check "
+            "less than it claims to."
+        )
+        assert len(_row_cells(line)) == width, (
+            f"a row of the {where} has {len(_row_cells(line))} cells against the header's {width}: "
+            f"{line!r}. GFM pads or truncates such a row, so the rendered table stops matching the "
+            "one this guard compares."
         )
         rows.append((match.group(1), match.group(2)))
     return rows
+
+
+def _glyph_rows() -> list[tuple[str, str]]:
+    """The shipped legend's ``(mark, status)`` cells."""
+    return _table_rows(_guide_region(_GLYPH_TABLE_RE, "status-glyphs"), "shipped glyph legend")
 
 
 def _glyph_status_pairings(text: str, marks: Mapping[str, str]) -> list[tuple[str, str]]:
@@ -708,6 +764,63 @@ def test_the_glyph_class_is_declared_and_not_borrowed_from_the_mapping() -> None
         "from the mark mapping stops recognising a mark at the moment it is RETIRED, which is the "
         "one drift this scan exists to catch, and no runtime test can see the difference before "
         "that moment. Write the characters out."
+    )
+
+
+def _legend_fixture(delimiter: str = "|---|---|---|", *, split: bool = False) -> str:
+    """A minimal legend region shaped like the shipped one, for the two table pins below."""
+    rows = ["| `✓` | `ok` | the service named itself |", "| `~` | `no_ingest` | not ingesting |"]
+    if split:
+        rows.insert(1, "")
+    return "\n".join(["", "| Mark | Status | Meaning |", delimiter, *rows, ""])
+
+
+def test_a_delimiter_row_a_renderer_would_reject_is_rejected_here() -> None:
+    """The property this step bought: the delimiter is held against the rule GFM applies, which is
+    a width comparison against the header plus a per-cell shape, not a character class.
+
+    Constructed input, and it has to be: on the tree the delimiter is correct, so nothing would go
+    red if this regressed. Each rejected spelling below was measured with a real CommonMark
+    renderer to produce NO table at all, zero rows, while the parser here went on reading six and
+    every guard stayed green. The guide is package data read by somebody with no repository around
+    it, so a legend that renders as a wall of pipes is the failure this file exists to prevent.
+
+    The accepted half is not decoration. Two of those three spellings are edits QA-50 deliberately
+    made legal, and a delimiter rule tight enough to reject them would have undone that.
+
+    Red-proof: match the delimiter against ``r"^\\|?[\\s|:-]+$"`` again, which accepts all five.
+    """
+    for delimiter in ("|---|---|", "|", "| | |", "|:|:|:|", "---"):
+        with pytest.raises(AssertionError, match="delimiter row"):
+            _table_rows(_legend_fixture(delimiter), "fixture legend")
+    for delimiter in ("|---|---|---|", "| --- | --- | --- |", "|:---:|:---:|---:|"):
+        rows = _table_rows(_legend_fixture(delimiter), "fixture legend")
+        assert [status for _, status in rows] == ["ok", "no_ingest"], (
+            f"a delimiter GFM accepts was rejected or misread: {delimiter!r} gave {rows}. The two "
+            "spacing spellings are edits this parser was changed to allow."
+        )
+
+
+def test_a_blank_line_inside_the_legend_is_rejected() -> None:
+    """The property this step bought: a blank line between two rows ends the table.
+
+    Constructed input, same reason. Measured with a renderer on the real legend: one blank line
+    before the last row renders six ``<tr>`` instead of seven and drops the last row into a
+    paragraph of literal pipes, while this parser still returned all six rows and every guard
+    stayed green. The filter that hid it is the ``line.strip()`` this function uses to find the
+    header, which is right for the marker padding around the table and wrong inside it.
+
+    The accepted half pins that padding: blank lines OUTSIDE the table, which every marked region
+    carries, must stay legal.
+
+    Red-proof: delete the split check.
+    """
+    with pytest.raises(AssertionError, match="blank line"):
+        _table_rows(_legend_fixture(split=True), "fixture legend")
+    padded = "\n\n" + _legend_fixture().strip("\n") + "\n\n"
+    assert len(_table_rows(padded, "fixture legend")) == 2, (
+        "blank lines around the table were rejected; they are the marker padding every marked "
+        "region carries and have to stay legal."
     )
 
 
