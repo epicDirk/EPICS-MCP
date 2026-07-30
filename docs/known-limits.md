@@ -11,8 +11,9 @@ open work in words.
 **Every entry carries its own measurement date**, and every figure in it is a measurement of the
 tree on that date, not an invariant: this file is markdown, and markdown is unguarded here (that is
 the first entry). Treat a number as "was true when written" and re-measure before building on it.
-Entries 1 to 8 were measured 2026-07-26, entries 9 and 10 on 2026-07-28, entry 11 on 2026-07-29 and
-entry 13 on 2026-07-30; entry 12 states a property of this page and measures nothing.
+Entries 1 to 8 were measured 2026-07-26 unless the entry itself states a later date, entries 9 and 10
+on 2026-07-28, entry 11 on 2026-07-29 and entry 13 on 2026-07-30; entry 12 states a property of this
+page and measures nothing.
 
 One consequence of that is applied here rather than only described: where a figure exists to
 establish a SHARE and no guard can re-run it, the share is what this page states, together with the
@@ -175,19 +176,37 @@ branch in any revision; the note this entry was transcribed from had it right, a
 mis-transcribed it on the way in. A page of limits that sends a reader to the wrong function costs exactly what the
 limit was meant to save.
 
-## 8 · The prose detector's own reading behaviour is barely pinned
+## 8 · The prose detector's reading behaviour is pinned on constructed input only
 
-`tests/prose_numbers.py` has no test module of its own. Its sentence-boundary look-ahead is, measured
-three times running, without effect on the currently watched prose, so both of its recorded repairs
-could be reverted with nothing going red. Open: `prose_numbers.py` needs a test module of its own,
-written over SYNTHETIC prose, because the watched tree cannot tell the behaviours apart (S37).
+**Re-measured 2026-07-30, and this entry changed as a result (S37).** It used to say that
+`tests/prose_numbers.py` had no test module at all, so both of its recorded repairs could be reverted
+with nothing going red. It now has one, `tests/test_prose_numbers.py`.
+
+That module is written over SYNTHETIC prose, and that is forced rather than preferred: on the watched
+tree the three spellings of the boundary class find an identical set of sites and keys, so a test
+against the real files cannot separate them, and would report the behaviour as guarded while every
+mutation of it stayed green. Constructed input is the only place the difference exists.
+
+Five behaviours are pinned, and each was proven able to go red by mutating the module and naming the
+test that fell: the sentence boundary (mutant `(?-i:[A-Z])`, three cases fell), the rule that a gap
+word may not end in a terminator (two fell), the blank line that ends a docstring paragraph, the bare
+`#` that ends a comment run, and the tokenizer being fed through `io.StringIO` rather than
+`str.splitlines`. The module was restored to a sha256-identical state afterwards.
+
+What remains true, and is why the heading says "on constructed input": the watched tree exercises none
+of it. These tests establish what the module DOES with prose somebody wrote for them, never that the
+watched prose is read correctly, which is the comparing half's job.
 
 ⛔ One specific tempting repair is measured to be **wrong**: making the boundary class case-sensitive.
 Counting a boundary as `[.;:]` + whitespace + a letter, inside the comment runs and docstring
 paragraphs the detector actually reads across the five watched files, **just over half** are followed
 by a lower-case word: an identifier, a quoted term, a continued clause. A capital-only rule stops
 recognising those and re-introduces the cross-sentence pairing the look-ahead exists to prevent. The
-class in the code now says "any letter", which is what it always did under `re.IGNORECASE`.
+class in the code now says "any letter", which is what it always did under `re.IGNORECASE`, and since
+S37 the decision is a TEST rather than this paragraph:
+`test_a_lower_case_word_after_a_terminator_still_ends_the_sentence` fails on the capital-only rule.
+⚠️ Only on the SCOPED mutant, though. A bare `[A-Z]` is no mutation at all under `re.IGNORECASE`, so
+an author checking their own repair against it measures nothing and concludes it is safe.
 
 ⚠️ The **share** is what carries that decision, and the share is all this entry states, because the
 absolute pair it used to print could not survive: written first from the previous commit's tree, in
