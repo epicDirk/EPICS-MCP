@@ -7,20 +7,20 @@ when the session trusts it. This binds the guide's tool-inventory section to the
 registrations and its ``EPICS_MCP_*`` mentions to ``EpicsConfig``: the same anti-drift pattern the
 repo already uses for README resource URIs.
 
-Three surfaces. ONE of them is anchored on a marked region rather than on a line number, and the
-other two read the whole guide on purpose, which is worth saying because the opposite used to be
-claimed here:
+Three surfaces, and no surface is read one single way, which is worth saying because a summary
+claiming otherwise stood here twice. What each guard reads is stated per guard, never per surface:
 
-* the tool inventory, against the registrations. This one IS anchored on markers;
+* the tool inventory, against the registrations. Anchored on markers;
 * every ``EPICS_MCP_*`` mention, against ``EpicsConfig``. Whole file: measured, the guide mentions
   those variables on 35 lines and NONE of them falls inside the inventory markers, so an anchored
   scan would read no mention at all;
 * the status legend and the statuses named in the prose above it, against ``PlaneStatus`` and
-  ``cli_doctor._STATUS_MARK`` (QA-47). Two of its four guards are anchored on markers; the pairing
-  scan reads the whole text, and that is what catches a SECOND, drifting copy of the marked region,
-  which the anchored guards cannot see because ``re.search`` returns the first match. It also
-  reaches beyond the guide: a glyph paired with a status name is checked on every TRACKED
-  ``docs/*.md`` page too, because a second copy of a guarded number is an unguarded number.
+  ``cli_doctor._STATUS_MARK`` (QA-47). Its four guards read four different things: the tiling guard
+  reads no guide text at all, the legend guard one marked region, the location guard both of them,
+  and the pairing scan the whole text. That last one is what catches a SECOND, drifting copy of a
+  marked region, which the anchored guards cannot see because ``re.search`` returns the first
+  match. It also reaches beyond the guide: a glyph paired with a status name is checked on every
+  TRACKED ``docs/*.md`` page too, because a second copy of a guarded number is an unguarded number.
 
 What is still deliberately outside: the free-form Archiver MGMT verbs (``getAllPVs`` /
 ``getPVsForThisAppliance``) are manual REST recipes with no implementing tool, so they are
@@ -281,11 +281,18 @@ _GLYPH_CHARACTERS = frozenset("✓✗?!~·i")
 # Every other tracked docs page is READ, but not required to contain anything: measured, the other
 # five carry no pairing at all today, so a floor over all of them would be red on the first day.
 #
-# These three stay LITERAL names on purpose, and the floor below is on the INPUT rather than on the
-# output. Without it this scan would be a regression rather than an improvement: today a renamed
-# docs/tools.md is a loud FileNotFoundError, whereas a page list derived from git would simply stop
-# containing it, and the page would drop out of the scan together with its floor, because the floor
-# lives inside the loop over the pages that ARE there.
+# These three stay LITERAL names on purpose, and the tuple is read TWICE: once as a floor on the
+# INPUT, before any page is read, and once as a floor on each page's OUTPUT. Before the page list
+# came from git, a renamed docs/tools.md WAS a loud FileNotFoundError; a derived list simply stops
+# containing it, and the page would then drop out of the scan together with its floor, because the
+# output floor lives inside the loop over the pages that ARE there.
+#
+# ⚠️ Those two readings are why removing a name from here is never a small edit. When a page
+# legitimately stops documenting statuses its output floor reddens, and deleting its name is the
+# repair that message invites; measured, that also retires the input floor, so a LATER rename of
+# the same page drops it out of the scan without a word. Retire a name only together with the page.
+# And the entry for the shipped guide can only ever satisfy the input floor, never fail it: that
+# key is put into the population unconditionally, one line above the check.
 _PAIRING_EXPECTED = ("the shipped guide", "docs/tools.md", "docs/deployment.md")
 
 
@@ -587,17 +594,25 @@ def test_the_guide_status_buckets_tile_plane_status() -> None:
     decides where it is written down, and that is the whole of QA-47: the legend ships inside the
     wheel as ``epics-pv://guide``, and a status missing from it used to be invisible.
 
-    The union is compared as a SET, and the count stands BESIDE it rather than in place of it. Three
-    equal cardinalities are blind to a RENAME, because a rename is cardinality-neutral: measured on
-    this tree, renaming a status in ``PlaneStatus`` and ``_STATUS_MARK`` while leaving the buckets
-    alone was green here for all twelve statuses, and for the six named outside the legend it was
-    green in every other guard in this file too, so the buckets would go on naming a status that no
-    longer exists. ``declared == len(union)`` is kept alongside for the DOUBLE-LISTING case, which
-    set equality alone cannot see. The message below already printed both set differences, and that
-    was the tell: a message that prints a set difference states a claim the assertion has to make.
+    The union is compared as a SET, and the double-listing count stands BESIDE it rather than in
+    place of it. Three equal cardinalities are blind to a RENAME, because a rename is
+    cardinality-neutral: measured on this tree, renaming a status in ``PlaneStatus`` and
+    ``_STATUS_MARK`` while leaving the buckets alone was green here for all twelve statuses, so the
+    buckets would go on naming a status that no longer exists. Set equality alone is in turn blind
+    to a DOUBLE listing, which is why both halves are asserted. The message below already printed
+    both set differences, and that was the tell: a message that prints a set difference states a
+    claim the assertion has to make.
 
-    Red-proof: rename a status without moving its bucket entry, add a Literal value without
-    bucketing it, drop one from a bucket, or list one twice.
+    How much of that this guard carries alone, re-measured after the location guard gained its
+    reverse direction, because the sentence that stood here was written before it and had gone
+    stale: of the six statuses named outside the legend, the THREE named in the prose region are
+    caught by ``test_the_declared_status_locations_still_describe_the_guide`` as well. The three
+    named in NEITHER region, ``disabled``, ``disconnected`` and ``info``, are caught by nothing but
+    the set comparison here.
+
+    Red-proof: ``test_a_renamed_status_is_reported_though_the_three_counts_still_agree``, which
+    pins the property on constructed input, plus the tree itself under a rename, an unbucketed
+    Literal value, a dropped bucket entry, or one listed twice.
     """
     buckets = (_IN_THE_GLYPH_TABLE, _IN_THE_STATUS_PROSE, _NOT_NAMED_IN_THE_GUIDE)
     statuses = set(get_args(PlaneStatus))
