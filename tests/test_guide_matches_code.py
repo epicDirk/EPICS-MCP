@@ -225,11 +225,18 @@ _BACKTICKED_RE = re.compile(r"`([^`\s]+)`")
 #: invisible (a false green) while an invented one reddened. Extracting the spans first cannot
 #: have that failure: it consumes each span whole.
 _LOWERCASE_TOKEN_RE = re.compile(r"[a-z][a-z0-9_]*")
-#: Tokens in the guide's status prose that are backticked and lower-case but are NOT plane statuses.
-#: EMPTY today, and that emptiness is the promise: the shipped guide says the statuses named in that
-#: paragraph are drift-guarded, and an allowlist that is needed on day one would be an excuse rather
-#: than a guard. A legitimate new non-status word there is DECLARED here, which the failure message
-#: says in as many words; the repair is to declare it, never to delete the check.
+#: Code spans in the guide's status prose that are lower-case identifiers but are NOT plane
+#: statuses. EMPTY today, and that emptiness is the promise: the shipped guide says the statuses
+#: named in that paragraph are drift-guarded, and an allowlist that is needed on day one would be an
+#: excuse rather than a guard. A legitimate new non-status word there is DECLARED here, which the
+#: failure message says in as many words; the repair is to declare it, never to delete the check.
+#:
+#: That instruction only costs anything because every entry has to EARN its place: an entry that is
+#: not written in the region is reported (``_prose_token_findings``). Without that floor "declare
+#: it" and "delete the check" are the same move at different prices, which was measured rather than
+#: argued: a dead entry was green, a real ``PlaneStatus`` declared away was green, and declaring all
+#: five of the region's identifiers at once was green too, leaving the reverse direction inert while
+#: the shipped marker went on promising it.
 _NOT_A_STATUS_IN_THE_PROSE: frozenset[str] = frozenset()
 #: EVERY code span of a line, including the whitespace-free ones. Matching them ALL and filtering
 #: afterwards is what keeps the backtick pairing honest, see ``_glyph_status_pairings``.
@@ -334,6 +341,25 @@ def _code_spans(text: str) -> list[str]:
             continue
         spans += _CODE_SPAN_RE.findall(line)
     return spans
+
+
+def _prose_token_findings(
+    spans: set[str], statuses: set[str], allowlist: frozenset[str]
+) -> tuple[list[str], list[str]]:
+    """``(dead, unknown)`` for the status paragraph: entries that earn nothing, tokens nobody knows.
+
+    Both halves of the reverse direction, in one place and taking their world as arguments, so the
+    properties below can be pinned on constructed input without monkeypatching a module. That is
+    the same shape, and the same reason, as ``marks`` being a parameter of
+    ``_glyph_status_pairings``, and it is this project's "no hidden state, inject it" rule.
+
+    ``dead`` is a floor on the DECLARATION and is reported first, before the comparison it guards:
+    an allowlist entry that is not written in the region weakens the check without anyone noticing.
+    ``unknown`` is the comparison itself.
+    """
+    dead = sorted(token for token in allowlist if token not in spans)
+    named = {span for span in spans if _LOWERCASE_TOKEN_RE.fullmatch(span)}
+    return dead, sorted(named - allowlist - statuses)
 
 
 def _glyph_rows() -> list[tuple[str, str]]:
@@ -720,6 +746,38 @@ def test_a_span_behind_another_span_is_read_and_the_prose_between_them_is_not() 
     )
 
 
+def test_a_declared_non_status_nobody_wrote_is_reported() -> None:
+    """The property this step bought: an allowlist entry has to EARN its place by being written in
+    the region it exempts.
+
+    Constructed input, and here that is not a convenience but the only possibility: the allowlist
+    is empty today, so the floor is vacuously green on the tree and would stay green if it were
+    deleted. Its whole value is what it does to a NON-empty allowlist, which does not exist yet.
+
+    Why it exists: the constant's own comment says the repair for a new non-status word is to
+    declare it, "never to delete the check". Measured before this floor, declaring was exactly as
+    effective as deleting and easier to justify. Declaring all five identifiers the region carries
+    left every guard green with the reverse direction doing nothing at all.
+
+    The second half is the control, and it is the half that keeps the floor honest: an entry that
+    IS written must be accepted and must not resurface as unknown. Without it the cheapest way to
+    pass this pin would be to reject every allowlist entry.
+
+    Red-proof: drop the ``dead`` computation from ``_prose_token_findings``, or return it empty.
+    """
+    dead, unknown = _prose_token_findings({"ok"}, {"ok"}, frozenset({"detail"}))
+    assert dead == ["detail"], (
+        f"a declared non-status that the region does not write was not reported: dead={dead}. "
+        "An allowlist entry nobody wrote silently widens the exemption."
+    )
+    assert not unknown, f"the dead entry leaked into the unknown list as well: {unknown}"
+    dead, unknown = _prose_token_findings({"ok", "detail"}, {"ok"}, frozenset({"detail"}))
+    assert not dead and not unknown, (
+        f"a declared non-status that IS written was rejected: dead={dead} unknown={unknown}. The "
+        "floor has to accept an earned entry, or declaring becomes impossible instead of costly."
+    )
+
+
 def test_the_declared_status_locations_still_describe_the_guide() -> None:
     """The two location buckets are held against the two marked regions, in both directions: a
     status declared as named in the prose has to be named there, and a status declared as named
@@ -781,8 +839,12 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
         "status really is documented as an epics-doctor status, move it to the bucket for the "
         "region it stands in; do not move it because a DIFFERENT namespace borrowed the word."
     )
-    named = {span for span in prose if _LOWERCASE_TOKEN_RE.fullmatch(span)}
-    unknown = sorted(named - _NOT_A_STATUS_IN_THE_PROSE - statuses)
+    dead, unknown = _prose_token_findings(prose, statuses, _NOT_A_STATUS_IN_THE_PROSE)
+    assert not dead, (
+        f"_NOT_A_STATUS_IN_THE_PROSE declares {dead}, but the guide's status prose does not write "
+        "them. Remove the entry: an allowlist that keeps a word nobody wrote is how this check "
+        "gets emptied one line at a time, and emptying it is what its own comment forbids."
+    )
     assert not unknown, (
         f"the guide's status prose names {unknown} as if epics-doctor printed them, but they are "
         "not PlaneStatus values. If the status was removed, the sentence has to go with it; if the "
