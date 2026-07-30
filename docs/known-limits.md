@@ -12,8 +12,8 @@ open work in words.
 tree on that date, not an invariant: this file is markdown, and markdown is unguarded here (that is
 the first entry). Treat a number as "was true when written" and re-measure before building on it.
 Entries 1 to 8 were measured 2026-07-26 unless the entry itself states a later date, entries 9 and 10
-on 2026-07-28, entry 11 on 2026-07-29 and entry 13 on 2026-07-30; entry 12 states a property of this
-page and measures nothing.
+on 2026-07-28, entry 11 on 2026-07-29 and entries 13 and 14 on 2026-07-30; entry 12 states a
+property of this page and measures nothing.
 
 One consequence of that is applied here rather than only described: where a figure exists to
 establish a SHARE and no guard can re-run it, the share is what this page states, together with the
@@ -332,3 +332,43 @@ Measured: the guard survives replacing any remedy with a different, equally impe
 no test reads a documentation path out of a Python string (`tests/test_doc_links.py` scans tracked
 markdown only). Deliberate: a guard over the WORDING would pin prose that has to be free to improve,
 which is the trade this page's first entry already describes. The check is the review.
+
+## 14 · The shipped status legend is guarded by name and glyph, not by what it says
+
+Measured 2026-07-30. `tests/test_guide_matches_code.py` holds the operator guide's status legend
+against `PlaneStatus` and `cli_doctor._STATUS_MARK`: every status is sorted into one of three
+declared buckets (named in the legend, named in the prose paragraph above it, named in neither),
+the legend's Status and Mark cells are compared with the code, and every backticked glyph/status
+pairing on the guide, `docs/tools.md` and `docs/deployment.md` has to agree with the mark the CLI
+prints. Every pairing on the tree today agrees, and the guard re-checks that on every run. Four
+things it does not do, and one it records.
+
+**The Meaning column is not read.** A row may describe its own status wrongly and stay green.
+Rejected rather than postponed, for the reason entry 13 gives about the remedy texts: a guard over
+the wording pins prose that has to stay free to improve. What is compared is a pair of code tokens.
+
+**The location buckets are checked inside two marked regions, not across the file.** The whole-file
+search was written first and then rejected on measurement: `disabled`, `info` and `disconnected`
+are ordinary words in that document in three FOREIGN senses (a log level, an alarm config value,
+and `diagnose_connection`'s own `State`, whose sibling `name_typo` the guide already code-formats).
+A whole-file search reddens on an edit that documented something else entirely, and the obvious
+repair for that red, moving the status into a "named" bucket, is fully GREEN while retiring the gap
+the bucket exists to record. The price paid instead is a false negative: a status documented in
+some third place goes unnoticed. The match is case-sensitive on purpose, because case-insensitively
+the guide already carries `Disabled` and `Info` in two of those foreign senses.
+
+**A bucket says where a status NAME appears, not whether the concept is explained.** The guide
+describes a disabled plane, an empty `*_URL` reported honestly and never a failure, without ever
+using the status name, so `disabled` counts as unnamed here.
+
+**A pairing needs both halves side by side.** A sentence naming glyphs alone, as the guide's "read
+the `?`, `!` and `~` lines" does, carries no status name and is outside the scan.
+
+**The gap those buckets record, written out here because a backlog is not a home for it.**
+`disabled`, `info` and `disconnected` are never named by their status name anywhere in the shipped
+guide, and two of the marks, the middle dot and the letter i, have no legend in it at all. That is
+a measurement and not a decision: the legend deliberately carries the identity-near statuses, but
+nobody decided that these three should be invisible to a reader who has only the shipped document.
+Re-derive it by searching the guide for each `PlaneStatus` value as a backticked token. The
+declaration in the test file states today's answer, and it goes red the moment one of them is
+documented inside a marked region.
