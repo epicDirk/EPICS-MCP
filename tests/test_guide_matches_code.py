@@ -379,9 +379,21 @@ def _prose_token_findings(
     ``dead`` is a floor on the DECLARATION and is reported first, before the comparison it guards:
     an allowlist entry that is not written in the region weakens the check without anyone noticing.
     ``unknown`` is the comparison itself.
+
+    Each span is STRIPPED before either half reads it, and that is a correctness fix rather than
+    tidiness: the comparison is against what a READER sees, and padding inside a code span is
+    invisible to one. CommonMark removes one leading and one trailing space when both are present,
+    so ```` ` detail ` ```` renders exactly like ```` `detail` ````; a one-sided ```` `detail ` ````
+    renders with a space nobody notices in running text. Measured before this strip, all four
+    padded spellings were GREEN while the unpadded one was red, which made two typed spaces the
+    cheapest way to retire this direction, cheaper than the allowlist entry the message asks for.
+    Stripping at the comparison point rather than in ``_code_spans`` is deliberate: the pairing pass
+    splits its tokens anyway, so it never had the defect, and the shared reader is left saying what
+    the markdown literally holds.
     """
-    dead = sorted(token for token in allowlist if token not in spans)
-    named = {span for span in spans if _LOWERCASE_TOKEN_RE.fullmatch(span)}
+    written = {span.strip() for span in spans}
+    dead = sorted(token for token in allowlist if token not in written)
+    named = {span for span in written if _LOWERCASE_TOKEN_RE.fullmatch(span)}
     return dead, sorted(named - allowlist - statuses)
 
 
@@ -1098,6 +1110,35 @@ def test_a_declared_non_status_nobody_wrote_is_reported() -> None:
         f"a declared non-status that IS written was rejected: dead={dead} unknown={unknown}. The "
         "floor has to accept an earned entry, or declaring becomes impossible instead of costly."
     )
+
+
+def test_a_padded_code_span_is_read_as_the_word_a_reader_sees() -> None:
+    """The property this step bought: whitespace inside a code span cannot hide a token.
+
+    The reverse direction compares against what a READER sees, and padding is invisible to one.
+    CommonMark drops one leading and one trailing space when both are present, so a padded span
+    and its unpadded twin render as the same word. Measured before the strip: the unpadded spelling
+    was reported and ALL FOUR padded ones were green, which made two typed spaces a cheaper way out
+    of this check than the allowlist entry its own failure message asks for. That is the shape this
+    file rejects everywhere else: a repair that is greener than the one the message steers to.
+
+    The second and third assertions are the controls. A padded REAL status must not start being
+    reported, or the strip would trade one false green for a false red; and the ``dead`` floor has
+    to see through padding as well, or an entry written with padding would be called unwritten.
+
+    Red-proof: drop the ``.strip()`` from ``_prose_token_findings``; the first assertion fails on
+    the first padded spelling.
+    """
+    for padded in (" detail ", "detail ", " detail", "  detail  "):
+        _, unknown = _prose_token_findings({"ok", padded}, {"ok"}, frozenset())
+        assert unknown == ["detail"], (
+            f"a padded code span hid a non-status token: {padded!r} gave {unknown}. A reader sees "
+            "the same word as in the unpadded spelling, so the guard has to as well."
+        )
+    _, unknown = _prose_token_findings({"ok", " ca_error "}, {"ok", "ca_error"}, frozenset())
+    assert not unknown, f"control: a padded real status was reported as unknown: {unknown}"
+    dead, _ = _prose_token_findings({" detail "}, set(), frozenset({"detail"}))
+    assert not dead, f"control: an allowlist entry written with padding was called dead: {dead}"
 
 
 def test_the_declared_status_locations_still_describe_the_guide() -> None:
