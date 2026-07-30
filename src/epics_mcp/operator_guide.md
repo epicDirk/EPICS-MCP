@@ -412,6 +412,7 @@ large waveforms vs. per-network instances, each with its own MGMT root), `getApp
 yields a complete-looking list of the wrong population.
 
 ### Verify a deployment's config: `epics-doctor`
+<!-- BEGIN:status-prose (the plane statuses named outside the legend below are drift-guarded against PlaneStatus, see tests/test_guide_matches_code.py) -->
 The `epics-doctor` CLI (core install) is a read-only self-check: it probes every CONFIGURED plane
 (a transport probe, refined on success by an identity probe, up to two requests for a healthy
 plane, THREE on the archiver, whose identified appliance is also asked whether it is actually
@@ -428,6 +429,7 @@ either. Run it first in a new facility to confirm the environment the launcher h
 (there is no `.env` file: configuration is read from `os.environ`); add `--probe-pv NAME` to also
 pass/fail the live PVA plane against a real PV. Full deployment/config guide:
 [docs/deployment.md](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md).
+<!-- END:status-prose -->
 
 Every line that reports a PROBLEM also carries its remedy, appended to the observation and never
 replacing it, so a `--json` reader gets both from the same `detail` field. That includes
@@ -447,6 +449,7 @@ about ChannelFinder). That exact case now surfaces as `!` `identity_probe_failed
 identity probe hits the 401 and no longer collapses to a silent exit `0`. Each plane is therefore
 also asked to **name itself**:
 
+<!-- BEGIN:status-glyphs (drift-guarded against cli_doctor._STATUS_MARK, see tests/test_guide_matches_code.py) -->
 | Mark | Status | Meaning |
 |---|---|---|
 | `✓` | `ok` | the service named itself correctly, confirmed |
@@ -455,6 +458,7 @@ also asked to **name itself**:
 | `✗` | `config_error` | the configuration is self-contradictory, no probe is even attempted (e.g. `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` set while `EPICS_MCP_ARCHIVER_URL` is empty, every archiver tool gates on the latter, so that retrieval URL is never used). Exit `1` |
 | `✗` | `backend_down` | reachable AND the service named itself, but a backend it depends on is measurably down, the alarm logger reports its Elasticsearch as not `Connected`, so its search/history tools will fail. The blind HEAD used to hide this as `ok`; unlike `unverified`, identity IS proven here and the service reports its OWN backend broken. Exit `1` |
 | `~` | `no_ingest` | reachable, identity PROVEN, and the service is measurably not doing its job: an Archiver appliance holding channels with **none** connected, or reporting one of its own webapps stopped. The wiring fault this tool exists to catch, and the blind identity probe used to hide it as `ok`. Exit stays `0` on purpose (a freshly commissioned or fully paused appliance is legitimately in this state, and a hard failure would cry wolf in every CI job), so it is surfaced instead: this glyph, its own verdict line, and `degraded_planes` in `--json`. Not `?`: that means "we could not tell what this is", and here we can |
+<!-- END:status-glyphs -->
 
 `unverified` is not a failure on purpose: that a healthy service answers its beacon anonymously is
 measured at one site, and making that a hard failure everywhere would be an overclaim. The same

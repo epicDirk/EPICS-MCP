@@ -1,26 +1,43 @@
-"""Drift guard: the guide's tool/env surface must match the code.
+"""Drift guard: the guide's tool, env and doctor-status surfaces must match the code.
 
-The guide is hand-written prose that names MCP tools and ``EPICS_MCP_*`` env vars. Without a guard,
-a renamed tool or a removed env var makes the guide silently wrong, it would tell a fresh session
-to call a tool that no longer exists, exactly when the session trusts it. This binds the guide's
-tool-inventory section to the ``@mcp.tool`` registrations and its ``EPICS_MCP_*`` mentions to
-``EpicsConfig``: the same anti-drift pattern the repo already uses for README resource URIs.
+The guide is hand-written prose that names MCP tools, ``EPICS_MCP_*`` env vars and the plane
+statuses ``epics-doctor`` prints. Without a guard, a renamed tool or a removed env var makes the
+guide silently wrong, it would tell a fresh session to call a tool that no longer exists, exactly
+when the session trusts it. This binds the guide's tool-inventory section to the ``@mcp.tool``
+registrations and its ``EPICS_MCP_*`` mentions to ``EpicsConfig``: the same anti-drift pattern the
+repo already uses for README resource URIs.
 
-Scope is deliberately narrow: MCP tool names and env vars only. The free-form Archiver MGMT verbs
-(``getAllPVs`` / ``getPVsForThisAppliance``) are manual REST recipes with no implementing tool, so
-they are documented in prose and never checked here.
+Three surfaces, each anchored on a marked region rather than on a line number:
+
+* the tool inventory, against the registrations;
+* every ``EPICS_MCP_*`` mention, against ``EpicsConfig``;
+* the status legend and the statuses named in the prose above it, against ``PlaneStatus`` and
+  ``cli_doctor._STATUS_MARK`` (QA-47). This one reaches beyond the guide: a glyph paired with a
+  status name is also checked on ``docs/tools.md`` and ``docs/deployment.md``, because a second
+  copy of a guarded fact is an unguarded fact.
+
+What is still deliberately outside: the free-form Archiver MGMT verbs (``getAllPVs`` /
+``getPVsForThisAppliance``) are manual REST recipes with no implementing tool, so they are
+documented in prose and never checked here, and the legend's Meaning column is prose that has to
+stay free to improve. What the status half does NOT check is written down and dated in
+``docs/known-limits.md`` section 14.
 """
 
 from __future__ import annotations
 
 import ast
 import re
+from itertools import pairwise
 from pathlib import Path
+from typing import get_args
 
+from epics_mcp import cli_doctor
 from epics_mcp.config import EpicsConfig
 from epics_mcp.resources import get_guide
+from epics_mcp.services.doctor import PlaneStatus
 
-_SRC = Path(__file__).resolve().parent.parent / "src" / "epics_mcp"
+_ROOT = Path(__file__).resolve().parent.parent
+_SRC = _ROOT / "src" / "epics_mcp"
 _SERVER = _SRC / "server.py"
 _DISPLAY_TOOLS = _SRC / "display_tools.py"
 
@@ -137,3 +154,229 @@ def test_every_level_parameter_points_at_list_log_levels() -> None:
     assert descriptions, "no level parameters found, the AST anchor broke"
     missing = sorted(name for name, text in descriptions.items() if "list_log_levels" not in text)
     assert not missing, f"level description does not mention list_log_levels: {missing}"
+
+
+# --- the doctor status surface (QA-47) ----------------------------------------------------------
+
+# Which marked region of the SHIPPED guide names each ``PlaneStatus``. The buckets are LOCATIONS,
+# not meanings ("named in the glyph legend", "named in the prose paragraph above it", "named in
+# neither"), so a status that gets documented later simply moves bucket, and the move stays a true
+# statement about where it now stands.
+#
+# Declared rather than derived, and that was measured rather than assumed: no boolean combination
+# of the code-side facts (the status frozensets in ``services/doctor.py``, the ``_REMEDY`` keys,
+# "carries a mark of its own") produces the legend's membership. Which statuses the legend carries
+# is an editorial choice, and only an explicit partition lets the tiling test below prove the three
+# buckets cover ``PlaneStatus`` exactly: the same shape, and the same reason, as the three sets
+# ``test_status_partition_is_total_and_disjoint`` tiles.
+_IN_THE_GLYPH_TABLE: frozenset[str] = frozenset(
+    {"ok", "unverified", "identity_probe_failed", "config_error", "backend_down", "no_ingest"}
+)
+_IN_THE_STATUS_PROSE: frozenset[str] = frozenset({"ca_error", "api_error", "unreachable"})
+# A MEASURED GAP, not a decision (2026-07-30): the shipped guide never names these three by their
+# status name, and their marks have no legend in it at all. Declared here so the gap is
+# machine-visible and cannot go stale in silence, rather than living only in a backlog; documenting
+# any of them inside a marked region reddens the location test below, which is the point.
+_NOT_NAMED_IN_THE_GUIDE: frozenset[str] = frozenset({"disabled", "info", "disconnected"})
+
+_GLYPH_TABLE_RE = re.compile(
+    r"<!-- BEGIN:status-glyphs.*?-->(.*?)<!-- END:status-glyphs -->", re.DOTALL
+)
+_STATUS_PROSE_RE = re.compile(
+    r"<!-- BEGIN:status-prose.*?-->(.*?)<!-- END:status-prose -->", re.DOTALL
+)
+# ``| `<mark>` | `<status>` | ...``: the two cells this file compares. The Meaning column is
+# deliberately not captured, a guard over it would pin prose that has to stay free to improve
+# (``docs/known-limits.md`` section 13 rejects exactly that for the sibling remedy guard).
+_GLYPH_ROW_RE = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*`([a-z_]+)`\s*\|")
+_BACKTICKED_RE = re.compile(r"`([^`\s]+)`")
+# The prose surfaces that re-state a pairing the legend already carries. They do NOT ship in the
+# wheel, unlike the guide, but a wrong glyph in them misleads a reader just the same and the cost
+# of covering them is one path each.
+_DOC_SURFACES = ("docs/tools.md", "docs/deployment.md")
+
+
+def _guide_region(pattern: re.Pattern[str], name: str) -> str:
+    match = pattern.search(get_guide())
+    assert match, f"the guide's {name} markers were not found, the drift anchor broke"
+    return match.group(1)
+
+
+def _glyph_rows() -> list[tuple[str, str]]:
+    """The ``(mark, status)`` cells of the shipped legend: every row, or a red test.
+
+    Both floors sit BEFORE any caller compares sets, the ordering
+    ``test_guide_tool_inventory_matches_registrations`` already uses (its anchor assertions run
+    before its set equality). Either floor placed after a comparison is dead code: the comparison
+    fails first and reports a documentation gap where in truth the anchor broke.
+    """
+    rows: list[tuple[str, str]] = []
+    for line in _guide_region(_GLYPH_TABLE_RE, "status-glyphs").splitlines():
+        if not line.startswith("|") or line.startswith(("| Mark ", "|--")):
+            continue
+        match = _GLYPH_ROW_RE.match(line)
+        assert match, (
+            "a row of the shipped glyph legend does not parse as `mark` | `status` | ...: "
+            f"{line!r}. Without this floor it would drop out of the comparison in silence and the "
+            "guard would check less than it claims to."
+        )
+        rows.append((match.group(1), match.group(2)))
+    assert rows, "the shipped glyph legend parsed no rows at all, the table anchor broke"
+    return rows
+
+
+def _glyph_status_pairings(text: str) -> list[tuple[str, str]]:
+    """Every ``(status, mark)`` the text sets side by side, in either order.
+
+    Consecutive backticked tokens separated by at most three characters, none of them a word
+    character: ```no_ingest` (`~`)``, ```!`
+    `identity_probe_failed``` and the legend's own ``| `~` |
+    `no_ingest` |``. Newlines are folded to spaces first, because the guide already
+    splits one such pairing across a line break. Pairs are read from OVERLAPPING neighbours rather
+    than by scanning left to right and consuming: a non-consuming scan is what makes
+    ``exit `3`) and `~``` stop hiding the pairing on either side of it.
+    """
+    folded = " ".join(text.splitlines())
+    tokens = list(_BACKTICKED_RE.finditer(folded))
+    glyphs = set(cli_doctor._STATUS_MARK.values())
+    pairings: list[tuple[str, str]] = []
+    for left, right in pairwise(tokens):
+        gap = folded[left.end() : right.start()]
+        if len(gap) > 3 or re.search(r"\w", gap):
+            continue
+        for status, mark in ((left.group(1), right.group(1)), (right.group(1), left.group(1))):
+            if status in cli_doctor._STATUS_MARK and mark in glyphs:
+                pairings.append((status, mark))
+    return pairings
+
+
+def test_the_guide_status_buckets_tile_plane_status() -> None:
+    """Every plane status is declared as documented in one marked region of the shipped guide, or
+    as documented in neither. A NEW status belongs to no bucket, so it goes red here until somebody
+    decides where it is written down, and that is the whole of QA-47: the legend ships inside the
+    wheel as ``epics-pv://guide``, and a status missing from it used to be invisible.
+
+    Counted rather than compared pair by pair: sum-of-sizes == size-of-union == PlaneStatus reddens
+    on a DOUBLE-LISTING as well as on a missing or an unknown status, where three ``isdisjoint``
+    calls plus a union assertion would each need their own mutant.
+
+    Red-proof: add a Literal value without bucketing it, drop one from a bucket, or list one twice.
+    """
+    buckets = (_IN_THE_GLYPH_TABLE, _IN_THE_STATUS_PROSE, _NOT_NAMED_IN_THE_GUIDE)
+    statuses = set(get_args(PlaneStatus))
+    assert statuses, "PlaneStatus yielded no values, the Literal anchor broke"
+    declared = sum(len(bucket) for bucket in buckets)
+    union = set().union(*buckets)
+    assert declared == len(union) == len(statuses), (
+        f"the guide-location buckets no longer tile PlaneStatus: declared={declared} "
+        f"distinct={len(union)} statuses={len(statuses)}; "
+        f"only-in-buckets={sorted(union - statuses)} "
+        f"only-in-PlaneStatus={sorted(statuses - union)} "
+        "(a declared count above the distinct one means a status is listed in two buckets)"
+    )
+
+
+def test_the_shipped_glyph_legend_carries_the_marks_the_cli_prints() -> None:
+    """The legend is held against ``cli_doctor._STATUS_MARK`` in both directions: no row for a
+    status that no longer exists, no declared status without a row, and every Mark cell equal to
+    the glyph the CLI actually renders.
+
+    Nothing read this table before. It is package data served as ``epics-pv://guide``, so a wrong
+    glyph reaches a reader who has no repository around it to check against, and the only thing
+    between the two was a hand comparison somebody had to remember to make.
+
+    Red-proof: delete a row, insert one, change a Mark cell, break a marker, unbacktick a cell.
+    """
+    rows = _glyph_rows()
+    documented = {status for _, status in rows}
+    assert documented == _IN_THE_GLYPH_TABLE, (
+        "the shipped glyph legend drifted from its declaration: "
+        f"only-in-guide={sorted(documented - _IN_THE_GLYPH_TABLE)} "
+        f"only-in-declaration={sorted(_IN_THE_GLYPH_TABLE - documented)}"
+    )
+    wrong = [
+        f"{status}: the guide shows {mark!r}, the CLI prints "
+        f"{cli_doctor._STATUS_MARK.get(status)!r}"
+        for mark, status in rows
+        if mark != cli_doctor._STATUS_MARK.get(status)
+    ]
+    assert not wrong, (
+        "the shipped legend advertises a different glyph than the CLI renders:\n  "
+        + "\n  ".join(wrong)
+    )
+
+
+def test_every_glyph_status_pairing_in_the_docs_agrees_with_the_render_marks() -> None:
+    """A status is paired with its glyph in more places than the legend, and a second copy of a
+    guarded fact is an unguarded fact (``docs/known-limits.md`` says it in those words). Measured
+    on the shipped guide alone, four such pairings stand OUTSIDE the legend, one of them split
+    across a line break.
+
+    Derived rather than declared, deliberately: there is no list to keep in step. Every backticked
+    pairing found on any of these surfaces has to agree with ``_STATUS_MARK``, so a prose copy that
+    drifts goes red without anybody having had to register it first.
+
+    The floor is per surface rather than a total: a file the scan reads as empty is the way this
+    goes vacuous, and it is a different failure from a file that has drifted.
+
+    Red-proof: change a mark next to a status name anywhere on these three surfaces.
+    """
+    surfaces = {"the shipped guide": get_guide()} | {
+        rel: (_ROOT / rel).read_text(encoding="utf-8") for rel in _DOC_SURFACES
+    }
+    mismatched: list[str] = []
+    for where, text in surfaces.items():
+        pairings = _glyph_status_pairings(text)
+        assert pairings, (
+            f"{where} yielded no glyph/status pairing at all, so the scan is not reading what it "
+            "claims to: either the extraction broke or the file stopped documenting the statuses"
+        )
+        mismatched += [
+            f"{where}: `{status}` is shown with {mark!r}, the CLI prints "
+            f"{cli_doctor._STATUS_MARK[status]!r}"
+            for status, mark in pairings
+            if cli_doctor._STATUS_MARK[status] != mark
+        ]
+    assert not mismatched, (
+        "a documented glyph disagrees with the one epics-doctor renders:\n  "
+        + "\n  ".join(mismatched)
+    )
+
+
+def test_the_declared_status_locations_still_describe_the_guide() -> None:
+    """The two location buckets are held against the two marked regions, in both directions: a
+    status declared as named in the prose has to be named there, and a status declared as named
+    NOWHERE must not turn up in either region.
+
+    The negative half is why the guide carries two marked regions instead of one. Searching the
+    WHOLE guide was probed and rejected: measured, ``disabled``, ``info`` and ``disconnected`` are
+    ordinary words there in three foreign senses (an Olog level, an alarm config value, and
+    ``diagnose_connection``'s own ``State``, which the guide already code-formats a sibling of), so
+    a whole-file search reddens on an edit that documented something else entirely, and the obvious
+    repair for that red is fully GREEN while quietly retiring the gap this bucket exists to record.
+    Confining both halves to the marked regions costs a false negative (a status documented in a
+    third place goes unnoticed) and buys the absence of a false positive with a green wrong repair.
+
+    The match is an exact, CASE-SENSITIVE backticked token, stated rather than left to the reader:
+    case-insensitively the guide already carries ``Disabled`` and ``Info`` in those foreign senses,
+    and this test would be red on the day it was written.
+
+    Red-proof: unbacktick a prose status name; write a declared-absent one into a region.
+    """
+    legend = _guide_region(_GLYPH_TABLE_RE, "status-glyphs")
+    prose = _guide_region(_STATUS_PROSE_RE, "status-prose")
+    missing = sorted(status for status in _IN_THE_STATUS_PROSE if f"`{status}`" not in prose)
+    assert not missing, (
+        f"declared as named in the guide's status prose, but not found there: {missing}. Either "
+        "the mention moved out of the marked region, or the bucket needs to say so."
+    )
+    surfaced = sorted(
+        status
+        for status in _NOT_NAMED_IN_THE_GUIDE
+        if f"`{status}`" in prose or f"`{status}`" in legend
+    )
+    assert not surfaced, (
+        f"declared as named NOWHERE in the shipped guide, but now named in it: {surfaced}. If the "
+        "status really is documented as an epics-doctor status, move it to the bucket for the "
+        "region it stands in; do not move it because a DIFFERENT namespace borrowed the word."
+    )
