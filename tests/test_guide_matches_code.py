@@ -254,6 +254,16 @@ _CODE_SPAN_RE = re.compile(r"`([^`]*)`")
 #: property pin ``test_a_retired_mark_is_still_read_as_a_pairing`` sees that revert; a floor over
 #: the FORM of the rule stays vacuously green under it.
 #:
+#: Naming ONE forbidden spelling protects one spelling. Writing this line as
+#: ``frozenset(cli_doctor._STATUS_MARK.values())`` buys the identical blindness, and it is the more
+#: likely edit, because it is what anybody reaches for on seeing a magic literal. Measured, it was
+#: green in every guard in this file and cost exactly what the named revert costs: with ``~``
+#: retired, 22 pairings and 6 stale copies reported become 16 and 0. The pin above cannot see it,
+#: and not by accident: it retires a mark at CALL time, while a derived constant is built at IMPORT
+#: time from the mapping that still has it. ``mypy`` cannot separate them either, both being
+#: ``frozenset[str]``. So the independence is pinned on the SOURCE, by
+#: ``test_the_glyph_class_is_declared_and_not_borrowed_from_the_mapping``.
+#:
 #: Two more open rules were built, measured and rejected. Both buy the same stale pairings, and both
 #: pay for them with false reds on correct FUTURE prose that the declared class does not produce:
 #:
@@ -648,6 +658,56 @@ def test_the_glyph_class_covers_every_mark_the_cli_prints() -> None:
     assert not missing, (
         f"epics-doctor prints marks the pairing scan cannot recognise: {missing}. Add them to "
         "_GLYPH_CHARACTERS; that set only ever grows, because a retired mark has to stay readable."
+    )
+
+
+def test_the_glyph_class_is_declared_and_not_borrowed_from_the_mapping() -> None:
+    """The mark class must not READ ``_STATUS_MARK``, and that is checked on the source text.
+
+    Naming a forbidden repair in a comment protects the spelling that was named. The comment on
+    ``_GLYPH_CHARACTERS`` forbids ``token in marks.values()`` and the pin below catches exactly
+    that; writing the CONSTANT as ``frozenset(cli_doctor._STATUS_MARK.values())`` buys the identical
+    blindness and was green in every guard in this file. It is also the likelier edit, being what
+    anybody reaches for on seeing a magic literal.
+
+    Why no runtime check can do it: a derived constant is built at IMPORT time, from a mapping that
+    still holds every current mark, so at the moment any test runs the two are indistinguishable.
+    Measured, they are equal today, character for character. The difference only appears once a mark
+    is RETIRED, which is the one moment this scan exists for and the one moment nobody is looking.
+    ``mypy`` cannot separate them either: both are ``frozenset[str]``.
+
+    So the property is read off the syntax, which is what the file already does to find the tool
+    registrations in ``server.py`` and what ``scripts/guard_audit.py`` does to the suite. Any name
+    or attribute in the assigned expression fails it, except the container being called, so a
+    literal stays free to be spelled as a string, a set or a list.
+
+    Red-proof: assign ``frozenset(cli_doctor._STATUS_MARK.values())``.
+    """
+    module = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    assigned = [
+        node.value
+        for node in ast.walk(module)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "_GLYPH_CHARACTERS" for t in node.targets)
+    ]
+    # Non-empty floor: an AST scan that finds nothing passes every check that follows it.
+    assert len(assigned) == 1, (
+        f"expected one assignment to _GLYPH_CHARACTERS in this file, found {len(assigned)}. The "
+        "source anchor broke, so this pin was about to check nothing."
+    )
+    borrowed = sorted(
+        {
+            ast.unparse(node)
+            for node in ast.walk(assigned[0])
+            if isinstance(node, ast.Attribute)
+            or (isinstance(node, ast.Name) and node.id not in {"frozenset", "set"})
+        }
+    )
+    assert not borrowed, (
+        f"_GLYPH_CHARACTERS reads {borrowed} instead of declaring its characters. A class derived "
+        "from the mark mapping stops recognising a mark at the moment it is RETIRED, which is the "
+        "one drift this scan exists to catch, and no runtime test can see the difference before "
+        "that moment. Write the characters out."
     )
 
 
