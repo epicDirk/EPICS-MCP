@@ -78,10 +78,18 @@ epics-coverage   --displays <project-root> --scope DEV: # coverage matrix (needs
 `epics-coverage` need the `opi_navigation` engine, which a published install cannot obtain
 (see above). All are read-only.
 
-All five commands answer `--version` with their own name and the package version. ⚠️ On
-`epics-crossplane` and `epics-coverage` the engine check runs before the arguments are parsed, so on a
-core-only install those two report the missing engine instead (exit `2`); the three core commands
-answer everywhere.
+All five commands answer `--help` and `--version` with their own name and the package version, on a
+core-only install as well: they parse their arguments before asking for the display engine, so the
+one command that explains the usage is never the one you cannot run.
+
+`epics-crossplane` and `epics-coverage` still need the engine to do their work, and they say so when
+asked to do it. So does a usage error on those two, deliberately: `epics-coverage --nope` on a
+core-only install answers with the missing engine rather than with `the following arguments are
+required`, because supplying the argument would not make the command run either. The exit code is the
+engine's, not argparse's: `2` where the engine is absent (which agrees with the usage-error code
+anyway) and `1` where it is installed and fails to load, the same code the command returns on that
+install with correct arguments. Install the engine from a checkout with
+`uv sync --extra dev --group displays`.
 
 Every `epics-doctor` line that reports a PROBLEM also says what to change: the observation (the HTTP
 code, the variable that could not be reached, the appliance figures) and then the remedy for that

@@ -9,6 +9,19 @@ carry breaking changes).
 
 ### Changed
 
+- **`epics-crossplane --help` and `epics-coverage --help` now answer on a core-only install.** They
+  used to report the missing display engine and exit `2` instead, so on any install from a package
+  index, where that engine is never present, the first answer to `--help` was an instruction to
+  install something you do not need in order to read a help text. Both commands now parse their
+  arguments before asking for the engine, and `--version` answers there too, so all five console
+  commands explain themselves everywhere. They still need the engine to do their work and still say
+  so when asked to do it.
+- **A usage error on those two commands reports the engine, and its exit code is the engine's.**
+  `epics-coverage --nope` on a core-only install answers with the missing engine rather than with
+  `the following arguments are required`, because supplying the argument would not make the command
+  run either. The code is `2` where the engine is absent, as before, and `1` where the engine is
+  installed and fails to load, which is the code the same command returns on that install with
+  correct arguments.
 - **The source distribution declares what it contains.** It did not, and an undeclared sdist is not
   "the tracked tree": the backend packs the working tree minus what version control ignores, so it
   also packs any untracked file that happens to be lying there at build time. Measured on the 0.4.0
