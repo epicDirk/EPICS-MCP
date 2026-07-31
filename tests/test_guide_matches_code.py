@@ -1563,6 +1563,84 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
 # What they do NOT cover, stated so the next reader does not have to measure it: their own removal.
 # No gate in this repository sees a deleted test, and an emptied test body is reported as passed by
 # pytest and ignored by ruff, whose rule set here carries no flake8-pytest checks.
+#
+# ⚠️ A wiring pin is expensive per assertion, and for one round only three of them existed while the
+# four status guards carried twelve assert statements. Measured against the full suite, TEN of the
+# remaining reverts were silent, including both of the sentences this file exists to make true. So
+# the breadth is carried by _ASSERTED_NAMES below, which is cheap and weaker, and the two central
+# comparisons carry a wiring pin on top. What each grade buys is written where it is checked.
+
+
+#: The names each status guard asserts ON, declared so that DELETING an assertion is loud. Read off
+#: the ``test`` expression of every ``assert`` in the four guards; the message is not read, because
+#: a reverted assertion often leaves its message behind.
+#:
+#: Declared rather than derived, for the reason ``_IN_THE_GLYPH_TABLE`` gives: a derived expectation
+#: is satisfied by whatever the file happens to say today, which is the one thing this cannot check.
+_ASSERTED_NAMES: dict[str, frozenset[str]] = {
+    "test_the_guide_status_buckets_tile_plane_status": frozenset(
+        {"statuses", "only_in_buckets", "only_in_plane_status", "double_listed"}
+    ),
+    "test_the_shipped_glyph_legend_carries_the_marks_the_cli_prints": frozenset(
+        {"repeated", "documented", "_IN_THE_GLYPH_TABLE", "wrong"}
+    ),
+    "test_every_glyph_status_pairing_in_the_docs_agrees_with_the_render_marks": frozenset(
+        {"absent", "pairings", "where", "_PAIRING_EXPECTED", "mismatched"}
+    ),
+    "test_the_declared_status_locations_still_describe_the_guide": frozenset(
+        {"missing", "surfaced", "dead", "unknown"}
+    ),
+}
+
+
+def test_every_status_guard_still_asserts_on_what_it_computes() -> None:
+    """A floor over all four guards: an assertion cannot be deleted in silence.
+
+    The wiring pins above each hold ONE property, by running its guard on a doctored world. That is
+    the strong grade and it is expensive. This is the cheap one, and its whole job is breadth:
+    measured against the full suite before it existed, ten of the twelve assert statements in the
+    four guards could be removed with all 1710 tests green, among them the legend's mark comparison
+    and the pairing scan's mismatch comparison, which are the two sentences this file exists to
+    make true.
+
+    What it buys: every DELETED assertion and every RENAMED finding variable goes red here, twelve
+    of twelve, measured by removing each statement in turn.
+
+    What it does NOT buy, stated rather than implied: an assertion that stays and stops meaning
+    anything. A finding list emptied where it is built (``wrong = []``) leaves the name standing in
+    the assert and passes here. That is why the two central comparisons carry a wiring pin as well,
+    and why this floor is a floor rather than a replacement.
+
+    Red-proof: delete any assert statement from any of the four guards, or rename one of their
+    finding variables.
+    """
+    module = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    found = {
+        node.name: {
+            name.id
+            for statement in ast.walk(node)
+            if isinstance(statement, ast.Assert)
+            for name in ast.walk(statement.test)
+            if isinstance(name, ast.Name)
+        }
+        for node in ast.walk(module)
+        if isinstance(node, ast.FunctionDef) and node.name in _ASSERTED_NAMES
+    }
+    absent = sorted(set(_ASSERTED_NAMES) - set(found))
+    assert not absent, (
+        f"a declared status guard is not in this file any more: {absent}. If it was renamed, move "
+        "the name here as well; do not let it drop out, because its whole row would leave with it."
+    )
+    lost = {
+        guard: sorted(declared - found[guard])
+        for guard, declared in _ASSERTED_NAMES.items()
+        if declared - found[guard]
+    }
+    assert not lost, (
+        f"a status guard no longer asserts on something it computes: {lost}. Either the assertion "
+        "was deleted, in which case the guard now checks less than it claims to, or the variable "
+        "was renamed, in which case _ASSERTED_NAMES has to move with it."
+    )
 
 
 def test_a_padded_span_cannot_hide_a_status_from_the_location_guard(
@@ -1654,3 +1732,60 @@ def test_the_location_guard_reports_an_unknown_prose_token_itself(
     monkeypatch.setitem(globals(), "get_guide", lambda: doctored)
     with pytest.raises(AssertionError, match="as if epics-doctor printed them"):
         test_the_declared_status_locations_still_describe_the_guide()
+
+
+def test_the_legend_guard_reports_a_wrong_glyph_itself(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The MARK comparison is still ASKED FOR by the legend guard.
+
+    This is one of the two sentences the whole file exists to make true: the shipped legend shows
+    the glyph ``epics-doctor`` renders. Measured before this pin, against the full suite: deleting
+    the comparison left all 1710 tests green, because the tree agrees and nothing else reads that
+    cell. A promise nothing asks for is the shape this file spent three rounds removing.
+
+    The doctored rows keep the declared status SET and carry no duplicate, so the guard's other two
+    assertions are satisfied and only the mark comparison can fire. The second half is the control:
+    the same rows with the right glyph must pass, or the pin would hold "the guard raises" rather
+    than "the guard compares marks".
+
+    Red-proof: drop the two ``wrong`` lines from
+    ``test_the_shipped_glyph_legend_carries_the_marks_the_cli_prints``.
+    """
+    correct = [(cli_doctor._STATUS_MARK[status], status) for status in sorted(_IN_THE_GLYPH_TABLE)]
+    wrong_mark = next(m for m in _GLYPH_CHARACTERS if m != correct[0][0])
+    monkeypatch.setitem(
+        globals(), "_glyph_rows", lambda: [(wrong_mark, correct[0][1]), *correct[1:]]
+    )
+    with pytest.raises(AssertionError, match="advertises a different glyph"):
+        test_the_shipped_glyph_legend_carries_the_marks_the_cli_prints()
+    monkeypatch.setitem(globals(), "_glyph_rows", lambda: correct)
+    test_the_shipped_glyph_legend_carries_the_marks_the_cli_prints()
+
+
+def test_the_pairing_guard_reports_a_wrong_glyph_itself(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The MISMATCH comparison is still ASKED FOR by the cross-page pairing scan.
+
+    The other of the two sentences the file exists to make true: every glyph documented beside a
+    status name, on the guide or on any tracked page, is the one the CLI renders. Measured before
+    this pin, against the full suite: deleting the comparison left all 1710 tests green.
+
+    The wrong pairing is injected OUTSIDE both marked regions and uses a mark that is not a
+    lower-case identifier, and both choices are deliberate: inside a marked region, or with the
+    ``info`` mark, the doctored guide reddens the LOCATION guard as well and this pin would pass for
+    the wrong reason.
+
+    ⚠️ This pin walks the same population the guard walks, so it SKIPS with it when the git binary
+    is missing, the one skip ``_tracked_doc_pages`` allows. It is named here rather than worked
+    around, because doctoring the population instead would trip the ``absent`` input floor first.
+
+    Red-proof: drop the two ``mismatched`` lines from
+    ``test_every_glyph_status_pairing_in_the_docs_agrees_with_the_render_marks``.
+    """
+    wrong_mark = next(m for m in _GLYPH_CHARACTERS if m != cli_doctor._STATUS_MARK["ok"])
+    assert not wrong_mark.isalnum(), (
+        f"the fixture mark {wrong_mark!r} is a lower-case identifier, so the doctored guide would "
+        "redden the location guard too and this pin would pass for the wrong reason."
+    )
+    doctored = get_guide() + f"\n\nA healthy plane reports `ok` (`{wrong_mark}`).\n"
+    monkeypatch.setitem(globals(), "get_guide", lambda: doctored)
+    with pytest.raises(AssertionError, match="disagrees with the one epics-doctor renders"):
+        test_every_glyph_status_pairing_in_the_docs_agrees_with_the_render_marks()
