@@ -351,7 +351,31 @@ def _guide_region(pattern: re.Pattern[str], name: str) -> str:
 
 
 def _code_spans(text: str) -> list[str]:
-    """The TEXT of every code span, in reading order, duplicates kept.
+    """The TEXT of every code span, in reading order, duplicates kept, each STRIPPED.
+
+    The strip is here, in the reader both markdown passes share, and that placement was measured
+    rather than argued. It used to sit at one comparison point inside ``_prose_token_findings``,
+    justified by "the pairing pass splits its tokens anyway, so it never had the defect". That
+    sentence is false for the FIRST of the pairing pass's two passes: its token pattern forbids
+    whitespace inside a span, so a padded span is not read at all, and a documentation page showing
+    a WRONG glyph beside a padded status name went unreported. Measured, ```` ` ok ` ```` beside a
+    wrong mark yields no pairing while ```` `ok` ```` yields one, and a reader sees the same word
+    in both.
+
+    Two more comparison points had the same blind spot for the same reason, and the strip closes
+    all three at once: the location guard's forward half read a padded prose mention as MISSING (a
+    false red whose invited repair is green and retires the bucket), and its negative half read a
+    padded declared-absent status as still absent (a false green that silently makes the recorded
+    gap untrue).
+
+    Why a reader is the right place to normalise: CommonMark removes one leading and one trailing
+    space from a span when both are present, so a padded span and its unpadded twin render as the
+    same word, and every consumer here compares against what a READER sees. Stripping more than
+    CommonMark does (tabs, two spaces a side) errs towards REPORTING, which is the loud direction.
+    Measured on the tree the strip changes nothing at all: no span on any scanned surface carries
+    padding today, all guards stay green, and the pairing pass is byte-identical because it calls
+    ``split()``. ``_prose_token_findings`` keeps its own strip, because it takes its world as
+    arguments and its pin hands it padded input directly.
 
     The one place in this file that decides what a code span is. Both readers of markdown here go
     through it: the second pass of ``_glyph_status_pairings`` and the location guard's reverse
@@ -369,7 +393,7 @@ def _code_spans(text: str) -> list[str]:
     for line in text.splitlines():
         if line.count("`") % 2:
             continue
-        spans += _CODE_SPAN_RE.findall(line)
+        spans += (span.strip() for span in _CODE_SPAN_RE.findall(line))
     return spans
 
 
@@ -394,9 +418,14 @@ def _prose_token_findings(
     renders with a space nobody notices in running text. Measured before this strip, all four
     padded spellings were GREEN while the unpadded one was red, which made two typed spaces the
     cheapest way to retire this direction, cheaper than the allowlist entry the message asks for.
-    Stripping at the comparison point rather than in ``_code_spans`` is deliberate: the pairing pass
-    splits its tokens anyway, so it never had the defect, and the shared reader is left saying what
-    the markdown literally holds.
+
+    ⚠️ This strip used to be the ONLY one, and the sentence that justified keeping it here rather
+    than in ``_code_spans`` was measured false: it said the pairing pass "splits its tokens anyway,
+    so it never had the defect". The pairing pass has TWO passes and only the second splits; the
+    first forbids whitespace inside a span, so a padded status name beside a WRONG glyph was not
+    read at all. Two further comparison points in the location guard had the same blind spot. The
+    reader normalises now, and the strip here is kept because this function takes its world as
+    arguments and its pin hands it padded input directly.
     """
     written = {span.strip() for span in spans}
     dead = sorted(token for token in allowlist if token not in written)
@@ -1534,6 +1563,41 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
 # What they do NOT cover, stated so the next reader does not have to measure it: their own removal.
 # No gate in this repository sees a deleted test, and an emptied test body is reported as passed by
 # pytest and ignored by ruff, whose rule set here carries no flake8-pytest checks.
+
+
+def test_a_padded_span_cannot_hide_a_status_from_the_location_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Padding no longer hides a name from the guard's NEGATIVE half either.
+
+    ``test_a_padded_code_span_is_read_as_the_word_a_reader_sees`` holds the helper. This holds the
+    guard, and it has to, because the two halves that compare against the region's spans directly
+    are not the helper: they are three lines inside
+    ``test_the_declared_status_locations_still_describe_the_guide``.
+
+    Measured before the reader was made to strip, against the REAL guide doctored inside its
+    markers: the bare spelling reddened with "declared as named NOWHERE", and all four padded
+    spellings were green while rendering identically for a reader. So two typed spaces retired the
+    gap that ``_NOT_NAMED_IN_THE_GUIDE`` exists to record, and the guide's own sentence promising
+    that documenting one of those statuses "goes red the moment" it happens was untrue.
+
+    The doctored world is the real guide with one sentence added inside the marked prose region,
+    the same path the guard uses, markers and all. The second half is the control: the bare
+    spelling must redden too, or the assertion above would pass for a guard that reddens on
+    anything.
+
+    Red-proof: drop the ``.strip()`` from ``_code_spans``.
+    """
+    end = "<!-- END:status-prose -->"
+    for spelling in ("` disabled `", "`disabled `", "` disabled`", "`  disabled  `", "`disabled`"):
+        doctored = get_guide().replace(end, f"\nThe {spelling} plane is skipped.\n\n" + end, 1)
+        assert doctored != get_guide(), (
+            "the status-prose end marker moved, this pin patched nothing"
+        )
+        monkeypatch.setitem(globals(), "get_guide", lambda text=doctored: text)
+        with pytest.raises(AssertionError, match="named NOWHERE"):
+            test_the_declared_status_locations_still_describe_the_guide()
+        monkeypatch.undo()
 
 
 def test_the_legend_guard_reports_a_duplicate_row_itself(monkeypatch: pytest.MonkeyPatch) -> None:
