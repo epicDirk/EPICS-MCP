@@ -7,6 +7,20 @@ carry breaking changes).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The guide's advice for sizing `EPICS_MCP_READ_RATE_LIMIT` was wrong for one of the two tools it
+  named, and unusable for the other.** It said a multi-GET tool such as `coverage_audit` **or**
+  `crossplane_check` spends "several tokens per audited PV". Measured at the throttle itself,
+  `crossplane_check` is not per-PV at all: it spends **2 tokens in total**, the same for one display
+  PV or a thousand, and **3** when the IOC device name turns out not to be registered, which is the
+  finding it exists to report. Anyone who sized a limit from the old sentence over-provisioned for
+  that tool by whatever their PV count was, and would still have been caught out on the one run that
+  finds something. `coverage_audit` is per-PV, and now says how much: **1 + 2N** with both per-PV
+  planes requested, rising to **1 + 3N** when the audited PVs are not alarm-configured, because a
+  missed alarm lookup re-asks for the bare tree. There is no single per-PV figure, and the guide now
+  says so instead of implying one.
+
 ## [0.4.0] - 2026-07-30
 
 ### Added

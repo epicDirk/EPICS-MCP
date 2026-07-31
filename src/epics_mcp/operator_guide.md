@@ -53,12 +53,21 @@ operational knowledge (see the Knowledge Persistence Policy in `CLAUDE.md`).
   (it needs a 2xx to tell "reachable" from "wrong endpoint"), so it spends a token like any other
   read and `epics-doctor` can be denied on a tight limit. That archiver plane now spends **three**
   tokens per run, not two: `check_connectivity`, the identity beacon, and the ingest probe
-  (`getApplianceMetrics`) that the identity beacon leads to. And a multi-GET tool such as
-  `coverage_audit` or `crossplane_check` spends several tokens per audited PV, growing with the
-  runtime planes it was asked for, so size the limit from the audited set and the planes requested
-  rather than from a fixed figure, or the tool aborts mid-run with a loud
-  `READ_RATE_LIMIT_EXCEEDED` (never a silent partial result). For `coverage_audit` the audited set
-  is ChannelFinder UNION the display PVs, which is not the display PV count.
+  (`getApplianceMetrics`) that the identity beacon leads to. The two multi-GET tools are measured
+  (2026-07-31) rather than estimated, and they do NOT behave alike, so size each from its own
+  figure or the tool aborts mid-run with a loud `READ_RATE_LIMIT_EXCEEDED` (never a silent partial
+  result):
+  - With both per-PV planes requested, `coverage_audit` spends 1 + 2N tokens for N audited PVs
+    (one ChannelFinder query for the whole set, then Archiver and Alarm once each per PV), rising
+    to 1 + 3N when none of them is alarm-configured: a MISSED alarm lookup buys one extra GET,
+    because the tree is re-asked to tell "not configured" apart from a misspelled tree name. The
+    cost per PV is therefore between 2 and 3 and depends on your data, not on a constant. Request
+    fewer planes and the per-PV term shrinks with them; the leading 1 is the ChannelFinder query.
+    The audited set N is ChannelFinder UNION the display PVs, which is not the display PV count.
+  - `crossplane_check` spends 2 tokens in total and is NOT per PV: Naming once for the IOC device
+    name, ChannelFinder once for the prefix, the same for one display PV or a thousand. It costs
+    3 when the device name is not registered, which is the finding it exists to report, because a
+    definitive negative is only given after the Naming service's identity is probed.
 
 ## The planes
 
