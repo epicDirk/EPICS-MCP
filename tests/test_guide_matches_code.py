@@ -1125,6 +1125,52 @@ def test_the_span_pass_matches_every_span_before_it_filters_on_tokens() -> None:
     )
 
 
+def test_the_span_pass_reads_a_span_of_exactly_two_tokens_and_no_longer_one() -> None:
+    """The two-token filter, which this page called unpinnable for two rounds.
+
+    ``docs/known-limits.md`` listed it among the things NOT held and said it "cannot be reddened by
+    any input". That is a universal built out of a TREE measurement, and the measurement it rests on
+    says something narrower: relaxing the filter changes no result on this tree. Measured, the two
+    rules disagree on constructed input at once, so the property is pinnable exactly like the eleven
+    others this file pins, and the odd-backtick filter one section above got that treatment in the
+    same round for the same tree-invisibility.
+
+    ``len(tokens) != 2`` versus ``len(tokens) < 2``, the relaxation the docstring of
+    ``_glyph_status_pairings`` names and rejects ("a longer span is prose in code formatting, and
+    its first two words are not thereby written as a pair"). The pass only ever inspects
+    ``tokens[0]`` and ``tokens[1]``, so any span whose first two tokens are a status and a mark
+    followed by more words separates them.
+
+    The first assertion is the control, in the shape this file requires beside an emptiness check:
+    on the same input the relaxed rule DOES read the pairing, so the emptiness below is a statement
+    about the rule and not about a pass that has stopped reading. The last one is the non-empty
+    floor.
+
+    Red-proof: change ``if len(tokens) != 2`` to ``< 2`` in ``_glyph_status_pairings``.
+    """
+    longer = "`✓ ok extra`"
+    relaxed = [
+        pair
+        for span in _code_spans(longer)
+        if len(span.split()) >= 2
+        for pair in ((span.split()[0], span.split()[1]), (span.split()[1], span.split()[0]))
+        if pair[0] in cli_doctor._STATUS_MARK and pair[1] in _GLYPH_CHARACTERS
+    ]
+    assert relaxed == [("ok", "✓")], (
+        f"control: the relaxed rule was expected to read this three-token span as a pairing, it "
+        f"read {relaxed}. Without that the emptiness below says nothing about the filter."
+    )
+    assert _glyph_status_pairings(longer, cli_doctor._STATUS_MARK) == [], (
+        "a span of three tokens was read as a pairing. Only a span that is NOTHING BUT a status "
+        "and a mark is one; the first two words of a sentence in code formatting are not written "
+        "as a pair, which is what the filter says and what nothing held until now."
+    )
+    assert ("ok", "✓") in _glyph_status_pairings("`✓ ok`", cli_doctor._STATUS_MARK), (
+        "floor: the two-token form itself is no longer read, so the emptiness above would pass for "
+        "a span pass that had been deleted rather than narrowed."
+    )
+
+
 def test_a_renamed_status_is_reported_though_the_three_counts_still_agree() -> None:
     """The property QA-50's first step bought: the buckets are compared as SETS.
 
