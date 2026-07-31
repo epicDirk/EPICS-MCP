@@ -428,6 +428,30 @@ def _repeated_statuses(rows: Sequence[tuple[str, str]]) -> list[str]:
     return sorted(status for status, seen in Counter(s for _, s in rows).items() if seen > 1)
 
 
+def _indent_columns(line: str) -> int:
+    """The leading indentation of a line in COLUMNS, the unit GFM measures it in.
+
+    A tab does not count as one character, it advances to the next multiple of four, so ``" \\t"``
+    is one space plus a jump to column four: four columns of indentation, an indented code block,
+    and a legend that renders as no table at all. Counting CHARACTERS instead reads that as one
+    space and lets it through, which is what the check below did until this was measured.
+
+    Measured with a renderer over 108 cases (18 prefixes by three placements by both pipe
+    spellings): the character rule accepts 28 spellings under which the shipped shape produces zero
+    table rows, this one accepts 16, and neither produces a single false red. What closes the
+    remaining 14 is the delimiter-only whitespace rule in ``_table_rows``, not a wider margin here.
+    """
+    column = 0
+    for character in line:
+        if character == " ":
+            column += 1
+        elif character == "\t":
+            column += 4 - column % 4
+        else:
+            break
+    return column
+
+
 def _row_cells(line: str) -> list[str]:
     """The cells of one GFM table row: the pipe-separated parts, outer pipes dropped.
 
@@ -471,28 +495,37 @@ def _table_rows(region: str, where: str) -> list[tuple[str, str]]:
     that stopped being a legend is the failure this whole file exists to prevent.
 
     ⚠️ INDENTATION is a fifth way to break the render, and it was the one this check missed while
-    claiming to hold the renderer's rule. Four spaces or a tab make GFM read a line as an indented
-    code block, so the table ends there or never starts. Measured with a renderer on the shipped
-    shape: indenting the HEADER by four spaces, or the DELIMITER, gives zero table rows for a
+    claiming to hold the renderer's rule. Four COLUMNS of indentation make GFM read a line as an
+    indented code block, so the table ends there or never starts. Measured with a renderer on the
+    shipped shape: indenting the HEADER that far, or the DELIMITER, gives zero table rows for a
     reader, and the parser here read every row and stayed green, because both ``body`` and
-    ``_row_cells`` strip. The mirror case was a false RED: a table indented by one to three spaces
+    ``_row_cells`` strip. The mirror case was a false RED: a table indented by one to three columns
     renders perfectly and was rejected, and only in the spelling that KEPT its leading pipe, since
     the pattern anchored that pipe at column zero. Both directions are held now, and the rejecting
     half is a line check here rather than a prefix in ``_GLYPH_ROW_RE``, because a pattern whose
     optional bar is followed by ``\\s*`` cannot reject indentation in the pipe-less spelling at all.
 
-    What that check is NOT: a markdown parser. It holds the delimiter rule, the blank-line rule and
-    the indentation limit, which are what the measured breakages violate, and no more. The rest of
-    the GFM table grammar stays outside, dated in ``docs/known-limits.md`` section 14. A renderer
-    was probed and rejected for two reasons: it would make a guard's verdict depend on a third-party
-    version, and the only one already in the tree arrives transitively rather than declared.
+    ⚠️ COLUMNS, not characters, and that distinction was a second measured hole rather than a
+    refinement. The first version of this check read a leading tab and a run of leading spaces, and
+    a tab is neither: it advances to the next multiple of four, so ``" \\t"``, ``"  \\t"`` and
+    ``"   \\t"`` are four columns while looking like one, two or three characters. Measured with a
+    renderer over 108 cases, the character rule let 28 spellings through that render as no table.
+    The count lives in ``_indent_columns``.
+
+    What that check is NOT: a markdown parser. It holds the delimiter rule, the blank-line rule, the
+    indentation limit, the delimiter's leading-whitespace rule and the row width, which are what the
+    measured breakages violate, and no more. The rest of the GFM table grammar stays outside, dated
+    in ``docs/known-limits.md`` section 14. A renderer was probed and rejected for two reasons: it
+    would make a guard's verdict depend on a third-party version, and the only one already in the
+    tree arrives transitively rather than declared.
 
     Floors, all BEFORE any caller compares sets, the ordering
     ``test_guide_tool_inventory_matches_registrations`` already uses. A floor placed after a
     comparison is dead code: the comparison fails first and reports a documentation gap where in
     truth the anchor broke. They are: the markers were found (in ``_guide_region``), the region
     carries a header AND a delimiter AND at least one row, no blank line splits the table, no line
-    is indented past the margin GFM allows, the delimiter is one GFM accepts for that header, and
+    is indented past the margin GFM allows, the delimiter does not open on a whitespace character
+    GFM refuses to read as indentation, the delimiter is one GFM accepts for that header, and
     every remaining line parses at the declared width. The size floor is a single assertion on
     purpose, because it already covers both the emptied table and the table with no rows left; a
     separate ``assert rows`` after it would be unreachable.
@@ -512,18 +545,32 @@ def _table_rows(region: str, where: str) -> list[tuple[str, str]]:
     )
     # BEFORE _row_cells, which strips unconditionally and would erase the evidence. Every line of
     # the block is checked, header and delimiter included: those two never reach _GLYPH_ROW_RE, and
-    # measured with a renderer, indenting EITHER of them by four spaces or a tab makes the legend
-    # render as no table at all while this parser went on reading every row and stayed green.
-    over_indented = [
-        line for line in body if line.startswith("\t") or len(line) - len(line.lstrip(" ")) >= 4
-    ]
+    # measured with a renderer, indenting EITHER of them past the margin makes the legend render as
+    # no table at all while this parser went on reading every row and stayed green.
+    over_indented = [line for line in body if _indent_columns(line) >= 4]
     assert not over_indented, (
-        f"a line of the {where} is indented by four spaces or a tab: {over_indented[0]!r}. GFM "
+        f"a line of the {where} is indented past the three columns GFM allows: "
+        f"{over_indented[0]!r} starts at column "
+        f"{_indent_columns(over_indented[0])}, counting a tab to the next multiple of four. GFM "
         "reads that as an indented code block rather than as part of a table, so the whole legend "
         "renders as literal text for a reader while this parser goes on reading rows. Up to three "
-        "spaces are legal and are read; move the line back inside that margin."
+        "columns are legal and are read."
     )
     header, delimiter, *rest = body
+    # Only the DELIMITER, and the scope was measured rather than chosen. A leading whitespace
+    # character that is neither a space nor a tab is not indentation to GFM, so it does not end the
+    # table: before the HEADER or before a ROW the renderer swallows it and produces the full table,
+    # and rejecting it there costs 28 false reds on markdown that renders. Before the DELIMITER it
+    # is fatal, because that line has to match the delimiter grammar from its first character, and
+    # `_row_cells` strips it away before this parser can notice. Measured over the same 108 cases:
+    # scoped here the false greens fall from 16 to 2 and no false red appears; applied to every line
+    # the 28 arrive at once. The residue is named in `docs/known-limits.md` section 14.
+    assert not (delimiter[:1].isspace() and delimiter[:1] not in " \t"), (
+        f"the delimiter row of the {where} begins with the whitespace character "
+        f"{delimiter[:1]!r}, which GFM does not read as indentation: the line stops being a "
+        "delimiter and the whole block renders as literal pipes, while this parser strips the "
+        "character away and goes on reading rows. Use a space, or no whitespace at all."
+    )
     width = len(_row_cells(header))
     cells = _row_cells(delimiter)
     assert len(cells) == width and all(_DELIMITER_CELL_RE.fullmatch(c) for c in cells), (
@@ -942,7 +989,20 @@ def test_indentation_is_held_against_the_margin_gfm_allows() -> None:
     throughout renders as no table, and a dedent would make this parser read it happily, so a
     correct red becomes a false green.
 
-    Red-proof: delete the ``over_indented`` check, and the first ``pytest.raises`` below fails.
+    ⚠️ The MIXED spellings below are the ones the first version of this check missed while claiming
+    to hold the renderer's rule, and they were invisible to the 56-case cross-check that came with
+    it, whose seven indentations were runs of spaces and a lone tab. A tab after one, two or three
+    spaces reaches column four, so ``" \\t"`` renders as no table and read as one character of
+    indentation. That is why the count lives in ``_indent_columns`` and is asserted in the message.
+
+    ⚠️ The last block is the green half of the delimiter-only whitespace rule, and it is what keeps
+    that rule from being widened. A leading non-breaking space before the HEADER, or before a
+    pipe-less ROW, renders as a full table; rejecting it there would cost 28 false reds, measured.
+    Only the DELIMITER placement is fatal, and only that one is rejected.
+
+    Red-proof: delete the ``over_indented`` check, and the first ``pytest.raises`` below fails;
+    count characters instead of columns, and the mixed spellings pass; widen the delimiter rule to
+    every line, and the last block fails.
     """
     for pad in ("", " ", "  ", "   "):
         rows = _table_rows(_indented_legend(head=pad, delim=pad, body=pad), "fixture legend")
@@ -957,9 +1017,27 @@ def test_indentation_is_held_against_the_margin_gfm_allows() -> None:
         "legal GFM and was deliberately legalised here; the limit must not take it back."
     )
     for kind in ("head", "delim", "body"):
-        for pad in ("    ", "        ", "\t"):
-            with pytest.raises(AssertionError, match="indented by four spaces or a tab"):
+        for pad in ("    ", "        ", "\t", "\t ", " \t", "  \t", "   \t"):
+            with pytest.raises(AssertionError, match="indented past the three columns GFM allows"):
                 _table_rows(_indented_legend(**{kind: pad}), "fixture legend")
+    # The count is asserted, not just the rejection: a character rule would report the wrong one,
+    # and " \t" is the spelling on which the two rules disagree.
+    with pytest.raises(AssertionError, match=r"starts at column 4"):
+        _table_rows(_indented_legend(head=" \t"), "fixture legend")
+
+    # The delimiter-only whitespace rule, both halves. The renderer was consulted for each: before
+    # the delimiter a non-breaking space gives a reader zero table rows, before the header or a
+    # pipe-less row it gives the full table.
+    with pytest.raises(AssertionError, match="does not read as indentation"):
+        _table_rows(_indented_legend(delim="\xa0"), "fixture legend")
+    pipe_less_rows = _indented_legend(body="\xa0").replace("\xa0| `", "\xa0`")
+    for spelling in (_indented_legend(head="\xa0"), pipe_less_rows):
+        kept = [status for _, status in _table_rows(spelling, "fixture legend")]
+        assert kept == ["ok", "no_ingest"], (
+            f"a leading non-breaking space outside the delimiter was rejected, read {kept}. GFM "
+            "renders that table in full, and widening the delimiter rule to every line costs 28 "
+            "false reds, measured."
+        )
 
 
 def test_a_row_whose_cell_count_drifts_from_the_header_is_rejected() -> None:
