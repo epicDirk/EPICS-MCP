@@ -1,7 +1,6 @@
 """Tests for server-level tool wrappers (EpicsError → ToolError conversion)."""
 
 import ast
-import importlib.util
 import logging
 import subprocess
 import sys
@@ -15,6 +14,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
 from epics_mcp.errors import PVNotFoundError, PVTimeoutError
+from tests.engine_gate import engine_available
 
 _Fn = Callable[..., object]
 
@@ -496,8 +496,10 @@ def test_load_display_registrar_returns_registrar_when_importable(
     }
 
 
+# Evaluated at COLLECTION time, so a bare find_spec here propagated a raising meta-path finder
+# into the collector and killed the run rather than skipping this one test (QA-48).
 @pytest.mark.skipif(
-    importlib.util.find_spec("opi_navigation") is None,
+    not engine_available(),
     reason="[displays] extra (opi_navigation) not installed",
 )
 def test_load_display_registrar_returns_real_registrar_when_installed() -> None:

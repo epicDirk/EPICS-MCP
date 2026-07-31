@@ -29,6 +29,7 @@ from epics_mcp.cli_common import (
     _report_engine_absent,
     require_display_engine,
 )
+from tests.engine_gate import engine_available
 
 _REPO = Path(__file__).resolve().parents[1]
 _COMMANDS = (
@@ -63,8 +64,13 @@ def test_the_engine_is_reported_present_in_this_checkout() -> None:
 
     Skips rather than fails where the engine really is absent (CI), because that is a legitimate
     environment, not a defect.
+
+    The question goes through ``tests.engine_gate`` (QA-48), which reaches ``find_spec`` as an
+    attribute of ``importlib.util`` for the reason that matters here: the ``engine_absent`` fixture
+    below fakes an engine-less environment by monkeypatching exactly that attribute, and this
+    control has to see the same world the fixture builds.
     """
-    if importlib.util.find_spec("opi_navigation") is None:
+    if not engine_available():
         pytest.skip("opi_navigation absent in this environment, nothing to control against")
 
     assert require_display_engine("epics-coverage") is None

@@ -1,7 +1,6 @@
 """Shared fixtures for EPICS MCP tests."""
 
 import collections
-import importlib.util
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -14,12 +13,17 @@ from epics_mcp.errors import RateLimitError
 from epics_mcp.safety import SafetyLayer
 from epics_mcp.services._concurrency import reset_monitor_executor
 from epics_mcp.services._http import clear_shared_sessions, reset_read_throttle
+from tests.engine_gate import engine_available
 
 # The display-aware tools and their opi_navigation-coupled tests need the optional
 # `[displays]` extra. When opi_navigation is not installed (a standalone core install),
 # skip those test modules at collection so the core suite still runs, mirroring
 # server.py, which registers the display tools only when opi_navigation is importable.
-if importlib.util.find_spec("opi_navigation") is None:
+#
+# Through engine_gate rather than a bare find_spec (QA-48): this line runs at COLLECTION time, so
+# a finder that RAISES took the entire run down with an ImportError on this conftest instead of
+# skipping the six modules below. Measured before the repair: exit 4, nothing collected.
+if not engine_available():
     collect_ignore = [
         "test_validate.py",
         "test_crossplane_tool.py",

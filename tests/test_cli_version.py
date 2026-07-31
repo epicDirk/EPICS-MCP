@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import contextlib
 import importlib
-import importlib.util
 import io
 import tomllib
 from pathlib import Path
@@ -38,6 +37,7 @@ import pytest
 
 from epics_mcp import __version__
 from epics_mcp.cli_common import _USAGE_ERROR
+from tests.engine_gate import engine_available
 
 _ROOT = Path(__file__).resolve().parent.parent
 _PYPROJECT = _ROOT / "pyproject.toml"
@@ -63,8 +63,13 @@ def _declared_entry_points() -> dict[str, str]:
 
 
 def _engine_installed() -> bool:
-    """Whether ``opi_navigation`` is importable, which decides what the two display CLIs answer."""
-    return importlib.util.find_spec("opi_navigation") is not None
+    """Whether ``opi_navigation`` is importable, which decides what the two display CLIs answer.
+
+    Through ``tests.engine_gate`` rather than a bare ``find_spec`` (QA-48): the bare call
+    propagates whatever a meta-path finder raises, so under a restricted import system this
+    module failed instead of taking the core-only branch it exists to describe.
+    """
+    return engine_available()
 
 
 def _run_version(module_name: str) -> tuple[int | None, str]:
