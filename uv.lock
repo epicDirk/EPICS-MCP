@@ -513,6 +513,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "requests" },
+    { name = "urllib3" },
 ]
 
 [package.optional-dependencies]
@@ -544,6 +545,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "requests", specifier = ">=2.25" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15" },
+    { name = "urllib3", specifier = ">=1.26" },
 ]
 provides-extras = ["dev"]
 

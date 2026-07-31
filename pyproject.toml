@@ -55,6 +55,21 @@ dependencies = [
     "p4p>=4.2.0,<5",
     # requests: read-only HTTP client for the ESS Naming Service (services/naming_client.py).
     "requests>=2.25",
+    # urllib3 is imported DIRECTLY (services/_http.py imports urllib3.exceptions and urllib3.util),
+    # so it is a dependency of this package and not only of requests. Declared for metadata
+    # correctness rather than to fix a breakage: requests pins urllib3 hard, so no install can
+    # reach this code without it and no failure is constructible today. Undeclared, the truth of
+    # that depended on a transitive edge somebody else is free to change.
+    #
+    # Why the floor is 1.26 and not something newer: the three APIs used are urllib3.util.parse_url,
+    # urllib3.exceptions.LocationParseError, and Retry(total, backoff_factor, status_forcelist),
+    # all present in 1.26. A higher floor would exclude environments this code runs on for no
+    # measured reason. No upper cap: the 2.x line kept all three, and requests carries its own.
+    #
+    # It is load-bearing rather than incidental: the reach decision in olog_safety.py and the
+    # loopback boundary in _http.py deliberately parse with urllib3, the parser requests actually
+    # CONNECTS through, because urlparse and urllib3 disagree on a userinfo-bearing authority.
+    "urllib3>=1.26",
 ]
 
 [project.optional-dependencies]
