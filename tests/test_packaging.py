@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import subprocess
+import tarfile
 import tomllib
 import zipfile
 from pathlib import Path
@@ -87,6 +88,137 @@ def test_build_failure_classification_fails_on_real_defects() -> None:
     assert _build_failure_action(1, "getaddrinfo: Temporary failure in name resolution") == "skip"
     assert _build_failure_action(1, "ValueError: invalid [tool.hatch.build] include") == "fail"
     assert _build_failure_action(1, "hatchling.builders.plugin: unknown target") == "fail"
+
+
+def _build(target: str, out_dir: Path) -> None:
+    """Build one distribution into *out_dir*, skipping only on an environment failure.
+
+    Shared by the two artifact guards below so the offline/defect split is decided in one place.
+    """
+    repo_root = Path(epics_mcp.__file__).resolve().parent.parent.parent  # .../EPICS-MCP-Server
+    try:
+        result = subprocess.run(
+            ["uv", "build", target, "--out-dir", str(out_dir)],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        pytest.skip(f"build toolchain unavailable: {exc}")
+    action = _build_failure_action(result.returncode, result.stderr)
+    if action == "skip":
+        pytest.skip(f"{target} build failed with an offline signature: {result.stderr[-400:]}")
+    if action == "fail":
+        pytest.fail(
+            f"{target} build failed, a real packaging defect, not a toolchain gap:\n"
+            f"{result.stderr[-400:]}"
+        )
+
+
+def _repo_root() -> Path:
+    return Path(epics_mcp.__file__).resolve().parent.parent.parent
+
+
+def _tracked_files() -> set[str]:
+    """``git ls-files``, the set an sdist is measured against."""
+    listing = subprocess.run(
+        ["git", "-C", str(_repo_root()), "ls-files"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    ).stdout.split()
+    assert "pyproject.toml" in listing, (
+        f"git ls-files returned a tree without pyproject.toml ({len(listing)} entries), the "
+        "population anchor broke and the assertions below would pass vacuously"
+    )
+    return set(listing)
+
+
+#: The top-level entries deliberately kept OUT of the sdist, each with the reason, because an
+#: omission without one becomes a blanket permission the moment nobody remembers what it was for.
+#: Checked in BOTH directions by the guard below: a new top-level that silently drops out is not
+#: in this map and reddens, and an entry that stops being omitted (because it was deleted, or
+#: because somebody added it to only-include) also reddens instead of standing as a stale claim.
+_DELIBERATELY_OUT = {
+    "tests": (
+        "development surface. A consumer cannot run this suite from an sdist in any case: nine "
+        "test modules import from scripts/ and three more read .github/ and "
+        ".pre-commit-config.yaml, none of which ship either"
+    ),
+    "scripts": "the prose and audit guards, run by the gate chain, not by a consumer",
+    ".github": "CI workflows and issue/PR templates, which belong to the repository",
+    ".pre-commit-config.yaml": "the local gate chain, meaningless without scripts/ and the hooks",
+    "CLAUDE.md": (
+        "internal instructions for an AI assistant working IN this repository. It shipped to a "
+        "public index in 0.4.0 and should not have"
+    ),
+    "uv.lock": (
+        "the development lockfile. A consumer resolves against their own environment, and a "
+        "lockfile in a source distribution invites the belief that it is honoured"
+    ),
+}
+
+
+def test_the_sdist_carries_what_it_declares_and_nothing_stray(tmp_path: Path) -> None:
+    """The sdist is compared as a SET against ``git ls-files``, in both directions (S45).
+
+    An undeclared sdist is not "the tracked tree". Hatchling packs the working tree minus what VCS
+    ignores, so it also packs every untracked, unignored file that happens to be lying around when
+    the build runs. Measured on 0.4.0 before the declaration: 192 files, which was 190 tracked +
+    PKG-INFO + a stray ``x.log`` from a parallel window. ``.github/workflows/publish.yml`` builds
+    BOTH artifacts and uploads the whole ``dist/`` directory, so that went to a public index.
+
+    ⚠️ This guard opens the ARTIFACT. It does not read ``[tool.hatch.build.targets.sdist]``, and
+    that is the whole point rather than an implementation detail. Two measured reasons:
+
+    * ``only-include`` is a PATH-PREFIX filter, not a VCS filter. A stray untracked file INSIDE an
+      included directory still ships. Measured in a scratch project: with
+      ``only-include = ["src", "tests"]``, an untracked ``src/probepkg/STRAY_TOKEN.txt`` was in the
+      artifact. Only the first assertion below can see that class, and a declaration-reading guard
+      never could.
+    * Hatchling force-includes ``pyproject.toml``, the VCS ignore files, the readme and the
+      license whatever the declaration says. Measured: ``.gitignore`` ships while being absent
+      from ``only-include``. A guard comparing the two LISTS would have recorded "deliberately
+      out" for a file that ships, a documented falsehood, and stayed green.
+
+    The second assertion is by TOP-LEVEL rather than by file, deliberately: a new test module must
+    not churn this map, but a new top-level directory silently dropping out of the distribution
+    must redden. ``PKG-INFO`` is the one member with no tracked counterpart, because the backend
+    generates it.
+    """
+    _build("--sdist", tmp_path)
+
+    archives = list(tmp_path.glob("*.tar.gz"))
+    assert archives, "uv build produced no sdist"
+    with tarfile.open(archives[0]) as archive:
+        members = {
+            member.name.split("/", 1)[1]
+            for member in archive.getmembers()
+            if member.isfile() and "/" in member.name
+        }
+
+    tracked = _tracked_files()
+
+    stray = sorted(members - tracked - {"PKG-INFO"})
+    assert not stray, (
+        f"the sdist carries files git does not track: {stray}. Hatchling packs the working tree, "
+        "so anything untracked and unignored sitting in an included directory is published. "
+        "Remove the file or add it to .gitignore; do not widen this assertion."
+    )
+
+    dropped = sorted({path.split("/")[0] for path in tracked - members})
+    assert dropped == sorted(_DELIBERATELY_OUT), (
+        f"the sdist's omissions have drifted from what is declared.\n"
+        f"  dropped but not declared: {sorted(set(dropped) - set(_DELIBERATELY_OUT))}\n"
+        f"  declared but not dropped: {sorted(set(_DELIBERATELY_OUT) - set(dropped))}\n"
+        "A top-level in the first list is falling out of the published distribution silently: "
+        "add it to [tool.hatch.build.targets.sdist] only-include, or to _DELIBERATELY_OUT with "
+        "the reason. A top-level in the second list no longer describes anything and should be "
+        "removed from _DELIBERATELY_OUT."
+    )
 
 
 def test_operator_guide_ships_in_the_wheel(tmp_path: Path) -> None:

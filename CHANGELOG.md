@@ -7,6 +7,18 @@ carry breaking changes).
 
 ## [Unreleased]
 
+### Changed
+
+- **The source distribution declares what it contains.** It did not, and an undeclared sdist is not
+  "the tracked tree": the backend packs the working tree minus what version control ignores, so it
+  also packs any untracked file that happens to be lying there at build time. Measured on the 0.4.0
+  artifact: 192 files, which was every tracked file plus a stray log file, and it included all 81
+  test modules, `scripts/`, `.github/` and `CLAUDE.md` (instructions meant for an assistant working
+  in the repository, not for anyone installing the package). The sdist now carries the package, the
+  documentation and the standard metadata files, 93 files, and a test builds it and compares its
+  contents against version control in both directions, so neither a stray file nor a silently
+  dropped directory can reach a package index again. The wheel is unchanged.
+
 ### Fixed
 
 - **The guide's advice for sizing `EPICS_MCP_READ_RATE_LIMIT` was wrong for one of the two tools it

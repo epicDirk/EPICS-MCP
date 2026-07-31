@@ -129,6 +129,45 @@ Documentation = "https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment
 [tool.hatch.build.targets.wheel]
 packages = ["src/epics_mcp"]
 
+# The sdist was UNDECLARED, and an undeclared sdist is not "the tracked tree": hatchling packs the
+# working tree minus what VCS ignores, so it also packs every untracked, unignored file that
+# happens to be lying there when the build runs. Measured on 0.4.0: 192 files, which is 190 tracked
+# + PKG-INFO + a stray `x.log` nobody meant to publish. It shipped all 81 test files, scripts/,
+# .github/ and CLAUDE.md (this repository's internal agent instructions) to a public index, since
+# .github/workflows/publish.yml builds BOTH artifacts and uploads the whole dist/ directory.
+#
+# Scope: the package a consumer installs, plus the documentation they read. Contributors get the
+# repository. tests/, scripts/, .github/ and CLAUDE.md are development surface and stay out; a
+# consumer cannot run the suite from an sdist anyway, because nine test modules import from
+# scripts/ and three more read .github/ and .pre-commit-config.yaml.
+#
+# ⚠️ only-include is a PATH-PREFIX filter, NOT a VCS filter, and that was measured before it was
+# relied on: a stray untracked file INSIDE an included directory still ships. So this declaration
+# alone does not close the hole it was written for, and it is not asked to. What closes it is
+# tests/test_packaging.py, which builds the sdist and compares its members against `git ls-files`
+# in both directions. Do not treat this list as the guard.
+#
+# ⚠️ Four paths ship whether or not they are named here: hatchling force-includes pyproject.toml,
+# the VCS ignore files, the readme and the license. `.gitignore` therefore appears in the artifact
+# while being absent from this list, which is why the guard reads the ARTIFACT rather than this
+# declaration: a guard comparing the two lists would have recorded a falsehood and stayed green.
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "src",
+    "docs",
+    "examples",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "ARCHITECTURE.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "OPERATING.md",
+    "CITATION.cff",
+    ".env.example",
+    "pyproject.toml",
+]
+
 [project.scripts]
 epics-mcp = "epics_mcp.server:main"
 epics-crossplane = "epics_mcp.cli_crossplane:main"
