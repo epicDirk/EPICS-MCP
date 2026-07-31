@@ -21,6 +21,8 @@ claiming otherwise stood here twice. What each guard reads is stated per guard, 
   marked region, which the anchored guards cannot see because ``re.search`` returns the first
   match. It also reaches beyond the guide: a glyph paired with a status name is checked on every
   TRACKED ``docs/*.md`` page too, because a second copy of a guarded number is an unguarded number.
+  "Paired" means one of the two written forms ``docs/known-limits.md`` section 14 names, not any
+  proximity, and tracked markdown OUTSIDE ``docs/`` is not read at all; both limits are dated there.
 
 What is still deliberately outside: the free-form Archiver MGMT verbs (``getAllPVs`` /
 ``getPVsForThisAppliance``) are manual REST recipes with no implementing tool, so they are

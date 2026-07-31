@@ -60,7 +60,8 @@ Two of these tiers are **drift-guarded**, not just prose (prose conventions are 
 var that is not in `EpicsConfig`, and it fails if a registered tool is **missing** from the guide, so
 adding a tool without documenting it is a red test, not a silent omission. The same file holds the
 shipped **status legend** against the code (QA-47): a new `PlaneStatus` is red until it is sorted into
-one of three declared guide-location buckets, and every glyph paired with a status name, in the guide
+one of three declared guide-location buckets, and every glyph paired with a status name in one of the
+two written forms `docs/known-limits.md` names, in the guide
 or on any tracked `docs/*.md` page, must be the one `cli_doctor` renders. The page list is derived
 from `git ls-files` rather than declared, so a new documentation page is covered the day it is
 **tracked**: a page still unstaged in the working tree is not read at all, and a wrong glyph in it
