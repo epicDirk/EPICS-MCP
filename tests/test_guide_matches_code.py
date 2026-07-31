@@ -1779,14 +1779,28 @@ def test_the_pairing_guard_reports_a_wrong_glyph_itself(monkeypatch: pytest.Monk
     is missing, the one skip ``_tracked_doc_pages`` allows. It is named here rather than worked
     around, because doctoring the population instead would trip the ``absent`` input floor first.
 
+    ⚠️ The fixture mark is FILTERED and then SORTED, and both halves are a repair rather than a
+    style choice. This used to read ``next(m for m in _GLYPH_CHARACTERS if m != ...)``, which draws
+    from a ``frozenset``: iteration order over a set of one-character strings follows the
+    per-process hash seed, so the draw was a coin flip. When it landed on ``i``, the only ALNUM
+    member of the class, the assertion below fired and this pin went red over its own fixture
+    rather than over anything it guards. Measured on the unmodified tree, the same single test
+    under twelve hash seeds: **10 green, 2 red**, red exactly in the two runs that drew ``i``
+    (``PYTHONHASHSEED=7`` reproduces it every time). Choosing the mark instead of drawing it makes
+    that impossible, and the assertion below stays as a floor on the CLASS: it now says "no usable
+    mark exists at all", which is a real change to ``_GLYPH_CHARACTERS`` rather than bad luck.
+
     Red-proof: drop the two ``mismatched`` lines from
     ``test_every_glyph_status_pairing_in_the_docs_agrees_with_the_render_marks``.
     """
-    wrong_mark = next(m for m in _GLYPH_CHARACTERS if m != cli_doctor._STATUS_MARK["ok"])
-    assert not wrong_mark.isalnum(), (
-        f"the fixture mark {wrong_mark!r} is a lower-case identifier, so the doctored guide would "
-        "redden the location guard too and this pin would pass for the wrong reason."
+    usable = sorted(
+        m for m in _GLYPH_CHARACTERS if m != cli_doctor._STATUS_MARK["ok"] and not m.isalnum()
     )
+    assert usable, (
+        "every mark besides ok's is a lower-case identifier, so no fixture mark is left that "
+        "leaves the location guard alone; see this docstring before widening the choice."
+    )
+    wrong_mark = usable[0]
     doctored = get_guide() + f"\n\nA healthy plane reports `ok` (`{wrong_mark}`).\n"
     monkeypatch.setitem(globals(), "get_guide", lambda: doctored)
     with pytest.raises(AssertionError, match="disagrees with the one epics-doctor renders"):
