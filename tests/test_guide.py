@@ -6,14 +6,25 @@ re-derive, and every committed knowledge file stays facility-agnostic (no site h
 personal names / usernames / realistic device-PV names), the CI-effective check, since the local
 commit guard's site patterns are git-ignored and absent on a fresh CI checkout.
 
-The facility-agnostic guard has two layers. A repo-wide DENYLIST (``_SITE_RE`` / ``_PERSON_RE``)
-catches known site tokens, username paths and personal names across every tracked text file, a
-best-effort list, not a proof. On top of it, a repo-can't-enumerate-them class (realistic, specific
-EPICS device/PV names) is handled the other way round: an ALLOWLIST-shaped structural detector
-(``_PV_RE``) runs over the human-maintained knowledge/prose surface only (``_tracked_doc_files``),
-flagging anything ESS-PV-shaped that is not a declared synthetic placeholder. The synthetic PV
-fixtures under ``tests/`` are intentional and stay covered by the denylist, not the structural
-check.
+The facility-agnostic guard has two layers, and both now read the SAME population: every tracked
+text file. A repo-wide DENYLIST (``_SITE_RE`` / ``_PERSON_RE``) catches known site tokens, username
+paths and personal names, a best-effort list, not a proof. On top of it, a
+repo-can't-enumerate-them class (realistic, specific EPICS device/PV names) is handled the other
+way round: an ALLOWLIST-shaped structural detector (``_PV_RE``) flags anything ESS-PV-shaped that
+is not a declared synthetic placeholder.
+
+The structural detector used to read a doc-suffix subset outside ``tests/`` and ``src/``, which was
+20 of 180 files, and that is QA-28. Measured, the PATH half of that filter excluded nothing: the
+only doc-suffixed file under either directory is the guide, which the filter admitted by name
+anyway. The SUFFIX half did all the narrowing, and what it narrowed away was every ``.py`` file,
+which is where QA-27 (a real device name, in THIS module) had been sitting unseen. Widening cost
+zero hits on the 160 files it newly reads: the PV fixtures under ``tests/`` pass because they carry
+the declared synthetic markers, not because anything exempts them.
+
+The one file that needs an exemption is this one, and only for one layer. It defines the denylist
+patterns as literals, so the denylist still skips it. The structural detector reads it, and
+subtracts :data:`_PV_SHAPES_DECLARED_HERE`, the PV shapes this module states on purpose; what holds
+that list honest, and what provably cannot, is written at the declaration.
 """
 
 from __future__ import annotations
@@ -160,9 +171,21 @@ def _pv_leak_tokens(text: str) -> list[str]:
     ]
 
 
-def _tracked_text_files() -> list[Path]:
+def _tracked_text_files(*, include_this_file: bool = False) -> list[Path]:
     """Every TRACKED text file (``git ls-files``) that ships to the fork, the true repo-wide,
-    hermetic surface. Excludes THIS file (pattern literals) and LICENSE (copyright attribution)."""
+    hermetic surface. Excludes LICENSE (copyright attribution) and, by default, THIS file.
+
+    THIS file is excluded because it defines the DENYLIST patterns as literals: ``_SITE_RE`` and
+    ``_PERSON_RE`` would match their own source, so a repo-wide denylist sweep that read this file
+    would report eleven site tokens that are the guard's own needle. Measured: eleven distinct,
+    and zero in every other tracked ``.py``, so the exemption exists for one file and one layer.
+
+    ``include_this_file`` narrows that exemption to the layer that needs it. The STRUCTURAL PV
+    detector is a different needle and does not match the denylist patterns, so it can and must
+    read this file: QA-27 was a real device name pasted into this very module, and a scan that
+    skips it cannot see the class it exists for. What that scan owes in return is a declared list
+    of the PV shapes stated here on purpose, which is :data:`_PV_SHAPES_DECLARED_HERE`.
+    """
     try:
         listing = subprocess.run(
             ["git", "ls-files"],
@@ -189,7 +212,7 @@ def _tracked_text_files() -> list[Path]:
         path = _ROOT / rel
         if (
             path.is_file()
-            and path.resolve() != this
+            and (include_this_file or path.resolve() != this)
             and path.name not in _EXCLUDED_NAMES
             and path.suffix.lower() in _SCAN_SUFFIXES
         ):
@@ -197,26 +220,55 @@ def _tracked_text_files() -> list[Path]:
     return sorted(files)
 
 
-# The operator guide lives under src/ but is a knowledge file (prose), so it is scanned by the PV
-# detector even though the rest of src/ (code + docstring examples) is not.
-_DOC_GUIDE_REL = "src/epics_mcp/operator_guide.md"
-_DOC_SUFFIXES = {".md", ".rst", ".example", ".txt"}
+#: Every PV-shaped string THIS module states on purpose: the positive fixtures of the detector
+#: test below, plus the two shapes the pattern comments above use to explain what anchors where.
+#: The structural detector scans this file, so these are precisely what it must not report, and
+#: anything else PV-shaped in here is a real leak.
+#:
+#: One list rather than two, because two would drift apart, and every entry is ASSERTED rather
+#: than merely listed: ``test_pv_detector_flags_realistic_names_and_passes_synthetic`` iterates it
+#: and requires each entry to be something the detector actually flags. An entry that stops being
+#: PV-shaped therefore reddens instead of quietly widening the scan, which is the "does the
+#: exception still bite" property, measured rather than assumed.
+#:
+#: ⚠️ What holds this list, stated exactly, because the tempting extra guard does NOT work. An
+#: obvious addition is "the declared set equals the PV-shaped strings this file carries", asserted
+#: as a set in both directions. It was written, measured, and removed: only one of its two
+#: directions can ever go red. An undeclared token appearing here reddens (and the scan below
+#: reddens on it too, so that half is duplicated), while a declaration with no other use CANNOT
+#: redden, because the declaration is itself an appearance in the scanned file. A guard whose name
+#: promises two directions and delivers one is the shape this repository keeps finding, so it is
+#: absent rather than present and misleading.
+#:
+#: ⚠️ The residual hole, named rather than papered over: this is a SELF-GRANTED allowance. Pasting
+#: a real device name INTO this list would pass everything. Nothing mechanical can close that from
+#: inside the file it exempts. What holds it is the rule below and the review of any diff touching
+#: these lines.
+#:
+#: Every head is INVENTED (QAB / VLXQ / WXY / SEC-SUB, no real facility segment), so stating them
+#: here cannot itself commit a facility name. That rule is the whole reason the class can be
+#: declared at all.
+_PV_SHAPES_DECLARED_HERE = (
+    "VLXQ-42:PWRC-UNIT-003:Curr-RB",
+    "QAB-ZZ07:Ctrl-XVR-03",
+    "WXY-QQ42:Diag-BPM-09",
+    "QAB-ZZ:Diag-BPM-09:Val",  # alpha-only head, digit in the DEVICE segment (Sec-Sub:Dev-NN)
+    "pva://VLXQ-42:Ctrl-XVR-03",  # scheme-prefixed paste form (Phoebus/pvget output)
+    "pvas://QAB-ZZ07:Ctrl-XVR-03",  # TLS-secured PVAccess paste form
+    "SIMD-07:Ctrl-XVR-03",  # head merely STARTS with 'SIM', not a whole-segment marker
+    "pva://SEC-SUB:Dev-01",  # the _SITE_RE lookbehind example, stated in the comment above
+    "QAB-ZZ:Diag-BPM-09",  # the _PV_RE digit-position example, stated in the comment above
+)
 
 
-def _tracked_doc_files() -> list[Path]:
-    """The human-maintained knowledge/prose surface, the guide plus every tracked doc/prose file
-    outside ``tests/`` and ``src/``. This is where a real device/PV name would be pasted by hand;
-    the ~200 synthetic PV fixtures under ``tests/`` and the sanctioned code examples under
-    ``src/*.py`` are intentional and covered by the repo-wide denylist, not the structural PV check.
-    Filters the repo-wide ``_tracked_text_files()`` by path, no second ``git ls-files`` call."""
-    docs: list[Path] = []
-    for path in _tracked_text_files():
-        rel = path.relative_to(_ROOT).as_posix()
-        if rel == _DOC_GUIDE_REL or (
-            not rel.startswith(("tests/", "src/")) and path.suffix.lower() in _DOC_SUFFIXES
-        ):
-            docs.append(path)
-    return docs
+def _declared_pv_tokens() -> set[str]:
+    """What the detector EXTRACTS from the declared shapes, which is what the scan compares.
+
+    Derived by running the production extractor over each declared shape rather than by listing
+    tokens by hand, because the two differ: a scheme-prefixed shape is stored with its ``pva://``
+    and read without it, so a hand-written token list would have drifted from the first entry.
+    """
+    return {token for shape in _PV_SHAPES_DECLARED_HERE for token in _pv_leak_tokens(shape)}
 
 
 def test_knowledge_files_are_facility_agnostic() -> None:
@@ -232,14 +284,31 @@ def test_knowledge_files_are_facility_agnostic() -> None:
             if match:
                 problems.append(f"{path.relative_to(_ROOT)} [{label}: {match.group(0)!r}]")
 
-    # The structural PV detector runs only over the knowledge/prose surface (the hand-paste vector);
-    # a realistic device/PV name there is a leak. The prose scope deliberately omits structured PV
-    # carriers (.json/.yaml/.bob/.db), those are covered, if at all, by the denylist, not this
-    # check. Test fixtures carry synthetic PV-shaped names by design and stay on the denylist above.
-    for path in _tracked_doc_files():
+    # The structural PV detector runs over the SAME population as the denylist above, plus this
+    # file (QA-28). It used to run over a doc-suffix subset outside tests/ and src/, which reached
+    # 20 of the 180 tracked text files and, measured, was narrowed by the SUFFIX alone: the only
+    # doc-suffixed file under either directory is the guide, which that filter admitted by name
+    # anyway, so the path half excluded nothing at all. What it did exclude was every .py, and
+    # QA-27 was a real device name in one of them.
+    #
+    # Widening costs nothing today, measured over the 160 files it newly reads: ZERO hits. The
+    # ~200 PV-shaped fixtures under tests/ are not passed by an exemption but by the declared
+    # synthetic markers (SIM / DEV-TEST / ZZZ-FAKE / EXAMPLE / FAKE / DEMO / DUMMY / MOCK) that
+    # _is_synthetic_pv already applies. The previous rationale here named an exemption that did
+    # not exist. What the widening buys is the future: a real device name pasted into any tracked
+    # text file is now reported, which is the class the denylist above cannot enumerate.
+    #
+    # This file is scanned with its declared shapes subtracted; see _PV_SHAPES_DECLARED_HERE for
+    # why that list is asserted in both directions rather than trusted.
+    declared = _declared_pv_tokens()
+    this = Path(__file__).resolve()
+    for path in _tracked_text_files(include_this_file=True):
         rel = path.relative_to(_ROOT)
+        allowed = declared if path.resolve() == this else frozenset()
         problems.extend(
-            f"{rel} [pv: {token!r}]" for token in _pv_leak_tokens(path.read_text(encoding="utf-8"))
+            f"{rel} [pv: {token!r}]"
+            for token in _pv_leak_tokens(path.read_text(encoding="utf-8"))
+            if token not in allowed
         )
 
     assert not problems, f"facility identifier(s) leaked into committed files: {problems}"
@@ -295,26 +364,24 @@ def test_denylist_flags_a_windows_drive_path_and_passes_look_alikes() -> None:
 def test_pv_detector_flags_realistic_names_and_passes_synthetic() -> None:
     """The PV detector must flag realistic, specific ESS-shaped device names, the leak class the
     old ``_SITE_RE`` let through, while passing declared synthetic placeholders, ISO timestamps and
-    non-PV constructs. The positive fixtures use INVENTED section heads (QAB / VLXQ / WXY, no real
-    ESS segment), so this assertion never itself commits a real facility name, and this file is
-    excluded from the scan (see ``_tracked_text_files``). Each positive is paired with its premise:
-    the old denylist did NOT catch it, that is what makes this guard provably able to go red. Two
-    index positions are covered so the detector is not narrowed to one: the digit in the head
-    ('QAB-ZZ07:...') AND the digit in a later device segment with an alpha-only head
-    ('QAB-ZZ:Diag-BPM-09:...'), the real ESS naming family the pre-first-colon head gate missed."""
+    non-PV constructs. The positive fixtures use INVENTED section heads (QAB / VLXQ / WXY / SEC-SUB,
+    no real ESS segment), so this assertion never itself commits a real facility name. Each positive
+    is paired with its premise: the old denylist did NOT catch it, that is what makes this guard
+    provably able to go red. Two index positions are covered so the detector is not narrowed to
+    one: the digit in the head ('QAB-ZZ07:...') AND the digit in a later device segment with an
+    alpha-only head ('QAB-ZZ:Diag-BPM-09:...'), the real ESS naming family that the
+    pre-first-colon head gate missed.
+
+    The fixtures come from :data:`_PV_SHAPES_DECLARED_HERE` rather than from a tuple written out
+    here, and that is the seam QA-28 needed: this file is now INSIDE the structural scan, which
+    subtracts exactly that list. Sharing it means the scan cannot be widened by adding a shape that
+    nothing asserts, and an asserted shape cannot fall out of the scan's allowance.
+    """
 
     def flags(name: str) -> bool:  # exact production path (scheme-strip + ISO + synthetic filter)
         return bool(_pv_leak_tokens(name))
 
-    for realistic in (
-        "VLXQ-42:PWRC-UNIT-003:Curr-RB",
-        "QAB-ZZ07:Ctrl-XVR-03",
-        "WXY-QQ42:Diag-BPM-09",
-        "QAB-ZZ:Diag-BPM-09:Val",  # alpha-only head, digit in the DEVICE segment (Sec-Sub:Dev-NN)
-        "pva://VLXQ-42:Ctrl-XVR-03",  # scheme-prefixed paste form (Phoebus/pvget output)
-        "pvas://QAB-ZZ07:Ctrl-XVR-03",  # TLS-secured PVAccess paste form
-        "SIMD-07:Ctrl-XVR-03",  # head merely STARTS with 'SIM', not a whole-segment marker
-    ):
+    for realistic in _PV_SHAPES_DECLARED_HERE:
         assert flags(realistic), f"detector must flag realistic PV {realistic!r}"
         assert not _SITE_RE.search(realistic), (
             f"premise: denylist is orthogonal, misses {realistic!r}"
