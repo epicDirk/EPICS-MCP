@@ -26,6 +26,13 @@ describe, measured: with ``forbid`` and with ``ignore``, an unknown ``EPICS_MCP_
 dropped either way, because ``env_prefix`` asks per declared field and a name no field asks for is
 never read at all. The docstrings say so in those words. What the pin protects is a DATED FIGURE
 quoted in shipped prose, which is the category ``docs/known-limits.md`` calls an unguarded number.
+
+WARNING, and it is a lesson this module paid for: the population comes from ``git ls-files``, so a
+file that is NEW is invisible here until it is STAGED. Measured on this very module. It was written
+with no entry in ``_ALLOWED_TO_CARRY_IT``, the full gate was green, and the guard reddened the
+moment ``git add`` put the file into its own population, one commit later and already pushed. An
+edit to an already-tracked file is seen at once (the content is read from disk); only a new PATH
+waits for the index. Run the gate AFTER staging, never before.
 """
 
 from __future__ import annotations
@@ -46,17 +53,28 @@ _REPO = Path(__file__).resolve().parents[1]
 #: which is the form a returning claim naturally takes. A fixed literal would have shipped having
 #: provably missed a third of its own class.
 #:
-#: It also cannot match its own source text, because the pattern carries the escapes and the needle
-#: does not. So this module needs no self-exemption, and therefore none of the machinery a
-#: self-exemption drags with it: an entry that can never be checked, kept out of the reverse
-#: direction for a reason that has to be argued each time somebody reads it.
+#: It DOES match this module's own prose, and the exemption below is the consequence. The sentence
+#: that stood here claimed the opposite ("cannot match its own source text, because the pattern
+#: carries the escapes and the needle does not"), and that is true of the ``re.compile`` line alone:
+#: every OTHER mention in this file quotes the retired claim plainly, in a docstring or in a failure
+#: message, which is exactly what a guard has to do to name what it forbids.
 _DEAD_SPELLING = re.compile(r"""extra\s*=\s*["']?ignore""")
 
 #: Files allowed to carry the dead spelling, each with the reason, because an exception without one
-#: becomes a blanket permission the moment nobody remembers what it was for. Empty today, and that
-#: is measured: the repository carries zero hits. Add an entry the day a legitimate
-#: ``ConfigDict(extra="ignore")`` appears, rather than widening the pattern.
-_ALLOWED_TO_CARRY_IT: dict[str, str] = {}
+#: becomes a blanket permission the moment nobody remembers what it was for. TWO kinds of entry are
+#: legitimate, and the second is why this dict is no longer empty: a module with a real
+#: ``ConfigDict(extra="ignore")``, and a guard that has to SAY the spelling in order to forbid it.
+#: Widen this list, never the pattern.
+_ALLOWED_TO_CARRY_IT: dict[str, str] = {
+    "tests/test_config_extra_spelling.py": (
+        "the guard states the needle it forbids, in the pattern above and in every quotation of "
+        "the retired claim throughout this module. What is given up is written down rather than "
+        "left to be discovered: the exemption covers the WHOLE file, not its quotations, so a "
+        "claim that genuinely returned INSIDE this module would pass. Nothing mechanical closes "
+        "that, because a file cannot police the vocabulary it exists to name; the guard's subject "
+        "is the rest of the tree"
+    ),
+}
 
 
 def _tracked_text() -> dict[str, str]:
@@ -111,15 +129,23 @@ def test_the_wrong_extra_default_claim_is_not_back() -> None:
         f"the retired claim about pydantic-settings' extra default is back in {sorted(offenders)}, "
         f"at these lines: {offenders}. An unknown EPICS_MCP_* variable is dropped by env_prefix "
         "before extra is consulted; see UnknownEpicsEnvVarWarning. If a legitimate "
-        'ConfigDict(extra="ignore") is meant, add the file to _ALLOWED_TO_CARRY_IT with the reason.'
+        'ConfigDict(extra="ignore") is meant, or the file has to SAY the spelling in order to '
+        "guard it, add the file to _ALLOWED_TO_CARRY_IT with the reason."
     )
 
 
 def test_each_allowed_file_still_carries_the_dead_spelling() -> None:
     """An exception list rots into a blanket permission unless its entries are checked too.
 
-    Vacuous while the list is empty, and deliberately kept: the first entry added would otherwise
-    arrive unguarded, which is the moment the reasoning is least likely to be re-derived.
+    Live rather than vacuous since the guard's own module joined the list: it reddens if that file
+    is renamed away, or stops carrying the spelling at all, either of which leaves an exemption
+    that only widens the guard.
+
+    What it deliberately does NOT do is count the occurrences. A count was weighed and rejected: it
+    would redden on any legitimate edit to this module's prose, and the only repair anybody would
+    ever apply is to raise the number, so it measures the COUNT and not the CLAIM. That is the
+    shape decision OX rejects one layer down, where a fixed literal measured the spelling instead
+    of the statement.
     """
     files = _tracked_text()
     for name, why in _ALLOWED_TO_CARRY_IT.items():
