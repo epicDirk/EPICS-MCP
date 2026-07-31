@@ -15,14 +15,20 @@ differ by their first token BY DESIGN (``epics-doctor 0.4.0`` is not ``epics-mcp
 first token is asserted too, against the name ``[project.scripts]`` declares, which extends the
 prog pin of QA-41 from one command to the whole set.
 
-⚠️ **Three of the five are behaviour-checked where the display engine is absent, not five.** The
-engine is deliberately absent in CI (``uv sync --extra dev --frozen``, no ``--group displays``;
-``pyproject.toml`` says why), and on ``epics-coverage`` / ``epics-crossplane`` the availability
-check runs BEFORE the parser is built, so ``--version`` cannot be reached there without it. Rather
-than skip those two, this module asserts the OTHER outcome for them (the engine refusal, exit 2),
-so it is total in both environments and the limit stays visible instead of silently untested.
-Lifting that limit is QA-42, which needs the help text of ``epics-coverage`` to stop depending on
-the engine.
+⚠️ **All five are checked in every environment, and that is new (QA-42).** Until then, the two
+display-aware commands ran their engine check BEFORE the parser was built, so ``--version`` could
+not be reached on a core-only install; this module carried a branch asserting the OTHER outcome for
+them (the engine refusal, exit 2) and a matching skip in the agreement test below. The engine is
+deliberately absent in CI (``uv sync --extra dev --frozen``, no ``--group displays``;
+``pyproject.toml`` says why), which is precisely the environment that branch described.
+
+QA-42 moved the check behind ``parse_args``, and ``action="version"`` prints through
+``parser.exit``, never through ``parser.error``, so the flag now answers everywhere. The branch and
+the skip are therefore GONE rather than inverted: an environment-conditional assertion here would
+have kept the two commands out of the agreement property in the one environment it matters in,
+while the count floor stayed satisfied by the other three. What holds the engine-absent behaviour
+of these two is ``tests/test_cli_without_display_engine.py``, which FAKES the absence and so runs
+in both environments.
 """
 
 from __future__ import annotations
@@ -36,16 +42,9 @@ from pathlib import Path
 import pytest
 
 from epics_mcp import __version__
-from epics_mcp.cli_common import _USAGE_ERROR
-from tests.engine_gate import engine_available
 
 _ROOT = Path(__file__).resolve().parent.parent
 _PYPROJECT = _ROOT / "pyproject.toml"
-
-#: The commands whose parser sits behind the ``opi_navigation`` availability check. Pinned as a
-#: relation against the declared set below rather than as a standalone list, so a command that
-#: becomes display-aware (or stops being) cannot leave this file describing the old shape.
-_DISPLAY_AWARE = frozenset({"epics-coverage", "epics-crossplane"})
 
 
 def _declared_entry_points() -> dict[str, str]:
@@ -62,22 +61,12 @@ def _declared_entry_points() -> dict[str, str]:
     }
 
 
-def _engine_installed() -> bool:
-    """Whether ``opi_navigation`` is importable, which decides what the two display CLIs answer.
-
-    Through ``tests.engine_gate`` rather than a bare ``find_spec`` (QA-48): the bare call
-    propagates whatever a meta-path finder raises, so under a restricted import system this
-    module failed instead of taking the core-only branch it exists to describe.
-    """
-    return engine_available()
-
-
 def _run_version(module_name: str) -> tuple[int | None, str]:
     """Call ``main(["--version"])`` and return ``(exit_code, stdout)``.
 
-    ``action="version"`` raises ``SystemExit`` from inside ``parse_args``; the engine refusal
-    RETURNS an exit code instead. Both are normal answers here, so both are captured rather than
-    one being treated as the failure of the other.
+    ``action="version"`` prints inside ``parse_args`` and raises ``SystemExit``, on all five
+    commands and in every environment. The ``SystemExit`` is caught here rather than left to
+    ``pytest.raises`` so the exit code and the printed line can be asserted together.
     """
     module = importlib.import_module(module_name)
     out = io.StringIO()
@@ -94,37 +83,31 @@ def test_the_declared_commands_are_the_population_this_file_checks() -> None:
 
     Without it, every parametrized test below would collect zero cases and the suite would report
     success for a package that declares no commands at all.
+
+    It used to carry two further clauses, partitioning the declared set into display-aware and core
+    commands. They went with the partition itself (QA-42): that distinction no longer changes what
+    any command answers to ``--version``, and a relation kept alive past the behaviour it described
+    is a claim nobody re-measures.
     """
     declared = _declared_entry_points()
 
     assert declared, "no [project.scripts] found, the test anchor broke"
-    assert set(declared) > _DISPLAY_AWARE, (
-        f"display-aware commands {sorted(_DISPLAY_AWARE)} not all declared: {sorted(declared)}"
-    )
-    assert set(declared) - _DISPLAY_AWARE, (
-        "every command is display-aware, so nothing is core-checked"
-    )
 
 
 @pytest.mark.parametrize("command", sorted(_declared_entry_points()))
 def test_every_command_answers_version_with_its_own_name(command: str) -> None:
-    """``<command> <version>``, exit 0, for every command that can reach its parser.
+    """``<command> <version>``, exit 0, for every declared command, in every environment.
+
+    Unconditional since QA-42. The engine-absent branch that used to sit here asserted the opposite
+    outcome for the two display-aware commands, and it was DEAD CODE in any checkout that has the
+    engine installed, which is every developer machine: only CI ever executed it. A branch the local
+    gate cannot reach is a branch a local gate cannot prove, and that is how a red main gets pushed.
 
     Red-proof: drop ``add_version_argument`` from one command and argparse reports an unrecognised
     option (exit 2) instead; change its ``prog`` and the first token stops matching.
     """
     module_name = _declared_entry_points()[command]
     code, out = _run_version(module_name)
-
-    if command in _DISPLAY_AWARE and not _engine_installed():
-        # QA-42: the engine check returns before the parser exists, so the flag is unreachable. That
-        # is the measured behaviour of a core-only install, and asserting it keeps this case honest
-        # instead of skipped.
-        assert code == _USAGE_ERROR, (
-            f"{command} without the engine should refuse with a usage error"
-        )
-        assert not out, f"{command} printed something on stdout while refusing: {out!r}"
-        return
 
     assert code == 0, f"{command} --version exited {code}"
     tokens = out.split()
@@ -136,7 +119,7 @@ def test_every_command_answers_version_with_its_own_name(command: str) -> None:
     assert tokens[1] == __version__
 
 
-def test_the_commands_that_answer_all_name_the_same_version() -> None:
+def test_all_declared_commands_name_the_same_version() -> None:
     """The property the per-command test cannot state: the versions AGREE.
 
     Each command could pass the test above while reading its version from somewhere else. This reads
@@ -144,17 +127,22 @@ def test_the_commands_that_answer_all_name_the_same_version() -> None:
     five copies that happen to agree today. ``epics_mcp.__version__`` is itself pinned to
     ``pyproject [project].version`` by ``tests/test_packaging.py``, so agreement here is agreement
     with the packaging metadata.
+
+    ⚠️ The floor is the DECLARED count, not a number. It used to be ``>= 3`` beside a skip for the
+    two display-aware commands, and that pair was the more dangerous half of the old shape: after
+    QA-42 those two answer on a core-only install too, but the skip would have gone on excluding
+    them there while three core commands kept the floor satisfied. The guard would then have
+    checked three of the five that answer, in the one environment reproducing a published install,
+    and looked complete. Deriving the floor makes a silently shrinking population impossible.
     """
-    engine = _engine_installed()
+    declared = _declared_entry_points()
     versions = {}
-    for command, module_name in sorted(_declared_entry_points().items()):
-        if command in _DISPLAY_AWARE and not engine:
-            continue
+    for command, module_name in sorted(declared.items()):
         code, out = _run_version(module_name)
         assert code == 0, f"{command} --version exited {code}"
         versions[command] = out.split()[1]
 
-    assert len(versions) >= 3, f"fewer commands answered than the core install provides: {versions}"
+    assert len(versions) == len(declared), f"a declared command did not answer: {versions}"
     assert set(versions.values()) == {__version__}, (
         f"the commands disagree about the version: {versions}"
     )

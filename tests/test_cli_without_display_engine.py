@@ -9,9 +9,23 @@ chain with a bare ``ModuleNotFoundError``. That is the first thing an outside us
 when the engine imports, keep the core server up. These tests pin the same decision for the CLI
 surface, which had never been given it.
 
-The engine is normally PRESENT in this checkout, so every test here fakes its absence rather than
-relying on the environment. That is the only way this can run in CI, where the engine is absent,
+The engine is normally PRESENT in this checkout, so most tests here fake its absence rather than
+relying on the environment. That is the only way they can run in CI, where the engine is absent,
 AND locally, where it is not.
+
+QA-42 MOVED THE SEAM, and this module is where that is pinned. The check used to run BEFORE the
+parser was built, which made ``--help`` and ``--version`` unreachable on exactly the install that
+needs them most. It now runs AFTER ``parse_args``, and a usage error still reaches it through
+``cli_common.DisplayEngineAwareParser``. So there are two refusal paths, not one, and they are
+guarded separately: past the parser (``main`` RETURNS the code) and inside ``error`` (``main``
+RAISES ``SystemExit``). Raise-versus-return is what tells the new behaviour from the old one; the
+exit code does not, because both answer 2 where the engine is absent.
+
+⚠️ WHAT THE ``engine_absent`` FIXTURE CANNOT SHOW, and it is the headline property of QA-42: it
+fakes ``find_spec`` only. The real import machinery is untouched and the engine IS installed here,
+so a re-introduced engine import inside the parser builds fine under the fixture and reddens only
+in CI. Every claim of the form "this works with no engine at all" is therefore proven in a
+SUBPROCESS under ``tests.engine_gate.BLOCKER``, which is total in both environments.
 """
 
 from __future__ import annotations
@@ -20,22 +34,61 @@ import importlib
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
+from epics_mcp import __version__
 from epics_mcp.cli_common import (
     _ENGINE_ENTRY_POINT,
     _report_engine_absent,
+    _report_engine_broken,
     require_display_engine,
 )
-from tests.engine_gate import engine_available
+from tests.engine_gate import BLOCKER, engine_available
 
 _REPO = Path(__file__).resolve().parents[1]
 _COMMANDS = (
     ("epics_mcp.cli_coverage", "epics-coverage"),
     ("epics_mcp.cli_crossplane", "epics-crossplane"),
 )
+
+#: Arguments each command accepts as COMPLETE, so ``parse_args`` succeeds and the refusal that
+#: follows is the post-parse one. The paths need not exist: they are validated inside the
+#: orchestrator, which the engine check returns before.
+_VALID_ARGV = {
+    "epics-coverage": ["--displays", "x"],
+    "epics-crossplane": ["--displays", "x", "--st-cmd", "y"],
+}
+
+#: The failure ``engine_present_but_broken`` injects, as a constant so a guard can derive the
+#: expected refusal from the SAME exception the fixture raises instead of restating its message.
+#: The everyday cause of that state is a missing transitive dependency, hence this one.
+_BROKEN_ENGINE_CAUSE = ImportError("No module named 'numpy'")
+
+
+def _normalized(text: str) -> str:
+    """Collapse whitespace: the refusals are hand-wrapped for a terminal, so a phrase that happens
+    to straddle a line break is not a different phrase."""
+    return " ".join(text.split())
+
+
+def _derived_refusal(
+    reporter: Callable[[str], int], command: str, capsys: pytest.CaptureFixture[str]
+) -> str:
+    """The exact text *reporter* writes for *command*, read back and whitespace-normalized.
+
+    DERIVED rather than written out as a literal, and that is decision OX applied here. A fixed
+    needle measures the SPELLING of ``cli_common``'s refusal: reword one line there and every
+    assertion below goes red for a cosmetic reason, whose natural repair is to loosen back to
+    ``command in err``. But ``command`` alone is satisfied by argparse's OWN message, which prints
+    ``prog`` twice, so that loosening would silently acquit the very mutation these guards exist to
+    catch. Comparing against what the reporter actually writes is immune to both.
+    """
+    reporter(command)
+    return _normalized(capsys.readouterr().err)
+
 
 #: All four console entry points, for properties every CLI must hold regardless of the engine.
 _ALL_CLI_MODULES = (
@@ -101,51 +154,178 @@ def test_the_message_says_what_still_works_and_how_to_get_the_rest(
 
 
 @pytest.mark.parametrize(("module_name", "command"), _COMMANDS)
-def test_main_refuses_cleanly_with_the_engine_faked_away(
+def test_complete_arguments_still_meet_the_refusal_after_parsing(
     module_name: str, command: str, engine_absent: None, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """End to end through the entry point, so the check is proven to sit BEFORE argument parsing.
+    """The POST-PARSE refusal path: arguments argparse is happy with, engine still missing.
 
-    Deliberately called with no arguments at all: both commands have a required ``--displays``, so
-    a check placed after parsing would exit 2 for the wrong reason and this test would pass on a
-    broken implementation. The stderr assertion is what tells the two apart.
+    Deliberately called with a COMPLETE argument list, which is the half that only this path can
+    reach. Its sibling below covers the other half, where argparse rejects the arguments first.
+
+    Red-proof is RAISE versus RETURN, not the exit code and not the message. Before QA-42 the check
+    ran ahead of the parser, so ``main([])`` returned 2 and the two paths were indistinguishable;
+    delete the post-parse check today and this call runs on into ``resolve_user_path``, which raises
+    ``EpicsError`` on the nonexistent ``x`` and also exits 2. Only the refusal TEXT tells those
+    apart, which is why it is asserted rather than the code alone.
     """
     module = importlib.import_module(module_name)
 
-    code = module.main([])
+    code = module.main(_VALID_ARGV[command])
+    refusal = _normalized(capsys.readouterr().err)
 
-    assert code == 2
-    assert command in capsys.readouterr().err
+    assert code == 2, f"{command} should refuse with a usage error, not run"
+    assert refusal == _derived_refusal(_report_engine_absent, command, capsys)
 
 
 @pytest.mark.parametrize(("module_name", "command"), _COMMANDS)
-def test_version_is_engine_gated_on_the_display_clis(
+def test_a_usage_error_is_answered_with_the_engine_not_with_argparse(
     module_name: str, command: str, engine_absent: None, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """QA-46 met QA-42 here, and this pins the seam between them.
+    """The ERROR-PATH refusal: a reader who mistypes on a core-only install gets usable advice.
+
+    This is QA-42's first pre-decision made durable (project decision, 2026-07-31: the engine
+    message stays). Moving the check behind the parser would otherwise
+    have answered ``epics-coverage --nope`` with "the following arguments are required: --displays",
+    advice nobody can act on, because supplying it would not make the command run either.
+
+    The argv carries the REQUIRED options plus the unknown one, deliberately: argparse checks
+    required arguments inside ``parse_known_args`` and unrecognised extras afterwards, in a
+    different call site, so a bare ``["--nope"]`` would measure the missing-argument path while
+    claiming the unknown-argument one (measured: it reports ``--displays``, never ``--nope``).
+
+    Red-proof: drop the ``DisplayEngineAwareParser`` override and argparse answers instead. It also
+    exits 2, and its own message contains the command name TWICE, so an ``assert command in err``
+    would acquit that mutation; equality against the derived refusal, plus the negative half below,
+    is what reddens.
+    """
+    module = importlib.import_module(module_name)
+
+    with pytest.raises(SystemExit) as exc:
+        module.main([*_VALID_ARGV[command], "--nope"])
+    refusal = _normalized(capsys.readouterr().err)
+
+    assert exc.value.code == 2
+    assert refusal == _derived_refusal(_report_engine_absent, command, capsys)
+    assert "unrecognized arguments" not in refusal, "argparse answered instead of the engine"
+
+
+@pytest.mark.parametrize(("module_name", "command"), _COMMANDS)
+def test_a_usage_error_on_a_BROKEN_engine_exits_one_not_two(
+    module_name: str,
+    command: str,
+    engine_present_but_broken: None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The engine decides the exit code, so one cause keeps one code (project decision, 2026-07-31).
+
+    A usage error would be argparse's 2. Here the engine is INSTALLED and will not load, which
+    ``cli_common`` reports as 1, and that is the code the same command returns on the same install
+    with correct arguments. Reporting 2 would give the same broken engine two different codes
+    depending on whether the reader also mistyped something.
+
+    ``docs/tools.md`` states this to users, and a documented promise with no guard is the class this
+    repository refuses. Red-proof: return ``_USAGE_ERROR`` unconditionally from the override.
+    """
+    module = importlib.import_module(module_name)
+
+    with pytest.raises(SystemExit) as exc:
+        module.main([*_VALID_ARGV[command], "--nope"])
+    refusal = _normalized(capsys.readouterr().err)
+
+    assert exc.value.code == 1, "an installed engine that will not load is a failure, not usage"
+    assert refusal == _derived_refusal(
+        lambda name: _report_engine_broken(name, _BROKEN_ENGINE_CAUSE), command, capsys
+    )
+
+
+@pytest.mark.parametrize(("module_name", "command"), _COMMANDS)
+def test_help_answers_without_the_engine(
+    module_name: str, command: str, engine_absent: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The whole point of QA-42: ``--help`` explains the command on an install that cannot run it.
+
+    Before this, both commands answered ``--help`` with the engine refusal and exit 2, so the first
+    thing a reader met after ``pip install`` was an instruction to install something they do not
+    need in order to READ. Three of five commands could explain themselves; now five can.
+
+    Red-proof: put ``require_display_engine`` back ahead of the parser and ``main`` RETURNS 2 with
+    an empty stdout, so ``pytest.raises`` fails with DID NOT RAISE. ⚠️ This one is in-process and
+    therefore blind to a re-introduced engine IMPORT (see the module docstring); its subprocess
+    sibling below is the total version.
+    """
+    module = importlib.import_module(module_name)
+
+    with pytest.raises(SystemExit) as exc:
+        module.main(["--help"])
+
+    assert exc.value.code == 0, f"{command} --help must answer, not refuse"
+    assert f"usage: {command}" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(("module_name", "command"), _COMMANDS)
+def test_help_answers_with_the_engine_genuinely_unreachable(module_name: str, command: str) -> None:
+    """The same claim as above, in the only environment that can actually prove it.
+
+    The ``engine_absent`` fixture fakes ``find_spec``; it does not touch the import system, and
+    ``opi_navigation`` is really installed in this checkout. So a ``DEFAULT_PV_CONTEXT_CAP`` import
+    put back into the parser would build fine under the fixture and redden only in CI, which is the
+    environment dependence this module's header calls a defect. Here the engine cannot be imported
+    at all, so the parser has to stand on its own.
+
+    Red-proof, measured both ways: restore ``default=DEFAULT_PV_CONTEXT_CAP`` (or its f-string in
+    the help text) and the subprocess dies with ``ModuleNotFoundError`` before argparse prints
+    anything.
+    """
+    script = BLOCKER + f"import {module_name} as m\nm.main(['--help'])\n"
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=_REPO,
+        timeout=120,
+        check=False,
+    )
+
+    assert "ModuleNotFoundError" not in result.stderr, (
+        f"{command} needs the engine to build its parser:\n{result.stderr[-800:]}"
+    )
+    assert result.returncode == 0, result.stderr[-800:]
+    assert f"usage: {command}" in result.stdout
+
+
+@pytest.mark.parametrize(("module_name", "command"), _COMMANDS)
+def test_version_answers_without_the_engine(
+    module_name: str, command: str, engine_absent: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """QA-46 met QA-42 here, and the seam between them has MOVED.
 
     ``--version`` was added to all five console commands, but on these two the availability check
-    runs BEFORE the parser is built, and the parser cannot be built without the engine anyway: its
-    help text and a default read ``DEFAULT_PV_CONTEXT_CAP`` from ``services/inventory_adapter``,
-    the sole importer of the engine. So on a core-only install (which is what CI is) the flag is
-    unreachable here, and ``tests/test_cli_version.py`` asserts exactly this outcome for that
-    environment.
+    used to run before the parser existed, so the flag was unreachable on a core-only install. That
+    limit is what QA-42 lifted, and this test is the inverted form of the one that pinned it: the
+    old version asserted exit 2 and the refusal, and its own docstring predicted that a QA-42 that
+    moved argument handling ahead of the check would turn it red on purpose.
 
-    Faked rather than environment-dependent, so the limit is provable in a checkout that HAS the
-    engine too. ⚠️ Should QA-42 ever move argument handling ahead of the check, this test goes red
-    on purpose: that is the signal to update it and the note in ``test_cli_version.py`` together,
-    instead of leaving a stale claim about what a published install can do.
+    ``action="version"`` prints through ``parser.exit``, never through ``parser.error``, so
+    ``DisplayEngineAwareParser`` does not intercept it. That is the mechanism, and it is why the
+    flag answers while a usage error still does not.
     """
     module = importlib.import_module(module_name)
 
-    code = module.main(["--version"])
+    with pytest.raises(SystemExit) as exc:
+        module.main(["--version"])
 
-    assert code == 2, f"{command} --version should refuse with a usage error, not answer"
-    assert command in capsys.readouterr().err
+    assert exc.value.code == 0, f"{command} --version must answer without the engine"
+    assert capsys.readouterr().out.split() == [command, __version__]
 
 
 @pytest.mark.parametrize(("module_name", "command"), _COMMANDS)
-def test_the_module_imports_at_all_without_the_engine(module_name: str, command: str) -> None:
+@pytest.mark.parametrize("argv", ["[]", "_VALID"], ids=["no-arguments", "valid-arguments"])
+def test_the_module_imports_at_all_without_the_engine(
+    module_name: str, command: str, argv: str
+) -> None:
     """The actual regression, and the one a fake cannot show: the module-level import chain.
 
     Faking ``find_spec`` inside this process proves nothing about it, because the module is already
@@ -153,27 +333,22 @@ def test_the_module_imports_at_all_without_the_engine(module_name: str, command:
     all, which is what a package-index install looks like. Red before the fix: ModuleNotFoundError
     on import, long before any of this module's other tests get a say.
 
-    The blocker RAISES rather than answering None, which is stricter than a plain missing package
-    and deliberately so: ``find_spec`` propagates whatever a meta-path finder raises, so this also
-    covers a restricted or broken import system. It found a real weakness on first run, an
-    availability probe that crashed instead of answering "unavailable".
+    STRENGTHENED at QA-42, not repaired: the no-argument case still runs (it now travels the
+    ``error`` override, since ``--displays`` is required), and a valid-argument case joins it so the
+    post-parse path is exercised in a real process too. The reason it needed strengthening is that
+    its three assertions had become satisfiable without the refusal: argparse exits 2 and prints
+    ``prog`` in its own message, so exit code plus command name could not tell the engine's answer
+    from argparse's. The refusal text is now asserted, and it is derived rather than spelled out.
     """
-    blocker = (
-        "import sys\n"
-        "class _Blocker:\n"
-        "    def find_spec(self, name, path=None, target=None):\n"
-        "        if name.split('.')[0] == 'opi_navigation':\n"
-        '            raise ModuleNotFoundError(f"No module named {name!r}")\n'
-        "        return None\n"
-        "sys.meta_path.insert(0, _Blocker())\n"
-        f"import {module_name} as m\n"
-        "sys.exit(m.main([]))\n"
-    )
+    arguments = "[]" if argv == "[]" else repr(_VALID_ARGV[command])
+    script = BLOCKER + f"import {module_name} as m\nsys.exit(m.main({arguments}))\n"
 
     result = subprocess.run(
-        [sys.executable, "-c", blocker],
+        [sys.executable, "-c", script],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         cwd=_REPO,
         timeout=120,
         check=False,
@@ -183,7 +358,64 @@ def test_the_module_imports_at_all_without_the_engine(module_name: str, command:
         f"{command} still dies on its import chain without the engine:\n{result.stderr[-800:]}"
     )
     assert result.returncode == 2, result.stderr[-800:]
-    assert command in result.stderr
+    assert _normalized(result.stderr).startswith(
+        f"{command}: needs the opi_navigation display engine"
+    ), f"the refusal did not come from the engine:\n{result.stderr[-800:]}"
+
+
+@pytest.mark.skipif(
+    not engine_available(),
+    reason="the resolved context cap comes from the engine, so this cannot run on a core-only "
+    "install; CI reports it as a SKIP rather than not collecting it at all",
+)
+@pytest.mark.parametrize(("module_name", "command"), _COMMANDS)
+@pytest.mark.parametrize(
+    ("flag", "expected"), [([], None), (["--context-cap", "7"], 7), (["--context-cap", "0"], 0)]
+)
+def test_the_context_cap_reaches_the_request(
+    module_name: str,
+    command: str,
+    flag: list[str],
+    expected: int | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--context-cap`` is passed through, and an omitted flag resolves to the ENGINE's default.
+
+    Nothing checked this before QA-42, and the change is exactly what made it worth checking: the
+    argparse default moved from the engine constant to ``None``, so a forgotten resolution line
+    would put ``None`` into a frozen dataclass, which does not validate, on a field typed ``int``.
+    ``mypy --strict`` cannot see it either, because ``argparse.Namespace`` attribute access is
+    ``Any``. The failure would surface deep inside the inventory, far from its cause.
+
+    ⚠️ The ZERO case is the one that earns its keep. ``cap = args.context_cap or DEFAULT`` reads
+    perfectly naturally and silently turns a deliberate ``--context-cap 0`` into the engine default;
+    the two positive cases are green on that mutant and only this one reddens.
+
+    ⚠️ THIS TEST CANNOT RUN IN CI, and that is a property of the import graph, not a choice: the
+    resolved value comes from ``services/inventory_adapter``, the sole importer of the engine, and
+    CI installs the core only. It lives here rather than in ``test_coverage_tool.py`` so the gap is
+    a visible SKIP instead of a module CI never collects (project decision, 2026-07-31).
+    """
+    from epics_mcp.services import orchestration
+    from epics_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
+
+    module = importlib.import_module(module_name)
+    entry_point = "build_coverage_report" if command == "epics-coverage" else "run_crossplane"
+    captured: list[object] = []
+
+    def _capture(request: object) -> object:
+        captured.append(request)
+        raise SystemExit(0)  # stop before the real join; the request is all this test wants
+
+    monkeypatch.setattr(orchestration, entry_point, _capture)
+
+    with pytest.raises(SystemExit):
+        module.main([*_VALID_ARGV[command], *flag])
+
+    assert captured, f"{command} never reached the orchestrator"
+    assert captured[0].context_cap == (  # type: ignore[attr-defined]
+        DEFAULT_PV_CONTEXT_CAP if expected is None else expected
+    )
 
 
 @pytest.fixture
@@ -208,7 +440,7 @@ def engine_present_but_broken(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def _import_module(name: str, package: str | None = None) -> object:
         if name == _ENGINE_ENTRY_POINT:
-            raise ImportError("No module named 'numpy'")
+            raise _BROKEN_ENGINE_CAUSE
         return real_import_module(name, package)
 
     monkeypatch.setattr(importlib.util, "find_spec", _find_spec)
@@ -348,9 +580,15 @@ def test_help_survives_a_legacy_encoded_console(module_name: str) -> None:
     non-ASCII character in their help cannot re-open the hole.
 
     ``PYTHONIOENCODING=cp1252:strict`` forces the legacy stream on every platform, so this runs
-    red-provably on Linux CI too, not only on a Windows console. Exit 0 is the help path; exit 2
-    is the engine refusal that legitimately precedes parsing on a core-only install. Both are
-    fine, a traceback is not.
+    red-provably on Linux CI too, not only on a Windows console.
+
+    ⚠️ The exit code is now pinned to 0 for all four. It used to accept ``(0, 2)``, because 2 was
+    the engine refusal that legitimately preceded parsing on a core-only install. QA-42 abolished
+    that outcome, and leaving the tolerance would have kept a standing permission for the very
+    regression the ticket removed, in the ONE environment that reproduces a published install: this
+    module is not in ``conftest``'s ``collect_ignore``, so CI runs it with the engine genuinely
+    absent. Tightening it costs one character and makes it the cheapest permanent guard for the
+    whole change. A traceback was never fine and still is not.
     """
     env = {**os.environ, "PYTHONIOENCODING": "cp1252:strict"}
 
@@ -366,4 +604,4 @@ def test_help_survives_a_legacy_encoded_console(module_name: str) -> None:
 
     assert "UnicodeEncodeError" not in result.stderr, result.stderr[-800:]
     assert "Traceback" not in result.stderr, result.stderr[-800:]
-    assert result.returncode in (0, 2), result.stderr[-800:]
+    assert result.returncode == 0, result.stderr[-800:]

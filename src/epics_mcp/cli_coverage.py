@@ -13,11 +13,15 @@ Usage::
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
-from epics_mcp.cli_common import add_version_argument, configure_stdout, require_display_engine
+from epics_mcp.cli_common import (
+    DisplayEngineAwareParser,
+    add_version_argument,
+    configure_stdout,
+    require_display_engine,
+)
 from epics_mcp.errors import EpicsError
 
 # The opi_navigation-backed imports live INSIDE main(), below the availability check.
@@ -31,22 +35,17 @@ def main(argv: list[str] | None = None) -> int:
     # parser description carries U+2194, which a cp1252 console cannot encode. With the reconfigure
     # after parsing, ``--help`` died with a bare UnicodeEncodeError on any non-UTF-8 stdout.
     configure_stdout()
-    unavailable = require_display_engine("epics-coverage")
-    if unavailable is not None:
-        return unavailable
 
-    from epics_mcp.services.coverage import render_markdown
-    from epics_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
-    from epics_mcp.services.orchestration import CoverageRequest, build_coverage_report
-
-    parser = argparse.ArgumentParser(
+    parser = DisplayEngineAwareParser(
         # prog pinned: argparse's default is interpreter dependent and prints an absolute console
         # script path on 3.14 (QA-41). Same reason at every entry point of this package.
         prog="epics-coverage",
         description="Cross-plane coverage audit: Display ↔ ChannelFinder ↔ Archiver ↔ Alarm",
     )
-    # Reachable only where the display engine is installed: the availability check above returns
-    # before this parser exists (QA-42 tracks that, and test_cli_without_display_engine pins it).
+    # The parser is built BEFORE the engine check and must therefore stay engine-free, so that
+    # --help and --version answer on an install that has no engine at all (QA-42). --context-cap is
+    # the one option that used to break that, and it now defaults to None; a usage error still gets
+    # the engine refusal, through DisplayEngineAwareParser.
     add_version_argument(parser)
     parser.add_argument(
         "--displays",
@@ -89,9 +88,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--context-cap",
         type=int,
-        default=DEFAULT_PV_CONTEXT_CAP,
+        # No number here, and no engine import to produce one: the default lives in the display
+        # engine, and printing it would put the parser back behind the engine it must not need.
+        default=None,
         help="max per-display reachability contexts the PV-inventory explores "
-        f"(default {DEFAULT_PV_CONTEXT_CAP}; higher = more complete, slower)",
+        "(default: the value the display engine defines; higher = more complete, slower)",
     )
     parser.add_argument(
         "--windows-paths",
@@ -99,6 +100,20 @@ def main(argv: list[str] | None = None) -> int:
         help="resolve embedded <file> refs case-insensitively (Windows host); default Linux",
     )
     args = parser.parse_args(argv)
+
+    unavailable = require_display_engine("epics-coverage")
+    if unavailable is not None:
+        return unavailable
+
+    from epics_mcp.services.coverage import render_markdown
+    from epics_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
+    from epics_mcp.services.orchestration import CoverageRequest, build_coverage_report
+
+    # ``is None`` rather than ``or``: an explicit ``--context-cap 0`` is a caller's decision and has
+    # always been passed through untouched, while ``or`` would silently replace it with the engine
+    # default. The flag carries no argparse default any more, so this is where the engine's value
+    # enters, and it is the only place that reads the constant.
+    context_cap = DEFAULT_PV_CONTEXT_CAP if args.context_cap is None else args.context_cap
 
     # One request → the SAME orchestrator the MCP tool calls (no duplicated join). Path validation
     # (canonicalize + existence + allowed_roots) happens inside build_coverage_report via
@@ -111,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         query_archiver=args.archiver,
         query_alarm=args.alarm,
         alarm_config=args.alarm_config,
-        context_cap=args.context_cap,
+        context_cap=context_cap,
         windows_paths=args.windows_paths,
     )
     try:

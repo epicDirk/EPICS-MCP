@@ -42,6 +42,30 @@ import importlib.util
 
 _ENGINE = "opi_navigation"
 
+#: A subprocess preamble that makes the engine genuinely unreachable, for the questions a fixture
+#: cannot answer. ONE home, because the two callers need the identical world and used to carry
+#: byte-identical copies of it.
+#:
+#: WHY A SUBPROCESS AT ALL: the ``engine_absent`` fixture in
+#: ``tests/test_cli_without_display_engine.py`` monkeypatches ``importlib.util.find_spec``, which is
+#: enough for anything that ASKS whether the engine is there, and blind to anything that IMPORTS it.
+#: In this checkout ``opi_navigation`` is really installed, so a module-level (or parser-level)
+#: engine import still succeeds under that fixture and the test stays green; it would redden only in
+#: CI. Anything claiming "this works without the engine" therefore has to run here.
+#:
+#: It RAISES rather than answering None, which is stricter than a plain missing package and
+#: deliberate: ``find_spec`` propagates whatever a meta-path finder raises, so this also covers a
+#: restricted or broken import system.
+BLOCKER = (
+    "import sys\n"
+    "class _Blocker:\n"
+    "    def find_spec(self, name, path=None, target=None):\n"
+    f"        if name.split('.')[0] == '{_ENGINE}':\n"
+    '            raise ModuleNotFoundError(f"No module named {name!r}")\n'
+    "        return None\n"
+    "sys.meta_path.insert(0, _Blocker())\n"
+)
+
 
 def engine_available() -> bool:
     """True iff the ``opi_navigation`` engine is present, never raising for any finder.

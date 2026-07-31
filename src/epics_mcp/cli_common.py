@@ -13,6 +13,7 @@ import importlib.util
 import io
 import math
 import sys
+from typing import NoReturn
 
 from epics_mcp import __version__
 
@@ -22,6 +23,12 @@ _USAGE_ERROR = 2
 #: Exit code for a command that FAILED. Distinct from ``_USAGE_ERROR`` on purpose: an engine that is
 #: absent is a capability that does not apply here (2), an engine that is present and does not
 #: import is something broken (1). QA-14.
+#:
+#: Since QA-42 this code also answers a USAGE error on the two display-aware commands whenever the
+#: engine is installed and will not load, because :class:`DisplayEngineAwareParser` lets the engine
+#: decide. That is deliberate: it is the same code the same command returns on the same install with
+#: correct arguments, so one cause keeps one code. A reader who typed a flag wrong on a broken
+#: install is told about the engine rather than the flag, which is the problem they can act on.
 _COMMAND_FAILED = 1
 
 #: The engine module whose import decides "usable", NOT the top package. The top package is a
@@ -134,6 +141,45 @@ def require_display_engine(command: str) -> int | None:
     return None
 
 
+class DisplayEngineAwareParser(argparse.ArgumentParser):
+    """An ``ArgumentParser`` that answers a usage error with the ENGINE refusal where that is the
+    real obstacle, used by the two display-aware commands.
+
+    WHY (QA-42). Those two commands used to run :func:`require_display_engine` BEFORE building their
+    parser, which made ``--help`` and ``--version`` unreachable on every install from a package
+    index: the first thing a reader met was an instruction to install something they do not need in
+    order to read a help text. Moving the check after ``parse_args`` fixes that, and it would have
+    cost the other half of the same courtesy: on a core-only install ``epics-coverage`` with no
+    arguments would have answered "the following arguments are required: --displays", advice that
+    cannot be followed, because supplying the argument would not make the command run either.
+
+    So the refusal is kept exactly where it still helps. ``argparse`` funnels EVERY usage error
+    through :meth:`error` (measured against the stdlib in use: three call sites, and ``error`` is
+    the only path to exit 2), while ``--help`` and ``--version`` print through ``parser.exit`` and
+    never reach here. That asymmetry is the whole mechanism.
+
+    The command name comes from ``self.prog`` rather than from a constructor argument: ``prog`` is
+    pinned to the declared command name at every entry point of this package (QA-41) and
+    ``tests/test_cli_version.py`` holds it there for all five, so there is nothing a second
+    parameter could say that this does not.
+
+    THE EXIT CODE IS THE ENGINE'S, not argparse's 2: absent gives 2 (which agrees with argparse
+    anyway) and installed-but-broken gives 1. One cause, one code; see :data:`_COMMAND_FAILED`.
+    """
+
+    def error(self, message: str) -> NoReturn:
+        """Refuse with the engine's message when the engine is unusable, else argparse's own.
+
+        ``require_display_engine`` WRITES its message itself and returns only a code, so nothing is
+        printed here: doing both would hand the reader the eight-line refusal twice, and a
+        containment-style assertion in a test could not see it.
+        """
+        code = require_display_engine(self.prog)
+        if code is not None:
+            self.exit(code)
+        super().error(message)
+
+
 def positive_timeout(value: str) -> float:
     """An ``argparse`` ``type=`` for a ``--timeout``: a strictly-positive, FINITE number of seconds.
 
@@ -168,8 +214,10 @@ def add_version_argument(parser: argparse.ArgumentParser) -> None:
 
     ``action="version"`` prints inside ``parse_args`` and raises ``SystemExit(0)``, so the console
     has to be reconfigured BEFORE the parser is built (QA-8), exactly as every entry point already
-    does. On the two display-aware commands the engine check runs earlier still, so there this flag
-    answers only where the engine is installed (a known limit, ticket QA-42).
+    does. It prints through ``parser.exit``, never through ``parser.error``, which is why it answers
+    on all five commands in every environment since QA-42: on the two display-aware ones the engine
+    check now runs AFTER parsing, and :class:`DisplayEngineAwareParser` intercepts only usage
+    errors.
     """
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 

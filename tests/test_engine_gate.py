@@ -24,21 +24,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.engine_gate import BLOCKER as _BLOCKER
 from tests.engine_gate import engine_available
 
 _REPO = Path(__file__).resolve().parents[1]
-
-# The blocker both subprocess guards install: find_spec RAISES rather than answering None, which
-# is the restricted-import-system case cli_common.require_display_engine calls "the measured one".
-_BLOCKER = (
-    "import sys\n"
-    "class _Blocker:\n"
-    "    def find_spec(self, name, path=None, target=None):\n"
-    "        if name.split('.')[0] == 'opi_navigation':\n"
-    '            raise ModuleNotFoundError(f"No module named {name!r}")\n'
-    "        return None\n"
-    "sys.meta_path.insert(0, _Blocker())\n"
-)
 
 
 @pytest.mark.parametrize(
@@ -111,10 +100,14 @@ def _bare_engine_probes(source: str) -> list[int]:
     """Line numbers of ``find_spec("opi_navigation")`` calls, read from the SYNTAX TREE.
 
     From the tree, never from the text, and that is measured rather than stylistic: the first
-    version of this guard matched a regex over the source and its single hit was
-    ``test_cli_without_display_engine.py:51``, the DOCSTRING of the fixture that fakes the engine
-    away. Prose describing the call is not the call. ``scripts/guard_audit.py`` records the same
-    lesson about the same class of guard, in the same words, one directory over.
+    version of this guard matched a regex over the source and its single hit was the DOCSTRING of
+    ``engine_absent``, the fixture in ``tests/test_cli_without_display_engine.py`` that fakes the
+    engine away. Prose describing the call is not the call. ``scripts/guard_audit.py`` records the
+    same lesson about the same class of guard, in the same words, one directory over.
+
+    ⚠️ That citation used to carry a LINE number, and QA-42 moved the fixture past it: the line it
+    named is now an unrelated assignment. Nothing mechanises a citation in prose, so the number is
+    gone rather than re-measured. The fixture is named instead, and a name survives an edit.
 
     Reading the tree also settles the two exemptions a text scan would have needed, by making them
     unnecessary: ``tests/engine_gate.py`` reaches the name through a constant rather than a

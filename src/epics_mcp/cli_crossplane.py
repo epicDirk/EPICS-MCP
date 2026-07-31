@@ -13,11 +13,15 @@ Usage::
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
-from epics_mcp.cli_common import add_version_argument, configure_stdout, require_display_engine
+from epics_mcp.cli_common import (
+    DisplayEngineAwareParser,
+    add_version_argument,
+    configure_stdout,
+    require_display_engine,
+)
 from epics_mcp.errors import EpicsError
 
 # The opi_navigation-backed imports live INSIDE main(), below the availability check.
@@ -31,21 +35,14 @@ def main(argv: list[str] | None = None) -> int:
     # parser description carries U+2194, which a cp1252 console cannot encode. With the reconfigure
     # after parsing, ``--help`` died with a bare UnicodeEncodeError on any non-UTF-8 stdout.
     configure_stdout()
-    unavailable = require_display_engine("epics-crossplane")
-    if unavailable is not None:
-        return unavailable
 
-    from epics_mcp.services.crossplane import render_markdown
-    from epics_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
-    from epics_mcp.services.orchestration import CrossPlaneRequest, run_crossplane
-
-    parser = argparse.ArgumentParser(
+    parser = DisplayEngineAwareParser(
         # prog pinned: argparse's default is interpreter dependent and prints an absolute console
         # script path on 3.14 (QA-41). Same reason at every entry point of this package.
         prog="epics-crossplane",
         description="Cross-plane PV provenance: Display ↔ e3 ↔ Naming",
     )
-    # Reachable only where the display engine is installed, as in cli_coverage (QA-42).
+    # Engine-free before the engine check, exactly as in cli_coverage (QA-42).
     add_version_argument(parser)
     parser.add_argument(
         "--displays",
@@ -70,9 +67,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--context-cap",
         type=int,
-        default=DEFAULT_PV_CONTEXT_CAP,
+        # No number here, and no engine import to produce one: the default lives in the display
+        # engine, and printing it would put the parser back behind the engine it must not need.
+        default=None,
         help="max per-display reachability contexts the PV-inventory explores "
-        f"(default {DEFAULT_PV_CONTEXT_CAP}; higher = more complete, slower)",
+        "(default: the value the display engine defines; higher = more complete, slower)",
     )
     parser.add_argument(
         "--windows-paths",
@@ -88,6 +87,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    unavailable = require_display_engine("epics-crossplane")
+    if unavailable is not None:
+        return unavailable
+
+    from epics_mcp.services.crossplane import render_markdown
+    from epics_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
+    from epics_mcp.services.orchestration import CrossPlaneRequest, run_crossplane
+
+    # ``is None`` rather than ``or``, as in cli_coverage: an explicit ``--context-cap 0`` is the
+    # caller's decision and has always been passed through untouched.
+    context_cap = DEFAULT_PV_CONTEXT_CAP if args.context_cap is None else args.context_cap
+
     # One request → the SAME orchestrator the MCP tool calls (no duplicated join). Path validation
     # (canonicalize + existence + allowed_roots) happens inside run_crossplane via
     # resolve_user_path, so the CLI now honours the same boundary the tool had (S4-4), a bad path
@@ -97,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
         st_cmd_path=str(args.st_cmd),
         query_naming=args.naming,
         query_channelfinder=args.channelfinder,
-        context_cap=args.context_cap,
+        context_cap=context_cap,
         windows_paths=args.windows_paths,
         module_db_root=args.module_db_root,
     )
