@@ -11,6 +11,17 @@ from epics_mcp.errors import EpicsError
 from epics_mcp.paths import resolve_user_path
 from epics_mcp.services.epics_client import pv_get_batch
 
+#: The suffix a display file carries. The inventory reads NOTHING else: ``opi_navigation``'s
+#: ``find_bob_files`` walks the root and keeps a candidate only when ``suffix.lower()`` equals this,
+#: and every embed target is resolved against that already-collected set, so a file with any other
+#: suffix can never surface as an ``origin_file``. Measured, not read off the source: a ``.txt``
+#: holding valid display XML AND embedded by a ``.bob`` still never appears (and ``UPPER.BOB``
+#: does, which is why the comparison must fold case).
+#:
+#: Deliberately a local constant rather than an import of the engine's private ``_BOB_SUFFIX``;
+#: ``tests/test_validate.py`` pins the coupling against the real ``find_bob_files`` instead.
+_DISPLAY_SUFFIX = ".bob"
+
 
 def _run_validate(file_path: str, displays_dir: str | None) -> tuple[list[str], bool]:
     """Extract the resolved, real (ca/pva) channels physically declared in *file_path*.
@@ -31,22 +42,38 @@ def _run_validate(file_path: str, displays_dir: str | None) -> tuple[list[str], 
     hit the per-display context cap, so *channels* is a lower bound (a single file
     fanned out across thousands of template instances can exceed the cap).
 
+    Two inputs are refused BEFORE the walk because each settles the answer alone: a *file_path*
+    that is not a ``.bob`` (the inventory reads nothing else), and one that is not under the
+    walked root (it can never match an ``origin_file``). Both used to be discovered AFTER a full
+    inventory run, i.e. after ~40 s on a large dataset, for an answer that was already fixed.
+    A ``.bob`` that simply declares no real channels is NOT one of these: that is a legitimate
+    empty result, not a refusal.
+
     Raises:
-        EpicsError(INVALID_INPUT): file_path / displays_dir missing, wrong kind, or
-            file_path not under displays_dir.
+        EpicsError(INVALID_INPUT): file_path / displays_dir missing, wrong kind, not a
+            ``.bob`` display file, or file_path not under displays_dir.
         EpicsError(PATH_OUTSIDE_WORKSPACE): a path is outside the opt-in allowed_roots.
     """
     f = resolve_user_path(file_path, kind="file", label="file_path")
+    # Both refusals below happen BEFORE the walk, because both decide the answer on their own.
+    # The walk is the expensive half (measured: 40 s on a 284-display dataset, of which 0.1 s is
+    # finding the files) and it does not depend on file_path at all, so running it first meant
+    # waiting a minute for a result that was settled before the first file was opened. This is
+    # the order services/orchestration.py already takes: validate every user path, then work.
+    if f.suffix.lower() != _DISPLAY_SUFFIX:
+        found = f.suffix or "no suffix"
+        raise EpicsError(
+            f"file_path must be a {_DISPLAY_SUFFIX} display file (got {found}): {file_path}. "
+            f"The display inventory reads only {_DISPLAY_SUFFIX} files, so this one has no PVs "
+            f"to extract. To check a plain list of PVs, pass pv_names instead.",
+            error_code="INVALID_INPUT",
+        )
     if displays_dir:
         root = resolve_user_path(displays_dir, kind="dir", label="displays_dir")
     else:
         # No explicit root → walk the file's own directory, but boundary-check that
         # directory too (the path actually walked, not just the file itself).
         root = resolve_user_path(str(f.parent), kind="dir", label="displays_dir")
-    # windows_paths=True: this server runs on a Windows host, so embedded <file>
-    # refs resolve case-insensitively. It does NOT affect the origin_file/rel match
-    # below (always posix), only cross-file embed resolution.
-    inventory = analyze_pv_inventory(root, windows_paths=True)
     try:
         rel = f.relative_to(root).as_posix()
     except ValueError as exc:
@@ -54,6 +81,10 @@ def _run_validate(file_path: str, displays_dir: str | None) -> tuple[list[str], 
             f"file_path is not under displays_dir: {file_path}",
             error_code="INVALID_INPUT",
         ) from exc
+    # windows_paths=True: this server runs on a Windows host, so embedded <file>
+    # refs resolve case-insensitively. It does NOT affect the origin_file/rel match
+    # below (always posix), only cross-file embed resolution.
+    inventory = analyze_pv_inventory(root, windows_paths=True)
 
     capped_tops = set(inventory.diagnostics.context_capped)
     seen: set[str] = set()
@@ -87,7 +118,10 @@ async def _validate_pvs(
     ``origin_file`` so embedded fragments work too). Pass *displays_dir* = the dataset
     ROOT for full macro resolution; without it the file's own directory is used and
     fragments under-resolve. A ``notes`` entry flags when the PV list is a lower bound
-    (the macro expansion hit the context cap). NOTE: a full inventory walk is ~60 s for
+    (the macro expansion hit the context cap). A *file_path* that is not a ``.bob``, or that
+    lies outside the walked root, is refused immediately (see :func:`_run_validate`); note this
+    only applies when *file_path* is used, an explicit *pvs* list wins and skips the file path
+    entirely. NOTE: a full inventory walk is ~60 s for
     a large dataset, do not call this per-file in a tight loop. The connectivity reads go
     through ``pv_get_batch`` (native batch + concurrent fallback) in ``max_batch_size`` chunks,
     so a disconnected channel no longer serialises the whole check (M6).

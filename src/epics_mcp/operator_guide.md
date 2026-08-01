@@ -727,6 +727,16 @@ messages embed the full request URL, an internal host would leak into this file)
   foreign archiver/olog 404 is corroboration, not a device-identity verdict). With the Olog plane
   *disabled*, `get_log_entry` answers `found:null` (not checked), mirroring the
   `archived`/`configured`/`registered` siblings.
+- **`validate_pvs` refuses a `file_path` with `INVALID_INPUT`.** Two inputs are refused before any
+  work: a path that is not a `.bob`, and one that is not under `displays_dir`. Both would run the
+  full display-inventory walk (tens of seconds on a large dataset) to arrive at a result that was
+  already settled: the inventory reads `.bob` files only, and resolves embed targets against that
+  same collected set, so nothing else can ever contribute a PV. The suffix comparison folds case,
+  `UPPER.BOB` is a display. ⚠ Do NOT read this as "an empty answer means a bad path": a genuine
+  `.bob` that simply declares no real `ca`/`pva` channels (only `loc://`, say) still answers
+  `total: 0`, and that is a fact about the display, not a refusal. To check a plain list of PVs
+  with no display involved, pass `pv_names` instead; supplying both makes the list win and the
+  file path is not looked at.
 
 ## Acceptance: the questions this guide must answer
 

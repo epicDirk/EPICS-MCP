@@ -64,6 +64,17 @@ carry breaking changes).
 
 ### Changed
 
+- **`validate_pvs` refuses an unusable `file_path` at once instead of walking the whole dataset
+  first.** A path that is not a `.bob`, or that lies outside `displays_dir`, used to run the full
+  display-PV inventory, tens of seconds on a large dataset, and only then return an empty result
+  (or, in the second case, the error it could have given straight away). Neither input can produce
+  a PV: the inventory reads `.bob` files only and resolves embedded targets against that same
+  collected set, so the outcome was settled before the first file was opened. Both are now
+  `INVALID_INPUT`, and the message names the way out (`pv_names` for a plain list of PVs).
+  **A client that passed a non-`.bob` path today received a successful `total: 0`, and will now
+  get an error.** The suffix comparison folds case, so `UPPER.BOB` is still a display; and a
+  genuine `.bob` that declares no real `ca`/`pva` channels is unchanged, that stays an honest
+  `total: 0`, not a refusal.
 - **Five capped arguments now reject a non-positive value instead of answering emptily.**
   `monitor_pv.max_events`, `find_channels.max_results` and the `context_cap` of
   `crossplane_check`, `coverage_audit` and `find_device` require `>= 1`, and `monitor_pv.duration`

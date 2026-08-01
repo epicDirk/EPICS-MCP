@@ -50,7 +50,10 @@ async def validate_pvs(
         Field(
             description="Path to a .bob file. Extracts the concrete, macro-resolved "
             "ca/pva channels it references (via the opi_navigation inventory) and "
-            "checks their connectivity."
+            "checks their connectivity. A path that is not a .bob, or that lies outside "
+            "displays_dir, is refused straight away with INVALID_INPUT: the inventory reads "
+            "only .bob files, so such a call can only ever come back empty, and it used to "
+            "take a full inventory walk to say so."
         ),
     ] = None,
     displays_dir: Annotated[

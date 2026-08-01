@@ -1,9 +1,10 @@
 """Tests for epics_mcp.tools.validate."""
 
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 from epics_mcp.errors import EpicsError
 from epics_mcp.tools.validate import _validate_pvs
@@ -221,6 +222,132 @@ async def test_validate_pvs_no_displays_dir_honors_allowed_roots(
         assert exc_info.value.error_code == "PATH_OUTSIDE_WORKSPACE"
     finally:
         config_module._config = None
+
+
+async def test_non_bob_file_path_is_refused_without_running_the_inventory(tmp_path: Path) -> None:
+    """QA-33: the walk is the expensive half, and for a non-.bob file its outcome is settled.
+
+    Asserted on the CAUSE (the inventory was never run), not on elapsed time: a duration
+    assertion would be flaky on a loaded machine and would still pass if the walk merely got
+    faster. The spy also proves the refusal sits BEFORE the walk rather than merely somewhere.
+    That this patch reaches the code despite ``asyncio.to_thread`` is not assumed either, the
+    pre-existing ``test_validate_pvs_file_path_context_capped_note`` patches the same name.
+    """
+    root, _ = _dataset(tmp_path)
+    other = root / "notes.txt"
+    other.write_text(_FRAGMENT, encoding="utf-8")  # valid display XML, wrong suffix
+
+    spy = Mock(side_effect=AssertionError("the inventory walk must not run for a non-.bob file"))
+    with (
+        patch("epics_mcp.tools.validate.analyze_pv_inventory", spy),
+        pytest.raises(EpicsError) as exc_info,
+    ):
+        await _validate_pvs(file_path=str(other), displays_dir=str(root))
+
+    assert exc_info.value.error_code == "INVALID_INPUT"
+    assert ".bob" in str(exc_info.value), "the message must name the suffix it wants"
+    assert "pv_names" in str(exc_info.value), "the message must name the way out"
+    spy.assert_not_called()
+
+
+async def test_uppercase_bob_suffix_is_accepted_because_the_engine_accepts_it(
+    tmp_path: Path,
+) -> None:
+    """The suffix comparison folds case, because ``find_bob_files`` does (``suffix.lower()``).
+
+    Measured before this was written: a file named ``UPPER.BOB`` IS collected by the engine, so
+    rejecting it would refuse a file the inventory happily reads. The naive ``endswith('.bob')``
+    is exactly the mutant this pins, and it fails here while every other test stays green.
+    """
+    root = tmp_path / "ds"
+    root.mkdir()
+    shouty = root / "UPPER.BOB"
+    shouty.write_text(_FRAGMENT, encoding="utf-8")
+
+    # No displays_dir: the file's own directory is walked. The fragment's $(PRP) stays unbound, so
+    # nothing resolves and the honest answer is total 0, the point is that it is NOT a refusal.
+    result = await _validate_pvs(file_path=str(shouty))
+    assert result["total"] == 0
+
+
+async def test_bob_outside_displays_dir_is_refused_without_running_the_inventory(
+    tmp_path: Path,
+) -> None:
+    """The second input that settles the answer on its own, and the one the entry did not name.
+
+    A .bob outside the walked root can never match an ``origin_file``, yet the check used to run
+    AFTER the inventory: on a large dataset that is ~40 s spent to reach a verdict that was fixed
+    before the first file was opened. Same spy as above; the pre-existing
+    ``test_validate_pvs_file_path_not_under_displays_dir`` keeps guarding the error code itself.
+    """
+    root, _ = _dataset(tmp_path)
+    outside = tmp_path / "outside.bob"
+    outside.write_text(_FRAGMENT, encoding="utf-8")
+
+    spy = Mock(side_effect=AssertionError("the inventory walk must not run for an outside file"))
+    with (
+        patch("epics_mcp.tools.validate.analyze_pv_inventory", spy),
+        pytest.raises(EpicsError) as exc_info,
+    ):
+        await _validate_pvs(file_path=str(outside), displays_dir=str(root))
+
+    assert exc_info.value.error_code == "INVALID_INPUT"
+    spy.assert_not_called()
+
+
+def test_the_engine_really_ignores_every_suffix_but_bob(tmp_path: Path) -> None:
+    """The COUPLING, against the real engine: our rule must be the engine's rule.
+
+    ``_DISPLAY_SUFFIX`` is a local constant, so nothing but this test stops the two from drifting
+    apart, and a drift is silent in the dangerous direction (we refuse a file the engine would
+    have read). Deliberately calls the genuine ``find_bob_files`` rather than restating its logic:
+    a test that re-implements the rule it checks proves only that the author is consistent.
+    """
+    from opi_navigation.discovery import find_bob_files
+
+    from epics_mcp.tools.validate import _DISPLAY_SUFFIX
+
+    for name in ("kept.bob", "KEPT2.BOB", "skipped.txt", "skipped.bob.bak", "no_suffix"):
+        (tmp_path / name).write_text(_FRAGMENT, encoding="utf-8")
+
+    collected = set(find_bob_files(tmp_path))
+    assert collected == {"kept.bob", "KEPT2.BOB"}, (
+        "the engine's file selection changed; _DISPLAY_SUFFIX and the refusal in _run_validate "
+        f"have to follow it (collected: {sorted(collected)})"
+    )
+    assert all(Path(name).suffix.lower() == _DISPLAY_SUFFIX for name in collected)
+
+
+async def test_the_refusal_reaches_a_client_over_the_wire(tmp_path: Path) -> None:
+    """What the USER sees, not what the internal function raises.
+
+    A unit test on ``_validate_pvs`` cannot show how the refusal is packaged: the error crosses
+    ``translate_epics_errors``, which turns it into a ``ToolError`` carrying the code as a tag.
+    The in-memory transport routes through the same registration a real client uses, so the
+    message asserted here is the message that arrives.
+    """
+    from fastmcp import Client
+
+    from epics_mcp.server import _DISPLAY_TOOLS_AVAILABLE, mcp
+
+    if not _DISPLAY_TOOLS_AVAILABLE:  # pragma: no cover - core-only install, tool not registered
+        pytest.skip("validate_pvs is display-gated and this install has no displays group")
+
+    root, _ = _dataset(tmp_path)
+    other = root / "notes.txt"
+    other.write_text(_FRAGMENT, encoding="utf-8")
+
+    with pytest.raises(ToolError) as exc_info:
+        async with Client(mcp) as client:
+            await client.call_tool(
+                "validate_pvs", {"file_path": str(other), "displays_dir": str(root)}
+            )
+
+    message = str(exc_info.value)
+    assert message.startswith("[INVALID_INPUT]"), (
+        f"the client must receive the tagged, curated refusal, got: {message!r}"
+    )
+    assert ".bob" in message
 
 
 async def test_validate_pvs_file_path_context_capped_note(tmp_path: Path) -> None:
