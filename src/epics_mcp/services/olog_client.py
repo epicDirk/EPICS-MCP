@@ -874,13 +874,6 @@ class OlogClient:
         )
 
     @property
-    def whole_mode(self) -> bool:
-        """Transitional, always True: entries leave whole since the read redaction was removed
-        (decision PI, 2026-08-01). Kept for one removal step so the service-layer whole-mode
-        preconditions still compile; dies together with them."""
-        return True
-
-    @property
     def attachment_bytes_allowed(self) -> bool:
         """True iff raw attachment bytes may leave: the explicit download opt-in.
 

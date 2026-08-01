@@ -82,7 +82,7 @@ def test_attachment_round_trip_is_byte_identical(client: OlogClient) -> None:
     """Create-with-attachments → download each back → bytes must match exactly.
 
     Covers both file types (image + non-image), both download routes (by log+filename and by GridFS
-    id), and the whole-mode entry read surfacing both attachments. A byte mismatch here would mean
+    id), and the entry read surfacing both attachments. A byte mismatch here would mean
     the multipart framing, the filename↔part pairing, or the download encoding is wrong, none of
     which an offline mock can observe.
     """
@@ -107,7 +107,7 @@ def test_attachment_round_trip_is_byte_identical(client: OlogClient) -> None:
     by_id, _server_name, _content_type = client.get_attachment_by_id(png["id"])
     assert by_id == _PNG
 
-    # the whole-mode entry read surfaces both stored attachments
+    # the entry read surfaces both stored attachments
     fetched = client.get_log_entry(log_id)
     assert fetched is not None
     raw = fetched.get("attachments")

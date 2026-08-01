@@ -62,32 +62,6 @@ class OlogWriteDeniedError(EpicsError):
         super().__init__(message, error_code="OLOG_WRITE_DENIED", details=details)
 
 
-class OlogWholeModeRequiredError(OlogWriteDeniedError):
-    """Raised when an Olog write tool refuses a redacted/remote server BEFORE the gate is consulted.
-
-    ``add_log_attachment`` and ``update_log_entry`` both go through the server's destructive
-    ``updateLog``, so they must round-trip the target entry's FULL content, readable only in
-    whole-mode (loopback URL + ``EPICS_MCP_OLOG_ASSUME_TEST_DATA``). The service layer checks that
-    posture at the very top of the call, *before* ``get_olog_safety()`` is reached.
-
-    Why its own class (write-gate contract point 4, "a refusal raised outside the gate must not
-    carry the gate's error code"): this refusal writes **no audit line at all**, it never reaches
-    the gate, so there is no gate verdict to record. Reusing ``OLOG_WRITE_DENIED`` would make an
-    un-audited pre-gate refusal indistinguishable from a real, audited gate DENY, and the audit's
-    coverage claim unfalsifiable from the outside. Deliberately stays a **subclass** of
-    :class:`OlogWriteDeniedError` so every existing ``except OlogWriteDeniedError`` keeps catching
-    it, and calls ``EpicsError.__init__`` directly because ``OlogWriteDeniedError.__init__``
-    hardcodes ``error_code="OLOG_WRITE_DENIED"``, the same shape as :class:`PVWriteBoundsError`.
-
-    Client-side twin: :class:`~epics_mcp.services.olog_exceptions.OlogWholeModeRequired`, the
-    defense-in-depth backstop inside ``OlogClient.get_raw_entry``. It carries the SAME code, via the
-    ClassVar convention that module uses, so a caller sees one code for one condition.
-    """
-
-    def __init__(self, message: str, details: dict[str, object] | None = None) -> None:
-        EpicsError.__init__(self, message, error_code="OLOG_WHOLE_MODE_REQUIRED", details=details)
-
-
 class RateLimitError(EpicsError):
     """Raised when a rate limit is exceeded, a write gate (PV / Olog); see also the read throttle's
     own :class:`ReadRateLimitError`."""

@@ -2,9 +2,8 @@
 
 No network. Olog's update is destructive (it prunes any attachment not resubmitted and NULLS any
 field not sent), so every test here defends the round-trip that makes a field edit safe. Red-proofs
-for the new guards:
+for the guards:
 
-* a non-whole-mode server is refused (no redacted entry is ever round-tripped),
 * a non-numeric log_id and an all-unchanged call are refused before any I/O,
 * an empty title is refused (Olog's update, unlike create, would silently accept it),
 * UNedited fields + attachments + properties survive verbatim; only edited fields change,
@@ -45,13 +44,12 @@ from epics_mcp.services.olog_exceptions import (
     OlogConnectionError,
     OlogResponseError,
     OlogRoundTripUnsafe,
-    OlogWholeModeRequired,
 )
 
 _AUDIT_LOGGER = "epics_mcp.olog_audit"
 _LOOPBACK = "http://localhost:8080/Olog"
 
-# A canonical raw (whole-mode) entry: every field the destructive update would otherwise wipe.
+# A canonical raw entry: every field the destructive update would otherwise wipe.
 _RAW_ENTRY: dict[str, object] = {
     "id": 17,
     "title": "existing title",
@@ -306,17 +304,9 @@ class TestOlogErrorCode:
     """The mapper had NO direct test, which is why its fallback branch could stay wrong."""
 
     def test_refusals_carry_their_own_code_not_internal(self) -> None:
-        # The class of three: all are permanent refusals that never wrap an HTTP response, and all
-        # three used to fall through to INTERNAL, i.e. "transient, try again".
+        # Permanent refusals that never wrap an HTTP response; both used to fall through to
+        # INTERNAL, i.e. "transient, try again".
         assert checkers_module._olog_error_code(OlogRoundTripUnsafe("x")) == "INVALID_INPUT"
-        # Its own code, NOT the write gate's OLOG_WRITE_DENIED: both this client backstop and its
-        # service-level twin refuse BEFORE the gate is consulted and emit no audit line, and the
-        # write-gate contract (docs/write-gate-contract.md, point 4) forbids an un-audited pre-gate
-        # refusal from being reportable as an audited gate DENY.
-        assert (
-            checkers_module._olog_error_code(OlogWholeModeRequired("x"))
-            == "OLOG_WHOLE_MODE_REQUIRED"
-        )
         assert (
             checkers_module._olog_error_code(OlogAttachmentDownloadDenied("x"))
             == "OLOG_ATTACHMENT_DOWNLOAD_DENIED"
@@ -346,10 +336,9 @@ class TestOlogErrorCode:
 
 
 class _UpdateCaptureClient:
-    """A fake OlogClient for update service tests: flippable whole_mode, a canned raw entry,
+    """A fake OlogClient for update service tests: a canned raw entry,
     canned logbook/tag listings, and a recording update_log_entry."""
 
-    whole: ClassVar[bool] = True
     raw: ClassVar[dict[str, object] | None] = None
     logbooks_available: ClassVar[list[str]] = ["Ops", "Commissioning"]
     tags_available: ClassVar[list[str]] = ["shift", "fault"]
@@ -358,10 +347,6 @@ class _UpdateCaptureClient:
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         pass
-
-    @property
-    def whole_mode(self) -> bool:
-        return _UpdateCaptureClient.whole
 
     def get_raw_entry(self, log_id: str) -> dict[str, object] | None:
         return _UpdateCaptureClient.raw
@@ -398,7 +383,6 @@ class _UpdateCaptureClient:
 
 
 def _install_fake(monkeypatch: pytest.MonkeyPatch, raw: dict[str, object] | None = None) -> None:
-    _UpdateCaptureClient.whole = True
     _UpdateCaptureClient.raw = _RAW_ENTRY if raw is None else raw
     _UpdateCaptureClient.logbooks_available = ["Ops", "Commissioning"]
     _UpdateCaptureClient.tags_available = ["shift", "fault"]
@@ -446,16 +430,6 @@ class TestServiceUpdate:
         with pytest.raises(EpicsError) as exc:
             await query_olog_update("17", title="   ")
         assert exc.value.error_code == "INVALID_INPUT"
-        assert _UpdateCaptureClient.calls == {}
-
-    @pytest.mark.asyncio
-    async def test_refuses_when_not_whole_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # RED-PROOF (guard a): a redacted server is refused up front, no read, no write.
-        config_module._config = _write_config()
-        _install_fake(monkeypatch)
-        _UpdateCaptureClient.whole = False
-        with pytest.raises(OlogWriteDeniedError, match="sandbox"):
-            await query_olog_update("17", title="x")
         assert _UpdateCaptureClient.calls == {}
 
     @pytest.mark.asyncio

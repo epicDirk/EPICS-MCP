@@ -13,10 +13,10 @@ map recorded with ``COVERAGE_CORE=ctrace`` and some ten minutes, which is not a 
 
 Findings of the 2026-07-25 run, kept here rather than in a document nobody reads again:
 
-* Sham guards (direction B): **none found, which is not the same as none there.** 103 tests
+* Sham guards (direction B): **none found, which is not the same as none there.** 102 tests
   install a client class double in their own body and NOT ONE of them executes a client-edge guard
   line, which is what a class-level double is FOR: it takes the real client off the path. That is
-  the double used legitimately, to keep a service-layer test off the network. 21 of those also
+  the double used legitimately, to keep a service-layer test off the network. 20 of those also
   carry payload vocabulary, and every one of them was read: they claim SERVICE-layer behaviour (an
   already-constructed exception must not be relabelled "unreachable"; an unknown level is refused
   before any request is built), not a client-edge check. ⚠️ The vocabulary filter itself decides
@@ -24,8 +24,8 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   whose docstring states the edge claim in words the regex did not know. Treat this as "no sham
   guard found by this filter", and widen the filter before treating it as a stronger statement.
 
-  S33, and the distinction matters for what can be checked cheaply: 21 of those carry payload
-  vocabulary before any coverage map is consulted, and 21 remain once the tests that DO execute a
+  S33, and the distinction matters for what can be checked cheaply: 20 of those carry payload
+  vocabulary before any coverage map is consulted, and 20 remain once the tests that DO execute a
   guard line are removed. The vocabulary figure follows from this repository's AST alone and is
   therefore pinned by a test in the ordinary gate; the two coverage figures are decided by the
   coverage map and are checked only by ``scripts/guard_audit.py sham --check --coverage-db ...``.
@@ -53,7 +53,7 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   ⚠️ Two caveats on the counterpart number. First, "observed in both polarities" is weaker than it
   sounds for the 21 RAISE guards: their enabling polarity fires the guard on every input, so every
   covering test dies by construction and only the disabling half carries information. Second,
-  three entries below (`alarm_client.py:250`, `epics_client.py:490`, `olog_client.py:181`) sit in
+  three entries below (`alarm_client.py:250`, `epics_client.py:490`, `olog_client.py:182`) sit in
   comprehension filters, where the tool builds no whole-condition target, for those "unobserved"
   means "this CONJUNCT is unobserved", the rest of the condition still stood during the mutant.
 
@@ -147,9 +147,9 @@ _UNOBSERVED: dict[str, str] = {
     "epics_client.py:461": "int-or-none column coercion",
     "epics_client.py:490": "NTMatrix dim entries",
     "epics_client.py:692": "NaN alarm field",
-    "olog_client.py:181": "lenient name filter inside an already-anchored entry",
-    "olog_client.py:389": "attachment filename check",
-    "olog_client.py:1013": "source default before concatenation",
+    "olog_client.py:182": "lenient name filter inside an already-anchored entry",
+    "olog_client.py:390": "attachment filename check",
+    "olog_client.py:1007": "source default before concatenation",
 }
 
 # Neither polarity is noticed, and lines no test executes at all. Both are TEST GAPS at the

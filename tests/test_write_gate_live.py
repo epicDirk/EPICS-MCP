@@ -299,9 +299,8 @@ async def test_add_log_attachment_denies_a_logbook_the_server_reported(
     with pytest.raises(OlogWriteDeniedError) as excinfo:
         await query_olog_add_attachment(log_id, attachments=[str(payload)])
 
-    # The gate's audited code, NOT the un-audited whole-mode refusal that sits above the gate on
-    # this same path (which now carries OLOG_WHOLE_MODE_REQUIRED and would mean the probe never
-    # reached the server at all).
+    # The gate's audited code: the allowlist denial fires AFTER the round-trip read, keyed on the
+    # logbooks the server itself reported for this entry.
     assert excinfo.value.error_code == "OLOG_WRITE_DENIED"
     # Branch 3 and not branch 0/1/2: all four raise the same class with the same code.
     assert _ALLOWLIST_DENY_MESSAGE in str(excinfo.value)

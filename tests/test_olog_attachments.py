@@ -2,13 +2,12 @@
 
 No network. Covers the two new transport helpers (multipart PUT + streaming byte GET), the pure
 attachment-prep helpers (plan / read / write, anti-DoS stat-before-read, deterministic injected
-UUIDs), the client upload/download paths + the download-privacy backstop, the write-gate size cap +
-audit, and the service orchestration, including red-proofs for the four new guards:
+UUIDs), the client upload/download paths + the download-opt-in backstop, the write-gate size cap +
+audit, and the service orchestration, including red-proofs for three guards:
 
-* download bytes WITHHELD unless whole-mode AND the explicit opt-in flag,
+* download bytes WITHHELD without the explicit opt-in flag,
 * an over-size upload DENIED by the gate,
-* a download output path outside EPICS_MCP_ALLOWED_ROOTS refused,
-* attachment FILENAMES withheld in redacted mode.
+* a download output path outside EPICS_MCP_ALLOWED_ROOTS refused.
 
 All host/URL/person/file tokens are SYNTHETIC (facility-agnostic guard).
 """
@@ -581,29 +580,21 @@ class TestGateSizeCap:
 
 
 # ======================================================================================
-# Service: create-with-attachments (gate size + audit + attachments_uploaded withholding)
+# Service: create-with-attachments (gate size + audit + attachments_uploaded echo)
 # ======================================================================================
 
 
 class _CaptureClient:
-    """A fake OlogClient recording the create call and echoing a create response.
+    """A fake OlogClient recording the create call and echoing a create response."""
 
-    ``whole_mode`` is set by the caller so the filename-withholding red-proof can flip it.
-    """
-
-    whole: ClassVar[bool] = True
     calls: ClassVar[dict[str, Any]] = {}
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         pass
 
-    @property
-    def whole_mode(self) -> bool:
-        return _CaptureClient.whole
-
     def create_log_entry(self, **kwargs: object) -> dict[str, object]:
         _CaptureClient.calls = dict(kwargs)
-        return {"id": 99, "title": "withheld", "logbooks": ["Ops"]}
+        return {"id": 99, "title": "t", "logbooks": ["Ops"]}
 
 
 class TestServiceCreate:
@@ -612,7 +603,6 @@ class TestServiceCreate:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         config_module._config = _write_config()
-        _CaptureClient.whole = True
         monkeypatch.setattr(checkers_module, "OlogClient", _CaptureClient)
         f = tmp_path / "plot.png"
         f.write_bytes(b"PNGDATA")  # 7 bytes
@@ -666,7 +656,6 @@ class TestServiceCreate:
     @pytest.mark.asyncio
     async def test_embed_appends_inline_markup(self, monkeypatch: pytest.MonkeyPatch) -> None:
         config_module._config = _write_config()
-        _CaptureClient.whole = True
         monkeypatch.setattr(checkers_module, "OlogClient", _CaptureClient)
         await query_olog_create(
             title="t",
@@ -677,28 +666,18 @@ class TestServiceCreate:
         )
         assert _CaptureClient.calls["description"] == "see below\n\n![](attachment/uidZ)"
 
-    # --- RED-PROOF (guard 4): filenames withheld in redacted mode, ids always ---
     @pytest.mark.asyncio
-    async def test_uploaded_filenames_withheld_when_redacted(
+    async def test_uploaded_ids_and_filenames_are_echoed(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         config_module._config = _write_config()
         monkeypatch.setattr(checkers_module, "OlogClient", _CaptureClient)
-        f = tmp_path / "secret_name.bob"
+        f = tmp_path / "plot_name.bob"
         f.write_bytes(b"x")
-
-        _CaptureClient.whole = False  # redacted
-        redacted = await query_olog_create(
-            title="t", logbooks=["Ops"], attachments=[str(f)], id_factory=lambda: "uid1"
-        )
-        uploaded_redacted = redacted["attachments_uploaded"]
-        assert uploaded_redacted == [{"id": "uid1"}]  # NO filename leaks
-
-        _CaptureClient.whole = True  # whole-mode: filename surfaced (positive control)
-        whole = await query_olog_create(
+        result = await query_olog_create(
             title="t", logbooks=["Ops"], attachments=[str(f)], id_factory=lambda: "uid2"
         )
-        assert whole["attachments_uploaded"] == [{"id": "uid2", "filename": "uid2_secret_name.bob"}]
+        assert result["attachments_uploaded"] == [{"id": "uid2", "filename": "uid2_plot_name.bob"}]
 
 
 # ======================================================================================
@@ -746,9 +725,9 @@ class TestServiceDownload:
         with pytest.raises(EpicsError):
             await query_olog_download(as_base64=True)
 
-    # --- RED-PROOF (guard 1): bytes withheld, and NO byte fetch, when posture forbids ---
+    # --- RED-PROOF (guard 1): bytes withheld, and NO byte fetch, without the opt-in flag ---
     @pytest.mark.asyncio
-    async def test_withheld_when_posture_forbids(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_withheld_without_the_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _set_config(olog_url=_LOOPBACK)
         monkeypatch.setattr(checkers_module, "OlogClient", _download_client(allowed=False))
         result = await query_olog_download(log_id="1", filename="a.png", as_base64=True)
@@ -809,7 +788,7 @@ def _list_client(entry: dict[str, object] | None) -> Callable[..., object]:
 
 class TestServiceList:
     @pytest.mark.asyncio
-    async def test_whole_mode_surfaces_filenames(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_list_surfaces_filenames(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _set_config(olog_url=_LOOPBACK)
         entry = {
             "id": 12,
@@ -825,22 +804,24 @@ class TestServiceList:
         ]
 
     @pytest.mark.asyncio
-    async def test_redacted_withholds_filenames(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_entry_without_attachment_list_yields_empty(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         _set_config(olog_url=_LOOPBACK)
-        # a redacted entry has no raw `attachments` list, only the synthesised count
-        entry: dict[str, object] = {"id": 12, "attachment_count": 3}
+        # an entry the server sends without a raw `attachments` list = no attachments
+        entry: dict[str, object] = {"id": 12}
         monkeypatch.setattr(checkers_module, "OlogClient", _list_client(entry))
         result = await query_olog_list_attachments("12")
-        assert result["withheld"] is True
+        assert result["found"] is True
         assert result["attachments"] == []
-        assert result["attachment_count"] == 3
+        assert result["attachment_count"] == 0
 
 
 # ======================================================================================
-# OA1b: add_log_attachment: client round-trip + whole-mode + service gating
+# OA1b: add_log_attachment: client round-trip + service gating
 # ======================================================================================
 
-# A representative RAW whole-mode entry (as measured from the live sandbox: source + properties
+# A representative RAW entry (as measured from the live sandbox: source + properties
 # present, logbooks a list-of-structs, attachments carry id/filename/metadata/checksum).
 _RAW_ENTRY: dict[str, object] = {
     "id": 17,
@@ -972,19 +953,14 @@ class TestClientAddAttachment:
 
 
 class _AddCaptureClient:
-    """A fake OlogClient for add_log_attachment service tests: flippable whole_mode, a canned raw
-    entry, and a recording add_attachment."""
+    """A fake OlogClient for add_log_attachment service tests: a canned raw
+    entry and a recording add_attachment."""
 
-    whole: ClassVar[bool] = True
     raw: ClassVar[dict[str, object] | None] = None
     calls: ClassVar[dict[str, Any]] = {}
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         pass
-
-    @property
-    def whole_mode(self) -> bool:
-        return _AddCaptureClient.whole
 
     def get_raw_entry(self, log_id: str) -> dict[str, object] | None:
         return _AddCaptureClient.raw
@@ -997,7 +973,7 @@ class _AddCaptureClient:
         inline_markup: str = "",
     ) -> dict[str, object]:
         _AddCaptureClient.calls = {"log_id": log_id, "uploads": uploads, "inline": inline_markup}
-        return {"id": int(log_id), "title": "withheld", "logbooks": ["Ops"]}
+        return {"id": int(log_id), "title": "t", "logbooks": ["Ops"]}
 
 
 class TestServiceAddAttachment:
@@ -1025,24 +1001,12 @@ class TestServiceAddAttachment:
         assert exc.value.error_code == "INVALID_INPUT"
 
     @pytest.mark.asyncio
-    async def test_refuses_when_not_whole_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # RED-PROOF (guard a, service): a redacted server is refused up front, no read, no write.
-        config_module._config = _write_config()
-        _AddCaptureClient.whole = False
-        _AddCaptureClient.calls = {}
-        monkeypatch.setattr(checkers_module, "OlogClient", _AddCaptureClient)
-        with pytest.raises(OlogWriteDeniedError, match="sandbox"):
-            await query_olog_add_attachment("17", attachments=["/x"])
-        assert _AddCaptureClient.calls == {}  # never reached add_attachment
-
-    @pytest.mark.asyncio
     async def test_gate_deny_when_target_logbook_not_allowlisted(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         # RED-PROOF (guard d): the gate is keyed on the TARGET entry's OWN logbooks; a target in a
         # logbook outside EPICS_MCP_OLOG_WRITE_LOGBOOKS is denied.
         config_module._config = _write_config(olog_write_logbooks="Ops")
-        _AddCaptureClient.whole = True
         _AddCaptureClient.raw = {"id": 17, "logbooks": [{"name": "SecretBook"}], "title": "x"}
         _AddCaptureClient.calls = {}
         monkeypatch.setattr(checkers_module, "OlogClient", _AddCaptureClient)
@@ -1057,7 +1021,6 @@ class TestServiceAddAttachment:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         config_module._config = _write_config(olog_write_logbooks="Ops")
-        _AddCaptureClient.whole = True
         _AddCaptureClient.raw = {"id": 17, "logbooks": [{"name": "Ops"}], "title": "existing"}
         _AddCaptureClient.calls = {}
         monkeypatch.setattr(checkers_module, "OlogClient", _AddCaptureClient)
@@ -1088,7 +1051,6 @@ class TestServiceAddAttachment:
         # update path; POST /logs/multipart IS the destructive updateLog, so a timeout can leave
         # the entry mutated while the caller sees FAILED; the record must name it.
         _set_config(olog_url=_LOOPBACK, allow_olog_write=True, olog_write_logbooks="Ops")
-        _AddCaptureClient.whole = True
         _AddCaptureClient.raw = {"id": 17, "logbooks": [{"name": "Ops"}], "title": "existing"}
         _AddCaptureClient.calls = {}
 

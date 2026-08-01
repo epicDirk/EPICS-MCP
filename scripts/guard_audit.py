@@ -344,12 +344,12 @@ CLIENT_MODULES = "client modules whose edges this audit covers"
 GUARD_TARGETS = "mutable guard sites the audit can address in them"
 
 PINNED_AST: dict[str, int] = {
-    DOUBLES: 103,
-    EDGE_VOCABULARY: 21,
+    DOUBLES: 102,
+    EDGE_VOCABULARY: 20,
     CLIENT_MODULES: 6,
     GUARD_TARGETS: 93,
 }
-PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 103, SHAM_CANDIDATES: 21}
+PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 102, SHAM_CANDIDATES: 20}
 PINNED: dict[str, int] = {**PINNED_AST, **PINNED_COVERAGE}
 
 # The candidate list, by NAME. A count is not a finding: the verdict "no sham guard found" was
@@ -372,12 +372,11 @@ PINNED_CANDIDATES: tuple[str, ...] = (
     "test_olog.py::test_note_on_a_mixed_or_list_does_not_generalise",
     "test_olog.py::test_search_bad_time_is_not_a_connection_error",
     "test_olog.py::test_unreadable_levels_lookup_says_so_and_keeps_the_result",
-    "test_olog_attachments.py::test_refuses_when_not_whole_mode",
     "test_olog_write.py::test_bad_level_does_not_burn_a_rate_token",
     "test_olog_write.py::test_blank_level_refused",
     "test_olog_write.py::test_reply_tool_threads_and_bad_id_is_400",
     "test_olog_write.py::test_unknown_level_refused",
-    "test_write_gate_contract.py::test_pre_gate_refusal_is_coded_apart_and_writes_no_audit_line",
+    "test_write_gate_contract.py::test_round_trip_write_is_gate_denied_before_any_read",
 )
 
 # Two recipes, because the whole point of the split above is that they cost different amounts. A

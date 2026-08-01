@@ -186,7 +186,7 @@ async def _add_log_attachment(
     embed_image_base64: str | None = None,
     timeout: float = 5.0,
 ) -> OlogAddAttachmentResult:
-    """Attach files to an EXISTING Olog entry. MUTATING, gated, whole-mode only.
+    """Attach files to an EXISTING Olog entry. MUTATING, gated.
 
     Thin MCP adapter over :func:`epics_mcp.services.checkers.query_olog_add_attachment`.
     *attachments* are comma-separated workspace file paths.
@@ -208,7 +208,7 @@ async def _update_log_entry(
     tags: str | None = None,
     timeout: float = 5.0,
 ) -> OlogUpdateResult:
-    """Edit an EXISTING Olog entry's fields. MUTATING, gated, whole-mode only.
+    """Edit an EXISTING Olog entry's fields. MUTATING, gated.
 
     Thin MCP adapter over :func:`epics_mcp.services.checkers.query_olog_update`. An argument left
     at ``None`` leaves that field UNCHANGED. *logbooks* and *tags* are comma-separated names and
@@ -234,7 +234,7 @@ async def _download_log_attachment(
     as_base64: bool = False,
     timeout: float = 5.0,
 ) -> OlogDownloadResult:
-    """Download one Olog attachment's raw bytes (posture-gated).
+    """Download one Olog attachment's raw bytes (opt-in-gated).
 
     Thin MCP adapter over :func:`epics_mcp.services.checkers.query_olog_download`.
     """
@@ -249,7 +249,7 @@ async def _download_log_attachment(
 
 
 async def _list_log_attachments(log_id: str, timeout: float = 5.0) -> OlogListAttachmentsResult:
-    """List one Olog entry's attachments (filenames whole-mode only).
+    """List one Olog entry's attachments (id + filename + fileMetadataDescription).
 
     Thin MCP adapter over :func:`epics_mcp.services.checkers.query_olog_list_attachments`.
     """

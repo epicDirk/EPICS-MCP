@@ -111,6 +111,36 @@ class OlogWriteGate:
     # Public API
     # ------------------------------------------------------------------
 
+    def check_write_env_and_url(self, caller: str = "create_log_entry") -> None:
+        """The two write checks that need NO logbook knowledge: env gate + test-server URL boundary.
+
+        Split out for the round-tripping callers (``add_log_attachment`` / ``update_log_entry``):
+        their logbook allowlist is keyed on the TARGET entry's own logbooks, which requires a read
+        first, but a caller the gate would refuse on the env or URL axis must be refused BEFORE
+        that read (no HTTP round-trip, no entry-existence oracle, for a write the gate rejects).
+        :meth:`check_write_preconditions` calls this too, so the checks and their audit lines stay
+        the same in every path. Each failing check audits DENY before the raise.
+        """
+        # 1. Environment gate
+        if not self._config.allow_olog_write:
+            self._audit_deny("OLOG_WRITE_DENIED", caller)
+            raise OlogWriteDeniedError(
+                "Olog writes are disabled. Set EPICS_MCP_ALLOW_OLOG_WRITE=true to enable "
+                "(ALLOW_PV_WRITE is a separate gate and stays off).",
+                details={"caller": caller},
+            )
+
+        # 2. Test-server URL boundary (the critical check, prevents an accidental production write)
+        if not self._url_write_allowed():
+            self._audit_deny("OLOG_WRITE_DENIED", caller)
+            raise OlogWriteDeniedError(
+                f"Olog write refused: target {self._config.olog_url!r} is not a permitted write "
+                "target. Only a loopback host, or an https URL that is in "
+                "EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true, "
+                "may be written to (a plain-http remote is refused, Basic creds are cleartext).",
+                details={"olog_url": self._config.olog_url},
+            )
+
     def check_write_preconditions(
         self, logbooks: list[str], caller: str = "create_log_entry"
     ) -> None:
@@ -130,25 +160,9 @@ class OlogWriteGate:
                 details={"logbooks": logbooks},
             )
 
-        # 1. Environment gate
-        if not self._config.allow_olog_write:
-            self._audit_deny("OLOG_WRITE_DENIED", caller)
-            raise OlogWriteDeniedError(
-                "Olog writes are disabled. Set EPICS_MCP_ALLOW_OLOG_WRITE=true to enable "
-                "(ALLOW_PV_WRITE is a separate gate and stays off).",
-                details={"logbooks": logbooks},
-            )
-
-        # 2. Test-server URL boundary (the critical check, prevents an accidental production write)
-        if not self._url_write_allowed():
-            self._audit_deny("OLOG_WRITE_DENIED", caller)
-            raise OlogWriteDeniedError(
-                f"Olog write refused: target {self._config.olog_url!r} is not a permitted write "
-                "target. Only a loopback host, or an https URL that is in "
-                "EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true, "
-                "may be written to (a plain-http remote is refused, Basic creds are cleartext).",
-                details={"olog_url": self._config.olog_url},
-            )
+        # 1. + 2. Environment gate and test-server URL boundary (shared with the round-trip
+        #    callers, see check_write_env_and_url).
+        self.check_write_env_and_url(caller)
 
         # 3. Logbook allowlist (empty allowlist = deny-all at runtime; the PV pattern is also
         #    fail-closed on empty but in a DIFFERENT shape, refuse-to-start, not allow-all;

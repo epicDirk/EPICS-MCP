@@ -21,7 +21,7 @@ from collections.abc import Callable
 from typing import TypedDict
 
 from epics_mcp.config import get_config
-from epics_mcp.errors import EpicsConnectionError, EpicsError, OlogWholeModeRequiredError
+from epics_mcp.errors import EpicsConnectionError, EpicsError
 from epics_mcp.olog_safety import get_olog_safety
 from epics_mcp.services._http import basic_auth_header, http_status
 from epics_mcp.services._time_window import TimeWindowFormatError
@@ -180,7 +180,6 @@ class OlogListAttachmentsResult(TypedDict, total=False):
     found: bool | None
     attachments: list[dict[str, object]]
     attachment_count: int | None
-    withheld: bool | None
     note: str | None
 
 
@@ -188,19 +187,13 @@ _OLOG_DISABLED_NOTE = (
     "Phoebus Olog is disabled. Set EPICS_MCP_OLOG_URL to the Olog REST root "
     "(e.g. http://host:8080/Olog) to enable logbook search."
 )
-# The download/list posture message: raw attachment bytes (and filenames, for a list) are author
-# free text and bypass the dict-based redaction, so they leave ONLY from a declared local sandbox
-# with the explicit opt-in, the same whole-mode threshold as an entry read, plus a second flag.
+# The download opt-in message: raw attachment BYTES leave only with the explicit flag (the by-id
+# endpoint has no server-side per-log authorization, so byte egress stays a deliberate choice).
 _ATTACH_WITHHELD_NOTE = (
-    "Attachment bytes are withheld. Raw bytes leave only from a declared local test sandbox "
-    "(loopback EPICS_MCP_OLOG_URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA) AND with "
-    "EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD=true (bytes bypass the entry redaction, so they need "
-    "their own opt-in; the by-id endpoint has no server-side per-log authorization). Run "
-    "epics-doctor to see the effective posture."
-)
-_ATTACH_LIST_WITHHELD_NOTE = (
-    "Attachment filenames are withheld (author free text). Only the count is shown unless the Olog "
-    "is a declared local test sandbox (loopback + EPICS_MCP_OLOG_ASSUME_TEST_DATA)."
+    "Attachment bytes are withheld. Raw bytes leave only with "
+    "EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD=true (the by-id endpoint has no server-side "
+    "per-log authorization, so byte egress needs its own opt-in). Run "
+    "epics-doctor to see the effective configuration."
 )
 # A base64 download is returned IN the tool result (response tokens), so it is capped far below the
 # path-based ceiling (olog_attach_max_bytes), a large blob must go to a workspace file, not the
@@ -666,14 +659,8 @@ async def query_olog_create(
         )
         result: OlogCreateResult = {"enabled": True, "created": True, "entry": entry}
         if uploads is not None:
-            # Filenames are author free text → whole-mode only; ids are UUIDs (safe) → always.
             result["attachments_uploaded"] = [
-                (
-                    {"id": u["id"], "filename": u["filename"]}
-                    if client.whole_mode
-                    else {"id": u["id"]}
-                )
-                for u in uploads
+                {"id": u["id"], "filename": u["filename"]} for u in uploads
             ]
         return result
 
@@ -695,15 +682,16 @@ async def query_olog_add_attachment(
     *,
     id_factory: Callable[[], str] = _default_olog_id_factory,
 ) -> OlogAddAttachmentResult:
-    """Attach files to an EXISTING Olog entry (OA1b). MUTATING, gated, WHOLE-MODE ONLY.
+    """Attach files to an EXISTING Olog entry (OA1b). MUTATING, gated.
 
-    Default-disabled (no ``EPICS_MCP_OLOG_URL`` → ``enabled: false``, no network). WHOLE-MODE ONLY:
-    the server's ``POST /logs/multipart`` runs a DESTRUCTIVE ``updateLog`` (it prunes any attachment
-    not resubmitted and overwrites title/body/logbooks/tags/level/properties), so a safe attach must
-    round-trip the target entry's FULL content, readable only whole (loopback +
-    ``EPICS_MCP_OLOG_ASSUME_TEST_DATA``). Against a redacted server it is refused. The write goes
-    through the SAME :class:`~epics_mcp.olog_safety.OlogWriteGate` as create, with the allowlist
-    keyed on the TARGET entry's own logbooks (read first). Backs ``add_log_attachment``.
+    Default-disabled (no ``EPICS_MCP_OLOG_URL`` → ``enabled: false``, no network). The server's
+    ``POST /logs/multipart`` runs a DESTRUCTIVE ``updateLog`` (it prunes any attachment not
+    resubmitted and overwrites title/body/logbooks/tags/level/properties), so a safe attach
+    round-trips the target entry's FULL content (read first). The write goes
+    through the SAME :class:`~epics_mcp.olog_safety.OlogWriteGate` as create: the env gate and the
+    test-server URL boundary are checked BEFORE the round-trip read (a write target the gate
+    refuses is never even read), the logbook allowlist afterwards, keyed on the TARGET entry's own
+    logbooks. Backs ``add_log_attachment``.
     """
     cfg = get_config()
     if not cfg.olog_url:
@@ -721,27 +709,13 @@ async def query_olog_add_attachment(
     caller = "add_log_attachment"
 
     def _run() -> OlogAddAttachmentResult:
+        gate = get_olog_safety()
+        # Env gate + URL boundary FIRST, before any read: a write target the gate refuses must not
+        # be read either (no HTTP round-trip and no entry-existence oracle for a denied caller).
+        # The logbook allowlist can only run AFTER the read, it is keyed on the target's logbooks.
+        gate.check_write_env_and_url(caller)
         auth = basic_auth_header(cfg.olog_write_user, cfg.olog_write_password)
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=auth)
-        # Whole-mode FIRST, before any read or write. It is required for the round-trip source AND
-        # implies the loopback write-URL boundary; a redacted/remote server is refused structurally.
-        #
-        # PRE-GATE refusal, and deliberately NOT audited (write-gate contract point 4). The audit
-        # promise is scoped to *gate verdicts and writes that reach the I/O*; this is neither, the
-        # gate below has not been consulted, no rate token exists, no write was attempted. Calling
-        # the gate's _audit_deny from here would also emit a DENY line from OUTSIDE the two gate
-        # modules, i.e. outside the reach of the drift guard in tests/test_write_gate_contract.py
-        # that counts them, a new blind spot dressed up as a fix. What the contract DOES require is
-        # that this refusal not masquerade as an audited gate DENY, hence its own error code
-        # (OLOG_WHOLE_MODE_REQUIRED via OlogWholeModeRequiredError, a subclass of
-        # OlogWriteDeniedError so existing handlers still catch it).
-        if not client.whole_mode:
-            raise OlogWholeModeRequiredError(
-                "Olog write refused: add_log_attachment needs a declared local test sandbox "
-                "(loopback EPICS_MCP_OLOG_URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA). Attaching to an "
-                "existing entry must round-trip its full content, the server's update prunes any "
-                "attachment or field not resubmitted, which is withheld against a redacted server."
-            )
         raw = client.get_raw_entry(log_id)
         if raw is None:
             raise EpicsError(
@@ -755,7 +729,6 @@ async def query_olog_add_attachment(
         raw_level = raw.get("level")
         level = raw_level if isinstance(raw_level, str) else None
         title_len = len(str(raw.get("title") or ""))
-        gate = get_olog_safety()
         # Gate ordering mirrors create: cheap checks (env / URL / allowlist on the TARGET logbooks)
         # with NO filesystem first, then stat-size the attachments, then the size cap + rate token.
         gate.check_write_preconditions(target_logbooks, caller=caller)
@@ -784,7 +757,6 @@ async def query_olog_add_attachment(
             attachment_count=len(plan.specs),
             attachment_bytes=plan.total_bytes,
         )
-        # Whole-mode is guaranteed here (refused otherwise), so filenames may be echoed.
         return {
             "enabled": True,
             "added": True,
@@ -809,17 +781,17 @@ async def query_olog_update(
     tags: list[str] | None = None,
     timeout: float = 5.0,
 ) -> OlogUpdateResult:
-    """Edit an EXISTING Olog entry's fields (OA3). MUTATING, gated, WHOLE-MODE ONLY.
+    """Edit an EXISTING Olog entry's fields (OA3). MUTATING, gated.
 
-    Default-disabled (no ``EPICS_MCP_OLOG_URL`` → ``enabled: false``, no network). WHOLE-MODE ONLY
-    for the same structural reason as ``add_log_attachment``: the server's update is DESTRUCTIVE (it
-    prunes any attachment not resubmitted and NULLS any field not sent), so a safe edit must
-    round-trip the target entry's FULL content, readable only whole (loopback +
-    ``EPICS_MCP_OLOG_ASSUME_TEST_DATA``). Against a redacted server it is refused.
+    Default-disabled (no ``EPICS_MCP_OLOG_URL`` → ``enabled: false``, no network). The server's
+    update is DESTRUCTIVE (it prunes any attachment not resubmitted and NULLS any field not sent),
+    so a safe edit round-trips the target entry's FULL content (read first).
 
     ``None`` means "leave unchanged"; only the fields passed are overlaid. The write goes
-    through the SAME :class:`~epics_mcp.olog_safety.OlogWriteGate` as create, but the
-    allowlist is keyed on the **UNION** of the entry's current logbooks and the ones it would
+    through the SAME :class:`~epics_mcp.olog_safety.OlogWriteGate` as create: the env gate and the
+    test-server URL boundary are checked BEFORE the round-trip read (a write target the gate
+    refuses is never even read), and the allowlist is keyed on the **UNION** of the entry's
+    current logbooks and the ones it would
     end up in: moving an entry INTO a logbook and pulling it OUT of one are both writes to that
     logbook, so gating on either side alone leaves a hole. Backs ``update_log_entry``.
     """
@@ -854,19 +826,14 @@ async def query_olog_update(
     caller = "update_log_entry"
 
     def _run() -> OlogUpdateResult:
+        gate = get_olog_safety()
+        # Env gate + URL boundary FIRST, before any read: a write target the gate refuses must not
+        # be read either (no HTTP round-trip and no entry-existence oracle for a denied caller).
+        # The logbook allowlist can only run AFTER the read, it is keyed on the union of the
+        # entry's current and resulting logbooks.
+        gate.check_write_env_and_url(caller)
         auth = basic_auth_header(cfg.olog_write_user, cfg.olog_write_password)
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=auth)
-        # Whole-mode FIRST, before any read or write. Required for the round-trip source AND it
-        # implies the loopback write-URL boundary; a redacted/remote server is refused structurally.
-        # PRE-GATE and un-audited on purpose, with its own error code, same reasoning as the twin
-        # in query_olog_add_attachment above (write-gate contract point 4).
-        if not client.whole_mode:
-            raise OlogWholeModeRequiredError(
-                "Olog write refused: update_log_entry needs a declared local test sandbox "
-                "(loopback EPICS_MCP_OLOG_URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA). Editing an entry "
-                "must round-trip its full content, the server's update prunes any attachment and "
-                "nulls any field not resubmitted, which is withheld against a redacted server."
-            )
         raw = client.get_raw_entry(stripped_id)
         if raw is None:
             raise EpicsError(
@@ -902,7 +869,6 @@ async def query_olog_update(
         raw_level = raw.get("level")
         entry_level = raw_level if isinstance(raw_level, str) else None
         title_len = len(title) if title is not None else len(str(raw.get("title") or ""))
-        gate = get_olog_safety()
         # Gate ordering mirrors create/add: the cheap deterministic checks (env / URL / allowlist)
         # first, then the name validation reads, then the rate token last.
         gate.check_write_preconditions(gate_logbooks, caller=caller)
@@ -982,13 +948,13 @@ async def query_olog_download(
     as_base64: bool = False,
     timeout: float = 5.0,
 ) -> OlogDownloadResult:
-    """Download one Olog attachment's raw bytes. Read-only, config-gated, and POSTURE-gated (OA1).
+    """Download one Olog attachment's raw bytes. Read-only, config-gated, opt-in-gated (OA1).
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` +
-    ``downloaded: false`` and makes NO network call. Bytes leave ONLY from a declared local sandbox
-    (whole-mode) AND with the explicit ``EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD`` opt-in:
+    ``downloaded: false`` and makes NO network call. Bytes leave ONLY with the explicit
+    ``EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD`` opt-in:
     otherwise
-    the result is ``withheld: true`` and NO byte fetch happens (the posture is checked BEFORE the
+    the result is ``withheld: true`` and NO byte fetch happens (the flag is checked BEFORE the
     request; the client's :meth:`~.OlogClient._require_attachment_bytes_allowed` is a further
     backstop). Identify the attachment by ``(log_id + filename)``, the primary route, or by
     ``attachment_id`` (the by-id route an inline image uses). Bytes cross the MCP boundary either
@@ -1071,13 +1037,12 @@ async def query_olog_download(
 async def query_olog_list_attachments(
     log_id: str, timeout: float = 5.0
 ) -> OlogListAttachmentsResult:
-    """List one Olog entry's attachments (id + fileMetadataDescription; filename whole-mode only).
+    """List one Olog entry's attachments (id + filename + fileMetadataDescription).
 
     Read-only, config-gated. Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset returns
-    ``enabled: false`` + ``found: None``. ``found: false`` for a definitive 404. Reuses
-    :meth:`~.OlogClient.get_log_entry`'s projection: in whole-mode the raw ``attachments`` array
-    (id / filename / fileMetadataDescription) is surfaced; in redacted mode only the count is known
-    and filenames are withheld (author free text). Backs ``list_log_attachments``.
+    ``enabled: false`` + ``found: None``. ``found: false`` for a definitive 404. Reads the entry's
+    raw ``attachments`` array; an entry the server sends without one yields an empty list with
+    count 0. Backs ``list_log_attachments``.
     """
     cfg = get_config()
     if not cfg.olog_url:
@@ -1095,9 +1060,8 @@ async def query_olog_list_attachments(
         if entry is None:
             return {"enabled": True, "id": log_id, "found": False, "attachments": []}
         raw = entry.get("attachments")
-        if isinstance(raw, list):
-            # whole-mode: the raw list is present (id/filename/fileMetadataDescription/checksum).
-            attachments: list[dict[str, object]] = [
+        attachments: list[dict[str, object]] = (
+            [
                 {
                     "id": item.get("id"),
                     "filename": item.get("filename"),
@@ -1106,25 +1070,15 @@ async def query_olog_list_attachments(
                 for item in raw
                 if isinstance(item, dict)
             ]
-            return {
-                "enabled": True,
-                "id": log_id,
-                "found": True,
-                "attachments": attachments,
-                "attachment_count": len(attachments),
-            }
-        # Redacted mode: no raw list, only the synthesised count; filenames withheld. entry is an
-        # untyped dict, so narrow the count to int|None at runtime (a non-int would be a projection
-        # bug, surface None, not a wrong-typed value).
-        raw_count = entry.get("attachment_count")
+            if isinstance(raw, list)
+            else []
+        )
         return {
             "enabled": True,
             "id": log_id,
             "found": True,
-            "attachments": [],
-            "withheld": True,
-            "attachment_count": raw_count if isinstance(raw_count, int) else None,
-            "note": _ATTACH_LIST_WITHHELD_NOTE,
+            "attachments": attachments,
+            "attachment_count": len(attachments),
         }
 
     try:

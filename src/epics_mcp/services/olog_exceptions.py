@@ -66,28 +66,6 @@ class OlogResponseError(OlogError, RestResponseError):
     error_code: ClassVar[str] = "OLOG_RESPONSE_ERROR"
 
 
-class OlogWholeModeRequired(OlogError):
-    """A whole-entry round-trip (add_log_attachment, OA1b) was requested but the client is not in
-    whole-mode (loopback URL + ``olog_assume_test_data``).
-
-    Attaching to an existing entry goes through ``POST /logs/multipart`` = the server's destructive
-    ``updateLog``, which PRUNES any attachment not resubmitted and OVERWRITES title/body/logbooks/
-    tags/level/properties with what is sent. A safe attach must therefore round-trip the entry's
-    FULL content: which is only readable whole (a redacted read withholds the free text and drops
-    the raw attachment list). Against a redacted server the operation is refused. The service checks
-    ``whole_mode`` up front; this backstop fires only if a raw read is reached, so a redacted entry
-    is never round-tripped. NOT a server error, it never wraps an HTTP response."""
-
-    # Same condition, same code as the service-level twin that normally catches this first:
-    # checkers raises OlogWholeModeRequiredError (= OLOG_WHOLE_MODE_REQUIRED). That code is NOT the
-    # write gate's OLOG_WRITE_DENIED, deliberately, per the write-gate contract
-    # (docs/write-gate-contract.md, point 4): both twins refuse BEFORE the gate is consulted and
-    # therefore emit NO audit line, and a refusal raised outside the gate must not be reportable as
-    # an audited gate DENY. It used to carry OLOG_WRITE_DENIED, which made the un-audited refusal
-    # indistinguishable from the audited one at the caller.
-    error_code: ClassVar[str] = "OLOG_WHOLE_MODE_REQUIRED"
-
-
 class OlogRoundTripUnsafe(OlogError):
     """An entry cannot be updated (OA3) because its attachments would not survive the round-trip.
 
@@ -128,20 +106,18 @@ class OlogRoundTripUnsafe(OlogError):
 
 
 class OlogAttachmentDownloadDenied(OlogError):
-    """Raw attachment bytes were requested but the read posture forbids them (OA1).
+    """Raw attachment bytes were requested without the download opt-in (OA1).
 
-    The DEFENSE-IN-DEPTH backstop for the attachment-download privacy gate: bytes leave only when
-    the
-    client is in whole-mode (loopback + ``olog_assume_test_data``) AND
-    ``olog_allow_attachment_download``
-    is set (see :attr:`~epics_mcp.services.olog_client.OlogClient.attachment_bytes_allowed`). The
-    normal path checks that posture in the service layer and returns a structured ``withheld``
+    The DEFENSE-IN-DEPTH backstop for the attachment-download opt-in: bytes leave only when
+    ``olog_allow_attachment_download`` is set
+    (see :attr:`~epics_mcp.services.olog_client.OlogClient.attachment_bytes_allowed`). The
+    normal path checks that flag in the service layer and returns a structured ``withheld``
     result
-    without a network call; this raise fires only if a byte-fetch is reached, so no un-redacted
-    bytes can slip out through a code path that forgot the check. NOT a server error, it never
+    without a network call; this raise fires only if a byte-fetch is reached, so no bytes
+    can slip out through a code path that forgot the check. NOT a server error, it never
     wraps
     an HTTP response."""
 
-    # A read-side privacy refusal: neither the write code nor a transport code fits, so it
-    # gets its own, a caller can tell "the posture forbids this" from "the service failed".
+    # A read-side refusal: neither the write code nor a transport code fits, so it
+    # gets its own, a caller can tell "the flag forbids this" from "the service failed".
     error_code: ClassVar[str] = "OLOG_ATTACHMENT_DOWNLOAD_DENIED"

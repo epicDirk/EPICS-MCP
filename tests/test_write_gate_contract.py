@@ -49,27 +49,24 @@ a real audited event but *not* a gate verdict, it fires after the gate admitted 
 legitimately HAS consumed a token and would (correctly) violate the point-3 invariant asserted here.
 
 **Pre-gate refusals, the error-code axis is closed, the audit axis is a reasoned scope limit.**
-Some refusals happen *before* a gate is consulted: the whole-mode preconditions in
-``services/checkers_olog.py`` (``add_log_attachment`` / ``update_log_entry``), their client-side
-backstop in ``services/olog_exceptions.py``, and the read throttle in ``services/_http.py``. Where
-this module stands on each axis:
+A refusal can happen *before* a gate is consulted; today's one such site is the read throttle in
+``services/_http.py`` (the whole-mode preconditions that used to sit in
+``services/checkers_olog.py`` were removed 2026-08-01; the round-tripping tools now consult the
+gate's env + URL checks BEFORE their pre-write read, see
+:func:`test_round_trip_write_is_gate_denied_before_any_read`). Where this module stands:
 
-* **Error code, closed, and now guarded as a RULE.** Those four used to carry the gates' own
-  ``OLOG_WRITE_DENIED`` / ``RATE_LIMIT_EXCEEDED``, so a caller could not tell an un-audited pre-gate
-  refusal from an audited gate DENY. They now carry ``OLOG_WHOLE_MODE_REQUIRED`` and
-  ``READ_RATE_LIMIT_EXCEEDED``, and :func:`test_no_pre_gate_refusal_carries_a_gate_error_code`
+* **Error code, closed, and guarded as a RULE.** A pre-gate refusal must not carry a gate's
+  audited code, and :func:`test_no_pre_gate_refusal_carries_a_gate_error_code`
   sweeps BOTH layers the contract names, ``services/`` and ``tools/``, resolving a raise through
   aliases, relative imports, attribute callees, locally defined subclasses (minus the ones that
-  override the code) and plain ``raise Cls``, so a SIXTH case fails the build rather than shipping.
-* **Audit line, deliberately none, which is a scope limit, not an oversight.** Contract point 4
+  override the code) and plain ``raise Cls``, so a new case fails the build rather than shipping.
+* **Audit line, deliberately none for a pre-gate refusal.** Contract point 4
   clamps the audit promise to *gate verdicts and writes that reach the I/O*; a pre-gate refusal is
   neither, no gate ran, no token was taken, no write was attempted. Emitting a gate ``DENY`` from
   ``services/`` would also put an audit call site OUTSIDE the reach of the ``_audit_deny`` drift
   guard below (which scans the gate modules only), i.e. buy a new blind spot in the name of a fix.
-  The reasoning is written at the raise sites, and the behaviour is pinned by
-  :func:`test_pre_gate_refusal_is_coded_apart_and_writes_no_audit_line`.
 * **The read throttle's own code was the wider decision.** ``ReadThrottle`` guards READS, but it is
-  reached from the reads the Olog write tools do before their gate, and it shares the write gates'
+  reached from the reads the Olog write tools do before their gate, and it shared the write gates'
   audited ``RATE_LIMIT_EXCEEDED``. Giving it ``READ_RATE_LIMIT_EXCEEDED`` was preferred over
   declaring a named exception to the rule: a rule filed as "hard" that carries a carve-out from day
   one is prose again. The cost is a wider blast radius on the read path (the throttle is opt-in,
@@ -109,7 +106,6 @@ import epics_mcp.services.checkers_olog as checkers_olog
 from epics_mcp.config import EpicsConfig
 from epics_mcp.errors import (
     EpicsError,
-    OlogWholeModeRequiredError,
     OlogWriteDeniedError,
     PVWriteDeniedError,
     RateLimitError,
@@ -521,20 +517,32 @@ def test_deny_call_sites_match_the_canonical_map() -> None:
         )
 
 
-class _NotWholeModeOlogClient:
-    """An ``OlogClient`` stand-in whose only behaviour is "not whole-mode".
+class _NeverConstructedOlogClient:
+    """An ``OlogClient`` stand-in whose construction FAILS.
 
-    Every other method is deliberately absent: the refusal under test happens at the very top of
-    the service call, so a client that reached ANY other method would fail loudly with an
-    ``AttributeError`` instead of passing the test for the wrong reason.
+    The refusal under test must happen before any client exists, so any HTTP round-trip is
+    structurally impossible; a service path that builds a client anyway dies loudly here instead
+    of passing for the wrong reason.
+    """
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        raise AssertionError(
+            "OlogClient must not be constructed for a write target the gate refuses"
+        )
+
+
+class _RawEntryNotFoundOlogClient:
+    """An ``OlogClient`` stand-in whose round-trip read reports "no such entry".
+
+    Reaching :meth:`get_raw_entry` proves the call got PAST the gate's env + URL checks and
+    performed the read, the positive control for the deny-before-read ordering.
     """
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         pass
 
-    @property
-    def whole_mode(self) -> bool:
-        return False
+    def get_raw_entry(self, log_id: str) -> dict[str, object] | None:
+        return None
 
 
 @pytest.mark.parametrize(
@@ -547,56 +555,53 @@ class _NotWholeModeOlogClient:
         ("update_log_entry", lambda: checkers_olog.query_olog_update("17", title="probe")),
     ],
 )
-async def test_pre_gate_refusal_is_coded_apart_and_writes_no_audit_line(
+async def test_round_trip_write_is_gate_denied_before_any_read(
     tool: str,
     call: Callable[[], Awaitable[object]],
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The behavioural half of contract point 4 for the whole-mode pre-gate refusals.
+    """The write protection of the round-tripping tools is the GATE, checked before the read.
 
-    Two claims, and the second is the one that actually carries the rule:
+    Since the whole-mode preconditions were removed (2026-08-01), ``add_log_attachment`` and
+    ``update_log_entry`` are guarded by the write gate alone. Two claims:
 
-    1. The refusal reports ``OLOG_WHOLE_MODE_REQUIRED``, its own code, not the gate's
-       ``OLOG_WRITE_DENIED``: while remaining catchable as ``OlogWriteDeniedError``.
-    2. It writes **no audit line at all**. That is what makes its own code NECESSARY rather than
-       cosmetic, and it is the promise the contract scopes ("a refusal raised before the gate is
-       consulted writes no audit line").
+    1. Against a URL the gate does not permit, the call is refused with the gate's own audited
+       ``OLOG_WRITE_DENIED`` (an ``event=DENY`` line exists), and NO ``OlogClient`` is even
+       constructed, so no HTTP request of any kind was made (no entry-existence oracle for a
+       denied caller).
+    2. POSITIVE CONTROL, same test: against a permitted (loopback) URL the same call passes the
+       gate's env + URL checks and REACHES the round-trip read (surfacing that read's definitive
+       404), so claim 1 cannot pass vacuously.
 
-    A POSITIVE CONTROL runs first, through the same ``caplog`` at the same level: a real gate DENY
-    on the same logger IS captured. Without it, "no DENY line" would also pass if the audit logger
-    were simply not being captured, the failure mode a previous review of this suite caught, and
-    the reason ``caplog.set_level`` is set EXPLICITLY here instead of relying on the root level.
-
-    RED-PROOF (mutant): point ``OlogWholeModeRequiredError`` back at ``EpicsError.__init__(...,
-    error_code="OLOG_WRITE_DENIED")`` → claim 1 fails; add a ``get_olog_safety()._audit_deny(
-    "OLOG_WRITE_DENIED", caller)`` before either raise in ``checkers_olog`` → claim 2 fails.
+    RED-PROOF (mutant): make ``OlogWriteGate._url_write_allowed`` return True (suspend the URL
+    boundary) → claim 1's denial vanishes and the never-constructed client detonates.
     """
     caplog.set_level(logging.INFO, logger=_OLOG_AUDIT_LOGGER)
 
-    # --- positive control: this logger, at this level, DOES capture a gate DENY ---
-    control_gate, fire_control = _arm_olog_env_off()
-    with pytest.raises(OlogWriteDeniedError):
-        fire_control()
-    assert [r for r in caplog.records if "event=DENY" in r.message], (
-        "the audit logger is not being captured, the no-audit assertion below could never go red"
-    )
-    assert control_gate is not None
-    caplog.clear()
-
-    # --- the pre-gate refusal itself ---
-    config_module._config = _olog_config()
-    monkeypatch.setattr(checkers_olog, "OlogClient", _NotWholeModeOlogClient)
+    # --- claim 1: a non-permitted URL is gate-denied before any client exists ---
+    config_module._config = _olog_config(olog_url="http://logbook-remote:8080/Olog")
+    olog_safety_module._olog_safety = None  # rebuild the gate from this config
+    monkeypatch.setattr(checkers_olog, "OlogClient", _NeverConstructedOlogClient)
 
     with pytest.raises(OlogWriteDeniedError) as excinfo:
         await call()
 
-    assert isinstance(excinfo.value, OlogWholeModeRequiredError), tool
-    assert excinfo.value.error_code == "OLOG_WHOLE_MODE_REQUIRED", tool
-    assert excinfo.value.error_code != "OLOG_WRITE_DENIED"
-    assert caplog.records == [], (
-        f"{tool}: a pre-gate refusal must leave NO audit record, got "
-        f"{[r.message for r in caplog.records]}"
+    assert excinfo.value.error_code == "OLOG_WRITE_DENIED", tool
+    assert [r for r in caplog.records if "event=DENY" in r.message], (
+        f"{tool}: the URL-boundary refusal must be an audited gate DENY"
+    )
+    caplog.clear()
+
+    # --- claim 2 (positive control): a permitted URL reaches the round-trip read ---
+    config_module._config = _olog_config()
+    olog_safety_module._olog_safety = None
+    monkeypatch.setattr(checkers_olog, "OlogClient", _RawEntryNotFoundOlogClient)
+
+    with pytest.raises(EpicsError) as read_excinfo:
+        await call()
+    assert read_excinfo.value.error_code == "OLOG_HTTP_404", (
+        f"{tool}: the permitted call must get past the gate and perform the read"
     )
 
 
@@ -734,8 +739,8 @@ def _defines_own_error_code(class_node: ast.ClassDef) -> bool:
     Both repo conventions count: a ClassVar assignment, and an ``__init__`` that passes an
     ``error_code=`` keyword on (the ``PVWriteBoundsError`` shape, calling ``EpicsError.__init__``
     directly). Without this check the inheritance walk below would flag exactly the classes that
-    exist BECAUSE of contract point 4, ``OlogWholeModeRequiredError`` and ``ReadRateLimitError``
-    both subclass a gate-code carrier and both override the code. That false positive is the whole
+    exist BECAUSE of contract point 4: ``ReadRateLimitError``
+    subclasses a gate-code carrier and overrides the code. That false positive is the whole
     risk of resolving inheritance at all, so it is checked first.
     """
     for statement in class_node.body:
@@ -931,12 +936,12 @@ def test_no_pre_gate_refusal_carries_a_gate_error_code() -> None:
     layer above it"*. It is clean today, so adding it is a no-op with a proof, which is the point:
     the guard's reach should match the rule's reach, not the location of the last five findings.
 
-    RED-PROOF (measured on ``f954cc6``, the commit before the fix): four findings:
-    ``checkers_olog.py`` raised ``OlogWriteDeniedError`` twice for its whole-mode preconditions,
-    ``olog_exceptions.py`` pinned ``OLOG_WRITE_DENIED`` on ``OlogWholeModeRequired``, and
-    ``_http.py`` raised the write gates' ``RateLimitError`` from the read throttle; the fifth
+    RED-PROOF (measured on ``f954cc6``, the commit before the fix): four findings, among them the
+    since-removed whole-mode preconditions in ``checkers_olog.py`` (which raised
+    ``OlogWriteDeniedError`` directly) and
+    ``_http.py`` raising the write gates' ``RateLimitError`` from the read throttle; a fifth
     (``olog_attachments.py``) came from the literal-keyword branch. Re-provable at any time by
-    pointing any one of those back at the gate's class or code, or by dropping a probe module with
+    pointing a pre-gate raise at a gate's class or code, or by dropping a probe module with
     any of the spellings :func:`_raise_gate_code_findings` resolves into either scanned package.
 
     Honest limits, so nobody reads more into a green run than it proves:

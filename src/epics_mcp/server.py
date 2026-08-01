@@ -1381,12 +1381,12 @@ async def add_log_attachment(
 ) -> OlogAddAttachmentResult:
     """Attach one or more files to an EXISTING Phoebus Olog entry (Olog REST POST /logs/multipart).
 
-    MUTATING and WHOLE-MODE ONLY. Olog's update endpoint is destructive, it prunes any attachment
-    not resubmitted and overwrites the entry's fields, so a safe attach must round-trip the target
-    entry's full content, readable only from a DECLARED local sandbox (loopback EPICS_MCP_OLOG_URL +
-    EPICS_MCP_OLOG_ASSUME_TEST_DATA). Against a redacted/remote server it is refused. Same gate as
-    create_log_entry (env gate + test-server URL boundary + rate limit + size cap), with the logbook
-    allowlist keyed on the TARGET entry's OWN logbooks (read first). The attach is purely ADDITIVE:
+    MUTATING. Olog's update endpoint is destructive, it prunes any attachment
+    not resubmitted and overwrites the entry's fields, so a safe attach round-trips the target
+    entry's full content (read first). Same gate as
+    create_log_entry (env gate + test-server URL boundary + rate limit + size cap): the env gate
+    and URL boundary are checked BEFORE the round-trip read, and the logbook
+    allowlist is keyed on the TARGET entry's OWN logbooks. The attach is purely ADDITIVE:
     existing attachments and every CONTENT field are preserved, but the entry's OWNER is
     re-stamped with the write service account, because this endpoint IS the destructive update
     (the original author then survives only in the server-side archived version, which no tool
@@ -1454,12 +1454,12 @@ async def update_log_entry(
 ) -> OlogUpdateResult:
     """Edit an EXISTING Phoebus Olog entry's fields (Olog REST POST /logs/multipart).
 
-    MUTATING and WHOLE-MODE ONLY. Olog's update is destructive, it prunes any attachment not
-    resubmitted and NULLS any field not sent, so a safe edit must round-trip the target entry's
-    full content, readable only from a DECLARED local sandbox (loopback EPICS_MCP_OLOG_URL +
-    EPICS_MCP_OLOG_ASSUME_TEST_DATA). Against a redacted/remote server it is refused. This tool does
+    MUTATING. Olog's update is destructive, it prunes any attachment not
+    resubmitted and NULLS any field not sent, so a safe edit round-trips the target entry's
+    full content. This tool does
     that round-trip for you: any field you omit stays EXACTLY as it was, and attachments and
-    properties are preserved. Same gate as create_log_entry, with the logbook allowlist keyed on the
+    properties are preserved. Same gate as create_log_entry (env gate and test-server URL boundary
+    checked BEFORE the round-trip read), with the logbook allowlist keyed on the
     UNION of the entry's current and resulting logbooks (moving an entry in or out is a write to
     both).
 
@@ -1529,12 +1529,10 @@ async def download_log_attachment(
     """Download one Phoebus Olog attachment's raw bytes (GET /logs/attachments/{id}/{name} or
     /attachment/{id}).
 
-    Identify it by (log_id + filename) or by attachment_id. POSTURE-GATED: raw bytes leave ONLY
-    from a
-    declared local test sandbox (loopback EPICS_MCP_OLOG_URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA) AND
+    Identify it by (log_id + filename) or by attachment_id. OPT-IN-GATED: raw bytes leave ONLY
     with EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD=true, otherwise the result is withheld=true and
     NO
-    byte fetch happens (bytes bypass the entry redaction, and the by-id endpoint has no server-side
+    byte fetch happens (the by-id endpoint has no server-side
     per-log auth, so byte egress is a deliberate opt-in). Bytes cross the boundary written to
     output_path (a NEW workspace file, EPICS_MCP_ALLOWED_ROOTS-checked) or base64 in the result
     (as_base64, small files), pass exactly one, not both. Either way the body is capped by
@@ -1566,8 +1564,7 @@ async def list_log_attachments(
 ) -> OlogListAttachmentsResult:
     """List one Phoebus Olog entry's attachments.
 
-    Returns each attachment's id + fileMetadataDescription always, and its filename ONLY from a
-    declared local sandbox (whole-mode, a filename is author free text). found=false for a
+    Returns each attachment's id, filename and fileMetadataDescription. found=false for a
     definitive
     404. With EPICS_MCP_OLOG_URL unset returns enabled=false. Use the ids/filenames with
     download_log_attachment.

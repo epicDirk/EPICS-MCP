@@ -1444,9 +1444,6 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
     ("services/checkers_olog.py", "<module>", "two validators", 2): (
         "a fact about the fastmcp SDK, not about this repository"
     ),
-    ("services/checkers_olog.py", "query_olog_add_attachment._run", "two gate modules", 2): (
-        "gate modules named in prose; the write-gate contract test discovers them by scanning"
-    ),
     ("tools/archiver.py", "<module>", "two non-nullable fields", 2): (
         "fields present on every path of one schema, a shape claim, not a table size"
     ),
@@ -1468,7 +1465,7 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
 # commit". These are the only hand-kept numbers outside ``_FROZEN``'s keys.
 _INVENTORY_SIZES: dict[str, int] = {
     "tests/test_server.py": 79,
-    "services/checkers_olog.py": 5,
+    "services/checkers_olog.py": 4,
     "services/checkers.py": 5,
     "tools/archiver.py": 5,
     "server.py": 2,
