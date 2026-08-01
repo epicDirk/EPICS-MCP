@@ -14,8 +14,10 @@ from epics_mcp import __version__
 from epics_mcp.cli_common import add_version_argument, configure_stdout
 from epics_mcp.config import get_config
 from epics_mcp.errors import SafetyConfigError
+from epics_mcp.presets import PRESETS
 from epics_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_mcp.prompts import diagnose_pv as _diagnose_pv
+from epics_mcp.prompts import setup_epics_mcp as _setup_epics_mcp
 from epics_mcp.resources import get_epics_config, get_guide, get_health
 from epics_mcp.safety import get_safety
 from epics_mcp.services.checkers import (
@@ -1666,6 +1668,16 @@ def guide() -> str:
 def diagnose_pv(pv_name: str) -> str:
     """Step-by-step PV diagnosis workflow."""
     return _diagnose_pv(pv_name)
+
+
+@mcp.prompt()
+def setup_epics_mcp() -> str:
+    """Configure this server for a new facility, one service plane at a time."""
+    # Thread the real preset table rather than letting the prompt hold its own copy: a preset
+    # added to epics_mcp.presets has to show up here without anyone remembering to edit a string.
+    # PRESETS is keyword-only and has no default on the other side, so a wrapper that stopped
+    # passing it is a TypeError in the tests, not a prompt that quietly offers a stale set.
+    return _setup_epics_mcp(presets=PRESETS)
 
 
 @mcp.prompt()

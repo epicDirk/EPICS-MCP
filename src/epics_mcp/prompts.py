@@ -1,5 +1,11 @@
 """MCP Prompts for the EPICS MCP server."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
+
+from epics_mcp.presets import Preset
+
 
 def diagnose_pv(pv_name: str) -> str:
     """Step-by-step PV diagnosis workflow."""
@@ -64,4 +70,47 @@ def compare_machine_state(
         "   - CRITICAL: Alarm severity > 0 or value out of range\n"
         "   - WARNING: Value changed but within limits\n"
         "   - OK: Value matches expected"
+    )
+
+
+def setup_epics_mcp(*, presets: Mapping[str, Preset]) -> str:
+    """Walk a newcomer through configuring this server, conversationally.
+
+    The same ground ``epics-init`` covers, for the reader who would rather be asked than read
+    ``docs/deployment.md``. It deliberately ends at a COMMAND rather than at a block of variables:
+    the assistant's job here is to work out which shape the user has, and ``epics-init`` already
+    knows what each shape needs. Emitting the variables from inside a prompt would be a second,
+    unguarded copy of the preset table.
+
+    ``presets`` is keyword-only and REQUIRED (no default), the same posture as
+    ``compare_machine_state``'s ``display_tools_available`` and for the same reason: the caller
+    must state what actually exists rather than let this function assume. A default would fail
+    OPEN. If the server wrapper stopped threading the real table, the prompt would keep naming
+    whatever set was frozen here, and a preset added later would silently never be offered.
+    Required means a mis-wired wrapper is a loud TypeError in a test instead.
+    """
+    catalogue = "\n".join(f"   - {name}: {preset.summary}" for name, preset in presets.items())
+    return (
+        "Help me configure the EPICS MCP server for my facility.\n\n"
+        "Ask me about each service plane in turn, and do NOT guess: an unset URL disables its "
+        "plane with no network call, so leaving one out is a valid answer, not a gap.\n"
+        "1. Live PVs: which host do my IOCs or my gateway answer on? PVA or CA?\n"
+        "2. ChannelFinder: do I have a channel registry, and at which URL?\n"
+        "3. Archiver Appliance: mgmt URL, and does retrieval run on its own port?\n"
+        "4. Alarm Logger: do I have a Phoebus alarm logger?\n"
+        "5. Naming Service: do I have one?\n"
+        "6. Olog: do I have a logbook?\n"
+        "7. Internal CA: does any of the above use HTTPS with a private root certificate?\n\n"
+        "Then match my answers to the closest of these shapes:\n"
+        f"{catalogue}\n\n"
+        "Then tell me to run, in a terminal (these are commands for ME, not tools you can call):\n"
+        "   epics-init --preset <the shape you picked> --set NAME=VALUE ...\n"
+        "and to save its output as the .mcp.json for my client.\n\n"
+        "It runs epics-doctor against the result and prints what each plane answered. Read that "
+        "report back with me, and treat these three as findings rather than noise:\n"
+        "   - '?' unverified: it answered, but could not prove what it is\n"
+        "   - '!' identity probe failed: reachable, but the probe got a 401/404/redirect\n"
+        "   - '~' no ingest: it proved what it is and is not doing its job\n"
+        "Note that without --probe-pv nothing reads a live PV, so a clean report on a "
+        "PV-only setup confirms that nothing is misconfigured, not that anything works."
     )
