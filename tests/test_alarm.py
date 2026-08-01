@@ -9,7 +9,6 @@ from epics_mcp.config import EpicsConfig
 from epics_mcp.services._time_window import TimeWindowFormatError
 from epics_mcp.services.alarm_client import AlarmClient
 from epics_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
-from epics_mcp.services.redact import FREETEXT_WITHHELD
 from epics_mcp.tools.alarm import _get_alarm_history, _is_alarm_configured
 
 
@@ -40,9 +39,9 @@ def test_is_alarm_configured_true(monkeypatch: pytest.MonkeyPatch) -> None:
     assert detail["config"] == "config:/Accelerator/DEV-TEST01/X"
 
 
-def test_is_alarm_configured_detail_strips_person_fields(monkeypatch: pytest.MonkeyPatch) -> None:
-    """DS-PRIVACY: a real config-change doc carries user/host (who changed it), the returned detail
-    must drop them (and any unknown field) while keeping the technical config."""
+def test_is_alarm_configured_detail_drops_unknown_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The allowlist is STRUCTURE: known AlarmLogMessage fields (incl. user/host) ride through
+    with their values, an unknown field a future logger version adds is dropped."""
     client = AlarmClient("http://alarm:8081")
     raw = {
         "config": "config:/Accelerator/DEV-TEST01/X",
@@ -51,7 +50,7 @@ def test_is_alarm_configured_detail_strips_person_fields(monkeypatch: pytest.Mon
         "guidance": [{"title": "check", "details": "..."}],
         "user": "jdoe",
         "host": "console-host-3.example.org",
-        "some_future_field": "leak?",
+        "some_future_field": "unknown",
     }
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([raw])))
     configured, detail = client.is_alarm_configured("X", config_name="Accelerator")
@@ -59,69 +58,53 @@ def test_is_alarm_configured_detail_strips_person_fields(monkeypatch: pytest.Mon
     assert detail["config"] == "config:/Accelerator/DEV-TEST01/X"
     assert detail["enabled"] is True
     assert detail["delay"] == 5
-    assert detail["guidance"] == FREETEXT_WITHHELD  # key kept, authored value withheld
-    # person-bearing + unknown fields are gone
-    assert "user" not in detail
-    assert "host" not in detail
+    assert detail["guidance"] == [{"title": "check", "details": "..."}]
+    assert detail["user"] == "jdoe"
+    assert detail["host"] == "console-host-3.example.org"
     assert "some_future_field" not in detail
 
 
-def test_is_alarm_configured_withholds_authored_freetext(monkeypatch: pytest.MonkeyPatch) -> None:
-    """DS-PRIVACY (defense-in-depth): if an alarm-logger ever surfaces the authored free-text
-    fields FLAT at top level, each VALUE must be withheld (Olog treatment), key kept, value gone.
-    NOTE: the CURRENT upstream nests these inside ``config_msg`` (dropped by the allowlist, see
-    ``..._drops_config_msg_person_data``); this only guards the hypothetical flat shape."""
+def test_is_alarm_configured_surfaces_authored_guidance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """POSITIVE PIN (decision PI, 2026-08-01): the authored fields carry their VALUES. The former
+    free-text withholding made exactly the actionable half, the handling GUIDANCE, unreadable;
+    re-hooking it turns this red. All tokens synthetic."""
     client = AlarmClient("http://alarm:8081")
     raw = {
         "config": "config:/Accelerator/Vacuum/SIM:Vac-Vlv-01:Pos-R",
         "enabled": True,
         "latching": True,
         "description": "Valve position alarm",
-        "guidance": [{"title": "On-call", "details": "Call Jane Doe (vacuum group), +46 46 888"}],
+        "guidance": [{"title": "On-call", "details": "Call the vacuum group, +46 46 888"}],
         "displays": [{"title": "Vac overview", "details": "vac.bob"}],
-        "commands": [{"title": "notify", "details": "email jane"}],
-        "actions": [{"title": "Notify", "details": "mailto:jane.doe@example.org"}],
-        "user": "eng.smith",
-        "host": "ws-ctrl-042",
+        "commands": [{"title": "notify", "details": "run notify script"}],
+        "actions": [{"title": "Notify", "details": "mailto:vacuum-oncall@example.org"}],
     }
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([raw])))
     _, detail = client.is_alarm_configured("SIM:Vac-Vlv-01:Pos-R", config_name="Accelerator")
-    # authored free-text values are withheld, no person can leak inside the prose / a mailto action
     for field in ("description", "guidance", "displays", "commands", "actions"):
-        assert detail[field] == FREETEXT_WITHHELD, field
-    # technical fields pass through; audit metadata is gone
+        assert detail[field] == raw[field], field
     assert detail["enabled"] is True
     assert detail["latching"] is True
     assert detail["config"] == "config:/Accelerator/Vacuum/SIM:Vac-Vlv-01:Pos-R"
-    assert "user" not in detail
-    assert "host" not in detail
 
 
-def test_is_alarm_configured_drops_config_msg_person_data(monkeypatch: pytest.MonkeyPatch) -> None:
-    """DS-PRIVACY (real upstream shape): a ``/search/alarm/config`` doc deserializes to the
-    Phoebus ``AlarmLogMessage`` shape {config, user, host, enabled, config_msg, message_time}. The
-    person data, who changed it (``user``/``host``) and the serialized ``AlarmConfigMessage``
-    (``config_msg``, which embeds guidance prose / ``mailto:`` actions), rides in fields that are
-    NONE of them on the allowlist. The load-bearing drop is the allowlist projection: assert the
-    three person-bearing fields are absent and only the technical fields remain."""
+def test_is_alarm_configured_surfaces_config_msg(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The REAL upstream shape: a ``/search/alarm/config`` doc deserializes to the Phoebus
+    ``AlarmLogMessage`` shape {config, user, host, enabled, config_msg, message_time}, and the
+    guidance rides serialized inside ``config_msg``. That field must come back readable, it is
+    the handling instruction (decision PI)."""
     client = AlarmClient("http://alarm:8081")
     raw = {
         "config": "config:/Accelerator/Vacuum/SIM:Vac-Vlv-01:Pos-R",
         "user": "eng.smith",
         "host": "ws-ctrl-042",
         "enabled": True,
-        "config_msg": '{"guidance":[{"details":"Call Jane Doe (mailto:jane.doe@x.org)"}]}',
+        "config_msg": '{"guidance":[{"details":"Call the vacuum on-call phone"}]}',
         "message_time": 1746093720000,
     }
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([raw])))
     _, detail = client.is_alarm_configured("SIM:Vac-Vlv-01:Pos-R", config_name="Accelerator")
-    assert detail == {
-        "config": "config:/Accelerator/Vacuum/SIM:Vac-Vlv-01:Pos-R",
-        "enabled": True,
-        "message_time": 1746093720000,
-    }
-    for leaked in ("user", "host", "config_msg"):
-        assert leaked not in detail
+    assert detail == raw
 
 
 def test_is_alarm_configured_false_when_tree_answers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -378,10 +361,10 @@ def test_get_alarm_history_projects_technical_fields(monkeypatch: pytest.MonkeyP
     assert events[0]["pv"] == "DEV-TEST01:X"
 
 
-def test_get_alarm_history_strips_person_fields(monkeypatch: pytest.MonkeyPatch) -> None:
-    """DS-PRIVACY: an alarm state doc can carry user/host (WHO acknowledged/enabled/disabled) plus a
-    command and a config_msg, the returned events must drop them (and any unknown field) while
-    keeping the technical alarm data. Mirrors the is_alarm_configured allowlist guard."""
+def test_get_alarm_history_surfaces_who_and_what(monkeypatch: pytest.MonkeyPatch) -> None:
+    """POSITIVE PIN (decision PI, 2026-08-01): user/host/command/config_msg come back readable,
+    WHO acknowledged or disabled an alarm and what was done is exactly what a history reader
+    needs. The allowlist stays as STRUCTURE: an unknown future field is still dropped."""
     client = AlarmClient("http://alarm:8081")
     raw = [
         {
@@ -397,8 +380,8 @@ def test_get_alarm_history_strips_person_fields(monkeypatch: pytest.MonkeyPatch)
             "user": "jdoe",
             "host": "console-host-3",
             "command": "Disabled",
-            "config_msg": "possibly authored text",
-            "some_future_field": "leak?",
+            "config_msg": "authored note",
+            "some_future_field": "unknown",
         }
     ]
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(raw)))
@@ -406,8 +389,11 @@ def test_get_alarm_history_strips_person_fields(monkeypatch: pytest.MonkeyPatch)
     event = events[0]
     assert event["severity"] == "MINOR"
     assert event["enabled"] is True
-    for leaked in ("user", "host", "command", "config_msg", "some_future_field"):
-        assert leaked not in event
+    assert event["user"] == "jdoe"
+    assert event["host"] == "console-host-3"
+    assert event["command"] == "Disabled"
+    assert event["config_msg"] == "authored note"
+    assert "some_future_field" not in event
 
 
 def test_get_alarm_history_capped(monkeypatch: pytest.MonkeyPatch) -> None:

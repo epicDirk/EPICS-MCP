@@ -951,9 +951,9 @@ async def get_alarm_history(
     Read-only. Disabled by default, returns enabled=false unless EPICS_MCP_ALARM_URL is set. start
     and end are required (a defaultless query must not pull the whole history). The stream carries
     alarm STATE changes and also alarm-CONFIG-change messages (the config field prefix
-    state:/config: distinguishes them). Events are newest first and carry only technical fields
-    (severity/message/value/time/current_severity/current_message/enabled/mode/pv/config); the raw
-    doc's user/host (who acknowledged/enabled/disabled) and command are stripped (privacy). capped
+    state:/config: distinguishes them). Events are newest first and carry the known
+    AlarmLogMessage fields, incl. user/host (who acknowledged/enabled/disabled), command and
+    config_msg; a field a future logger version adds is dropped (known-field allowlist). capped
     is true when more than max_events matched. An unreadable payload or record raises a loud
     error, never an empty result that reads as 'nothing alarmed'.
 

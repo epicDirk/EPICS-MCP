@@ -53,7 +53,7 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   ⚠️ Two caveats on the counterpart number. First, "observed in both polarities" is weaker than it
   sounds for the 21 RAISE guards: their enabling polarity fires the guard on every input, so every
   covering test dies by construction and only the disabling half carries information. Second,
-  three entries below (`alarm_client.py:250`, `epics_client.py:490`, `olog_client.py:181`) sit in
+  three entries below (`alarm_client.py:247`, `epics_client.py:490`, `olog_client.py:181`) sit in
   comprehension filters, where the tool builds no whole-condition target, for those "unobserved"
   means "this CONJUNCT is unobserved", the rest of the condition still stood during the mutant.
 
@@ -133,8 +133,8 @@ _GUARD_POPULATION: dict[str, tuple[int, int]] = {
 # 1446 passed / 65 skipped). Key is ``module:line``, the finer offset moves with any edit to the
 # line, which would make this table rot for a reason that is not a change in the finding.
 _UNOBSERVED: dict[str, str] = {
-    "alarm_client.py:247": "empty-list fallback; disabling it is not noticed",
-    "alarm_client.py:250": "any() filter over the config records",
+    "alarm_client.py:244": "empty-list fallback; disabling it is not noticed",
+    "alarm_client.py:247": "any() filter over the config records",
     "archiver_client.py:152": "sample check, masked by the following 'secs'/'val' membership test",
     "archiver_client.py:497": "history block shape",
     "channelfinder_client.py:91": "list check, masked by the item check at :98",

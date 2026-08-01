@@ -27,7 +27,7 @@ from __future__ import annotations
 from epics_mcp.services._http import get_shared_session, rest_get_json
 from epics_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
 from epics_mcp.services.alarm_time import normalize_alarm_time
-from epics_mcp.services.redact import project_allowlist, redact_record
+from epics_mcp.services.redact import project_allowlist
 
 # MA-2b(d): there is deliberately NO default alarm-tree name. The former ``"Accelerator"`` default
 # matched nothing at a real facility (the tree names are site-specific, DTL/BIS/FBIS/..., and a
@@ -35,19 +35,22 @@ from epics_mcp.services.redact import project_allowlist, redact_record
 # ``is_alarm_configured`` silently withhold. The caller MUST name the tree (the leading path segment
 # that selects the ES index).
 
-# DS-PRIVACY: a Phoebus alarm config-CHANGE document carries ``user`` and ``host``, WHO last
-# changed the alarm config, alongside the technical settings, AND its authored free-text fields
-# (guidance/displays/commands/actions/description) can name a person in prose (e.g. "call Jane Doe")
-# or a ``mailto:`` notification action. Returning the raw ES record would leak a person's username;
-# keeping the free-text VALUES would leak a name inside them. We therefore ``redact_record`` the
-# doc: project onto this allowlist of technical fields (an allowlist, not a denylist, a NEW
-# person-bearing field a future logger version adds is dropped by default), THEN withhold the
-# authored free-text VALUES (:data:`_ALARM_CONFIG_FREETEXT`). ``user``/``host`` are not on the
-# allowlist, so they are gone entirely.
+# A Phoebus alarm config-CHANGE document, projected onto the fields the AlarmLogMessage model
+# names. An allowlist, not a denylist: it is the STRUCTURAL guard that keeps an unknown field a
+# future logger version adds from riding through unnoticed. The authored fields
+# (description/guidance/displays/commands/actions, and the serialized ``config_msg`` the real
+# upstream nests them in) come back WITH their values: the former
+# free-text withholding was removed together with the Olog read redaction it mirrored
+# (decision PI, 2026-08-01; see docs/safety.md), because it made exactly the actionable half
+# (the GUIDANCE, the handling instruction) unreadable. ``user``/``host`` ride through too, WHO
+# last changed the config is part of the record.
 _ALARM_CONFIG_ALLOWLIST = frozenset(
     {
         "config",
         "pv",
+        "user",
+        "host",
+        "config_msg",
         "enabled",
         "latching",
         "annunciating",
@@ -64,32 +67,22 @@ _ALARM_CONFIG_ALLOWLIST = frozenset(
     }
 )
 
-# DS-PRIVACY: the allowlist fields whose VALUE is AUTHORED free text, a person can be named inside
-# them (guidance prose "call Jane Doe", an ``actions`` ``mailto:jane.doe@...``). Kept for their
-# PRESENCE but their value is withheld (the Olog free-text treatment). This resolves the former
-# accepted Batch-1 residual after the pre-live-smoke privacy audit exhibited the leak against the
-# non-negotiable "no person data" guardrail (project decision, 2026-07: withhold all five).
-_ALARM_CONFIG_FREETEXT = frozenset({"description", "guidance", "displays", "commands", "actions"})
-
 
 def _project_alarm_config(record: dict[str, object]) -> dict[str, object]:
-    """Return *record* reduced to the technical allowlist with authored free-text values withheld.
+    """Return *record* reduced to the known-field allowlist, values intact.
 
-    Uses the shared DS-PRIVACY :func:`~epics_mcp.services.redact.redact_record` barrier: it drops
-    ``user``/``host``/unknown (allowlist) and then replaces the authored free-text VALUES
-    (:data:`_ALARM_CONFIG_FREETEXT`, guidance/actions/commands/description/displays) with a
-    withheld marker, so a person named in prose or a ``mailto:`` action cannot leak (the Olog
-    treatment). The key is kept, so a caller still learns the field is present.
+    The allowlist is structure, not privacy: it keeps unknown future fields out of the advertised
+    shape. The authored fields (guidance and friends) carry their values; the former withholding
+    was removed with the Olog read redaction it mirrored (decision PI, 2026-08-01).
     """
-    return redact_record(record, allowed=_ALARM_CONFIG_ALLOWLIST, freetext=_ALARM_CONFIG_FREETEXT)
+    return project_allowlist(record, _ALARM_CONFIG_ALLOWLIST)
 
 
-# DS-PRIVACY (DS-3): an alarm STATE/history document (``/search/alarm``) can carry ``user`` and
-# ``host``, WHO acknowledged / enabled / disabled the alarm, plus a ``command`` (the action taken)
-# and a ``config_msg`` (potentially authored). Returning the raw ES record would leak a person's
-# username. We project onto this allowlist of technical alarm fields (matching the AlarmLogMessage
-# model in the Phoebus alarm-logger). An allowlist (not a denylist) means a NEW person-bearing field
-# a future logger version adds is dropped by default. ``pv``/``config`` are kept so the caller can
+# An alarm STATE/history document (``/search/alarm``), projected onto the AlarmLogMessage fields.
+# The allowlist mechanism stays for the same structural reason as the config one above; ``user``,
+# ``host``, ``command`` and ``config_msg`` are ON it since the removal of the privacy withholding
+# (decision PI, 2026-08-01): WHO acknowledged or disabled an alarm, and what was done, is exactly
+# what a reader of the history needs. ``pv``/``config`` are kept so the caller can
 # SEE which PV each event belongs to (the ``pv`` query matches a substring of the config path, so
 # results can include sibling PVs, keeping the identity makes that transparent, not hidden).
 _ALARM_HISTORY_ALLOWLIST = frozenset(
@@ -105,13 +98,17 @@ _ALARM_HISTORY_ALLOWLIST = frozenset(
         "message_time",
         "pv",
         "config",
+        "user",
+        "host",
+        "command",
+        "config_msg",
     }
 )
 
 
 def _project_alarm_event(record: dict[str, object]) -> dict[str, object]:
-    """Return *record* restricted to the technical allowlist (drops ``user``/``host``/``command``/
-    ``config_msg``/unknown) via the shared ``redact.project_allowlist`` barrier."""
+    """Return *record* restricted to the known-field allowlist (unknown future fields dropped)
+    via the shared ``redact.project_allowlist`` barrier."""
     return project_allowlist(record, _ALARM_HISTORY_ALLOWLIST)
 
 
