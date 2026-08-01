@@ -46,7 +46,6 @@ from epics_mcp.services.olog_exceptions import (
     OlogConnectionError,
     OlogResponseError,
     OlogRoundTripUnsafe,
-    OlogWholeModeRequired,
 )
 
 _AUDIT_LOGGER = "epics_mcp.olog_audit"
@@ -419,7 +418,7 @@ class TestClientUpload:
             return {"id": 42, "title": "t", "logbooks": ["Ops"]}
 
         monkeypatch.setattr(olog_client_module, "rest_put_multipart", fake_multipart)
-        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        client = OlogClient(_LOOPBACK)
         upload = AttachmentUpload(
             id="uid1", filename="uid1_plot.png", content=b"PNG", content_type="image/png"
         )
@@ -455,28 +454,22 @@ class TestClientUpload:
 
         monkeypatch.setattr(olog_client_module, "rest_put_json", fake_json)
         monkeypatch.setattr(olog_client_module, "rest_put_multipart", boom_multipart)
-        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        client = OlogClient(_LOOPBACK)
         client.create_log_entry(title="t", logbooks=["Ops"])
         assert seen["url"].endswith("/logs")  # the plain JSON endpoint, not /logs/multipart
 
 
 # ======================================================================================
-# Client: download posture (attachment_bytes_allowed / whole_mode) + URL encoding + backstop
+# Client: download opt-in (attachment_bytes_allowed) + URL encoding + backstop
 # ======================================================================================
 
 
 class TestClientDownload:
-    def test_posture_flags(self) -> None:
-        # whole-mode requires loopback + assume_test_data; bytes additionally require the flag.
-        redacted = OlogClient(_REMOTE, assume_test_data=True, allow_attachment_download=True)
-        assert redacted.whole_mode is False
-        assert redacted.attachment_bytes_allowed is False  # not loopback → redacted
-        whole_no_flag = OlogClient(
-            _LOOPBACK, assume_test_data=True, allow_attachment_download=False
-        )
-        assert whole_no_flag.whole_mode is True
-        assert whole_no_flag.attachment_bytes_allowed is False  # flag off
-        allowed = OlogClient(_LOOPBACK, assume_test_data=True, allow_attachment_download=True)
+    def test_download_flag(self) -> None:
+        # Raw attachment bytes need the explicit opt-in flag; the URL plays no role.
+        no_flag = OlogClient(_LOOPBACK, allow_attachment_download=False)
+        assert no_flag.attachment_bytes_allowed is False  # flag off
+        allowed = OlogClient(_REMOTE, allow_attachment_download=True)
         assert allowed.attachment_bytes_allowed is True
 
     def test_by_name_url_is_percent_encoded(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -489,7 +482,7 @@ class TestClientDownload:
             return (b"DATA", "plot.png", "image/png")
 
         monkeypatch.setattr(olog_client_module, "rest_get_bytes", fake_get_bytes)
-        client = OlogClient(_LOOPBACK, assume_test_data=True, allow_attachment_download=True)
+        client = OlogClient(_LOOPBACK, allow_attachment_download=True)
         content, _fn, _ct = client.get_attachment("12", "my plot.png")
         assert content == b"DATA"
         # space → %20 (a single path segment), matching CS-Studio's URLEncoder + '+'→'%20'
@@ -507,7 +500,7 @@ class TestClientDownload:
             return (b"DATA", "plot.png", "image/png")
 
         monkeypatch.setattr(olog_client_module, "rest_get_bytes", fake_get_bytes)
-        client = OlogClient(_LOOPBACK, assume_test_data=True, allow_attachment_download=True)
+        client = OlogClient(_LOOPBACK, allow_attachment_download=True)
         client.get_attachment("4 2/x", "plot.png")
         assert captured["url"] == f"{_LOOPBACK}/logs/attachments/4%202%2Fx/plot.png"
 
@@ -521,22 +514,17 @@ class TestClientDownload:
             return (b"X", None, None)
 
         monkeypatch.setattr(olog_client_module, "rest_get_bytes", fake_get_bytes)
-        client = OlogClient(_LOOPBACK, assume_test_data=True, allow_attachment_download=True)
+        client = OlogClient(_LOOPBACK, allow_attachment_download=True)
         client.get_attachment_by_id("abc-123")
         assert captured["url"] == f"{_LOOPBACK}/attachment/abc-123"
 
     # --- RED-PROOF (guard 1): the download backstop raises when bytes may not leave ---
-    def test_backstop_raises_when_redacted(self) -> None:
-        client = OlogClient(_REMOTE, allow_attachment_download=True)  # not loopback → redacted
+    def test_backstop_raises_when_flag_off(self) -> None:
+        client = OlogClient(_LOOPBACK, allow_attachment_download=False)
         with pytest.raises(OlogAttachmentDownloadDenied):
             client.get_attachment("1", "a.png")
         with pytest.raises(OlogAttachmentDownloadDenied):
             client.get_attachment_by_id("x")
-
-    def test_backstop_raises_when_flag_off(self) -> None:
-        client = OlogClient(_LOOPBACK, assume_test_data=True, allow_attachment_download=False)
-        with pytest.raises(OlogAttachmentDownloadDenied):
-            client.get_attachment("1", "a.png")
 
 
 # ======================================================================================
@@ -899,7 +887,7 @@ class TestClientAddAttachment:
             return {"id": 17, "title": "withheld", "logbooks": ["Ops"]}
 
         monkeypatch.setattr(olog_client_module, "rest_post_multipart", fake_post)
-        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        client = OlogClient(_LOOPBACK)
         new = AttachmentUpload(
             id="new1", filename="new1_x.bob", content=b"<display/>", content_type=None
         )
@@ -939,7 +927,7 @@ class TestClientAddAttachment:
             return {"id": 17, "logbooks": ["Ops"]}
 
         monkeypatch.setattr(olog_client_module, "rest_post_multipart", fake_post)
-        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        client = OlogClient(_LOOPBACK)
         new = AttachmentUpload(
             id="img1", filename="img1.png", content=b"IMG", content_type="image/png"
         )
@@ -960,7 +948,7 @@ class TestClientAddAttachment:
             return {"id": 17, "logbooks": ["Ops"]}
 
         monkeypatch.setattr(olog_client_module, "rest_post_multipart", fake_post)
-        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        client = OlogClient(_LOOPBACK)
         entry = dict(_RAW_ENTRY)
         entry["attachments"] = [
             {"id": "1", "filename": "plot.png"},
@@ -973,19 +961,10 @@ class TestClientAddAttachment:
             client.add_attachment("17", entry, [new])
         assert captured == {}  # nothing was written
 
-    def test_get_raw_entry_refuses_when_not_whole_mode(self) -> None:
-        # RED-PROOF (guard a, client backstop): a redacted client (loopback but no assume_test_data)
-        # must refuse to read the round-trip source, no redacted entry is ever round-tripped.
-        client = OlogClient(_LOOPBACK, assume_test_data=False)
-        assert client.whole_mode is False
-        with pytest.raises(OlogWholeModeRequired):
-            client.get_raw_entry("17")
-
     def test_get_raw_entry_quotes_log_id_in_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # S1: the whole-mode round-trip read must percent-encode the log_id in the URL path too
+        # S1: the round-trip read must percent-encode the log_id in the URL path too
         # (mirrors get_log_entry / get_attachment). A raw '/' would retarget the GET.
-        client = OlogClient(_LOOPBACK, assume_test_data=True)
-        assert client.whole_mode is True
+        client = OlogClient(_LOOPBACK)
         get = MagicMock(return_value=_ok_resp(_RAW_ENTRY))
         monkeypatch.setattr(client.session, "get", get)
         client.get_raw_entry("4 2/x")

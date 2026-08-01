@@ -95,7 +95,7 @@ from epics_mcp.services.olog_exceptions import (
 #
 # Only fields present on EVERY return path (``enabled`` + each tool's core status/payload fields)
 # stay non-nullable. The nested entry/entries/attachments projections keep ``dict[str, object]``
-# inner shapes (whole-mode vs redacted-mode variance). fastmcp turns these into a typed
+# inner shapes (the server's own fields ride through). fastmcp turns these into a typed
 # ``outputSchema`` (``properties``; ``anyOf[T, null]`` for the nullable fields) instead of the bare
 # ``{additionalProperties: true}`` a plain dict yields, provided the tool does not opt out with
 # ``@mcp.tool(output_schema=None)``, which overrides the annotation entirely.
@@ -298,10 +298,9 @@ async def query_olog_search(
     """Search the Phoebus Olog logbook. Read-only, gated.
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns a structured ``enabled: false``
-    result and makes NO network call (no ESS egress). Every returned entry passes the Olog client's
-    output projection: redacted against a real server (author dropped, free text withheld), but
-    WHOLE against a declared loopback test sandbox, do NOT assume this layer only ever sees
-    redacted data (ESS-spec pending; see services.olog_client._project). *offset*
+    result and makes NO network call (no ESS egress). Every returned entry comes back WHOLE
+    (title, description, owner, source, properties, plus the derived name-only logbook/tag lists
+    and attachment_count; see services.olog_client._expand_log_entry). *offset*
     (Olog wire ``from``) pages past the first *size* results; *sort* orders by create time (``down``
     newest-first default, ``up`` oldest-first). ``total`` is the number of entries returned;
     ``total_matches`` is the true total across all pages (Olog ``hitCount``, ``None`` if the Olog
@@ -370,7 +369,7 @@ async def query_olog_search(
 
 
 async def query_olog_entry(log_id: str, timeout: float = 5.0) -> OlogEntryResult:
-    """Return one Olog entry by id (URL+declaration-bound posture). Read-only, config-gated.
+    """Return one Olog entry by id, whole. Read-only, config-gated.
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` with
     ``found: None``, the plane was NOT checked, mirroring the ``archived: None`` /
@@ -573,7 +572,7 @@ async def query_olog_create(
     *,
     id_factory: Callable[[], str] = _default_olog_id_factory,
 ) -> OlogCreateResult:
-    """Create (or, with *in_reply_to*, reply to) an Olog log entry. MUTATING, gated, redacted.
+    """Create (or, with *in_reply_to*, reply to) an Olog log entry. MUTATING, gated.
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes NO
     network call. When enabled, the CHEAP :class:`~epics_mcp.olog_safety.OlogWriteGate` stages
@@ -582,8 +581,8 @@ async def query_olog_create(
     since the level check was added, a ``GET /levels`` (only when a ``level`` is passed) and the
     attachment ``stat`` both happen BEFORE the attachment size cap and the rate token, so a denial
     from *those* two does follow some I/O. That ordering is deliberate, a bad level must not cost a
-    rate token, and is spelled out at the call sites below. The full server response
-    is run through the read redaction before return (owner dropped, title/description withheld). A
+    rate token, and is spelled out at the call sites below. The full server response is returned
+    whole, so the caller can verify what was written. A
     completed write is audited ALLOW; a write that passes the gate but fails at the HTTP layer is
     audited FAILED (no entry id/owner) and re-raised. Backs ``create_log_entry`` / ``reply_to_log``.
 
@@ -592,7 +591,7 @@ async def query_olog_create(
     ``![](attachment/<uuid>)`` markup is appended to the description. Attachment SIZES are summed
     (``stat``, not read) and fed to the gate's size cap BEFORE any bytes are read; the UUIDs are
     minted by *id_factory* (injected for deterministic tests). ``attachments_uploaded`` echoes the
-    ``{id[, filename]}`` of each upload (filename only in whole-mode, it is author free text).
+    ``{id, filename}`` of each upload.
     """
     cfg = get_config()
     if not cfg.olog_url:

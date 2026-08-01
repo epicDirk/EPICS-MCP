@@ -1,4 +1,4 @@
-"""Offline tests for the Phoebus Olog client + tools (no network), DS-PRIVACY focus."""
+"""Offline tests for the Phoebus Olog client + tools (no network)."""
 
 from typing import Any, ClassVar
 from unittest.mock import Mock
@@ -8,7 +8,6 @@ import requests
 
 from epics_mcp.config import EpicsConfig
 from epics_mcp.errors import EpicsConnectionError, EpicsError
-from epics_mcp.olog_safety import OlogWriteGate
 from epics_mcp.services._time_window import TimeWindowFormatError
 from epics_mcp.services.olog_client import OlogClient, split_level_values
 from epics_mcp.services.olog_exceptions import (
@@ -17,7 +16,6 @@ from epics_mcp.services.olog_exceptions import (
     OlogFilterValueError,
     OlogResponseError,
 )
-from epics_mcp.services.redact import FREETEXT_WITHHELD
 from epics_mcp.tools.olog import (
     _get_log_entry,
     _list_log_levels,
@@ -26,8 +24,8 @@ from epics_mcp.tools.olog import (
     _search_logbook,
 )
 
-# A raw Olog entry that names people in EVERY person-bearing place: the owner key, the source, the
-# title AND description free text, a logbook owner, an attachment filename, and a property value.
+# A raw Olog entry with values in every field a server can send (owner, source, free text,
+# logbook owner, attachment filename, property value), the fixture for the whole-entry pins.
 _RAW_ENTRY = {
     "id": 42,
     "createdDate": 1717200000000,
@@ -43,7 +41,6 @@ _RAW_ENTRY = {
     "attachments": [{"id": 1, "filename": "photo-by-g.person.png"}],
     "properties": [{"name": "x", "attributes": [{"name": "author", "value": "h.person"}]}],
 }
-_PERSON_NAMES = [f"{c}.person" for c in "abcdefgh"]
 
 
 def _resp(payload: object, *, ok: bool = True) -> Mock:
@@ -67,22 +64,17 @@ def _err_resp(status: int) -> Mock:
     return resp
 
 
-# --- client: the redaction switch (ESS-spec pending, decisions 2026-07-15) ---
+# --- client: whole-entry reads (decision PI, 2026-08-01: the read redaction is removed) ---
 #
-# Against a real server the projection below is unchanged. Entries leave WHOLE only when BOTH hold:
-# a loopback URL AND the operator's explicit `assume_test_data` declaration. Neither suffices alone,
-# a port-forward serves production on localhost without the URL changing (so the URL cannot prove
-# the data is synthetic), and a flag alone would not catch "pointed at the facility and forgot".
+# POSITIVE PIN: every read returns the whole server record (title, description, owner, source,
+# properties) plus the derived fields (name-only logbooks/tags, attachment_count). Re-hooking the
+# removed ``_project_log_entry`` allowlist turns these red (owner would vanish, free text would be
+# withheld).
 
 
-def _sandbox(url: str = "http://localhost:8080/Olog") -> OlogClient:
-    """A client for a DECLARED local sandbox, the only configuration that sees whole entries."""
-    return OlogClient(url, assume_test_data=True)
-
-
-def test_declared_loopback_client_returns_the_whole_entry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A declared loopback sandbox surfaces free text, owner, source and properties."""
-    client = _sandbox()
+def test_reads_return_the_whole_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The positive pin: a read surfaces free text, owner, source and properties in the clear."""
+    client = OlogClient("http://olog:8080/Olog")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(_RAW_ENTRY)))
     entry = client.get_log_entry("42")
     assert entry is not None
@@ -93,30 +85,14 @@ def test_declared_loopback_client_returns_the_whole_entry(monkeypatch: pytest.Mo
     assert entry["properties"] == _RAW_ENTRY["properties"]
 
 
-def test_loopback_without_the_declaration_still_redacts(monkeypatch: pytest.MonkeyPatch) -> None:
-    """THE tunnel guard: a loopback URL alone must NOT un-redact.
-
-    `ssh -L 8080:olog-prod:8080` makes a production logbook answer on localhost with the URL
-    unchanged, so the address can never be the sufficient condition. Only a person can declare the
-    data synthetic. Default (no declaration) = redact.
-    """
-    client = OlogClient("http://localhost:8080/Olog", assume_test_data=False)
-    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(_RAW_ENTRY)))
-    entry = client.get_log_entry("42")
-    assert entry is not None
-    assert entry["title"] == FREETEXT_WITHHELD
-    assert "owner" not in entry
-
-
-def test_sandbox_refuses_to_follow_a_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A declared sandbox must not follow a redirect, it could land on a real server un-redacted.
+def test_client_refuses_to_follow_a_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The client must not follow a redirect: Olog's REST API has no legitimate one.
 
     Demonstrated live (QA 2026-07-15): a loopback server answering 302 -> a non-loopback address
-    made the client return that server's entries WHOLE, because the mode was decided from the
-    configured URL while requests silently followed the hop. Olog's REST API has no legitimate
-    redirect, so the client refuses to follow one at all, a loud error beats a silent leak.
+    silently served that other server's entries, because requests followed the hop while every
+    decision had been made from the configured URL. A loud error beats a silent traversal.
     """
-    client = _sandbox()
+    client = OlogClient("http://localhost:8080/Olog")
     captured: dict[str, object] = {}
 
     def _get(url: str, **kwargs: object) -> Mock:
@@ -136,48 +112,22 @@ def test_sandbox_refuses_to_follow_a_redirect(monkeypatch: pytest.MonkeyPatch) -
     assert "redirect" in str(excinfo.value).lower()
 
 
-def test_declaration_without_loopback_still_redacts(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The other half: declaring test data does NOT un-redact a remote server.
-
-    Catches "pointed at the facility and forgot the flag was on", loopback stays necessary.
-    """
-    client = OlogClient("https://olog.example.org/Olog", assume_test_data=True)
-    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(_RAW_ENTRY)))
-    entry = client.get_log_entry("42")
-    assert entry is not None
-    assert entry["title"] == FREETEXT_WITHHELD
-
-
-def test_client_reads_the_declaration_from_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With no explicit argument the client takes the declaration from the config."""
-    monkeypatch.setattr(
-        "epics_mcp.services.olog_client.get_config",
-        lambda: EpicsConfig(olog_url="http://localhost:8080/Olog", olog_assume_test_data=True),
-    )
-    assert OlogClient("http://localhost:8080/Olog")._redact is False
-    monkeypatch.setattr(
-        "epics_mcp.services.olog_client.get_config",
-        lambda: EpicsConfig(olog_url="http://localhost:8080/Olog"),
-    )
-    assert OlogClient("http://localhost:8080/Olog")._redact is True  # default false = redact
-
-
-def test_declared_sandbox_keeps_the_derived_shape(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The full mode only ADDS fields, it never changes the shape the caller already relies on.
+def test_entry_keeps_the_derived_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The whole entry still carries the DERIVED fields the callers rely on.
 
     Regression guard: returning the server dict verbatim would drop ``attachment_count`` (it is
     SYNTHESISED, not an Olog field) and flip ``logbooks``/``tags`` from list[str] to list[dict].
     ``dict[str, object]`` is wide enough that mypy would not catch either.
     """
-    client = _sandbox("http://127.0.0.1:8080/Olog")
+    client = OlogClient("http://127.0.0.1:8080/Olog")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(_RAW_ENTRY)))
     entry = client.get_log_entry("42")
     assert entry is not None
-    assert entry["logbooks"] == ["Operations"]  # name-only list[str], as in redacted mode
+    assert entry["logbooks"] == ["Operations"]  # name-only list[str], derived
     assert entry["tags"] == ["vacuum"]
     assert entry["attachment_count"] == 1
-    # Every key the redacted mode promises is still present.
-    redacted_keys = {
+    # Every key the projection promises is present.
+    promised_keys = {
         "id",
         "createdDate",
         "modifyDate",
@@ -189,109 +139,45 @@ def test_declared_sandbox_keeps_the_derived_shape(monkeypatch: pytest.MonkeyPatc
         "tags",
         "attachment_count",
     }
-    assert redacted_keys <= entry.keys()
+    assert promised_keys <= entry.keys()
 
 
-def test_full_mode_search_still_truncates(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The full mode must not disturb ``[:size]`` truncation.
+def test_search_still_truncates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Whole entries must not disturb ``[:size]`` truncation.
 
-    ``capped``/``total_matches`` are computed on the RAW list before projection. (This test used
+    ``capped``/``total_matches`` are computed on the RAW list before the shaping. (This test used
     to also pin a silent non-dict FILTER inside the comprehension; S11 removed that filter: a
     junk element in the page now raises instead of silently shrinking the result, see
     ``test_search_entry_without_identity_raises``.)
     """
-    client = _sandbox()
+    client = OlogClient("http://localhost:8080/Olog")
     payload = [dict(_RAW_ENTRY, id=i) for i in range(3)]
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
     entries, capped, _ = client.search_logbook(text="vacuum", size=2)
     assert len(entries) == 2  # slice keeps size
-    assert capped is True  # capped is computed on the RAW list, before projection
+    assert capped is True  # capped is computed on the RAW list, before the shaping
     assert all(isinstance(e, dict) for e in entries)
 
 
-def test_allowlisted_remote_write_target_is_still_read_redacted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """THE core regression: a URL the WRITE gate would allow remotely must still READ redacted.
-
-    ``OlogWriteGate._url_write_allowed`` returns True for an allowlisted remote host with
-    ``allow_remote``: reusing it as the read predicate would surface a PRODUCTION logbook in the
-    clear. Only ``is_loopback_url`` may drive the redaction. This pins that for good.
-    """
-    remote = "https://olog.example.org/Olog"
-    gate = OlogWriteGate(
-        EpicsConfig(
-            olog_url=remote,
-            allow_olog_write=True,
-            olog_write_logbooks="Operations",
-            olog_write_url_allowlist=remote,
-            olog_write_allow_remote=True,
-        )
-    )
-    gate.check_write_allowed(["Operations"])  # the gate says: writing here is permitted...
-
-    # assume_test_data=True isolates the URL as the deciding condition, without it the client would
-    # redact regardless and this would not test the write-gate/read-predicate separation at all.
-    client = OlogClient(remote, assume_test_data=True)
-    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(_RAW_ENTRY)))
-    entry = client.get_log_entry("42")
-    assert entry is not None
-    assert entry["title"] == FREETEXT_WITHHELD  # ...and reading it is STILL redacted.
-    assert "owner" not in entry
-    for name in _PERSON_NAMES:
-        assert name not in str(entry)
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "http://127.0.0.1@evil.example.org/Olog",  # userinfo spoof: host is evil.example.org
-        "http://[::1]./Olog",  # malformed → unparseable
-        "garbage",
-    ],
-)
-def test_spoofed_or_unparseable_url_redacts(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail-safe: anything not provably loopback is redacted, even WITH the declaration set.
-
-    ``assume_test_data=True`` on purpose: it isolates the loopback check as the deciding condition,
-    so this stays a real test of the URL logic. Without it the client would redact anyway and the
-    case would pass even if ``is_loopback_url`` were broken.
-    """
-    client = OlogClient(url, assume_test_data=True)
-    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(_RAW_ENTRY)))
-    entry = client.get_log_entry("42")
-    assert entry is not None
-    assert entry["title"] == FREETEXT_WITHHELD
-
-
-# --- client: DS-PRIVACY projection (the core guarantee) ---
-
-
-def test_project_log_entry_withholds_all_person_data(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The redacted entry keeps only technical fields + logbook/tag NAMES; every person name (owner,
-    source, free-text title/description, logbook owner, attachment filename, property) is gone."""
+def test_search_returns_whole_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The search path surfaces the whole entry too: owner, free text, source, properties, plus
+    the derived name-only logbook/tag lists and the synthesised attachment_count."""
     client = OlogClient("http://olog")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([_RAW_ENTRY])))
     entries, capped, total_matches = client.search_logbook(text="vacuum")
     assert capped is False
     assert total_matches is None  # bare-list has no hitCount → honest None (not fabricated)
-    assert entries == [
-        {
-            "id": 42,
-            "createdDate": 1717200000000,
-            "modifyDate": 1717200500000,
-            "level": "Info",
-            "state": "Active",
-            "title": FREETEXT_WITHHELD,
-            "description": FREETEXT_WITHHELD,
-            "logbooks": ["Operations"],
-            "tags": ["vacuum"],
-            "attachment_count": 1,
-        }
-    ]
-    blob = str(entries)
-    for name in _PERSON_NAMES:
-        assert name not in blob  # NO person name leaks, from any field
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["id"] == 42
+    assert entry["owner"] == "a.person"
+    assert entry["title"] == "Vacuum trip found by c.person"
+    assert entry["description"] == "d.person restarted the IOC; ask e.person"
+    assert entry["source"] == "written by b.person"
+    assert entry["properties"] == _RAW_ENTRY["properties"]
+    assert entry["logbooks"] == ["Operations"]
+    assert entry["tags"] == ["vacuum"]
+    assert entry["attachment_count"] == 1
 
 
 def test_search_logbook_capped_and_query_params(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -330,14 +216,14 @@ def test_search_logbook_wrapped_response(monkeypatch: pytest.MonkeyPatch) -> Non
     assert total_matches == 7  # authoritative total across all pages, NOT len(entries)
 
 
-def test_get_log_entry_found_and_redacted(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_log_entry_found(monkeypatch: pytest.MonkeyPatch) -> None:
     client = OlogClient("http://olog")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(_RAW_ENTRY)))
     entry = client.get_log_entry("42")
     assert entry is not None
-    assert entry["title"] == FREETEXT_WITHHELD
+    assert entry["title"] == "Vacuum trip found by c.person"
+    assert entry["owner"] == "a.person"
     assert entry["logbooks"] == ["Operations"]
-    assert "a.person" not in str(entry)
 
 
 def test_get_log_entry_404_is_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -441,9 +327,9 @@ async def test_get_log_entry_tool_disabled_no_network(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
-async def test_search_logbook_tool_enabled_is_redacted(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The LAYERING contract: the tool routes through the redacting client, a person named in the
-    free-text title/description of a raw entry never reaches the tool result."""
+async def test_search_logbook_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The LAYERING contract: the tool surfaces the client's entries faithfully (the whole-entry
+    shaping itself is pinned by the client tests above)."""
     monkeypatch.setattr(
         "epics_mcp.services.checkers_olog.get_config",
         lambda: EpicsConfig(olog_url="http://olog"),
@@ -456,19 +342,17 @@ async def test_search_logbook_tool_enabled_is_redacted(monkeypatch: pytest.Monke
         def search_logbook(
             self, **kwargs: object
         ) -> tuple[list[dict[str, object]], bool, int | None]:
-            # a REAL client would redact; this fake returns an already-redacted entry to assert the
-            # tool surfaces it faithfully (redaction is pinned by the client tests above). The
-            # 3-tuple mirrors the real client (entries, capped, total_matches).
-            return [{"id": 7, "title": FREETEXT_WITHHELD, "logbooks": ["Ops"]}], False, 1
+            # The 3-tuple mirrors the real client (entries, capped, total_matches).
+            return [{"id": 7, "title": "Vacuum trip", "logbooks": ["Ops"]}], False, 1
 
     monkeypatch.setattr("epics_mcp.services.checkers_olog.OlogClient", _Fake)
-    result = await _search_logbook(text="c.person")
+    result = await _search_logbook(text="vacuum")
     assert result["enabled"] is True
     assert result["total"] == 1
     assert result["total_matches"] == 1
     entries = result["entries"]
     assert isinstance(entries, list)
-    assert entries[0]["title"] == FREETEXT_WITHHELD
+    assert entries[0]["title"] == "Vacuum trip"
 
 
 # --- search_logbook: the ERROR CLASS at the tool boundary ---
@@ -558,7 +442,7 @@ async def test_get_log_entry_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> No
             pass
 
         def get_log_entry(self, log_id: str) -> dict[str, object] | None:
-            return {"id": 7, "title": FREETEXT_WITHHELD}
+            return {"id": 7, "title": "Vacuum trip"}
 
     monkeypatch.setattr("epics_mcp.services.checkers_olog.OlogClient", _Fake)
     result = await _get_log_entry("7")

@@ -53,12 +53,13 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   ⚠️ Two caveats on the counterpart number. First, "observed in both polarities" is weaker than it
   sounds for the 21 RAISE guards: their enabling polarity fires the guard on every input, so every
   covering test dies by construction and only the disabling half carries information. Second,
-  three entries below (`alarm_client.py:250`, `epics_client.py:490`, `olog_client.py:211`) sit in
+  three entries below (`alarm_client.py:250`, `epics_client.py:490`, `olog_client.py:181`) sit in
   comprehension filters, where the tool builds no whole-condition target, for those "unobserved"
   means "this CONJUNCT is unobserved", the rest of the condition still stood during the mutant.
 
-Honest scope, because the numbers invite over-reading: measured WITHOUT the live lane (the ten
-``*_live`` modules, 66 skipped), which is exactly where a guard meets a real payload. And a
+Honest scope, because the numbers invite over-reading: measured WITHOUT the live lane (the nine
+``*_live`` modules, 66 skipped at the time of the sweep), which is exactly where a guard meets a
+real payload. And a
 surviving mutant is not by itself a defect, it can equally be an equivalent mutant or a guard
 masked by its neighbour. ``channelfinder_client.py:91`` is the measured example of the latter:
 disable the list check and the loop iterates a dict, whose keys the item check at :98 rejects
@@ -146,9 +147,9 @@ _UNOBSERVED: dict[str, str] = {
     "epics_client.py:461": "int-or-none column coercion",
     "epics_client.py:490": "NTMatrix dim entries",
     "epics_client.py:692": "NaN alarm field",
-    "olog_client.py:211": "lenient name filter inside an already-anchored entry",
-    "olog_client.py:419": "attachment filename check",
-    "olog_client.py:1109": "source default before concatenation",
+    "olog_client.py:181": "lenient name filter inside an already-anchored entry",
+    "olog_client.py:389": "attachment filename check",
+    "olog_client.py:1013": "source default before concatenation",
 }
 
 # Neither polarity is noticed, and lines no test executes at all. Both are TEST GAPS at the

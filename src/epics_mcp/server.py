@@ -137,8 +137,7 @@ def build_instructions(display_tools_available: bool) -> str:
         "Read-only EPICS PV access by default: read live values and metadata, monitor, "
         "discover, " + display_clause + "ChannelFinder lookups, Archiver history + archive "
         "configuration, Alarm configuration and history, ESS Naming-Service device-name lookup, "
-        "and Phoebus Olog logbook search (author dropped; free text withheld unless the Olog is a "
-        "DECLARED local test sandbox). "
+        "and Phoebus Olog logbook search (whole entries: title, text, author, attachments). "
         "It can also WRITE to the Olog logbook (create/reply/update entries, each carrying "
         "attachments) behind its OWN gate (EPICS_MCP_ALLOW_OLOG_WRITE + a test-server URL "
         "boundary + a logbook allowlist + an upload-size cap + a rate limit; the author is the "
@@ -1057,12 +1056,8 @@ async def search_logbook(
     """Search the Phoebus Olog electronic logbook (Olog REST /logs/search).
 
     Read-only. Disabled by default, returns enabled=false unless EPICS_MCP_OLOG_URL is set.
-    DS-PRIVACY: entries are redacted, technical fields (id, dates, level, state) and logbook/tag
-    NAMES are kept, author/owner is dropped, the title/description free text is WITHHELD (a person
-    can be named inside it), attachments are a count only. They come back WHOLE only for a DECLARED
-    local sandbox (a loopback URL AND EPICS_MCP_OLOG_ASSUME_TEST_DATA), so results are judgeable;
-    the shape is the same either way (the full mode only adds fields). ESS-spec pending, run
-    epics-doctor for the effective posture.
+    Entries come back WHOLE: id, dates, level, state, title, description, owner (the author),
+    source and properties, plus the derived name-only logbook/tag lists and attachment_count.
 
     Time window: start/end take an absolute time (ISO-8601, normalized to UTC before sending;
     a naive value is read as UTC) or a single relative amount ('7 days', '90 min', 'now'). Months
@@ -1133,9 +1128,8 @@ async def get_log_entry(
     """Fetch one Phoebus Olog entry by id (Olog REST /logs/{id}).
 
     Read-only. Disabled by default, returns enabled=false with found=null (the plane was NOT
-    checked) unless EPICS_MCP_OLOG_URL is set. Same DS-PRIVACY posture as search_logbook
-    (redacted: author dropped, title/description withheld, attachments as a count; whole only for
-    a DECLARED local sandbox).
+    checked) unless EPICS_MCP_OLOG_URL is set. Same whole-entry shape as search_logbook (title,
+    description, owner, source, properties, raw attachments list + attachment_count).
 
     found is false ONLY on the service's definitive HTTP 404; an unreadable 2xx raises a loud
     error (it is neither a "not found" nor projected as a fabricated entry). NOTE: a real Olog
@@ -1272,14 +1266,14 @@ async def create_log_entry(
     allowlisted https URL with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true) AND a logbook allowlist
     (EPICS_MCP_OLOG_WRITE_LOGBOOKS) AND a rate limit; ALLOW_PV_WRITE is untouched. The author
     (owner) is the configured write service account, set server-side; a caller cannot spoof it. The
-    returned entry follows the same posture as a read (redacted; whole only for a DECLARED local
-    sandbox, where a write can therefore verify what it just wrote). A write response that is not
-    the created entry raises a loud error, it is never projected as a fabricated confirmation.
+    returned entry is the created entry WHOLE, so a write can verify what it just wrote. A write
+    response that is not the created entry raises a loud error, it is never reported as a
+    fabricated confirmation.
     With EPICS_MCP_OLOG_URL unset the tool returns enabled=false and makes no network call.
 
     With attachments (workspace file paths, any type/size) the entry is sent as multipart; their
     total size is capped (EPICS_MCP_OLOG_ATTACH_MAX_BYTES) and only HEIC is refused server-side. The
-    response echoes attachments_uploaded (the {id[, filename]} of each, filename whole-mode only).
+    response echoes attachments_uploaded (the {id, filename} of each).
     """
     return await _create_log_entry(
         title=title,
@@ -1339,7 +1333,7 @@ async def reply_to_log(
 ) -> OlogCreateResult:
     """Reply to an existing Phoebus Olog entry (Olog REST PUT /logs?inReplyTo=log_id).
 
-    MUTATING. Same gate, service account, and DS-PRIVACY redaction as create_log_entry, it threads
+    MUTATING. Same gate, service account, and whole-entry response as create_log_entry, it threads
     the new entry to log_id via the Olog Log Entry Group. A reply is its own entry, so it carries
     its
     OWN attachments (workspace file paths, any type, capped by EPICS_MCP_OLOG_ATTACH_MAX_BYTES). A

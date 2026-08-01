@@ -179,7 +179,6 @@ def raw_client() -> OlogClient:
         _URL,
         timeout=15.0,
         auth_header=basic_auth_header(_WRITE_USER, _WRITE_PASSWORD),
-        assume_test_data=True,
     )
 
 

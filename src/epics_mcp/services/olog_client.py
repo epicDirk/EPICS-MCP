@@ -1,10 +1,9 @@
 """Client for the Phoebus Olog (electronic logbook) REST API, read plus one gated write path.
 
-The reads are default-disabled and DS-PRIVACY-redacted; the single write
-(:meth:`OlogClient.create_log_entry`, ``PUT /logs``) is gated separately by
-:mod:`epics_mcp.olog_safety` (this module only carries the transport) and its response goes
-through the SAME output projection as a read, see :meth:`OlogClient._project`, which decides
-whether that projection redacts.
+The reads are default-disabled (no ``EPICS_MCP_OLOG_URL`` = no network call) and return the WHOLE
+server record; the single write (:meth:`OlogClient.create_log_entry`, ``PUT /logs``) is gated
+separately by :mod:`epics_mcp.olog_safety` (this module only carries the transport) and its
+response goes through the same output shaping as a read (:func:`_expand_log_entry`).
 
 Read-only jobs:
 
@@ -20,33 +19,20 @@ Read-only jobs:
 header is forwarded for secured deployments. Structure mirrors
 :mod:`epics_mcp.services.alarm_client`.
 
-⛔ **DS-PRIVACY: REDACTED BY DEFAULT.** Olog entries carry person data not only
-in ``owner`` but throughout FREE TEXT, the title, the description/body, attachment filenames, and
-per-item owners inside the ``logbooks``/``tags`` structures. A key-based strip is therefore NOT
-sufficient. Against any REAL (non-loopback) server every entry is run through a strict OUTPUT
-ALLOWLIST (:func:`_project_log_entry`): technical fields (``id``/dates/``level``/``state``) are
-kept; ``logbooks``/``tags`` are reshaped to name-only lists (their per-item owners dropped);
-``title``/``description`` keep their key but their value is WITHHELD (a name inside the text cannot
-leak); attachments are surfaced only as a COUNT; and ``owner``/``source``/``properties``
-(author-written) are dropped entirely.
+Entries leave WHOLE: ``title``, ``description``, ``owner``, ``source``, ``properties`` and the raw
+``attachments`` array all come back as the server sent them. The former DS-PRIVACY read redaction
+(an output allowlist with withheld free text) was removed 2026-08-01: it was written against an
+ASSUMED privacy rule that was never specified for this server, and withholding the free text costs
+a logbook its entire point (a search returns ids whose content the caller cannot judge, and a
+write cannot verify what it just wrote). If a real facility privacy specification ever arrives,
+rebuild against THAT spec; the removed mechanism (``_project_log_entry`` and its allowlist) is in
+the git history up to 2026-08-01.
 
-Entries leave WHOLE (:func:`_expand_log_entry`) only when BOTH hold: the URL is loopback AND the
-operator has DECLARED the data synthetic (``olog_assume_test_data``). Withholding the free text
-otherwise costs a logbook its entire point: a search returns ids whose content the caller cannot
-judge, and a write cannot verify what it just wrote. **ESS-SPEC PENDING** (decisions 2026-07-15):
-the withholding policy above was written against an ASSUMED rule, none was ever specified for this
-server, so it is DEFERRED for declared test data until a real specification exists, then re-applied
-here rather than re-invented. The allowlist and the projection are kept intact meanwhile; only the
-DEFAULT moved.
+Redirects are still refused rather than followed (:meth:`OlogClient._get`): Olog's REST API has no
+legitimate redirect, so a hop is a misconfiguration surfaced loudly, not silently traversed.
 
-Both conditions are needed, and neither is redundant: a loopback ADDRESS cannot prove the DATA is
-synthetic (a port-forward serves production on localhost with the URL unchanged, demonstrated live,
-QA 2026-07-15), and the declaration alone would not catch "pointed at the facility and forgot". For
-the same reason redirects are refused rather than followed (:meth:`OlogClient._get`): a hop would
-move the data's true origin without changing the URL the decision was made from.
-
-This is a RUNTIME output policy and is unrelated to keeping person names out of COMMITTED files:
-that is enforced separately (the facility-agnostic guards and hand-transcription rule, CLAUDE.md).
+Keeping person names out of COMMITTED files is a separate, unchanged rule (the facility-agnostic
+guards and hand-transcription rule, CLAUDE.md).
 
 ⚠️ Search-param names and the entry field names follow the documented Phoebus Olog model. What has
 actually been PROBED live against a running Olog (2026-07-15), and what has not:
@@ -83,8 +69,8 @@ actually been PROBED live against a running Olog (2026-07-15), and what has not:
 * ``size``/``offset``, ``offset`` probed (page 0 vs page N differ as expected); ``size`` is bounded
   at the tool layer and only ever narrows a result.
 * The ENTRY FIELD names (the shape of what comes BACK) are still best-effort, they are not a
-  promise this client makes about a request, and the redaction is defence-in-depth regardless of
-  which extra fields a given Olog version returns.
+  promise this client makes about a request; extra fields a given Olog version returns are passed
+  through unchanged.
 """
 
 from __future__ import annotations
@@ -105,7 +91,6 @@ from epics_mcp.services._http import (
     http_status,
     is_http_400,
     is_http_404,
-    is_loopback_url,
     rest_get_bytes,
     rest_get_json,
     rest_post_multipart,
@@ -119,10 +104,8 @@ from epics_mcp.services.olog_exceptions import (
     OlogFilterValueError,
     OlogResponseError,
     OlogRoundTripUnsafe,
-    OlogWholeModeRequired,
 )
 from epics_mcp.services.olog_time import OLOG_WIRE_TZ, normalize_olog_time
-from epics_mcp.services.redact import redact_record
 
 
 class AttachmentUpload(TypedDict):
@@ -183,18 +166,6 @@ DEFAULT_MAX_LOGS = 50
 # Static, non-identifying client-info header value (server-side only logged, never persisted). NOT a
 # personal username/hostname, a facility-agnostic constant.
 _CLIENT_INFO = "epics-mcp"
-
-# DS-PRIVACY output allowlist: the only entry fields that may leave whenever the posture redacts
-# (a DECLARED loopback sandbox returns the whole entry, see _expand_log_entry). ``title``/
-# ``description`` are kept for their PRESENCE but their value is withheld (they are free text).
-# Everything not
-# listed, ``owner``, ``source``, ``properties``, raw ``attachments``, and any field a future Olog
-# version adds, is dropped, so a new person-bearing field never leaks by default.
-_LOG_ALLOWLIST = frozenset(
-    {"id", "createdDate", "modifyDate", "level", "state", "title", "description"}
-)
-# Fields whose VALUE is author-written free text: kept-but-withheld (a person can be named inside).
-_LOG_FREETEXT = frozenset({"title", "description"})
 
 
 def _names(items: object) -> list[str]:
@@ -446,14 +417,13 @@ def unroundtrippable_attachment_filenames(raw_entry: dict[str, object]) -> list[
 
 
 def _derive_shape(entry: dict[str, object], out: dict[str, object]) -> dict[str, object]:
-    """Add the DERIVED fields both projections owe their callers, and return *out*.
+    """Add the DERIVED fields the projection owes its callers, and return *out*.
 
     ``logbooks``/``tags`` are reshaped from Olog's list-of-structs to name-only lists, and
-    ``attachment_count`` is SYNTHESISED (it is not an Olog field at all). Shared by both modes so
-    the returned SHAPE never depends on the redaction: a caller sees the same keys and the same
-    types either way, and the full mode only ADDS fields. Skipping this on the full path would
-    silently drop ``attachment_count`` and flip ``logbooks`` from list[str] to list[dict], and
-    ``dict[str, object]`` is wide enough that mypy would not say a word.
+    ``attachment_count`` is SYNTHESISED (it is not an Olog field at all). Returning the server
+    dict verbatim instead would silently drop ``attachment_count`` and flip ``logbooks`` from
+    list[str] to list[dict], and ``dict[str, object]`` is wide enough that mypy would not say a
+    word.
     """
     out["logbooks"] = _names(entry.get("logbooks"))
     out["tags"] = _names(entry.get("tags"))
@@ -462,37 +432,14 @@ def _derive_shape(entry: dict[str, object], out: dict[str, object]) -> dict[str,
     return out
 
 
-def _project_log_entry(entry: dict[str, object]) -> dict[str, object]:
-    """Return *entry* reduced to the DS-PRIVACY allowlist (see the module docstring).
-
-    Technical fields kept; ``logbooks``/``tags`` reshaped to name-only lists; ``title``/
-    ``description`` withheld; attachments surfaced as a count only; ``owner``/``source``/
-    ``properties`` dropped. The privacy barrier for every Olog entry that leaves this module,
-    except from a declared local sandbox, see :meth:`OlogClient._project` for when it applies.
-    """
-    redacted = redact_record(entry, allowed=_LOG_ALLOWLIST, freetext=_LOG_FREETEXT)
-    return _derive_shape(entry, redacted)
-
-
 def _expand_log_entry(entry: dict[str, object]) -> dict[str, object]:
-    """Return *entry* WHOLE, free text, owner and all, for a declared local test server only.
+    """Return *entry* WHOLE (free text, owner, source, properties, raw attachments) + derived
+    fields.
 
-    ESS-SPEC PENDING (decisions 2026-07-15). The redaction above was written against an ASSUMED
-    privacy rule, never a specification: no such rule was ever issued for this server. Withholding
-    ``title``/``description`` costs the whole point of a logbook (a search returns ids whose content
-    the caller cannot see, and a write cannot verify what it just wrote), so the policy is DEFERRED
-    until a real specification exists, at which point it is re-applied here, not re-invented.
-    Deferred, NOT dropped: :func:`_project_log_entry` and the allowlist stay intact and guard
-    everything else.
-
-    Reaching this function requires TWO independent conditions (see :meth:`OlogClient.__init__`):
-    a loopback URL AND ``olog_assume_test_data``. Neither is sufficient alone, and the reason is
-    worth knowing before anyone "simplifies" it: a loopback ADDRESS does not prove the DATA is
-    synthetic, a port-forward (``ssh -L 8080:olog-prod:8080``) serves a production logbook on
-    localhost without the URL ever changing, so binding to the URL alone silently un-redacts
-    production (demonstrated live, QA 2026-07-15). No URL inspection can see through a tunnel; only
-    a person can assert what the data is, which is what the flag is for. The loopback condition
-    stays because it still catches the other failure, "pointed at the facility and forgot".
+    The ONE output projection since the read redaction was removed (decision PI, 2026-08-01): the
+    former ``_project_log_entry`` allowlist was built on an ASSUMED privacy rule that was never
+    specified for this server. If a real facility privacy specification ever arrives, rebuild
+    against that spec (the removed mechanism is in the git history up to 2026-08-01).
     """
     return _derive_shape(entry, dict(entry))
 
@@ -545,16 +492,14 @@ def _hit_count(data: object) -> int | None:
 
 
 class OlogClient:
-    """Client for the Phoebus Olog REST API. Reads are GET-only; the one write (create_log_entry,
-    PUT /logs) is gated by olog_safety. Every path (read + write) leaves through _project:
-    redacted against a real server, whole against a declared local sandbox."""
+    """Client for the Phoebus Olog REST API. Reads are GET-only and return the whole server
+    record; the one write (create_log_entry, PUT /logs) is gated by olog_safety."""
 
     def __init__(
         self,
         base_url: str,
         timeout: float = 5.0,
         auth_header: str | None = None,
-        assume_test_data: bool | None = None,
         allow_attachment_download: bool | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -565,20 +510,9 @@ class OlogClient:
         # cached_property's reach. The read `session` above stays byte-identical (auth on it is
         # harmless: reads / check_connectivity use it, never the PUT, that uses the write one).
         self._auth_header = auth_header
-        # ESS-SPEC PENDING (see _expand_log_entry): redact everything EXCEPT a server that is BOTH
-        # loopback AND declared to hold test data. Two conditions, because neither suffices alone:
-        # a loopback address does not prove the data is synthetic (a port-forward serves production
-        # on localhost, demonstrated live, QA 2026-07-15), and a flag alone would not catch
-        # "pointed
-        # at the facility and forgot". Fails closed on both: an unparseable URL is not loopback, and
-        # the declaration defaults to false. `assume_test_data=None` reads the config; pass
-        # it explicitly to decide per client (tests do).
-        if assume_test_data is None:
-            assume_test_data = get_config().olog_assume_test_data
-        self._redact = not (is_loopback_url(self.base_url) and assume_test_data)
-        # OA1: a SEPARATE, explicit opt-in for handing back raw attachment BYTES/filenames on top of
-        # whole-mode (defense-in-depth, the by-id endpoint has no server-side per-log auth). Read
-        # from config when not passed (tests pass it explicitly). See ``attachment_bytes_allowed``.
+        # OA1: an explicit opt-in for handing back raw attachment BYTES (the by-id endpoint has no
+        # server-side per-log auth). Read from config when not passed (tests pass it explicitly).
+        # See ``attachment_bytes_allowed``.
         if allow_attachment_download is None:
             allow_attachment_download = get_config().olog_allow_attachment_download
         self._allow_attachment_download = allow_attachment_download
@@ -596,22 +530,11 @@ class OlogClient:
         """
         return build_write_session(auth_header=self._auth_header, verify=self.session.verify)
 
-    def _project(self, entry: dict[str, object]) -> dict[str, object]:
-        """Project one entry on its way out: redacted for a real server, whole for a local sandbox.
-
-        The ONE place the mode is decided. Note this must not be derived from the write gate's
-        ``_url_write_allowed``: that is True for an allowlisted REMOTE too, which as a read
-        predicate would surface a production logbook in the clear.
-        """
-        return _project_log_entry(entry) if self._redact else _expand_log_entry(entry)
-
     def _get(self, url: str, params: dict[str, str]) -> object:
         """Issue a GET and return parsed JSON, translating failures to Olog exceptions.
 
-        Redirects are refused, not followed: the output posture is decided from the CONFIGURED host
-        (see :meth:`_project`), so a followed hop would let a loopback URL serve entries from a real
-        server un-redacted, demonstrated live (QA 2026-07-15). Olog's REST API has no legitimate
-        redirect, so a loud error is the right answer.
+        Redirects are refused, not followed: Olog's REST API has no legitimate redirect, so a hop
+        is a misconfiguration and a loud error is the right answer.
         """
         return rest_get_json(
             self.session,
@@ -686,7 +609,7 @@ class OlogClient:
         level: str | None = None,
         title: str | None = None,
     ) -> tuple[list[dict[str, object]], bool, int | None]:
-        """Search log entries → ``(entries, capped, total_matches)``; see :meth:`_project`.
+        """Search log entries → ``(entries, capped, total_matches)``, each entry whole.
 
         *text* searches the description; *logbooks*/*tags* are comma-separated names; *start*/*end*
         bound the time window. *offset* is the 0-based pagination offset (Olog wire param ``from``;
@@ -760,11 +683,11 @@ class OlogClient:
         # S11: every entry of the page must be a readable log entry, junk used to be silently
         # dropped (a fabricated, smaller result). Validate ALL entries, then project the page.
         records = [_require_entry(e, "search") for e in entries]
-        projected = [self._project(record) for record in records[:size]]
+        projected = [_expand_log_entry(record) for record in records[:size]]
         return projected, capped, total_matches
 
     def get_log_entry(self, log_id: str) -> dict[str, object] | None:
-        """Return one log entry by id (DS-PRIVACY-redacted), or ``None`` when it does not exist.
+        """Return one log entry by id (whole + derived fields), or ``None`` when it does not exist.
 
         A missing/deleted id makes the Olog answer HTTP 404, which is the definitive "not found"
         (mapped to ``None``); every OTHER failure (5xx, an unreachable service, or a 2xx whose
@@ -781,14 +704,14 @@ class OlogClient:
             if is_http_404(exc):
                 return None
             raise
-        return self._project(_require_entry(data, "GET /logs/{id}"))
+        return _expand_log_entry(_require_entry(data, "GET /logs/{id}"))
 
     def list_logbooks(self) -> list[str]:
         """Return the names of all Olog logbooks (``GET /logbooks``), name-only.
 
-        DS-PRIVACY: each ``Logbook`` carries an ``owner`` (PII); :func:`_names` keeps only the
-        ``name``, so no owner reaches the caller. The names are the valid filter values for
-        ``search_logbook(logbooks=...)``.
+        Each ``Logbook`` struct also carries an ``owner`` and a ``state``; :func:`_named_list`
+        keeps only the ``name``, because the names ARE the answer here: the valid filter values
+        for ``search_logbook(logbooks=...)``.
         """
         data = self._get(f"{self.base_url}/logbooks", {})
         return _named_list(data, f"GET {self.base_url}/logbooks")
@@ -812,9 +735,9 @@ class OlogClient:
         explaining *note* whenever the server does not state it unambiguously (see
         :func:`_level_list`).
 
-        A ``Level`` carries no owner, so, like ``/tags``, this is trivially PII-free and needs no
-        redaction. An unreadable listing raises rather than collapsing to an empty list: "there are
-        no levels" would tell a caller validating a filter value that none of them exist."""
+        A ``Level`` carries no owner, so, like ``/tags``, this is a pure name/flag listing. An
+        unreadable listing raises rather than collapsing to an empty list: "there are no levels"
+        would tell a caller validating a filter value that none of them exist."""
         data = self._get(f"{self.base_url}/levels", {})
         return _level_list(data, f"GET {self.base_url}/levels")
 
@@ -828,12 +751,13 @@ class OlogClient:
         in_reply_to: str | None = None,
         attachments: list[AttachmentUpload] | None = None,
     ) -> dict[str, object]:
-        """Create a log entry (``PUT /logs``) and return it DS-PRIVACY-redacted.
+        """Create a log entry (``PUT /logs``) and return the created entry whole.
 
         With *attachments* the entry is sent as ``multipart/form-data`` to ``PUT /logs/multipart``
         instead (create-with-attachments, OA1, the CS-Studio ``OlogHttpClient.save`` path); WITHOUT
         them the plain ``PUT /logs`` JSON path is byte-identical to before. Either way the response
-        leaves through the same :meth:`_project`.
+        leaves through the same :func:`_expand_log_entry` shaping as a read, so a write can verify
+        what it just wrote.
 
         *title* and *logbooks* are mandatory server-side (empty → HTTP 400); the named logbooks and
         tags MUST already exist (else 400). *in_reply_to* (wire query ``inReplyTo``) threads the new
@@ -842,10 +766,6 @@ class OlogClient:
         server sets ``owner`` from the auth Principal and IGNORES a caller-supplied owner, so this
         client never sends one.
 
-        The server's create response is a FULL log (with owner/free text) → it leaves this module
-        through the SAME :meth:`_project` as a read, so write and read never disagree about what is
-        visible: redacted against a real server, whole against a loopback sandbox (where seeing it
-        is the point, a write can then verify what it wrote instead of needing an outside client).
         HTTP 400 → a clear :class:`OlogResponseError` (a named logbook/tag does not exist, an empty
         title, or a bad ``inReplyTo``, explicitly NOT "not found"); 401 → an auth error; 5xx
         propagates."""
@@ -914,7 +834,7 @@ class OlogClient:
         # S11: the write response must be the created log entry, any other non-empty dict used
         # to be projected as a fabricated write confirmation.
         which = "PUT /logs/multipart (create)" if attachments else "PUT /logs (create)"
-        return self._project(_require_entry(data, which))
+        return _expand_log_entry(_require_entry(data, which))
 
     def _put_multipart(
         self,
@@ -955,35 +875,28 @@ class OlogClient:
 
     @property
     def whole_mode(self) -> bool:
-        """True when entries leave WHOLE (loopback + declared test data), the filename-visibility
-        gate. An attachment FILENAME is author free text (a person can be named in it), so it is
-        surfaced only in whole-mode; raw attachment BYTES need the additional explicit opt-in
-        (:attr:`attachment_bytes_allowed`). The inverse of the internal ``_redact`` flag, exposed so
-        the service layer gates filenames off the SAME decision rather than re-deriving it."""
-        return not self._redact
+        """Transitional, always True: entries leave whole since the read redaction was removed
+        (decision PI, 2026-08-01). Kept for one removal step so the service-layer whole-mode
+        preconditions still compile; dies together with them."""
+        return True
 
     @property
     def attachment_bytes_allowed(self) -> bool:
-        """True iff raw attachment bytes/filenames may leave: whole-mode AND the explicit opt-in.
+        """True iff raw attachment bytes may leave: the explicit download opt-in.
 
-        The ONE place the download posture is decided. ``_redact is False`` is the whole-mode signal
-        (loopback URL AND declared test data); ``_allow_attachment_download`` is the second,
-        deliberate
-        opt-in on top (the by-id endpoint ``/attachment/{id}`` has no server-side per-log auth, so
-        byte
-        egress stays an intentional choice, decision a). The service layer checks this BEFORE any
-        byte
-        fetch and withholds structurally; the download methods re-check it as a defense-in-depth
-        backstop (:meth:`_require_attachment_bytes_allowed`).
+        The ONE place the download posture is decided. ``_allow_attachment_download`` is a
+        deliberate opt-in (the by-id endpoint ``/attachment/{id}`` has no server-side per-log
+        auth). The service layer checks this BEFORE any byte fetch and withholds structurally; the
+        download methods re-check it as a defense-in-depth backstop
+        (:meth:`_require_attachment_bytes_allowed`).
         """
-        return (not self._redact) and self._allow_attachment_download
+        return self._allow_attachment_download
 
     def _require_attachment_bytes_allowed(self) -> None:
         """Backstop: raise :class:`OlogAttachmentDownloadDenied` unless bytes may leave."""
         if not self.attachment_bytes_allowed:
             raise OlogAttachmentDownloadDenied(
-                "Raw Olog attachment bytes are withheld: this needs a declared local test sandbox "
-                "(loopback URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA) AND "
+                "Raw Olog attachment bytes are withheld: this needs "
                 "EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD=true."
             )
 
@@ -1044,21 +957,13 @@ class OlogClient:
         )
 
     def get_raw_entry(self, log_id: str) -> dict[str, object] | None:
-        """The RAW server entry for a whole-mode round-trip (OA1b), NOT projected. Whole-mode only.
+        """The RAW server entry for an update/attach round-trip (OA1b), NOT reshaped.
 
-        ``add_attachment`` must resubmit the entry's FULL content, because the server's ``POST
-        /logs/multipart`` runs a destructive ``updateLog`` (prunes any attachment not resubmitted,
-        overwrites the fields). That content is only readable whole, so this refuses unless the
-        client is in whole-mode (loopback + declared test data), the defense-in-depth backstop for
-        the service's up-front check. Returns ``None`` on a definitive 404 (unknown/deleted id); a
-        2xx that is not a readable log entry raises (never a fabricated round-trip source)."""
-        if not self.whole_mode:
-            raise OlogWholeModeRequired(
-                "add_log_attachment needs a declared local test sandbox (loopback "
-                "EPICS_MCP_OLOG_URL + EPICS_MCP_OLOG_ASSUME_TEST_DATA): attaching to an existing "
-                "entry must round-trip its full content, which is withheld against a redacted "
-                "server."
-            )
+        ``add_attachment`` and ``update`` must resubmit the entry's FULL content, because the
+        server's ``POST /logs/multipart`` runs a destructive ``updateLog`` (prunes any attachment
+        not resubmitted, overwrites the fields). Returns ``None`` on a definitive 404
+        (unknown/deleted id); a 2xx that is not a readable log entry raises (never a fabricated
+        round-trip source)."""
         try:
             data = self._get(f"{self.base_url}/logs/{quote(log_id, safe='')}", {})
         except OlogResponseError as exc:
@@ -1075,7 +980,7 @@ class OlogClient:
         inline_markup: str = "",
     ) -> dict[str, object]:
         """Attach *uploads* to an EXISTING entry (OA1b, ``POST /logs/multipart``) and return the
-        result DS-PRIVACY-projected.
+        result whole (+ derived fields).
 
         ``POST /logs/multipart`` is NOT additive: it runs the full ``updateLog``, which
         ``retainAll``-prunes every attachment not resubmitted and overwrites
@@ -1095,7 +1000,7 @@ class OlogClient:
 
         *inline_markup* (from an ``embed_image_base64``) is appended to the round-tripped ``source``
         so the new inline image renders; ``markup=commonmark`` regenerates ``description`` from
-        ``source`` server-side. *raw_entry* comes from :meth:`get_raw_entry` (whole-mode)."""
+        ``source`` server-side. *raw_entry* comes from :meth:`get_raw_entry`."""
         existing_meta, unsafe = attachment_round_trip(raw_entry)
         if unsafe:
             raise OlogRoundTripUnsafe(
@@ -1135,7 +1040,7 @@ class OlogClient:
             resp_exc=OlogResponseError,
             allow_redirects=False,
         )
-        return self._project(_require_entry(data, "POST /logs/multipart (add attachment)"))
+        return _expand_log_entry(_require_entry(data, "POST /logs/multipart (add attachment)"))
 
     def update_log_entry(
         self,
@@ -1147,7 +1052,7 @@ class OlogClient:
         logbooks: list[str] | None = None,
         tags: list[str] | None = None,
     ) -> dict[str, object]:
-        """Edit an EXISTING entry's fields (OA3) and return the result DS-PRIVACY-projected.
+        """Edit an EXISTING entry's fields (OA3) and return the result whole (+ derived fields).
 
         Sent as ``POST /logs/multipart`` with the ``logEntry`` part and NO file parts. That is the
         same server core as OA1b's attach, the multipart handler delegates straight into the JSON
@@ -1178,7 +1083,7 @@ class OlogClient:
         NOT validate logbook/tag existence on update (unlike
         create) nor the ``level`` on ANY write path, which is why the service checks edited names
         and the level itself (see ``_reject_unknown_level``). *raw_entry* comes from
-        :meth:`get_raw_entry` (whole-mode only); the server's own numeric id is round-tripped
+        :meth:`get_raw_entry`; the server's own numeric id is round-tripped
         verbatim (the multipart handler reads the id from the BODY, :577, so no path/body id
         mismatch is possible).
         """
@@ -1239,4 +1144,4 @@ class OlogClient:
             # Never follow a redirect on a write: the gate approved THIS host.
             allow_redirects=False,
         )
-        return self._project(_require_entry(data, "POST /logs/multipart (update)"))
+        return _expand_log_entry(_require_entry(data, "POST /logs/multipart (update)"))

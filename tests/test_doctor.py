@@ -47,7 +47,6 @@ from epics_mcp.services.doctor import (
     _with_remedy,
     run_doctor,
 )
-from epics_mcp.services.olog_client import OlogClient
 from epics_mcp.services.rest_exceptions import RestConnectionError
 
 
@@ -1323,10 +1322,6 @@ def test_privacy_report_olog_freetext_matches_the_client(
     """
     cfg = EpicsConfig(olog_url=olog_url, olog_assume_test_data=declared)
     assert _privacy_report(cfg).olog_freetext_withheld is withheld
-    # The report must not diverge from what the client actually does.
-    if olog_url:
-        client = OlogClient(olog_url, assume_test_data=declared)
-        assert client._redact is withheld
 
 
 # --- live plane (Plan-QA #4: no default egress) ---

@@ -62,14 +62,12 @@ _BLOB = b"<display version='2.0.0'><name>oa1-probe</name></display>"
 
 @pytest.fixture
 def client() -> OlogClient:
-    """A write+download-capable client for the declared loopback sandbox (whole-mode)."""
+    """A write+download-capable client for the loopback sandbox."""
     auth = basic_auth_header(
         os.environ["EPICS_MCP_OLOG_WRITE_USER"], os.environ["EPICS_MCP_OLOG_WRITE_PASSWORD"]
     )
     assert _URL is not None  # guarded by the module gate
-    return OlogClient(
-        _URL, timeout=15.0, auth_header=auth, assume_test_data=True, allow_attachment_download=True
-    )
+    return OlogClient(_URL, timeout=15.0, auth_header=auth, allow_attachment_download=True)
 
 
 def _upload(content: bytes, name: str, content_type: str | None) -> AttachmentUpload:
@@ -118,12 +116,12 @@ def test_attachment_round_trip_is_byte_identical(client: OlogClient) -> None:
 
 
 def test_download_is_withheld_without_the_flag() -> None:
-    """The privacy posture, live: a client WITHOUT the opt-in flag refuses to hand back bytes even
-    against the same declared sandbox, the flag, not the URL alone, unlocks byte egress."""
+    """The download opt-in, live: a client WITHOUT the flag refuses to hand back bytes even
+    against the same sandbox; the flag unlocks byte egress."""
     from epics_mcp.services.olog_exceptions import OlogAttachmentDownloadDenied
 
     assert _URL is not None
-    no_flag = OlogClient(_URL, timeout=15.0, assume_test_data=True, allow_attachment_download=False)
+    no_flag = OlogClient(_URL, timeout=15.0, allow_attachment_download=False)
     with pytest.raises(OlogAttachmentDownloadDenied):
         no_flag.get_attachment("1", "whatever.png")
 
@@ -204,7 +202,6 @@ def test_add_attachment_restamps_the_owner(client: OlogClient) -> None:
         _URL,
         timeout=15.0,
         auth_header=basic_auth_header(_OTHER_USER or "", _OTHER_PASSWORD or ""),
-        assume_test_data=True,
     )
     created = other.create_log_entry(
         title="OQ4 owner re-stamp probe",

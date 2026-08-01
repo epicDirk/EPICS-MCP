@@ -28,7 +28,6 @@ from epics_mcp.services._http import basic_auth_header
 from epics_mcp.services._time_window import TimeWindowFormatError
 from epics_mcp.services.olog_client import OlogClient
 from epics_mcp.services.olog_exceptions import OlogError, OlogFilterValueError
-from epics_mcp.services.redact import FREETEXT_WITHHELD
 from tests.live_gate import assert_live_available, live_demanded
 
 pytestmark = pytest.mark.live
@@ -65,17 +64,6 @@ _NO_REFERENCE = (
 def client() -> OlogClient:
     url = os.environ["EPICS_MCP_OLOG_URL"]
     return OlogClient(url, timeout=10.0)
-
-
-@pytest.fixture
-def whole_client() -> OlogClient:
-    """A client that may see free text, for probes that must READ a title to derive a probe word.
-
-    Declaring test data is not enough on its own: the client un-redacts only when the URL is ALSO
-    loopback, so pointing this suite at a real server keeps the free text withheld and the probes
-    that need it skip rather than leak."""
-    url = os.environ["EPICS_MCP_OLOG_URL"]
-    return OlogClient(url, timeout=10.0, assume_test_data=True)
 
 
 def _hits(client: OlogClient, start: str, end: str) -> int | None:
@@ -325,7 +313,7 @@ def test_unknown_level_is_silently_zero_not_an_error(client: OlogClient) -> None
     assert total in (0, None)
 
 
-def test_title_filter_is_honoured_and_matches_whole_words(whole_client: OlogClient) -> None:
+def test_title_filter_is_honoured_and_matches_whole_words(client: OlogClient) -> None:
     """``title`` filters as named, case-insensitively, and matches whole WORDS, not substrings.
 
     The fragment is DERIVED, not hard-coded: a strict prefix of a real title word that is itself not
@@ -333,22 +321,13 @@ def test_title_filter_is_honoured_and_matches_whole_words(whole_client: OlogClie
     bare, it must find nothing; wildcarded, it must find the word it was taken from. (Nothing from
     the fixture is committed; titles are read at runtime.)
 
-    Takes the WHOLE-mode client on purpose: the probe word has to be read out of a real title, and
-    the default posture WITHHOLDS title free text. Deriving from a redacted title silently probes
-    the withheld-placeholder text instead, which matches nothing and fails the positive control
-    (measured while writing this test).
-
     Worth stating because it is the OPPOSITE of ``find_channels``, whose bare value is an anchored
     substring glob, copying that wording over would have been a false documented promise."""
-    entries, _capped, _total = whole_client.search_logbook(size=200)
+    entries, _capped, _total = client.search_logbook(size=200)
     assert entries, _NO_REFERENCE
-    titles = [
-        str(entry["title"])
-        for entry in entries
-        if isinstance(entry.get("title"), str) and entry["title"] != FREETEXT_WITHHELD
-    ]
+    titles = [str(entry["title"]) for entry in entries if isinstance(entry.get("title"), str)]
     if not titles:
-        pytest.skip("titles are withheld here (not a declared loopback sandbox), no probe word")
+        pytest.skip("no readable string titles in the fixture, no probe word")
     words = {word for title in titles for word in title.lower().split() if word.isalnum()}
 
     # Sorted by (-length, word) so a length tie breaks on the WORD, not on set-iteration order:
@@ -362,7 +341,7 @@ def test_title_filter_is_honoured_and_matches_whole_words(whole_client: OlogClie
         pytest.skip("the derived fragment is itself a title word; cannot decide substring-ness")
 
     def hits(value: str) -> int:
-        return len(whole_client.search_logbook(title=value, size=200)[0])
+        return len(client.search_logbook(title=value, size=200)[0])
 
     assert hits(probe), "positive control: the word must match"
     assert hits(probe.upper()) == hits(probe), "must be case-insensitive"
@@ -374,9 +353,7 @@ def test_title_filter_is_honoured_and_matches_whole_words(whole_client: OlogClie
     assert hits(f"{fragment}*") >= hits(probe), "the wildcard must find at least the word itself"
 
 
-def test_documented_combination_semantics_hold(
-    client: OlogClient, whole_client: OlogClient
-) -> None:
+def test_documented_combination_semantics_hold(client: OlogClient) -> None:
     """Pins the three COMBINATION promises the tool description makes, each of which was documented
     from one probe and nothing else, an unpinned promise is one server upgrade from being a lie.
 
@@ -396,22 +373,16 @@ def test_documented_combination_semantics_hold(
         joined = client.search_logbook(level=f"{first}{separator}{second}", size=200)[0]
         assert len(joined) == union, f"{separator!r} did not OR the two levels"
 
-    # The title half needs the WHOLE-mode client: the default posture withholds title free text,
-    # and a probe word derived from the withheld placeholder matches nothing (measured twice
-    # while writing this file, it presents as a skip or a failed positive control, never as a
-    # real result).
-    entries, _capped, _total = whole_client.search_logbook(size=200)
-    titles = [
-        str(entry["title"])
-        for entry in entries
-        if isinstance(entry.get("title"), str) and entry["title"] != FREETEXT_WITHHELD
-    ]
+    # The title half derives its probe words from real titles read at runtime (nothing from the
+    # fixture is committed).
+    entries, _capped, _total = client.search_logbook(size=200)
+    titles = [str(entry["title"]) for entry in entries if isinstance(entry.get("title"), str)]
     pair = next((t.lower().split() for t in sorted(titles) if len(t.split()) >= 2), None)
     if pair is None:
-        pytest.skip("no multi-word title readable in this posture, cannot probe AND/phrase")
+        pytest.skip("no multi-word title in the fixture, cannot probe AND/phrase")
 
     def hits(value: str) -> int:
-        return len(whole_client.search_logbook(title=value, size=200)[0])
+        return len(client.search_logbook(title=value, size=200)[0])
 
     assert hits(f"{pair[0]} {pair[1]}") == hits(f'"{pair[0]} {pair[1]}"'), (
         "AND-ing two adjacent words and quoting them as a phrase disagree on a title that "
@@ -533,7 +504,6 @@ def test_server_does_not_validate_a_written_level() -> None:
             os.environ["EPICS_MCP_OLOG_WRITE_USER"],
             os.environ.get("EPICS_MCP_OLOG_WRITE_PASSWORD", ""),
         ),
-        assume_test_data=True,
     )
     known, _default, _note = client.list_log_levels()
     bogus = "Urgnet"  # a typo of a real level, so it cannot collide with a site's vocabulary

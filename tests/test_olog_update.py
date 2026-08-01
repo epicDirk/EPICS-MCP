@@ -204,7 +204,7 @@ class TestClientUpdate:
         # RED-PROOF (guard c, inverse): a title-only edit must leave EVERY other field byte-for-byte
         # as it was, updateLog is a full replace, so anything not resubmitted is nulled.
         captured = _capture_post(monkeypatch)
-        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        client = OlogClient(_LOOPBACK)
         client.update_log_entry(_RAW_ENTRY, title="new title")
         log_json = _sent_log_json(captured)
         assert log_json["title"] == "new title"  # the ONE edited field
@@ -222,7 +222,7 @@ class TestClientUpdate:
         # RED-PROOF (guard g): drop the existing_meta round-trip and the server's retainAll prunes
         # every attachment on a plain field edit.
         captured = _capture_post(monkeypatch)
-        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        client = OlogClient(_LOOPBACK)
         client.update_log_entry(_RAW_ENTRY, title="new title")
         log_json = _sent_log_json(captured)
         assert log_json["attachments"] == [
@@ -234,7 +234,7 @@ class TestClientUpdate:
         # RED-PROOF (guard j): under markup=commonmark the server regenerates description FROM
         # source, so writing the new body to description next to a stale source would lose the edit.
         captured = _capture_post(monkeypatch)
-        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        client = OlogClient(_LOOPBACK)
         client.update_log_entry(_RAW_ENTRY, description="new **body**")
         log_json = _sent_log_json(captured)
         assert log_json["source"] == "new **body**"
@@ -243,7 +243,7 @@ class TestClientUpdate:
 
     def test_edited_logbooks_and_tags_are_reshaped(self, monkeypatch: pytest.MonkeyPatch) -> None:
         captured = _capture_post(monkeypatch)
-        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        client = OlogClient(_LOOPBACK)
         client.update_log_entry(_RAW_ENTRY, logbooks=["Ops", "Commissioning"], tags=[])
         log_json = _sent_log_json(captured)
         assert log_json["logbooks"] == [{"name": "Ops"}, {"name": "Commissioning"}]
@@ -251,7 +251,7 @@ class TestClientUpdate:
 
     def test_write_never_follows_a_redirect(self, monkeypatch: pytest.MonkeyPatch) -> None:
         captured = _capture_post(monkeypatch)
-        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        client = OlogClient(_LOOPBACK)
         client.update_log_entry(_RAW_ENTRY, title="new title")
         assert captured["allow_redirects"] is False
         assert captured["url"].endswith("/logs/multipart")
@@ -261,7 +261,7 @@ class TestClientUpdate:
     ) -> None:
         # Olog's save path dereferences description without a null-guard: never send null.
         captured = _capture_post(monkeypatch)
-        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        client = OlogClient(_LOOPBACK)
         client.update_log_entry({"id": 9, "title": "t"}, title="new")
         log_json = _sent_log_json(captured)
         assert log_json["description"] == ""
@@ -271,7 +271,7 @@ class TestClientUpdate:
         # RED-PROOF (guard i, client backstop): even if the service check were bypassed, the client
         # refuses rather than silently letting the server drop a colliding attachment.
         captured = _capture_post(monkeypatch)
-        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        client = OlogClient(_LOOPBACK)
         entry = dict(_RAW_ENTRY)
         entry["attachments"] = [
             {"id": "1", "filename": "plot.png"},
@@ -289,7 +289,7 @@ class TestClientUpdate:
         # survives. The sibling service-level assertion (TestServiceUpdate) cannot cover this: it
         # monkeypatches OlogClient away, so the wire payload is never built.
         captured = _capture_post(monkeypatch)
-        client = OlogClient(_LOOPBACK, assume_test_data=True)
+        client = OlogClient(_LOOPBACK)
         client.update_log_entry(_RAW_ENTRY, level="Problem")
         log_json = _sent_log_json(captured)
         assert log_json["level"] == "Problem"  # the caller's level wins over the raw entry's

@@ -1,7 +1,7 @@
 """Offline tests for the Olog WRITE surface, gate, URL boundary, allowlist, audit privacy, client.
 
 No network. Covers the OlogWriteGate (env gate + test-server URL boundary + logbook allowlist +
-rate limit + privacy-clean audit), the client PUT path (JSON shape, redaction, error mapping) and
+rate limit + privacy-clean audit), the client PUT path (JSON shape, error mapping) and
 the tool/service orchestration (disabled path, enabled path, audit ALLOW/FAILED). The person-name
 regression (a person named in the free-text title/description NEVER reaches the audit) is the most
 important test of the phase. All host/URL/person tokens are SYNTHETIC (facility-agnostic guard).
@@ -34,7 +34,6 @@ from epics_mcp.services._http import basic_auth_header
 from epics_mcp.services.checkers import query_olog_create
 from epics_mcp.services.olog_client import OlogClient
 from epics_mcp.services.olog_exceptions import OlogResponseError
-from epics_mcp.services.redact import FREETEXT_WITHHELD
 from epics_mcp.tools.olog import _create_log_entry, _reply_to_log
 
 _AUDIT_LOGGER = "epics_mcp.olog_audit"
@@ -481,12 +480,12 @@ class TestOlogAuditSink:
 
 
 # ======================================================================================
-# OlogClient.create_log_entry: JSON shape, redaction, error mapping
+# OlogClient.create_log_entry: JSON shape, whole response, error mapping
 # ======================================================================================
 
 
 class TestCreateClient:
-    def test_builds_correct_json_and_redacts_response(
+    def test_builds_correct_json_and_returns_whole_response(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         client = OlogClient("http://olog:8080/Olog", auth_header="Basic dXNlcjpwYXNz")
@@ -497,7 +496,7 @@ class TestCreateClient:
             captured["json"] = kwargs.get("json")
             captured["params"] = kwargs.get("params")
             captured["headers"] = kwargs.get("headers")
-            # a FULL server response with owner + free text, must be redacted before return
+            # a FULL server response with owner + free text, returned whole
             return _resp(
                 {
                     "id": 5,
@@ -532,12 +531,11 @@ class TestCreateClient:
         # too, byte-identical, a silent drop on either would 401 a secured server.
         assert client._write_session.headers.get("authorization") == "Basic dXNlcjpwYXNz"
         assert client.session.headers.get("authorization") == "Basic dXNlcjpwYXNz"
-        # redaction: owner dropped, free text withheld, logbook name-only, NO person name leaks
-        assert "owner" not in entry
-        assert entry["title"] == FREETEXT_WITHHELD
-        assert entry["description"] == FREETEXT_WITHHELD
+        # whole response: owner and free text in the clear, logbooks derived name-only
+        assert entry["owner"] == "z.person"
+        assert entry["title"] == "written by z.person"
+        assert entry["description"] == "z.person did it"
         assert entry["logbooks"] == ["Ops"]
-        assert "z.person" not in str(entry)
 
     def test_reply_sends_in_reply_to_query(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = OlogClient("http://olog:8080/Olog")
@@ -601,13 +599,13 @@ class TestCreateClient:
 
 
 class _FakeClient:
-    """A fake OlogClient returning an already-redacted create response (redaction pinned above)."""
+    """A fake OlogClient returning a canned create response (the shaping is pinned above)."""
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         pass
 
     def create_log_entry(self, **kwargs: object) -> dict[str, object]:
-        return {"id": 99, "title": FREETEXT_WITHHELD, "logbooks": ["Ops"]}
+        return {"id": 99, "title": "Vacuum trip", "logbooks": ["Ops"]}
 
     def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
         # The create path checks a passed level against this before taking the rate token.
@@ -636,7 +634,7 @@ class TestToolOrchestration:
             await _create_log_entry(title="t", logbooks="Ops")
 
     @pytest.mark.asyncio
-    async def test_create_tool_enabled_surfaces_redacted_entry(
+    async def test_create_tool_enabled_surfaces_the_entry(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         config_module._config = _write_config()
@@ -647,7 +645,7 @@ class TestToolOrchestration:
         entry = result["entry"]
         assert isinstance(entry, dict)
         assert entry["id"] == 99
-        assert entry["title"] == FREETEXT_WITHHELD
+        assert entry["title"] == "Vacuum trip"
 
     @pytest.mark.asyncio
     async def test_reply_tool_threads_and_bad_id_is_400(
@@ -662,7 +660,7 @@ class TestToolOrchestration:
 
             def create_log_entry(self, **kwargs: object) -> dict[str, object]:
                 captured["in_reply_to"] = kwargs.get("in_reply_to")
-                return {"id": 7, "title": FREETEXT_WITHHELD, "logbooks": ["Ops"]}
+                return {"id": 7, "title": "re", "logbooks": ["Ops"]}
 
         monkeypatch.setattr("epics_mcp.services.checkers_olog.OlogClient", _Fake)
         result = await _reply_to_log(log_id="42", title="re", logbooks="Ops")
@@ -749,7 +747,7 @@ class _LevelCountingClient:
         return ["Info", "Problem", "Request"], "Info", None
 
     def create_log_entry(self, **kwargs: object) -> dict[str, object]:
-        return {"id": 99, "title": FREETEXT_WITHHELD, "logbooks": ["Ops"]}
+        return {"id": 99, "title": "t", "logbooks": ["Ops"]}
 
 
 class TestCreateLevelVocabulary:

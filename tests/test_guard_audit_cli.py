@@ -114,7 +114,7 @@ def test_check_with_a_database_compares_the_coverage_pins_too(
     )
 
     monkeypatch.setattr(
-        guard_audit, "load_coverage_map", lambda _path: {("olog_client.py", 211): {covering}}
+        guard_audit, "load_coverage_map", lambda _path: {("olog_client.py", 181): {covering}}
     )
     counted = guard_audit.population()
     # The deviation is MANUFACTURED, not hoped for. The first version of this test asserted exit 1
@@ -171,7 +171,7 @@ def test_a_coverage_context_is_matched_by_file_and_function(
         monkeypatch.setattr(
             guard_audit,
             "load_coverage_map",
-            lambda _path, hit=context: {("olog_client.py", 211): {hit}},
+            lambda _path, hit=context: {("olog_client.py", 181): {hit}},
         )
         monkeypatch.setitem(guard_audit.PINNED, guard_audit.NOT_EXECUTING, expected + 7)
         assert guard_audit.main([*_ARGV, "--coverage-db", "synthetic"]) == 1
@@ -243,7 +243,7 @@ def test_the_candidate_list_is_pinned_by_its_members_not_only_its_length(
     # An empty covering set: no claiming test executes a guard line, so sham_edge is the whole
     # real candidate list and the COUNTS are unchanged. Only the membership differs.
     monkeypatch.setattr(
-        guard_audit, "load_coverage_map", lambda _path: {("olog_client.py", 211): set()}
+        guard_audit, "load_coverage_map", lambda _path: {("olog_client.py", 181): set()}
     )
 
     assert guard_audit.main([*_ARGV, "--coverage-db", "synthetic"]) == 1

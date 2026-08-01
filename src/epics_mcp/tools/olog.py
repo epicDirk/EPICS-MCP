@@ -1,10 +1,9 @@
-"""MCP adapters for the Phoebus Olog logbook (reads + one gated write; output posture is
-redacted against a real server, whole against a declared local test sandbox).
+"""MCP adapters for the Phoebus Olog logbook (reads + one gated write; entries leave whole).
 
 Thin wrappers: the config-gated, off-loop queries live in the services layer
-(:func:`epics_mcp.services.checkers.query_olog_search` / ``query_olog_entry``), so the
-DS-PRIVACY redaction runs on the ONE code path every caller shares (the "build a client directly in
-the tool" anti-pattern is avoided for this name-capable surface). Default-disabled behaviour (no
+(:func:`epics_mcp.services.checkers.query_olog_search` / ``query_olog_entry``), so the output
+shaping runs on the ONE code path every caller shares (the "build a client directly in
+the tool" anti-pattern is avoided for this surface). Default-disabled behaviour (no
 ``EPICS_MCP_OLOG_URL`` → no network call) is enforced there.
 """
 
@@ -68,7 +67,7 @@ async def _search_logbook(
     title: str | None = None,
     timeout: float = 5.0,
 ) -> OlogSearchResult:
-    """Search the Phoebus Olog logbook (see services.olog_client for the output posture).
+    """Search the Phoebus Olog logbook (entries come back whole).
 
     Thin MCP adapter over :func:`epics_mcp.services.checkers.query_olog_search`.
     """
@@ -88,7 +87,7 @@ async def _search_logbook(
 
 
 async def _get_log_entry(log_id: str, timeout: float = 5.0) -> OlogEntryResult:
-    """Return one Olog entry by id (see services.olog_client for the output posture).
+    """Return one Olog entry by id, whole.
 
     Thin MCP adapter over :func:`epics_mcp.services.checkers.query_olog_entry`.
     """
@@ -96,7 +95,7 @@ async def _get_log_entry(log_id: str, timeout: float = 5.0) -> OlogEntryResult:
 
 
 async def _list_logbooks(timeout: float = 5.0) -> OlogLogbooksResult:
-    """List the valid Olog logbook names (name-only; owners dropped).
+    """List the valid Olog logbook names (name-only).
 
     Thin MCP adapter over :func:`epics_mcp.services.checkers.query_olog_logbooks`.
     """
@@ -130,7 +129,7 @@ async def _create_log_entry(
     timeout: float = 5.0,
 ) -> OlogCreateResult:
     """Create a Phoebus Olog log entry, optionally with attachments. MUTATING, gated; the response
-    follows the same output posture as a read.
+    is the created entry whole.
 
     Thin MCP adapter over :func:`epics_mcp.services.checkers.query_olog_create`. *logbooks* and
     *tags* are comma-separated names; *attachments* are comma-separated workspace file paths
@@ -161,7 +160,7 @@ async def _reply_to_log(
     embed_image_base64: str | None = None,
     timeout: float = 5.0,
 ) -> OlogCreateResult:
-    """Reply to an existing Olog entry (threads via the Log Entry Group). MUTATING, gated, redacted.
+    """Reply to an existing Olog entry (threads via the Log Entry Group). MUTATING, gated.
 
     Thin MCP adapter over :func:`epics_mcp.services.checkers.query_olog_create` with
     ``in_reply_to=log_id``: the same client/server code path as a create (a reply is its own entry,
