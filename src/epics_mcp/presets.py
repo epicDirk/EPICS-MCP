@@ -38,7 +38,28 @@ SERVER_COMMAND = "epics-mcp"
 
 #: A placeholder a human still has to replace. Anchored on the angle brackets rather than on a word
 #: list, so a new preset cannot introduce a placeholder this fails to see.
-_PLACEHOLDER_RE = re.compile(r"<[a-z][a-z0-9-]*>")
+#:
+#: The character class covers UPPER and mixed case and the underscore, which the first version did
+#: not, and both halves of that were measured rather than imagined (QA-68). The presets themselves
+#: spell their placeholders ``<lower-case-with-hyphens>``, so a lower-case-only pattern looked
+#: sufficient; but the values this is applied to include everything a caller passes with ``--set``,
+#: and ``--set EPICS_MCP_ARCHIVER_URL=http://<ARCHIVER-HOST>:17665`` went straight past it. The
+#: check then RAN and reported ``Failed to resolve '%3carchiver-host%3e'``: a DNS failure shaped
+#: exactly like a genuine finding, url-encoded into something even harder to recognise as an
+#: unfilled blank. That is the report this refusal exists to prevent.
+#:
+#: The three lookbehinds carve out Python's named-group syntax, the one legitimate value in this
+#: configuration that carries angle brackets: ``EPICS_MCP_PV_WRITE_PATTERN`` is a REGEX, and
+#: ``^SIM:(?P<dev>PS-01):Cur-SP$`` was read as a placeholder, so a COMPLETE configuration had its
+#: check silently refused. ``(?P<``, ``(?<`` and ``\k<`` are spelled out because they are the forms
+#: a regex can carry; a general "is this value a regex" test does not exist and guessing one would
+#: be a second, weaker copy of ``re``'s own parser.
+#:
+#: Honest limit, named rather than papered over: a placeholder with a SPACE in it
+#: (``<archiver host>``) is still not seen. Admitting whitespace would let the pattern reach across
+#: unrelated text, and no preset spells one that way; the two forms above are the ones a reader
+#: actually types when copying the emitted block.
+_PLACEHOLDER_RE = re.compile(r"(?<!\?)(?<!\?P)(?<!\\k)<[A-Za-z][A-Za-z0-9_-]*>")
 
 #: The prefix ``EpicsConfig`` binds to (``model_config = {"env_prefix": "EPICS_MCP_"}``).
 _CONFIG_PREFIX = "EPICS_MCP_"
@@ -119,7 +140,10 @@ PRESETS: Mapping[str, Preset] = {
         name="sandbox",
         summary=(
             "Loopback only: a local soft IOC, no REST planes. The workshop and summer-school "
-            "shape, and the one preset that needs no editing."
+            "shape, and the one preset with no value left to fill in. It reaches an IOC running "
+            "NATIVELY on this host, because it searches by UDP broadcast to 127.0.0.1; a "
+            "CONTAINERISED IOC usually publishes only its TCP port, and then it also needs "
+            "--set EPICS_PVA_NAME_SERVERS=127.0.0.1:5075."
         ),
         env=dict(_LOOPBACK_SEARCH),
     ),

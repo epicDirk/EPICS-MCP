@@ -81,6 +81,44 @@ class TestPresetData:
         test above and refuse every check forever."""
         assert open_placeholders({"A": "http://archiver.example.org:17665"}) == []
 
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "http://<ARCHIVER-HOST>:17665",
+            "http://<Archiver-Host>:17665",
+            "http://<archiver_host>:17665",
+        ],
+    )
+    def test_a_placeholder_is_seen_whatever_case_the_reader_typed(self, value: str) -> None:
+        """The presets spell theirs lower case, the VALUES do not have to (QA-68).
+
+        ``open_placeholders`` is applied to everything a caller passes with ``--set``, not only to
+        what a preset ships. Measured before this: ``--set
+        EPICS_MCP_ARCHIVER_URL=http://<ARCHIVER-HOST>:17665`` was not seen, the check ran, and the
+        report said ``Failed to resolve '%3carchiver-host%3e'`` - a DNS failure wearing the shape of
+        a genuine finding, which is the exact outcome the refusal exists to prevent.
+        """
+        assert open_placeholders({"A": value}) == [f"A={value}"]
+
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            r"^SIM:(?P<dev>PS-01):Cur-SP$",
+            r"^SIM:(?<dev>PS-01):Cur-SP$",
+            r"^(?P<d>SIM):\k<d>$",
+        ],
+    )
+    def test_a_named_regex_group_is_not_mistaken_for_a_placeholder(self, pattern: str) -> None:
+        """The counter-direction of the one above, and not hypothetical: this configuration has a
+        value that is a REGEX (QA-68).
+
+        ``EPICS_MCP_PV_WRITE_PATTERN`` guards the PV write gate, and a named group carries angle
+        brackets. Measured before this: passing one refused the check of a COMPLETE configuration
+        and exited 0, so the loudest thing about that setup was a warning that nothing was wrong
+        with it.
+        """
+        assert open_placeholders({"EPICS_MCP_PV_WRITE_PATTERN": pattern}) == []
+
     def test_overrides_replace_in_place_and_additions_append(self) -> None:
         """Key order is the reading order of the emitted block, so an override must not move the
         variable it replaces; a genuinely new variable has nowhere to go but the end."""
@@ -238,6 +276,34 @@ class TestEnvironmentIsolation:
         ]
 
         assert stale_config_vars(search) == sorted(search)
+
+    def test_the_cleared_search_variables_track_the_ones_the_doctor_actually_reads(self) -> None:
+        """The list above is a LITERAL, and on its own it guards only one direction.
+
+        WHY this second assertion exists, measured rather than argued (QA-68). ``presets`` and
+        ``services.doctor`` each hold their own copy of the search-path variables, and
+        ``presets._SEARCH_VARS`` says in its comment that it mirrors the doctor's. Nothing held
+        that sentence: adding a seventh entry to ``doctor._SEARCH_LIST_VARS`` and leaving
+        ``presets`` untouched left the WHOLE suite green (1805 passed, byte-identical to the clean
+        run). The test above cannot catch it either, because it compares the literal to itself.
+
+        That is the direction code actually grows in. A variable the doctor learns to read but the
+        preset does not clear survives ``_run_check`` from the caller's shell, and the report then
+        describes a reach the emitted block does not state, which is the one failure
+        ``stale_config_vars`` exists to prevent.
+
+        The two ``*_AUTO_ADDR_LIST`` names stay spelled out here rather than imported: the doctor
+        picks ONE of them per provider (``doctor._live_search_posture``), so there is no collection
+        on that side to compare against, and a preset has to clear both regardless of which
+        provider it names. Duplication is not derived away, it is BOUND, which is the shape
+        ``tests/test_presets_match_examples.py`` uses for the same class of problem.
+        """
+        from epics_mcp.presets import _SEARCH_VARS
+        from epics_mcp.services.doctor import _SEARCH_LIST_VARS
+
+        auto_switches = {"EPICS_PVA_AUTO_ADDR_LIST", "EPICS_CA_AUTO_ADDR_LIST"}
+
+        assert set(_SEARCH_VARS) == set(_SEARCH_LIST_VARS) | auto_switches
 
     def test_unrelated_epics_variables_are_left_alone(self) -> None:
         """The counter-direction, and a real boundary rather than politeness: probing a preset

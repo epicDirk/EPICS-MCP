@@ -406,7 +406,19 @@ Three things about it are worth knowing before you read its output:
 
 A preset still carrying placeholders (`<archiver-host>`) makes the command REFUSE the check and
 name them, rather than report a DNS failure shaped like a genuine finding. Fill them in the emitted
-block or pass `--set NAME=VALUE`.
+block or pass `--set NAME=VALUE`. The refusal reads the VALUE, not a word list, so it also catches a
+placeholder you typed yourself in any case (`<ARCHIVER-HOST>`, `<archiver_host>`); it deliberately
+does not fire on a named regex group (`(?P<dev>...)`), which a write-gate pattern legitimately
+carries.
+
+⚠️ **A loopback preset finds a NATIVE soft IOC, not automatically a containerised one.** `sandbox`
+sets `EPICS_PVA_ADDR_LIST=127.0.0.1`, so the client searches by UDP broadcast on the PVA search port
+(5076). An IOC started directly on the host answers that. A containerised IOC usually publishes only
+its PVA **TCP** port (commonly 5075) and no UDP search port, so the search finds nothing and the
+probe reports `PV_TIMEOUT` while the IOC is perfectly healthy. Measured: identical run, identical
+IOC, adding `--set EPICS_PVA_NAME_SERVERS=127.0.0.1:5075` turned `disconnected` into `connected`.
+`EPICS_PVA_NAME_SERVERS` is a TCP unicast search path and is the right answer whenever the server
+you want is reachable by address and port but not by broadcast.
 
 The same walkthrough is available conversationally as the `setup_epics_mcp` prompt, which asks
 about each plane in turn and ends by telling the user which `epics-init` command to run.

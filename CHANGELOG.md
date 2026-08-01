@@ -17,10 +17,14 @@ carry breaking changes).
   .mcp.json` yields a usable file. `--set NAME=VALUE` fills or adds a variable, `--probe-pv NAME` is
   passed to the doctor, `--no-check` emits only. It introduces no new `EPICS_MCP_*` variable: the
   presets set existing ones. Exit codes are the doctor's own (`0`/`1`/`3`), with `2` for a usage
-  error. Two behaviours worth knowing: a preset still carrying placeholders makes it REFUSE the
-  check and name them rather than report an unactionable failure, and a shape with no REST plane
-  probed without `--probe-pv` is reported as confirming nothing, because the live plane makes no
-  network call in that case.
+  error. Three behaviours worth knowing: a value still carrying a placeholder makes it REFUSE the
+  check and name it rather than report an unactionable failure (it reads the value in any case,
+  `<ARCHIVER-HOST>` as well as `<archiver-host>`, and does not fire on a named regex group such as
+  a write-gate pattern); a shape with no REST plane probed without `--probe-pv` is reported as
+  confirming nothing, because the live plane makes no network call in that case; and `sandbox`
+  searches by UDP broadcast to `127.0.0.1`, which reaches a soft IOC running natively on the host
+  but not a containerised one that publishes only its PVA TCP port, where
+  `--set EPICS_PVA_NAME_SERVERS=127.0.0.1:5075` is needed as well.
 - **`setup_epics_mcp`, a third MCP prompt.** The same walkthrough conversationally: it asks about
   each service plane in turn and ends by naming the `epics-init` command to run.
 
