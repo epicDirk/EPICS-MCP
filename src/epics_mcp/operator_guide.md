@@ -419,14 +419,16 @@ placeholder you typed yourself in any case (`<ARCHIVER-HOST>`, `<archiver_host>`
 does not fire on a named regex group (`(?P<dev>...)`), which a write-gate pattern legitimately
 carries.
 
-⚠️ **A loopback preset finds a NATIVE soft IOC, not automatically a containerised one.** `sandbox`
-sets `EPICS_PVA_ADDR_LIST=127.0.0.1`, so the client searches by UDP broadcast on the PVA search port
-(5076). An IOC started directly on the host answers that. A containerised IOC usually publishes only
-its PVA **TCP** port (commonly 5075) and no UDP search port, so the search finds nothing and the
-probe reports `PV_TIMEOUT` while the IOC is perfectly healthy. Measured: identical run, identical
-IOC, adding `--set EPICS_PVA_NAME_SERVERS=127.0.0.1:5075` turned `disconnected` into `connected`.
-`EPICS_PVA_NAME_SERVERS` is a TCP unicast search path and is the right answer whenever the server
-you want is reachable by address and port but not by broadcast.
+**A loopback preset has to search BOTH ways, and `sandbox` does.** `EPICS_PVA_ADDR_LIST=127.0.0.1`
+searches by UDP broadcast on the PVA search port (5076), which an IOC started directly on the host
+answers. A containerised IOC usually publishes only its PVA **TCP** port (commonly 5075) and no UDP
+search port, so a broadcast-only config finds nothing and the probe reports `PV_TIMEOUT` while the
+IOC is perfectly healthy. `sandbox` therefore also sets `EPICS_PVA_NAME_SERVERS=127.0.0.1:5075`, the
+TCP-unicast search path. Measured over all four cells, both IOC shapes against both configurations:
+the line turns the container from `disconnected` to `connected` and leaves a native server
+connected, because the UDP search still runs alongside it. If your IOC serves another port, change
+it; and outside this preset, `EPICS_PVA_NAME_SERVERS` is the right answer whenever the server you
+want is reachable by address and port but not by broadcast.
 
 The same walkthrough is available conversationally as the `setup_epics_mcp` prompt, which asks
 about each plane in turn and ends by telling the user which `epics-init` command to run.

@@ -96,16 +96,29 @@ REST_PLANE_VARS = frozenset(
     }
 )
 
-#: Loopback-only PV search, the posture ``epics-doctor`` reports as ``localhost-isolated``. Held
-#: once because three of the four presets open with it, and because getting it WRONG is silent:
-#: EPICS defaults its auto-address search to ON, so omitting the two ``*_AUTO_ADDR_LIST`` lines
+#: Loopback-only PV search: every route a PV search could take points at 127.0.0.1, and the two
+#: subnet-broadcast switches are OFF. Held as a name because getting it WRONG is silent: EPICS
+#: defaults its auto-address search to ON, so omitting the two ``*_AUTO_ADDR_LIST`` lines
 #: broadcasts PV searches into the local subnets while looking like a narrower config than it is.
+#:
+#: ``EPICS_PVA_NAME_SERVERS`` is the TCP-unicast route, and it is here because the UDP one alone
+#: does not reach a CONTAINERISED IOC: a container usually publishes its PVA TCP port and no UDP
+#: search port, so the broadcast finds nothing while the IOC is perfectly healthy. Measured over
+#: all four cells, both IOC shapes against both configurations: adding this line turns the
+#: container from ``disconnected`` to ``connected`` and leaves a NATIVE server connected, because
+#: the UDP search below still runs alongside it. That fourth cell is the one that decides between
+#: repairing this and merely documenting it, so it is measured rather than assumed.
+#:
+#: ⚠️ Two claims that used to stand here were wrong and are gone: this is used by ONE preset
+#: (``sandbox``), not three, and ``epics-doctor`` does NOT report it as ``localhost-isolated``,
+#: which it claims only when every search list is UNSET. It prints the loopback search paths.
 _LOOPBACK_SEARCH = {
     "EPICS_MCP_PROVIDER": "pva",
     "EPICS_PVA_AUTO_ADDR_LIST": "NO",
     "EPICS_CA_AUTO_ADDR_LIST": "NO",
     "EPICS_PVA_ADDR_LIST": "127.0.0.1",
     "EPICS_CA_ADDR_LIST": "127.0.0.1",
+    "EPICS_PVA_NAME_SERVERS": "127.0.0.1:5075",
 }
 
 #: The same posture pointed at a real IOC or gateway instead of loopback. Same five keys on
@@ -140,10 +153,10 @@ PRESETS: Mapping[str, Preset] = {
         name="sandbox",
         summary=(
             "Loopback only: a local soft IOC, no REST planes. The workshop and summer-school "
-            "shape, and the one preset with no value left to fill in. It reaches an IOC running "
-            "NATIVELY on this host, because it searches by UDP broadcast to 127.0.0.1; a "
-            "CONTAINERISED IOC usually publishes only its TCP port, and then it also needs "
-            "--set EPICS_PVA_NAME_SERVERS=127.0.0.1:5075."
+            "shape, and the one preset with no value left to fill in. It searches both ways a "
+            "PVA client can, UDP broadcast to 127.0.0.1 and TCP unicast to 127.0.0.1:5075, so it "
+            "reaches a soft IOC running natively on this host AND one in a container, which "
+            "usually publishes only its TCP port. Change the port if your IOC serves another."
         ),
         env=dict(_LOOPBACK_SEARCH),
     ),

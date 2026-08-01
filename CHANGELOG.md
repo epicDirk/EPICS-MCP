@@ -22,9 +22,9 @@ carry breaking changes).
   `<ARCHIVER-HOST>` as well as `<archiver-host>`, and does not fire on a named regex group such as
   a write-gate pattern); a shape with no REST plane probed without `--probe-pv` is reported as
   confirming nothing, because the live plane makes no network call in that case; and `sandbox`
-  searches by UDP broadcast to `127.0.0.1`, which reaches a soft IOC running natively on the host
-  but not a containerised one that publishes only its PVA TCP port, where
-  `--set EPICS_PVA_NAME_SERVERS=127.0.0.1:5075` is needed as well.
+  searches BOTH ways a PVA client can, UDP broadcast to `127.0.0.1` and TCP unicast to
+  `127.0.0.1:5075`, so it reaches a soft IOC running natively on the host as well as one in a
+  container, which typically publishes only its PVA TCP port and no UDP search port.
 - **`setup_epics_mcp`, a third MCP prompt.** The same walkthrough conversationally: it asks about
   each service plane in turn and ends by naming the `epics-init` command to run.
 - **`monitor_pv` says whether the channel was reachable.** A new `connection` field
