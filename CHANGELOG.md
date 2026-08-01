@@ -7,6 +7,23 @@ carry breaking changes).
 
 ## [Unreleased]
 
+### Added
+
+- **`epics-init`, a sixth console command: the configuration you need, without reading the
+  reference first.** It prints the MCP client-configuration block for one of four deployment shapes
+  (`sandbox`, `ioc-only`, `ioc-archiver`, `full`; `--list` describes them) and then runs
+  `epics-doctor` against exactly that block, so generating a configuration and checking it are one
+  step. The block goes to stdout and everything else to stderr, so `epics-init --preset X >
+  .mcp.json` yields a usable file. `--set NAME=VALUE` fills or adds a variable, `--probe-pv NAME` is
+  passed to the doctor, `--no-check` emits only. It introduces no new `EPICS_MCP_*` variable: the
+  presets set existing ones. Exit codes are the doctor's own (`0`/`1`/`3`), with `2` for a usage
+  error. Two behaviours worth knowing: a preset still carrying placeholders makes it REFUSE the
+  check and name them rather than report an unactionable failure, and a shape with no REST plane
+  probed without `--probe-pv` is reported as confirming nothing, because the live plane makes no
+  network call in that case.
+- **`setup_epics_mcp`, a third MCP prompt.** The same walkthrough conversationally: it asks about
+  each service plane in turn and ends by naming the `epics-init` command to run.
+
 ### Removed
 
 - **The Olog read redaction is gone: every logbook read returns the whole entry.** `search_logbook`,

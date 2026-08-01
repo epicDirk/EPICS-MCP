@@ -383,6 +383,34 @@ large waveforms vs. per-network instances, each with its own MGMT root), `getApp
 `identity` tells you which appliance a URL actually is, and enumerating the wrong cluster silently
 yields a complete-looking list of the wrong population.
 
+### Start a deployment's config: `epics-init`
+
+`epics-init` (core install) is the step before the doctor: it prints the MCP client-configuration
+block for one of four named deployment shapes, then runs the doctor against exactly that block.
+`--list` describes the shapes: `sandbox` (loopback only, the workshop setup and the only one that
+needs no editing), `ioc-only`, `ioc-archiver` (the most common partial deployment) and `full`.
+
+Three things about it are worth knowing before you read its output:
+
+- **The block goes to stdout, everything else to stderr**, so `epics-init --preset X > .mcp.json`
+  produces a usable file even when the command is warning about something.
+- **It probes the preset, not your shell.** The doctor reads `os.environ`, so the command clears
+  every `EPICS_MCP_*` variable and the six EPICS search-path variables before applying the preset.
+  Without that, a variable you exported earlier would be probed as though it were part of the
+  preset, and the report would describe a configuration that exists nowhere. Transport tuning
+  outside those two groups is left alone.
+- **A shape with no REST plane confirms very little on its own.** Without `--probe-pv NAME` the
+  live plane is reported and never contacted, so a clean run on `sandbox` or `ioc-only` says
+  nothing is misconfigured, not that anything works. The command says so; `--probe-pv` is what
+  turns it into a real answer.
+
+A preset still carrying placeholders (`<archiver-host>`) makes the command REFUSE the check and
+name them, rather than report a DNS failure shaped like a genuine finding. Fill them in the emitted
+block or pass `--set NAME=VALUE`.
+
+The same walkthrough is available conversationally as the `setup_epics_mcp` prompt, which asks
+about each plane in turn and ends by telling the user which `epics-init` command to run.
+
 ### Verify a deployment's config: `epics-doctor`
 <!-- BEGIN:status-prose (the plane statuses named outside the legend below are drift-guarded against PlaneStatus, see tests/test_guide_matches_code.py) -->
 The `epics-doctor` CLI (core install) is a read-only self-check: it probes every CONFIGURED plane

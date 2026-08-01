@@ -140,7 +140,7 @@ the gates.
   have uploaded it alongside the new files. The workflow clears the directory; a manual release
   must too.
 - A published package is not the same thing as a working one. Installing the built wheel into a
-  clean environment and running all five console scripts found two that died on their import chain
+  clean environment and running every console script found two that died on their import chain
   with a bare traceback. Do that check by hand whenever an entry point or an optional dependency
   changes; no unit test replaces it.
 - **The `v` in the tag is load-bearing, and this repository's own history proves it can be

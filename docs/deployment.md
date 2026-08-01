@@ -13,6 +13,22 @@ setting those variables for *your* services, with no code change. This guide wal
 
 ## 1. Quick start
 
+0. **Or start from a preset.** `epics-init` writes the client-configuration block for one of four
+   deployment shapes and then runs the self-check of step 3 against it, so the shortest path
+   through this whole page is two commands:
+
+   ```bash
+   epics-init --list                          # sandbox | ioc-only | ioc-archiver | full
+   epics-init --preset ioc-archiver > .mcp.json
+   ```
+
+   The block goes to stdout and everything else to stderr, so the redirect above yields a usable
+   file. Placeholders like `<archiver-host>` are yours to replace, either in the file or with
+   `--set EPICS_MCP_ARCHIVER_URL=...`; while any remain, the command says so and skips the check
+   rather than reporting a failure you cannot act on. `--no-check` skips it outright. The steps
+   below are what the presets are made of, and remain the reference when your facility does not
+   match one of the four shapes.
+
 1. Open `.env.example` and copy the lines you need into your launcher, setting the URLs for the
    services you have (all are optional: an unset URL disables that plane, with no network call).
    Nothing on disk named `.env` is ever read: the server takes its configuration from the process

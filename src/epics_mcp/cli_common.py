@@ -77,7 +77,7 @@ def _report_engine_broken(command: str, exc: BaseException) -> int:
 def require_display_engine(command: str) -> int | None:
     """Return an exit code when the ``opi_navigation`` engine is unusable, else ``None``.
 
-    WHY this exists at all: two of the five console scripts (``epics-crossplane``,
+    WHY this exists at all: two of the console scripts (``epics-crossplane``,
     ``epics-coverage``) are display-aware and need an engine that is NOT part of the published
     package. Installed from an index, both used to die on the module-level import chain with a bare
     ``ModuleNotFoundError`` traceback, which reads as a broken package rather than as a missing
@@ -202,20 +202,22 @@ def positive_timeout(value: str) -> float:
 def add_version_argument(parser: argparse.ArgumentParser) -> None:
     """Give *parser* the ``--version`` action every console script of this package shares.
 
-    ONE home, so the five console scripts cannot drift apart. The flag used to exist on
-    ``epics-mcp`` alone (the bug-report template asks reporters for that version) and the other four
-    had no way to answer the same question. Copying the line into each was the alternative, and then
-    the version source, the ``%(prog)s`` prefix and the exit code would each be free to differ per
-    command, which is what ``tests/test_cli_version.py`` now pins across the whole set.
+    ONE home, so the console scripts cannot drift apart. The flag used to exist on ``epics-mcp``
+    alone (the bug-report template asks reporters for that version) and the others had no way to
+    answer the same question. Copying the line into each was the alternative, and then the version
+    source, the ``%(prog)s`` prefix and the exit code would each be free to differ per command,
+    which is what ``tests/test_cli_version.py`` now pins across the whole set. That test derives
+    the set from ``[project.scripts]``, so a command added later joins it without anyone
+    remembering to, and joins it RED until it calls this.
 
     ``%(prog)s`` resolves to the parser's OWN pinned ``prog``, so the line names the command the
-    reader typed instead of an interpreter path (QA-41), which also means the five outputs differ by
+    reader typed instead of an interpreter path (QA-41), which also means the outputs differ by
     that first token by design: what has to agree is the version after it.
 
     ``action="version"`` prints inside ``parse_args`` and raises ``SystemExit(0)``, so the console
     has to be reconfigured BEFORE the parser is built (QA-8), exactly as every entry point already
     does. It prints through ``parser.exit``, never through ``parser.error``, which is why it answers
-    on all five commands in every environment since QA-42: on the two display-aware ones the engine
+    on every command in every environment since QA-42: on the two display-aware ones the engine
     check now runs AFTER parsing, and :class:`DisplayEngineAwareParser` intercepts only usage
     errors.
     """

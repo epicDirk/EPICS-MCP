@@ -78,7 +78,7 @@ epics-coverage   --displays <project-root> --scope DEV: # coverage matrix (needs
 `epics-coverage` need the `opi_navigation` engine, which a published install cannot obtain
 (see above). All are read-only.
 
-All five commands answer `--help` and `--version` with their own name and the package version, on a
+Every console command answers `--help` and `--version` with its own name and the package version, on a
 core-only install as well: they parse their arguments before asking for the display engine, so the
 one command that explains the usage is never the one you cannot run.
 

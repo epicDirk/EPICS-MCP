@@ -31,10 +31,12 @@ package ships `py.typed`. The CI badge above reports the current state of both g
 `softIocPVA` and the sample database in [`examples/`](https://github.com/epicDirk/EPICS-MCP/tree/main/examples/) give you a working PV in about
 five minutes; no facility, no ChannelFinder, no archiver.
 
-**I want to point it at my facility.** Read the
-[deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md). It walks through the variables plane by plane, the CA-bundle
-recipe for internal HTTPS, and the documented assumptions. Then run `epics-doctor`, which probes
-every configured plane read-only and tells you what your instance actually reaches.
+**I want to point it at my facility.** Start with `epics-init --list`, pick the shape that matches
+what you run, and let `epics-init --preset <shape>` write the client-configuration block and check
+it for you. When your facility does not match one of the four shapes, the
+[deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md) walks through the variables plane by plane, the CA-bundle
+recipe for internal HTTPS, and the documented assumptions. Either way you end at `epics-doctor`,
+which probes every configured plane read-only and tells you what your instance actually reaches.
 
 ## What is this (for EPICS people)?
 
@@ -95,8 +97,9 @@ For the development version, install straight from the repository
 (`uv tool install git+https://github.com/epicDirk/EPICS-MCP`); from a local checkout,
 `uv tool install .` and `pip install .` do the same thing.
 
-This installs the **core** server: live PV access, diagnosis, and the REST-service planes, plus
-five commands (`epics-mcp`, `epics-doctor`, `epics-diagnose`, `epics-crossplane`, `epics-coverage`).
+This installs the **core** server: live PV access, diagnosis, and the REST-service planes, plus six
+commands (`epics-mcp`, `epics-init`, `epics-doctor`, `epics-diagnose`, `epics-crossplane`,
+`epics-coverage`).
 
 The last two are **display-aware** and need the `opi_navigation` engine, which is not part of the
 package: they refuse with an explanation rather than running. Everything else works without it.
@@ -125,7 +128,7 @@ See [Related and roadmap](#related-and-roadmap).
    epics-mcp
    ```
 
-   `epics-mcp --help` explains the invocation, and each of the five commands answers
+   `epics-mcp --help` explains the invocation, and every console command answers
    `--help` and `--version` with its own name and the installed version (the one a bug report
    asks for), on a core-only install as well. `epics-crossplane` and `epics-coverage` still
    need the display engine to RUN, and say so when asked to. The server itself is configured
