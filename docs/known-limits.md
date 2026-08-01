@@ -249,10 +249,13 @@ per-line exception file is the intended relief; this very paragraph needed those
 doubles as the end-to-end proof of the mechanism. Two sibling classes from the same audit ARE
 repaired mechanically, because their fix costs no German recall: URL-shaped tokens are blanked
 before any signal (`https://web.mit.edu` carries the German preposition as a host label; a BARE
-hostname without a scheme or `www.` prefix is not URL-shaped and stays a residual), and nine
+hostname without a scheme or `www.` prefix is not URL-shaped and stays a residual), and twenty-one
 English words ending in a watched suffix (`unsung`, `sprung`, `strung`, `hamstrung`,
-`Fahrenheit`, ...) sit in an explicit lookalike stoplist whose entries are pinned to still match
-the suffix rule.
+`Fahrenheit`, `armadillos`, `pueblos`, ...) sit in an explicit lookalike stoplist whose entries are
+pinned to still match the suffix rule. That count was nine until the `los` suffix was admitted:
+twelve of the entries exist only because of it, and none of them occurs in this tree, so they carry
+what CAN collide rather than what does. Nothing pins this number, which is why it is stated here
+rather than left to be inferred (see section 2).
 
 ⛔ The tempting repair, a general language-detection library, is rejected rather than postponed: a
 statistical detector on a 100-column line of technical English with identifiers in it is noisy in

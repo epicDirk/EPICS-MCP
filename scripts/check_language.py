@@ -17,10 +17,21 @@ independent, each catching what the previous one cannot:
      ``den``); each of them is a common English word and would fire on ordinary prose.
   2. UMLAUTS: the original search, kept as a cheap backstop for German that uses no function word.
   3. GERMAN MORPHOLOGY: word-formation suffixes that English does not produce (-ung, -keit,
-     -heit, -schaft, -lich, -ieren, -isch and their inflections). Every candidate suffix was
+     -heit, -schaft, -lich, -ieren, -isch, -los and their inflections). Every candidate suffix was
      probed against the whole English tree before being admitted, because a suffix that fires on
      English is worse than no suffix at all. This signal earned its place immediately: it found
      "ehrlichen" in a comment the other two signals and the original sweep had all walked past.
+
+     The ``los`` member arrived later, and from a sibling repository, where a measurement earned
+     it: the German ``wirkungslos`` sat in an otherwise English doc comment and NO signal caught
+     it, because it carries no umlaut, no function word, and ends in ``los`` rather than in
+     ``ung``. Probed against THIS tree before being admitted, exactly as the paragraph above
+     demands: zero hits over every tracked file, with AND without the stoplist below. So here it
+     is preventive rather than a repair, and it is recorded as preventive instead of being sold
+     as a fix for something. The three-word-character floor already covers the short English
+     plurals ``kilos``/``silos``/``solos``/``halos`` (two characters ahead of the suffix, so the
+     floor rejects them); ``logos`` does not end in ``los`` at all and never was at risk. The
+     English words that DO collide are enumerated below.
 
 An ALL-CAPS match is not a hit. Measured: without that rule the guard reports the MIT licence six
 times (the ``mit`` function word) and the site acronym BIS once. German prose does not write its
@@ -60,7 +71,7 @@ _FUNCTION_WORDS = """
 # suffix that fires there is not a signal, it is noise, and was dropped rather than special-cased.
 _GERMAN_SUFFIXES = """
     ung ungen keit keiten heit heiten schaft schaften lich liche lichen licher liches
-    ieren iert ierte ierten ierung ierungen isch ische ischen ischer
+    ieren iert ierte ierten ierung ierungen isch ische ischen ischer los
 """.split()  # noqa: SIM905 (prose block, see above)
 
 # English words the suffix rule would otherwise flag (QA-5). The tree probe above answers only
@@ -69,9 +80,16 @@ _GERMAN_SUFFIXES = """
 # pins that every entry still matches, so a stale entry goes red instead of silently widening).
 # The 'ung' family needs three word characters before the suffix, which is why 'flung'/'swung'
 # pass on their own; 'fahrenheit' is 'fahren' + 'heit' and the likeliest hit in this domain.
+# The 'los' family is the second block below: the same floor already rejects the short plurals
+# ('kilos', 'silos', 'solos', 'halos' each carry only two characters ahead of the suffix), so what
+# remains is loanwords and proper nouns with a longer stem. None of them occurs in this tree today,
+# measured; they are listed because this list answers "which English words CAN collide", not
+# "which do right now".
 _ENGLISH_SUFFIX_LOOKALIKES = frozenset(
     """
     fahrenheit hamstrung overstrung restrung sprung strung underslung unstrung unsung
+    amarillos armadillos buffalos carlos diabolos gigolos marcelos pianolos piccolos
+    pomelos pueblos tremolos
 """.split()  # noqa: SIM905 (prose block, see above)
 )
 

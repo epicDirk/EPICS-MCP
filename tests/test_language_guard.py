@@ -57,6 +57,14 @@ MORPHOLOGY = "German word formation"
         # Signal 3 alone: neither a function word nor an umlaut in sight. This signal found a real
         # line the other two walked past ("ehrlichen"), which is why it is not decoration.
         ("# Die ehrlichen Notes: glob-cap (Adapter)", [MORPHOLOGY]),
+        # Signal 3 through the 'los' suffix specifically, and the row is built so that ONLY that
+        # member can carry it: the sentence around the German word is English (no function word),
+        # there is no umlaut, and "wirkungslos" does NOT match the 'ung' member either, because
+        # that one needs a word boundary after "ung" and here an "s" follows. Drop 'los' from
+        # _GERMAN_SUFFIXES and this row goes red on its own, which is what makes it a proof about
+        # the member rather than about the signal. This is the shape that got through unseen in a
+        # sibling repository.
+        ("# the gate stays wirkungslos when the pattern is empty", [MORPHOLOGY]),
         # All three at once, the ordinary case.
         ("# Die Prüfung der Konfiguration ist fehlerhaft", [WORD, UMLAUT, MORPHOLOGY]),
     ],
@@ -86,6 +94,11 @@ def test_each_signal_catches_what_the_others_miss(line: str, expected: list[str]
         "# the trap had sprung on unsung code, strung together overnight",
         "# temperatures arrive in Fahrenheit here, never in Celsius",
         "# see https://web.mit.edu/paper and www.mit.edu for the source",
+        # The 'los' member's own counter-direction, and it is NOT covered by the stoplist: these
+        # four are rejected by the three-word-character floor instead, so they prove the floor
+        # rather than the discard. Shortening the floor would redden this row while every
+        # stoplist row stayed green.
+        "# retention counts kilos across silos, solos and halos alike",
     ],
 )
 def test_english_stays_quiet(line: str) -> None:
