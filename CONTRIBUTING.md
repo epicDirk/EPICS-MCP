@@ -48,9 +48,12 @@ when the package is absent, so the core suite stays green.
 - New operational knowledge (a service/IOC recipe, an endpoint, an error signature) lands in the
   operator guide (`src/epics_mcp/operator_guide.md`), not just a commit body. See the Knowledge
   Persistence Policy in `CLAUDE.md`. A new tool must appear in the guide's tool inventory, any new
-  `EPICS_MCP_*` var must be mentioned there, and a new `epics-doctor` plane status must be sorted
-  into one of the guide-location buckets (the legend, the prose above it, or neither, with the
-  glyph the CLI prints); all three are drift-checked by `test_guide_matches_code.py`.
+  `EPICS_MCP_*` var must be mentioned there, and a new `epics-doctor` plane status must be **given a
+  row in the shipped legend**, with the glyph the CLI prints, and sorted into the matching
+  guide-location bucket. ⚠️ Leaving it undocumented is not an option the buckets offer any more:
+  "named in neither" is empty since QA-49 and putting a status there is a red test, not a decision.
+  A status the code treats as a hard failure must additionally stay named in the prose paragraph
+  above the legend. All of it is drift-checked by `test_guide_matches_code.py`.
 - A new **write** surface additionally satisfies all six points of the
   [write-gate contract](docs/write-gate-contract.md)
   and registers every one of its deny paths in `tests/test_write_gate_contract.py::DENY_PATHS`, each

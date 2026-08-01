@@ -350,7 +350,11 @@ guard's honest limits are the one thing that cannot be written in advance.
 and `cli_doctor._STATUS_MARK`. Every status is sorted into one of three declared buckets (named in
 the legend, named in the prose paragraph above it, named in neither), and the buckets are compared
 with `PlaneStatus` as SETS, with a double-listing count beside the comparison because set equality
-alone cannot see a repeated member. The legend's Status and Mark cells are held against the code in
+alone cannot see a repeated member. Since QA-49 (2026-08-02) the legend bucket holds all twelve and
+the other two are EMPTY, so the three-way sort no longer decides anything by itself: a separate
+guard requires the legend bucket to be TOTAL, which is what makes "what the report prints, the
+shipped handbook explains" a gate rather than a sentence. Putting a status into either empty bucket
+is still a legal SORT and is exactly what that guard reddens on. The legend's Status and Mark cells are held against the code in
 both directions, its rows are counted before they are reduced, and its delimiter row, its
 indentation and its row widths are held against the rules a renderer applies rather than against a
 character class. Every glyph and status pairing on
@@ -375,8 +379,11 @@ That is the strong grade, and it is the only one that sees an assertion which st
 meaning anything: a finding list emptied where it is built leaves its name standing in the assert.
 It is also expensive per assertion, which is why for one round only three existed. Measured against
 the full suite in the fourth round, ten of the twelve assert statements in the four status guards
-could then be deleted with all 1710 tests green, among them the legend's mark comparison and the
-pairing scan's mismatch comparison, which are the two sentences this file exists to make true.
+of the time could then be deleted with all 1710 tests green, among them the legend's mark comparison
+and the pairing scan's mismatch comparison, which are the two sentences this file exists to make
+true. ⚠️ QA-49 raised that population to six guards and fifteen assertions; the three it added ride
+the same structural pin but were NOT put through the per-statement revert sweep, so the figures in
+this paragraph are dated 2026-07-30 and describe the twelve that were measured.
 
 A STRUCTURAL pin reads this file's own source and holds each guard's asserted NAMES against a
 declaration. That is the cheap grade and its job is breadth: every deleted assertion and every
@@ -397,24 +404,34 @@ the pairing scan's mismatch comparison, the duplicate count, the set comparison,
 direction and the negative location half, and nowhere else; re-derive that list by reading the
 wiring pins. And no gate in this repository sees a pin being DELETED: pytest reports an emptied test
 body as passed and the lint rules here carry no flake8-pytest checks, so the structural pin covers
-the four GUARDS and nothing covers the pins themselves.
+the GUARDS it lists and nothing covers the pins themselves. ⚠️ It lists them by DECLARATION and has
+no reverse direction: it compares `declared - found`, so a guard added without a row in
+`_ASSERTED_NAMES` is unfloored and nothing says so. Measured on the QA-49 change, where two guards
+were added; the rows were written in the same edit, which is discipline, not a gate.
 
 What follows is what the guard does NOT do, and one thing it records.
 
 **The Meaning column is not read.** A row may describe its own status wrongly and stay green,
-measured by giving one row another row's meaning and by replacing a meaning with nonsense: all four
-guards stay green. Rejected rather than postponed, for the reason entry 13 gives about the remedy
+measured by giving one row another row's meaning and by replacing a meaning with nonsense: every
+guard stays green. Rejected rather than postponed, for the reason entry 13 gives about the remedy
 texts: a guard over the wording pins prose that has to stay free to improve. What is compared is a
 pair of code tokens.
 
 **The location buckets are checked inside two marked regions, not across the file.** The whole-file
-search was written first and then rejected on measurement, and the argument rests on TWO of the
-three declared-absent names rather than three. `Disabled` (guide line 647) is an alarm configuration
-command value and `Info` (line 153) is an Olog level, both capitalised, so only a case-INSENSITIVE
-whole-file search reddens on them. The third name carries none of that weight: it is the `State` of
-`diagnose_connection` in the code, but the guide writes it only as plain prose about PV connections
-and never as a code span, in either case mode, so no whole-file search over spans sees it. Two are
-enough. A whole-file search reddens on an edit that documented something else, and the obvious
+search was written first and then rejected on measurement, and the argument rested on TWO of the
+three then declared-absent names rather than three. `Disabled` (guide line 675 today, 647 when this
+was written; it moves whenever the legend above it grows, so re-measure rather than cite) is an
+alarm configuration
+command value and `Info` is an Olog level, both capitalised, so only a case-INSENSITIVE
+whole-file search reddens on them. ⚠️ What this entry said about the third name was measured FALSE
+on 2026-08-02, and the correction strengthens the argument rather than weakening it: it is the
+`State` of
+`diagnose_connection` in the code, and the entry claimed the guide writes it "only as plain prose
+about PV connections and never as a code span, in either case mode". Measured over the whole guide,
+`disconnected` appears as a code span TWICE, in that foreign namespace and outside both marked
+regions. So the third name carries the same weight as the other two rather than none, and a
+whole-file search over spans would redden on it in either case mode. Two names were enough for the
+argument; three make it stronger. A whole-file search reddens on an edit that documented something else, and the obvious
 repair for that red, moving the status into a "named" bucket, is fully GREEN while retiring the gap
 the bucket exists to record. The price paid instead is a false negative: a status documented in some
 third place goes unnoticed. The match is case-sensitive so that the behaviour is stated rather than
@@ -423,11 +440,13 @@ confined to the two regions, it stays green, because the capitalised words carry
 senses both stand outside the regions.
 
 **A bucket says where a status NAME appears, not whether the concept is explained, and not that it
-appears only there.** The guide describes a disabled plane, an empty URL variable reported honestly
-and never a failure, without ever using the status name, so that status counts as unnamed here. And
-two statuses that have a legend row are named in the prose region as well, which no bucket denies
-and nothing requires. They ARE read, by the reverse direction below, which is why removing either
-from `PlaneStatus` reddens; what no guard states is that the prose has to keep naming them.
+appears only there.** Until QA-49 the guide described a disabled plane, an empty URL variable
+reported honestly and never a failure, without ever using the status name, so that status counted as
+unnamed here. It has a legend row now. What survives the change is the second half: statuses that
+have a legend row are named in the prose region as well (five of them, the exit-1 sentence), which
+no bucket denies. Since QA-49 the prose IS required to keep naming them, but by a guard that reads
+`doctor._FAILING_STATUSES` rather than by a bucket, so it is the code's own set that decides and
+not a list anybody can trim here.
 
 **A pairing needs both halves side by side.** A sentence naming glyphs alone, as the guide does
 where it tells a reader which lines to read, carries no status name and is outside the scan. Side by
@@ -472,7 +491,7 @@ still covers every current mark.
 
 **The per-surface floor detects an EMPTY read, not an almost-empty one, and it covers three of the
 eight surfaces read.** A file that stops documenting all but one of its pairings passes. On the
-guide the floor is carried by the six legend rows that the legend guard already compares, so the
+guide the floor is carried by the twelve legend rows that the legend guard already compares, so the
 derived scan adds no floor of its own there. Measured: rewriting the guide's prose pairings into a
 form the scan does not read leaves every guard green. The tempting repair, a floor of "at least one
 pairing OUTSIDE the legend region", is green today and was rejected on the test this page applies
@@ -507,8 +526,8 @@ package data and once as the source file it is served from.
 **What the status paragraph's reverse direction does not see.** Every lower-case identifier written
 as a code span in that paragraph has to be a plane status, which is what makes the marker printed
 above it true: before that, a status removed from `PlaneStatus` and from its bucket while the
-sentence naming it stayed in the guide was green in all four guards, and the tiling guard FORCES
-that bucket removal in the same edit. It does not see a status name outside both marked regions, one
+sentence naming it stayed in the guide was green in all four guards that existed then (2026-07-30),
+and the tiling guard FORCES that bucket removal in the same edit. It does not see a status name outside both marked regions, one
 written without backticks, one written with a capital, or one written as a code span that runs
 across a LINE BREAK, which the odd-backtick filter below drops before this direction ever sees it.
 The allowlist for tokens in that paragraph
@@ -640,17 +659,51 @@ without padding. For a value borrowed from another namespace, prefer prose to co
 is not theoretical: the first draft of the rewrite above put a contrasted pair into a live code span
 and the scan went red on it, one paragraph below this one.
 
-**The gap those buckets record, written out here because a backlog is not a home for it.**
-`disabled`, `info` and `disconnected` are never named by their status name anywhere in the shipped
-guide, and two of the marks, the middle dot and the letter i, have no legend in it at all. That is a
-measurement and not a decision: the legend deliberately carries the identity-near statuses, but
-nobody decided that these three should be invisible to a reader who has only the shipped document.
-Re-derive it by searching the guide for each `PlaneStatus` value as a backticked token. The
-declaration in the test file states today's answer, and it goes red the moment one of them is
-documented inside a marked region. ⚠️ That last sentence was untrue for one round and is measured
-true again: padding inside the code span made all four padded spellings green while rendering
-identically for a reader, so two typed spaces retired the gap this paragraph records. The shared
-span reader strips now, and a wiring pin holds the guard against every padded spelling.
+**The gap those buckets recorded is CLOSED (QA-49, 2026-08-02), and what replaced it.**
+`disabled`, `info` and `disconnected` used to be named nowhere in the shipped guide by their status
+name, and two of the marks, the middle dot and the letter i, had no legend in it at all: 9 of 12
+explained. That was a measurement rather than a decision, the legend having grown around the
+identity-near statuses, and nobody had decided the other three should be invisible to a reader who
+has only the shipped document. All twelve have a legend row now and every mark is explained, in the
+guide and in the `_STATUS_MARK` comment the CLI renders from. Re-derive it the same way, by
+searching the guide for each `PlaneStatus` value as a backticked token.
+
+The declaration in the test file no longer records a gap; it records that there is none, and that
+statement is now GUARDED rather than merely written down. Putting a status back into an empty bucket
+is a legal sort under the tiling guard and reddens the totality guard instead, which is the
+mechanical form of "what the report prints, the shipped handbook explains". ⚠️ Two consequences of
+that are honest losses and are named rather than implied. The location guard's two bucket-driven
+halves iterate over empty sets and are therefore vacuous, so THREE of its four assertions carry
+nothing today (the third, the allowlist's dead-entry half, was already empty by design); only the
+reverse direction over the prose region still fires. And the prose region's PRESENCE requirement,
+which used to come from a bucket, now comes from `doctor._FAILING_STATUSES`: derived instead of
+declared, twice the reach (six statuses rather than three), and not trimmable from the test file.
+
+⚠️ The padding history stays, because it is about the reader and not about the gap: padding inside a
+code span made all four padded spellings green while rendering identically for a reader, so two
+typed spaces retired the statement this paragraph used to record. The shared span reader strips now,
+and a wiring pin holds the guard against every padded spelling. ⚠️ That pin needed repairing for
+QA-49 and the obvious repair was the wrong one: with `disabled` in the legend, the guard's negative
+half fires on the LEGEND whatever the doctored prose says, so patching only the bucket left the pin
+green with its own red-proof applied. It doctors the legend row away as well now, and it carries a
+NEGATIVE control, which is what would have caught the sham state on its own.
+
+**⚠️ "Every status is explained" is not "every LINE is explained", and the difference is the open
+gap.** The totality guard proves one property: that `PlaneStatus` is a subset of the legend. The
+report has three other parts, and measured on 2026-08-02 not one of their fixed strings appears in
+the shipped guide: the header line, the `Privacy (ChannelFinder redaction):` block with its two
+allowlists, and the `Overall:` verdict in all SIX of its branches (`PROBLEM`, `INCONCLUSIVE` and
+four distinct `OK` wordings). The plane name `archiver_retrieval` is absent as well, while the other
+six plane names are present. The verdict is the last line an operator reads, so this is not a
+cosmetic omission.
+
+It was left open deliberately rather than overlooked, and the reason is a difference in kind. A mark
+is a CHARACTER: `·` cannot be guessed, which is why it needed a legend. The verdict and the privacy
+block are English sentences that state their own meaning, and the semantics behind the verdict, all
+four exit codes including what exit `0` does NOT promise, are already written in the guide in two
+places. Documenting them would buy a reader the ability to FIND the wording, not to understand it,
+and it would need a second declaration and a second guard, or the new text would be unguarded from
+the day it was written. Carried as a follow-up, with this measurement as its starting point.
 
 ## 15 · The remote-https write path has no live probe any more, only in-memory coverage
 

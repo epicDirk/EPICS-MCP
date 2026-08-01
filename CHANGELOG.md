@@ -120,6 +120,13 @@ carry breaking changes).
 
 ### Fixed
 
+- **The shipped status legend explained 9 of the 12 states `epics-doctor` can print, and two of its
+  marks not at all.** `disabled`, `info` and `disconnected` were never named by their status name
+  anywhere in the guide, and the marks `·` and `i` had no legend entry, so an operator could see a
+  character the document travelling with the server did not explain. All twelve states now have a
+  row, every mark is explained, and the legend is held TOTAL against `PlaneStatus`: a state that is
+  not documented is a failing test rather than a decision. Still not documented, and now recorded as
+  such: the `Overall:` verdict line, the privacy block and the plane name `archiver_retrieval`.
 - **The guide's advice for sizing `EPICS_MCP_READ_RATE_LIMIT` was wrong for one of the two tools it
   named, and unusable for the other.** It said a multi-GET tool such as `coverage_audit` **or**
   `crossplane_check` spends "several tokens per audited PV". Measured at the throttle itself,

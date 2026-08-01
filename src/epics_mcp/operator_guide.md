@@ -443,7 +443,7 @@ reports, per plane, whether it is reachable, whether the CA bundle works, whethe
 service **identifies itself as the one that URL should point at**, and what the ChannelFinder
 redaction is set to. A disabled plane (empty `*_URL`) is reported honestly, never a failure. Exit
 `0` = nothing failed and no identity probe failed, `1` = a configured plane HARD-failed
-(`unreachable` / `ca_error` / `api_error` / `config_error` / `backend_down` / probe-disconnect),
+(`unreachable` / `ca_error` / `api_error` / `config_error` / `backend_down` / `disconnected`),
 `2` = a usage error,
 `3` = INCONCLUSIVE, a plane is reachable but its identity probe FAILED (a served non-2xx like a
 401/404, a transport error, or a refused redirect): not a hard failure, but not a silent all-clear
@@ -475,9 +475,15 @@ also asked to **name itself**:
 | Mark | Status | Meaning |
 |---|---|---|
 | `✓` | `ok` | the service named itself correctly, confirmed |
+| `·` | `disabled` | the plane's `*_URL` is unset, so it is honestly OFF: no client is built and no request leaves this process. Reported rather than hidden, and never a failure. Exit stays `0` |
+| `i` | `info` | the live/PVA plane has no URL to probe, so without `--probe-pv` there is nothing to connect to. The line reports the POSTURE it would use (provider plus the EPICS search path) instead of a verdict: nothing was probed, so nothing is claimed. Exit stays `0` |
 | `?` | `unverified` | reachable and ANSWERED 2xx, but could not prove what it is (a body with no usable `name`, an unreadable/HTML body, or a beacon naming a *different* service, with that name in the detail). **Honest, not healthy**, exit stays `0` |
 | `!` | `identity_probe_failed` | reachable, but the identity probe FAILED (a served non-2xx like a `401` auth wall or `404`, a transport error, or a refused redirect on the identity endpoint). Reachable but suspect, **not** a hard failure (the plane's tool endpoints may work), **not** a silent all-clear either: exit `3` (INCONCLUSIVE) |
 | `✗` | `config_error` | the configuration is self-contradictory, no probe is even attempted (e.g. `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` set while `EPICS_MCP_ARCHIVER_URL` is empty, every archiver tool gates on the latter, so that retrieval URL is never used). Exit `1` |
+| `✗` | `ca_error` | TLS/CA verification failed against this plane's host, so the transport never completed and nothing about the service behind it is known. The remedy is the CA bundle, not the URL. Exit `1` |
+| `✗` | `api_error` | the host ANSWERED and the answer was unusable: a served non-2xx carrying its HTTP code, or a 5xx that survived the retries. Reachable AND erroring, which is a different fault from not being reached at all, and the URL may well be pointing at the right host but the wrong webapp. Exit `1` |
+| `✗` | `unreachable` | the transport probe failed with no HTTP response chained to it at all: wrong host, wrong port, or nothing listening there. Exit `1` |
+| `✗` | `disconnected` | with `--probe-pv NAME`, that PV did not connect within the timeout. The live plane is the only one probed over EPICS rather than over HTTP, and an internal failure of the probe itself is reported here as well rather than being hidden behind a healthy-looking line. Exit `1` |
 | `✗` | `backend_down` | reachable AND the service named itself, but a backend it depends on is measurably down, the alarm logger reports its Elasticsearch as not `Connected`, so its search/history tools will fail. The blind HEAD used to hide this as `ok`; unlike `unverified`, identity IS proven here and the service reports its OWN backend broken. Exit `1` |
 | `~` | `no_ingest` | reachable, identity PROVEN, and the service is measurably not doing its job: an Archiver appliance holding channels with **none** connected, or reporting one of its own webapps stopped. The wiring fault this tool exists to catch, and the blind identity probe used to hide it as `ok`. Exit stays `0` on purpose (a freshly commissioned or fully paused appliance is legitimately in this state, and a hard failure would cry wolf in every CI job), so it is surfaced instead: this glyph, its own verdict line, and `degraded_planes` in `--json`. Not `?`: that means "we could not tell what this is", and here we can |
 <!-- END:status-glyphs -->

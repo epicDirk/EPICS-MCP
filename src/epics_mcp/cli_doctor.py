@@ -52,11 +52,15 @@ from epics_mcp.errors import EpicsError
 from epics_mcp.services.doctor import DoctorReport, run_doctor
 
 #: One glyph per status for the human-readable render (deterministic). A status gets a mark of
-#: its own rather than borrowing ✓ or ✗ when it is neither "confirmed" nor "broken": ``?`` =
-#: answered 2xx but not nameable (exit 0), ``!`` = the identity probe failed (exit 3), ``~`` =
-#: identity IS proven and the service is reachable, but it is not doing its job (exit 0, the
-#: archiver that archives nothing). ``~`` is deliberately not ``?``: that one means "we could
-#: not tell what this is", and here we can.
+#: its own rather than borrowing ✓ or ✗ when it is neither "confirmed" nor "broken". Every one of
+#: them is glossed here, because a mark nobody explains is a character the reader cannot act on:
+#: ``·`` = the plane is OFF, its URL is unset, so no client was built and nothing was probed
+#: (exit 0), ``i`` = the live plane has no URL to probe and no ``--probe-pv`` was given, so the
+#: line states the posture it would use rather than a verdict (exit 0), ``?`` = answered 2xx but
+#: not nameable (exit 0), ``!`` = the identity probe failed (exit 3), ``~`` = identity IS proven
+#: and the service is reachable, but it is not doing its job (exit 0, the archiver that archives
+#: nothing). ``~`` is deliberately not ``?``: that one means "we could not tell what this is",
+#: and here we can. ``·`` and ``i`` are likewise not ``✓``: nothing was verified in either case.
 #:
 #: What each mark REPLACED, stated per mark because the earlier wording put them in one bucket
 #: and that bucket was measured wrong: ``?`` and ``~`` used to be reported as ``ok`` (``✓``),

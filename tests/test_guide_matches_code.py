@@ -15,9 +15,12 @@ claiming otherwise stood here twice. What each guard reads is stated per guard, 
   those variables on 35 lines and NONE of them falls inside the inventory markers, so an anchored
   scan would read no mention at all;
 * the status legend and the statuses named in the prose above it, against ``PlaneStatus`` and
-  ``cli_doctor._STATUS_MARK`` (QA-47). Its four guards read four different things: the tiling guard
-  reads no guide text at all, the legend guard one marked region, the location guard both of them,
-  and the pairing scan the whole text. That last one is what catches a SECOND, drifting copy of a
+  ``cli_doctor._STATUS_MARK`` (QA-47, widened by QA-49). Its six guards read six different things:
+  the tiling guard and the totality guard read no guide text at all (the second one holds the
+  legend's DECLARATION against ``PlaneStatus``, so a status may not be left undocumented), the
+  legend guard one marked region, the prose-presence guard the other one against the code's own
+  failing-status set, the location guard both regions, and the pairing scan the whole text. That
+  last one is what catches a SECOND, drifting copy of a
   marked region, which the anchored guards cannot see because ``re.search`` returns the first
   match. It also reaches beyond the guide: a glyph paired with a status name is checked on every
   TRACKED ``docs/*.md`` page too, because a second copy of a guarded number is an unguarded number.
@@ -47,6 +50,7 @@ import pytest
 from epics_mcp import cli_doctor
 from epics_mcp.config import EpicsConfig
 from epics_mcp.resources import get_guide
+from epics_mcp.services import doctor
 from epics_mcp.services.doctor import PlaneStatus
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -190,14 +194,34 @@ def test_every_level_parameter_points_at_list_log_levels() -> None:
 # ``frozenset[str]`` is the cheap green repair that silently takes the lint away, and a bucket built
 # from a comprehension is a mypy error whose cheapest repair is to delete the annotation.
 _IN_THE_GLYPH_TABLE: frozenset[PlaneStatus] = frozenset(
-    {"ok", "unverified", "identity_probe_failed", "config_error", "backend_down", "no_ingest"}
+    {
+        "ok",
+        "disabled",
+        "info",
+        "unverified",
+        "no_ingest",
+        "identity_probe_failed",
+        "config_error",
+        "ca_error",
+        "api_error",
+        "unreachable",
+        "disconnected",
+        "backend_down",
+    }
 )
-_IN_THE_STATUS_PROSE: frozenset[PlaneStatus] = frozenset({"ca_error", "api_error", "unreachable"})
-# A MEASURED GAP, not a decision (2026-07-30): the shipped guide never names these three by their
-# status name, and their marks have no legend in it at all. Declared here so the gap is
-# machine-visible and cannot go stale in silence, rather than living only in a backlog; documenting
-# any of them inside a marked region reddens the location test below, which is the point.
-_NOT_NAMED_IN_THE_GUIDE: frozenset[PlaneStatus] = frozenset({"disabled", "info", "disconnected"})
+# EMPTY since QA-49 (2026-08-02), and the emptiness is a CONSEQUENCE rather than a decision: the
+# legend now names every status, so no status has the prose region as its only home. Both remaining
+# buckets are therefore empty, which makes two of this file's assertions structurally vacuous
+# (``missing`` and ``surfaced`` below); ``docs/known-limits.md`` section 14 records that and says
+# which guard carries their weight instead. What did NOT move into the vacuum: the prose region's
+# presence guard, which is now DERIVED from ``doctor._FAILING_STATUSES`` rather than declared here
+# (``test_the_status_prose_still_names_every_failing_status``), and is twice as wide for it.
+_IN_THE_STATUS_PROSE: frozenset[PlaneStatus] = frozenset()
+# The gap this bucket recorded was CLOSED by QA-49; it is kept, empty, as the declared place where a
+# future, deliberate gap would have to be written down. That is not a free pass: putting a status
+# here reddens ``test_the_shipped_legend_names_every_plane_status``, which is what turns "what the
+# report prints, the shipped handbook explains" from prose into a gate.
+_NOT_NAMED_IN_THE_GUIDE: frozenset[PlaneStatus] = frozenset()
 
 _GLYPH_TABLE_RE = re.compile(
     r"<!-- BEGIN:status-glyphs.*?-->(.*?)<!-- END:status-glyphs -->", re.DOTALL
@@ -519,8 +543,8 @@ def _table_rows(region: str, where: str) -> list[tuple[str, str]]:
     the delimiter row has the SAME number of cells as the header and every cell is dashes with
     optional alignment colons. A class of "pipes, dashes, colons and spaces" accepts five spellings
     that fail that rule, and under each of them the shipped legend renders as NO TABLE AT ALL,
-    a wall of literal pipes for every human reader, while this parser went on reading six rows and
-    all four guards stayed green: one cell too few, a bare ``|``, ``| | |``, ``|:|:|:|``, and a
+    a wall of literal pipes for every human reader, while this parser went on reading every row and
+    all the guards stayed green: one cell too few, a bare ``|``, ``| | |``, ``|:|:|:|``, and a
     plain ``---``. The same holds for a BLANK LINE between two rows, which ends the table in GFM.
     Since the guide is package data served to a reader who has no repository around it, a legend
     that stopped being a legend is the failure this whole file exists to prevent.
@@ -733,10 +757,13 @@ def test_the_guide_status_buckets_tile_plane_status() -> None:
 
     How much of that this guard carries alone, re-measured after the location guard gained its
     reverse direction, because the sentence that stood here was written before it and had gone
-    stale: of the six statuses named outside the legend, the THREE named in the prose region are
-    caught by ``test_the_declared_status_locations_still_describe_the_guide`` as well. The three
-    named in NEITHER region, ``disabled``, ``disconnected`` and ``info``, are caught by nothing but
-    the set comparison here.
+    stale: it was written when six statuses stood outside the legend, three of them named nowhere
+    at all. QA-49 closed that, so the legend is total and both other buckets are empty. What this
+    comparison carries alone is therefore no longer a set of statuses but a SHAPE: a bucket entry
+    that names something ``PlaneStatus`` does not have, or names it twice. The question "may a
+    status be left undocumented" moved to
+    ``test_the_shipped_legend_names_every_plane_status``, which is a different question and is
+    asked separately on purpose.
 
     Red-proof: ``test_a_renamed_status_is_reported_though_the_three_counts_still_agree``, which
     pins the property on constructed input, plus the tree itself under a rename, an unbucketed
@@ -750,6 +777,41 @@ def test_the_guide_status_buckets_tile_plane_status() -> None:
         f"the guide-location buckets no longer tile PlaneStatus: "
         f"only-in-buckets={only_in_buckets} only-in-PlaneStatus={only_in_plane_status} "
         f"listed-in-two-buckets={double_listed}"
+    )
+
+
+def test_the_shipped_legend_names_every_plane_status() -> None:
+    """The legend is TOTAL: every ``PlaneStatus`` is documented in it, with no exception (QA-49).
+
+    This is the one guard that turns "what the report prints, the shipped handbook explains" from a
+    sentence somebody wrote into a gate. Without it that promise is prose, and prose is the category
+    that rots: the buckets above only require a status to be sorted SOMEWHERE, and "named nowhere in
+    the guide" is one of the three places it may legally land.
+
+    Why it is not redundant with the tiling guard, measured rather than argued. Take the one edit
+    that reopens the gap this ticket closed, in BOTH its halves: delete a row from the shipped
+    legend AND move that status into ``_NOT_NAMED_IN_THE_GUIDE`` in the same change. Then the tiling
+    guard is green (the three buckets still tile ``PlaneStatus`` exactly), the legend guard is green
+    (the table and its declaration still agree), the pairing scan is green (no glyph disagrees with
+    the CLI) and the location guard is green (the status really is named nowhere). All four say
+    nothing. Only this one reddens.
+
+    ⚠️ The red-proof is deliberately spelled in two halves, because the cheaper ONE-file variant
+    reads as evidence that this guard is redundant and it is not. Moving only the declaration, with
+    the guide untouched, reddens THREE guards (this one, the legend guard on ``only-in-guide``, and
+    the location guard on ``surfaced``), which invites the reading "somebody else already covers
+    it". They cover the half-done edit, not the complete one.
+
+    Red-proof: delete the ``disabled`` row from the ``status-glyphs`` region AND add ``"disabled"``
+    to ``_NOT_NAMED_IN_THE_GUIDE`` in the same edit; only this guard goes red.
+    """
+    unlisted = sorted(set(get_args(PlaneStatus)) - _IN_THE_GLYPH_TABLE)
+    assert not unlisted, (
+        f"epics-doctor can print {unlisted}, and the shipped legend does not name them. Every "
+        "status the report shows has to be explained by the handbook that travels with it, without "
+        "exception: give each one a row in the status-glyphs region and declare it in "
+        "_IN_THE_GLYPH_TABLE. Do NOT repair this by moving the status into another bucket; those "
+        "record where a status IS documented, not permission to leave it undocumented."
     )
 
 
@@ -823,7 +885,7 @@ def test_every_glyph_status_pairing_in_the_docs_agrees_with_the_render_marks() -
     first day.
 
     Reach, stated rather than implied: the floor covers 3 of the 8 surfaces that are read. On the
-    guide it is satisfied by the six legend rows that
+    guide it is satisfied by the twelve legend rows that
     ``test_the_shipped_glyph_legend_carries_the_marks_the_cli_prints`` compares anyway, so it adds
     nothing there beyond what that guard already holds. The five unfloored pages are read without
     one, which catches a GLOBAL extraction break and not a page-specific one.
@@ -971,10 +1033,12 @@ def test_a_delimiter_row_a_renderer_would_reject_is_rejected_here() -> None:
 def test_a_blank_line_inside_the_legend_is_rejected() -> None:
     """The property this step bought: a blank line between two rows ends the table.
 
-    Constructed input, same reason. Measured with a renderer on the real legend: one blank line
-    before the last row renders six ``<tr>`` instead of seven and drops the last row into a
-    paragraph of literal pipes, while this parser still returned all six rows and every guard
-    stayed green. The filter that hid it is the ``line.strip()`` this function uses to find the
+    Constructed input, same reason. Measured with a renderer on the legend as it stood then (six
+    rows): one blank line before the last row rendered six ``<tr>`` instead of seven and dropped
+    the last row into a paragraph of literal pipes, while this parser still returned every row and
+    every guard stayed green. The legend has twelve rows since QA-49; the property is the same and
+    the measurement is dated rather than re-run, because it is about the RENDERER, not the count.
+    The filter that hid it is the ``line.strip()`` this function uses to find the
     header, which is right for the marker padding around the table and wrong inside it.
 
     The accepted half pins that padding: blank lines OUTSIDE the table, which every marked region
@@ -1207,8 +1271,10 @@ def test_a_renamed_status_is_reported_though_the_three_counts_still_agree() -> N
 
     A rename is cardinality-neutral, so three equal sizes cannot see it. Measured on the tree,
     renaming any of the twelve statuses while leaving the buckets alone was green under the old
-    count-only assertion, all twelve times, and for the three named in neither region it was green
-    in every other guard in this file too.
+    count-only assertion, all twelve times, and for the three then named in neither region it was
+    green in every other guard in this file too. (That second clause is dated 2026-07-30: QA-49
+    has since put every status in the legend, so no status is named in neither region any more.
+    The property this pin holds is unaffected, a rename stays cardinality-neutral.)
 
     The second assertion is the control that turns the first into a finding rather than a
     demonstration: on the SAME input the retired three-count form is satisfied. Without it, "the
@@ -1288,11 +1354,13 @@ def test_a_prose_token_that_is_not_a_status_is_reported() -> None:
     """The property QA-50's seventh step bought: the status paragraph's reverse direction exists.
 
     Before it, a status removed from ``PlaneStatus``, from ``_STATUS_MARK`` and from its bucket,
-    while the sentence naming it stayed in the guide, was GREEN in all four guards, and the tiling
-    guard FORCES that bucket removal in the same edit, so the path is the likely one rather than an
-    exotic one. Measured on the tree afterwards, the direction catches three of the six statuses
-    named outside the legend; the other three are named in neither region and are still held by the
-    set comparison alone.
+    while the sentence naming it stayed in the guide, was GREEN in all four guards that existed
+    then, and the tiling guard FORCES that bucket removal in the same edit, so the path is the
+    likely one rather than an exotic one. Measured on the tree afterwards (2026-07-30), the
+    direction caught three of the six statuses then named outside the legend; the other three were
+    named in neither region and were held by the set comparison alone. Since QA-49 the legend names
+    every status, so the reverse direction and the legend guard both reach all twelve, and this
+    direction is what still makes the marked region's own promise true for the prose.
 
     The second assertion is the control: a token that IS a status must pass, or the direction would
     just be a ban on writing anything.
@@ -1473,13 +1541,23 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
     status declared as named in the prose has to be named there, and a status declared as named
     NOWHERE must not turn up in either region.
 
+    ⚠️ Both of those buckets are EMPTY since QA-49, so both of those halves iterate over nothing.
+    They are kept because they define what the buckets MEAN, and a future deliberate gap would
+    reactivate them; what they no longer do is carry weight today. The third direction below does,
+    and it is what makes the marker printed above the prose region true. Which guard carries what
+    after QA-49, and which assertions are vacuous, is written down in ``docs/known-limits.md``
+    section 14 rather than left to be rediscovered.
+
     The negative half is why the guide carries two marked regions instead of one. Searching the
-    WHOLE guide was probed and rejected, and the argument rests on TWO of the three declared-absent
-    names rather than three, which was re-measured rather than repeated: ``Disabled`` at guide line
-    647 is an alarm ``command`` value and ``Info`` at line 153 is an Olog level, both capitalised,
-    so only a case-INSENSITIVE whole-file search reddens on them. ``disconnected`` carries none of
-    that weight: it appears in the guide as plain prose about PV connections, never as a code span,
-    so a whole-file search over spans never sees it in either case mode. Two names are enough,
+    WHOLE guide was probed and rejected, and the argument rested on TWO of the three then
+    declared-absent names rather than three: ``Disabled`` (guide line 675 today, 647 when this was
+    written, and it moves whenever the legend above it grows) is an alarm ``command`` value and
+    ``Info`` is an Olog level, both capitalised, so only a case-INSENSITIVE whole-file search
+    reddens on them. ⚠️ The sentence that stood here about the third name was measured FALSE on
+    2026-08-02: it claimed ``disconnected`` appears in the guide "never as a code span", and it
+    appears as one twice, outside both marked regions, in the ``ConnectionState`` namespace of
+    ``diagnose_connection``. That makes it the same case as the other two rather than a weaker one,
+    which strengthens the argument it was cited against. Two names are enough,
     because a whole-file search reddens on an edit that documented something else entirely, and the
     obvious repair for that red is fully GREEN while quietly retiring the gap this bucket exists to
     record. Confining both halves to the marked regions costs a false negative (a status documented
@@ -1503,10 +1581,13 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
     PlaneStatus", and the two halves above did not deliver it. Measured for each of the three
     statuses whose only home is that paragraph: removing one from ``PlaneStatus``, from
     ``_STATUS_MARK`` and from its bucket, while the sentence naming it stays in the guide, was GREEN
-    in all four guards. That is the likely path rather than an exotic one, because the tiling guard
-    FORCES the bucket to be cleared in the same edit. So every lower-case identifier written as a
-    code span in the prose region has to be a plane status. (A status that also has a legend row is
-    caught by the legend guard as well; these three were caught by nothing.)
+    in all four guards that existed then (2026-07-30). That is the likely path rather than an
+    exotic one, because the tiling guard FORCES the bucket to be cleared in the same edit. So every
+    lower-case identifier written as a code span in the prose region has to be a plane status.
+    (A status that also has a legend row is caught by the legend guard as well; those three were
+    caught by nothing. Since QA-49 every status has a legend row, so this direction is no longer
+    the only cover for any of them, and it is kept because it is the only one that reads the PROSE
+    region and therefore the only one that makes the marker printed above it true.)
 
     Only the prose region, not the legend. The legend region carries ``degraded_planes`` and
     ``name``, so extending this half there would need two allowlist entries on the first day, and an
@@ -1546,6 +1627,42 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
     )
 
 
+def test_the_status_prose_still_names_every_failing_status() -> None:
+    """The prose region's PRESENCE guard, derived from the code rather than declared (QA-49).
+
+    It replaces a half that QA-49 would otherwise have removed silently, and that is worth writing
+    down because the loss was invisible until it was probed. Before this ticket, ``missing`` above
+    required the three prose-only statuses to still be written in the marked region; measured,
+    deleting `` `unreachable` `` from the exit-1 sentence reddened it. Once the legend names every
+    status, ``_IN_THE_STATUS_PROSE`` is empty, that half iterates over nothing, and the same
+    deletion is green in all five guards. The marked region still promises the reader its statuses
+    are "drift-guarded against PlaneStatus", and without this guard that promise would only hold in
+    the DELETE direction (a removed status reddens the reverse half) and not in the PRESENCE one.
+
+    DERIVED, not declared, and that is the whole improvement. A declared list can be emptied one
+    entry at a time, which decision OO (c) measured on this file's own allowlist: declaring a token
+    away was exactly as effective as deleting the check and easier to justify. ``_FAILING_STATUSES``
+    is the set the sentence is ABOUT, it lives in the code the guide documents, and nobody can trim
+    it here without changing what ``epics-doctor`` treats as a failure.
+
+    Twice the reach for it: the declared half covered three statuses, this covers six. What it
+    deliberately does not check is the sentence's wording, only that each name is written there as
+    a code span, for the reason section 13 of ``docs/known-limits.md`` gives about prose guards.
+
+    Red-proof: remove `` `disconnected` `` (or any other failing status) from the exit-1 sentence in
+    the ``status-prose`` region.
+    """
+    prose = set(_code_spans(_guide_region(_STATUS_PROSE_RE, "status-prose")))
+    assert doctor._FAILING_STATUSES, "the failing-status set is empty, the code anchor broke"
+    unwritten = sorted(doctor._FAILING_STATUSES - prose)
+    assert not unwritten, (
+        f"the guide's status prose no longer names {unwritten}, which epics-doctor treats as a "
+        "hard failure. The marked region tells the reader its statuses are drift-guarded, so a "
+        "failing status has to be written there as a code span. Add it to the exit-1 sentence; do "
+        "not narrow this guard, it reads the code's own set on purpose."
+    )
+
+
 # --- the WIRING, pinned by running a guard on a doctored world -----------------------------------
 #
 # The pins above hold the HELPERS on constructed input, and that is not the same as holding the
@@ -1567,22 +1684,31 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
 # pytest and ignored by ruff, whose rule set here carries no flake8-pytest checks.
 #
 # ⚠️ A wiring pin is expensive per assertion, and for one round only three of them existed while the
-# four status guards carried twelve assert statements. Measured against the full suite, TEN of the
+# four status guards of the time carried twelve assert statements (2026-07-30; there are six guards
+# and fifteen assertions since QA-49, and the three added by it are NOT individually revert-measured
+# the way those twelve were). Measured against the full suite, TEN of the
 # remaining reverts were silent, including both of the sentences this file exists to make true. So
 # the breadth is carried by _ASSERTED_NAMES below, which is cheap and weaker, and the two central
 # comparisons carry a wiring pin on top. What each grade buys is written where it is checked.
 
 
 #: The names each status guard asserts ON, declared so that DELETING an assertion is loud. Read off
-#: the ``test`` expression of every ``assert`` in the four guards; the message is not read, because
+#: the ``test`` expression of every ``assert`` in the six guards; the message is not read, because
 #: a reverted assertion often leaves its message behind.
 #:
 #: Declared rather than derived, for the reason ``_IN_THE_GLYPH_TABLE`` gives: a derived expectation
 #: is satisfied by whatever the file happens to say today, which is the one thing this cannot check.
+#:
+#: ⚠️ A guard that is NOT listed here is covered by nothing, and nothing says so: the floor below
+#: compares ``declared - found`` and has no reverse direction, so a seventh guard added without a
+#: row would be silently unfloored. That gap is recorded in ``docs/known-limits.md`` section 14.
+#: Adding a guard means adding its row in the same edit.
 _ASSERTED_NAMES: dict[str, frozenset[str]] = {
     "test_the_guide_status_buckets_tile_plane_status": frozenset(
         {"statuses", "only_in_buckets", "only_in_plane_status", "double_listed"}
     ),
+    "test_the_shipped_legend_names_every_plane_status": frozenset({"unlisted"}),
+    "test_the_status_prose_still_names_every_failing_status": frozenset({"doctor", "unwritten"}),
     "test_the_shipped_glyph_legend_carries_the_marks_the_cli_prints": frozenset(
         {"repeated", "documented", "_IN_THE_GLYPH_TABLE", "wrong"}
     ),
@@ -1596,25 +1722,28 @@ _ASSERTED_NAMES: dict[str, frozenset[str]] = {
 
 
 def test_every_status_guard_still_asserts_on_what_it_computes() -> None:
-    """A floor over all four guards: an assertion cannot be deleted in silence.
+    """A floor over every guard in ``_ASSERTED_NAMES``: an assertion cannot be deleted in silence.
 
     The wiring pins above each hold ONE property, by running its guard on a doctored world. That is
     the strong grade and it is expensive. This is the cheap one, and its whole job is breadth:
     measured against the full suite before it existed, ten of the twelve assert statements in the
-    four guards could be removed with all 1710 tests green, among them the legend's mark comparison
-    and the pairing scan's mismatch comparison, which are the two sentences this file exists to
-    make true.
+    four guards of the time could be removed with all 1710 tests green, among them the legend's
+    mark comparison and the pairing scan's mismatch comparison, which are the two sentences this
+    file exists to make true.
 
     What it buys: every DELETED assertion and every RENAMED finding variable goes red here, twelve
-    of twelve, measured by removing each statement in turn.
+    of twelve, measured by removing each statement in turn (2026-07-30). ⚠️ QA-49 added two guards
+    and three assertions, fifteen over six guards now, and those three are covered by the same
+    MECHANISM but were not put through that per-statement sweep. The claim is therefore about the
+    twelve that were measured, not about all fifteen.
 
     What it does NOT buy, stated rather than implied: an assertion that stays and stops meaning
     anything. A finding list emptied where it is built (``wrong = []``) leaves the name standing in
     the assert and passes here. That is why the two central comparisons carry a wiring pin as well,
     and why this floor is a floor rather than a replacement.
 
-    Red-proof: delete any assert statement from any of the four guards, or rename one of their
-    finding variables.
+    Red-proof: delete any assert statement from any guard listed in ``_ASSERTED_NAMES``, or rename
+    one of their finding variables.
     """
     module = ast.parse(Path(__file__).read_text(encoding="utf-8"))
     found = {
@@ -1661,23 +1790,42 @@ def test_a_padded_span_cannot_hide_a_status_from_the_location_guard(
     gap that ``_NOT_NAMED_IN_THE_GUIDE`` exists to record, and the guide's own sentence promising
     that documenting one of those statuses "goes red the moment" it happens was untrue.
 
-    The doctored world is the real guide with one sentence added inside the marked prose region,
-    the same path the guard uses, markers and all. The second half is the control: the bare
-    spelling must redden too, or the assertion above would pass for a guard that reddens on
-    anything.
+    ⚠️ The doctored world has to remove the ``disabled`` LEGEND ROW as well, and getting that wrong
+    turns this pin into a guard that checks nothing. QA-49 made the legend total, so every status is
+    now in it; the negative half reads ``status in prose or status in legend``, and with the row
+    still there it reports "named NOWHERE" from the LEGEND, whatever the doctored prose says.
+    Measured in exactly that state: all five spellings raise the expected message even with the
+    ``.strip()`` removed, so the pin passes while its own red-proof is applied. Patching only the
+    bucket, which is the obvious repair when this pin first fails, buys precisely that.
 
-    Red-proof: drop the ``.strip()`` from ``_code_spans``.
+    Hence the third control below, and it is the one this pin was missing. A positive control
+    ("the bare spelling must redden too") cannot tell a working guard from one that reddens on
+    everything, which is what the state above was. The NEGATIVE control asserts the doctored world
+    is green BEFORE the sentence is added, so the red has to come from the sentence.
+
+    Red-proof: drop the ``.strip()`` from ``_code_spans``; the four padded spellings go green.
     """
     end = "<!-- END:status-prose -->"
+    # The legend row for ``disabled`` has to go, or the negative half fires on the legend and this
+    # pin never exercises the prose at all. Bound once and asserted, so a reformatted row is loud.
+    without_row = re.sub(r"(?m)^\|\s*`·`\s*\|\s*`disabled`\s*\|.*\n", "", get_guide(), count=1)
+    assert without_row != get_guide(), (
+        "the `disabled` legend row was not found in the shipped guide, so this pin would test the "
+        "legend rather than the prose. If the row was reformatted, move this pattern with it."
+    )
+    monkeypatch.setitem(globals(), "_NOT_NAMED_IN_THE_GUIDE", frozenset({"disabled"}))
+    # NEGATIVE control first: without the added sentence the doctored world must be GREEN, or every
+    # assertion below would pass for a guard that reddens on anything.
+    monkeypatch.setitem(globals(), "get_guide", lambda text=without_row: text)
+    test_the_declared_status_locations_still_describe_the_guide()
     for spelling in ("` disabled `", "`disabled `", "` disabled`", "`  disabled  `", "`disabled`"):
-        doctored = get_guide().replace(end, f"\nThe {spelling} plane is skipped.\n\n" + end, 1)
-        assert doctored != get_guide(), (
+        doctored = without_row.replace(end, f"\nThe {spelling} plane is skipped.\n\n" + end, 1)
+        assert doctored != without_row, (
             "the status-prose end marker moved, this pin patched nothing"
         )
         monkeypatch.setitem(globals(), "get_guide", lambda text=doctored: text)
         with pytest.raises(AssertionError, match="named NOWHERE"):
             test_the_declared_status_locations_still_describe_the_guide()
-        monkeypatch.undo()
 
 
 def test_the_legend_guard_reports_a_duplicate_row_itself(monkeypatch: pytest.MonkeyPatch) -> None:

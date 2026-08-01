@@ -59,8 +59,12 @@ Two of these tiers are **drift-guarded**, not just prose (prose conventions are 
 `test_guide_matches_code.py` fails if the guide names a tool that is not registered or an `EPICS_MCP_*`
 var that is not in `EpicsConfig`, and it fails if a registered tool is **missing** from the guide, so
 adding a tool without documenting it is a red test, not a silent omission. The same file holds the
-shipped **status legend** against the code (QA-47): a new `PlaneStatus` is red until it is sorted into
-one of three declared guide-location buckets, and every glyph paired with a status name in one of the
+shipped **status legend** against the code (QA-47, QA-49): a new `PlaneStatus` is red until it is
+sorted into one of three declared guide-location buckets **and given a row in the legend**. Sorting
+alone is no longer a way out: the legend has to name every status, so the "named in neither" bucket
+is empty and putting a status there reddens a guard of its own. The prose paragraph above the legend
+must in turn keep naming every status the code treats as a hard failure, checked against
+`doctor._FAILING_STATUSES` rather than against a list in the test file. And every glyph paired with a status name in one of the
 two written forms `docs/known-limits.md` names, in the guide
 or on any tracked `docs/*.md` page, must be the one `cli_doctor` renders. The page list is derived
 from `git ls-files` rather than declared, so a new documentation page is covered the day it is
