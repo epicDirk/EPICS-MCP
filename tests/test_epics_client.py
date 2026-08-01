@@ -1315,3 +1315,41 @@ def test_format_value_real_p4p_empty_descriptor_is_omitted() -> None:
     result = _format_value("DESC:PV", v)
 
     assert "descriptor" not in result
+
+
+@pytest.mark.parametrize(
+    ("notices", "expected", "phrase"),
+    [
+        ((), "unknown", "no channel state was observed"),
+        ((Disconnected(),), "disconnected", "not reachable"),
+        ((Finished(),), "unknown", "ended the subscription"),
+        ((RemoteError("nope"),), "unknown", "channel reported"),
+    ],
+)
+def test_channel_notices_verdicts(
+    notices: tuple[Exception, ...], expected: str, phrase: str
+) -> None:
+    """The verdict table of _ChannelNotices, unit-level.
+
+    The first row is the reason this test exists: a run where NOTHING was observed is reachable
+    in code but not through p4p, which pushes a Disconnected() at subscribe time unconditionally.
+    The tests above therefore cannot reach that branch, and it was shipped unexercised. It is a
+    defensive fallback rather than dead code (a future p4p, or a provider double, can produce it),
+    so it is tested here rather than deleted, and `unknown` is the only honest answer for it.
+    """
+    recorder = epics_client._ChannelNotices()
+    for notice in notices:
+        recorder.record(notice)
+
+    assert recorder.state() == expected
+    assert phrase in str(recorder.detail())
+
+
+def test_a_value_makes_the_detail_line_disappear() -> None:
+    """The complementary control for the row above: with a value there is nothing to explain,
+    so detail() is None and the tool omits the key entirely."""
+    recorder = epics_client._ChannelNotices()
+    recorder.saw_value = True
+
+    assert recorder.state() == "connected"
+    assert recorder.detail() is None

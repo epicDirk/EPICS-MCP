@@ -121,8 +121,12 @@ _LOOPBACK_SEARCH = {
     "EPICS_PVA_NAME_SERVERS": "127.0.0.1:5075",
 }
 
-#: The same posture pointed at a real IOC or gateway instead of loopback. Same five keys on
-#: purpose: a preset that reaches a facility must still disable the auto search explicitly.
+#: The same posture pointed at a real IOC or gateway instead of loopback. It repeats the five
+#: keys above on purpose: a preset that reaches a facility must still disable the auto search
+#: explicitly. It deliberately does NOT repeat the sixth, ``EPICS_PVA_NAME_SERVERS``: that one
+#: needs a host AND a port, and this preset does not know the port. Emitting a guessed one would
+#: put a wrong value in front of a reader who has no way to tell it apart from a measured one,
+#: which is worse than the line being absent. Whoever needs it adds it, and the guide says so.
 _FACILITY_SEARCH = {
     "EPICS_MCP_PROVIDER": "pva",
     "EPICS_PVA_AUTO_ADDR_LIST": "NO",
