@@ -113,12 +113,6 @@ def _render(report: DoctorReport) -> str:
     props = ", ".join(report.privacy.cf_safe_property_names) or "(empty, all properties redacted)"
     lines.append(f"  owner allowlist:    {owners}")
     lines.append(f"  property allowlist: {props}")
-    olog_freetext = (
-        "withheld"
-        if report.privacy.olog_freetext_withheld
-        else "FULL (declared local test data, ESS-spec pending)"
-    )
-    lines.append(f"  Olog free-text:     {olog_freetext}")
     lines.append("")
     # One precedence, shared with main() via _exit_category, so the verdict word and the exit code
     # can never drift: failed → PROBLEM (exit 1), inconclusive → INCONCLUSIVE (exit 3), clean → OK.

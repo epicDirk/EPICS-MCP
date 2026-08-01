@@ -13,7 +13,7 @@ map recorded with ``COVERAGE_CORE=ctrace`` and some ten minutes, which is not a 
 
 Findings of the 2026-07-25 run, kept here rather than in a document nobody reads again:
 
-* Sham guards (direction B): **none found, which is not the same as none there.** 101 tests
+* Sham guards (direction B): **none found, which is not the same as none there.** 100 tests
   install a client class double in their own body and NOT ONE of them executes a client-edge guard
   line, which is what a class-level double is FOR: it takes the real client off the path. That is
   the double used legitimately, to keep a service-layer test off the network. 20 of those also

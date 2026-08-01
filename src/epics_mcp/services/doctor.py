@@ -260,15 +260,14 @@ class PlaneCheck(_Model):
 
 
 class PrivacyReport(_Model):
-    """What the ChannelFinder redaction surfaces vs. drops (the effective, site-configured sets)."""
+    """What the ChannelFinder redaction surfaces vs. drops (the effective, site-configured sets).
+
+    Olog is deliberately absent: its reads return the whole entry since the read redaction was
+    removed (decision PI, 2026-08-01), so there is no Olog posture left to report.
+    """
 
     cf_safe_owner_accounts: list[str]
     cf_safe_property_names: list[str]
-    #: Whether Olog free text (title/description) is withheld, the EFFECTIVE posture, resolved from
-    #: ``olog_url``, not a static promise: entries come back whole from a loopback sandbox (ESS-spec
-    #: pending, see olog_client). This is the tool used to CHECK the posture, so it must never claim
-    #: a guarantee it does not have; ``True`` for a disabled plane (nothing is read at all).
-    olog_freetext_withheld: bool
 
 
 class DoctorReport(_Model):
@@ -1225,16 +1224,10 @@ async def _probe_live_pv(pv_name: str, timeout: float) -> tuple[bool, str | None
 
 
 def _privacy_report(cfg: EpicsConfig) -> PrivacyReport:
-    """The effective redaction posture, resolved through the SAME helpers the clients use.
-
-    ``olog_freetext_withheld`` is constantly False since the Olog read redaction was removed
-    (decision PI, 2026-08-01): every read returns the whole entry. Transitional: the field itself
-    dies in the next removal step.
-    """
+    """The effective redaction posture, resolved through the SAME helpers the clients use."""
     return PrivacyReport(
         cf_safe_owner_accounts=sorted(resolve_safe_owner_accounts(cfg)),
         cf_safe_property_names=sorted(resolve_safe_property_names(cfg)),
-        olog_freetext_withheld=False,
     )
 
 

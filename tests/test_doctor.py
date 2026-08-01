@@ -1287,9 +1287,6 @@ async def test_privacy_report_reflects_default(monkeypatch: pytest.MonkeyPatch) 
     report = await run_doctor()
     assert report.privacy.cf_safe_owner_accounts == ["recceiver"]
     assert "iocName" in report.privacy.cf_safe_property_names
-    # The Olog read redaction was removed (decision PI, 2026-08-01): nothing is withheld,
-    # regardless of the URL. Transitional: the field itself dies in the next removal step.
-    assert report.privacy.olog_freetext_withheld is False
 
 
 async def test_privacy_report_reflects_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1298,20 +1295,11 @@ async def test_privacy_report_reflects_override(monkeypatch: pytest.MonkeyPatch)
     assert report.privacy.cf_safe_owner_accounts == ["svc_a", "svc_b"]
 
 
-@pytest.mark.parametrize(
-    "olog_url",
-    [
-        "http://localhost:8080/Olog",
-        "https://olog.example.org/Olog",
-        "",
-    ],
-)
-def test_privacy_report_olog_freetext_never_claims_withheld(olog_url: str) -> None:
-    """Since the read redaction was removed, the doctor must not claim a withheld posture for any
-    URL: entries always come back whole. Tested against ``_privacy_report`` directly (the unit
-    that carries the answer; ``run_doctor`` would probe the URL over the network)."""
-    cfg = EpicsConfig(olog_url=olog_url)
-    assert _privacy_report(cfg).olog_freetext_withheld is False
+def test_privacy_report_carries_no_olog_field() -> None:
+    """The doctor makes no Olog posture claim at all: reads are whole (decision PI, 2026-08-01),
+    so a field that could say "withheld" would only be a place for a future lie."""
+    report = _privacy_report(EpicsConfig(olog_url="http://localhost:8080/Olog"))
+    assert "olog" not in {name.split("_")[0] for name in type(report).model_fields}
 
 
 # --- live plane (Plan-QA #4: no default egress) ---
@@ -1555,9 +1543,8 @@ def test_cli_render_glyphs_and_privacy_block(
     assert "owner allowlist:" in out
     assert "property allowlist:" in out
     assert "(empty, all owners redacted)" in out  # the empty-owner fallback line
-    # Transitional: reads are whole (decision PI), so the line must not claim "withheld"; the
-    # line itself dies in the next removal step.
-    assert "Olog free-text:     withheld" not in out
+    # No Olog posture line at all: reads are whole (decision PI, 2026-08-01).
+    assert "Olog free-text" not in out
 
 
 def test_cli_config_error_renders_failing_and_exits_one(
@@ -1651,9 +1638,7 @@ def test_render_and_exit_agree() -> None:
     so they cannot drift. A reorder of the _render elif-chain that said "OK" while main exits 3
     would break here.
     """
-    privacy = PrivacyReport(
-        cf_safe_owner_accounts=[], cf_safe_property_names=[], olog_freetext_withheld=True
-    )
+    privacy = PrivacyReport(cf_safe_owner_accounts=[], cf_safe_property_names=[])
 
     def _mk(
         *,
@@ -1957,22 +1942,6 @@ def test_a_healthy_status_gets_no_remedy_appended() -> None:
         assert _with_remedy(status, observation) == observation, (
             f"{status} is an honest state, not a problem, and must not be given advice"
         )
-
-
-def test_cli_never_reports_withheld_olog_freetext(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The human render must not claim a withheld Olog posture: reads are whole since the
-    redaction was removed (decision PI, 2026-08-01). Transitional: the line itself dies in the
-    next removal step."""
-    _set_config(monkeypatch, olog_url="http://localhost:8080/Olog")
-    monkeypatch.setattr(
-        "epics_mcp.services.doctor.OlogClient",
-        _cause_client(requests.exceptions.ConnectionError("refused")),
-    )
-    cli_doctor.main([])
-    out = capsys.readouterr().out
-    assert "Olog free-text:     withheld" not in out
 
 
 def test_cli_bad_arg_exits_two() -> None:
