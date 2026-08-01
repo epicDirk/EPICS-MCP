@@ -246,7 +246,8 @@ def test_help_answers_without_the_engine(
 
     Before this, both commands answered ``--help`` with the engine refusal and exit 2, so the first
     thing a reader met after ``pip install`` was an instruction to install something they do not
-    need in order to READ. Three of five commands could explain themselves; now five can.
+    need in order to READ. Three of the five commands there were could explain themselves; now every
+    declared command can.
 
     Red-proof: put ``require_display_engine`` back ahead of the parser and ``main`` RETURNS 2 with
     an empty stdout, so ``pytest.raises`` fails with DID NOT RAISE. ⚠️ This one is in-process and

@@ -160,7 +160,8 @@ class DisplayEngineAwareParser(argparse.ArgumentParser):
 
     The command name comes from ``self.prog`` rather than from a constructor argument: ``prog`` is
     pinned to the declared command name at every entry point of this package (QA-41) and
-    ``tests/test_cli_version.py`` holds it there for all five, so there is nothing a second
+    ``tests/test_cli_version.py`` holds it there for every command ``[project.scripts]`` declares
+    (its population is derived from that table, so it grows with it), and there is nothing a second
     parameter could say that this does not.
 
     THE EXIT CODE IS THE ENGINE'S, not argparse's 2: absent gives 2 (which agrees with argparse

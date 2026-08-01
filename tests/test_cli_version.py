@@ -10,12 +10,12 @@ Two properties are pinned here, and the second is the one worth having:
 * the VERSION TOKEN is identical across the commands that answer, and equals
   ``epics_mcp.__version__``.
 
-⚠️ Not "all five print the same string": ``%(prog)s`` resolves per parser, so the five lines
+⚠️ Not "they all print the same string": ``%(prog)s`` resolves per parser, so the lines
 differ by their first token BY DESIGN (``epics-doctor 0.4.0`` is not ``epics-mcp 0.4.0``). That
 first token is asserted too, against the name ``[project.scripts]`` declares, which extends the
 prog pin of QA-41 from one command to the whole set.
 
-⚠️ **All five are checked in every environment, and that is new (QA-42).** Until then, the two
+⚠️ **All of them are checked in every environment, and that is new (QA-42).** Until then, the two
 display-aware commands ran their engine check BEFORE the parser was built, so ``--version`` could
 not be reached on a core-only install; this module carried a branch asserting the OTHER outcome for
 them (the engine refusal, exit 2) and a matching skip in the agreement test below. The engine is
@@ -64,8 +64,8 @@ def _declared_entry_points() -> dict[str, str]:
 def _run_version(module_name: str) -> tuple[int | None, str]:
     """Call ``main(["--version"])`` and return ``(exit_code, stdout)``.
 
-    ``action="version"`` prints inside ``parse_args`` and raises ``SystemExit``, on all five
-    commands and in every environment. The ``SystemExit`` is caught here rather than left to
+    ``action="version"`` prints inside ``parse_args`` and raises ``SystemExit``, on every declared
+    command and in every environment. The ``SystemExit`` is caught here rather than left to
     ``pytest.raises`` so the exit code and the printed line can be asserted together.
     """
     module = importlib.import_module(module_name)
@@ -124,7 +124,7 @@ def test_all_declared_commands_name_the_same_version() -> None:
 
     Each command could pass the test above while reading its version from somewhere else. This reads
     them all and compares, which is what makes ``add_version_argument`` a single home rather than
-    five copies that happen to agree today. ``epics_mcp.__version__`` is itself pinned to
+    one copy per command that happens to agree today. ``epics_mcp.__version__`` is itself pinned to
     ``pyproject [project].version`` by ``tests/test_packaging.py``, so agreement here is agreement
     with the packaging metadata.
 
