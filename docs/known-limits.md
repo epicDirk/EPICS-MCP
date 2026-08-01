@@ -12,7 +12,7 @@ open work in words.
 tree on that date, not an invariant: this file is markdown, and markdown is unguarded here (that is
 the first entry). Treat a number as "was true when written" and re-measure before building on it.
 Entries 1 to 8 were measured 2026-07-26 unless the entry itself states a later date, entries 9 and 10
-on 2026-07-28, entry 11 on 2026-07-29, entry 13 on 2026-07-30 and entry 14 on 2026-07-31; entry 12
+on 2026-07-28, entry 11 on 2026-07-29, entry 13 on 2026-07-30, entry 14 on 2026-07-31 and entry 15 on 2026-08-01; entry 12
 states a property of this page and measures nothing.
 
 One consequence of that is applied here rather than only described: where a figure exists to
@@ -648,3 +648,30 @@ documented inside a marked region. ⚠️ That last sentence was untrue for one 
 true again: padding inside the code span made all four padded spellings green while rendering
 identically for a reader, so two typed spaces retired the gap this paragraph records. The shared
 span reader strips now, and a wiring pin holds the guard against every padded spelling.
+
+## 15 · The remote-https write path has no live probe any more, only in-memory coverage
+
+Measured 2026-08-01, during the QA of the Olog redaction removal. Commit `c05a93f` deleted
+`tests/test_olog_remote_https_live.py`, and the removal plan named it "the live test module of the
+loopback boundary". That name understated it. The module verified the REMOTE-HTTPS write path
+(`OA1c`) against a local self-signed TLS proxy, with both directions of one claim: an upload
+through the full gate over an https URL succeeds because the CA comes from `EPICS_MCP_CA_BUNDLE`
+via the config, and the SAME upload without that bundle fails TLS verification. Its bytes were then
+read back and compared, so "the https upload stored them" was a measurement rather than a 2xx.
+
+Why the deletion still stands: the module could only prove the round trip by reading the uploaded
+bytes back through a second client, and that read leaned on a posture (whole-mode) that no longer
+exists. Rebuilding it is a rewrite, not a revert.
+
+What covers the path today, and what does not. `tests/test_http.py` holds the pieces in memory: that
+a configured CA bundle is applied and `trust_env` pinned off, that an empty bundle falls back to
+certifi with `trust_env` left on, and that the write session is built without env influence. Those
+are the decisions the code makes. What nobody checks any more is that the assembled session then
+completes a real TLS handshake against a server presenting that CA, which is the one thing a mock
+cannot fake and the reason the module existed. A `verify` argument that stops reaching requests, or
+a session that silently falls back to the system store, would pass every test in this repository.
+
+The honest repair is a rebuilt live module (self-signed proxy, synthetic `*.localtest.me` hostname,
+throwaway cert, opt-in behind `pytest -m live`), reading the bytes back through an ordinary client
+now that reads are whole. It is not scheduled here; a maintainer backlog outside this repository
+carries it, and this entry exists so the gap is not rediscovered as a surprise.

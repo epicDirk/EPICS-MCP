@@ -19,9 +19,12 @@ logbook this test **never passed to the service**, it can only have travelled id
 
 * ``pv_env_off`` / ``pv_allowlist_miss`` / ``pv_rate_limit``, the PV gate refuses before the first
   network I/O. A live run would execute byte-identical code beside an unused socket.
-* ``olog_env_off`` / ``olog_boundary_reject``, on these two tool paths they are unreachable: the
-  whole-mode precondition (loopback URL + declared test data) is checked *before* them and shadows
-  both. A live run that satisfies whole-mode has already satisfied the URL boundary.
+* ``olog_env_off`` / ``olog_boundary_reject``, reachable on these two tool paths since 2026-08-01
+  (they are now the FIRST thing checked, before the pre-write read) but nothing a live server can
+  decide: both refuse from local config alone, before a client is even constructed, so a live run
+  would execute identical code beside an unused socket. In-memory is the honest coverage, and the
+  ordering itself is pinned by
+  ``test_write_gate_contract.py::test_round_trip_write_is_gate_denied_before_any_read``.
 * ``olog_empty_logbooks``: unreachable here too: the logbook list is derived from a server entry,
   and an entry always lives in at least one logbook.
 * ``olog_attach_too_large``: the size cap is decided from local ``stat`` data; the server never
@@ -47,7 +50,8 @@ prove. Countermeasures, all of them:
    discriminator between the four branches.
 2. Assert the deny names the exact logbook the SERVER reported for the target entry.
 3. Assert the exact ``error_code``, after the pre-gate-code fix this also separates a gate DENY
-   from the un-audited whole-mode refusal above it.
+   from an un-audited pre-gate refusal on the same call path (today the read throttle, which the
+   round-trip read passes through before the allowlist verdict).
 4. Demand all SIX env vars at setup through ``assert_live_available``, not a one-variable gate, so a
    demanded run (``EPICS_MCP_REQUIRE_LIVE=1``) goes red instead of skipping.
 5. Route every "this server cannot host the probe" condition, an unnamed deny logbook, a name that
@@ -165,7 +169,7 @@ def _fresh_gate_and_config() -> Iterator[None]:
 
 @pytest.fixture
 def raw_client() -> OlogClient:
-    """A whole-mode client used ONLY to lay down targets, it bypasses the write gate by design.
+    """A raw client used ONLY to lay down targets, it bypasses the write gate by design.
 
     Contract point 6: the gate guards writes *through this server's tool path*; the library it
     depends on reaches the same service without it. That property is what makes this module

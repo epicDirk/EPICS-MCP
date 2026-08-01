@@ -499,9 +499,11 @@ def test_is_retry_error_false_for_others() -> None:
 # ----------------------------------------------------------------------------------------------
 # is_loopback_url, the shared "is this a local test server?" primitive
 #
-# Extracted from the Olog write gate so the READ redaction can reuse the SAME hardened host
-# extraction without reusing the gate's POLICY (`_url_write_allowed` also returns True for an
-# allowlisted REMOTE host, see test_reads_a_url_the_write_gate_would_allow_remotely).
+# Extracted from the Olog write gate so a caller asking "is this a local test server?" gets the
+# SAME hardened host extraction without inheriting the gate's POLICY (`_url_write_allowed` also
+# returns True for an allowlisted REMOTE host, which is a write permission, not a locality claim).
+# Its second consumer was the Olog read redaction, removed 2026-08-01 (decision PI); the write
+# gate's loopback branch is what remains.
 # ----------------------------------------------------------------------------------------------
 
 
@@ -525,7 +527,7 @@ def test_is_loopback_url_true_for_local_test_servers(url: str) -> None:
     "url",
     [
         "https://olog.example.org/Olog",  # a plain hostname is not an IP literal
-        "http://olog:8080/Olog",  # the docker-compose service name (used by the redaction tests)
+        "http://olog:8080/Olog",  # the docker-compose service name of the local sandbox
         # RFC1918 PRIVATE is NOT loopback: a production service lives on a private network.
         "http://10.0.0.5/Olog",
         "http://192.168.1.10/Olog",
@@ -558,8 +560,9 @@ def test_is_loopback_url_false_for_remote_hosts(url: str) -> None:
 def test_is_loopback_url_fails_closed_on_hostile_or_malformed(url: str) -> None:
     """Anything unparseable or spoofed resolves to NOT-loopback.
 
-    Same boolean direction as the write gate: False -> restrict. For a write that means "deny",
-    for a read it means "redact", fail-closed and fail-safe agree, so no inversion is needed.
+    Same boolean direction as the write gate: False -> restrict, i.e. for a write, "deny". A
+    spoofed authority must never widen what the caller may do, so fail-closed and fail-safe agree
+    here and no inversion is needed.
     """
     assert is_loopback_url(url) is False
 

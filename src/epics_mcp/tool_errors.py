@@ -27,8 +27,9 @@ def translate_epics_errors[**P, R](
     * any other :class:`Exception` → ``ToolError("[INTERNAL] <ClassName>")``, an UNEXPECTED bug.
       Its raw ``str(e)`` can carry an internal detail (a request URL, a live PV name, a filesystem
       path), so only the exception CLASS name is on the wire; the FULL detail (message + traceback)
-      is logged SERVER-SIDE at ERROR level for debugging. This keeps the server's redaction posture
-      (CF/Alarm/Olog) consistent on the error path without losing debuggability. (Note:
+      is logged SERVER-SIDE at ERROR level for debugging. What every tool answers with is a
+      CURATED payload, and an unexpected traceback is the one path that could bypass that; this
+      closes it without losing debuggability. (Note:
       ``mask_error_details`` on the FastMCP constructor does NOT cover this, a ToolError message
       always reaches the client; the confinement has to happen HERE, where the message is built.)
 

@@ -74,15 +74,18 @@ gate's env + URL checks BEFORE their pre-write read, see
 
 **On live coverage, per surface, the premise is not the same on both.** For the PV gate every deny
 path raises before any network I/O, so a live deny test would execute identical code beside an
-unused socket; the in-memory rows are the honest coverage, not a lesser substitute. For the Olog
-gate that premise does **not** hold: on the attachment/update tool paths a real HTTP round-trip
-happens before the gate is consulted, so these rows prove the gate *method*, not the ordering
-inside the tool path. Contract point 6 prefers a live deny test over an in-memory one, and for that
-one class it now exists: ``tests/test_write_gate_live.py`` drives ``olog_allowlist_miss`` on both
-round-tripping tools against a real Olog, keyed on logbooks the SERVER reported. Exactly one path
-is covered that way, deliberately, it is the only one whose decision input a mock cannot falsify;
-the module's docstring argues each of the other eight out by name. So: **PV = not applicable with a
-reason, Olog = one path live, the rest reasoned.** Not "every deny path is proven against the wire".
+unused socket; the in-memory rows are the honest coverage, not a lesser substitute. The Olog gate
+splits: its env and URL checks also raise before any I/O (since 2026-08-01 the round-tripping tools
+run them BEFORE their pre-write read, see
+:func:`test_round_trip_write_is_gate_denied_before_any_read`), but its logbook allowlist cannot,
+that verdict is keyed on logbooks only the server can supply. So for the allowlist branch these
+rows prove the gate *method*, not that the tool path feeds it what the wire actually returned.
+Contract point 6 prefers a live deny test over an in-memory one, and for exactly that class it
+exists: ``tests/test_write_gate_live.py`` drives ``olog_allowlist_miss`` on both round-tripping
+tools against a real Olog, keyed on logbooks the SERVER reported. One path is covered that way,
+deliberately, it is the only one whose decision input a mock cannot falsify; that module's
+docstring argues each of the other eight out by name. So: **PV = not applicable with a reason,
+Olog = one path live, the rest reasoned.** Not "every deny path is proven against the wire".
 """
 
 from __future__ import annotations

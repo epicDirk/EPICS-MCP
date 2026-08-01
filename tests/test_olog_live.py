@@ -235,7 +235,7 @@ def _raw_hit_count(client: OlogClient, params: dict[str, str]) -> int | None:
 
 def _levels_in_fixture(client: OlogClient) -> Counter[str]:
     """How many entries carry each level, read from the unfiltered set. ``level`` is a technical
-    field and survives redaction, so this works in either output posture."""
+    field the server always supplies, so this counts the corpus without touching its free text."""
     entries, _capped, _total = client.search_logbook(size=200)
     return Counter(str(entry["level"]) for entry in entries if entry.get("level"))
 
