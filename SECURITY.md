@@ -39,14 +39,15 @@ setting.
 - **Mandatory, metadata-only audit.** A write-enabled server refuses to start unless a durable audit
   path is configured, because an audit nobody can read after the process exits is a promise rather
   than a record. The audit carries identifiers, the writing principal and bounded scalars. It never
-  carries free text that the read path redacts.
+  carries free text (a title/description body, a filename).
 - **No network reach without configuration.** Each optional REST plane (ChannelFinder, Archiver,
   Alarm, Naming, Olog) stays disabled until its `*_URL` is set: unset means no client and no network
   call. PV reach follows the standard EPICS search environment, which the launcher controls and this
   server does not. Run `epics-doctor` to see what an instance actually reaches.
-- **Output redaction.** ChannelFinder owners and property values pass a site-configurable allowlist.
-  Olog entries are redacted (author dropped, free text withheld) unless the URL is loopback **and**
-  the deployment explicitly declares the data synthetic.
+- **Output redaction (ChannelFinder only).** ChannelFinder owners and property values pass a
+  site-configurable allowlist. Olog entries come back WHOLE (title, text, author, attachments):
+  the former Olog read redaction was removed 2026-08-01 as a deliberate prototype decision, see
+  `docs/safety.md` for the stated consequences.
 
 ## What this is not
 

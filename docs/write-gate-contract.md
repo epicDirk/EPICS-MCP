@@ -83,8 +83,8 @@ different event, and it says so where it is implemented.
 - **Metadata only.** The record may carry identifiers (target name, entry/operation id), the **principal** the
   server records as the writing account, any correlation id, and bounded scalars appropriate to the surface (a
   numeric setpoint's old/new value, a title *length*, an attachment *count* and *byte total*). It must
-  **never** carry free text the read path redacts (a title/description body, a filename); routing write
-  content around the read-side redaction is itself the defect the audit exists to prevent.
+  **never** carry free text (a title/description body, a filename): the audit is a durable, appended
+  record, and authored content does not belong in it.
 - **The audit sink is validated at gate construction and fails closed**: a broken or unwritable sink is a
   config error, never a raw exception at the first write. *When* that validation runs follows the gate's own
   construction: at startup for an eagerly-built gate, at first write for a lazily-built one. An audit
@@ -150,7 +150,8 @@ Point 6's own *live* preference, stated per surface rather than as one number:
   only deny path whose *decision input* comes from the server (the target entry's logbooks, read back over
   HTTP), i.e. the only one a mock cannot falsify, because the mock supplies the very payload shape the code
   assumes. The other Olog paths are argued out one by one in that module's docstring (env-off and the URL
-  boundary are shadowed by the whole-mode precondition on those tool paths; empty-logbooks is unreachable
+  boundary deny before any client exists, pinned in-memory by
+  `test_round_trip_write_is_gate_denied_before_any_read`; empty-logbooks is unreachable
   there; the size cap has no server-side input; a rate-limit probe would need N real mutating writes).
 - **Not claimed:** that every gate refusal has been observed against a real service. It has not, and the
   list above says which ones and why, recorded rather than papered over.

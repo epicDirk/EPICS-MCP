@@ -186,15 +186,6 @@ An unbalanced double quote in `title` makes the server throw, which an anonymous
 (Olog's error dispatch requires auth and so masks its own 400). On this read path a 401 almost always
 means the QUERY was rejected, not that credentials are wrong.
 
-**Honest limit of the free-text withholding (stated, not solved).** Against a redacted server the
-`title`/`description` values are withheld, but a *search* still answers with a hit COUNT, so asking
-`title=<word>` reveals whether that word occurs in some title even though no title is readable. This
-is inherent to any search interface over withheld text and is **not new** with the `title` facet:
-`text`/`desc` has offered the same oracle over the body since the first read tool. It is recorded
-here because the redaction section otherwise reads as a stronger guarantee than it is. Closing it
-would mean withholding counts too, which costs search its purpose, the withholding policy is
-ESS-spec-pending anyway (see above), so this is a known, bounded gap, not an accepted design.
-
 ### PV write posture (`set_pv_value`): the audit trail
 
 A `set_pv_value` write leaves a `PV_WRITE` audit line at each stage. A write-enabled server

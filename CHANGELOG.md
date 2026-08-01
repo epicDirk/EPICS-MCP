@@ -7,6 +7,30 @@ carry breaking changes).
 
 ## [Unreleased]
 
+### Removed
+
+- **The Olog read redaction is gone: every logbook read returns the whole entry.** `search_logbook`,
+  `get_log_entry`, the create/reply/update echoes and `list_log_attachments` now carry `title`,
+  `description`, `owner` (the author), `source`, `properties` and the raw attachments list for every
+  server, and `download_log_attachment` hands the bytes back (size-capped) without an opt-in. The
+  redaction had been built against an assumed privacy rule that was never specified for this server,
+  and it cost the logbook its point: a search returned ids whose content the caller could not judge.
+  A deliberate prototype decision (2026-08-01), consequences stated in `docs/safety.md`; if a real
+  facility privacy specification ever arrives, it will be rebuilt against that specification. With
+  it go, user-visibly: the env vars `EPICS_MCP_OLOG_ASSUME_TEST_DATA` and
+  `EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD` (now unknown, the config warns if still set), the
+  error codes `OLOG_WHOLE_MODE_REQUIRED` and `OLOG_ATTACHMENT_DOWNLOAD_DENIED`, the `withheld`
+  fields of the download/list results, and the doctor's `Olog free-text:` line. The whole-mode
+  preconditions of `add_log_attachment` / `update_log_entry` are replaced by the write gate itself:
+  its env + URL checks now run BEFORE the pre-write read, so a target the gate refuses is never
+  even read. Both write gates, the ChannelFinder redaction and the withheld-is-not-no semantics of
+  the other planes are unchanged.
+- **The alarm twin of that redaction is gone too.** `is_alarm_configured` returns the authored
+  fields (`description`/`guidance`/`displays`/`commands`/`actions` and the serialized `config_msg`)
+  with their values, exactly the handling instruction the withholding used to blank, and
+  `get_alarm_history` events carry `user`/`host`/`command`/`config_msg` again. The known-field
+  allowlists stay as structure: an unknown field a future logger version adds is still dropped.
+
 ### Changed
 
 - **`epics-crossplane --help` and `epics-coverage --help` now answer on a core-only install.** They
