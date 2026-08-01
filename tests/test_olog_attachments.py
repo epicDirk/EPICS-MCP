@@ -41,7 +41,6 @@ from epics_mcp.services.checkers import (
 from epics_mcp.services.olog_attachments import plan_attachments, read_uploads, write_download
 from epics_mcp.services.olog_client import AttachmentUpload, OlogClient
 from epics_mcp.services.olog_exceptions import (
-    OlogAttachmentDownloadDenied,
     OlogConnectionError,
     OlogResponseError,
     OlogRoundTripUnsafe,
@@ -49,7 +48,6 @@ from epics_mcp.services.olog_exceptions import (
 
 _AUDIT_LOGGER = "epics_mcp.olog_audit"
 _LOOPBACK = "http://localhost:8080/Olog"
-_REMOTE = "http://olog.example.org/Olog"
 
 
 @pytest.fixture(autouse=True)
@@ -459,18 +457,11 @@ class TestClientUpload:
 
 
 # ======================================================================================
-# Client: download opt-in (attachment_bytes_allowed) + URL encoding + backstop
+# Client: download URL encoding
 # ======================================================================================
 
 
 class TestClientDownload:
-    def test_download_flag(self) -> None:
-        # Raw attachment bytes need the explicit opt-in flag; the URL plays no role.
-        no_flag = OlogClient(_LOOPBACK, allow_attachment_download=False)
-        assert no_flag.attachment_bytes_allowed is False  # flag off
-        allowed = OlogClient(_REMOTE, allow_attachment_download=True)
-        assert allowed.attachment_bytes_allowed is True
-
     def test_by_name_url_is_percent_encoded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         captured: dict[str, str] = {}
 
@@ -481,7 +472,7 @@ class TestClientDownload:
             return (b"DATA", "plot.png", "image/png")
 
         monkeypatch.setattr(olog_client_module, "rest_get_bytes", fake_get_bytes)
-        client = OlogClient(_LOOPBACK, allow_attachment_download=True)
+        client = OlogClient(_LOOPBACK)
         content, _fn, _ct = client.get_attachment("12", "my plot.png")
         assert content == b"DATA"
         # space → %20 (a single path segment), matching CS-Studio's URLEncoder + '+'→'%20'
@@ -499,7 +490,7 @@ class TestClientDownload:
             return (b"DATA", "plot.png", "image/png")
 
         monkeypatch.setattr(olog_client_module, "rest_get_bytes", fake_get_bytes)
-        client = OlogClient(_LOOPBACK, allow_attachment_download=True)
+        client = OlogClient(_LOOPBACK)
         client.get_attachment("4 2/x", "plot.png")
         assert captured["url"] == f"{_LOOPBACK}/logs/attachments/4%202%2Fx/plot.png"
 
@@ -513,17 +504,9 @@ class TestClientDownload:
             return (b"X", None, None)
 
         monkeypatch.setattr(olog_client_module, "rest_get_bytes", fake_get_bytes)
-        client = OlogClient(_LOOPBACK, allow_attachment_download=True)
+        client = OlogClient(_LOOPBACK)
         client.get_attachment_by_id("abc-123")
         assert captured["url"] == f"{_LOOPBACK}/attachment/abc-123"
-
-    # --- RED-PROOF (guard 1): the download backstop raises when bytes may not leave ---
-    def test_backstop_raises_when_flag_off(self) -> None:
-        client = OlogClient(_LOOPBACK, allow_attachment_download=False)
-        with pytest.raises(OlogAttachmentDownloadDenied):
-            client.get_attachment("1", "a.png")
-        with pytest.raises(OlogAttachmentDownloadDenied):
-            client.get_attachment_by_id("x")
 
 
 # ======================================================================================
@@ -681,22 +664,18 @@ class TestServiceCreate:
 
 
 # ======================================================================================
-# Service: download (disabled / withheld red-proof / written / base64) + list
+# Service: download (disabled / written / base64) + list
 # ======================================================================================
 
 
 def _download_client(
-    *, allowed: bool, result: tuple[bytes, str | None, str | None] = (b"DATA", "a.png", "image/png")
+    *, result: tuple[bytes, str | None, str | None] = (b"DATA", "a.png", "image/png")
 ) -> Callable[..., object]:
-    """A fake-OlogClient factory for query_olog_download: posture + the bytes it would return."""
+    """A fake-OlogClient factory for query_olog_download: the bytes it would return."""
 
     class _Fake:
         def __init__(self, *args: object, **kwargs: object) -> None:
             pass
-
-        @property
-        def attachment_bytes_allowed(self) -> bool:
-            return allowed
 
         def get_attachment(
             self, log_id: str, filename: str, *, max_bytes: int | None = None
@@ -725,16 +704,6 @@ class TestServiceDownload:
         with pytest.raises(EpicsError):
             await query_olog_download(as_base64=True)
 
-    # --- RED-PROOF (guard 1): bytes withheld, and NO byte fetch, without the opt-in flag ---
-    @pytest.mark.asyncio
-    async def test_withheld_without_the_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        _set_config(olog_url=_LOOPBACK)
-        monkeypatch.setattr(checkers_module, "OlogClient", _download_client(allowed=False))
-        result = await query_olog_download(log_id="1", filename="a.png", as_base64=True)
-        assert result["downloaded"] is False
-        assert result["withheld"] is True
-        assert "content_base64" not in result  # nothing fetched
-
     @pytest.mark.asyncio
     async def test_writes_to_output_path(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -743,7 +712,7 @@ class TestServiceDownload:
         monkeypatch.setattr(
             checkers_module,
             "OlogClient",
-            _download_client(allowed=True, result=(b"BYTES", "a.png", None)),
+            _download_client(result=(b"BYTES", "a.png", None)),
         )
         target = tmp_path / "dl.bin"
         result = await query_olog_download(log_id="1", filename="a.png", output_path=str(target))
@@ -757,7 +726,7 @@ class TestServiceDownload:
         monkeypatch.setattr(
             checkers_module,
             "OlogClient",
-            _download_client(allowed=True, result=(b"XY", "a.png", None)),
+            _download_client(result=(b"XY", "a.png", None)),
         )
         result = await query_olog_download(attachment_id="abc", as_base64=True)
         assert result["content_base64"] == base64.b64encode(b"XY").decode()

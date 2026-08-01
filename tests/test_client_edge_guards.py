@@ -13,7 +13,7 @@ map recorded with ``COVERAGE_CORE=ctrace`` and some ten minutes, which is not a 
 
 Findings of the 2026-07-25 run, kept here rather than in a document nobody reads again:
 
-* Sham guards (direction B): **none found, which is not the same as none there.** 102 tests
+* Sham guards (direction B): **none found, which is not the same as none there.** 101 tests
   install a client class double in their own body and NOT ONE of them executes a client-edge guard
   line, which is what a class-level double is FOR: it takes the real client off the path. That is
   the double used legitimately, to keep a service-layer test off the network. 20 of those also
@@ -53,7 +53,7 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   ⚠️ Two caveats on the counterpart number. First, "observed in both polarities" is weaker than it
   sounds for the 21 RAISE guards: their enabling polarity fires the guard on every input, so every
   covering test dies by construction and only the disabling half carries information. Second,
-  three entries below (`alarm_client.py:250`, `epics_client.py:490`, `olog_client.py:182`) sit in
+  three entries below (`alarm_client.py:250`, `epics_client.py:490`, `olog_client.py:181`) sit in
   comprehension filters, where the tool builds no whole-condition target, for those "unobserved"
   means "this CONJUNCT is unobserved", the rest of the condition still stood during the mutant.
 
@@ -147,9 +147,9 @@ _UNOBSERVED: dict[str, str] = {
     "epics_client.py:461": "int-or-none column coercion",
     "epics_client.py:490": "NTMatrix dim entries",
     "epics_client.py:692": "NaN alarm field",
-    "olog_client.py:182": "lenient name filter inside an already-anchored entry",
-    "olog_client.py:390": "attachment filename check",
-    "olog_client.py:1007": "source default before concatenation",
+    "olog_client.py:181": "lenient name filter inside an already-anchored entry",
+    "olog_client.py:389": "attachment filename check",
+    "olog_client.py:977": "source default before concatenation",
 }
 
 # Neither polarity is noticed, and lines no test executes at all. Both are TEST GAPS at the

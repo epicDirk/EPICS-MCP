@@ -67,7 +67,6 @@ combined-bundle recipe is in [the deployment guide](deployment.md#3-tls--ca-bund
 | `EPICS_MCP_NAMING_URL` | _(empty)_ | ESS Naming plane for `lookup_device_name` / `diagnose_connection` / `crossplane_check`. **No built-in host, so no egress unless set** |
 | `EPICS_MCP_OLOG_URL` | _(empty)_ | Phoebus Olog REST root (incl. context path, e.g. `.../Olog`) for `search_logbook` / `get_log_entry`. **No built-in host, so no egress unless set** |
 | `EPICS_MCP_OLOG_AUTH` | _(empty)_ | Optional `Authorization` header for a secured Olog (READ only) |
-| `EPICS_MCP_OLOG_ASSUME_TEST_DATA` | `false` | Declares the logbook's data synthetic. Together with a **loopback** `EPICS_MCP_OLOG_URL` this is "whole mode": entries come back whole instead of redacted, and `list_log_attachments` / `download_log_attachment` become usable. **Both** conditions are required, because neither proves the case alone: a loopback address does not prove the data is synthetic (a port-forward serves production on localhost with the URL unchanged), and the flag alone would not catch "pointed it at the facility and forgot". Only a person can assert what the data is |
 | `EPICS_MCP_ALLOW_OLOG_WRITE` | `false` | Master gate for `create_log_entry` / `reply_to_log` / `add_log_attachment` / `update_log_entry` (separate from `ALLOW_PV_WRITE`) |
 | `EPICS_MCP_OLOG_WRITE_USER` | _(empty)_ | Basic-auth service account for Olog writes (a dedicated account, never a personal login, because it becomes the record `owner`) |
 | `EPICS_MCP_OLOG_WRITE_PASSWORD` | _(empty)_ | Basic-auth password for the write service account |
@@ -75,7 +74,6 @@ combined-bundle recipe is in [the deployment guide](deployment.md#3-tls--ca-bund
 | `EPICS_MCP_OLOG_WRITE_RATE_LIMIT` | `5` | Max Olog writes per 60 s window |
 | `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` | _(empty)_ | Comma-separated exact base URLs allowed as non-loopback write targets (only with `_ALLOW_REMOTE`) |
 | `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE` | `false` | Permit writes to a non-loopback (allowlisted) Olog. Default false: only loopback is writable. A remote **must** be `https://`; a plain-http remote is refused (Basic creds are cleartext). The write session is env-independent (no proxy/`REQUESTS_CA_BUNDLE` env): give a remote's CA via `EPICS_MCP_CA_BUNDLE` |
-| `EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD` | `false` | Opt-in for `download_log_attachment` to hand back raw **bytes** (+ list filenames): only in whole-mode (loopback + `ASSUME_TEST_DATA`) **and** with this set. Bytes bypass the entry redaction; the by-id endpoint has no server-side per-log auth, so byte egress is a deliberate choice |
 | `EPICS_MCP_OLOG_ATTACH_MAX_BYTES` | `52428800` | Client-side cap on total upload bytes (checked before files are read; the server enforces its own 413) |
 
 ## EPICS network (standard EPICS env; controls what the server can reach)

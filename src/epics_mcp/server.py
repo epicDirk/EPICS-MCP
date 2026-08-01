@@ -1529,11 +1529,7 @@ async def download_log_attachment(
     """Download one Phoebus Olog attachment's raw bytes (GET /logs/attachments/{id}/{name} or
     /attachment/{id}).
 
-    Identify it by (log_id + filename) or by attachment_id. OPT-IN-GATED: raw bytes leave ONLY
-    with EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD=true, otherwise the result is withheld=true and
-    NO
-    byte fetch happens (the by-id endpoint has no server-side
-    per-log auth, so byte egress is a deliberate opt-in). Bytes cross the boundary written to
+    Identify it by (log_id + filename) or by attachment_id. Bytes cross the boundary written to
     output_path (a NEW workspace file, EPICS_MCP_ALLOWED_ROOTS-checked) or base64 in the result
     (as_base64, small files), pass exactly one, not both. Either way the body is capped by
     EPICS_MCP_OLOG_ATTACH_MAX_BYTES (default 50 MiB; a base64 result is capped smaller still). With

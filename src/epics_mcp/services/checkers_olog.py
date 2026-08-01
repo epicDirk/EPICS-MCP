@@ -45,7 +45,7 @@ from epics_mcp.services.olog_exceptions import (
 
 # --- Tool result shapes (MA-1 Commit C; nullability hardened in the MA-1 follow-up) ------------
 # One ``total=False`` TypedDict per query function: every key across the function's return paths
-# (disabled / not-found / withheld / success + the conditionally-added note/warnings/attachments/
+# (disabled / not-found / success + the conditionally-added note/warnings/attachments/
 # download-sink keys). Every field ABSENT on some return path is typed ``X | None``.
 #
 # WHY the nullability: the canonical statement for every typed output shape in this server;
@@ -165,7 +165,6 @@ class OlogUpdateResult(TypedDict, total=False):
 class OlogDownloadResult(TypedDict, total=False):
     enabled: bool
     downloaded: bool
-    withheld: bool | None
     size_bytes: int | None
     content_type: str | None
     filename: str | None
@@ -186,14 +185,6 @@ class OlogListAttachmentsResult(TypedDict, total=False):
 _OLOG_DISABLED_NOTE = (
     "Phoebus Olog is disabled. Set EPICS_MCP_OLOG_URL to the Olog REST root "
     "(e.g. http://host:8080/Olog) to enable logbook search."
-)
-# The download opt-in message: raw attachment BYTES leave only with the explicit flag (the by-id
-# endpoint has no server-side per-log authorization, so byte egress stays a deliberate choice).
-_ATTACH_WITHHELD_NOTE = (
-    "Attachment bytes are withheld. Raw bytes leave only with "
-    "EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD=true (the by-id endpoint has no server-side "
-    "per-log authorization, so byte egress needs its own opt-in). Run "
-    "epics-doctor to see the effective configuration."
 )
 # A base64 download is returned IN the tool result (response tokens), so it is capped far below the
 # path-based ceiling (olog_attach_max_bytes), a large blob must go to a workspace file, not the
@@ -948,15 +939,11 @@ async def query_olog_download(
     as_base64: bool = False,
     timeout: float = 5.0,
 ) -> OlogDownloadResult:
-    """Download one Olog attachment's raw bytes. Read-only, config-gated, opt-in-gated (OA1).
+    """Download one Olog attachment's raw bytes. Read-only, config-gated (OA1).
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` +
-    ``downloaded: false`` and makes NO network call. Bytes leave ONLY with the explicit
-    ``EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD`` opt-in:
-    otherwise
-    the result is ``withheld: true`` and NO byte fetch happens (the flag is checked BEFORE the
-    request; the client's :meth:`~.OlogClient._require_attachment_bytes_allowed` is a further
-    backstop). Identify the attachment by ``(log_id + filename)``, the primary route, or by
+    ``downloaded: false`` and makes NO network call.
+    Identify the attachment by ``(log_id + filename)``, the primary route, or by
     ``attachment_id`` (the by-id route an inline image uses). Bytes cross the MCP boundary either
     written to ``output_path`` (a NEW workspace file, ``EPICS_MCP_ALLOWED_ROOTS``-checked) or, with
     ``as_base64=true``, base64-encoded in the result (small files only, the payload is response
@@ -988,14 +975,6 @@ async def query_olog_download(
 
     def _run() -> OlogDownloadResult:
         client = OlogClient(cfg.olog_url, timeout=timeout, auth_header=cfg.olog_auth or None)
-        # Posture FIRST: if raw bytes may not leave, withhold structurally, no byte fetch at all.
-        if not client.attachment_bytes_allowed:
-            return {
-                "enabled": True,
-                "downloaded": False,
-                "withheld": True,
-                "note": _ATTACH_WITHHELD_NOTE,
-            }
         # A base64 result rides back in the tool output (response tokens), so it is capped far below
         # the path-based ceiling; a path download uses the client's default (olog_attach_max_bytes).
         max_bytes = (

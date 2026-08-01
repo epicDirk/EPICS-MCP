@@ -1,6 +1,6 @@
 """Live round-trip for Olog ATTACHMENTS (OA1), the differential a mock cannot carry.
 
-Opt-in: ``pytest -m live`` against a WRITABLE loopback Olog sandbox with attachment download on.
+Opt-in: ``pytest -m live`` against a WRITABLE loopback Olog sandbox.
 Uploads a real PNG + a non-image file via multipart, downloads each back (by name AND by GridFS
 id), and asserts the bytes are BYTE-IDENTICAL, the one thing that proves the real server's
 multipart parsing, filename↔metadata pairing, GridFS storage and streaming download all agree with
@@ -22,7 +22,6 @@ from tests.live_gate import assert_live_available, live_demanded
 _URL = os.environ.get("EPICS_MCP_OLOG_URL")
 _WRITE = os.environ.get("EPICS_MCP_ALLOW_OLOG_WRITE", "").lower() == "true"
 _LOGBOOKS = os.environ.get("EPICS_MCP_OLOG_WRITE_LOGBOOKS", "")
-_DOWNLOAD = os.environ.get("EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD", "").lower() == "true"
 _WRITE_USER = os.environ.get("EPICS_MCP_OLOG_WRITE_USER")
 _WRITE_PASSWORD = os.environ.get("EPICS_MCP_OLOG_WRITE_PASSWORD")
 # A SECOND principal, distinct from the write service account. Only with two accounts can the
@@ -45,10 +44,10 @@ def _require_live_stack() -> None:
     snapshot); only the DEMAND is read fresh.
     """
     assert_live_available(
-        bool(_URL and _WRITE and _LOGBOOKS and _DOWNLOAD and _WRITE_USER and _WRITE_PASSWORD),
-        "live attachment round-trip needs a WRITABLE loopback Olog with attachment download "
-        "enabled: EPICS_MCP_OLOG_URL + _ALLOW_OLOG_WRITE + _WRITE_LOGBOOKS + "
-        "_ALLOW_ATTACHMENT_DOWNLOAD + write creds (_WRITE_USER/_WRITE_PASSWORD)",
+        bool(_URL and _WRITE and _LOGBOOKS and _WRITE_USER and _WRITE_PASSWORD),
+        "live attachment round-trip needs a WRITABLE loopback Olog: "
+        "EPICS_MCP_OLOG_URL + _ALLOW_OLOG_WRITE + _WRITE_LOGBOOKS + "
+        "write creds (_WRITE_USER/_WRITE_PASSWORD)",
         demanded=live_demanded(os.environ),
     )
 
@@ -67,7 +66,7 @@ def client() -> OlogClient:
         os.environ["EPICS_MCP_OLOG_WRITE_USER"], os.environ["EPICS_MCP_OLOG_WRITE_PASSWORD"]
     )
     assert _URL is not None  # guarded by the module gate
-    return OlogClient(_URL, timeout=15.0, auth_header=auth, allow_attachment_download=True)
+    return OlogClient(_URL, timeout=15.0, auth_header=auth)
 
 
 def _upload(content: bytes, name: str, content_type: str | None) -> AttachmentUpload:
@@ -113,17 +112,6 @@ def test_attachment_round_trip_is_byte_identical(client: OlogClient) -> None:
     raw = fetched.get("attachments")
     assert isinstance(raw, list)
     assert len(raw) == 2
-
-
-def test_download_is_withheld_without_the_flag() -> None:
-    """The download opt-in, live: a client WITHOUT the flag refuses to hand back bytes even
-    against the same sandbox; the flag unlocks byte egress."""
-    from epics_mcp.services.olog_exceptions import OlogAttachmentDownloadDenied
-
-    assert _URL is not None
-    no_flag = OlogClient(_URL, timeout=15.0, allow_attachment_download=False)
-    with pytest.raises(OlogAttachmentDownloadDenied):
-        no_flag.get_attachment("1", "whatever.png")
 
 
 def test_add_attachment_is_additive_and_byte_identical(client: OlogClient) -> None:

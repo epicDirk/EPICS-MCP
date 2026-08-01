@@ -71,7 +71,7 @@ Run::
 
     EPICS_MCP_REQUIRE_LIVE=1 uv run pytest -m live tests/test_write_gate_live.py
 
-with ``EPICS_MCP_OLOG_URL`` / ``_OLOG_ASSUME_TEST_DATA`` / ``_ALLOW_OLOG_WRITE`` /
+with ``EPICS_MCP_OLOG_URL`` / ``_ALLOW_OLOG_WRITE`` /
 ``_OLOG_WRITE_LOGBOOKS`` / ``_OLOG_WRITE_USER`` / ``_OLOG_WRITE_PASSWORD`` set, and with
 ``EPICS_MCP_AUDIT_LOG_FILE`` UNSET (this module refuses to run otherwise; see the fixture).
 
@@ -100,7 +100,6 @@ from epics_mcp.services.olog_client import OlogClient
 from tests.live_gate import assert_live_available, live_demanded
 
 _URL = os.environ.get("EPICS_MCP_OLOG_URL")
-_ASSUME_TEST_DATA = os.environ.get("EPICS_MCP_OLOG_ASSUME_TEST_DATA", "").lower() == "true"
 _WRITE = os.environ.get("EPICS_MCP_ALLOW_OLOG_WRITE", "").lower() == "true"
 _LOGBOOKS = os.environ.get("EPICS_MCP_OLOG_WRITE_LOGBOOKS", "")
 _WRITE_USER = os.environ.get("EPICS_MCP_OLOG_WRITE_USER")
@@ -120,7 +119,7 @@ pytestmark = pytest.mark.live
 
 @pytest.fixture(autouse=True)
 def _require_live_stack() -> None:
-    """Setup-time gate (S30) over ALL SIX prerequisites of a gated Olog write.
+    """Setup-time gate (S30) over ALL FIVE prerequisites of a gated Olog write.
 
     A one-variable gate would be the defect this module is written against: with
     ``EPICS_MCP_ALLOW_OLOG_WRITE`` missing the gate denies at its FIRST branch, the test stays
@@ -128,11 +127,9 @@ def _require_live_stack() -> None:
     ``EPICS_MCP_REQUIRE_LIVE=1``.
     """
     assert_live_available(
-        bool(
-            _URL and _ASSUME_TEST_DATA and _WRITE and _LOGBOOKS and _WRITE_USER and _WRITE_PASSWORD
-        ),
-        "the live Olog write-gate probe needs a WRITABLE, whole-mode loopback Olog: "
-        "EPICS_MCP_OLOG_URL + _OLOG_ASSUME_TEST_DATA + _ALLOW_OLOG_WRITE + _OLOG_WRITE_LOGBOOKS "
+        bool(_URL and _WRITE and _LOGBOOKS and _WRITE_USER and _WRITE_PASSWORD),
+        "the live Olog write-gate probe needs a WRITABLE loopback Olog: "
+        "EPICS_MCP_OLOG_URL + _ALLOW_OLOG_WRITE + _OLOG_WRITE_LOGBOOKS "
         "+ _OLOG_WRITE_USER + _OLOG_WRITE_PASSWORD",
         demanded=live_demanded(os.environ),
     )

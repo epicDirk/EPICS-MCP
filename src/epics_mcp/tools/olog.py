@@ -234,7 +234,7 @@ async def _download_log_attachment(
     as_base64: bool = False,
     timeout: float = 5.0,
 ) -> OlogDownloadResult:
-    """Download one Olog attachment's raw bytes (opt-in-gated).
+    """Download one Olog attachment's raw bytes (size-capped).
 
     Thin MCP adapter over :func:`epics_mcp.services.checkers.query_olog_download`.
     """

@@ -148,23 +148,10 @@ class EpicsConfig(BaseSettings):
     # naming unless this is set.
     naming_url: str = ""
     # Phoebus Olog (electronic logbook) REST root incl. context path, e.g. "http://host:8080/Olog".
-    # Empty (default) = disabled: the Olog plane makes NO network call and no ESS egress. Read-only.
-    # Output posture: DS-PRIVACY-redacted (author dropped, free text withheld) unless BOTH this url
-    # is loopback AND olog_assume_test_data is set, see below. `epics-doctor` prints the effective
-    # posture.
+    # Empty (default) = disabled: the Olog plane makes NO network call and no ESS egress. Reads
+    # return the whole entry (the former read redaction was removed 2026-08-01, decision PI).
     olog_url: str = ""
     olog_auth: str = ""  # optional Authorization header value for secured deployments
-    # The operator's EXPLICIT declaration: "the Olog at olog_url holds synthetic test data, so its
-    # entries may leave whole". Default false = redact, always.
-    #
-    # Why a flag AND the loopback url, when the url alone looks like it should do: a loopback
-    # ADDRESS does not prove the DATA is synthetic. `ssh -L 8080:olog-prod:8080` or a
-    # port-forward make a production logbook answer on localhost:8080, the url never changes,
-    # so binding to it alone would silently un-redact production (demonstrated live, QA
-    # 2026-07-15). No url inspection can see through a tunnel. Only a person can assert what
-    # the data IS, and this flag is where they do it: loopback stays a NECESSARY condition (it
-    # still catches "pointed at the facility and forgot"), and the flag adds the sufficient one.
-    olog_assume_test_data: bool = False
 
     # --- Olog WRITE gate (separate from ALLOW_PV_WRITE; that stays false + untouched) ---
     # Olog write is a deliberately-authorized, SEPARATE logbook surface behind its OWN gate. Unlike
@@ -193,19 +180,6 @@ class EpicsConfig(BaseSettings):
     olog_write_allow_remote: bool = False
 
     # --- Olog ATTACHMENT surface (OA1) ---
-    # A downloaded attachment's raw BYTES and its FILENAME are author-written free text (a person
-    # can
-    # be named in either) and BYPASS the dict-based redact_record barrier, so they need their own
-    # gate at the byte boundary. Raw bytes leave ONLY when the read posture is already whole-mode
-    # (loopback url AND olog_assume_test_data, i.e. OlogClient._redact is False) AND this flag is
-    # explicitly set. A SECOND, deliberate opt-in on top of the whole-mode signal (defense-in-depth,
-    # like the write gate): the by-id endpoint /Olog/attachment/{id} has no server-side per-log
-    # authorization, so un-redacted byte egress stays an intentional, auditable choice. Default
-    # false
-    # = never emit raw attachment bytes. Filenames follow the whole-mode boundary alone (they are a
-    # lesser exposure and already visible in a whole-mode entry read); this flag gates only the
-    # bytes.
-    olog_allow_attachment_download: bool = False
     # Client-side anti-DoS cap on attachment bytes, both directions. On UPLOAD it caps the TOTAL
     # size,
     # checked in the Olog write gate BEFORE the files are read (a stat-sum) AND re-checked while

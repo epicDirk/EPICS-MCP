@@ -80,8 +80,8 @@ For the canonical plane→source→tools table and the safety/network posture, s
   (MGMT root, `/mgmt/bpl`) + optionally `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` (retrieval root, `/retrieval/data`).
 - **Phoebus Alarm Logger**: is a PV alarm-configured, and its alarm history. `EPICS_MCP_ALARM_URL`.
 - **Naming Service**: is a device name registered + ACTIVE. `EPICS_MCP_NAMING_URL`.
-- **Phoebus Olog**: logbook search; author dropped, free text withheld unless a DECLARED local
-  sandbox (see "Olog output posture"). `EPICS_MCP_OLOG_URL`.
+- **Phoebus Olog**: logbook search and reading, whole entries (title, text, author, attachments).
+  `EPICS_MCP_OLOG_URL`.
 
 ## Tool palette
 
@@ -106,39 +106,22 @@ are simply absent, that is an unmet optional dependency group, not a bug.
 Composing the display tools: `find_device` (which screens show device X + live value + serving IOC),
 `coverage_audit` (which delivered PV has no screen/archive/alarm, the blind spots).
 
-### Olog output posture (what a read gives you back), ESS-SPEC PENDING
+### Olog output shape (what a read gives you back)
 
-Entries come back redacted: author dropped, `title`/`description` free text withheld, attachments
-as a count, `logbooks`/`tags` as name-only lists, UNLESS **both** of these hold:
+Entries come back **whole**: `title`, `description`, `owner` (the author), `source`, `properties`
+and the raw `attachments` array, plus two derived conveniences, the synthesised
+`attachment_count` and name-only `logbooks`/`tags` lists.
 
-1. `EPICS_MCP_OLOG_URL` is **loopback** (`localhost` / `127.0.0.0/8` / `::1`), and
-2. `EPICS_MCP_OLOG_ASSUME_TEST_DATA=true` **declares** the data synthetic.
+The former DS-PRIVACY read redaction (author dropped, free text withheld outside a declared local
+sandbox) was removed 2026-08-01: it was written against an *assumed* privacy policy that was never
+specified for this server, and it cost the logbook its point (a search returned ids whose content
+you could not judge, and a write could not verify what it just wrote). If a real facility privacy
+specification ever arrives, it will be rebuilt against that specification; the removed mechanism
+is in the git history. The privacy consequences of whole reads are stated in `docs/safety.md`.
 
-Then the **whole** entry is returned, free text and owner included.
-
-The shape does not change between the two: the full mode only ADDS fields, so `attachment_count` and
-the name-only `logbooks`/`tags` are there either way.
-
-**Why.** Withholding the free text costs a logbook its entire point, a search returns ids whose
-content you cannot judge, and a write cannot verify what it just wrote (you would need a separate
-client to check). The withholding rule was written against an *assumed* privacy policy; none was
-ever specified for this server. So it is **deferred for local test data until a real specification
-exists**, then re-applied, the allowlist and the projection stay intact meanwhile, guarding every
-real server. Only the default moved.
-
-**Why two conditions.** A loopback ADDRESS does not prove the DATA is synthetic: `ssh -L
-8080:olog-prod:8080` or a port-forward serves a production logbook on localhost with the URL
-unchanged (demonstrated live, QA 2026-07-15), no URL inspection can see through a tunnel, so only
-a person can assert what the data is. Conversely the declaration alone would not catch "pointed it
-at the facility and forgot", which is what the loopback condition still catches. For the same
-reason the client REFUSES redirects rather than follow them: a hop moves the data's true origin
-without changing the URL the decision came from. And note the write gate's own URL check must NOT
-be reused as the read predicate: it also passes an *allowlisted remote*, which would surface a
-production logbook in the clear.
-
-**Diagnosis:** `epics-doctor` prints the effective posture (`Olog free-text: withheld` vs `FULL
-(declared local test data, ESS-spec pending)`). This is a *runtime output* policy and has nothing to do
-with keeping person data out of committed files, that is a separate, unaffected guard.
+The client still REFUSES redirects rather than follow them: Olog's REST API has no legitimate
+redirect, so a hop is a misconfiguration surfaced loudly. Keeping person data out of COMMITTED
+files is a separate, unaffected guard.
 
 ### Olog search filters: what the server does with a value it does not like
 
@@ -352,19 +335,15 @@ restore it, recovery is manual, by someone with direct access to the Olog servic
 API or its datastore). Treat every edit as effectively irreversible from here, and take the
 `owner` re-stamp as permanent for any purpose this server can serve.
 
-**Download** (`download_log_attachment`, by `log_id`+`filename`, or by GridFS `attachment_id`) and the
-filenames in `list_log_attachments`: raw bytes and filenames are author free text and BYPASS the entry
-redaction, so they leave only in **whole-mode** (loopback URL + `ASSUME_TEST_DATA`), and the raw BYTES
-additionally require the explicit **`EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD`** opt-in (default false =
-withheld). Two reasons for the second gate: bytes sidestep the dict-based redaction entirely, and the
-by-id endpoint has NO server-side per-log authorization (any valid GridFS id grants content), so
-un-redacted byte egress is a deliberate, auditable choice, not implied by the URL. Bytes cross the MCP
+**Download** (`download_log_attachment`, by `log_id`+`filename`, or by GridFS `attachment_id`) hands
+the raw bytes back; `list_log_attachments` lists each attachment's id, filename and
+fileMetadataDescription. Worth knowing: the by-id endpoint has NO server-side per-log authorization
+(any valid GridFS id grants content). Bytes cross the MCP
 boundary as a workspace file `output_path` (a NEW file, `EPICS_MCP_ALLOWED_ROOTS`-checked, it refuses
 to overwrite an existing file or follow a symlink, so a download never loses data or escapes the
 boundary) or, for a small inline image, base64 in the result. The download body is size-capped by
 `EPICS_MCP_OLOG_ATTACH_MAX_BYTES` (a base64 result is capped smaller still, it rides back as response
-tokens), so a huge attachment cannot OOM the process. `epics-doctor`'s Olog posture line already tells
-you whether whole-mode is in effect.
+tokens), so a huge attachment cannot OOM the process.
 
 ## Operational recipes (the non-obvious parts)
 

@@ -103,21 +103,3 @@ class OlogRoundTripUnsafe(OlogError):
     # Mirrors the service-level pre-check for exactly this case, which already raises
     # EpicsError(INVALID_INPUT): the layer that catches it must not change the verdict.
     error_code: ClassVar[str] = "INVALID_INPUT"
-
-
-class OlogAttachmentDownloadDenied(OlogError):
-    """Raw attachment bytes were requested without the download opt-in (OA1).
-
-    The DEFENSE-IN-DEPTH backstop for the attachment-download opt-in: bytes leave only when
-    ``olog_allow_attachment_download`` is set
-    (see :attr:`~epics_mcp.services.olog_client.OlogClient.attachment_bytes_allowed`). The
-    normal path checks that flag in the service layer and returns a structured ``withheld``
-    result
-    without a network call; this raise fires only if a byte-fetch is reached, so no bytes
-    can slip out through a code path that forgot the check. NOT a server error, it never
-    wraps
-    an HTTP response."""
-
-    # A read-side refusal: neither the write code nor a transport code fits, so it
-    # gets its own, a caller can tell "the flag forbids this" from "the service failed".
-    error_code: ClassVar[str] = "OLOG_ATTACHMENT_DOWNLOAD_DENIED"

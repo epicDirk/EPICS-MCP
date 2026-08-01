@@ -99,7 +99,6 @@ from epics_mcp.services._http import (
 )
 from epics_mcp.services._time_window import TimeWindowFormatError
 from epics_mcp.services.olog_exceptions import (
-    OlogAttachmentDownloadDenied,
     OlogConnectionError,
     OlogFilterValueError,
     OlogResponseError,
@@ -500,7 +499,6 @@ class OlogClient:
         base_url: str,
         timeout: float = 5.0,
         auth_header: str | None = None,
-        allow_attachment_download: bool | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -510,12 +508,6 @@ class OlogClient:
         # cached_property's reach. The read `session` above stays byte-identical (auth on it is
         # harmless: reads / check_connectivity use it, never the PUT, that uses the write one).
         self._auth_header = auth_header
-        # OA1: an explicit opt-in for handing back raw attachment BYTES (the by-id endpoint has no
-        # server-side per-log auth). Read from config when not passed (tests pass it explicitly).
-        # See ``attachment_bytes_allowed``.
-        if allow_attachment_download is None:
-            allow_attachment_download = get_config().olog_allow_attachment_download
-        self._allow_attachment_download = allow_attachment_download
 
     @functools.cached_property
     def _write_session(self) -> requests.Session:
@@ -873,26 +865,6 @@ class OlogClient:
             allow_redirects=False,
         )
 
-    @property
-    def attachment_bytes_allowed(self) -> bool:
-        """True iff raw attachment bytes may leave: the explicit download opt-in.
-
-        The ONE place the download posture is decided. ``_allow_attachment_download`` is a
-        deliberate opt-in (the by-id endpoint ``/attachment/{id}`` has no server-side per-log
-        auth). The service layer checks this BEFORE any byte fetch and withholds structurally; the
-        download methods re-check it as a defense-in-depth backstop
-        (:meth:`_require_attachment_bytes_allowed`).
-        """
-        return self._allow_attachment_download
-
-    def _require_attachment_bytes_allowed(self) -> None:
-        """Backstop: raise :class:`OlogAttachmentDownloadDenied` unless bytes may leave."""
-        if not self.attachment_bytes_allowed:
-            raise OlogAttachmentDownloadDenied(
-                "Raw Olog attachment bytes are withheld: this needs "
-                "EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD=true."
-            )
-
     def _attachment_max_bytes(self, max_bytes: int | None) -> int:
         """The effective download size cap: *max_bytes* if given, else the configured upload cap.
 
@@ -909,11 +881,10 @@ class OlogClient:
         ``GET /logs/attachments/{logId}/{name}``: *name* is a single path segment, percent-encoded
         with ``quote(safe="")`` (a space becomes ``%20``, matching CS-Studio's ``URLEncoder`` +
         ``+``→``%20`` fix; a ``+`` is not valid in an Olog path element). No auth (reads are open:
-        CS-Studio sends none). Guarded first by :meth:`_require_attachment_bytes_allowed`; the body
+        CS-Studio sends none). The body
         is
         size-capped (*max_bytes*, default the configured upload cap) so a huge object never OOMs.
         """
-        self._require_attachment_bytes_allowed()
         # Both path segments are percent-encoded (safe="") so a space / '/' / '+' in either the log
         # id or the filename stays a single path element instead of retargeting the request.
         log_seg = quote(log_id, safe="")
@@ -935,9 +906,8 @@ class OlogClient:
         """Download one attachment by its GridFS id → ``(bytes, server_filename, content_type)``.
 
         ``GET /attachment/{id}``: the route an inline image (``![](attachment/<id>)``) resolves to.
-        Same posture backstop, redirect refusal and size cap as :meth:`get_attachment`.
+        Same redirect refusal and size cap as :meth:`get_attachment`.
         """
-        self._require_attachment_bytes_allowed()
         url = f"{self.base_url}/attachment/{quote(attachment_id, safe='')}"
         return rest_get_bytes(
             self.session,

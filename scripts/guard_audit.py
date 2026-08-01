@@ -344,12 +344,12 @@ CLIENT_MODULES = "client modules whose edges this audit covers"
 GUARD_TARGETS = "mutable guard sites the audit can address in them"
 
 PINNED_AST: dict[str, int] = {
-    DOUBLES: 102,
+    DOUBLES: 101,
     EDGE_VOCABULARY: 20,
     CLIENT_MODULES: 6,
     GUARD_TARGETS: 93,
 }
-PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 102, SHAM_CANDIDATES: 20}
+PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 101, SHAM_CANDIDATES: 20}
 PINNED: dict[str, int] = {**PINNED_AST, **PINNED_COVERAGE}
 
 # The candidate list, by NAME. A count is not a finding: the verdict "no sham guard found" was

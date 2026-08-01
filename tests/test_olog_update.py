@@ -40,7 +40,6 @@ from epics_mcp.services.olog_client import (
     unroundtrippable_attachment_filenames,
 )
 from epics_mcp.services.olog_exceptions import (
-    OlogAttachmentDownloadDenied,
     OlogConnectionError,
     OlogResponseError,
     OlogRoundTripUnsafe,
@@ -304,13 +303,9 @@ class TestOlogErrorCode:
     """The mapper had NO direct test, which is why its fallback branch could stay wrong."""
 
     def test_refusals_carry_their_own_code_not_internal(self) -> None:
-        # Permanent refusals that never wrap an HTTP response; both used to fall through to
+        # A permanent refusal that never wraps an HTTP response; it used to fall through to
         # INTERNAL, i.e. "transient, try again".
         assert checkers_module._olog_error_code(OlogRoundTripUnsafe("x")) == "INVALID_INPUT"
-        assert (
-            checkers_module._olog_error_code(OlogAttachmentDownloadDenied("x"))
-            == "OLOG_ATTACHMENT_DOWNLOAD_DENIED"
-        )
 
     def test_connection_and_response_branches_survive_the_new_one(self) -> None:
         # ORDER REGRESSION: OlogConnectionError and OlogResponseError are themselves OlogError

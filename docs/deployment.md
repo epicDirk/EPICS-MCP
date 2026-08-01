@@ -72,7 +72,7 @@ Only set the planes you use. See `.env.example` for the full commented list and 
 | Archiver Appliance | `EPICS_MCP_ARCHIVER_URL` (mgmt `:17665`), `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` (retrieval `:17668`), `_AUTH` | See the cluster/port assumptions in section 5. |
 | Alarm Logger | `EPICS_MCP_ALARM_URL` (+ `_AUTH`) | Phoebus Alarm Logger REST root. |
 | Naming Service | `EPICS_MCP_NAMING_URL` | No built-in host, so no egress unless set. |
-| Olog logbook | `EPICS_MCP_OLOG_URL` (+ `_AUTH`, `_ASSUME_TEST_DATA`) | REST root incl. context path. Output is DS-PRIVACY-redacted (author dropped / free text withheld), **unless BOTH the URL is loopback AND `EPICS_MCP_OLOG_ASSUME_TEST_DATA=true`**, where entries come back whole (ESS-spec pending; `epics-doctor` prints the effective posture). |
+| Olog logbook | `EPICS_MCP_OLOG_URL` (+ `_AUTH`) | REST root incl. context path. Reads return the whole entry (title, text, author, attachments); the former read redaction was removed 2026-08-01, see `docs/safety.md`. |
 
 Network posture: PV reach is decided by the launcher's EPICS search-path env: address lists, name
 servers, and the auto-addr search, which defaults to **ON** (subnet broadcast) when unset; a

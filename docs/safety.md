@@ -45,19 +45,19 @@ This is a controls tool, so the trust questions come first.
   (`EPICS_MCP_OLOG_WRITE_LOGBOOKS`; empty = deny-all) **and** a rate limit. The author is the write
   service account (`EPICS_MCP_OLOG_WRITE_USER`), set server-side and not spoofable; the audit line
   is metadata-only (never the title/description free text). **`ALLOW_PV_WRITE` is untouched by it.**
-- **Olog output posture: redacted unless declared test data** *(ESS-spec pending)*. Every entry
-  leaves through a strict allowlist: author dropped, `title`/`description` free text withheld,
-  attachments as a count, **unless BOTH** `EPICS_MCP_OLOG_URL` is loopback **and**
-  `EPICS_MCP_OLOG_ASSUME_TEST_DATA=true`. Then entries come back **whole**, because withholding
-  the free text costs a logbook its point (a search returns ids whose content you cannot judge,
-  and a write cannot verify what it wrote). **Two conditions, because neither proves the case
-  alone:** a loopback *address* does not prove the *data* is synthetic (a port-forward serves
-  production on localhost with the URL unchanged), and a flag alone would not catch "pointed it at
-  the facility and forgot". For the same reason the Olog client refuses redirects instead of
-  following them. **Why "pending":** the withholding rule was written against an *assumed* privacy
-  policy, never a specified one; it is deferred for declared test data until a real specification
-  exists, then re-applied; the allowlist and projection stay intact meanwhile. `epics-doctor`
-  reports the effective posture. Note this is a *runtime output* policy, unrelated to keeping
+- **Olog reads return the whole entry, a deliberate prototype decision (2026-08-01).** Every read
+  (`search_logbook`, `get_log_entry`, the create/reply/update echoes, attachment listing and
+  download) returns the full server record: `title`, `description`, `owner` (the author's
+  account), `source`, `properties` and the raw attachments. **Consequence, stated plainly:** an
+  AI assistant reading a production logbook hands its clear text, author names included, onward
+  to the MCP client, the model provider, the conversation transcript and any client-side logs.
+  The former DS-PRIVACY read redaction was removed because it was built against an *assumed*
+  privacy rule that was never specified for this server, and it cost the logbook its point (a
+  search returned ids whose content you could not judge, and a write could not verify what it
+  wrote). If a real facility privacy specification ever arrives, it will be rebuilt against that
+  specification; the removed mechanism is in the git history (up to 2026-08-01). The Olog client
+  still refuses redirects instead of
+  following them. Note this is a *runtime output* decision, unrelated to keeping
   person data out of committed files (see `CLAUDE.md`).
 - **Network reach is the launcher's decision, not this server's.** PV searches follow the
   standard EPICS env: the address lists (`EPICS_PVA_ADDR_LIST` / `EPICS_CA_ADDR_LIST`), the name

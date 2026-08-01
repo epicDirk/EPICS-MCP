@@ -48,7 +48,6 @@ from epics_mcp.errors import EpicsError
 from epics_mcp.services._http import (
     build_retrying_session,
     http_status,
-    is_loopback_url,
     is_retry_error,
     is_ssl_error,
     rest_get_json,
@@ -1228,15 +1227,14 @@ async def _probe_live_pv(pv_name: str, timeout: float) -> tuple[bool, str | None
 def _privacy_report(cfg: EpicsConfig) -> PrivacyReport:
     """The effective redaction posture, resolved through the SAME helpers the clients use.
 
-    ``olog_freetext_withheld`` mirrors ``OlogClient._redact`` exactly, BOTH conditions, or this
-    tool would report a posture the client does not have. An unconfigured plane reads nothing, so
-    True is honest there.
+    ``olog_freetext_withheld`` is constantly False since the Olog read redaction was removed
+    (decision PI, 2026-08-01): every read returns the whole entry. Transitional: the field itself
+    dies in the next removal step.
     """
-    olog_full = bool(cfg.olog_url) and is_loopback_url(cfg.olog_url) and cfg.olog_assume_test_data
     return PrivacyReport(
         cf_safe_owner_accounts=sorted(resolve_safe_owner_accounts(cfg)),
         cf_safe_property_names=sorted(resolve_safe_property_names(cfg)),
-        olog_freetext_withheld=not olog_full,
+        olog_freetext_withheld=False,
     )
 
 
