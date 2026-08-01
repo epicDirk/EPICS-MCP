@@ -10,8 +10,9 @@ import logging
 import math
 import threading
 from collections.abc import Callable
+from typing import Literal, NamedTuple
 
-from p4p.client.thread import Context
+from p4p.client.thread import Context, Disconnected, Finished
 
 from epics_mcp.config import get_config
 from epics_mcp.errors import (
@@ -177,17 +178,101 @@ async def pv_put(name: str, value: object, timeout: float | None = None) -> None
         raise _classify_p4p_error(name, e, action="writing") from e
 
 
+#: Whether a channel was reachable during an operation. Defined HERE rather than in
+#: ``services.diagnose`` (which aliases it) because the live p4p connect is the ONLY authority for
+#: connected/disconnected, as ``diagnose`` itself states: the explanatory REST planes never
+#: overturn it. The import direction settles the placement anyway, diagnose imports from here.
+ConnectionState = Literal["connected", "disconnected", "unknown"]
+
+
+class _ChannelNotices:
+    """What a subscription observed ABOUT ITS CHANNEL, kept apart from the values it delivered.
+
+    Three p4p notification classes have to stay distinguishable, and the obvious ``isinstance``
+    order gets it wrong: ``Finished`` SUBCLASSES ``Disconnected`` (p4p ``_p4p.pyx``), so a plain
+    ``isinstance(exc, Disconnected)`` also swallows a stream the server ended normally, which is
+    the opposite claim. ``Finished`` is therefore tested first, and the order is pinned by test.
+    """
+
+    def __init__(self) -> None:
+        self.saw_value = False
+        self.saw_disconnect = False
+        self.saw_finished = False
+        self.errors: list[str] = []
+
+    def record(self, notice: Exception) -> None:
+        """Sort one p4p notification. Order matters, see the class docstring."""
+        if isinstance(notice, Finished):
+            self.saw_finished = True
+        elif isinstance(notice, Disconnected):
+            self.saw_disconnect = True
+        else:
+            # RemoteError, Cancelled, anything a future p4p adds. Recorded rather than raised: a
+            # monitor that collected values AND hit an error should report both, and until now
+            # this class of failure reached nobody at all (p4p only logs it without this flag).
+            self.errors.append(str(notice) or type(notice).__name__)
+
+    def state(self) -> ConnectionState:
+        """The honest verdict, claiming ``connected`` only where a value proves it.
+
+        A delivered value is positive proof the channel was open, so it outranks everything.
+        ``disconnected`` is claimed only for the clean never-arrived case; anything mixed
+        (an error, or a stream that finished without ever yielding a value) is ``unknown``
+        rather than a guess, the same withheld-over-wrong rule the REST planes follow.
+        """
+        if self.saw_value:
+            return "connected"
+        if self.saw_disconnect and not self.saw_finished and not self.errors:
+            return "disconnected"
+        return "unknown"
+
+    def detail(self) -> str | None:
+        """One sentence explaining a non-obvious verdict, or ``None`` when there is nothing to add.
+
+        Carried in the response rather than left to the guide, because the reader who most needs
+        it (an assistant looking at an empty event list) is exactly the reader least likely to
+        fetch a resource first.
+        """
+        if self.errors:
+            return "channel reported: " + "; ".join(self.errors)
+        state = self.state()
+        if state == "disconnected":
+            return (
+                "the channel never connected during this run, so an empty event list means "
+                "the PV was not reachable, NOT that it was quiet"
+            )
+        if state == "unknown":
+            if self.saw_finished:
+                return "the server ended the subscription before any value arrived"
+            return "no channel state was observed, so reachability is undetermined"
+        return None
+
+
+class MonitorOutcome(NamedTuple):
+    """One monitor run: the values it collected, whether the cap cut them, and the channel state."""
+
+    events: list[dict[str, object]]
+    truncated: bool
+    connection: ConnectionState
+    connection_detail: str | None
+
+
 async def pv_monitor(
     name: str,
     duration: float | None = None,
     max_events: int | None = None,
-) -> tuple[list[dict[str, object]], bool]:
-    """Monitor a PV for *duration* seconds, returning ``(events, truncated)``.
+) -> MonitorOutcome:
+    """Monitor a PV for *duration* seconds, returning ``(events, truncated, connection)``.
 
     Collects up to *max_events* events; ``truncated`` is True iff MORE than *max_events*
     actually arrived, detected by over-collecting exactly one extra "canary" event, then
     trimming it off (the same honest over-fetch as ``get_alarm_history``'s ``size=max+1``).
     A stream that delivers exactly *max_events* and then goes quiet is NOT truncated.
+
+    ``connection`` resolves the ambiguity of an EMPTY result (QA-31): zero events used to mean
+    either "the PV is quiet" or "the PV was never there", and ``get_pv_value`` contradicted this
+    tool on the second case by raising ``PVTimeoutError``. The channel state is subscribed for
+    rather than probed separately, so it describes THIS run rather than a second moment.
 
     Runs the p4p subscription in a background thread and uses
     ``threading.Event`` for clean cancellation.
@@ -205,6 +290,7 @@ async def pv_monitor(
     lock = threading.Lock()
     stop_event = threading.Event()
     error_holder: list[Exception] = []
+    notices = _ChannelNotices()
 
     def _monitor_thread() -> None:
         """Run in a worker thread, p4p monitor is synchronous."""
@@ -212,7 +298,18 @@ async def pv_monitor(
         def _on_value(value: object) -> None:
             if stop_event.is_set():
                 return
+            # With notify_disconnect below, p4p delivers channel STATE to this same callback as
+            # Exception instances. They are state, not data, and appending them would be the exact
+            # inversion this feature exists to avoid: p4p pushes one Disconnected() at SUBSCRIBE
+            # time (client/thread.py, "all subscriptions are inittially disconnected"), so a
+            # never-connected PV and a healthy one delivering its first value would BOTH answer
+            # total_events=1, destroying the very signal that distinguishes them today.
+            if isinstance(value, Exception):
+                with lock:
+                    notices.record(value)
+                return
             with lock:
+                notices.saw_value = True
                 # Over-collect by one: stop only at max_events+1, so a later `len > max_events`
                 # honestly distinguishes "the cap cut the stream" (truncated) from "exactly
                 # max_events arrived, then it went quiet" (complete). The canary is trimmed off
@@ -239,7 +336,10 @@ async def pv_monitor(
 
         sub = None
         try:
-            sub = ctxt.monitor(name, _on_value)
+            # notify_disconnect=True is what makes the channel state observable at all. Without it
+            # p4p only LOGS a disconnect or a RemoteError (client/thread.py) and the caller sees an
+            # empty result it cannot explain. The callback sorts state from data; see _on_value.
+            sub = ctxt.monitor(name, _on_value, notify_disconnect=True)
             stop_event.wait(timeout=duration)
         except TimeoutError:
             error_holder.append(
@@ -267,7 +367,7 @@ async def pv_monitor(
 
     # Honest truncation via the over-collect above: True only when the +1 canary was reached.
     truncated = len(collected) > max_events
-    return collected[:max_events], truncated
+    return MonitorOutcome(collected[:max_events], truncated, notices.state(), notices.detail())
 
 
 # ---------------------------------------------------------------------------

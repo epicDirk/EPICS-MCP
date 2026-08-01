@@ -109,7 +109,8 @@ async def crossplane_check(
         Field(
             description="Max per-display reachability contexts the PV-inventory explores (higher "
             "= more complete, slower; a large dataset like fbis takes ~60 s at the default). "
-            "Capped displays are reported as a lower bound in 'displays_incomplete'."
+            "Capped displays are reported as a lower bound in 'displays_incomplete'.",
+            ge=1,
         ),
     ] = DEFAULT_PV_CONTEXT_CAP,
     windows_paths: Annotated[
@@ -182,7 +183,8 @@ async def coverage_audit(
         ),
     ] = None,
     context_cap: Annotated[
-        int, Field(description="max per-display reachability contexts the PV-inventory explores")
+        int,
+        Field(description="max per-display reachability contexts the PV-inventory explores", ge=1),
     ] = DEFAULT_PV_CONTEXT_CAP,
     windows_paths: Annotated[
         bool, Field(description="resolve embedded <file> refs case-insensitively (Windows host)")
@@ -219,7 +221,8 @@ async def find_device(
     ] = "prefix",
     timeout: Annotated[float, Field(description="Live-read timeout in seconds")] = 5.0,
     context_cap: Annotated[
-        int, Field(description="Per-display macro-context cap (higher = more complete, slower)")
+        int,
+        Field(description="Per-display macro-context cap (higher = more complete, slower)", ge=1),
     ] = DEFAULT_PV_CONTEXT_CAP,
     windows_paths: Annotated[
         bool, Field(description="Resolve embedded <file> refs case-insensitively (Windows host)")

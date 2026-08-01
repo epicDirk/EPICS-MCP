@@ -41,6 +41,14 @@ operational knowledge (see the Knowledge Persistence Policy in `CLAUDE.md`).
   read/write, so a burst of monitors cannot starve the rest of the server into an apparent hang.
   Raise it only if operators legitimately need more simultaneous long monitors; the ceiling bounds
   monitors alone.
+- **An empty monitor result says WHY it is empty.** `monitor_pv` returns `connection`
+  (`connected` / `disconnected` / `unknown`) alongside the events, so zero events no longer reads
+  the same for a quiet PV and for one that was never reachable, which is what made this tool
+  contradict `get_pv_value` (it raises `PV_TIMEOUT` on the second case). `connected` is claimed
+  only where a delivered value proves it; a stream the server ended, or one that reported an
+  error, is `unknown` rather than a guess, and `connection_detail` then carries one sentence
+  saying what was seen. The state is subscribed for, not probed separately, so it describes the
+  same run as the events.
 - **Reads can be throttled (opt-in).** `EPICS_MCP_READ_RATE_LIMIT` (default 0 = off) caps REST reads
   per 60 s at the shared GET chokepoint; over the limit a read is DENIED
   (`ReadRateLimitError` → `READ_RATE_LIMIT_EXCEEDED`, its own code, never the write gates'

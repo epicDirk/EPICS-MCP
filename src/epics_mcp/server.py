@@ -372,23 +372,37 @@ async def monitor_pv(
     pv_name: Annotated[str, Field(description="EPICS PV name to monitor")],
     duration: Annotated[
         float,
+        # gt=0: this is a collection WINDOW, not a timeout. Zero would end the subscription
+        # before any update could arrive and answer with a successful empty result, which is
+        # the very ambiguity the connection field below exists to remove.
         Field(
             description="Duration in seconds to monitor (clamped to the server's "
-            "max_monitor_duration, default 60, EPICS_MCP_MAX_MONITOR_DURATION)"
+            "max_monitor_duration, default 60, EPICS_MCP_MAX_MONITOR_DURATION)",
+            gt=0,
         ),
     ] = 10.0,
     max_events: Annotated[
         int,
+        # ge=1: a non-positive cap is meaningless, it would empty a valid response and the client
+        # would then mislabel it. The same reason its four capped siblings carry, and here it is
+        # literal: min(0, max_monitor_events) is 0, so the stream is discarded and the answer
+        # reads exactly like a PV that had nothing to say.
         Field(
             description="Maximum events to collect (clamped to the server's max_monitor_events, "
-            "default 1000, EPICS_MCP_MAX_MONITOR_EVENTS)"
+            "default 1000, EPICS_MCP_MAX_MONITOR_EVENTS)",
+            ge=1,
+            le=100000,
         ),
     ] = 100,
 ) -> dict[str, object]:
     """Subscribe to PV changes for a given duration and return collected events.
 
     Each event carries the same best-effort metadata as get_pv_info
-    (alarm/timestamp/display/control/value_alarm/enum)."""
+    (alarm/timestamp/display/control/value_alarm/enum).
+
+    Also returns ``connection`` (connected/disconnected/unknown), so an empty ``events`` list
+    says which it is: a quiet PV, or one that was never reachable. When there is something to
+    explain, ``connection_detail`` carries one sentence saying what."""
     return await _monitor_pv(pv_name, duration, max_events)
 
 
@@ -454,7 +468,14 @@ async def find_channels(
     ],
     max_results: Annotated[
         int,
-        Field(description="Cap on returned channels (a broad glob can match a whole site)"),
+        # ge=1: same reason as the siblings, and here the empty response would be actively
+        # misleading. The service over-fetches by one to report `capped` honestly, so a cap of 0
+        # returns NO channels together with capped=true, i.e. "there is more" attached to nothing.
+        Field(
+            description="Cap on returned channels (a broad glob can match a whole site)",
+            ge=1,
+            le=100000,
+        ),
     ] = 500,
     timeout: Annotated[float, Field(description="Timeout in seconds")] = 5.0,
     has_properties: Annotated[

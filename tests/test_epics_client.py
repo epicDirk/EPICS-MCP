@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from p4p.client.thread import Cancelled, Disconnected, Finished, RemoteError
 
 import epics_mcp.services.epics_client as epics_client
 from epics_mcp.errors import EpicsConnectionError, EpicsError, PVNotFoundError, PVTimeoutError
@@ -704,11 +705,24 @@ class _FakeSub:
         pass
 
 
+def _deliver_initial_disconnect(cb: Any, notify_disconnect: bool) -> None:
+    """Reproduce the ONE p4p behaviour these doubles must not paper over.
+
+    ``p4p.client.thread.Subscription.__init__`` pushes a ``Disconnected()`` into the callback at
+    SUBSCRIBE time, unconditionally, commented "all subscriptions are inittially disconnected".
+    A double that skips it would let a monitor which counts notifications as events pass every
+    test here and still invert the signal against a real IOC, so every context below calls this.
+    """
+    if notify_disconnect:
+        cb(Disconnected())
+
+
 class _FakeMonitorContext:
     def __init__(self, value: object) -> None:
         self._value = value
 
-    def monitor(self, name: str, cb: Any) -> _FakeSub:
+    def monitor(self, name: str, cb: Any, notify_disconnect: bool = False) -> _FakeSub:
+        _deliver_initial_disconnect(cb, notify_disconnect)
         cb(self._value)  # deliver one event synchronously
         return _FakeSub()
 
@@ -723,7 +737,9 @@ async def test_monitor_format_failure_yields_none(monkeypatch: Any) -> None:
 
     monkeypatch.setattr(epics_client, "_format_value", _boom)
 
-    events, truncated = await epics_client.pv_monitor("X:Y", duration=0.2, max_events=1)
+    events, truncated, connection, _detail = await epics_client.pv_monitor(
+        "X:Y", duration=0.2, max_events=1
+    )
 
     # QA: the fallback event must DECLARE itself, a bare {"value": None} was
     # indistinguishable from a genuinely-None reading in the event count.
@@ -732,6 +748,9 @@ async def test_monitor_format_failure_yields_none(monkeypatch: Any) -> None:
     assert events[0]["pv_name"] == "X:Y"
     assert events[0]["value"] is None
     assert "extraction failed" in str(events[0]["note"])
+    # A value arrived, so the channel was open even though formatting it failed. The two are
+    # independent: a formatting bug on our side says nothing about the IOC.
+    assert connection == "connected"
 
 
 class _MultiEventContext:
@@ -741,7 +760,8 @@ class _MultiEventContext:
     def __init__(self, n: int) -> None:
         self._n = n
 
-    def monitor(self, name: str, cb: Any) -> _FakeSub:
+    def monitor(self, name: str, cb: Any, notify_disconnect: bool = False) -> _FakeSub:
+        _deliver_initial_disconnect(cb, notify_disconnect)
         for i in range(self._n):
             cb(float(i))  # _format_value is stubbed in the tests below
         return _FakeSub()
@@ -757,7 +777,9 @@ async def test_pv_monitor_flags_overflow_and_trims(monkeypatch: Any) -> None:
     )
     monkeypatch.setattr(epics_client, "get_context", lambda: _MultiEventContext(5))
 
-    events, truncated = await epics_client.pv_monitor("X:Y", duration=0.2, max_events=3)
+    events, truncated, _connection, _detail = await epics_client.pv_monitor(
+        "X:Y", duration=0.2, max_events=3
+    )
 
     assert len(events) == 3
     assert truncated is True
@@ -771,10 +793,110 @@ async def test_pv_monitor_exact_fill_is_not_truncated(monkeypatch: Any) -> None:
     )
     monkeypatch.setattr(epics_client, "get_context", lambda: _MultiEventContext(3))
 
-    events, truncated = await epics_client.pv_monitor("X:Y", duration=0.2, max_events=3)
+    events, truncated, _connection, _detail = await epics_client.pv_monitor(
+        "X:Y", duration=0.2, max_events=3
+    )
 
     assert len(events) == 3
     assert truncated is False
+
+
+# --- QA-31: the channel state a monitor observed, kept apart from the values it delivered ---
+
+
+class _NoticeContext:
+    """Deliver an arbitrary sequence of p4p notifications and/or values, in order."""
+
+    def __init__(self, *items: object) -> None:
+        self._items = items
+
+    def monitor(self, name: str, cb: Any, notify_disconnect: bool = False) -> _FakeSub:
+        _deliver_initial_disconnect(cb, notify_disconnect)
+        for item in self._items:
+            if isinstance(item, Exception) and not notify_disconnect:
+                continue  # p4p only forwards notifications when the flag is on
+            cb(item)
+        return _FakeSub()
+
+
+async def test_a_never_connected_channel_reports_disconnected_with_zero_events(
+    monkeypatch: Any,
+) -> None:
+    """QA-31's defect, at the layer that can actually observe it: nothing but the subscribe-time
+    Disconnected() arrives, so the empty event list gets a reason instead of being mistaken for
+    a quiet PV."""
+    monkeypatch.setattr(epics_client, "get_context", lambda: _NoticeContext())
+
+    outcome = await epics_client.pv_monitor("NO:SUCH:PV", duration=0.05, max_events=10)
+
+    assert outcome.events == []
+    assert outcome.connection == "disconnected"
+    assert "not reachable" in str(outcome.connection_detail)
+
+
+async def test_the_subscribe_time_disconnect_is_not_counted_as_an_event(monkeypatch: Any) -> None:
+    """RED PROOF for the inversion the roadmap entry warns about.
+
+    p4p pushes a Disconnected() at subscribe time even for a channel that connects immediately
+    afterwards. Appending notifications to ``collected`` (the naive reading of
+    notify_disconnect=True) makes a healthy single-value PV report total_events=2 and a
+    never-connected one report 1, so the count that distinguishes them today would be destroyed.
+    This asserts the healthy case still counts exactly its own value.
+    """
+    monkeypatch.setattr(
+        epics_client, "_format_value", lambda name, value: {"pv_name": name, "value": value}
+    )
+    monkeypatch.setattr(epics_client, "get_context", lambda: _NoticeContext(1.0))
+
+    outcome = await epics_client.pv_monitor("X:Y", duration=0.05, max_events=10)
+
+    assert outcome.events == [{"pv_name": "X:Y", "value": 1.0}]
+    assert outcome.connection == "connected"
+    assert outcome.connection_detail is None
+
+
+async def test_finished_is_not_read_as_disconnected(monkeypatch: Any) -> None:
+    """RED PROOF for the subclass trap. ``Finished`` SUBCLASSES ``Disconnected`` in p4p, so an
+    isinstance chain testing Disconnected first also swallows a stream the server ended normally
+    and would report it as "never reachable", which is a different and wrong claim. Withheld
+    (``unknown``) is the honest answer for a stream that finished without yielding anything."""
+    monkeypatch.setattr(epics_client, "get_context", lambda: _NoticeContext(Finished()))
+
+    outcome = await epics_client.pv_monitor("X:Y", duration=0.05, max_events=10)
+
+    assert outcome.connection == "unknown"
+    assert "ended the subscription" in str(outcome.connection_detail)
+
+
+@pytest.mark.parametrize("notice", [RemoteError("server said no"), Cancelled()])
+async def test_a_channel_error_reaches_the_caller_instead_of_only_the_log(
+    monkeypatch: Any, notice: Exception
+) -> None:
+    """Without notify_disconnect, p4p only LOGS a subscription RemoteError (client/thread.py),
+    so the caller saw an unexplained empty result. It is surfaced rather than raised: a monitor
+    that collected values AND hit an error should report both, and an unreachable PV is a normal
+    outcome for this tool, not a failure (the same rule diagnose_connection follows)."""
+    monkeypatch.setattr(epics_client, "get_context", lambda: _NoticeContext(notice))
+
+    outcome = await epics_client.pv_monitor("X:Y", duration=0.05, max_events=10)
+
+    assert outcome.connection == "unknown"
+    assert "channel reported" in str(outcome.connection_detail)
+
+
+async def test_a_value_outranks_a_later_disconnect(monkeypatch: Any) -> None:
+    """A PV that delivers and then drops was demonstrably connected. Positive proof outranks a
+    later notification, otherwise a mid-run reconnect would retroactively deny the readings the
+    caller is holding."""
+    monkeypatch.setattr(
+        epics_client, "_format_value", lambda name, value: {"pv_name": name, "value": value}
+    )
+    monkeypatch.setattr(epics_client, "get_context", lambda: _NoticeContext(1.0, Disconnected()))
+
+    outcome = await epics_client.pv_monitor("X:Y", duration=0.05, max_events=10)
+
+    assert len(outcome.events) == 1
+    assert outcome.connection == "connected"
 
 
 # --- K4 bulkhead: pv_monitor runs on a dedicated executor, not the shared default pool ---
@@ -791,8 +913,9 @@ async def test_pv_monitor_runs_on_dedicated_executor(monkeypatch: Any) -> None:
     captured: dict[str, str] = {}
 
     class _ThreadNameContext:
-        def monitor(self, name: str, cb: Any) -> _FakeSub:
+        def monitor(self, name: str, cb: Any, notify_disconnect: bool = False) -> _FakeSub:
             captured["thread"] = threading.current_thread().name
+            _deliver_initial_disconnect(cb, notify_disconnect)
             return _FakeSub()
 
     monkeypatch.setattr(epics_client, "get_context", lambda: _ThreadNameContext())

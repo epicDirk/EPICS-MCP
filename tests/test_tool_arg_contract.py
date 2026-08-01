@@ -243,3 +243,55 @@ async def test_retired_argument_names_are_gone_from_the_prose() -> None:
     assert not offenders, "a shipped surface still names a retired argument:\n" + "\n".join(
         offenders
     )
+
+
+# --- Guard 4: every integer argument carries a lower bound -------------------------------------
+
+
+def _numeric_variants(spec: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """The numeric branches of one property schema, unwrapping an ``X | None`` union."""
+    variants = spec.get("anyOf") or [spec]
+    return [v for v in variants if v.get("type") in {"integer", "number"}]
+
+
+def _has_lower_bound(variant: Mapping[str, Any]) -> bool:
+    return "minimum" in variant or "exclusiveMinimum" in variant
+
+
+async def test_every_integer_argument_has_a_lower_bound() -> None:
+    """QA-65, generalised past the one tool that reported it.
+
+    A cap of ``0`` does not fail: it succeeds and returns nothing, and an empty result is
+    indistinguishable from "the thing you asked about does not exist". Measured on the three
+    mechanisms this server has, all of which answer successfully at 0: ``min(0, max)`` in the
+    monitor, ``fetched[:0]`` in the ChannelFinder query (which also attaches ``capped=true`` to
+    an empty list, so the answer actively claims there is more), and ``seen_per_top >= 0`` in the
+    PV inventory, which marks every display capped and yields an empty inventory.
+
+    Written against the LIVE REGISTRY rather than a list of known tools, which is the whole point
+    (decision PY (a)): a guard comparing a literal to itself only watches the direction the code
+    does not grow in, and the entry this test comes from had been measured against ``server.py``
+    alone while four more tools are registered from ``display_tools.py``. Here a new tool is
+    covered on the day it is registered.
+
+    Deliberately integer-only for now: the ten ``float`` timeouts still lacking ``gt=0`` are a
+    DIFFERENT failure class (a zero timeout raises PVTimeoutError, an honest error, rather than
+    fabricating an empty success), tracked separately. Widen this to ``number`` once they are
+    fixed, and delete this paragraph with them.
+    """
+    offenders: list[str] = []
+    checked = 0
+    for name, schema in (await _input_schemas()).items():
+        for argument, spec in (schema.get("properties") or {}).items():
+            for variant in _numeric_variants(spec):
+                if variant.get("type") != "integer":
+                    continue
+                checked += 1
+                if not _has_lower_bound(variant):
+                    offenders.append(f"{name}.{argument}")
+    assert not offenders, (
+        "an integer argument accepts a non-positive value, which succeeds and returns an empty "
+        "result the caller cannot tell from 'nothing exists':\n  " + "\n  ".join(offenders)
+    )
+    # Non-empty floor, same reason as guard 2: a broken unwrap would make this vacuously green.
+    assert checked >= 5, f"only {checked} integer arguments found, the scan is probably broken"

@@ -44,11 +44,14 @@ from epics_mcp.services.checkers import (
     query_channels,
 )
 from epics_mcp.services.crossplane import _record_name
-from epics_mcp.services.epics_client import pv_get
+from epics_mcp.services.epics_client import ConnectionState, pv_get
 from epics_mcp.services.naming_client import NamingServiceClient
 
 # --- Enums (Literal so mypy checks exhaustiveness in the ``match`` below) ---
-State = Literal["connected", "disconnected", "unknown"]
+#: Aliased rather than restated: ``monitor_pv`` reports the same three states about the same
+#: channel, and two independent spellings of one vocabulary is how they start to drift apart.
+#: It lives next to the p4p connect because that is the sole authority for the verdict here.
+State = ConnectionState
 LikelyCause = Literal["healthy", "ioc_down", "name_typo", "unregistered", "indeterminate"]
 Confidence = Literal["confirmed", "likely", "indeterminate"]
 

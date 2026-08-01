@@ -37,8 +37,10 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   107 / 102 / 20 said five of the population reached a guard line; four of those five were
   miscounted into the population, and the fifth was credited with a SAME-NAMED test's execution in
   another file.
-* Unobserved polarities (direction A): 19 of 93 targets, plus one where neither polarity is
-  noticed and two that no test executes at all. They are declared below.
+* Unobserved polarities (direction A): 19 of 96 targets, plus one where neither polarity is
+  noticed and two that no test executes at all. They are declared below. (The denominator rose
+  from 93 with QA-31, which added three guard sites to ``epics_client``; the findings themselves
+  were only RE-LOCATED to their moved lines, so the numerator is unchanged and unreviewed.)
 
   The sweep counted 19 such targets and the table below has 17 rows, which is not a discrepancy:
   the key is ``module:line``, and one line can carry several targets, eight of those keys do.
@@ -124,7 +126,7 @@ _GUARD_POPULATION: dict[str, tuple[int, int]] = {
     "alarm_client.py": (6, 1),
     "archiver_client.py": (15, 6),
     "channelfinder_client.py": (16, 5),
-    "epics_client.py": (16, 2),
+    "epics_client.py": (19, 2),
     "naming_client.py": (2, 1),
     "olog_client.py": (19, 4),
 }
@@ -142,11 +144,14 @@ _UNOBSERVED: dict[str, str] = {
     "channelfinder_client.py:335": "find_channels list check, masked by its item check at :343",
     "channelfinder_client.py:473": "property name/value pair check (both halves)",
     "channelfinder_client.py:479": "equivalent mutant: a pure mypy narrowing, provably always true",
-    "epics_client.py:131": "PVNotFoundError branch of the gather dispatch",
-    "epics_client.py:451": "NTNDArray element_count",
-    "epics_client.py:461": "int-or-none column coercion",
-    "epics_client.py:490": "NTMatrix dim entries",
-    "epics_client.py:692": "NaN alarm field",
+    # The five epics_client rows moved with the QA-31 edit (+1 above pv_monitor, +100 below it)
+    # and were RE-LOCATED, not re-judged: each still names the same guard, verified against the
+    # surrounding code. This is the offset rot the comment above predicts, not a new finding.
+    "epics_client.py:132": "PVNotFoundError branch of the gather dispatch",
+    "epics_client.py:551": "NTNDArray element_count",
+    "epics_client.py:561": "int-or-none column coercion",
+    "epics_client.py:590": "NTMatrix dim entries",
+    "epics_client.py:792": "NaN alarm field",
     "olog_client.py:181": "lenient name filter inside an already-anchored entry",
     "olog_client.py:389": "attachment filename check",
     "olog_client.py:977": "source default before concatenation",
@@ -154,8 +159,8 @@ _UNOBSERVED: dict[str, str] = {
 
 # Neither polarity is noticed, and lines no test executes at all. Both are TEST GAPS at the
 # refusal path, not evidence that the check is removable: production input is not test input.
-_UNOBSERVED_EITHER_WAY: tuple[str, ...] = ("epics_client.py:133",)
-_NEVER_EXECUTED: tuple[str, ...] = ("epics_client.py:135", "epics_client.py:384")
+_UNOBSERVED_EITHER_WAY: tuple[str, ...] = ("epics_client.py:134",)
+_NEVER_EXECUTED: tuple[str, ...] = ("epics_client.py:136", "epics_client.py:484")
 
 _RERUN = (
     "re-run the audit: COVERAGE_CORE=ctrace COVERAGE_FILE=<scratch>/cov uv run pytest "

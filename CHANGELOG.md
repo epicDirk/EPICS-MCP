@@ -27,6 +27,16 @@ carry breaking changes).
   `--set EPICS_PVA_NAME_SERVERS=127.0.0.1:5075` is needed as well.
 - **`setup_epics_mcp`, a third MCP prompt.** The same walkthrough conversationally: it asks about
   each service plane in turn and ends by naming the `epics-init` command to run.
+- **`monitor_pv` says whether the channel was reachable.** A new `connection` field
+  (`connected` / `disconnected` / `unknown`) travels with the events, and `connection_detail`
+  adds one sentence whenever there is something to explain. Zero events used to be ambiguous
+  between "the PV was quiet" and "the PV was never there", and `get_pv_value` contradicted this
+  tool on the second case by raising `PV_TIMEOUT`, so the two disagreed about one fact.
+  `connected` is claimed only where a delivered value proves it; a stream the server ended, or
+  one that reported an error, is `unknown` rather than a guess. A subscription `RemoteError` now
+  reaches the caller as well, where before it only went to the log and left an unexplained empty
+  result. The state is subscribed for rather than probed separately, so it describes the same run
+  as the events. Purely additive: existing fields are unchanged.
 
 ### Removed
 
@@ -54,6 +64,16 @@ carry breaking changes).
 
 ### Changed
 
+- **Five capped arguments now reject a non-positive value instead of answering emptily.**
+  `monitor_pv.max_events`, `find_channels.max_results` and the `context_cap` of
+  `crossplane_check`, `coverage_audit` and `find_device` require `>= 1`, and `monitor_pv.duration`
+  requires `> 0`. A cap of `0` did not fail before: it succeeded and returned nothing, which a
+  client cannot tell from "the thing you asked about does not exist". `find_channels` was the
+  sharpest case, returning an empty channel list together with `capped: true`, so the answer
+  claimed there was more while showing none. **A client passing `0` today will now get a
+  validation error** rather than an empty result. The four sibling caps that already carried this
+  bound stated the reason at the call site; it now holds everywhere, watched by a test over the
+  live tool registry rather than a list, so a future tool is covered the day it is registered.
 - **`epics-crossplane --help` and `epics-coverage --help` now answer on a core-only install.** They
   used to report the missing display engine and exit `2` instead, so on any install from a package
   index, where that engine is never present, the first answer to `--help` was an instruction to

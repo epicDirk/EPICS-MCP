@@ -15,7 +15,7 @@ The full surface: every MCP tool grouped by plane, the standalone command-line t
 | `get_pv_value` | Read a single PV's current value (+ best-effort metadata) |
 | `get_pvs` | Batch-read multiple PVs in one call |
 | `get_pv_info` | Connection state, data type, alarm status, display/control limits |
-| `monitor_pv` | Subscribe to PV updates for a bounded duration |
+| `monitor_pv` | Subscribe to PV updates for a bounded duration; reports the channel `connection` so an empty result is readable |
 | `discover_pvs` | Probe a concrete PV name (wildcards need ChannelFinder) |
 | `set_pv_value` | Write a value to a PV, **gated off by default** (see Safety) |
 
