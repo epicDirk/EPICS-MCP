@@ -241,6 +241,21 @@ including, for a server-decided parameter, its **probed** semantics or an explic
 (see above); the operator guide is updated, and `.env.example` documents any new var. See
 `CONTRIBUTING.md`.
 
+**The same applies to CHANGED behaviour of an existing tool, and that half had to be learned.**
+Both this clause and `CONTRIBUTING.md` used to say only "new", and a wire-contract change slipped
+through the gap: `docs/tools.md` kept describing a tool whose refusal semantics had just changed
+(QA-33). A behaviour change is the more dangerous case, because a stale sentence about a tool that
+still exists reads as current. So: **enumerate every surface that describes the tool, do not
+recall them.** `git grep -n '<tool_name>'` over the tracked tree is the enumeration, and it must
+include the surfaces that TEACH a call rather than describe one, `src/epics_mcp/prompts.py`
+above all: a prompt that names an argument or a file kind the server now rejects hands the client
+an impossible plan, and it has done so twice (the `pv_names` rename, then QA-33).
+
+⚠️ **Do not expect the guards to catch this.** `docs/known-limits.md` already records that the tool
+table in `docs/tools.md` is unchecked, and `test_tool_arg_contract.py` pins argument NAMES, not
+semantics; its prose scan hardcodes a `.bob` example, so the very case that broke was invisible to
+it. The enumeration above is the check.
+
 ## Build-once
 
 The display-aware tools depend on `opi_navigation` via the `displays` **dependency group** (PEP

@@ -3,24 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from opi_navigation.pv_analysis import analyze_pv_inventory, channel_name
 
 from epics_mcp.config import get_config
+from epics_mcp.display_files import DISPLAY_SUFFIX
 from epics_mcp.errors import EpicsError
 from epics_mcp.paths import resolve_user_path
 from epics_mcp.services.epics_client import pv_get_batch
 
-#: The suffix a display file carries. The inventory reads NOTHING else: ``opi_navigation``'s
-#: ``find_bob_files`` walks the root and keeps a candidate only when ``suffix.lower()`` equals this,
-#: and every embed target is resolved against that already-collected set, so a file with any other
-#: suffix can never surface as an ``origin_file``. Measured, not read off the source: a ``.txt``
-#: holding valid display XML AND embedded by a ``.bob`` still never appears (and ``UPPER.BOB``
-#: does, which is why the comparison must fold case).
-#:
-#: Deliberately a local constant rather than an import of the engine's private ``_BOB_SUFFIX``;
-#: ``tests/test_validate.py`` pins the coupling against the real ``find_bob_files`` instead.
-_DISPLAY_SUFFIX = ".bob"
+#: ⚠ What this check and the engine agree on is NOT the file name. ``find_bob_files`` deliberately
+#: does not resolve symlinks, ``resolve_user_path`` here does, so a ``link.bob`` pointing at a
+#: ``.txt`` IS collected by the engine (under the link's own name) and is refused below. Refusing
+#: it stays correct for the OTHER reason: the lookup key ``rel`` is built from the resolved path
+#: too, so it could never match that entry, and the previous code answered empty after a full
+#: walk. Do not simplify the comment on the refusal to "the engine would ignore it".
+_DISPLAY_SUFFIX = DISPLAY_SUFFIX
 
 
 def _run_validate(file_path: str, displays_dir: str | None) -> tuple[list[str], bool]:
@@ -45,9 +44,9 @@ def _run_validate(file_path: str, displays_dir: str | None) -> tuple[list[str], 
     Two inputs are refused BEFORE the walk because each settles the answer alone: a *file_path*
     that is not a ``.bob`` (the inventory reads nothing else), and one that is not under the
     walked root (it can never match an ``origin_file``). Both used to be discovered AFTER a full
-    inventory run, i.e. after ~40 s on a large dataset, for an answer that was already fixed.
-    A ``.bob`` that simply declares no real channels is NOT one of these: that is a legitimate
-    empty result, not a refusal.
+    inventory run, i.e. after the better part of a minute on a large dataset, for an answer that
+    was already fixed. A ``.bob`` that simply declares no real channels is NOT one of these: that
+    is a legitimate empty result, not a refusal.
 
     Raises:
         EpicsError(INVALID_INPUT): file_path / displays_dir missing, wrong kind, not a
@@ -55,25 +54,35 @@ def _run_validate(file_path: str, displays_dir: str | None) -> tuple[list[str], 
         EpicsError(PATH_OUTSIDE_WORKSPACE): a path is outside the opt-in allowed_roots.
     """
     f = resolve_user_path(file_path, kind="file", label="file_path")
-    # Both refusals below happen BEFORE the walk, because both decide the answer on their own.
-    # The walk is the expensive half (measured: 40 s on a 284-display dataset, of which 0.1 s is
-    # finding the files) and it does not depend on file_path at all, so running it first meant
-    # waiting a minute for a result that was settled before the first file was opened. This is
-    # the order services/orchestration.py already takes: validate every user path, then work.
-    if f.suffix.lower() != _DISPLAY_SUFFIX:
-        found = f.suffix or "no suffix"
-        raise EpicsError(
-            f"file_path must be a {_DISPLAY_SUFFIX} display file (got {found}): {file_path}. "
-            f"The display inventory reads only {_DISPLAY_SUFFIX} files, so this one has no PVs "
-            f"to extract. To check a plain list of PVs, pass pv_names instead.",
-            error_code="INVALID_INPUT",
-        )
     if displays_dir:
         root = resolve_user_path(displays_dir, kind="dir", label="displays_dir")
     else:
         # No explicit root → walk the file's own directory, but boundary-check that
         # directory too (the path actually walked, not just the file itself).
         root = resolve_user_path(str(f.parent), kind="dir", label="displays_dir")
+    # Both refusals below happen BEFORE the walk, because both decide the answer on their own.
+    # The walk is the expensive half (measured 2026-08-01: 45 to 52 s over ten runs on a
+    # 284-display dataset, of which 0.1 s is finding the files) and it does not depend on
+    # file_path at all, so running it first meant waiting the better part of a minute for a
+    # result that was settled before the first file was opened.
+    #
+    # They sit AFTER both resolve_user_path calls, not between them: a refusal placed in the
+    # middle answers a caller whose displays_dir is ALSO bad with the suffix instead of the
+    # boundary error the previous release gave (measured: PATH_OUTSIDE_WORKSPACE became
+    # INVALID_INPUT). Validate every user path first, then decide, which is also the order
+    # services/orchestration.py takes.
+    if f.suffix.lower() != _DISPLAY_SUFFIX:
+        found = f.suffix or "no suffix"
+        # Name the RESOLVED path when it differs from what was passed: with a symlink the two
+        # disagree, and quoting the raw name beside the target's suffix reads as a contradiction
+        # ("got .txt: ...\link.bob").
+        shown = str(f) if f != Path(file_path) else file_path
+        raise EpicsError(
+            f"file_path must be a {_DISPLAY_SUFFIX} display file (got {found}): {shown}. "
+            f"The display inventory reads only {_DISPLAY_SUFFIX} files, so this call can only "
+            f"come back empty. To check a plain list of PVs, pass pv_names instead.",
+            error_code="INVALID_INPUT",
+        )
     try:
         rel = f.relative_to(root).as_posix()
     except ValueError as exc:

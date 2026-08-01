@@ -737,6 +737,9 @@ messages embed the full request URL, an internal host would leak into this file)
   `total: 0`, and that is a fact about the display, not a refusal. To check a plain list of PVs
   with no display involved, pass `pv_names` instead; supplying both makes the list win and the
   file path is not looked at.
+- **`coverage_audit` refuses "alarm plane, no tree named" with `INVALID_INPUT`.** Same shape as
+  above: the verdict follows from the arguments, so it is given before the display-PV walk rather
+  than after it. Name the tree (`alarm_config`); there is no correct default, they are site-specific.
 
 ## Acceptance: the questions this guide must answer
 

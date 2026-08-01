@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from epics_mcp.display_files import is_display_file
 from epics_mcp.presets import Preset
 
 
@@ -37,7 +38,7 @@ def compare_machine_state(
     real capability, the prompt would silently re-instruct the missing tool. Required → a mis-wired
     wrapper is a loud TypeError in a test, not a silent regression.
     """
-    if reference_file and display_tools_available:
+    if reference_file and is_display_file(reference_file) and display_tools_available:
         # S1-3: pass the dataset ROOT as displays_dir too, without it validate_pvs walks the
         # file's own directory and under-resolves embedded fragments (consistent with the tool's
         # own description).
@@ -45,6 +46,16 @@ def compare_machine_state(
             f'\n1. Extract PVs from "{reference_file}" using '
             f'validate_pvs(file_path="{reference_file}", displays_dir="<dataset ROOT>") '
             "(displays_dir = the project ROOT; without it embedded fragments under-resolve)\n"
+        )
+    elif reference_file and display_tools_available:
+        # QA-33: the tool now REFUSES a non-.bob file_path outright (INVALID_INPUT), where it used
+        # to answer an empty result. Naming it for, say, a CSV would teach a call that is certain
+        # to fail, and this prompt has been that surface once before (the pv_names rename). The
+        # display tools exist here, they just do not parse this KIND of file.
+        file_note = (
+            f'\n1. Read "{reference_file}" yourself and collect the PV names it references '
+            "(or ask the user for the PV list); validate_pvs reads .bob displays only and "
+            "refuses any other file\n"
         )
     elif reference_file:
         # Core-only: no MCP tool parses a .bob here (the .bob-parsing tool is display-gated and not

@@ -257,17 +257,31 @@ async def test_uppercase_bob_suffix_is_accepted_because_the_engine_accepts_it(
 
     Measured before this was written: a file named ``UPPER.BOB`` IS collected by the engine, so
     rejecting it would refuse a file the inventory happily reads. The naive ``endswith('.bob')``
-    is exactly the mutant this pins, and it fails here while every other test stays green.
+    is exactly the mutant this pins.
+
+    The file declares a CONCRETE channel, and the assertion is that channel. An earlier version
+    used the macro fragment and asserted ``total == 0``, which was worthless in the direction that
+    matters: 0 is what you get whether the file was READ or IGNORED, so it stayed green under a
+    mutant that made the engine case-sensitive. A non-empty expected value can only be produced by
+    actually reading the file.
     """
     root = tmp_path / "ds"
     root.mkdir()
     shouty = root / "UPPER.BOB"
-    shouty.write_text(_FRAGMENT, encoding="utf-8")
+    shouty.write_text(
+        '<display version="2.0.0"><name>U</name><widget type="textupdate">'
+        "<name>s</name><pv_name>SIM:PROBE-01:Val</pv_name></widget></display>",
+        encoding="utf-8",
+    )
 
-    # No displays_dir: the file's own directory is walked. The fragment's $(PRP) stays unbound, so
-    # nothing resolves and the honest answer is total 0, the point is that it is NOT a refusal.
-    result = await _validate_pvs(file_path=str(shouty))
-    assert result["total"] == 0
+    mock = AsyncMock(
+        return_value={"results": [{"pv_name": "SIM:PROBE-01:Val", "value": 1}], "errors": []}
+    )
+    with patch("epics_mcp.tools.validate.pv_get_batch", mock):
+        result = await _validate_pvs(file_path=str(shouty), displays_dir=str(root))
+
+    assert result["total"] == 1, "the .BOB was not read at all, so the case fold did not happen"
+    mock.assert_awaited_once_with(["SIM:PROBE-01:Val"], None)
 
 
 async def test_bob_outside_displays_dir_is_refused_without_running_the_inventory(
@@ -292,30 +306,88 @@ async def test_bob_outside_displays_dir_is_refused_without_running_the_inventory
         await _validate_pvs(file_path=str(outside), displays_dir=str(root))
 
     assert exc_info.value.error_code == "INVALID_INPUT"
+    assert "not under displays_dir" in str(exc_info.value), (
+        "any early INVALID_INPUT satisfies the two assertions above (a missing fixture file "
+        "raises one from resolve_user_path without ever reaching the code under test), so the "
+        "reason has to be asserted too"
+    )
     spy.assert_not_called()
 
 
-def test_the_engine_really_ignores_every_suffix_but_bob(tmp_path: Path) -> None:
-    """The COUPLING, against the real engine: our rule must be the engine's rule.
+async def test_a_bad_displays_dir_is_still_reported_as_such_for_a_non_bob_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The suffix refusal must not MASK a path-boundary failure of the other argument.
 
-    ``_DISPLAY_SUFFIX`` is a local constant, so nothing but this test stops the two from drifting
-    apart, and a drift is silent in the dangerous direction (we refuse a file the engine would
-    have read). Deliberately calls the genuine ``find_bob_files`` rather than restating its logic:
-    a test that re-implements the rule it checks proves only that the author is consistent.
+    Placed between the two ``resolve_user_path`` calls, the new check answered a caller whose
+    ``displays_dir`` was also bad with the suffix instead of the boundary error the previous
+    release gave: measured, ``PATH_OUTSIDE_WORKSPACE`` silently became ``INVALID_INPUT``, and it
+    named the wrong argument. Validating every user path first keeps both diagnoses intact.
+    """
+    import epics_mcp.config as config_module
+
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "notes.txt").write_text("not a display", encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.setenv("EPICS_MCP_ALLOWED_ROOTS", str(root))
+    config_module._config = None
+    try:
+        with pytest.raises(EpicsError) as exc_info:
+            await _validate_pvs(file_path=str(root / "notes.txt"), displays_dir=str(elsewhere))
+        assert exc_info.value.error_code == "PATH_OUTSIDE_WORKSPACE", (
+            "the suffix refusal is masking the displays_dir boundary error"
+        )
+        assert "displays_dir" in str(exc_info.value)
+    finally:
+        config_module._config = None
+
+
+def test_our_display_suffix_is_the_engines_own_constant() -> None:
+    """The COUPLING, nailed to the engine's own rule rather than to a sample of file names.
+
+    The first version of this guard wrote five names into a tmp directory and compared the
+    collected set. That is blind in the direction that matters: widening the engine to also accept
+    ``.opi`` leaves every one of those five names classified exactly as before, so we would start
+    refusing files the inventory reads and no test would notice.
+
+    Reading the engine's private constant is deliberate. A test may reach where production code
+    should not, and this is the only assertion that goes red for a widening. If the engine ever
+    replaces the constant with a set, the import fails loudly here, which is the correct outcome:
+    the refusal in ``_run_validate`` would then need rewriting anyway.
+    """
+    from opi_navigation.discovery import _BOB_SUFFIX
+
+    from epics_mcp.display_files import DISPLAY_SUFFIX
+
+    assert DISPLAY_SUFFIX == _BOB_SUFFIX, (
+        "the display-PV engine no longer selects files by this suffix; the refusal in "
+        "_run_validate now rejects files the inventory would read"
+    )
+
+
+def test_the_engine_really_ignores_every_suffix_but_bob(tmp_path: Path) -> None:
+    """The same coupling from the behaviour side: what the engine actually collects.
+
+    Complements the constant check above, which cannot see a change in HOW the suffix is compared
+    (a mutant making ``find_bob_files`` case-sensitive keeps the constant equal). Deliberately
+    calls the genuine ``find_bob_files`` rather than restating its logic: a test that
+    re-implements the rule it checks proves only that the author is consistent.
     """
     from opi_navigation.discovery import find_bob_files
 
-    from epics_mcp.tools.validate import _DISPLAY_SUFFIX
+    from epics_mcp.display_files import DISPLAY_SUFFIX
 
-    for name in ("kept.bob", "KEPT2.BOB", "skipped.txt", "skipped.bob.bak", "no_suffix"):
+    for name in ("kept.bob", "KEPT2.BOB", "skipped.txt", "skipped.opi", "skipped.bob.bak", "x"):
         (tmp_path / name).write_text(_FRAGMENT, encoding="utf-8")
 
     collected = set(find_bob_files(tmp_path))
     assert collected == {"kept.bob", "KEPT2.BOB"}, (
-        "the engine's file selection changed; _DISPLAY_SUFFIX and the refusal in _run_validate "
+        "the engine's file selection changed; DISPLAY_SUFFIX and the refusal in _run_validate "
         f"have to follow it (collected: {sorted(collected)})"
     )
-    assert all(Path(name).suffix.lower() == _DISPLAY_SUFFIX for name in collected)
+    assert all(Path(name).suffix.lower() == DISPLAY_SUFFIX for name in collected)
 
 
 async def test_the_refusal_reaches_a_client_over_the_wire(tmp_path: Path) -> None:

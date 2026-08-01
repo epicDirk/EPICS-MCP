@@ -43,7 +43,10 @@ _READONLY = ToolAnnotations(
 async def validate_pvs(
     pv_names: Annotated[
         list[str] | None,
-        Field(description="List of PV names to validate"),
+        Field(
+            description="List of PV names to validate. Takes precedence: supply this together "
+            "with file_path and the list wins, the file is not looked at (and not refused)."
+        ),
     ] = None,
     file_path: Annotated[
         str | None,

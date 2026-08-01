@@ -138,14 +138,19 @@ def build_coverage_report(request: CoverageRequest) -> CoverageReport:
     """
     # S5-7: walk the canonicalized path resolve_user_path returns, not the raw request string.
     displays_dir = resolve_user_path(request.displays_dir, kind="dir", label="displays_dir")
+    # The checkers are constructed BEFORE the index walk, because one of them refuses outright:
+    # build_alarm_checker raises INVALID_INPUT when the alarm plane is requested without naming a
+    # tree. Built afterwards, that refusal arrived only once the walk had spent the better part of
+    # a minute, for a verdict fixed by the arguments alone. Same defect QA-33 removed from
+    # validate.py, in the sibling tool. Construction is config-only, no network call happens here.
+    channelfinder = build_cf_checker(request.query_channelfinder)
+    archived = build_archiver_checker(request.query_archiver)
+    alarmed = build_alarm_checker(request.query_alarm, request.alarm_config)
     index_rows, context_capped, glob_capped_count = analyze_display_index(
         displays_dir,
         context_cap=request.context_cap,
         windows_paths=request.windows_paths,
     )
-    channelfinder = build_cf_checker(request.query_channelfinder)
-    archived = build_archiver_checker(request.query_archiver)
-    alarmed = build_alarm_checker(request.query_alarm, request.alarm_config)
     return audit_coverage(
         index_rows,
         scope=request.scope,

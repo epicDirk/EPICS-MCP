@@ -74,7 +74,17 @@ carry breaking changes).
   **A client that passed a non-`.bob` path today received a successful `total: 0`, and will now
   get an error.** The suffix comparison folds case, so `UPPER.BOB` is still a display; and a
   genuine `.bob` that declares no real `ca`/`pva` channels is unchanged, that stays an honest
-  `total: 0`, not a refusal.
+  `total: 0`, not a refusal. Passing `pv_names` as well makes the list win, and the file path is
+  neither read nor refused.
+- **`coverage_audit` reports a missing alarm tree before doing the work, not after.** Asking for
+  the alarm plane without naming a tree (`alarm_config`) was already an `INVALID_INPUT`, but the
+  refusal arrived only once the display-PV walk had finished, tens of seconds on a large dataset,
+  for a verdict the arguments alone decide. Same defect as the `validate_pvs` one above, in the
+  sibling tool. The error itself is unchanged.
+- **The `compare_machine_state` prompt no longer suggests `validate_pvs` for a non-display file.**
+  With a `reference_file` such as a CSV or a JSON snapshot it now tells the client to read the file
+  itself, because naming the tool would hand over a call the server is now certain to refuse. A
+  `.bob` reference file (in any capitalisation) is unaffected and still uses the tool.
 - **Five capped arguments now reject a non-positive value instead of answering emptily.**
   `monitor_pv.max_events`, `find_channels.max_results` and the `context_cap` of
   `crossplane_check`, `coverage_audit` and `find_device` require `>= 1`, and `monitor_pv.duration`

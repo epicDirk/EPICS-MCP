@@ -140,6 +140,37 @@ async def test_coverage_passes_canonical_displays_dir_to_walker(
     assert displays == Path(raw).resolve()
 
 
+async def test_coverage_refuses_a_missing_alarm_tree_without_running_the_walk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """QA-33's defect class, in the sibling tool: refuse first, then do the expensive work.
+
+    ``build_alarm_checker`` rejects "alarm plane requested, no tree named" outright. Constructed
+    AFTER the display-PV walk, that refusal arrived only once the walk had spent the better part
+    of a minute on a large dataset, for a verdict the arguments alone decide. Asserted on the
+    cause (the walker was never called), not on elapsed time, so it cannot pass by getting faster.
+    """
+    from unittest.mock import Mock, patch
+
+    displays = _setup(tmp_path)
+    monkeypatch.setenv("EPICS_MCP_ALARM_URL", "http://alarm.invalid:8081")
+    import epics_mcp.config as config_module
+
+    config_module._config = None
+    spy = Mock(side_effect=AssertionError("the display walk must not run before the refusal"))
+    try:
+        with (
+            patch("epics_mcp.services.orchestration.analyze_display_index", spy),
+            pytest.raises(EpicsError) as exc_info,
+        ):
+            await _coverage_audit(str(displays), query_alarm=True)
+        assert exc_info.value.error_code == "INVALID_INPUT"
+        assert "alarm" in str(exc_info.value).lower()
+        spy.assert_not_called()
+    finally:
+        config_module._config = None
+
+
 def test_cli_coverage_rejects_missing_dir(tmp_path: Path) -> None:
     """A non-existent displays directory exits 2 with an error on stderr (no join)."""
     rc = main(["--displays", str(tmp_path / "nope")])

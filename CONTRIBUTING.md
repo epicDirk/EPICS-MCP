@@ -40,6 +40,11 @@ when the package is absent, so the core suite stays green.
   cannot see is written down in [docs/known-limits.md](docs/known-limits.md) sections 9 and 10.
 - New behaviour has a test; new tools/config are documented in `README.md` (the resource
   URIs are drift-checked against the server by a test).
+- **Changed** behaviour of an existing tool carries the same documentation duty as a new one, and
+  it is the easier one to miss: a stale sentence about a tool that still exists reads as current.
+  Enumerate the surfaces with `git grep` over the tracked tree, do not recall them, and include the ones that TEACH a
+  call (`src/epics_mcp/prompts.py`) rather than describe one. Rationale and the measured miss:
+  `CLAUDE.md`, "Definition of Done (doc-sync)".
 - New operational knowledge (a service/IOC recipe, an endpoint, an error signature) lands in the
   operator guide (`src/epics_mcp/operator_guide.md`), not just a commit body. See the Knowledge
   Persistence Policy in `CLAUDE.md`. A new tool must appear in the guide's tool inventory, any new

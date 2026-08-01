@@ -36,6 +36,42 @@ def test_compare_machine_state_without_file() -> None:
     assert "ask the user" in result.lower() or "PV list" in result
 
 
+@pytest.mark.parametrize("reference_file", ["expected_state.csv", "snapshot.json", "notes"])
+def test_compare_machine_state_does_not_teach_validate_pvs_for_a_non_display(
+    reference_file: str,
+) -> None:
+    """QA-33 follow-up: the prompt must not name a call the server is CERTAIN to refuse.
+
+    Since ``validate_pvs`` refuses a non-``.bob`` ``file_path`` outright, teaching it for a CSV or
+    a snapshot hands the client an impossible plan, the same failure this prompt had once before
+    (the ``names`` to ``pv_names`` rename, see the changelog). The display tools ARE registered
+    here, they just do not parse this kind of file, so the fallback has to be the read-it-yourself
+    branch rather than the core-only wording about a missing tool.
+    """
+    result = compare_machine_state(
+        "MPS:", reference_file=reference_file, display_tools_available=True
+    )
+    assert "validate_pvs(" not in result, (
+        f"the prompt teaches a validate_pvs call for {reference_file!r}, which the tool refuses"
+    )
+    assert reference_file in result, "the file must still be part of the plan"
+    assert "yourself" in result
+
+
+@pytest.mark.parametrize("reference_file", ["status.bob", "STATUS.BOB"])
+def test_compare_machine_state_still_teaches_validate_pvs_for_a_display(
+    reference_file: str,
+) -> None:
+    """The negative control for the test above: a display, in either case, keeps the tool path.
+
+    Without this, dropping the branch entirely would look like a fix.
+    """
+    result = compare_machine_state(
+        "MPS:", reference_file=reference_file, display_tools_available=True
+    )
+    assert f'validate_pvs(file_path="{reference_file}"' in result
+
+
 def test_compare_machine_state_core_only_omits_validate_pvs() -> None:
     # Guard B1 (S26/N05): core-only (no [displays] extra) the reference_file path must NOT instruct
     # the LLM to call the display-gated validate_pvs tool, that would be an impossible plan.

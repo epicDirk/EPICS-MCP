@@ -57,7 +57,7 @@ group. These four tools are therefore unavailable in a published install today.)
 
 | Tool | Description |
 |------|-------------|
-| `validate_pvs` | Extract the macro-resolved PVs of a `.bob` display and check their connectivity |
+| `validate_pvs` | Extract the macro-resolved PVs of a `.bob` display and check their connectivity. A `file_path` that is not a `.bob` (case-folded, so `UPPER.BOB` is one), or that lies outside `displays_dir`, is refused immediately with `INVALID_INPUT`: the inventory reads `.bob` files only, so such a call can only come back empty, and it used to take a full inventory walk to say so. A genuine `.bob` declaring no real channels still answers `total: 0`, which is a fact about the display, not a refusal. Passing `pv_names` as well makes the list win and the file path is not looked at |
 | `crossplane_check` | PV provenance: display PVs ↔ e3 IOC `st.cmd` (+ optional `.db`) ↔ Naming (read-only) |
 | `coverage_audit` | Cross-plane coverage matrix: delivered PVs (ChannelFinder) ↔ displays ↔ archive ↔ alarm; blind spots + critical-uncovered |
 | `find_device` | Which operator screens show a device, its live channel values (capped), and the serving IOC |
