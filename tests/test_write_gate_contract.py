@@ -102,6 +102,7 @@ import pytest
 import epics_mcp.config as config_module
 import epics_mcp.olog_safety as olog_safety_module
 import epics_mcp.safety as safety_module
+import epics_mcp.services._http as http_module
 import epics_mcp.services.checkers_olog as checkers_olog
 from epics_mcp.config import EpicsConfig
 from epics_mcp.errors import (
@@ -109,6 +110,7 @@ from epics_mcp.errors import (
     OlogWriteDeniedError,
     PVWriteDeniedError,
     RateLimitError,
+    ReadRateLimitError,
 )
 from epics_mcp.olog_safety import OlogWriteGate
 from epics_mcp.safety import SafetyLayer
@@ -212,14 +214,21 @@ def _olog_config(
     olog_write_logbooks: str = "Ops",
     olog_write_rate_limit: int = 5,
     olog_attach_max_bytes: int = 1024,
+    read_rate_limit: int = 0,
 ) -> EpicsConfig:
-    """Olog writes enabled against a loopback sandbox; every value synthetic."""
+    """Olog writes enabled against a loopback sandbox; every value synthetic.
+
+    ``read_rate_limit`` is the READ throttle and stays at its production default (0 = disabled)
+    unless a test arms it deliberately: it is not a write gate, it is the one pre-gate refusal
+    this module holds against contract point 4.
+    """
     return EpicsConfig(
         olog_url=olog_url,
         allow_olog_write=allow_olog_write,
         olog_write_logbooks=olog_write_logbooks,
         olog_write_rate_limit=olog_write_rate_limit,
         olog_attach_max_bytes=olog_attach_max_bytes,
+        read_rate_limit=read_rate_limit,
         olog_write_user="epics-pv-logbook-svc",
         olog_write_password="pw",
     )
@@ -603,6 +612,79 @@ async def test_round_trip_write_is_gate_denied_before_any_read(
     assert read_excinfo.value.error_code == "OLOG_HTTP_404", (
         f"{tool}: the permitted call must get past the gate and perform the read"
     )
+
+
+@pytest.mark.parametrize(
+    ("tool", "call"),
+    [
+        (
+            "add_log_attachment",
+            lambda: checkers_olog.query_olog_add_attachment("17", attachments=["/probe.bob"]),
+        ),
+        ("update_log_entry", lambda: checkers_olog.query_olog_update("17", title="probe")),
+    ],
+)
+async def test_pre_gate_refusal_is_coded_apart_and_writes_no_audit_line(
+    tool: str,
+    call: Callable[[], Awaitable[object]],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The behavioural half of contract point 4, held against today's pre-gate refusal.
+
+    A refusal can happen BEFORE a gate is consulted. Until 2026-08-01 the site this test used was
+    the whole-mode precondition; the redaction removal deleted it (decision PI) and with it the
+    behavioural pin, while the contract kept making the promise and this module's prose kept
+    claiming it was pinned. The site that remains is the READ THROTTLE, reached from the round-trip
+    read these two tools perform after the gate's env + URL checks but BEFORE its verdict on the
+    target's logbooks. Two claims:
+
+    1. It reports ``READ_RATE_LIMIT_EXCEEDED``, its OWN code, never the write gates'
+       ``RATE_LIMIT_EXCEEDED``, while staying catchable as ``RateLimitError``.
+    2. It writes **no audit line at all**. That is what makes its own code NECESSARY rather than
+       cosmetic, and it is the promise the contract scopes ("a refusal raised before the gate is
+       consulted writes no audit line").
+
+    A POSITIVE CONTROL runs first, through the same ``caplog`` at the same level: a real gate DENY
+    on the same logger IS captured. Without it, "no DENY line" would also pass if the audit logger
+    were simply not being captured, and ``caplog.set_level`` is therefore set EXPLICITLY here
+    instead of relying on the root level.
+
+    RED-PROOF (mutant): give ``ReadRateLimitError`` the write gates' ``RATE_LIMIT_EXCEEDED`` back
+    -> claim 1 fails; add a ``get_olog_safety()._audit_deny("OLOG_WRITE_DENIED", caller)`` beside
+    the throttle's raise -> claim 2 fails.
+    """
+    caplog.set_level(logging.INFO, logger=_OLOG_AUDIT_LOGGER)
+
+    # --- positive control: this logger, at this level, DOES capture a gate DENY ---
+    control_gate, fire_control = _arm_olog_env_off()
+    with pytest.raises(OlogWriteDeniedError):
+        fire_control()
+    assert [r for r in caplog.records if "event=DENY" in r.message], (
+        "the audit logger is not being captured, the no-audit assertion below could never go red"
+    )
+    assert control_gate is not None
+    caplog.clear()
+
+    # --- the pre-gate refusal itself: an armed read throttle with its single token spent ---
+    config_module._config = _olog_config(read_rate_limit=1)
+    olog_safety_module._olog_safety = None  # rebuild the gate from this config
+    http_module.reset_read_throttle()
+    try:
+        http_module.get_read_throttle().check()  # spend the only token, the next read is refused
+
+        with pytest.raises(ReadRateLimitError) as excinfo:
+            await call()
+
+        assert excinfo.value.error_code == "READ_RATE_LIMIT_EXCEEDED", tool
+        assert excinfo.value.error_code != "RATE_LIMIT_EXCEEDED"
+        assert isinstance(excinfo.value, RateLimitError), tool  # still catchable as the family
+        assert caplog.records == [], (
+            f"{tool}: a pre-gate refusal must leave NO audit record, got "
+            f"{[r.message for r in caplog.records]}"
+        )
+    finally:
+        # A throttle of 1 leaking into the next test would refuse every read in this session.
+        http_module.reset_read_throttle()
 
 
 # ======================================================================================
