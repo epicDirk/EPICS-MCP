@@ -40,6 +40,41 @@ SERVER_COMMAND = "epics-mcp"
 #: list, so a new preset cannot introduce a placeholder this fails to see.
 _PLACEHOLDER_RE = re.compile(r"<[a-z][a-z0-9-]*>")
 
+#: The prefix ``EpicsConfig`` binds to (``model_config = {"env_prefix": "EPICS_MCP_"}``).
+_CONFIG_PREFIX = "EPICS_MCP_"
+
+#: The EPICS search-path variables the doctor reads DIRECTLY from ``os.environ`` rather than
+#: through ``EpicsConfig``, because they belong to the EPICS client libraries and carry no
+#: ``EPICS_MCP_`` prefix. Mirrors ``doctor._SEARCH_LIST_VARS`` plus the two auto-search switches.
+#: Listed rather than matched on a prefix so that transport tuning a preset says nothing about
+#: (ports, buffer sizes) is left alone: probing a preset should answer "is THIS configuration
+#: sound", not "is this machine sound after I stripped it".
+_SEARCH_VARS = frozenset(
+    {
+        "EPICS_PVA_ADDR_LIST",
+        "EPICS_CA_ADDR_LIST",
+        "EPICS_PVA_NAME_SERVERS",
+        "EPICS_CA_NAME_SERVERS",
+        "EPICS_PVA_AUTO_ADDR_LIST",
+        "EPICS_CA_AUTO_ADDR_LIST",
+    }
+)
+
+#: The variables whose presence ENABLES a REST plane, named explicitly rather than matched on a
+#: ``_URL`` suffix. The suffix looks tempting and is wrong: ``EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST``
+#: carries it and enables nothing. Used to tell a preset that probing can confirm something from
+#: one where the doctor would have nothing to do.
+REST_PLANE_VARS = frozenset(
+    {
+        "EPICS_MCP_CHANNELFINDER_URL",
+        "EPICS_MCP_ARCHIVER_URL",
+        "EPICS_MCP_ARCHIVER_RETRIEVAL_URL",
+        "EPICS_MCP_ALARM_URL",
+        "EPICS_MCP_NAMING_URL",
+        "EPICS_MCP_OLOG_URL",
+    }
+)
+
 #: Loopback-only PV search, the posture ``epics-doctor`` reports as ``localhost-isolated``. Held
 #: once because three of the four presets open with it, and because getting it WRONG is silent:
 #: EPICS defaults its auto-address search to ON, so omitting the two ``*_AUTO_ADDR_LIST`` lines
@@ -150,6 +185,38 @@ def with_overrides(env: Mapping[str, str], overrides: Mapping[str, str]) -> dict
     merged = dict(env)
     merged.update(overrides)
     return merged
+
+
+def configures_a_rest_plane(env: Mapping[str, str]) -> bool:
+    """True when *env* enables at least one plane the doctor can identify.
+
+    A preset that enables none (``sandbox``, ``ioc-only``) leaves the doctor with nothing to
+    verify unless it is also given a PV to read: the live plane without ``--probe-pv`` reports its
+    posture and makes no network call at all. Callers use this to say so out loud instead of
+    printing a clean report that confirms nothing.
+    """
+    return any(name in REST_PLANE_VARS and value for name, value in env.items())
+
+
+def stale_config_vars(environ: Iterable[str]) -> list[str]:
+    """Return the names in *environ* that configure THIS server, sorted.
+
+    WHY this exists, and it is the whole correctness of probing a preset. ``epics-doctor`` reads
+    the process environment, never a file, so probing a preset means putting the preset INTO the
+    environment first. Merely adding it is not enough: a variable the caller already exported and
+    the preset does not mention would survive and be probed as though it were part of the preset.
+    That is not hypothetical, it is the normal case for anyone who already runs this server, and
+    the resulting report would describe a configuration that exists nowhere, mixing half the
+    preset with half the shell.
+
+    So the caller REMOVES these first, then applies the preset. The set is everything
+    ``EpicsConfig`` binds plus the EPICS search-path variables the doctor reads directly. Transport
+    tuning outside both (ports, buffer sizes) is deliberately left in place, because the question
+    is whether this CONFIGURATION is sound, not whether the machine is.
+    """
+    return sorted(
+        name for name in environ if name.startswith(_CONFIG_PREFIX) or name in _SEARCH_VARS
+    )
 
 
 def render_client_config(env: Mapping[str, str]) -> str:
