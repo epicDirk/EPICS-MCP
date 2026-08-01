@@ -125,6 +125,29 @@ class TestWriteGate:
         gate = OlogWriteGate(_write_config())
         gate.check_write_allowed(["Ops"])  # must not raise
 
+    def test_env_denial_details_name_what_the_caller_already_knew(self) -> None:
+        """The env denial's ``details`` follows the caller's knowledge, not the method split.
+
+        Splitting the env + URL checks into ``check_write_env_and_url`` (2026-08-01, so the
+        round-tripping tools can deny BEFORE their pre-write read) reshaped this payload for EVERY
+        caller, including ``create_log_entry``, whose gate that change was not about. No test and
+        no doc read the field, so nothing went red. Both shapes are pinned here.
+
+        RED-PROOF: drop the ``logbooks`` argument of ``check_write_env_and_url`` again, and the
+        create half of this test fails.
+        """
+        gate = OlogWriteGate(_write_config(allow_olog_write=False))
+
+        with pytest.raises(OlogWriteDeniedError) as create_denial:
+            gate.check_write_allowed(["Ops"])
+        assert create_denial.value.details == {"logbooks": ["Ops"]}
+
+        # A round-tripping caller has NOT read its target yet, so it names itself instead: the
+        # target's logbooks are exactly the thing this early denial refuses to go and fetch.
+        with pytest.raises(OlogWriteDeniedError) as round_trip_denial:
+            gate.check_write_env_and_url("add_log_attachment")
+        assert round_trip_denial.value.details == {"caller": "add_log_attachment"}
+
 
 # ======================================================================================
 # OlogWriteGate: test-server URL boundary (the critical check)

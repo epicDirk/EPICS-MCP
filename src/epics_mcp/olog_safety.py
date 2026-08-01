@@ -24,8 +24,9 @@ PV write path is never touched: three things diverge deliberately:
   constructs and denies at runtime. NOT an inverse (neither is fail-open), the shape is a
   deliberate per-surface choice; never describe either gate as "allow all on empty".
 * **Metadata-only audit.** The PV audit logs old/new VALUES; the Olog audit must NEVER log the
-  ``title``/``description`` free text (that would route write around the READ redaction). Only
-  logbook names, level, title LENGTH, entry id, and the service-account owner are recorded.
+  ``title``/``description`` free text: an audit file is a SEPARATE and longer-lived channel than
+  the answer handed to one caller, and a person can be named in either field. Only logbook names,
+  level, title LENGTH, entry id, and the service-account owner are recorded.
 """
 
 from __future__ import annotations
@@ -111,7 +112,9 @@ class OlogWriteGate:
     # Public API
     # ------------------------------------------------------------------
 
-    def check_write_env_and_url(self, caller: str = "create_log_entry") -> None:
+    def check_write_env_and_url(
+        self, caller: str = "create_log_entry", logbooks: list[str] | None = None
+    ) -> None:
         """The two write checks that need NO logbook knowledge: env gate + test-server URL boundary.
 
         Split out for the round-tripping callers (``add_log_attachment`` / ``update_log_entry``):
@@ -120,14 +123,23 @@ class OlogWriteGate:
         that read (no HTTP round-trip, no entry-existence oracle, for a write the gate rejects).
         :meth:`check_write_preconditions` calls this too, so the checks and their audit lines stay
         the same in every path. Each failing check audits DENY before the raise.
+
+        ``logbooks`` is what the caller ALREADY knows, and it exists so that splitting this method
+        out did not silently reshape a denial the split was never about: the create path passes its
+        target list, so its env denial keeps carrying ``{"logbooks": ...}`` in ``details`` exactly
+        as before. The round-tripping callers pass nothing and get ``{"caller": ...}``, because at
+        this point the target's logbooks are precisely what has not been read yet.
         """
         # 1. Environment gate
         if not self._config.allow_olog_write:
+            env_details: dict[str, object] = (
+                {"logbooks": logbooks} if logbooks is not None else {"caller": caller}
+            )
             self._audit_deny("OLOG_WRITE_DENIED", caller)
             raise OlogWriteDeniedError(
                 "Olog writes are disabled. Set EPICS_MCP_ALLOW_OLOG_WRITE=true to enable "
                 "(ALLOW_PV_WRITE is a separate gate and stays off).",
-                details={"caller": caller},
+                details=env_details,
             )
 
         # 2. Test-server URL boundary (the critical check, prevents an accidental production write)
@@ -161,8 +173,9 @@ class OlogWriteGate:
             )
 
         # 1. + 2. Environment gate and test-server URL boundary (shared with the round-trip
-        #    callers, see check_write_env_and_url).
-        self.check_write_env_and_url(caller)
+        #    callers, see check_write_env_and_url). The logbooks ride along so the env denial
+        #    keeps the details shape this path had before the two checks were split out.
+        self.check_write_env_and_url(caller, logbooks)
 
         # 3. Logbook allowlist (empty allowlist = deny-all at runtime; the PV pattern is also
         #    fail-closed on empty but in a DIFFERENT shape, refuse-to-start, not allow-all;
@@ -251,7 +264,7 @@ class OlogWriteGate:
         """Log a completed (ALLOW) Olog write. Metadata only, NEVER title/description free text.
 
         ``owner`` is the write service-account name from config (the Principal the SERVER records
-        as owner, not the redacted response, which drops owner). ``attachment_count``/
+        as owner, read from config, not parsed back out of the response). ``attachment_count``/
         ``attachment_bytes`` (OA1) are COUNTS/SIZES only, never a filename, which is author free
         text
         (a person can be named in it); they are appended only for an upload, so a plain write's
@@ -317,10 +330,11 @@ class OlogWriteGate:
            plain-http Basic-auth write to a real server would expose the credentials, see
            :func:`~epics_mcp.services._http.is_https_url`).
 
-        The hardened host extraction lives in :func:`~epics_mcp.services._http.url_host` and is
-        shared with the Olog READ redaction, the PRIMITIVE is shared, this POLICY is not. Note the
-        read side must NOT reuse this method: it returns True for an allowlisted REMOTE host too
-        (step 3), which as a read predicate would surface a production logbook un-redacted.
+        The hardened host extraction lives in :func:`~epics_mcp.services._http.url_host`, the only
+        parser this boundary trusts. What this method expresses is the WRITE policy and nothing
+        else: it returns True for an allowlisted REMOTE host too (step 3), so it is never the
+        answer to "is this a local test server", which is
+        :func:`~epics_mcp.services._http.is_loopback_url`.
         """
         url = self._config.olog_url
         if url_host(url) is None:  # SEC-2: unparseable → fail closed, allowlist cannot override
