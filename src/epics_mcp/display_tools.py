@@ -28,7 +28,7 @@ from epics_mcp.tool_errors import translate_epics_errors
 from epics_mcp.tools.coverage_audit import _coverage_audit
 from epics_mcp.tools.crossplane import _crossplane_check
 from epics_mcp.tools.find_device import _find_device
-from epics_mcp.tools.validate import _validate_pvs
+from epics_mcp.tools.validate import PvView, _validate_pvs
 
 # All four display tools share the same read-only, side-effect-free posture.
 _READONLY = ToolAnnotations(
@@ -53,12 +53,26 @@ async def validate_pvs(
         Field(
             description="Path to a .bob file. Extracts the concrete, macro-resolved "
             "ca/pva channels it references (via the opi_navigation inventory) and "
-            "checks their connectivity. A path that is not a .bob, or that lies outside "
+            "checks their connectivity; which channels those are depends on view. A path that "
+            "is not a .bob, or that lies outside "
             "displays_dir, is refused straight away with INVALID_INPUT: the inventory reads "
             "only .bob files, so such a call can only ever come back empty, and it used to "
             "take a full inventory walk to say so."
         ),
     ] = None,
+    view: Annotated[
+        PvView,
+        Field(
+            description="Which question about file_path to answer. 'file' (default) = the "
+            "channels the file itself declares, attributed across every display that embeds it. "
+            "'display' = the channels the file resolves to when opened as a display, its embedded "
+            "fragments included. These differ a lot: a parent that only composes fragments "
+            "declares nothing itself and answers total 0 under 'file' while resolving thousands "
+            "under 'display'; a fragment is the reverse, because its macros are unbound when it "
+            "stands alone. The result always reports shown_by_display, and under 'file' a note "
+            "says how many channels the display view adds. Ignored when pv_names is given."
+        ),
+    ] = "file",
     displays_dir: Annotated[
         str | None,
         Field(
@@ -79,7 +93,11 @@ async def validate_pvs(
 ) -> dict[str, object]:
     """Check PV connectivity. Provide a PV list or a .bob file path (+ displays_dir ROOT)."""
     return await _validate_pvs(
-        pvs=pv_names, file_path=file_path, displays_dir=displays_dir, timeout=timeout
+        pvs=pv_names,
+        file_path=file_path,
+        displays_dir=displays_dir,
+        timeout=timeout,
+        view=view,
     )
 
 

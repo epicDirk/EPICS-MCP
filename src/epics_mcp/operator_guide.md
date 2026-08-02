@@ -756,10 +756,18 @@ messages embed the full request URL, an internal host would leak into this file)
   already settled: the inventory reads `.bob` files only, and resolves embed targets against that
   same collected set, so nothing else can ever contribute a PV. The suffix comparison folds case,
   `UPPER.BOB` is a display. ⚠ Do NOT read this as "an empty answer means a bad path": a genuine
-  `.bob` that simply declares no real `ca`/`pva` channels (only `loc://`, say) still answers
-  `total: 0`, and that is a fact about the display, not a refusal. To check a plain list of PVs
-  with no display involved, pass `pv_names` instead; supplying both makes the list win and the
-  file path is not looked at.
+  `.bob` that declares no real `ca`/`pva` channels of its own still answers `total: 0`, and that is
+  a fact about the file, not a refusal. To check a plain list of PVs with no display involved, pass
+  `pv_names` instead; supplying both makes the list win and the file path is not looked at.
+- **`total: 0` is not the same as "this screen has no PVs", and the answer says which one it is.**
+  A `.bob` that only composes embedded fragments declares nothing itself, so the default file view
+  is empty while the display resolves plenty. The result therefore always carries
+  `shown_by_display` (plus `shown_by_display_capped`), and when the file view omits something a
+  note says how many channels it omits. Pass `view="display"` to check that set instead. Neither
+  view is the right one: `view="file"` asks what this file contributes wherever it is used, which
+  is what you want for a fragment; `view="display"` asks what an operator opening this screen would
+  see. A fragment answers 0 under `view="display"`, because its macros are unbound when it stands
+  alone, and that is correct rather than a failure.
 - **`coverage_audit` refuses "alarm plane, no tree named" with `INVALID_INPUT`.** Same shape as
   above: the verdict follows from the arguments, so it is given before the display-PV walk rather
   than after it. Name the tree (`alarm_config`); there is no correct default, they are site-specific.

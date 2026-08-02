@@ -169,6 +169,12 @@ async def test_validate_pvs_file_path_zero_real_pvs_is_total_zero(tmp_path: Path
     result = await _validate_pvs(file_path=str(local), displays_dir=str(root))
     assert result["total"] == 0
     assert result["pvs"] == []
+    # The display view has to apply the same protocol filter. Without it the loc:// channel counts
+    # as something the display "also resolves", and this file, which hides nothing, gets a note
+    # telling the caller to go look at one more channel that is not a channel. Asserted here
+    # because the two assertions above stay green either way.
+    assert result["shown_by_display"] == 0
+    assert "notes" not in result
 
 
 async def test_validate_pvs_file_path_outside_allowed_roots(
@@ -420,6 +426,343 @@ async def test_the_refusal_reaches_a_client_over_the_wire(tmp_path: Path) -> Non
         f"the client must receive the tagged, curated refusal, got: {message!r}"
     )
     assert ".bob" in message
+
+
+# --- The two views (GB-4) ---------------------------------------------------------------------
+# A dataset that separates the cases the two views disagree on. Deliberately richer than
+# ``_dataset``: that one's parent declares no PV of its own, so it can only ever exercise the
+# empty-result path, and a mutation that only fires on the normal path would survive it.
+_OWNING_PARENT = (  # declares one channel itself AND embeds a fragment whose macro it binds
+    '<display version="2.0.0"><name>Owner</name>'
+    '<widget type="textupdate"><name>own</name><pv_name>SIM:OWNER:Val</pv_name></widget>'
+    '<widget type="embedded"><name>e</name><file>bound.bob</file>'
+    "<macros><PRP>DEV-TEST02:Spu01</PRP></macros>"
+    "</widget></display>"
+)
+_BOUND_FRAGMENT = (
+    '<display version="2.0.0"><name>Bound</name>'
+    '<widget type="textupdate"><name>s</name><pv_name>$(PRP):Val</pv_name></widget></display>'
+)
+_DISTRACTOR = (  # resolved channels, but embedded by nobody and embedding nothing
+    '<display version="2.0.0"><name>Distractor</name>'
+    '<widget type="textupdate"><name>d1</name><pv_name>SIM:DISTRACT:One</pv_name></widget>'
+    '<widget type="textupdate"><name>d2</name><pv_name>SIM:DISTRACT:Two</pv_name></widget>'
+    "</display>"
+)
+_LEAF = (  # own channels, no fragments: both views agree, so no note may fire
+    '<display version="2.0.0"><name>Leaf</name>'
+    '<widget type="textupdate"><name>l</name><pv_name>SIM:LEAF:Val</pv_name></widget></display>'
+)
+_TWO_FORMS = (  # ONE channel written two ways; the engine yields two events for it
+    '<display version="2.0.0"><name>TwoForms</name>'
+    '<widget type="textupdate"><name>a</name><pv_name>SIM:FORMS:Val</pv_name></widget>'
+    '<widget type="textupdate"><name>b</name><pv_name>ca://SIM:FORMS:Val</pv_name></widget>'
+    "</display>"
+)
+
+
+def _views_dataset(tmp_path: Path) -> Path:
+    """Write the view dataset and return its root."""
+    root = tmp_path / "views"
+    root.mkdir()
+    for name, body in (
+        ("owner.bob", _OWNING_PARENT),
+        ("bound.bob", _BOUND_FRAGMENT),
+        ("container.bob", _PARENT),  # composes only, declares nothing
+        ("frag.bob", _FRAGMENT),
+        ("distractor.bob", _DISTRACTOR),
+        ("leaf.bob", _LEAF),
+        ("two_forms.bob", _TWO_FORMS),
+    ):
+        (root / name).write_text(body, encoding="utf-8")
+    return root
+
+
+async def _connect_all(names: list[str], timeout: float | None = None) -> dict[str, object]:
+    """A batch read where every channel answers, so tests can assert on selection, not on IO."""
+    return {"results": [{"pv_name": n, "value": 1} for n in names], "errors": []}
+
+
+async def test_owning_parent_file_view_notes_what_the_display_view_adds(tmp_path: Path) -> None:
+    """The normal path: the file view finds the parent's OWN channel and says one more exists.
+
+    ``_dataset``'s parent cannot exercise this: with no channel of its own it always takes the
+    empty-result return, so a note wired only into the normal path would still look correct.
+    """
+    root = _views_dataset(tmp_path)
+    with patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all):
+        result = await _validate_pvs(file_path=str(root / "owner.bob"), displays_dir=str(root))
+
+    assert result["total"] == 1, "the file view holds the parent's own channel only"
+    assert result["shown_by_display"] == 2
+    assert result["shown_by_display_capped"] is False
+    notes = result["notes"]
+    assert isinstance(notes, list)
+    assert any("1 further channel(s)" in str(n) for n in notes), notes
+    assert any('view="display"' in str(n) for n in notes), notes
+
+
+async def test_owning_parent_display_view_returns_the_larger_set(tmp_path: Path) -> None:
+    """The point of the parameter: the other view is reachable in the same call, no second tool."""
+    root = _views_dataset(tmp_path)
+    batch = AsyncMock(side_effect=_connect_all)
+    with patch("epics_mcp.tools.validate.pv_get_batch", batch):
+        result = await _validate_pvs(
+            file_path=str(root / "owner.bob"), displays_dir=str(root), view="display"
+        )
+
+    assert result["total"] == 2
+    checked = result["pvs"]
+    assert isinstance(checked, list)
+    assert sorted(p["pv_name"] for p in checked) == ["DEV-TEST02:Spu01:Val", "SIM:OWNER:Val"]
+    # The display view is what was asked for, so nothing is being withheld and no note fires.
+    assert "notes" not in result
+
+
+async def test_pure_container_reports_zero_and_still_says_what_it_hides(tmp_path: Path) -> None:
+    """The dominant case (measured: 42 of 54 affected files in one dataset).
+
+    A display that only composes fragments declares nothing itself, so the file view answers
+    ``total: 0`` and returns BEFORE the connectivity read. Without the note in that branch the
+    single most misleading answer the tool gives would stay silent.
+    """
+    root = _views_dataset(tmp_path)
+    spy = AsyncMock(side_effect=_connect_all)
+    with patch("epics_mcp.tools.validate.pv_get_batch", spy):
+        result = await _validate_pvs(file_path=str(root / "container.bob"), displays_dir=str(root))
+
+    assert result["total"] == 0
+    assert result["shown_by_display"] == 1
+    notes = result["notes"]
+    assert isinstance(notes, list)
+    assert any("1 further channel(s)" in str(n) for n in notes), notes
+    spy.assert_not_awaited()  # total 0 means no PV is read at all
+
+
+async def test_fragment_keeps_the_file_view_and_reports_an_honest_zero(tmp_path: Path) -> None:
+    """The counter-direction, and the reason the ``origin_file`` filter must stay.
+
+    A fragment's macros are unbound when it is seeded standalone, so its DISPLAY view really is
+    empty while its file view is not. ``shown_by_display: 0`` next to ``total: 1`` is therefore a
+    fact about the file, not a defect, and it is asserted here so it cannot be "fixed" away.
+    """
+    root = _views_dataset(tmp_path)
+    with patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all):
+        result = await _validate_pvs(file_path=str(root / "bound.bob"), displays_dir=str(root))
+
+    assert result["total"] == 1
+    assert result["shown_by_display"] == 0
+    assert "notes" not in result, "the display view is smaller here, there is nothing to add"
+
+
+async def test_fragment_display_view_is_empty_not_the_lifted_set(tmp_path: Path) -> None:
+    """``view="display"`` on a fragment answers about the fragment, not about its parent."""
+    root = _views_dataset(tmp_path)
+    with patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all):
+        result = await _validate_pvs(
+            file_path=str(root / "bound.bob"), displays_dir=str(root), view="display"
+        )
+
+    assert result["total"] == 0
+    assert result["pvs"] == []
+
+
+async def test_a_leaf_display_gets_no_note_and_still_reports_the_field(tmp_path: Path) -> None:
+    """Both views agree: no note. But the field is still there.
+
+    The second assertion is the one that matters: an implementation that only sets
+    ``shown_by_display`` inside the note branch passes every other test here and makes the field
+    unusable for exactly the comparison it exists for.
+    """
+    root = _views_dataset(tmp_path)
+    with patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all):
+        result = await _validate_pvs(file_path=str(root / "leaf.bob"), displays_dir=str(root))
+
+    assert result["total"] == 1
+    assert "notes" not in result
+    assert result["shown_by_display"] == result["total"]
+
+
+async def test_the_distractor_display_does_not_leak_into_the_display_view(tmp_path: Path) -> None:
+    """The display view keys on THIS display, not on the whole inventory.
+
+    ``distractor.bob`` carries two resolved channels and is unrelated to ``leaf.bob``. Counting the
+    display view over all displays instead of the matching one would show them here.
+    """
+    root = _views_dataset(tmp_path)
+    with patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all):
+        result = await _validate_pvs(
+            file_path=str(root / "leaf.bob"), displays_dir=str(root), view="display"
+        )
+
+    assert result["total"] == 1
+    checked = result["pvs"]
+    assert isinstance(checked, list)
+    assert [p["pv_name"] for p in checked] == ["SIM:LEAF:Val"]
+
+
+async def test_one_channel_written_two_ways_counts_once(tmp_path: Path) -> None:
+    """The display view normalises the protocol prefix, as the file view has always done.
+
+    Measured on the engine: ``SIM:X`` and ``ca://SIM:X`` in one display produce TWO events whose
+    ``pv`` differs and whose ``channel_name`` is the same. Deduplicating on the raw ``pv`` would
+    make the display view look bigger than the file view on a display with no fragments at all,
+    firing the note on a file that hides nothing.
+    """
+    root = _views_dataset(tmp_path)
+    with patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all):
+        result = await _validate_pvs(file_path=str(root / "two_forms.bob"), displays_dir=str(root))
+
+    assert result["total"] == 1
+    assert result["shown_by_display"] == 1
+    assert "notes" not in result, "the two spellings are one channel, so nothing is hidden"
+
+
+async def test_an_explicit_list_wins_over_file_path_and_view(tmp_path: Path) -> None:
+    """``pv_names`` short-circuits the file, so the view fields have nothing to describe."""
+    root = _views_dataset(tmp_path)
+    spy = Mock(side_effect=AssertionError("the inventory must not run when a list is given"))
+    with (
+        patch("epics_mcp.tools.validate.analyze_pv_inventory", spy),
+        patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all),
+    ):
+        result = await _validate_pvs(
+            pvs=["SIM:EXPLICIT:Val"],
+            file_path=str(root / "owner.bob"),
+            view="display",
+        )
+
+    assert result["total"] == 1
+    assert "shown_by_display" not in result, "no display was consulted, so nothing may be claimed"
+    spy.assert_not_called()
+
+
+async def test_the_wire_default_is_the_file_view(tmp_path: Path) -> None:
+    """Over the REGISTERED tool, not the inner function: omitting ``view`` must not change anything.
+
+    Every other test here calls ``_validate_pvs`` directly and therefore cannot see the default
+    declared at the tool boundary. Measured: flipping that default to "display" left all of them
+    green, which would have shipped a silent breaking change on the wire.
+
+    Asserted on the parent that owns one channel and embeds one more, because that is the display
+    where the two views differ by exactly one and the numbers cannot be confused.
+    """
+    from fastmcp import Client
+
+    from epics_mcp.server import _DISPLAY_TOOLS_AVAILABLE, mcp
+
+    if not _DISPLAY_TOOLS_AVAILABLE:  # pragma: no cover - core-only install, tool not registered
+        pytest.skip("validate_pvs is display-gated and this install has no displays group")
+
+    root = _views_dataset(tmp_path)
+    with patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all):
+        async with Client(mcp) as client:
+            call = await client.call_tool(
+                "validate_pvs",
+                {"file_path": str(root / "owner.bob"), "displays_dir": str(root)},
+            )
+
+    payload = call.data
+    assert payload["total"] == 1, "the wire default must still be the file view"
+    assert payload["shown_by_display"] == 2
+
+
+def _capped_inventory(rel: str, *, declared: bool, capped: tuple[str, ...]) -> object:
+    """An inventory whose display *rel* embeds a fragment, with *capped* naming what was capped.
+
+    *declared*: whether *rel* also owns a channel, i.e. whether the call takes the normal path
+    (True) or the empty-result path (False).
+
+    *capped* goes into ``diagnostics.context_capped`` verbatim, because WHICH path is in there
+    decides which of the two cap tests can see it: the pre-existing flag matches on the events'
+    ``top_level_display`` (so it needs *rel*), the new one also matches the origins of the
+    display's own events (so ``frag.bob`` alone is enough for it, and invisible to the old one).
+    """
+    from opi_navigation.pv_analysis import (
+        DisplayPvInventory,
+        ExpandedPv,
+        PvDiagnostics,
+        PvInventory,
+    )
+
+    def _pv(name: str, origin: str) -> object:
+        return ExpandedPv(
+            pv=f"ca://{name}",
+            raw_pv="$(P):X",
+            resolution="resolved",
+            role="read",
+            protocol="ca",
+            top_level_display=rel,
+            origin_file=origin,
+        )
+
+    pvs = [_pv("SYSX:FROM_FRAGMENT", "frag.bob")]
+    if declared:
+        pvs.insert(0, _pv("SYSX:OWN", rel))
+    return PvInventory(
+        repo_root="/nowhere",
+        displays=(
+            DisplayPvInventory(display_path=rel, operator_facing=True, pvs=tuple(pvs)),  # type: ignore[arg-type]
+        ),
+        # The engine records the capped TARGET, not the top it was capped under.
+        diagnostics=PvDiagnostics(context_capped=capped),
+    )
+
+
+async def test_capped_fragment_makes_the_display_figure_a_lower_bound(tmp_path: Path) -> None:
+    """Normal path with BOTH paths capped: the new note says "at least", the old one survives.
+
+    Both are listed as capped on purpose. The pre-existing note needs ``d.bob`` (it matches on
+    ``top_level_display``); the new one would fire on ``frag.bob`` alone. Listing only the fragment
+    is a different case, and it is the next test.
+
+    ``notes[0]`` is pinned because order is what a model reads first, and nothing else would
+    notice the two swapping.
+    """
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
+    with (
+        patch(
+            "epics_mcp.tools.validate.analyze_pv_inventory",
+            return_value=_capped_inventory("d.bob", declared=True, capped=("d.bob", "frag.bob")),
+        ),
+        patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all),
+    ):
+        result = await _validate_pvs(file_path=str(root / "d.bob"), displays_dir=str(root))
+
+    assert result["total"] == 1
+    assert result["shown_by_display_capped"] is True
+    notes = result["notes"]
+    assert isinstance(notes, list) and len(notes) == 2
+    assert "lower bound" in str(notes[0]), "the pre-existing cap note must keep coming first"
+    assert "at least 1 further channel(s)" in str(notes[1]), notes
+
+
+async def test_capped_is_seen_on_the_empty_path_where_the_old_flag_is_blind(
+    tmp_path: Path,
+) -> None:
+    """The one place the new cap test and the pre-existing ``capped`` flag disagree.
+
+    The old flag is only ever set inside the ``origin_file``-filtered loop, so when nothing passes
+    that filter it stays False no matter what was capped. Measured on a real dataset: 12 of the 42
+    files taking this path are genuinely capped and every one of them reported ``capped=False``.
+    Without this test, replacing the new check with the old flag is invisible.
+    """
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
+    with patch(
+        "epics_mcp.tools.validate.analyze_pv_inventory",
+        return_value=_capped_inventory("d.bob", declared=False, capped=("frag.bob",)),
+    ):
+        result = await _validate_pvs(file_path=str(root / "d.bob"), displays_dir=str(root))
+
+    assert result["total"] == 0, "nothing passed the origin_file filter, so the old flag is False"
+    assert result["shown_by_display_capped"] is True
+    notes = result["notes"]
+    assert isinstance(notes, list) and len(notes) == 1, "only the new note, the old one cannot fire"
+    assert "at least 1 further channel(s)" in str(notes[0]), notes
 
 
 async def test_validate_pvs_file_path_context_capped_note(tmp_path: Path) -> None:

@@ -42,10 +42,17 @@ def compare_machine_state(
         # S1-3: pass the dataset ROOT as displays_dir too, without it validate_pvs walks the
         # file's own directory and under-resolves embedded fragments (consistent with the tool's
         # own description).
+        # GB-4: name the view as well. Comparing machine state against a reference SCREEN wants
+        # everything that screen shows, and the tool's default is the other question (what the file
+        # declares). On a screen that only composes fragments the default answers total 0, so a
+        # prompt that omits the view teaches a call which silently finds nothing.
         file_note = (
             f'\n1. Extract PVs from "{reference_file}" using '
-            f'validate_pvs(file_path="{reference_file}", displays_dir="<dataset ROOT>") '
-            "(displays_dir = the project ROOT; without it embedded fragments under-resolve)\n"
+            f'validate_pvs(file_path="{reference_file}", displays_dir="<dataset ROOT>", '
+            'view="display") '
+            "(displays_dir = the project ROOT; without it embedded fragments under-resolve. "
+            'view="display" asks what the screen shows, fragments included; the default "file" '
+            "asks only what this file declares itself)\n"
         )
     elif reference_file and display_tools_available:
         # QA-33: the tool now REFUSES a non-.bob file_path outright (INVALID_INPUT), where it used

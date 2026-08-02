@@ -125,8 +125,11 @@ def build_instructions(display_tools_available: bool) -> str:
     them. A pure function of the flag → both branches are directly testable without a reimport.
     """
     display_clause = (
-        "validate the PVs of a .bob display, cross-plane provenance, device lookup "
-        "(screens + live + source IOC), "
+        # "file or display view" earns its bytes: without it this clause reads as a promise that
+        # the tool reports what a display SHOWS, which is not the view it takes by default. The
+        # byte budget below leaves no room to spell that out; the tool description does.
+        "validate the PVs of a .bob display (file or display view), cross-plane provenance, "
+        "device lookup (screens + live + source IOC), "
         if display_tools_available
         else ""
     )

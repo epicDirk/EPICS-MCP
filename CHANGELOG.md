@@ -9,6 +9,21 @@ carry breaking changes).
 
 ### Added
 
+- **`validate_pvs` can answer the other question about a display: `view="file" | "display"`.** The
+  tool has always reported what a `.bob` file itself declares, attributed across every display that
+  embeds it. That is the right answer for a fragment and the wrong one for a screen: a display that
+  only composes embedded fragments declares nothing of its own, so it answered `total: 0` while
+  resolving thousands of channels. `view="display"` asks the second question, what the file
+  resolves to when opened as a display, fragments included. Measured on a 257-display dataset, the
+  two views disagree on 54 files, 42 of which answered `total: 0` under the default, the largest
+  hiding 5846 channels. The default stays `"file"`, so nothing changes for existing callers.
+  Both views come out of the same inventory walk, so the second one is free.
+- **Every `file_path` result now carries `shown_by_display` and `shown_by_display_capped`**, and
+  under `view="file"` a `notes` entry says how many channels the display view adds. The counts let
+  a caller see which of the two questions was answered without running the other one. The capped
+  flag is computed separately from the existing `capped` field, which only ever sees channels that
+  passed the file filter and is therefore always `false` on an empty result.
+
 - **`epics-init`, a sixth console command: the configuration you need, without reading the
   reference first.** It prints the MCP client-configuration block for one of four deployment shapes
   (`sandbox`, `ioc-only`, `ioc-archiver`, `full`; `--list` describes them) and then runs

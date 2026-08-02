@@ -49,7 +49,10 @@ your local subnets. Drop them when you point this at a real IOC.
 epics-crossplane --displays . --st-cmd <path-to-st.cmd>
 ```
 
-or `validate_pvs(file_path="examples/sample_display.bob")` from an MCP client.
+or `validate_pvs(file_path="examples/sample_display.bob")` from an MCP client. That default answers
+what the file itself declares; add `view="display"` to ask what it resolves to when opened as a
+display, fragments included. The two differ as soon as a screen embeds anything, and the answer
+always reports `shown_by_display` so you can see which question you asked.
 
 > The `.bob`-handling comes from the `opi_navigation` library (the optional `displays`
 > dependency group), **not** from any Claude skill; the server itself runs standalone. If you don't
