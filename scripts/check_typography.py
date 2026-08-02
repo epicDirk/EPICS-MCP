@@ -24,6 +24,15 @@ multiplication sign carry meaning no ASCII substitute holds. The arrow in partic
 column separator in two endpoint tables, where a wider substitute would destroy the alignment it
 exists to hold.
 
+Where the doubled hyphen counts (QA-13): between two spaces, and equally at the START or the END
+of a line. Its needle carries spaces, but those are not part of the FORM, they are its context, a
+dash having text on either side. A line edge is that same context, so ``scan`` pads each line with
+one space per side rather than growing an edge-shaped second branch. Before QA-13 the rule could
+not see an edge at all, which is precisely where the form lands when a sentence wraps: the one
+real instance in this repository sat at a line end. Deliberately NOT extended to a tab neighbour:
+what was asked for is the line EDGE, and an indented line is not an edge. (A tab neighbour also
+occurs zero times in the tracked tree, measured, but that is an observation and not the reason.)
+
 Scope: every file pre-commit hands over that decodes as UTF-8. A binary is skipped by the decode
 itself, not by an extension list that would need maintaining. Output is ``file:line: label``, the
 label naming the character; the line's text is never echoed, mirroring check_no_ess_internal.py.
@@ -99,14 +108,28 @@ def is_excepted(path: str, line: str, exceptions: list[tuple[str, str]]) -> bool
 
 
 def scan(path: str, exceptions: list[tuple[str, str]]) -> list[str]:
-    """Return ``file:line: label`` for every forbidden character in *path*, text files only."""
+    """Return ``file:line: label`` for every forbidden entry in *path*, text files only."""
     try:
         content = Path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         return []  # binary or unreadable, nothing a typographic rule applies to
     hits: list[str] = []
     for lineno, line in enumerate(content.splitlines(), start=1):
-        found = [label for character, label in _FORBIDDEN if character in line]
+        # Padded with one space on each side (QA-13). For the doubled hyphen the surrounding
+        # spaces are not PART of the form, they are its context: a dash has text on both sides.
+        # The start and the end of a line are that same context, and without the padding the
+        # needle simply cannot match there, which is exactly where a dash lands when a sentence
+        # wraps. Padding gives both edges the context the middle of a line has anyway, so the
+        # rule reads the same everywhere instead of carrying a second, edge-shaped branch.
+        #
+        # It applies to ALL entries, and for the eight single-character needles that is provably
+        # inert: a leading or trailing space can neither create nor destroy a one-character
+        # match. Measured both ways, exhaustively over every string up to length 7 and over the
+        # whole tracked tree, against the rule spelled out longhand: zero divergences. A FUTURE
+        # entry that carries spaces of its own would be widened by this too, so such an entry
+        # has to state whether it wants that.
+        padded = " " + line + " "
+        found = [label for character, label in _FORBIDDEN if character in padded]
         if found and not is_excepted(path, line, exceptions):
             hits.extend(f"{path}:{lineno}: {label}" for label in found)
     return hits

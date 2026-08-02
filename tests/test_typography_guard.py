@@ -44,6 +44,14 @@ GUARD_SOURCE = _REPO / "scripts" / "check_typography.py"
 # the guard on its own commit.
 DOUBLED_HYPHEN = " " + "--" + " "
 
+# The bare pair, for the line-edge table (QA-13). There the surrounding spaces are the CONTEXT
+# under test, so they must not be baked into the sample the way they are above. Spelling it out is
+# safe: quoted, it has a quote on either side rather than a space or a line edge, so the guard does
+# not find it here. Every row of that table is assembled from THIS, never written out, because a
+# row spelled literally would be a finding in this file, and nothing guards that: the self-block
+# test scans the GUARD's source, not the test's.
+HYPHENS = "--"
+
 # The one real exception, assembled rather than written out: spelled literally, this test file
 # would trip the guard on its own commit. Which it did, on the first attempt, and that is the
 # cheapest end-to-end proof the hook is wired up at all.
@@ -101,6 +109,45 @@ def test_clean_text_is_not_reported(tmp_path: Path) -> None:
     target.write_text(f"it{chr(0x2019)}s read-only: endpoint {tolerated} 2\n", encoding="utf-8")
 
     assert scan(str(target), exceptions=[]) == []
+
+
+def test_the_doubled_hyphen_is_caught_at_a_line_edge(tmp_path: Path) -> None:
+    """QA-13: the needle carries spaces, but a line EDGE is the same context as a space.
+
+    Before this, the rule could only see the form between two spaces, so it was blind exactly
+    where a dash lands when a sentence wraps. The one real instance in this repository sat at a
+    line end and went unreported for months.
+
+    Both directions in one table, because a rule that fired on every line would pass a hit-only
+    test. The silent rows are the forms this widening could plausibly have swallowed: a long
+    hyphen run (the repository writes its section banners that way), a command-line flag, and the
+    pair inside a word. Red-provable against the pre-QA-13 guard, where the first two rows fail.
+    """
+    cases: list[tuple[str, bool]] = [
+        (f"{HYPHENS} the form leads the line", True),
+        (f"the line trails off into {HYPHENS}", True),
+        (f"between two spaces {HYPHENS} as before", True),
+        (HYPHENS, True),
+        (f"a run of three {HYPHENS}- stays silent", False),
+        (f"a banner {HYPHENS}---- stays silent", False),
+        (f"{HYPHENS}check is a flag, not a dash", False),
+        (f"    {HYPHENS}check indented is one too", False),
+        (f"glued in a{HYPHENS}word", False),
+    ]
+    target = tmp_path / "cases.md"
+    target.write_text("\n".join(text for text, _expected in cases) + "\n", encoding="utf-8")
+
+    hits = scan(str(target), exceptions=[])
+
+    caught = {
+        lineno
+        for lineno, _case in enumerate(cases, start=1)
+        if any(hit.startswith(f"{target}:{lineno}: ") for hit in hits)
+    }
+    expected = {lineno for lineno, (_text, is_hit) in enumerate(cases, start=1) if is_hit}
+    assert caught == expected, hits
+    # No row may report twice: one line, one finding, or the table above proves less than it says.
+    assert len(hits) == len(expected), hits
 
 
 def test_the_guard_does_not_block_itself() -> None:

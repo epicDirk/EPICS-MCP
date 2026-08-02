@@ -562,7 +562,7 @@ def test_check_connectivity_raises_on_transport_failure(monkeypatch: pytest.Monk
         client.check_connectivity()
 
 
-# --- MA-2b(d): the alarm tree is required (no silent 'Accelerator' default that matches nothing) --
+# --- MA-2b(d): the alarm tree is required (no silent 'Accelerator' default that matches nothing)
 
 
 async def test_is_alarm_configured_tool_requires_config_name() -> None:

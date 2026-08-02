@@ -154,6 +154,15 @@ carry breaking changes).
   missed alarm lookup re-asks for the bare tree. There is no single per-PV figure, and the guide now
   says so instead of implying one.
 
+### Internal
+
+- The typography guard sees the doubled hyphen at the START and the END of a line, not only between
+  two spaces. That is where the form lands when a sentence wraps, and it was the one place the rule
+  could not look. `scan` pads each line with one space per side, so the rule table is unchanged; the
+  two occurrences this uncovered in the tree were corrected with it. The reach, the four legitimate
+  forms the widening also catches and the blind spots that remain are recorded in
+  `docs/known-limits.md` section 10.
+
 ## [0.4.0] - 2026-07-30
 
 ### Added

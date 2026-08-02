@@ -11,8 +11,9 @@ open work in words.
 **Every entry carries its own measurement date**, and every figure in it is a measurement of the
 tree on that date, not an invariant: this file is markdown, and markdown is unguarded here (that is
 the first entry). Treat a number as "was true when written" and re-measure before building on it.
-Entries 1 to 8 were measured 2026-07-26 unless the entry itself states a later date, entries 9 and 10
-on 2026-07-28, entry 11 on 2026-07-29, entry 13 on 2026-07-30, entry 14 on 2026-07-31 and entry 15 on 2026-08-01; entry 12
+Entries 1 to 8 were measured 2026-07-26, entries 9 and 10
+on 2026-07-28, entry 11 on 2026-07-29, entry 13 on 2026-07-30, entry 14 on 2026-07-31 and entry 15 on 2026-08-01,
+each unless the entry itself states a later date; entry 12
 states a property of this page and measures nothing.
 
 One consequence of that is applied here rather than only described: where a figure exists to
@@ -269,12 +270,33 @@ three-signal design exists to answer, and it is the reason a single-signal guard
 
 ## 10 · The typography guard forbids a named set, not typography in general
 
-**Measured 2026-07-28.** `scripts/check_typography.py` blocks nine things: the em dash, the en dash,
-the ellipsis, four curly quotes and the doubled hyphen. Against `db5a83c` it reports **3056** lines.
+**Measured 2026-07-28, counts re-measured 2026-08-02.** `scripts/check_typography.py` blocks nine
+things: the em dash, the en dash, the ellipsis, five curly quotes and the doubled hyphen. Against
+`db5a83c` the rule as it stood on 2026-07-28 reported **3056**, the rule after QA-13 reports
+**3058**. Both figures count what the guard PRINTS, one line per finding, so a source line carrying
+two forbidden characters contributes two; the distinct source lines behind the 3056 are **3034**.
+And both apply today's `scripts/.typography-exceptions` to a tree that did not yet contain that
+file: without it the older figure is 3057.
+
+Since QA-13 the doubled hyphen counts at the START and at the END of a line as well as between two
+spaces, because a line edge is the same context a space is, and it is where a dash lands when a
+sentence wraps. `scan` pads every line with one space per side instead of carrying a second,
+edge-shaped branch. It is deliberately NOT extended to a tab neighbour: what was asked for is the
+line edge, and an indented line is not one. The widening cost exactly two findings over the tracked
+tree, one a real dash at a wrap and one a section banner whose trailing rule had been shortened to
+two hyphens to fit the 100-column limit.
+
+⚠️ Four legitimate forms fall under that widening. None occurs in the tracked tree today
+(measured 2026-08-02), and each is a case for an exception entry rather than for narrowing the rule
+again: git's pathspec separator where it ends a command line, the pair as a comment prefix in
+column 0 (SQL, Lua, Ada, Haskell, and the hook has no file-type filter), the RFC 3676 signature
+delimiter, and a Setext heading underlined with a pair.
 
 It does **not** know any other typographic character (a minus sign, a non-breaking hyphen, a
 figure dash), and it deliberately tolerates the typographic apostrophe, the arrow and the
-multiplication sign, which carry meaning no ASCII substitute holds. An exception frees the whole
+multiplication sign, which carry meaning no ASCII substitute holds. Nor does it see a run of three
+or more standing in for a dash, a tab or a non-breaking space as the neighbour, or the pair glued
+inside a word. An exception frees the whole
 LINE rather than one character on it; with one exception in the file, a narrower key would be more
 machinery than the problem deserves.
 
