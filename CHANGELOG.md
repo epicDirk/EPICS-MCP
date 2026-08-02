@@ -68,8 +68,10 @@ carry breaking changes).
   it go, user-visibly: the env vars `EPICS_MCP_OLOG_ASSUME_TEST_DATA` and
   `EPICS_MCP_OLOG_ALLOW_ATTACHMENT_DOWNLOAD` (now unknown, the config warns if still set), the
   error codes `OLOG_WHOLE_MODE_REQUIRED` and `OLOG_ATTACHMENT_DOWNLOAD_DENIED`, the `withheld`
-  fields of the download/list results, and the doctor's `Olog free-text:` line. The whole-mode
-  preconditions of `add_log_attachment` / `update_log_entry` are replaced by the write gate itself:
+  fields of the download/list results, and the doctor's `Olog free-text:` line together with the
+  `olog_freetext_withheld` field its privacy report carried, which `epics-doctor --json` therefore
+  no longer emits. The whole-mode preconditions of `add_log_attachment` / `update_log_entry` are
+  replaced by the write gate itself:
   its env + URL checks now run BEFORE the pre-write read, so a target the gate refuses is never
   even read. Both write gates, the ChannelFinder redaction and the withheld-is-not-no semantics of
   the other planes are unchanged.
@@ -131,8 +133,8 @@ carry breaking changes).
   used to report the missing display engine and exit `2` instead, so on any install from a package
   index, where that engine is never present, the first answer to `--help` was an instruction to
   install something you do not need in order to read a help text. Both commands now parse their
-  arguments before asking for the engine, and `--version` answers there too, so all five console
-  commands explain themselves everywhere. They still need the engine to do their work and still say
+  arguments before asking for the engine, and `--version` answers there too, so every console
+  command explains itself everywhere. They still need the engine to do their work and still say
   so when asked to do it.
 - **A usage error on those two commands reports the engine, and its exit code is the engine's.**
   `epics-coverage --nope` on a core-only install answers with the missing engine rather than with
@@ -146,7 +148,7 @@ carry breaking changes).
   artifact: 192 files, which was every tracked file plus a stray log file, and it included all 81
   test modules, `scripts/`, `.github/` and `CLAUDE.md` (instructions meant for an assistant working
   in the repository, not for anyone installing the package). The sdist now carries the package, the
-  documentation and the standard metadata files, 93 files, and a test builds it and compares its
+  documentation and the standard metadata files, 96 files, and a test builds it and compares its
   contents against version control in both directions, so neither a stray file nor a silently
   dropped directory can reach a package index again. The wheel is unchanged.
 

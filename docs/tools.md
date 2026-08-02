@@ -68,14 +68,20 @@ The cross-plane analyses are also standalone CLIs, useful in a terminal or CI, w
 MCP client involved:
 
 ```bash
+epics-init       --list                                 # emit a client configuration, then check it
 epics-doctor                                            # read-only config self-check (all planes)
 epics-diagnose   TEST:Temperature                       # connection diagnosis
 epics-crossplane --displays <project-root> --st-cmd <st.cmd>     # display ↔ IOC ↔ Naming (needs opi_navigation)
 epics-coverage   --displays <project-root> --scope DEV: # coverage matrix (needs opi_navigation)
 ```
 
-`epics-doctor` and `epics-diagnose` are part of the core install; `epics-crossplane` and
-`epics-coverage` need the `opi_navigation` engine, which a published install cannot obtain
+`epics-init` prints the MCP client-configuration block for one of four deployment shapes
+(`sandbox`, `ioc-only`, `ioc-archiver`, `full`; `--list` describes them) and then runs the
+`epics-doctor` checks against exactly that block, so generating a configuration and checking it are
+one step. It writes nothing unless asked to.
+
+`epics-init`, `epics-doctor` and `epics-diagnose` are part of the core install; `epics-crossplane`
+and `epics-coverage` need the `opi_navigation` engine, which a published install cannot obtain
 (see above). All are read-only.
 
 Every console command answers `--help` and `--version` with its own name and the package version, on a
@@ -145,4 +151,5 @@ as the resource (and mirrored for human readers by [`OPERATING.md`](../OPERATING
 |--------|-------------|
 | `diagnose_pv` | Step-by-step PV diagnosis workflow (info, read, monitor) |
 | `compare_machine_state` | Compare current PV values against an expected state |
+| `setup_epics_mcp` | Walk through configuring this server for a facility, one question at a time |
 
