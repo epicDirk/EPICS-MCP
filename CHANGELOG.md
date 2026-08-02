@@ -7,6 +7,8 @@ carry breaking changes).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-02
+
 ### Added
 
 - **`validate_pvs` can answer the other question about a display: `view="file" | "display"`.** The
