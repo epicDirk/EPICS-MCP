@@ -1,13 +1,13 @@
-"""Drift guard: the guide's tool, env and doctor-status surfaces must match the code.
+"""Drift guard: the guide's tool, env, doctor-status and doctor-plane surfaces must match the code.
 
-The guide is hand-written prose that names MCP tools, ``EPICS_MCP_*`` env vars and the plane
-statuses ``epics-doctor`` prints. Without a guard, a renamed tool or a removed env var makes the
-guide silently wrong, it would tell a fresh session to call a tool that no longer exists, exactly
-when the session trusts it. This binds the guide's tool-inventory section to the ``@mcp.tool``
-registrations and its ``EPICS_MCP_*`` mentions to ``EpicsConfig``: the same anti-drift pattern the
-repo already uses for README resource URIs.
+The guide is hand-written prose that names MCP tools, ``EPICS_MCP_*`` env vars, and both the plane
+statuses ``epics-doctor`` prints and the planes it prints them for. Without a guard, a renamed tool
+or a removed env var makes the guide silently wrong, it would tell a fresh session to call a tool
+that no longer exists, exactly when the session trusts it. This binds the guide's tool-inventory
+section to the ``@mcp.tool`` registrations and its ``EPICS_MCP_*`` mentions to ``EpicsConfig``: the
+same anti-drift pattern the repo already uses for README resource URIs.
 
-Three surfaces, and no surface is read one single way, which is worth saying because a summary
+Four surfaces, and no surface is read one single way, which is worth saying because a summary
 claiming otherwise stood here twice. What each guard reads is stated per guard, never per surface:
 
 * the tool inventory, against the registrations. Anchored on markers;
@@ -25,7 +25,12 @@ claiming otherwise stood here twice. What each guard reads is stated per guard, 
   match. It also reaches beyond the guide: a glyph paired with a status name is checked on every
   TRACKED ``docs/*.md`` page too, because a second copy of a guarded number is an unguarded number.
   "Paired" means one of the two written forms ``docs/known-limits.md`` section 14 names, not any
-  proximity, and tracked markdown OUTSIDE ``docs/`` is not read at all; both limits are dated there.
+  proximity, and tracked markdown OUTSIDE ``docs/`` is not read at all; both limits are dated there;
+* the plane NAMES the report prints, against a real ``run_doctor`` run and against the literals in
+  ``services/doctor.py`` (QA-73). Two guards, two comparisons, and the split is the point: the guide
+  is held against what the report PRODUCES, while the source literals are held against that same
+  runtime set rather than against the guide, because a literal nobody calls is a dead branch and not
+  a documentation gap. What a status LINE says was already guarded; what it is CALLED was not.
 
 What is still deliberately outside: the free-form Archiver MGMT verbs (``getAllPVs`` /
 ``getPVsForThisAppliance``) are manual REST recipes with no implementing tool, so they are
@@ -171,6 +176,189 @@ def test_every_level_parameter_points_at_list_log_levels() -> None:
     assert descriptions, "no level parameters found, the AST anchor broke"
     missing = sorted(name for name, text in descriptions.items() if "list_log_levels" not in text)
     assert not missing, f"level description does not mention list_log_levels: {missing}"
+
+
+# --- the doctor PLANE surface (QA-73) -----------------------------------------------------------
+
+_PLANE_INVENTORY_RE = re.compile(
+    r"<!-- BEGIN:plane-inventory.*?-->(.*?)<!-- END:plane-inventory -->", re.DOTALL
+)
+#: A plane name as the report prints it. Deliberately NOT ``_TOOL_TOKEN_RE``: that one requires an
+#: underscore, to exclude camelCase REST verbs and single words. Measured, exactly ONE of the seven
+#: plane names has an underscore, so reusing it would have dropped the other six out of the
+#: comparison in silence and left this guard green against a nearly empty set.
+#:
+#: The price of dropping the underscore is that EVERY bare lower-case code span between the markers
+#: reads as a plane name. The markers therefore fence the name list ALONE, with the explaining prose
+#: outside them, which is the difference from the tool inventory: that one may keep prose inside
+#: because its own pattern demands an underscore.
+#:
+#: ⚠️ Both halves of that were learned the hard way, in one sitting. The first version of this
+#: comment claimed "the region carries names and nothing else, prose there stays unbackticked",
+#: which was already false on the tree that introduced it (``epics-doctor`` sat in the region and
+#: survived only because a hyphen ends the match). The repair to that sentence then put ``plane``,
+#: ``planes`` and ``config_error`` inside the markers while explaining the very hazard, and the
+#: guard went red with three phantom planes. Fencing the list is what makes the rule keepable
+#: instead of merely stated.
+_PLANE_TOKEN_RE = re.compile(r"`([a-z][a-z0-9_]*)`")
+
+
+def _guide_plane_tokens() -> set[str]:
+    match = _PLANE_INVENTORY_RE.search(get_guide())
+    assert match, "guide plane-inventory markers not found, the drift anchor broke"
+    return set(_PLANE_TOKEN_RE.findall(match.group(1)))
+
+
+def _plane_taking_helpers(tree: ast.Module) -> set[str]:
+    """Every function in the module whose FIRST parameter is named ``plane``.
+
+    Derived rather than declared, and that distinction was measured rather than chosen. The first
+    version of this scan carried a hand-kept pair, ``_run_probe`` and ``_disabled``, on the ground
+    that the helpers below them take the name as a variable. That is true of their DEFINITIONS and
+    false of their CALL SITES: six further calls pass a plane-name literal positionally
+    (``_identify``, ``_unverified``, ``_identity_fetch_failure``, ``_backend_down``,
+    ``_classify_phoebus_name``). An adversarial probe turned that gap into a working exploit,
+    renaming one such literal so the report printed a plane that appeared in NEITHER set while both
+    guards stayed green. Reading the parameter name instead cannot miss a helper nobody added to a
+    list.
+    """
+    return {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.args.args
+        and node.args.args[0].arg == "plane"
+    }
+
+
+def _source_plane_names() -> set[str]:
+    """Every plane name written as a LITERAL in ``services/doctor.py``.
+
+    The second source, and it reads a different axis than the runtime one: the runtime set is what
+    ONE config produced, this is what the module spells out. Neither subsumes the other, which is
+    the whole reason both exist (see the guard below).
+
+    Two shapes are read, and together they cover every literal on the tree: the first positional
+    argument of a call to a plane-taking helper (see :func:`_plane_taking_helpers`), and a
+    ``plane=`` keyword. The keyword shape carries five distinct names across eight sites, not the
+    single ``plane="live"`` an earlier version of this comment claimed.
+    """
+    tree = ast.parse(Path(doctor.__file__).read_text(encoding="utf-8"))
+    helpers = _plane_taking_helpers(tree)
+    assert helpers, "no plane-taking helper found in services/doctor.py, the AST anchor broke"
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        called = node.func.id if isinstance(node.func, ast.Name) else ""
+        if called in helpers and node.args:
+            first = node.args[0]
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                names.add(first.value)
+        for keyword in node.keywords:
+            if (
+                keyword.arg == "plane"
+                and isinstance(keyword.value, ast.Constant)
+                and isinstance(keyword.value.value, str)
+            ):
+                names.add(keyword.value.value)
+    return names
+
+
+async def _reported_plane_names() -> set[str]:
+    """The planes ``run_doctor`` actually reports, read off a real run against an empty config.
+
+    Hermetic because the URLs are BLANKED here, not because the machine happens to have none set.
+    ⚠️ That distinction was measured, and the first version of this docstring got it wrong: it said
+    "hermetic by construction" while constructing ``EpicsConfig()`` with no arguments at all.
+    ``EpicsConfig`` is a ``BaseSettings`` with ``env_prefix="EPICS_MCP_"``, so a bare instantiation
+    reads the PROCESS ENVIRONMENT, and ``conftest.py`` deliberately leaves those variables alone.
+    Measured with two of them pointed at a discard port, this guard took 11.16 s instead of 0.03 s
+    and issued real connects while staying green: the silent failure mode, on precisely the kind of
+    machine where a facility is configured. The fields are derived from the model rather than
+    listed, so a new URL variable is blanked the day it is added.
+
+    ``rest_get_json`` is stubbed on top, because the retrieval plane and the identity probes call it
+    DIRECTLY rather than through the client classes; that is the exact hole the autouse fixture in
+    ``tests/test_doctor.py`` documents having measured at 12.1 seconds of real hostname resolution.
+    """
+    blanked = {name: "" for name in EpicsConfig.model_fields if name.endswith("_url")}
+    assert blanked, "EpicsConfig exposes no *_url field, the blanking anchor broke"
+    config = EpicsConfig(**blanked)  # type: ignore[arg-type]
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr("epics_mcp.services.doctor.get_config", lambda: config)
+        patch.setattr("epics_mcp.services.doctor.rest_get_json", lambda *_a, **_k: {})
+        report = await doctor.run_doctor()
+    return {plane.plane for plane in report.planes}
+
+
+async def test_the_guide_names_every_plane_the_report_prints() -> None:
+    """The contract: every plane ``epics-doctor`` prints a line for is named in the shipped guide.
+
+    Why this is not covered by the status guards below. They hold what a line SAYS (its glyph, its
+    status word) against the code; nothing held what a line is CALLED. Measured on 2026-08-02, the
+    guide's ``## The planes`` bullets are grouped by SERVICE and count six, while the report is
+    grouped by CHECK and prints seven: the archiver is probed twice, and ``archiver_retrieval``
+    appeared under no bullet at all. Both orderings are individually correct, which is why prose
+    alone never noticed; what was missing is the mapping between them.
+
+    Red-proof: delete any name from the plane-inventory region (this reddens with that name), or add
+    one nobody prints (this reddens the other way). Both directions are needed: presence alone would
+    pass a region that named a plane the report has since dropped.
+    """
+    guide = _guide_plane_tokens()
+    reported = await _reported_plane_names()
+    # Non-empty floors (F23), both sides, the same shape as the tool-inventory guard above: set
+    # equality passes vacuously as empty == empty if either scanner silently returns nothing.
+    assert guide, "the guide's plane inventory is empty, the marker or token anchor broke"
+    assert reported, "run_doctor reported no planes at all, the report anchor broke"
+    # The findings are NAMED rather than computed inline, and that is what makes the central
+    # comparison visible to _ASSERTED_NAMES below. ⚠️ Measured on the first version of this guard:
+    # with `guide` and `reported` as the only declared names, both were already satisfied by the two
+    # floors above, so deleting this comparison outright left the floor GREEN. A row that its own
+    # floor assertions satisfy declares nothing.
+    only_in_guide = sorted(guide - reported)
+    only_in_report = sorted(reported - guide)
+    assert not (only_in_guide or only_in_report), (
+        f"guide plane inventory <-> report drift: only-in-guide={only_in_guide} "
+        f"only-in-report={only_in_report}. Every plane the report prints a line for has "
+        "to be named in the plane-inventory region, in the spelling the line uses."
+    )
+
+
+async def test_every_plane_literal_in_the_source_reaches_the_report() -> None:
+    """The second comparison, and it is deliberately NOT against the guide.
+
+    An AST pin held against the GUIDE would report a dead literal (a ``_disabled("x")`` nobody
+    calls) as a documentation gap, which it is not: that is a false alarm on the wrong surface. Held
+    against the RUNTIME set instead, the same drift says the true thing, in either direction: a
+    plane name is spelled in the module but never reaches a report, or a plane reaches the report
+    without a literal this scan can see.
+
+    It earns its place because the two sources are blind to different things. The runtime set is
+    what ONE config produced, so a plane that only appears under some other configuration would be
+    missing from it; the literal set is spelled in the source, so it has that plane. Conversely a
+    computed or f-string name is invisible HERE and present in the runtime set. Neither blindness is
+    hypothetical in general, though both are on today's tree: all seven planes are unconditional and
+    all seven are literals.
+
+    Red-proof: add ``_disabled("ghost")`` to a branch nothing calls (reddens as only-in-source), or
+    make a plane's name an f-string (reddens as only-in-report).
+    """
+    literals = _source_plane_names()
+    reported = await _reported_plane_names()
+    assert literals, "no plane literals found in services/doctor.py, the AST anchor broke"
+    assert reported, "run_doctor reported no planes at all, the report anchor broke"
+    # Named for the same reason as in the guard above: a finding the floor cannot see is a row that
+    # declares nothing.
+    only_in_source = sorted(literals - reported)
+    unlit_in_report = sorted(reported - literals)
+    assert not (only_in_source or unlit_in_report), (
+        f"plane literals <-> report drift: only-in-source={only_in_source} "
+        f"only-in-report={unlit_in_report}. This is NOT a documentation finding: a "
+        "name spelled in the module that never reaches a report is dead, and a reported plane with "
+        "no literal is one this scan cannot see."
+    )
 
 
 # --- the doctor status surface (QA-47) ----------------------------------------------------------
@@ -1692,17 +1880,24 @@ def test_the_status_prose_still_names_every_failing_status() -> None:
 # comparisons carry a wiring pin on top. What each grade buys is written where it is checked.
 
 
-#: The names each status guard asserts ON, declared so that DELETING an assertion is loud. Read off
-#: the ``test`` expression of every ``assert`` in the six guards; the message is not read, because
-#: a reverted assertion often leaves its message behind.
+#: The names each listed guard asserts ON, declared so that DELETING an assertion is loud. Read off
+#: the ``test`` expression of every ``assert`` in the guards below; the message is not read, because
+#: a reverted assertion often leaves its message behind. No count is stated here on purpose: the
+#: population grows every round, nothing reads this comment, and a stale figure beside a derived set
+#: reads as a measurement. Re-derive it from the dict.
 #:
 #: Declared rather than derived, for the reason ``_IN_THE_GLYPH_TABLE`` gives: a derived expectation
 #: is satisfied by whatever the file happens to say today, which is the one thing this cannot check.
 #:
 #: ⚠️ A guard that is NOT listed here is covered by nothing, and nothing says so: the floor below
-#: compares ``declared - found`` and has no reverse direction, so a seventh guard added without a
-#: row would be silently unfloored. That gap is recorded in ``docs/known-limits.md`` section 14.
+#: compares ``declared - found`` and has no reverse direction, so a NEW guard added without a row
+#: would be silently unfloored. That gap is recorded in ``docs/known-limits.md`` section 14.
 #: Adding a guard means adding its row in the same edit.
+#:
+#: ⚠️ And a row has to name the FINDING, not just the inputs. A row whose names are already
+#: satisfied by its guard's own non-empty floors leaves the central comparison deletable in silence,
+#: which is the sham shape this floor exists to prevent; measured on the QA-73 pair before their
+#: finding variables were named.
 _ASSERTED_NAMES: dict[str, frozenset[str]] = {
     "test_the_guide_status_buckets_tile_plane_status": frozenset(
         {"statuses", "only_in_buckets", "only_in_plane_status", "double_listed"}
@@ -1718,6 +1913,18 @@ _ASSERTED_NAMES: dict[str, frozenset[str]] = {
     "test_the_declared_status_locations_still_describe_the_guide": frozenset(
         {"missing", "surfaced", "dead", "unknown"}
     ),
+    # QA-73. Not status guards, but the same floor applies for the same reason, and the dict has no
+    # reverse direction: a guard added without a row here is unfloored and nothing says so.
+    # ⚠️ The FINDING names carry the row, not the input names. Measured on the first version, which
+    # declared only {"guide", "reported"} and {"literals", "reported"}: both were already satisfied
+    # by each guard's own non-empty floors, so the central comparison could be deleted outright with
+    # this floor staying green. A row satisfied by its guard's floors declares nothing.
+    "test_the_guide_names_every_plane_the_report_prints": frozenset(
+        {"guide", "reported", "only_in_guide", "only_in_report"}
+    ),
+    "test_every_plane_literal_in_the_source_reaches_the_report": frozenset(
+        {"literals", "reported", "only_in_source", "unlit_in_report"}
+    ),
 }
 
 
@@ -1732,10 +1939,18 @@ def test_every_status_guard_still_asserts_on_what_it_computes() -> None:
     file exists to make true.
 
     What it buys: every DELETED assertion and every RENAMED finding variable goes red here, twelve
-    of twelve, measured by removing each statement in turn (2026-07-30). ⚠️ QA-49 added two guards
-    and three assertions, fifteen over six guards now, and those three are covered by the same
-    MECHANISM but were not put through that per-statement sweep. The claim is therefore about the
-    twelve that were measured, not about all fifteen.
+    of twelve, measured by removing each statement in turn (2026-07-30). ⚠️ Later rounds added more
+    guards and assertions (QA-49, then QA-73) which ride the same MECHANISM but were not put through
+    that per-statement sweep. The claim is therefore about the twelve that were measured, and the
+    current totals are deliberately NOT restated here: they move every round, nothing reads this
+    docstring, and a stale count would read as a measurement. Re-derive them from
+    ``_ASSERTED_NAMES`` instead.
+
+    ⚠️ ``ast.AsyncFunctionDef`` is read alongside ``ast.FunctionDef``, and that is load-bearing
+    rather than tidy: the QA-73 guards are ``async def``, and reading only the sync node type would
+    have left them out of ``found`` while their rows stood in the dict. That does not fail open,
+    it fails LOUD on the ``absent`` assertion below, which is why it was caught; a guard whose row
+    simply never matched would be the dangerous shape.
 
     What it does NOT buy, stated rather than implied: an assertion that stays and stops meaning
     anything. A finding list emptied where it is built (``wrong = []``) leaves the name standing in
@@ -1755,7 +1970,7 @@ def test_every_status_guard_still_asserts_on_what_it_computes() -> None:
             if isinstance(name, ast.Name)
         }
         for node in ast.walk(module)
-        if isinstance(node, ast.FunctionDef) and node.name in _ASSERTED_NAMES
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name in _ASSERTED_NAMES
     }
     absent = sorted(set(_ASSERTED_NAMES) - set(found))
     assert not absent, (

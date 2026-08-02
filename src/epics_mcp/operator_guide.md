@@ -91,6 +91,23 @@ For the canonical plane→source→tools table and the safety/network posture, s
 - **Phoebus Olog**: logbook search and reading, whole entries (title, text, author, attachments).
   `EPICS_MCP_OLOG_URL`.
 
+The bullets above are grouped by SERVICE, which is how you configure them. The `epics-doctor` report
+is grouped by CHECK, and prints one line per plane under the name below. These are the strings to
+search for when a report line is unclear, and each one is also the `plane` field of an entry in the
+`planes` list of the `--json` output.
+
+<!-- BEGIN:plane-inventory (names only, drift-guarded against the planes run_doctor reports; keep prose OUTSIDE these markers, see tests/test_guide_matches_code.py) -->
+`live` · `channelfinder` · `archiver` · `archiver_retrieval` · `alarm` · `naming` · `olog`
+<!-- END:plane-inventory -->
+
+The Archiver Appliance is the one service holding two of them, which is why the bullets above list
+one archiver while the report prints two lines. They are probed as separate planes: a correct
+management URL beside an unreachable retrieval one shows up as one healthy line and one failing
+line rather than as a single ambiguous verdict. They are not fully independent, though, and the one
+coupling is deliberate: a retrieval URL set while the management URL is empty is reported on the
+retrieval line as `config_error` without any probe at all, because every archiver tool gates on the
+management URL, so that retrieval URL would never be used.
+
 ## Tool palette
 
 The core tools always register. The four **display-aware** tools register only when the optional

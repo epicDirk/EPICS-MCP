@@ -715,8 +715,7 @@ gap.** The totality guard proves one property: that `PlaneStatus` is a subset of
 report has three other parts, and measured on 2026-08-02 not one of their fixed strings appears in
 the shipped guide: the header line, the `Privacy (ChannelFinder redaction):` block with its two
 allowlists, and the `Overall:` verdict in all SIX of its branches (`PROBLEM`, `INCONCLUSIVE` and
-four distinct `OK` wordings). The plane name `archiver_retrieval` is absent as well, while the other
-six plane names are present. The verdict is the last line an operator reads, so this is not a
+four distinct `OK` wordings). The verdict is the last line an operator reads, so this is not a
 cosmetic omission.
 
 It was left open deliberately rather than overlooked, and the reason is a difference in kind. A mark
@@ -726,6 +725,56 @@ four exit codes including what exit `0` does NOT promise, are already written in
 places. Documenting them would buy a reader the ability to FIND the wording, not to understand it,
 and it would need a second declaration and a second guard, or the new text would be unguarded from
 the day it was written. Carried as a follow-up, with this measurement as its starting point.
+
+**The plane NAMES were part of that same measurement and are now guarded (QA-73).** They turned out
+to be a different kind from the verdict, which is why they were split off and built: a plane name is
+a token, not a sentence (it follows the status mark on its line), so a reader who cannot find it has
+nothing to fall back on. ⚠️ The original phrasing here, "the plane name `archiver_retrieval` is
+absent while the other six are present", was measured too narrowly and is corrected rather than
+deleted: counted as bare lower-case tokens, the spelling the report actually prints, `channelfinder`
+and `olog` each appeared exactly once and neither occurrence was a plane name (a placeholder URL and
+the phrase "foreign archiver/olog 404"). The six were present as SERVICE names in prose, which is a
+different claim than the one the sentence made. What was really missing was the mapping between two
+individually correct orderings: the guide's bullets group by service and count six, the report
+groups by check and prints seven.
+
+Two guards hold it now, and the split between them is deliberate. `test_the_guide_names_every_plane_the_report_prints`
+holds the `plane-inventory` region against a real `run_doctor` run, both directions. `test_every_plane_literal_in_the_source_reaches_the_report`
+holds the plane-name literals in `services/doctor.py` against that SAME runtime set, not against the
+guide: an AST scan pointed at the guide would report a dead literal as a documentation gap, which is
+a false alarm on the wrong surface.
+
+What they do NOT hold, named rather than implied. ⚠️ The region's prose is NOT free, and saying it
+was, as an earlier draft of this paragraph did, gets it backwards: `_PLANE_TOKEN_RE` reads every
+bare lower-case code span in the region as a plane name, so a single backticked word added to the
+surrounding sentences reddens the guard with a phantom plane. Measured. The two spans the region
+already carries survive on a technicality rather than on discipline, both containing a hyphen that
+ends the match. The legend's Meaning column really is free; this region is the opposite, and an
+editor has to know that. Neither the order of the names nor a name written twice is checked; a
+repeated name collapses into the same set member, which for a name list is cosmetic rather than a
+contradiction, unlike a repeated legend row that could carry two meanings. Names hidden inside an
+HTML comment INSIDE the region still count, so a region that renders as nothing can still pass.
+
+Both sources are blind to something the other sees: the runtime set is what ONE config produced, so
+a plane appearing only under some other configuration would be missing from it, while the literal
+scan reads `ast.Constant` only, so a computed or f-string name is invisible to it. A plane name that
+is in NEITHER, computed at runtime and absent from any literal, is unguarded. On the tree today all
+seven planes are unconditional and all seven are literals, so neither blindness is live; both are
+stated because that is the condition under which they would become so. ⚠️ The literal scan derives
+its call shapes from the parameter name (`_plane_taking_helpers`) rather than from a list, and that
+was a repair: a hand-kept pair missed six positional literals, and an adversarial probe turned the
+gap into a working exploit, renaming one of them so the report printed a plane that appeared in
+neither set with both guards green.
+
+⚠️ Further plane orderings exist elsewhere and are held against nothing. No count is given, because
+the first attempt at one was measured too narrowly (it said four and missed `ARCHITECTURE.md`, whose
+section is literally called "The planes"). Enumerate instead of trusting a figure: run `git grep`
+for `plane` over the tracked markdown and the package sources. What that found on 2026-08-02: `README.md`
+counts eight under different names (Live, Registry, History and so on), `ARCHITECTURE.md` eight more
+in a diagram, `docs/deployment.md` six with the two archiver roots on one row, `prompts.py` six with
+retrieval as a sub-question, and `presets.py` carries TWO orderings of its own, a six-item prose
+summary with retrieval in brackets and `REST_PLANE_VARS` where retrieval is a full member. None is
+wrong for its own purpose, and unifying them is a separate cut rather than a side effect of this one.
 
 ## 15 · The remote-https write path has no live probe any more, only in-memory coverage
 

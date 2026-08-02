@@ -69,8 +69,13 @@ two written forms `docs/known-limits.md` names, in the guide
 or on any tracked `docs/*.md` page, must be the one `cli_doctor` renders. The page list is derived
 from `git ls-files` rather than declared, so a new documentation page is covered the day it is
 **tracked**: a page still unstaged in the working tree is not read at all, and a wrong glyph in it
-passes locally until the `git add`. What that half deliberately does not check is dated in
-`docs/known-limits.md`.
+passes locally until the `git add`. The same file also holds the **plane names** the report prints
+(QA-73), which is a different question from the statuses: a status is what a line SAYS, a plane is
+what it is CALLED, and only the first was guarded before. Two comparisons, deliberately not one: the
+guide's `plane-inventory` region against a real `run_doctor` run, and the plane-name literals in
+`services/doctor.py` against that same run rather than against the guide, because a literal nobody
+calls is a dead branch and reporting it as a documentation gap would be a false alarm on the wrong
+surface. What all of that deliberately does not check is dated in `docs/known-limits.md`.
 
 ## Facility-agnostic guardrail (hard)
 

@@ -141,7 +141,14 @@ carry breaking changes).
   character the document travelling with the server did not explain. All twelve states now have a
   row, every mark is explained, and the legend is held TOTAL against `PlaneStatus`: a state that is
   not documented is a failing test rather than a decision. Still not documented, and now recorded as
-  such: the `Overall:` verdict line, the privacy block and the plane name `archiver_retrieval`.
+  such: the `Overall:` verdict line and the privacy block.
+- **The guide explained what a report line SAYS but never what it is CALLED, and one plane had no
+  entry at all.** The guide's plane bullets are grouped by service and count six; `epics-doctor` is
+  grouped by check and prints seven, because the Archiver's management root and its retrieval root
+  are separate planes. `archiver_retrieval` therefore appeared under no bullet, and a reader seeing
+  that line had nothing to look it up by. Both orderings were individually correct, which is why
+  prose alone never caught it. The guide now names all seven planes in the spelling the report uses,
+  and says which `--json` field carries them.
 - **The guide's advice for sizing `EPICS_MCP_READ_RATE_LIMIT` was wrong for one of the two tools it
   named, and unusable for the other.** It said a multi-GET tool such as `coverage_audit` **or**
   `crossplane_check` spends "several tokens per audited PV". Measured at the throttle itself,
@@ -162,6 +169,13 @@ carry breaking changes).
   two occurrences this uncovered in the tree were corrected with it. The reach, the four legitimate
   forms the widening also catches and the blind spots that remain are recorded in
   `docs/known-limits.md` section 10.
+- Two guards hold the shipped guide's new plane inventory: the region against a real `run_doctor`
+  run, and the plane-name literals in `services/doctor.py` against that same run rather than against
+  the guide, so a name spelled in the module that never reaches a report is reported as the dead
+  branch it is instead of as a documentation gap. The literal scan derives which call shapes carry a
+  plane name from the parameter name rather than from a list, after a hand-kept list was measured to
+  miss six positional literals. What neither guard holds is recorded in `docs/known-limits.md`
+  section 14.
 
 ## [0.4.0] - 2026-07-30
 

@@ -53,7 +53,10 @@ when the package is absent, so the core suite stays green.
   guide-location bucket. ⚠️ Leaving it undocumented is not an option the buckets offer any more:
   "named in neither" is empty since QA-49 and putting a status there is a red test, not a decision.
   A status the code treats as a hard failure must additionally stay named in the prose paragraph
-  above the legend. All of it is drift-checked by `test_guide_matches_code.py`.
+  above the legend. A new `epics-doctor` **plane** must be named in the guide's `plane-inventory`
+  region, in the spelling the report prints, which is a separate obligation from the status one: a
+  status is what a line SAYS, a plane is what it is CALLED, and only the first was guarded until
+  QA-73. All of it is drift-checked by `test_guide_matches_code.py`.
 - A new **write** surface additionally satisfies all six points of the
   [write-gate contract](docs/write-gate-contract.md)
   and registers every one of its deny paths in `tests/test_write_gate_contract.py::DENY_PATHS`, each
