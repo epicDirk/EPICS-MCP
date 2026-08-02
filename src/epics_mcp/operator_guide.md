@@ -746,6 +746,15 @@ messages embed the full request URL, an internal host would leak into this file)
 - **`coverage_audit` refuses "alarm plane, no tree named" with `INVALID_INPUT`.** Same shape as
   above: the verdict follows from the arguments, so it is given before the display-PV walk rather
   than after it. Name the tree (`alarm_config`); there is no correct default, they are site-specific.
+- **Every `timeout` is refused at zero or below, on every tool that takes one.** A validation error
+  naming the argument, before any request exists. Ten tools used to accept `0`, and the assumption
+  that this merely produced a fast, honest failure was wrong for half of them: measured, `0` made
+  `find_device` answer "No operator-facing screen references this device", `validate_pvs` report
+  the PV as disconnected, `diagnose_connection` name a cause, and `discover_pvs`/`get_pvs` return
+  empty. Of the five that did fail, two blamed the wrong thing (`PV_TIMEOUT` points at the device,
+  `is_archived` raised `INTERNAL` and logged a server-side traceback). So: if a call is rejected
+  for `timeout`, the fix is the argument, and a *previous* run that answered "nothing found" with
+  `timeout=0` should be repeated before its answer is believed.
 
 ## Acceptance: the questions this guide must answer
 

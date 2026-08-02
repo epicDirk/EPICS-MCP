@@ -228,9 +228,16 @@ mcp = FastMCP(
 @translate_epics_errors
 async def get_pv_value(
     pv_name: Annotated[str, Field(description="EPICS PV name")],
+    # gt=0 on every timeout in this file (QA-71). A zero timeout was assumed to be the honest
+    # counterpart to QA-65's caps, raising rather than fabricating a success. Measured over every
+    # tool that lacked the bound, that was true for only part of them: the rest answered
+    # plausibly instead (find_device reported "no screen references this device", validate_pvs
+    # reported the PV as disconnected). Refusing at the boundary is the reading that is right
+    # either way. The counts stay in the CHANGELOG and in the guard's docstring, where a stale
+    # one is visible; a statistic does not belong at a call site.
     timeout: Annotated[
         float | None,
-        Field(description="Timeout in seconds (default: EPICS_MCP_DEFAULT_TIMEOUT)"),
+        Field(description="Timeout in seconds (default: EPICS_MCP_DEFAULT_TIMEOUT)", gt=0),
     ] = None,
 ) -> dict[str, object]:
     """Get the current value of an EPICS Process Variable.
@@ -260,7 +267,7 @@ async def get_pvs(
     ],
     timeout: Annotated[
         float | None,
-        Field(description="Timeout in seconds per PV (default: EPICS_MCP_DEFAULT_TIMEOUT)"),
+        Field(description="Timeout in seconds per PV (default: EPICS_MCP_DEFAULT_TIMEOUT)", gt=0),
     ] = None,
 ) -> dict[str, object]:
     """Batch-read multiple EPICS PVs in a single call.
@@ -292,7 +299,7 @@ async def set_pv_value(
     value: Annotated[str, Field(description="New value to set")],
     timeout: Annotated[
         float | None,
-        Field(description="Timeout in seconds (default: EPICS_MCP_DEFAULT_TIMEOUT)"),
+        Field(description="Timeout in seconds (default: EPICS_MCP_DEFAULT_TIMEOUT)", gt=0),
     ] = None,
 ) -> dict[str, object]:
     """Set a PV value. Requires EPICS_MCP_ALLOW_PV_WRITE=true.
@@ -341,7 +348,7 @@ async def get_pv_info(
     pv_name: Annotated[str, Field(description="EPICS PV name")],
     timeout: Annotated[
         float | None,
-        Field(description="Timeout in seconds (default: EPICS_MCP_DEFAULT_TIMEOUT)"),
+        Field(description="Timeout in seconds (default: EPICS_MCP_DEFAULT_TIMEOUT)", gt=0),
     ] = None,
 ) -> dict[str, object]:
     """Get detailed PV metadata: value, alarm (severity/status incl. text + message),
@@ -428,7 +435,7 @@ async def discover_pvs(
     ],
     timeout: Annotated[
         float | None,
-        Field(description="Timeout in seconds (default: EPICS_MCP_DEFAULT_TIMEOUT)"),
+        Field(description="Timeout in seconds (default: EPICS_MCP_DEFAULT_TIMEOUT)", gt=0),
     ] = None,
 ) -> DiscoverPvsResult:
     """Discover PVs by name.
@@ -477,7 +484,7 @@ async def find_channels(
             le=100000,
         ),
     ] = 500,
-    timeout: Annotated[float, Field(description="Timeout in seconds")] = 5.0,
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
     has_properties: Annotated[
         dict[str, str] | None,
         Field(
@@ -650,7 +657,7 @@ async def lookup_device_name(
 @translate_epics_errors
 async def is_archived(
     pv_name: Annotated[str, Field(description="EPICS PV name")],
-    timeout: Annotated[float, Field(description="Timeout in seconds")] = 5.0,
+    timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
 ) -> ArchiveStatusResult:
     """Report whether a PV is being archived (EPICS Archiver Appliance MGMT getPVStatus).
 
@@ -1605,7 +1612,10 @@ async def diagnose_connection(
     pv_name: Annotated[str, Field(description="The PV to diagnose")],
     timeout: Annotated[
         float | None,
-        Field(description="Live-probe timeout in seconds (default: config diagnose_timeout, 5.0)"),
+        Field(
+            description="Live-probe timeout in seconds (default: config diagnose_timeout, 5.0)",
+            gt=0,
+        ),
     ] = None,
     check_channelfinder: Annotated[
         bool,

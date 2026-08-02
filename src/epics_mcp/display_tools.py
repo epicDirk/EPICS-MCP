@@ -68,9 +68,13 @@ async def validate_pvs(
             "~60 s for a large dataset; do not call per-file in a loop."
         ),
     ] = None,
+    # gt=0 (QA-71): both display-gated tools answered a zero timeout with a plausible-looking
+    # result rather than an error. validate_pvs reported the PV as disconnected and find_device
+    # reported "No operator-facing screen references this device", which is the same class of
+    # fabricated answer QA-65 removed from the caps, not the honest failure it was assumed to be.
     timeout: Annotated[
         float | None,
-        Field(description="Timeout in seconds per PV (default: EPICS_MCP_DEFAULT_TIMEOUT)"),
+        Field(description="Timeout in seconds per PV (default: EPICS_MCP_DEFAULT_TIMEOUT)", gt=0),
     ] = None,
 ) -> dict[str, object]:
     """Check PV connectivity. Provide a PV list or a .bob file path (+ displays_dir ROOT)."""
@@ -225,7 +229,7 @@ async def find_device(
     match: Annotated[
         MatchMode, Field(description="Match mode against the protocol-stripped channel")
     ] = "prefix",
-    timeout: Annotated[float, Field(description="Live-read timeout in seconds")] = 5.0,
+    timeout: Annotated[float, Field(description="Live-read timeout in seconds", gt=0)] = 5.0,
     context_cap: Annotated[
         int,
         Field(description="Per-display macro-context cap (higher = more complete, slower)", ge=1),

@@ -95,6 +95,21 @@ carry breaking changes).
   validation error** rather than an empty result. The four sibling caps that already carried this
   bound stated the reason at the call site; it now holds everywhere, watched by a test over the
   live tool registry rather than a list, so a future tool is covered the day it is registered.
+- **Ten `timeout` arguments now reject zero and below.** `get_pv_value`, `get_pvs`, `get_pv_info`,
+  `set_pv_value`, `discover_pvs`, `diagnose_connection`, `find_channels`, `is_archived`,
+  `validate_pvs` and `find_device` require `> 0`, which the other nineteen timeouts already did.
+  **A client passing `timeout=0` today will now get a validation error** naming the argument,
+  before any request exists. This was deferred once as a mere inconsistency, on the assumption
+  that a zero timeout fails honestly rather than fabricating an answer. Measured over all ten,
+  that assumption held for five and was wrong for the other five, which returned a
+  plausible-looking result instead: `find_device` answered "No operator-facing screen references
+  this device", `validate_pvs` reported the PV as disconnected, `diagnose_connection` named a
+  cause, `discover_pvs` and `get_pvs` came back empty. Two of the five that did raise pointed at
+  the wrong thing: `PV_TIMEOUT` blames the device rather than the argument, and `is_archived`
+  surfaced `INTERNAL` with a server-side traceback for what is a caller input error. The registry
+  guard that watches this now covers every numeric argument rather than only the integer half,
+  and for a `number` it requires an EXCLUSIVE lower bound, so a future `ge=0` cannot reintroduce
+  the same defect.
 - **`epics-crossplane --help` and `epics-coverage --help` now answer on a core-only install.** They
   used to report the missing display engine and exit `2` instead, so on any install from a package
   index, where that engine is never present, the first answer to `--help` was an instruction to

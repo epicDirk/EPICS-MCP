@@ -13,13 +13,16 @@ Both halves had already failed once, and this module is the guard for each:
   (``get_pvs(names=[...])``) and the operator guide served as ``epics-pv://guide``
   (``get_alarm_history`` ... ``pv``). A client that follows either builds a call the server rejects.
 
-Three guards, in the order the failure happened:
+Four guards. The first three are in the order the failure happened; the fourth arrived later, with
+QA-65, and watches the argument VALUE range rather than its name:
 
 1. the wire contract itself (``inputSchema``), including the absence of the retired names;
 2. every ``tool(keyword=...)`` example in the prose, checked against the real schema, this one
    generalizes to a future rename, because the tool set comes from the live registry;
 3. the retired names of THIS rename, which must not appear beside their tool in prose that carries
-   no call syntax (exactly how the guide's occurrence was phrased).
+   no call syntax (exactly how the guide's occurrence was phrased);
+4. every numeric argument carries a lower bound, so a non-positive value is refused at the
+   boundary instead of producing an answer the caller cannot tell from a real one.
 
 Honest limits, so nobody reads more into this than it proves:
 
@@ -245,7 +248,15 @@ async def test_retired_argument_names_are_gone_from_the_prose() -> None:
     )
 
 
-# --- Guard 4: every integer argument carries a lower bound -------------------------------------
+# --- Guard 4: every numeric argument carries a lower bound -------------------------------------
+
+#: Floors for the per-type scan, MEASURED ON THE CORE LANE (``uv sync --extra dev``, no
+#: ``--group displays``), which is what CI installs (``.github/workflows/ci.yml``, and
+#: ``pyproject.toml`` says so in as many words). The full lane has 10 and 30; pinning THOSE would
+#: pass locally and redden CI on both matrix legs after the push, the exact trap
+#: ``test_server.py`` and ``test_prose_counters.py`` each warn about for their own counts.
+_MIN_INTEGER_ARGUMENTS = 7
+_MIN_NUMBER_ARGUMENTS = 28
 
 
 def _numeric_variants(spec: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -255,11 +266,25 @@ def _numeric_variants(spec: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 
 
 def _has_lower_bound(variant: Mapping[str, Any]) -> bool:
+    """Whether the variant refuses a non-positive value.
+
+    Asymmetric BY MEASUREMENT, not by taste. A ``number`` here is always a duration, and a
+    duration has no meaning at 0, so it must carry ``exclusiveMinimum``; accepting a plain
+    ``minimum`` would let a future ``Field(ge=0)`` render ``minimum: 0``, pass this guard and
+    take ``timeout=0`` again, which is the defect QA-71 removed. The ``integer`` half genuinely
+    uses both: the caps carry ``minimum: 1``, and ``search_logbook.offset`` carries ``minimum: 0``
+    because the first page IS 0.
+    """
+    if variant.get("type") == "number":
+        return "exclusiveMinimum" in variant
     return "minimum" in variant or "exclusiveMinimum" in variant
 
 
-async def test_every_integer_argument_has_a_lower_bound() -> None:
-    """QA-65, generalised past the one tool that reported it.
+async def test_every_numeric_argument_has_a_lower_bound() -> None:
+    """QA-65 and QA-71, generalised past the one tool that reported either.
+
+    Two failure classes, one rule, because measurement showed they are not as distinct as the
+    argument names suggest.
 
     A cap of ``0`` does not fail: it succeeds and returns nothing, and an empty result is
     indistinguishable from "the thing you asked about does not exist". Measured on the three
@@ -268,30 +293,54 @@ async def test_every_integer_argument_has_a_lower_bound() -> None:
     an empty list, so the answer actively claims there is more), and ``seen_per_top >= 0`` in the
     PV inventory, which marks every display capped and yields an empty inventory.
 
+    A ``timeout`` of ``0`` was believed to be the honest half, raising ``PVTimeoutError`` instead
+    of fabricating a success. Measured over all ten tools that lacked the bound (QA-71), that
+    held for five and failed for the other five, which returned a plausible-looking answer:
+    ``find_device`` reported "No operator-facing screen references this device", ``validate_pvs``
+    reported the PV as disconnected, ``diagnose_connection`` invented a cause in the one tool
+    whose entire job is naming causes. Two of the five that DID fail were still wrong about the
+    reason (``PV_TIMEOUT`` blames the device, ``is_archived`` raised ``[INTERNAL] ValueError``
+    and logged a server-side traceback for what is a caller's input error).
+
     Written against the LIVE REGISTRY rather than a list of known tools, which is the whole point
     (decision PY (a)): a guard comparing a literal to itself only watches the direction the code
     does not grow in, and the entry this test comes from had been measured against ``server.py``
     alone while four more tools are registered from ``display_tools.py``. Here a new tool is
     covered on the day it is registered.
 
-    Deliberately integer-only for now: the ten ``float`` timeouts still lacking ``gt=0`` are a
-    DIFFERENT failure class (a zero timeout raises PVTimeoutError, an honest error, rather than
-    fabricating an empty success), tracked separately. Widen this to ``number`` once they are
-    fixed, and delete this paragraph with them.
+    Honest limit, so nobody reads more into the floors than they prove: they count what was
+    SCANNED, never what was JUDGED, so no floor can catch a broken ``_has_lower_bound``. What
+    catches that is the red-proof this test is required to pass before it is trusted (a mutant
+    returning ``True`` leaves the pre-fix tree green, which is visible only by running it there).
+    A future ``integer`` with ``ge=0`` would also pass; ``number`` is guarded against that by
+    ``_has_lower_bound``, ``integer`` is not, because ``offset`` needs ``minimum: 0``.
     """
     offenders: list[str] = []
-    checked = 0
+    checked: dict[str, int] = {"integer": 0, "number": 0}
     for name, schema in (await _input_schemas()).items():
         for argument, spec in (schema.get("properties") or {}).items():
             for variant in _numeric_variants(spec):
-                if variant.get("type") != "integer":
+                kind = variant.get("type")
+                if kind not in checked:
                     continue
-                checked += 1
+                checked[kind] += 1
                 if not _has_lower_bound(variant):
-                    offenders.append(f"{name}.{argument}")
+                    offenders.append(f"{name}.{argument} ({kind})")
     assert not offenders, (
-        "an integer argument accepts a non-positive value, which succeeds and returns an empty "
-        "result the caller cannot tell from 'nothing exists':\n  " + "\n  ".join(offenders)
+        "a numeric argument accepts a non-positive value. A cap of 0 succeeds and returns an "
+        "empty result the caller cannot tell from 'nothing exists'; a timeout of 0 does the same "
+        "in half the tools measured and misattributes the cause in the rest:\n  "
+        + "\n  ".join(offenders)
     )
-    # Non-empty floor, same reason as guard 2: a broken unwrap would make this vacuously green.
-    assert checked >= 5, f"only {checked} integer arguments found, the scan is probably broken"
+    # Non-empty floors, same reason as guard 2: a broken unwrap would make this vacuously green.
+    # PER TYPE, because one combined floor cannot see a whole half disappear, and the plausible
+    # drift is exactly that: dropping the ``anyOf`` unwrap silently removes the seven optional
+    # timeouts, leaving the integers to hold a combined floor green.
+    assert checked["integer"] >= _MIN_INTEGER_ARGUMENTS, (
+        f"only {checked['integer']} integer arguments found (core lane has "
+        f"{_MIN_INTEGER_ARGUMENTS}), the scan is probably broken"
+    )
+    assert checked["number"] >= _MIN_NUMBER_ARGUMENTS, (
+        f"only {checked['number']} number arguments found (core lane has "
+        f"{_MIN_NUMBER_ARGUMENTS}), the scan is probably broken"
+    )
