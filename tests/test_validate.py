@@ -665,18 +665,40 @@ async def test_the_wire_default_is_the_file_view(tmp_path: Path) -> None:
     payload = call.data
     assert payload["total"] == 1, "the wire default must still be the file view"
     assert payload["shown_by_display"] == 2
+    # The only place any test looks at ``notes`` ACROSS the tool boundary. The honesty notes are a
+    # user-visible part of the answer, and the registered wrapper is a layer the inner tests never
+    # execute; without this line a wrapper that dropped them would pass the whole suite.
+    assert "notes" in payload, "the honesty notes must survive the registered tool wrapper"
 
 
-def _capped_inventory(rel: str, *, declared: bool, capped: tuple[str, ...]) -> object:
+def _capped_inventory(
+    rel: str,
+    *,
+    declared: bool,
+    capped: tuple[str, ...],
+    own_unresolved: bool = False,
+    foreign_top: str | None = None,
+    foreign_first: bool = False,
+) -> object:
     """An inventory whose display *rel* embeds a fragment, with *capped* naming what was capped.
 
-    *declared*: whether *rel* also owns a channel, i.e. whether the call takes the normal path
-    (True) or the empty-result path (False).
+    *declared*: whether *rel* also owns a RESOLVED channel, i.e. whether the call takes the normal
+    path (True) or the empty-result path (False).
+
+    *own_unresolved*: give *rel* an occurrence of its own that does NOT pass the resolution filter.
+    That is the shape of the two real files this defect was measured on: they declare PVs, none of
+    which resolve at the default cap. It is what separates "declares nothing" from "declares
+    something that has not resolved yet", and the cap verdict must tell those apart.
+
+    *foreign_top*: append (or, with *foreign_first*, prepend) a SECOND display of that name, whose
+    events belong to itself. It serves two purposes: a top in ``capped`` that must NOT count for
+    *rel*, and a position control, because a verdict collected per display instead of across the
+    whole inventory is invisible in a one-display fixture.
 
     *capped* goes into ``diagnostics.context_capped`` verbatim, because WHICH path is in there
-    decides which of the two cap tests can see it: the pre-existing flag matches on the events'
-    ``top_level_display`` (so it needs *rel*), the new one also matches the origins of the
-    display's own events (so ``frag.bob`` alone is enough for it, and invisible to the old one).
+    decides which test can see it: the top term needs a path that is a ``top_level_display`` of
+    *rel*'s own events, the ``rel`` term needs *rel* itself and fires with no event at all, and the
+    display view's own term also matches the origins of the display's events.
     """
     from opi_navigation.pv_analysis import (
         DisplayPvInventory,
@@ -685,36 +707,65 @@ def _capped_inventory(rel: str, *, declared: bool, capped: tuple[str, ...]) -> o
         PvInventory,
     )
 
-    def _pv(name: str, origin: str) -> object:
+    def _pv(name: str, origin: str, top: str | None = None) -> object:
         return ExpandedPv(
             pv=f"ca://{name}",
             raw_pv="$(P):X",
             resolution="resolved",
             role="read",
             protocol="ca",
-            top_level_display=rel,
+            top_level_display=top or rel,
             origin_file=origin,
         )
 
     pvs = [_pv("SYSX:FROM_FRAGMENT", "frag.bob")]
     if declared:
         pvs.insert(0, _pv("SYSX:OWN", rel))
+    if own_unresolved:
+        # Engine-shaped: an unbound macro leaves the string as written, so ``pv`` still carries the
+        # macro and the protocol falls back to the raw one (expansion.py). Building it as a
+        # concrete ``ca://`` name with resolution="dynamic" would be a state the engine cannot
+        # produce.
+        pvs.insert(
+            0,
+            ExpandedPv(
+                pv="$(P):X",
+                raw_pv="$(P):X",
+                resolution="dynamic",
+                role="read",
+                protocol="ca",
+                top_level_display=rel,
+                origin_file=rel,
+            ),
+        )
+    displays = [
+        DisplayPvInventory(display_path=rel, operator_facing=True, pvs=tuple(pvs)),  # type: ignore[arg-type]
+    ]
+    if foreign_top is not None:
+        foreign = DisplayPvInventory(
+            display_path=foreign_top,
+            operator_facing=True,
+            pvs=(_pv("SYSX:FOREIGN", foreign_top, top=foreign_top),),  # type: ignore[arg-type]
+        )
+        displays.insert(0 if foreign_first else len(displays), foreign)
     return PvInventory(
         repo_root="/nowhere",
-        displays=(
-            DisplayPvInventory(display_path=rel, operator_facing=True, pvs=tuple(pvs)),  # type: ignore[arg-type]
-        ),
+        displays=tuple(displays),
         # The engine records the capped TARGET, not the top it was capped under.
         diagnostics=PvDiagnostics(context_capped=capped),
     )
 
 
 async def test_capped_fragment_makes_the_display_figure_a_lower_bound(tmp_path: Path) -> None:
-    """Normal path with BOTH paths capped: the new note says "at least", the old one survives.
+    """Normal path with BOTH paths capped: the display note says "at least", the file note survives.
 
-    Both are listed as capped on purpose. The pre-existing note needs ``d.bob`` (it matches on
-    ``top_level_display``); the new one would fire on ``frag.bob`` alone. Listing only the fragment
-    is a different case, and it is the next test.
+    Both are listed as capped on purpose. The file note needs ``d.bob``; the display one would fire
+    on ``frag.bob`` alone. Listing only the fragment is a different case, and it is the next test.
+
+    ⚠ Since GB-26 the file note here is OVER-determined: ``d.bob`` satisfies both of
+    ``_file_view_is_capped``'s terms at once, so deleting either one leaves this test green. The
+    term isolation lives in ``test_validate_pvs_file_path_context_capped_note`` (top term only) and
+    in ``test_capped_file_alone_is_a_lower_bound_on_the_normal_path`` (rel term only).
 
     ``notes[0]`` is pinned because order is what a model reads first, and nothing else would
     notice the two swapping.
@@ -742,12 +793,17 @@ async def test_capped_fragment_makes_the_display_figure_a_lower_bound(tmp_path: 
 async def test_capped_is_seen_on_the_empty_path_where_the_old_flag_is_blind(
     tmp_path: Path,
 ) -> None:
-    """The one place the new cap test and the pre-existing ``capped`` flag disagree.
+    """The one place the display cap test and the file one disagree, and why they must.
 
-    The old flag is only ever set inside the ``origin_file``-filtered loop, so when nothing passes
-    that filter it stays False no matter what was capped. Measured on a real dataset: 12 of the 42
-    files taking this path are genuinely capped and every one of them reported ``capped=False``.
-    Without this test, replacing the new check with the old flag is invisible.
+    ``frag.bob`` is capped, ``d.bob`` is not, and no occurrence of ``d.bob``'s own exists here. The
+    display view is fed BY the fragment, so it is a lower bound; the file view of ``d.bob`` is not,
+    because ``d.bob`` declares nothing whose enumeration a larger budget could extend.
+
+    Since GB-26 this is the guard against handing the file view the display view's predicate:
+    ``_display_view_is_capped`` matches the ORIGINS feeding the display (``frag.bob``, a hit),
+    ``_file_view_is_capped`` matches ``rel`` plus the tops of ``rel``'s OWN occurrences (neither,
+    no hit, and the occurrence guard settles it first). Swapping one for the other turns the single
+    note below into two.
     """
     root = tmp_path / "ds"
     root.mkdir()
@@ -758,11 +814,15 @@ async def test_capped_is_seen_on_the_empty_path_where_the_old_flag_is_blind(
     ):
         result = await _validate_pvs(file_path=str(root / "d.bob"), displays_dir=str(root))
 
-    assert result["total"] == 0, "nothing passed the origin_file filter, so the old flag is False"
+    assert result["total"] == 0, "nothing passed the origin_file filter"
     assert result["shown_by_display_capped"] is True
     notes = result["notes"]
-    assert isinstance(notes, list) and len(notes) == 1, "only the new note, the old one cannot fire"
+    assert isinstance(notes, list) and len(notes) == 1, "only the view note, the file one must not"
     assert "at least 1 further channel(s)" in str(notes[0]), notes
+    assert not any("per-display context cap" in str(n) for n in notes), (
+        "the file view declares nothing here, so calling it a lower bound would be a false "
+        "statement; 'lower bound' alone cannot be asserted on, BOTH notes carry that phrase"
+    )
 
 
 async def test_validate_pvs_file_path_context_capped_note(tmp_path: Path) -> None:
@@ -816,3 +876,222 @@ async def test_validate_pvs_file_path_context_capped_note(tmp_path: Path) -> Non
     assert isinstance(notes, list)
     assert any("lower bound" in str(n) for n in notes)
     mock_batch.assert_awaited_once_with(["SYSX:X"], None)
+
+
+# --- GB-26: the file-view cap verdict, its guard, and its two negative controls ------------------
+#
+# ⚠ ``"lower bound"`` is a FORBIDDEN assertion fragment in this block. Both notes carry it (the cap
+# note says "PV list is a lower bound", the view note ends with "That figure is a lower bound"), so
+# a test asserting on it would stay green with the cap note gone. The cap note is identified by
+# ``"per-display context cap"``, which the view note does not contain. For the same reason
+# ``"notes" not in result`` is never the negative assertion here: the view note fires in all four
+# fixtures below.
+
+
+def _own_pv_inventory(rel: str, *, capped: tuple[str, ...], foreign_first: bool) -> object:
+    """A one-occurrence inventory shaped like ``test_validate_pvs_file_path_context_capped_note``.
+
+    *rel* is expected to sit in a SUBDIRECTORY, and the single event is attributed to a top of a
+    different name, so the ``rel`` term of ``_file_view_is_capped`` is the only one that can fire.
+    The extra display exists purely as a position control (see the note in the test).
+    """
+    from opi_navigation.pv_analysis import (
+        DisplayPvInventory,
+        ExpandedPv,
+        PvDiagnostics,
+        PvInventory,
+    )
+
+    owner = DisplayPvInventory(
+        display_path="ov.bob",
+        operator_facing=True,
+        pvs=(
+            ExpandedPv(
+                pv="ca://SYSX:X",
+                raw_pv="$(P):X",
+                resolution="resolved",
+                role="read",
+                protocol="ca",
+                top_level_display="ov.bob",
+                origin_file=rel,
+            ),
+        ),
+    )
+    other = DisplayPvInventory(
+        display_path="zz_other.bob",
+        operator_facing=True,
+        pvs=(
+            ExpandedPv(
+                pv="ca://SYSX:FOREIGN",
+                raw_pv="$(P):Y",
+                resolution="resolved",
+                role="read",
+                protocol="ca",
+                top_level_display="zz_other.bob",
+                origin_file="zz_other.bob",
+            ),
+        ),
+    )
+    displays = (other, owner) if foreign_first else (owner, other)
+    return PvInventory(
+        repo_root="/nowhere",
+        displays=displays,  # type: ignore[arg-type]
+        diagnostics=PvDiagnostics(context_capped=capped),
+    )
+
+
+async def test_capped_file_alone_is_a_lower_bound_on_the_normal_path(tmp_path: Path) -> None:
+    """The new term carrying ALONE, on a non-empty result: contexts into the file were dropped.
+
+    The file resolves one channel and is itself a capped target, while the top it contributes to is
+    not. The pre-existing top term therefore cannot fire and the note can only come from
+    ``rel in capped_targets``. That also pins the effect as NOT confined to the empty path: a
+    variant that applied the new term only when the channel list came back empty is red here.
+
+    ⚠ The file sits in a subdirectory and ``context_capped`` names the same root-relative posix
+    path, so a verdict computed from the bare file name or from the absolute path is red too. (A
+    comparison that merely FOLDS the directory away on both sides stays green; that mutation is not
+    covered, and no cheap fixture covers it.)
+
+    ⚠ The foreign display comes FIRST on purpose. Every other cap fixture in this file holds a
+    single display, so a verdict collected from ``inventory.displays[0]`` alone would be invisible
+    in all of them while being silently wrong on a real dataset (fbis: 257 displays).
+    """
+    root = tmp_path / "ds"
+    (root / "sub").mkdir(parents=True)
+    frag = root / "sub" / "frag.bob"
+    frag.write_text('<display version="2.0.0"><name>F</name></display>', encoding="utf-8")
+    mock_batch = AsyncMock(
+        return_value={"results": [{"pv_name": "SYSX:X", "value": 1}], "errors": []}
+    )
+    with (
+        patch(
+            "epics_mcp.tools.validate.analyze_pv_inventory",
+            return_value=_own_pv_inventory(
+                "sub/frag.bob", capped=("sub/frag.bob",), foreign_first=True
+            ),
+        ),
+        patch("epics_mcp.tools.validate.pv_get_batch", mock_batch),
+    ):
+        result = await _validate_pvs(file_path=str(frag), displays_dir=str(root))
+
+    assert result["total"] == 1, "the file view holds its own channel"
+    notes = result["notes"]
+    # No display carries display_path == rel, so the view note cannot fire and the cap note is
+    # alone. Pinning the count as well as the content keeps a second note from sneaking in unread.
+    assert isinstance(notes, list) and len(notes) == 1, notes
+    assert "per-display context cap" in str(notes[0]), notes
+
+
+async def test_capped_file_with_only_unresolved_pvs_of_its_own_says_it_is_a_lower_bound(
+    tmp_path: Path,
+) -> None:
+    """GB-26 itself: ``total: 0`` on a file that declares PVs which have not resolved yet.
+
+    This is the measured shape of the two files the previous flag stayed silent on (one of them
+    resolving 0 channels at the default cap and 5576 at four times the cap): they DO declare PVs,
+    but not one of those resolves under the cap, so nothing passes the resolution filter and the
+    old in-loop flag could never be set.
+
+    ⚠ It is also the guard against putting the occurrence test BEHIND that filter, which reads like
+    a harmless simplification and measurably reinstates the whole defect: both real files have zero
+    resolved channels at the default cap.
+
+    ⚠ The foreign display comes LAST, so a verdict reset per display (rather than accumulated over
+    the inventory) loses the evidence and goes red.
+    """
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
+    spy = AsyncMock(side_effect=_connect_all)
+    with (
+        patch(
+            "epics_mcp.tools.validate.analyze_pv_inventory",
+            return_value=_capped_inventory(
+                "d.bob",
+                declared=False,
+                own_unresolved=True,
+                capped=("d.bob",),
+                foreign_top="zz_other.bob",
+            ),
+        ),
+        patch("epics_mcp.tools.validate.pv_get_batch", spy),
+    ):
+        result = await _validate_pvs(file_path=str(root / "d.bob"), displays_dir=str(root))
+
+    assert result["total"] == 0, "the file's own occurrence does not resolve at this cap"
+    spy.assert_not_awaited()
+    notes = result["notes"]
+    # Two notes on purpose: the cap note AND the view note, because the display view does resolve
+    # the embedded fragment's channel. Asserting len == 1 here (the shape of the sibling test just
+    # above) would be red on correct code.
+    assert isinstance(notes, list) and len(notes) == 2, notes
+    assert "per-display context cap" in str(notes[0]), notes
+
+
+async def test_capped_file_that_declares_no_pv_at_all_is_not_called_a_lower_bound(
+    tmp_path: Path,
+) -> None:
+    """The negative control the guard exists for, and the one the naive repair got wrong.
+
+    Same constellation as the test above with ONE difference: the file declares no occurrence of
+    its own. Its file view is then exactly complete at every cap, and calling it a lower bound
+    would be a false statement, however capped the file is as an embed target.
+
+    Measured on a 257-display dataset: without this guard the verdict fires on 73 files instead of
+    49, and 20 of the 24 newly flagged ones declare no PV whatsoever, against 2 genuinely silenced
+    files that the repair recovers.
+    """
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
+    with patch(
+        "epics_mcp.tools.validate.analyze_pv_inventory",
+        return_value=_capped_inventory("d.bob", declared=False, capped=("d.bob",)),
+    ):
+        result = await _validate_pvs(file_path=str(root / "d.bob"), displays_dir=str(root))
+
+    assert result["total"] == 0
+    notes = result["notes"]
+    assert isinstance(notes, list) and len(notes) == 1, notes
+    assert not any("per-display context cap" in str(n) for n in notes), (
+        "the file declares nothing, so its total: 0 is exact and not a lower bound"
+    )
+
+
+async def test_a_capped_top_of_a_foreign_file_does_not_make_this_file_a_lower_bound(
+    tmp_path: Path,
+) -> None:
+    """The second negative control: the verdict is scoped to THIS file's own occurrences.
+
+    ``zz_other.bob`` is a capped top, but of a display this file contributes nothing to; and
+    ``frag.bob`` is a capped ORIGIN of this display, which is a statement about the display view,
+    not about the file view. Neither may reach the file verdict.
+
+    Two mutations are red here and nowhere else: collecting the tops without the ``origin_file``
+    scoping (the foreign top leaks in), and matching the display view's origins instead of the
+    file's tops (``frag.bob`` leaks in).
+    """
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
+    with (
+        patch(
+            "epics_mcp.tools.validate.analyze_pv_inventory",
+            return_value=_capped_inventory(
+                "d.bob",
+                declared=True,
+                capped=("frag.bob", "zz_other.bob"),
+                foreign_top="zz_other.bob",
+            ),
+        ),
+        patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all),
+    ):
+        result = await _validate_pvs(file_path=str(root / "d.bob"), displays_dir=str(root))
+
+    assert result["total"] == 1, "the file's own channel, and only that one"
+    notes = result["notes"]
+    assert isinstance(notes, list) and len(notes) == 1, notes
+    assert not any("per-display context cap" in str(n) for n in notes), (
+        "neither a foreign top nor an origin of the DISPLAY view is a statement about this file"
+    )

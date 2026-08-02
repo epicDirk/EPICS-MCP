@@ -75,6 +75,47 @@ def _display_view_is_capped(rel: str, origins: set[str], capped_targets: frozens
     return rel in capped_targets or bool(origins & capped_targets)
 
 
+def _file_view_is_capped(rel: str, tops: set[str], capped_targets: frozenset[str]) -> bool:
+    """Is the file view of *rel* a lower bound, because an expansion feeding it was cut short?
+
+    *tops* is every ``top_level_display`` under which this file contributed a PV OCCURRENCE, taken
+    BEFORE the resolved/ca-pva filter. That placement is the repair, not a style choice, and the set
+    carries two facts at once.
+
+    An EMPTY set means the file declares no PV occurrence at all: ``pv_analysis/expansion.py`` seeds
+    every known file standalone, past the cap, and writes ``origin_file=source`` for each of its own
+    occurrences, so nothing else can produce an empty set. Such a file answers the same at every
+    cap, and calling its answer a lower bound would be a false statement. Measured on a 257-display
+    dataset: without this test the flag fires on 73 files, and 20 of the 24 newly flagged ones
+    declare no PV whatsoever.
+
+    A NON-EMPTY set makes the flag a lower-bound statement in two ways. ``rel in capped_targets``
+    says contexts INTO this file were dropped, so fewer instances of it were enumerated. That is the
+    reading :func:`_display_view_is_capped` already records for this axis, and it needs no event,
+    which is why it also works on the empty-result path, where the previous in-loop flag could never
+    fire. The intersection says a display this file feeds was itself cut short. Measured with a cap
+    lift from 256 to 1024: 9 files provably grow, the previous flag missed 2 of them (both answering
+    ``total: 0``, one hiding 5846 channels), this one misses none, and no file flagged today stops
+    being flagged. Placing the collection behind the filter instead misses the same 2 again, because
+    both resolve nothing at all at the lower cap.
+
+    Two limits, named rather than papered over. The test is NECESSARY, not sufficient: an occurrence
+    carrying no macro yields the same channel in every context and can never add one, so a sharper
+    test would ask for a macro-templated occurrence. Measured, that would also silence 4 files that
+    are flagged today, i.e. a behaviour change beyond the defect repaired here, so it is not applied
+    and is recorded instead. And *tops* counts ``loc``/``sim`` occurrences too, because a macro can
+    supply the protocol prefix and the engine falls back to the raw protocol only when the expanded
+    string still STARTS with a macro.
+
+    The sibling above deliberately does NOT carry this guard: on the display view the same test
+    would have to run over the whole embedded subtree, not over one file, so that view stays
+    over-cautious by design (its own docstring measures the price).
+    """
+    if not tops:
+        return False
+    return rel in capped_targets or bool(tops & capped_targets)
+
+
 def _run_validate(file_path: str, displays_dir: str | None, view: PvView = "file") -> _Extraction:
     """Extract the resolved, real (ca/pva) channels of *file_path* under the requested *view*.
 
@@ -161,26 +202,31 @@ def _run_validate(file_path: str, displays_dir: str | None, view: PvView = "file
     # Named for what the engine actually puts in here: the TARGET of a capped enqueue, not the top
     # it was capped under (expansion.py adds ``target`` while the cap key is the pair). The old name
     # ``capped_tops`` read as if it held top-levels and invited exactly the axis mix-up that
-    # _display_view_is_capped exists to avoid. The membership test below is unchanged.
+    # _display_view_is_capped exists to avoid. BOTH membership tests below rest on that reading:
+    # ``rel`` asks whether contexts INTO this file were dropped, which is a statement about the file
+    # view, while a top set asks whether a display the file feeds was itself cut short.
     capped_targets = frozenset(inventory.diagnostics.context_capped)
 
     # The FILE view, unchanged: every resolved real PV whose physical origin is this file, across
     # all top-levels, in document order.
     seen: set[str] = set()
     file_channels: list[str] = []
-    file_capped = False
+    # Collected across the WHOLE inventory (a file's occurrences are attributed to every top that
+    # reaches it) and BEFORE the filter below. Both properties are load-bearing, see
+    # _file_view_is_capped, which turns this one set into the cap verdict.
+    file_tops: set[str] = set()
     for display in inventory.displays:
         for ev in display.pvs:
             if ev.origin_file != rel:
                 continue
+            file_tops.add(ev.top_level_display)
             if ev.resolution != "resolved" or ev.protocol not in ("ca", "pva"):
                 continue
-            if ev.top_level_display in capped_targets:
-                file_capped = True
             channel = channel_name(ev.pv)  # strip pva://... for the live read
             if channel not in seen:
                 seen.add(channel)
                 file_channels.append(channel)
+    file_capped = _file_view_is_capped(rel, file_tops, capped_targets)
 
     # The DISPLAY view: what this file expands to as a display of its own. A single lookup rather
     # than a second sweep, and a None default rather than an index, because the inventory only

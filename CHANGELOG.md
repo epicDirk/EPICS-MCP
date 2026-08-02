@@ -21,8 +21,8 @@ carry breaking changes).
 - **Every `file_path` result now carries `shown_by_display` and `shown_by_display_capped`**, and
   under `view="file"` a `notes` entry says how many channels the display view adds. The counts let
   a caller see which of the two questions was answered without running the other one. The capped
-  flag is computed separately from the existing `capped` field, which only ever sees channels that
-  passed the file filter and is therefore always `false` on an empty result.
+  flag is computed separately from the file view's own cap verdict, which asks a different question
+  (see the `Fixed` entry below).
 
 - **`epics-init`, a sixth console command: the configuration you need, without reading the
   reference first.** It prints the MCP client-configuration block for one of four deployment shapes
@@ -150,7 +150,17 @@ carry breaking changes).
 
 ### Fixed
 
-- **The shipped status legend explained 9 of the 12 states `epics-doctor` can print, and two of its
+- **`validate_pvs` answered `total: 0` without a word when the macro expansion had been cut short.**
+  The honesty note that says the PV list is a lower bound was raised inside the loop that filters a
+  display's PVs down to this file's own resolved channels, so on a file where nothing survived that
+  filter the loop body never ran and the note could never appear. That is exactly the answer a
+  reader is most likely to take at face value: measured on a 257-display dataset, 9 files hold a
+  file view that provably grows with a larger context budget, and the 2 the tool stayed silent on
+  were both answering `total: 0`, one of them resolving 5846 channels once the budget allowed it.
+  The verdict now also fires when the contexts reaching the file itself were dropped, on an empty
+  and a non-empty result alike, and it is guarded: a file that declares no PV at all keeps its
+  silent, exact `total: 0`, because calling that a lower bound would be a false statement. No file
+  that carried the note before loses it. The `view="display"` verdict is unchanged.
   marks not at all.** `disabled`, `info` and `disconnected` were never named by their status name
   anywhere in the guide, and the marks `·` and `i` had no legend entry, so an operator could see a
   character the document travelling with the server did not explain. All twelve states now have a
