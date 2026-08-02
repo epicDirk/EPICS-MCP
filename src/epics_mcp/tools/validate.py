@@ -89,15 +89,22 @@ def _file_view_is_capped(rel: str, tops: set[str], capped_targets: frozenset[str
     dataset: without this test the flag fires on 73 files, and 20 of the 24 newly flagged ones
     declare no PV whatsoever.
 
-    A NON-EMPTY set makes the flag a lower-bound statement in two ways. ``rel in capped_targets``
-    says contexts INTO this file were dropped, so fewer instances of it were enumerated. That is the
-    reading :func:`_display_view_is_capped` already records for this axis, and it needs no event,
-    which is why it also works on the empty-result path, where the previous in-loop flag could never
-    fire. The intersection says a display this file feeds was itself cut short. Measured with a cap
-    lift from 256 to 1024: 9 files provably grow, the previous flag missed 2 of them (both answering
-    ``total: 0``, one hiding 5846 channels), this one misses none, and no file flagged today stops
-    being flagged. Placing the collection behind the filter instead misses the same 2 again, because
-    both resolve nothing at all at the lower cap.
+    A NON-EMPTY set makes the flag a lower-bound statement. The intersection says an expansion this
+    file feeds was cut short, and BECAUSE the set is collected before the resolution filter it also
+    covers the empty-result path, where the previous in-loop flag could never fire: an occurrence
+    that has not resolved still puts its top in here. That, not the disjunct below, is what repairs
+    the defect. Measured with a cap lift from 256 to 1024: 9 files provably grow, the previous flag
+    missed 2 of them (both answering ``total: 0``, one resolving 5576 channels at the higher cap),
+    this one misses none, and no file flagged before stops being flagged. Collecting behind the
+    filter instead misses the same 2 again, because both resolve nothing at all at the lower cap.
+
+    ``rel in capped_targets`` says contexts INTO this file were dropped, which is the reading
+    :func:`_display_view_is_capped` already records for this axis. On today's engine it is
+    REDUNDANT and never decides alone: the standalone seed gives every file that declares anything
+    a top of its own, so a non-empty set always contains *rel* (measured over 284 files: no
+    disagreement with the intersection alone, and no file where this term decides). It is kept
+    because it states the question the file view actually asks, and because it is the term that
+    survives an engine which stops seeding standalone. Do not read it as the working half.
 
     Two limits, named rather than papered over. The test is NECESSARY, not sufficient: an occurrence
     carrying no macro yields the same channel in every context and can never add one, so a sharper

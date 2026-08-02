@@ -894,6 +894,13 @@ def _own_pv_inventory(rel: str, *, capped: tuple[str, ...], foreign_first: bool)
     *rel* is expected to sit in a SUBDIRECTORY, and the single event is attributed to a top of a
     different name, so the ``rel`` term of ``_file_view_is_capped`` is the only one that can fire.
     The extra display exists purely as a position control (see the note in the test).
+
+    ⚠ This is a state the ENGINE cannot produce, and knowingly so: it seeds every file that declares
+    anything as a top of its own, so a real inventory always holds a display for *rel* as well, and
+    the ``rel`` term is then redundant with the top term (see ``_file_view_is_capped``). The fixture
+    isolates that term deliberately, the way the pre-existing
+    ``test_validate_pvs_file_path_context_capped_note`` isolates the other one. A test built on it
+    pins the CONTRACT of the function, not a reachable inventory.
     """
     from opi_navigation.pv_analysis import (
         DisplayPvInventory,

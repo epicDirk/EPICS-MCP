@@ -156,11 +156,12 @@ carry breaking changes).
   filter the loop body never ran and the note could never appear. That is exactly the answer a
   reader is most likely to take at face value: measured on a 257-display dataset, 9 files hold a
   file view that provably grows with a larger context budget, and the 2 the tool stayed silent on
-  were both answering `total: 0`, one of them resolving 5846 channels once the budget allowed it.
+  were both answering `total: 0`, one of them resolving 5576 channels once the budget allowed it.
   The verdict now also fires when the contexts reaching the file itself were dropped, on an empty
   and a non-empty result alike, and it is guarded: a file that declares no PV at all keeps its
   silent, exact `total: 0`, because calling that a lower bound would be a false statement. No file
   that carried the note before loses it. The `view="display"` verdict is unchanged.
+- **The shipped status legend explained 9 of the 12 states `epics-doctor` can print, and two of its
   marks not at all.** `disabled`, `info` and `disconnected` were never named by their status name
   anywhere in the guide, and the marks `·` and `i` had no legend entry, so an operator could see a
   character the document travelling with the server did not explain. All twelve states now have a
