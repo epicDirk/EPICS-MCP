@@ -15,15 +15,12 @@ ChannelFinder by hand.
 **Read-only by default.** `set_pv_value` is triple-gated: an env switch, a required regex
 allowlist, and a rate limit. Logbook writes sit behind their own separate gate.
 
-> **Project status: work in progress (pre-1.0).** Under active development;
-> the tool surface and APIs may still change. Semantic-versioning pre-1.0 caveats apply, so
-> pin a version if you depend on it. The released version is the one the PyPI badge above shows;
-> it is deliberately not restated here, because a version spelled twice is a version that drifts.
+> **Project status: pre-1.0 and under active development.** Tools and APIs may still change
+> between minor versions, so pin one if you depend on it.
 
-**Maturity.** The full test suite passes on a standalone install with no EPICS infrastructure at
-all, and that is what CI runs on every push, against Python 3.12 and 3.13; the live-stack tests are
-opt-in and skip without a stack. `mypy --strict` covers `src`, `tests` and `scripts`, and the
-package ships `py.typed`. The CI badge above reports the current state of both gates.
+**Maturity.** CI runs the full suite on every push against Python 3.12 and 3.13, on a standalone
+install with no EPICS infrastructure at all; the live-stack tests are opt-in and skip without a
+stack. `mypy --strict` covers `src`, `tests` and `scripts`, and the package ships `py.typed`.
 
 ## Where to start
 
