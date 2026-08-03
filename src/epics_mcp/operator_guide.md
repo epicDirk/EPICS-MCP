@@ -4,14 +4,10 @@ The operational cookbook for this MCP server: the service landscape, the tricks 
 obvious from the tool signatures, and the error signatures that tell you which tool to reach for.
 A fresh session should read this once instead of re-deriving it.
 
-This file is served verbatim as the `epics-pv://guide` MCP resource and shipped inside the package,
-so it travels with the server, no external skill or project folder required. It is **the** home for
-operational knowledge (see the Knowledge Persistence Policy in `CLAUDE.md`).
-
-> **Facility-agnostic by rule.** Every example here uses synthetic placeholder names
-> (`SIM:PS-01:Cur-RB`, `sim://ramp`, `http://archiver:17665`, `http://channelfinder:8080/ChannelFinder`).
-> Never paste a real site hostname, device/PV name, or personal name into this file, a committed test
-> enforces it, and this file ships to a public fork.
+It is served verbatim as the `epics-pv://guide` MCP resource and shipped inside the package, so it
+travels with the server: no external skill or project folder required. Every example uses a
+synthetic placeholder name (`SIM:PS-01:Cur-RB`, `sim://ramp`, `http://archiver:17665`,
+`http://channelfinder:8080/ChannelFinder`), never a real one.
 
 ## Posture (read this first)
 
@@ -314,12 +310,10 @@ resubmitted and overwrites title/body/logbooks/tags/level/properties, so a safe 
 round-trips the target entry's FULL content. The write is purely ADDITIVE for CONTENT:
 existing attachments and every content field survive, and only the new file(s) are added.
 
-⚠️ **One field does NOT survive: `owner`.** Because this endpoint IS the destructive update,
-the server re-stamps the entry's owner with the write service account on every attach, the
-original author then exists only in the server-side archived version. Attaching a file to
-someone else's entry therefore rewrites its authorship. This is the same behaviour documented
-for `update_log_entry` below; it was previously described here as "every field survives",
-which was the opposite of what the server does.
+⚠️ **One field does NOT survive: `owner`.** This endpoint IS the destructive update, so the server
+re-stamps the entry's owner with the write service account on every attach; the original author
+then exists only in the server-side archived version. Attaching a file to someone else's entry
+therefore rewrites its authorship. Same behaviour as `update_log_entry` below.
 
 ⚠️ **Attachment retention is FILENAME-keyed, not id-keyed** (measured in the server source, and the
 single most surprising fact about this endpoint). `retainAll` tests membership against the SUBMITTED
@@ -387,28 +381,16 @@ the combination (`INVALID_ARGUMENT`) rather than answer it wrongly; client-side 
 substitute, because `limit` is applied server-side, filtering a capped page yields an arbitrary
 subset behind a meaningless `capped`.
 
-**Finding PVs by archiving RATE (e.g. a moderately-sampled test fixture):** enumeration cannot see
-rates, but the MGMT report endpoints can, `GET /mgmt/bpl/getEventRateReport` answers a rate-sorted
-list of `{pvName, eventRate}` objects (the shape: measured live on two appliances, 2026-07-16;
-the descending sort order, string-serialized rates and the `limit` semantics below: measured on
-one 16-member cluster, 2026-07-17). Two measured semantics matter:
+**Finding PVs by archiving RATE (a moderately-sampled test fixture, say):** enumeration cannot see
+rates, but `GET /mgmt/bpl/getEventRateReport` answers a rate-sorted `{pvName, eventRate}` list.
+Three traps, all measured on a live cluster: `limit` is NOT a row cap (it behaves as if applied per
+cluster member, so omit it and filter client-side); the report is near-complete but not the whole
+archived set, so a PV's absence from it proves nothing; and the rate is the appliance's own
+recent-window figure rather than your target window's, so a band hit is a hypothesis that a real
+history fetch in the window you care about has to confirm. Sampling `getAllPVs` blindly finds
+nothing, archives being bimodal. `python -m epics_mcp.find_moderate_pv` (read-only, core install)
+automates the whole walk.
 
-- **`limit` is NOT a row cap.** It behaves as if applied per cluster member with the members'
-  slices merged, row counts = limit × member count, measured twice (`limit=3` → 48 rows,
-  `limit=100` → 1600 on 16 members; the mechanism is inferred from the counts, not observed).
-  Omit `limit` entirely and filter client-side. The no-limit report is near-complete but NOT
-  the whole archived set (measured: ~1.5M report rows vs ~1.7M `getAllPVs` names on the same
-  cluster; the gap is unverified, plausibly paused or rate-less PVs), so a PV's absence from
-  the report proves nothing about its archive status.
-- **The rate is the appliance's own recent-window figure, not your target window's.** A band hit
-  is a hypothesis, never a fixture: counter-verify every candidate with a real history fetch in
-  the window you actually care about (a PV can sit in the band and still hold nothing there).
-
-Sampling `getAllPVs` blindly is the wrong tool for that job: archives are often bimodal (fast PVs
-plus carried-only ones), so a blind stride finds no middle, measured: five blind strategies over
-153 candidates found none, while the report-walk verified its first candidates in one pass.
-`python -m epics_mcp.find_moderate_pv` (read-only, in the core install) automates exactly this
-walk: full report → rate band → per-candidate counter-verification against the target window.
 Also know your SITE'S cluster layout before
 enumerating: a facility may run **several archiver clusters split by purpose** (e.g. scalars vs.
 large waveforms vs. per-network instances, each with its own MGMT root), `getApplianceInfo`'s
@@ -491,9 +473,8 @@ The transport probe is a HEAD and
 counts *any* HTTP response as reachable, so a URL pointing at the wrong host can look alive:
 measured, a ChannelFinder URL aimed at a dead container reported `✓ ok` because an unrelated service
 on that port answered `401` (blanket auth answers 401 for every path, so the status said nothing
-about ChannelFinder). That exact case now surfaces as `!` `identity_probe_failed` (exit `3`): the
-identity probe hits the 401 and no longer collapses to a silent exit `0`. Each plane is therefore
-also asked to **name itself**:
+about ChannelFinder). That case surfaces as `!` `identity_probe_failed` (exit `3`), because the
+identity probe hits the 401. Each plane is therefore also asked to **name itself**:
 
 <!-- BEGIN:status-glyphs (drift-guarded against cli_doctor._STATUS_MARK, see tests/test_guide_matches_code.py) -->
 | Mark | Status | Meaning |
@@ -508,17 +489,16 @@ also asked to **name itself**:
 | `✗` | `api_error` | the host ANSWERED and the answer was unusable: a served non-2xx carrying its HTTP code, or a 5xx that survived the retries. Reachable AND erroring, which is a different fault from not being reached at all, and the URL may well be pointing at the right host but the wrong webapp. Exit `1` |
 | `✗` | `unreachable` | the transport probe failed with no HTTP response chained to it at all: wrong host, wrong port, or nothing listening there. Exit `1` |
 | `✗` | `disconnected` | with `--probe-pv NAME`, that PV did not connect within the timeout. The live plane is the only one probed over EPICS rather than over HTTP, and an internal failure of the probe itself is reported here as well rather than being hidden behind a healthy-looking line. Exit `1` |
-| `✗` | `backend_down` | reachable AND the service named itself, but a backend it depends on is measurably down, the alarm logger reports its Elasticsearch as not `Connected`, so its search/history tools will fail. The blind HEAD used to hide this as `ok`; unlike `unverified`, identity IS proven here and the service reports its OWN backend broken. Exit `1` |
-| `~` | `no_ingest` | reachable, identity PROVEN, and the service is measurably not doing its job: an Archiver appliance holding channels with **none** connected, or reporting one of its own webapps stopped. The wiring fault this tool exists to catch, and the blind identity probe used to hide it as `ok`. Exit stays `0` on purpose (a freshly commissioned or fully paused appliance is legitimately in this state, and a hard failure would cry wolf in every CI job), so it is surfaced instead: this glyph, its own verdict line, and `degraded_planes` in `--json`. Not `?`: that means "we could not tell what this is", and here we can |
+| `✗` | `backend_down` | reachable AND the service named itself, but a backend it depends on is measurably down, the alarm logger reports its Elasticsearch as not `Connected`, so its search/history tools will fail. Unlike `unverified`, identity IS proven here and the service reports its OWN backend broken. Exit `1` |
+| `~` | `no_ingest` | reachable, identity PROVEN, and the service is measurably not doing its job: an Archiver appliance holding channels with **none** connected, or reporting one of its own webapps stopped. The wiring fault this tool exists to catch. Exit stays `0` on purpose (a freshly commissioned or fully paused appliance is legitimately in this state, and a hard failure would cry wolf in every CI job), so it is surfaced instead: this glyph, its own verdict line, and `degraded_planes` in `--json`. Not `?`: that means "we could not tell what this is", and here we can |
 <!-- END:status-glyphs -->
 
 `unverified` is not a failure on purpose: that a healthy service answers its beacon anonymously is
 measured at one site, and making that a hard failure everywhere would be an overclaim. The same
-holds when the beacon names a *different* known service (an earlier release failed that case as
-`wrong_service`, exit `1`): measured, a path-based reverse proxy served the real ChannelFinder API
-while the base GET answered as Olog, the foreign name cannot prove a misconfiguration, so the
-doctor reports it honestly and keeps the found name in the detail as the first clue for when the
-config IS wrong.
+holds when the beacon names a *different* known service. Measured: a path-based reverse proxy
+served the real ChannelFinder API while the base GET answered as Olog, so a foreign name cannot
+prove a misconfiguration. The doctor reports it honestly and keeps the found name in the detail as
+the first clue for when the config IS wrong.
 
 Each plane has its own beacon, because they do not share one:
 
@@ -642,16 +622,6 @@ yourself. Also note: **months/years are unusable** (the amount is subtracted fro
 which cannot carry them → rejected), and `millis` means **minutes** to Olog's unit dispatch (use
 `ms`). Always send `tz` with a wall clock, without it Olog reads the string in the **server's**
 default zone, so a window is silently offset against any deployment not on UTC.
-
-**Generalisable:** a fully-mocked test suite cannot detect a server-side silent drop, a mock only
-sees what the client *sent*, never what the server *honoured*. Only a differential live probe
-(same window, several formats, plus a negative control) can.
-
-The converse hides just as well: a mock cannot see a **loud** server-side rejection either. The
-Archiver 500s on four notations a caller may reasonably send, and the offline suite was green
-throughout, it passed `"a"`/`"b"` as the window, values no layer ever looked at. A parameter that
-nothing validates and nothing probes live is *untested*, however many tests name it. Three planes
-were checked this way; **three** carried a defect no mock could reach.
 
 ## Error signatures → which tool answers
 
@@ -779,29 +749,7 @@ messages embed the full request URL, an internal host would leak into this file)
   above: the verdict follows from the arguments, so it is given before the display-PV walk rather
   than after it. Name the tree (`alarm_config`); there is no correct default, they are site-specific.
 - **Every `timeout` is refused at zero or below, on every tool that takes one.** A validation error
-  naming the argument, before any request exists. Ten tools used to accept `0`, and the assumption
-  that this merely produced a fast, honest failure was wrong for half of them: measured, `0` made
-  `find_device` answer "No operator-facing screen references this device", `validate_pvs` report
-  the PV as disconnected, `diagnose_connection` name a cause, and `discover_pvs`/`get_pvs` return
-  empty. Of the five that did fail, two blamed the wrong thing (`PV_TIMEOUT` points at the device,
-  `is_archived` raised `INTERNAL` and logged a server-side traceback). So: if a call is rejected
-  for `timeout`, the fix is the argument, and a *previous* run that answered "nothing found" with
-  `timeout=0` should be repeated before its answer is believed.
-
-## Acceptance: the questions this guide must answer
-
-A fresh session with only this guide should now handle the four things a live smoke had to re-derive:
-
-1. **Enumerate archived PVs** → `list_archived_pvs` (uses `getAllPVs` / `getPVsForThisAppliance`, not
-   `getMatchingPVs`, which may 404 on split/proxied deployments).
-2. **A clustered archiver** → one `EPICS_MCP_ARCHIVER_URL` covers all members (retrieval-aware; the
-   `appliance` field names the owner). The mgmt/retrieval port split is orthogonal: if retrieval runs on
-   `:17668`, still set `EPICS_MCP_ARCHIVER_RETRIEVAL_URL`, clustering does not remove the port split.
-3. **TLS fails on one plane but not another** → combine internal CA + public roots (certifi) into one
-   `EPICS_MCP_CA_BUNDLE` PEM.
-4. **A service presents a public certificate** → the combined CA bundle already covers it; no separate config.
-
----
-
-*Found a new service/operational/IOC fact? Add it here, this file is the operational-knowledge tier of
-the Knowledge Persistence Policy (`CLAUDE.md`), not a session transcript. Keep it facility-agnostic.*
+  naming the argument, before any request exists. A `timeout=0` did not fail honestly: measured, it
+  made `find_device` answer "No operator-facing screen references this device", `validate_pvs`
+  report the PV as disconnected, `diagnose_connection` name a cause, and `discover_pvs`/`get_pvs`
+  return empty. So repeat any EARLIER `timeout=0` call before believing its "nothing found".
