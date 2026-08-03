@@ -22,10 +22,11 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
 
-from tests.conftest import ENGINE_COUPLED_MODULES, pytest_report_header
+from tests.conftest import ENGINE_COUPLED_MODULES, pytest_configure, pytest_report_header
 from tests.engine_gate import BLOCKER as _BLOCKER
 from tests.engine_gate import (
     REQUIRE_DISPLAYS_ENV,
@@ -306,14 +307,196 @@ def test_an_undemanded_run_carries_its_own_gap_in_the_report_header() -> None:
     )
 
 
-def test_the_header_stays_silent_when_nothing_is_missing() -> None:
+def test_the_header_speaks_only_for_the_ignore_decision() -> None:
     """Counter-probe: a line printed unconditionally would be noise, not a signal.
 
-    This checkout HAS the engine, so the ordinary run this test belongs to must not carry the gap
-    line. Without this the assertion above would also pass on a header that always prints.
+    ⚠️ This test used to open with ``assert engine_available()``, and that is the defect it now
+    guards against. On an engine-less checkout, which is EXACTLY the CI lane this repository runs
+    on purpose, that line is ``assert False``: the GB-27 commit turned CI red and it stayed red for
+    six runs, because the author measured locally, where the engine IS installed. A ``skipif``
+    would have hidden it rather than fixed it, and it would have switched the counter-probe off
+    precisely where it is needed; the ``skipif`` decorators were deliberately abolished here
+    anyway (``tests/live_gate.py``).
+
+    The repair is to stop asking the ENVIRONMENT for a decision the hook can be HANDED. The header
+    reads a frozen module global, so the branch a run happens to be in used to decide which
+    branches were testable at all. With the decision injected, all three are, everywhere: in CI,
+    on a developer machine, and under the blocker.
+
+    What this does NOT claim is that pytest calls the hook or prints its answer. That half needs a
+    real process and is pinned by the two subprocess guards above. Same two-layer split the file
+    already uses for ``engine_collection_decision``.
     """
-    assert engine_available(), (
-        "this counter-probe assumes an installed engine; on an engine-less checkout it cannot "
-        "distinguish the two cases and would be vacuous"
+    assert pytest_report_header(decision="collect") is None, (
+        "an installed engine leaves no gap, so the header must stay silent"
     )
-    assert pytest_report_header() is None
+    assert pytest_report_header(decision="fail") is None, (
+        "the demanded-but-impossible run refuses in pytest_configure; a header would be dead prose"
+    )
+
+    lines = pytest_report_header(decision="ignore")
+    assert lines and "opi_navigation engine absent" in lines[0], (
+        f"the ignore decision is the one that MUST speak, got: {lines!r}"
+    )
+
+
+def test_the_refusal_speaks_only_for_the_fail_decision() -> None:
+    """The other hook, same seam: injected rather than inherited from this run's environment.
+
+    ``pytest_configure`` is the loud half of GB-27, and until now nothing tested its two SILENT
+    branches at all. They matter: a refusal on ``collect`` would break every ordinary run, and one
+    on ``ignore`` would break the standalone-core case this repository ships for.
+    """
+    for decision in ("collect", "ignore"):
+        pytest_configure(_UNUSED_CONFIG, decision=decision)  # must not raise
+
+    with pytest.raises(pytest.UsageError, match=REQUIRE_DISPLAYS_ENV):
+        pytest_configure(_UNUSED_CONFIG, decision="fail")
+
+
+#: ``pytest_configure`` deletes its ``config`` argument unread, so the counter-probe above has
+#: nothing to build. Named rather than passed as a bare ``None`` so the next reader sees that the
+#: hook genuinely does not touch it, instead of wondering what a None config would do.
+_UNUSED_CONFIG = cast(pytest.Config, None)
+
+
+# --- The engine-coupled module list is data, and data drifts ----------------------------------
+
+
+def _module_level_imports(tree: ast.Module) -> set[str]:
+    """Dotted names imported at MODULE level, the only ones that can break COLLECTION.
+
+    Module level is the whole question here: ``server.py`` reaches the engine too, but inside
+    ``_load_display_registrar``, so importing it costs nothing and it is correctly absent from
+    ``ENGINE_COUPLED_MODULES``. A guard that counted any import would flag it and would have to
+    grow an exemption for the one file that does this RIGHT.
+
+    ``if``/``try`` bodies are walked because a guarded import still executes at module level; a
+    ``def``/``class`` body is not, for the reason above.
+    """
+    found: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level or not node.module:  # relative imports stay inside a package
+                continue
+            found.add(node.module)
+            found.update(f"{node.module}.{alias.name}" for alias in node.names)
+        elif isinstance(node, ast.If | ast.Try):
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Import):
+                    found.update(alias.name for alias in inner.names)
+                elif isinstance(inner, ast.ImportFrom) and not inner.level and inner.module:
+                    found.add(inner.module)
+                    found.update(f"{inner.module}.{a.name}" for a in inner.names)
+    return found
+
+
+def _reaches(name: str, tainted: frozenset[str] | set[str]) -> bool:
+    """Is *name*, or any package prefix of it, in *tainted*?
+
+    ``from epics_mcp.tools import validate`` yields both ``epics_mcp.tools`` and
+    ``epics_mcp.tools.validate``, and ``import a.b.c`` binds ``a``; walking the prefixes covers
+    every spelling with one rule instead of a case analysis per import form.
+    """
+    while name:
+        if name in tainted:
+            return True
+        name = name.rpartition(".")[0]
+    return False
+
+
+def _engine_tainted_modules() -> set[str]:
+    """Every ``epics_mcp`` module that reaches ``opi_navigation`` at module level, transitively."""
+    src = _REPO / "src"
+    graph: dict[str, set[str]] = {}
+    for path in sorted(src.rglob("*.py")):
+        parts = list(path.relative_to(src).with_suffix("").parts)
+        if parts[-1] == "__init__":
+            parts.pop()
+        graph[".".join(parts)] = _module_level_imports(ast.parse(path.read_text(encoding="utf-8")))
+
+    tainted = {
+        module
+        for module, imports in graph.items()
+        if any(name.split(".")[0] == _ENGINE_PKG for name in imports)
+    }
+    changed = True
+    while changed:  # transitive closure; the graph is ~60 modules, a fixpoint loop is plenty
+        changed = False
+        for module, imports in graph.items():
+            if module in tainted:
+                continue
+            if any(_reaches(name, tainted) for name in imports):
+                tainted.add(module)
+                changed = True
+    return tainted
+
+
+#: The optional display engine, by package name. One spelling, because three functions ask.
+_ENGINE_PKG = "opi_navigation"
+
+
+def test_the_engine_coupled_module_list_is_complete_and_real() -> None:
+    """``ENGINE_COUPLED_MODULES`` is hand-written data, and nothing checked it (QA, 2026-08-03).
+
+    It feeds ``collect_ignore``, the header line and the refusal, so a wrong entry makes all three
+    wrong at once, and in the direction that hurts: a SEVENTH engine-coupled module would not be
+    ignored, would fail at import, and would redden the engine-less lane only. That is the exact
+    damage class this file already carries once, where a counter-probe asserted an installed engine
+    and CI went red for six runs while every local run stayed green.
+
+    Both directions, because they fail differently. A missing entry is the silent-in-CI defect
+    above; a stale entry (a renamed or moved file) keeps being counted by ``len()``, so the header
+    and the refusal name a module that no longer exists and overstate the gap.
+
+    Module level only, and that is what makes the guard precise rather than noisy: see
+    :func:`_module_level_imports`.
+    """
+    tainted = _engine_tainted_modules()
+    assert tainted, "the taint walk found nothing at all, so this assertion would be vacuous"
+
+    coupled = {
+        path.name
+        for path in sorted((_REPO / "tests").glob("test_*.py"))
+        if any(
+            _reaches(name, tainted) or name.split(".")[0] == _ENGINE_PKG
+            for name in _module_level_imports(ast.parse(path.read_text(encoding="utf-8")))
+        )
+    }
+
+    assert coupled == set(ENGINE_COUPLED_MODULES), (
+        "ENGINE_COUPLED_MODULES no longer matches the tree. Missing from the list (these would "
+        f"break the engine-less lane): {sorted(coupled - set(ENGINE_COUPLED_MODULES))}. Listed but "
+        f"not coupled (these inflate the header and the refusal): "
+        f"{sorted(set(ENGINE_COUPLED_MODULES) - coupled)}"
+    )
+
+    missing_files = [
+        name for name in ENGINE_COUPLED_MODULES if not (_REPO / "tests" / name).is_file()
+    ]
+    assert not missing_files, (
+        f"ENGINE_COUPLED_MODULES names files that do not exist: {missing_files}. collect_ignore "
+        "resolves names against the conftest directory, so such an entry silently matches nothing."
+    )
+
+
+def test_the_coupling_guard_reads_module_level_and_not_function_level() -> None:
+    """The property the guard is FOR, pinned on constructed input rather than on the tree.
+
+    On today's tree every coupled module imports at module level, so no tree-driven assertion can
+    hold this apart. ``epics_mcp/server.py`` is the real case for the second spelling: it reaches
+    the engine inside ``_load_display_registrar``, which is why it is correctly NOT in the list.
+    """
+    at_module_level = "from epics_mcp.tools.validate import x\n"
+    inside_a_function = "def f():\n    from epics_mcp.tools.validate import x\n"
+    guarded_at_module_level = "try:\n    import opi_navigation\nexcept ImportError:\n    pass\n"
+
+    assert "epics_mcp.tools.validate" in _module_level_imports(ast.parse(at_module_level))
+    assert _module_level_imports(ast.parse(inside_a_function)) == set(), (
+        "an import inside a function cannot break collection and must not be flagged"
+    )
+    assert "opi_navigation" in _module_level_imports(ast.parse(guarded_at_module_level)), (
+        "a guarded import still executes at module level"
+    )

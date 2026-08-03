@@ -46,7 +46,7 @@ if _DECISION == "ignore":
     collect_ignore = list(ENGINE_COUPLED_MODULES)
 
 
-def pytest_configure(config: pytest.Config) -> None:
+def pytest_configure(config: pytest.Config, decision: str = _DECISION) -> None:
     """Refuse a DEMANDED display run that cannot happen, instead of reporting it green (GB-27).
 
     Without this, ``EPICS_MCP_REQUIRE_DISPLAYS=1`` on an engine-less checkout produced exactly the
@@ -54,9 +54,17 @@ def pytest_configure(config: pytest.Config) -> None:
     A hundred tests, silently absent. ``UsageError`` rather than an assertion because that is what
     it is, a run asking for something this environment cannot deliver; it prints one line, without
     a traceback, and exits 4.
+
+    ``decision`` defaults to this run's frozen ``_DECISION`` and exists so a test can ask about the
+    OTHER branches without owning the environment that produces them. It costs nothing at run time:
+    pluggy sorts a parameter WITH a default into ``kwargnames`` and validates only ``argnames``
+    against the hook spec, so pytest calls this exactly as before (measured on pytest 9.1.0 /
+    pluggy 1.6.0). See the counter-probe in ``tests/test_engine_gate.py`` for why it had to become
+    injectable: it used to assert ``engine_available()`` first, which is ``assert False`` on the
+    engine-less checkout, so the GB-27 commit turned CI red for six runs before anyone noticed.
     """
     del config  # the hook signature is pytest's, the decision needs nothing from it
-    if _DECISION == "fail":
+    if decision == "fail":
         raise pytest.UsageError(
             f"{REQUIRE_DISPLAYS_ENV} demands the display-coupled tests, but the opi_navigation "
             f"engine is not importable, so these {len(ENGINE_COUPLED_MODULES)} modules would be "
@@ -65,16 +73,26 @@ def pytest_configure(config: pytest.Config) -> None:
         )
 
 
-def pytest_report_header() -> list[str] | None:
-    """Print the gap into the header of EVERY run that has one (GB-27).
+def pytest_report_header(decision: str = _DECISION) -> list[str] | None:
+    """Print the gap into the header of every run that PRINTS a header (GB-27).
 
     This is the half that needs no switch and no credential, and it is the one that fixes the
     actual damage. CI syncs without ``--group displays`` on purpose, so that it tests exactly the
     standalone core a public user gets; that is a decision, not an oversight. What was wrong is
     that its green report said nothing about the hundred tests it did not run, so a reader had no
     way to tell a full run from a partial one. Now the run carries its own gap.
+
+    ⚠️ "every run that prints a header" is the honest reach, and it used to say "EVERY run":
+    ``-q`` and ``--no-header`` suppress the header block entirely, and this hook is called from
+    inside it (measured on the installed pytest 9.1.0: ``_pytest/terminal.py``, ``showheader`` is
+    ``verbosity >= 0``, and the ``pytest_report_header`` call sits behind both that and
+    ``no_header``). No real invocation here loses the line (CI runs without ``-q``, and the one
+    ``-q`` caller in this suite already passes ``quiet=False`` for exactly this reason), so the
+    reach is stated rather than worked around.
+
+    ``decision`` is injectable for the same reason as in :func:`pytest_configure`; see there.
     """
-    if _DECISION != "ignore":
+    if decision != "ignore":
         return None
     return [
         f"opi_navigation engine absent: {len(ENGINE_COUPLED_MODULES)} display-coupled test "
