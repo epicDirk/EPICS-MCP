@@ -1,6 +1,7 @@
 """Shared fixtures for EPICS MCP tests."""
 
 import collections
+import os
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -13,24 +14,72 @@ from epics_mcp.errors import RateLimitError
 from epics_mcp.safety import SafetyLayer
 from epics_mcp.services._concurrency import reset_monitor_executor
 from epics_mcp.services._http import clear_shared_sessions, reset_read_throttle
-from tests.engine_gate import engine_available
+from tests.engine_gate import (
+    REQUIRE_DISPLAYS_ENV,
+    displays_demanded,
+    engine_available,
+    engine_collection_decision,
+)
 
 # The display-aware tools and their opi_navigation-coupled tests need the optional
-# `[displays]` extra. When opi_navigation is not installed (a standalone core install),
+# `displays` dependency group. When opi_navigation is not installed (a standalone core install),
 # skip those test modules at collection so the core suite still runs, mirroring
 # server.py, which registers the display tools only when opi_navigation is importable.
 #
 # Through engine_gate rather than a bare find_spec (QA-48): this line runs at COLLECTION time, so
 # a finder that RAISES took the entire run down with an ImportError on this conftest instead of
 # skipping the six modules below. Measured before the repair: exit 4, nothing collected.
-if not engine_available():
-    collect_ignore = [
-        "test_validate.py",
-        "test_crossplane_tool.py",
-        "test_coverage_tool.py",
-        "test_find_device_tool.py",
-        "test_device_lookup.py",
-        "test_inventory_adapter.py",
+ENGINE_COUPLED_MODULES = (
+    "test_validate.py",
+    "test_crossplane_tool.py",
+    "test_coverage_tool.py",
+    "test_find_device_tool.py",
+    "test_device_lookup.py",
+    "test_inventory_adapter.py",
+)
+
+_DECISION = engine_collection_decision(
+    available=engine_available(), demanded=displays_demanded(os.environ)
+)
+
+if _DECISION == "ignore":
+    collect_ignore = list(ENGINE_COUPLED_MODULES)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Refuse a DEMANDED display run that cannot happen, instead of reporting it green (GB-27).
+
+    Without this, ``EPICS_MCP_REQUIRE_DISPLAYS=1`` on an engine-less checkout produced exactly the
+    report of a healthy run: the six modules above were dropped at collection and nothing said so.
+    A hundred tests, silently absent. ``UsageError`` rather than an assertion because that is what
+    it is, a run asking for something this environment cannot deliver; it prints one line, without
+    a traceback, and exits 4.
+    """
+    del config  # the hook signature is pytest's, the decision needs nothing from it
+    if _DECISION == "fail":
+        raise pytest.UsageError(
+            f"{REQUIRE_DISPLAYS_ENV} demands the display-coupled tests, but the opi_navigation "
+            f"engine is not importable, so these {len(ENGINE_COUPLED_MODULES)} modules would be "
+            f"skipped silently: {', '.join(ENGINE_COUPLED_MODULES)}. "
+            "Install it with: uv sync --extra dev --group displays"
+        )
+
+
+def pytest_report_header() -> list[str] | None:
+    """Print the gap into the header of EVERY run that has one (GB-27).
+
+    This is the half that needs no switch and no credential, and it is the one that fixes the
+    actual damage. CI syncs without ``--group displays`` on purpose, so that it tests exactly the
+    standalone core a public user gets; that is a decision, not an oversight. What was wrong is
+    that its green report said nothing about the hundred tests it did not run, so a reader had no
+    way to tell a full run from a partial one. Now the run carries its own gap.
+    """
+    if _DECISION != "ignore":
+        return None
+    return [
+        f"opi_navigation engine absent: {len(ENGINE_COUPLED_MODULES)} display-coupled test "
+        f"modules NOT collected ({', '.join(ENGINE_COUPLED_MODULES)}); "
+        f"set {REQUIRE_DISPLAYS_ENV}=1 to make that a refusal instead of a silent skip"
     ]
 
 

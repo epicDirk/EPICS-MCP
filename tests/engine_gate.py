@@ -39,6 +39,7 @@ import time, leaving the fixture's fake unreached and the control green for the 
 from __future__ import annotations
 
 import importlib.util
+from collections.abc import Mapping
 
 _ENGINE = "opi_navigation"
 
@@ -82,3 +83,40 @@ def engine_available() -> bool:
         return False
     except Exception:  # noqa: BLE001 (a finder that cannot answer must not abort collection)
         return False
+
+
+#: The harness switch that turns a MISSING engine from a silent skip into a loud refusal.
+#: Named like its sibling ``EPICS_MCP_REQUIRE_LIVE`` (tests/live_gate.py) because it answers the
+#: same class of question: "I DEMANDED this run, do not hand me a green report for it".
+REQUIRE_DISPLAYS_ENV = "EPICS_MCP_REQUIRE_DISPLAYS"
+
+# Read generously so a "true"/"yes" does not silently count as "not demanded"; a false-negative
+# switch would be the very defect this exists to remove. Same vocabulary as live_gate._TRUTHY.
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def displays_demanded(env: Mapping[str, str]) -> bool:
+    """Was the display suite explicitly demanded?
+
+    The environment is INJECTED rather than read globally, so the decision is deterministic and
+    offline testable. That matters more here than usual: the consumer is a collection hook, which
+    is the hardest place in a test suite to observe from the inside.
+    """
+    return env.get(REQUIRE_DISPLAYS_ENV, "").strip().lower() in _TRUTHY
+
+
+def engine_collection_decision(*, available: bool, demanded: bool) -> str:
+    """What ``tests/conftest.py`` should do about the six engine-coupled modules.
+
+    ``"collect"``  the engine is there, run them.
+    ``"ignore"``   it is absent and nobody asked, skip them (the standalone-core case a public
+                   user gets, and what CI deliberately exercises).
+    ``"fail"``     it is absent but the run DEMANDED it: refuse loudly instead of reporting a
+                   green run over a hundred tests that never executed (GB-27).
+
+    A pure function, separate from the hook that consumes it, because a hook can only be observed
+    by starting a whole pytest process. This is the half a normal test can pin.
+    """
+    if available:
+        return "collect"
+    return "fail" if demanded else "ignore"

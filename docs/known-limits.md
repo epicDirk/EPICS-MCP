@@ -802,3 +802,40 @@ The honest repair is a rebuilt live module (self-signed proxy, synthetic `*.loca
 throwaway cert, opt-in behind `pytest -m live`), reading the bytes back through an ordinary client
 now that reads are whole. It is not scheduled here; a maintainer backlog outside this repository
 carries it, and this entry exists so the gap is not rediscovered as a surprise.
+
+## 16 · CI cannot run the display-coupled tests, and no switch inside this repository changes that
+
+Measured 2026-08-03, while closing the silent half of the same gap (GB-27).
+
+`.github/workflows/ci.yml` syncs with `uv sync --extra dev --frozen` and passes no `--group`, so
+the six `opi_navigation`-coupled test modules are not collected there. That is a decision with a
+reason, stated in `pyproject.toml` next to the `displays` group and in `CONTRIBUTING.md`: CI tests
+exactly the standalone core a public user gets. What was wrong is a different thing, and it is
+fixed: the green report said nothing about the **100 tests** (measured 2026-08-03) it had not run,
+so a reader could not tell a full run from a partial one. Every run that drops those modules now
+carries a gap line in its report header, and `EPICS_MCP_REQUIRE_DISPLAYS=1` turns the silent skip
+into a refusal for anyone who demands the full suite locally.
+
+What that does NOT do is make the display tests run in CI, and the reason is not oversight either.
+Measured on 2026-08-03: this repository is PUBLIC (`gh repo view --json visibility`) and carries
+**zero** repository secrets (`gh secret list`, exit 0, empty), while `opi_navigation` lives in a
+PRIVATE repository that a runner cannot clone without a credential. Adding one is a maintainer
+decision about the exposure surface of a public repository, not a technical detail, so it is not
+taken here.
+
+The tempting repair, probed and rejected for now: commit the extra job in commented-out form so it
+"only needs the secret". Rejected because commented-out YAML is dead code that nothing lints, runs
+or type-checks, and it rots against the next Actions schema change while looking ready. A second
+option a maintainer may prefer is a job in the PRIVATE repository that checks THIS public one out
+(a public checkout needs no credential at all) and runs the six modules with the engine it already
+has; that inverts which side needs the secret, which is to say it needs none. Neither is built, and
+neither is scheduled here.
+
+Corollary for a reader of a green CI run: it means "the standalone core passes", never "the display
+tools pass". The mutation proofs of the display tools are sharp only on a checkout that installed
+the `displays` group:
+
+```bash
+uv sync --extra dev --group displays
+EPICS_MCP_REQUIRE_DISPLAYS=1 uv run pytest tests/
+```

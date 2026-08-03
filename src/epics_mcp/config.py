@@ -26,7 +26,14 @@ class UnknownEpicsEnvVarWarning(UserWarning):
 # (tests/live_gate.py + the *_live.py modules), never by the server. Their stripped, lowercased
 # remainders start with one of these prefixes, so the unknown-var guard below does not
 # false-positive on a legitimate opt-in live run that sets them.
-_RESERVED_ENV_REMAINDER_PREFIXES = ("live_", "olog_test_", "require_live")
+#
+# ``require_`` rather than ``require_live``: the harness now has a SECOND demand switch,
+# ``EPICS_MCP_REQUIRE_DISPLAYS`` (GB-27), and with the narrower prefix every ``EpicsConfig()``
+# built under it warned that the name "matches no EpicsConfig setting, check for a typo".
+# Measured, and exactly the wrong advice, since the variable is correct and simply belongs to
+# the harness. The family is the right unit here: a demand switch is by construction not a
+# server setting.
+_RESERVED_ENV_REMAINDER_PREFIXES = ("live_", "olog_test_", "require_")
 
 
 class EpicsConfig(BaseSettings):

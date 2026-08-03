@@ -204,7 +204,9 @@ uv run pre-commit run --all-files              # ruff + format + mypy --strict +
 **dependency group** (`--group displays`), because it lives in a private repository: a group
 stays out of the published package, where an unreachable dependency would be a promise nobody
 can keep. CI passes no `--group`, so it tests the standalone core a public user gets, and the
-`opi_navigation`-coupled test modules self-skip when it is absent.
+`opi_navigation`-coupled test modules are dropped when it is absent. A run that drops them says so
+in its report header, and `EPICS_MCP_REQUIRE_DISPLAYS=1` turns that skip into a refusal, so a
+half-installed checkout cannot report green over tests it never ran.
 
 Live tests that need a running EPICS stack are opt-in and skip by default. See
 [CONTRIBUTING.md](https://github.com/epicDirk/EPICS-MCP/blob/main/CONTRIBUTING.md).

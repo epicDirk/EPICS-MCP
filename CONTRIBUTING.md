@@ -23,8 +23,19 @@ a direct git reference, made the package unpublishable, which is the single thin
 outright.
 
 CI runs `uv sync --extra dev --frozen` and passes no `--group`, so it tests exactly the
-standalone core a public user gets. The `opi_navigation`-coupled test modules skip themselves
-when the package is absent, so the core suite stays green.
+standalone core a public user gets. The `opi_navigation`-coupled test modules are dropped at
+collection when the package is absent, so the core suite stays green.
+
+**That drop is no longer silent (GB-27).** A green report over a hundred tests that never ran is
+indistinguishable from a full one, so a run that drops those six modules now says so in its report
+header, and a run that DEMANDS them refuses instead:
+
+```bash
+EPICS_MCP_REQUIRE_DISPLAYS=1 uv run pytest        # engine missing -> refusal, not a silent skip
+```
+
+Use it whenever a change touches the display-aware tools, so a half-installed checkout cannot hand
+you a green run. Why CI itself still cannot execute them: `docs/known-limits.md`, entry 16.
 
 ## Definition of done
 

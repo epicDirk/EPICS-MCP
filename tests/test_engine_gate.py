@@ -18,14 +18,21 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from tests.conftest import ENGINE_COUPLED_MODULES, pytest_report_header
 from tests.engine_gate import BLOCKER as _BLOCKER
-from tests.engine_gate import engine_available
+from tests.engine_gate import (
+    REQUIRE_DISPLAYS_ENV,
+    displays_demanded,
+    engine_available,
+    engine_collection_decision,
+)
 
 _REPO = Path(__file__).resolve().parents[1]
 
@@ -55,6 +62,45 @@ def test_the_gate_answers_for_every_finder_failure(
     assert engine_available() is False
 
 
+def _collect_without_the_engine(
+    *, demanded: bool, quiet: bool = True
+) -> subprocess.CompletedProcess[str]:
+    """Collect the suite in a subprocess where ``opi_navigation`` is genuinely unreachable.
+
+    The environment is passed EXPLICITLY, and that is load-bearing rather than tidy (GB-27): a
+    child inherits the parent's environment, so once ``EPICS_MCP_REQUIRE_DISPLAYS`` exists, a
+    developer with it set in their shell would silently flip this probe into the opposite case and
+    redden a guard that has nothing to do with their change. Measured before the switch to an
+    explicit env: the child saw the variable. So the demanded case SETS it and the default case
+    SCRUBS it, and neither depends on who is running.
+
+    ``quiet=False`` drops ``-q``, because ``-q`` suppresses the report HEADER, which is where the
+    gap line lives. Measured: with ``-q`` the header assertion failed against a collection listing
+    that was otherwise perfectly correct.
+    """
+    env = dict(os.environ)
+    if demanded:
+        env[REQUIRE_DISPLAYS_ENV] = "1"
+    else:
+        env.pop(REQUIRE_DISPLAYS_ENV, None)
+
+    flags = "'--collect-only', '-p', 'no:cacheprovider', 'tests/'"
+    if quiet:
+        flags = "'--collect-only', '-q', '-p', 'no:cacheprovider', 'tests/'"
+    script = _BLOCKER + f"import pytest\nraise SystemExit(pytest.main([{flags}]))\n"
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=_REPO,
+        env=env,
+        timeout=300,
+        check=False,
+    )
+
+
 def test_collection_survives_a_raising_finder() -> None:
     """The outcome the helper exists for, proven the only way it can be: in a subprocess.
 
@@ -71,22 +117,7 @@ def test_collection_survives_a_raising_finder() -> None:
     ``conftest`` line and ``test_server``'s ``skipif`` decorator) and a full run under the blocker
     would cost the suite a second time for no extra claim.
     """
-    script = (
-        _BLOCKER + "import pytest\n"
-        "raise SystemExit(pytest.main("
-        "['--collect-only', '-q', '-p', 'no:cacheprovider', 'tests/']))\n"
-    )
-
-    result = subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        cwd=_REPO,
-        timeout=300,
-        check=False,
-    )
+    result = _collect_without_the_engine(demanded=False)
 
     assert "ImportError while loading conftest" not in (result.stdout + result.stderr), (
         "a raising finder still takes the collector down instead of skipping the engine-coupled "
@@ -187,3 +218,102 @@ def test_the_breadth_guard_reads_calls_and_not_prose() -> None:
         "a call that reaches the name through a constant is what engine_gate itself does, and is "
         "not the defect this guard is for"
     )
+
+
+# --- GB-27: a DEMANDED display run must not be reported green ---------------------------------
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on", "  1  "])
+def test_displays_demanded_accepts_truthy_spellings(value: str) -> None:
+    assert displays_demanded({REQUIRE_DISPLAYS_ENV: value}) is True
+
+
+@pytest.mark.parametrize("value", ["", "   ", "0", "false", "no", "off", "maybe"])
+def test_displays_demanded_rejects_everything_else(value: str) -> None:
+    assert displays_demanded({REQUIRE_DISPLAYS_ENV: value}) is False
+
+
+def test_displays_demanded_is_false_when_the_variable_is_absent() -> None:
+    """The default run and CI do not set it, and that MUST stay the silent path."""
+    assert displays_demanded({}) is False
+
+
+@pytest.mark.parametrize(
+    ("available", "demanded", "expected"),
+    [
+        (True, False, "collect"),
+        (True, True, "collect"),
+        (False, False, "ignore"),
+        (False, True, "fail"),
+    ],
+)
+def test_the_collection_decision_covers_all_four_combinations(
+    available: bool, demanded: bool, expected: str
+) -> None:
+    """The three outcomes, and the one asymmetry that carries the ticket.
+
+    Demanding changes nothing while the engine is there (a demand is not a different suite), and
+    everything while it is not. Without the fourth row this would also pass if "fail" were
+    unreachable.
+    """
+    assert engine_collection_decision(available=available, demanded=demanded) == expected
+
+
+def test_the_demanded_run_refuses_instead_of_collecting_a_partial_suite() -> None:
+    """The outcome the switch exists for, proven the only way it can be: in a subprocess.
+
+    Faking the finder inside this process cannot show it, because ``tests/conftest.py`` was
+    imported long ago and its decision is already made.
+
+    ⚠️ The assertions read STDERR and do not pin exit 1. ``pytest.UsageError`` from
+    ``pytest_configure`` is reported as a usage error: measured, that is exit 4 and a single line
+    on stderr, with stdout EMPTY. A copy of the sibling guard above (returncode == 0, text in
+    stdout) would have looked at the wrong stream and the wrong code.
+    """
+    result = _collect_without_the_engine(demanded=True)
+    combined = result.stdout + result.stderr
+
+    assert result.returncode != 0, f"a demanded run over a missing engine stayed green:\n{combined}"
+    assert REQUIRE_DISPLAYS_ENV in result.stderr, (
+        "the refusal must name the variable that caused it, otherwise the reader hunts the cause "
+        f"in the test tree instead of in their environment:\n{combined[-1200:]}"
+    )
+    assert "test_validate.py" in result.stderr, (
+        f"the refusal must name what would have been skipped:\n{combined[-1200:]}"
+    )
+    assert "tests collected" not in result.stdout, (
+        f"the run must refuse BEFORE collecting a partial suite:\n{result.stdout[-800:]}"
+    )
+
+
+def test_an_undemanded_run_carries_its_own_gap_in_the_report_header() -> None:
+    """The half that needs no switch and no credential, and the one that fixes the damage.
+
+    CI syncs without ``--group displays`` deliberately, so it tests exactly the standalone core a
+    public user gets. What was wrong is that its green report said nothing about the modules it
+    did not run, so a reader could not tell a full run from a partial one.
+    """
+    result = _collect_without_the_engine(demanded=False, quiet=False)
+
+    assert "opi_navigation engine absent" in result.stdout, (
+        "a run that drops the display-coupled modules must say so in its header:\n"
+        f"{result.stdout[:1500]}"
+    )
+    for module in ENGINE_COUPLED_MODULES:
+        assert module in result.stdout, f"{module} missing from the header gap line"
+    assert REQUIRE_DISPLAYS_ENV in result.stdout, (
+        "the header must name the way to turn the silent skip into a refusal"
+    )
+
+
+def test_the_header_stays_silent_when_nothing_is_missing() -> None:
+    """Counter-probe: a line printed unconditionally would be noise, not a signal.
+
+    This checkout HAS the engine, so the ordinary run this test belongs to must not carry the gap
+    line. Without this the assertion above would also pass on a header that always prints.
+    """
+    assert engine_available(), (
+        "this counter-probe assumes an installed engine; on an engine-less checkout it cannot "
+        "distinguish the two cases and would be vacuous"
+    )
+    assert pytest_report_header() is None
