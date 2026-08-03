@@ -29,25 +29,25 @@ The full surface: every MCP tool grouped by plane, the standalone command-line t
 
 | Tool | Service | Enabled by |
 |------|---------|-----------|
-| `find_channels` | ChannelFinder: which IOC/host serves a PV + tags/properties; optional property/tag filters (`has_properties`/`lacks_properties` incl. `prop!=*` "lacks", `not_property_values`, `has_tags`/`lacks_tags`) and `count_only` for the exact match count via `/count`. The two modes return DISJOINT fields, and the configuration splits them again: configured list = `{enabled, channels, total, capped}`, configured count = `{enabled, match_count}`; unconfigured they are `{enabled, channels, total, note}` and `{enabled, match_count, note}`, so `note` is added and `capped` is NOT emitted. `enabled` is the only field on every path. Property filtering is gated to the DS-privacy safe-property allowlist (a redacted property like `accessGroup` is refused); tag-filter (`has_tags`/`lacks_tags`) semantics UNVERIFIED until a live probe | `EPICS_MCP_CHANNELFINDER_URL` |
-| `list_channel_vocabulary` | ChannelFinder: the property keys + tag names `find_channels` can be filtered on, NAMES only (`{enabled, properties, tags}`). `properties` is the allowlisted subset present in this instance (never advertises a key `find_channels` would refuse); `tags` is the full server tag set. An empty list ≠ CF unconfigured (`enabled:false`); an unreadable listing raises | `EPICS_MCP_CHANNELFINDER_URL` |
-| `is_archived` | Archiver Appliance: is a PV being archived? (+ connection_state / last_event / is_monitored, plus the connection-history cluster connection_loss_regain_count / connection_first_established / connection_last_restablished, from the same getPVStatus call) | `EPICS_MCP_ARCHIVER_URL` |
-| `get_pv_history` | Archiver Appliance: archived samples over an ISO-8601 window (+ the getData.json `meta` block: EGU units, PREC precision; `status` = ok/empty/withheld so an empty result is never mistaken for "could not read"; one unreadable sample withholds the whole result) | `EPICS_MCP_ARCHIVER_URL` |
-| `get_archive_info` | Archiver Appliance: how a PV is archived (sampling method/period, STS/MTS/LTS retention, DBRType, archived fields, source host, the alarm/display/control limits + units/precision (the nine numeric limits read `"0.0"` when unset, so `"0.0"` ≠ a literal zero limit) and controlling_pv/policy_name/modification_time); `found:false` ONLY on the 404 (never-archived); an unreadable 2xx errors, never a false `found` | `EPICS_MCP_ARCHIVER_URL` |
-| `get_appliance_info` | Archiver Appliance: the appliance's own topology (no PV): `identity`, the per-plane root URLs (mgmt/engine/etl/retrieval/data_retrieval), `cluster_inet_port` and a `version` string, the `getApplianceInfo` body of which the doctor plane-check keeps only `identity`. Confirms WHICH cluster you are on before trusting `list_archived_pvs`/`get_pv_history` (the wrong cluster silently returns a complete-looking list of the WRONG PVs) and reads a split/proxied deployment's plane layout. No `found` key; `version` omitted when absent (not "always present"); a 404 = wrong endpoint (retrieval serves `/retrieval/bpl`, not `/mgmt/bpl`), which errors rather than a false empty answer | `EPICS_MCP_ARCHIVER_URL` |
-| `list_archived_pvs` | Archiver Appliance: enumerate archived PV names (getAllPVs / `this_appliance`=getPVsForThisAppliance, not getMatchingPVs); optional name-glob `pattern` (getAllPVs only, because `getPVsForThisAppliance` has no name filter, so the combination is refused rather than answered unfiltered), honest `capped` | `EPICS_MCP_ARCHIVER_URL` |
+| `find_channels` | ChannelFinder: which IOC/host serves a PV, plus its tags/properties. Optional server-side property and tag filters, and `count_only` for an exact match count without pulling the matches. Property filtering is confined to the privacy-safe property allowlist. ⚠️ The tag-filter semantics are UNVERIFIED until a live probe | `EPICS_MCP_CHANNELFINDER_URL` |
+| `list_channel_vocabulary` | ChannelFinder: the property keys and tag names `find_channels` can be filtered on, names only. An empty list is not the same as ChannelFinder being unconfigured | `EPICS_MCP_CHANNELFINDER_URL` |
+| `is_archived` | Archiver Appliance: is a PV being archived, plus its connection state, last event and flapping counters, all harvested from the one `getPVStatus` call | `EPICS_MCP_ARCHIVER_URL` |
+| `get_pv_history` | Archiver Appliance: archived samples over an ISO-8601 window, with the units/precision meta block. `status` is ok/empty/withheld, so an empty result is never mistaken for a failed read | `EPICS_MCP_ARCHIVER_URL` |
+| `get_archive_info` | Archiver Appliance: how a PV is archived (sampling method and period, retention, DBRType, source host, the alarm/display/control limits, policy). `found:false` comes ONLY from the 404; an unreadable 2xx errors rather than minting a false answer | `EPICS_MCP_ARCHIVER_URL` |
+| `get_appliance_info` | Archiver Appliance: the appliance's own topology, no PV needed. Confirms WHICH cluster you are on before you trust `list_archived_pvs` or `get_pv_history`, because the wrong cluster returns a complete-looking list of the wrong PVs | `EPICS_MCP_ARCHIVER_URL` |
+| `list_archived_pvs` | Archiver Appliance: enumerate archived PV names, with an honest `capped`. An optional name glob works on the whole-appliance endpoint only, so combining it with `this_appliance` is refused rather than answered unfiltered | `EPICS_MCP_ARCHIVER_URL` |
 | `is_alarm_configured` | Phoebus Alarm Logger: is a PV in the alarm tree? | `EPICS_MCP_ALARM_URL` |
 | `get_alarm_history` | Phoebus Alarm Logger: alarm state history of a PV over a window (required start/end; newest-first; known AlarmLogMessage fields incl. user/host/command) | `EPICS_MCP_ALARM_URL` |
-| `lookup_device_name` | ESS Naming Service: is a device name registered + ACTIVE? (HTTP 204, the real service's measured "no such name", and 404 = definitive not-registered **only after the `/rest/swagger.json` identity probe confirms the responder, S13**; a service error, unreadable record or unverified identity is withheld, never a false negative) | `EPICS_MCP_NAMING_URL` |
-| `search_logbook` | Phoebus Olog: search log entries (returned whole: title, description, owner, source, properties, plus derived name-only logbooks/tags and attachment_count); paginate with `offset`/`sort`, `total_matches` = true total across all pages. Filter by `level` (triage axis, OR over `,`/`;`/`\|`) and `title` (whole WORDS, not substrings; wildcard with `*`; separate axis from `text`, which searches the body only); both case-insensitive and differentially probed. An **unknown level returns 0 hits rather than an error**, so an empty level-filtered result is annotated; see `list_log_levels` | `EPICS_MCP_OLOG_URL` |
+| `lookup_device_name` | ESS Naming Service: is a device name registered and ACTIVE? A definitive negative is given only after the identity beacon confirms the responder; an unverified or failing service is withheld, never a false negative | `EPICS_MCP_NAMING_URL` |
+| `search_logbook` | Phoebus Olog: search log entries, returned whole. Paginate with `offset`/`sort`. Filter by `level`, and by `title`, which matches whole WORDS and is a separate axis from `text` (the body). ⚠️ An unknown level returns 0 hits rather than an error, so call `list_log_levels` first | `EPICS_MCP_OLOG_URL` |
 | `get_log_entry` | Phoebus Olog: one entry by id, whole (404 = definitive found:false, everything else (including an unreadable 2xx) errors; disabled → found:null) | `EPICS_MCP_OLOG_URL` |
 | `list_logbooks` | Phoebus Olog: list the valid logbook names (name-only; owners dropped) | `EPICS_MCP_OLOG_URL` |
 | `list_tags` | Phoebus Olog: list the valid tag names | `EPICS_MCP_OLOG_URL` |
-| `list_log_levels` | Phoebus Olog: list the valid log levels (the triage axis; site-configurable, so the server is the only source). Returns the names plus `default_level`, the one a create uses when none is given, `null` + a note when the server does not state it unambiguously. Call it before filtering a search by level: an unknown level is **not rejected**, it returns 0 hits | `EPICS_MCP_OLOG_URL` |
-| `create_log_entry` | Phoebus Olog: **post** a log entry (MUTATING; own gate + test-server URL boundary + logbook allowlist + upload-size cap + rate limit; author = the service account, not spoofable; response = the created entry, whole). Optional `attachments` (workspace file paths, any type/size, multipart) + `embed_image_base64` (small inline image) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` |
+| `list_log_levels` | Phoebus Olog: the valid log levels plus `default_level`. Site-configurable, so the server is the only source. Call it before filtering a search by level | `EPICS_MCP_OLOG_URL` |
+| `create_log_entry` | Phoebus Olog: **post** a log entry (MUTATING, behind its own gate). Optional `attachments` (workspace file paths) and `embed_image_base64`. The author is the write service account and cannot be spoofed | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` |
 | `reply_to_log` | Phoebus Olog: **reply** to an entry (threads via the Log Entry Group; same gate/response/attachments as create_log_entry; bad id → 400) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` |
-| `add_log_attachment` | Phoebus Olog: attach file(s) to an **existing** entry (MUTATING; same gate as create, allowlist keyed on the TARGET entry's logbooks; env gate + URL boundary checked BEFORE the round-trip read). The server's update is destructive (prunes/overwrites), so it round-trips the full entry; the attach is purely **additive** for CONTENT (existing attachments + content fields preserved), but the server re-stamps `owner` to the write service account on every call, because this endpoint IS its destructive update | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` |
-| `update_log_entry` | Phoebus Olog: edit an **existing** entry's `title` / body / `level` / `logbooks` / `tags` (MUTATING). Same destructive endpoint: an omitted argument means *unchanged*, and attachments + properties + unedited fields are round-tripped verbatim. The logbook allowlist is keyed on the **UNION** of current + resulting logbooks (a move writes to both). A body edit goes to the raw `source` (the server regenerates the rendered text); an entry with duplicate/missing attachment filenames is **refused** (Olog matches attachments by filename) | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` |
+| `add_log_attachment` | Phoebus Olog: attach file(s) to an **existing** entry (MUTATING). Additive for content, every existing attachment and field survives. ⚠️ `owner` does not: the server re-stamps it to the write service account, because this endpoint IS its destructive update | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` |
+| `update_log_entry` | Phoebus Olog: edit an existing entry's `title` / body / `level` / `logbooks` / `tags` (MUTATING). An omitted argument means unchanged. The logbook allowlist is keyed on the UNION of the current and resulting logbooks, because a move writes to both | `EPICS_MCP_OLOG_URL` + `EPICS_MCP_ALLOW_OLOG_WRITE` |
 | `list_log_attachments` | Phoebus Olog: list one entry's attachments (id + filename + fileMetadataDescription; 404 → found:false) | `EPICS_MCP_OLOG_URL` |
 | `download_log_attachment` | Phoebus Olog: download one attachment's raw **bytes** by (log_id + filename) or GridFS id, to a workspace `output_path` or `as_base64`, size-capped by `EPICS_MCP_OLOG_ATTACH_MAX_BYTES` | `EPICS_MCP_OLOG_URL` |
 
@@ -57,7 +57,7 @@ group. These four tools are therefore unavailable in a published install today.)
 
 | Tool | Description |
 |------|-------------|
-| `validate_pvs` | Extract the macro-resolved PVs of a `.bob` and check their connectivity, under one of two views. `view="file"` (default) takes what the file itself declares, attributed across every display that embeds it; `view="display"` takes what it resolves to when opened as a display, embedded fragments included. A screen that only composes fragments declares nothing itself, so it answers `total: 0` under the default while resolving plenty under `view="display"`; a fragment is the reverse, because its macros are unbound standalone. The result always reports `shown_by_display` and `shown_by_display_capped`, and under the default a note says how many channels the display view adds. A `file_path` that is not a `.bob` (case-folded, so `UPPER.BOB` is one), or that lies outside `displays_dir`, is refused immediately with `INVALID_INPUT`: the inventory reads `.bob` files only, so such a call can only come back empty, and it used to take a full inventory walk to say so. Passing `pv_names` as well makes the list win, and the file path and view are not looked at |
+| `validate_pvs` | Extract the macro-resolved PVs of a `.bob` and check their connectivity. Two views: `view="file"` (default) is what the file itself declares, `view="display"` what it resolves to when opened, embedded fragments included. A screen that only composes fragments answers `total: 0` under the default. ⚠️ Passing `pv_names` wins, and the file path is then not looked at |
 | `crossplane_check` | PV provenance: display PVs ↔ e3 IOC `st.cmd` (+ optional `.db`) ↔ Naming (read-only) |
 | `coverage_audit` | Cross-plane coverage matrix: delivered PVs (ChannelFinder) ↔ displays ↔ archive ↔ alarm; blind spots + critical-uncovered |
 | `find_device` | Which operator screens show a device, its live channel values (capped), and the serving IOC |
@@ -97,44 +97,25 @@ anyway) and `1` where it is installed and fails to load, the same code the comma
 install with correct arguments. Install the engine from a checkout with
 `uv sync --extra dev --group displays`.
 
-Every `epics-doctor` line that reports a PROBLEM also says what to change: the observation (the HTTP
-code, the variable that could not be reached, the appliance figures) and then the remedy for that
-status. The honest-but-not-healthy states are deliberately left without one, because there is nothing
-here to set: `unverified` already carries the specific clue it measured, and `no_ingest` is a fault
-inside the appliance, not in this configuration.
-
-`epics-diagnose`/`epics-crossplane`/`epics-coverage` exit `0` even on a negative finding (a
-disconnect / a broken link is a result, not a crash). **`epics-doctor` is the deliberate exception**
-It is a scriptable pass/fail, so it exits `0` when nothing failed and no identity probe failed,
-`1` when a configured plane HARD-fails (unreachable / CA error / API error / probe-disconnect /
-config_error (for instance a retrieval URL with no archiver URL, which no tool would ever use), or
-backend_down, a reachable+identified plane whose backend is down, e.g. the alarm logger's
-Elasticsearch),
-`2` on a usage error, and `3` (INCONCLUSIVE) when a plane is reachable but its identity probe
-FAILED: a served non-2xx like a 401/404, a transport error, or a refused redirect on the identity
-endpoint. Exit 3 is not a hard failure (the plane's tool endpoints may work) but not a silent
-all-clear either. A service that ANSWERS with a *different* known service's name is reported
-`unverified` (exit 0) with the found name in the detail, not a failure, because a path-based
-reverse proxy can serve the real API behind a base URL that names another service (measured). Run
-it first in a new facility to confirm the environment your launcher hands the server (see
-`docs/deployment.md`).
+`epics-diagnose` / `epics-crossplane` / `epics-coverage` exit `0` even on a negative finding: a
+disconnect or a broken link is a result, not a crash. **`epics-doctor` is the deliberate
+exception**, a scriptable pass/fail with four exit codes: `0` clean, `1` a configured plane
+hard-failed, `2` a usage error, `3` inconclusive. The full contract, the six failing statuses, the
+remedies and the `--json` keys a script must read are in
+[the deployment guide](deployment.md#1-quick-start). Run it first in a new facility.
 
 Each plane is also asked to **name itself**, because reachable is not identified: the transport probe
 counts any HTTP response as reachable, so a URL aimed at the wrong host can look alive (measured: a
 ChannelFinder URL pointing at a dead container read `✓ ok` because an unrelated service on that port
 answered 401). A plane that ANSWERED (2xx) but cannot prove what it is reports `unverified` (`?`),
-honest, **not** healthy, exit `0`; a plane whose identity probe FAILED reports `identity_probe_failed`
-(`!`): reachable but suspect, exit `3`. And identified is not working: a plane that proved its
-identity and is measurably not doing its job reports `no_ingest` (`~`), exit `0` (an Archiver
-appliance holding channels with none connected, or reporting one of its own webapps stopped).
-⚠️ Exit `0` therefore means "nothing failed", **not**
-"everything confirmed": a script must read `verification_complete` / `unverified_planes` /
-`inconclusive_identity_planes` / `degraded_planes` from `--json` rather than the exit code alone (a
-failed probe lands in `inconclusive_identity_planes`, **not** `unverified_planes`; a degraded one in
-`degraded_planes` and in NEITHER of those), and for **positive** confirmation
-assert `identified_planes` is non-empty, because `verification_complete` is vacuously true on an
-empty config (nothing probed ≠ everything confirmed). ⚠️ `identified_planes` also lists a degraded
-plane, since its identity IS proven, so it alone never means healthy.
+honest but **not** healthy, exit `0`. A plane whose identity probe FAILED reports
+`identity_probe_failed` (`!`), reachable but suspect, exit `3`. A plane that proved its identity and
+is measurably not doing its job reports `no_ingest` (`~`), exit `0`.
+
+⚠️ So exit `0` means "nothing failed", **not** "everything confirmed". A script reads
+`verification_complete` / `unverified_planes` / `inconclusive_identity_planes` / `degraded_planes`
+from `--json` rather than the exit code alone, and asserts `identified_planes` is non-empty for
+positive confirmation, because `verification_complete` is vacuously true on an empty config.
 
 ## Resources & Prompts
 
