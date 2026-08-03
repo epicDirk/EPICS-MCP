@@ -108,9 +108,15 @@ you a green run. Why CI itself still cannot execute them: `docs/known-limits.md`
   the audit report false survivors; the reasoning is in `CLAUDE.md`'s evidence section.
 
 - **What this repository deliberately does NOT guard** is written down and dated in
-  [docs/known-limits.md](docs/known-limits.md). Read it before building a guard for something:
-  several of the obvious candidates were measured and rejected for a reason, and the reason is
-  there rather than in a commit body.
+  [docs/known-limits.md](docs/known-limits.md), which carries the limits a reader of this project
+  needs. Read it before building a guard for something: several of the obvious candidates were
+  measured and rejected for a reason, and the reason is there rather than in a commit body.
+- **A limit of ONE guard belongs in that guard's docstring, not on that page.** The distinction is
+  who has to read it. A limit an adopter or a fork contributor can act on goes on the page; a limit
+  only the next author of a particular guard can act on goes beside the assertion it qualifies,
+  where that author will meet it. The page grew to 841 lines before this rule existed, and half of
+  it was a maintenance manual for `tests/test_guide_matches_code.py`. Retired entries keep their
+  numbers, which are never reused, so a citation by section number does not rot.
 
 ## Releasing
 

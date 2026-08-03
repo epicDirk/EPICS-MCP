@@ -55,6 +55,16 @@ transcript or a commit body, which future sessions won't find. Three tiers, by t
 guide + docstrings), not only the session transcript. Because this policy lives *in the repo*, it holds
 in any session working here, and that is the growth mechanism.
 
+⚠️ **The tier is decided by WHO has to read it, and getting that wrong is how a page grows without
+anyone deciding to grow it.** A limit only the next author of one guard can act on is a tier-1 fact:
+it belongs in that guard's docstring, beside the assertion it qualifies. Writing it on a shared page
+instead looks like documentation and reads like a maintenance manual, and it is invisible to the
+person editing the guard. Measured: `docs/known-limits.md` reached 841 lines that way, one entry of
+which was 418 (52% of the page) and was the manual for a single test module; the guards' own
+docstrings already carried most of it, so the page was a second, unguarded copy. The same question
+applies to the operator guide, which SHIPS: a rule addressed to whoever edits that file is not a
+tier-2 fact, because its reader is an assistant that never writes it.
+
 Two of these tiers are **drift-guarded**, not just prose (prose conventions are the category that rots):
 `test_guide_matches_code.py` fails if the guide names a tool that is not registered or an `EPICS_MCP_*`
 var that is not in `EpicsConfig`, and it fails if a registered tool is **missing** from the guide, so
@@ -75,7 +85,9 @@ what it is CALLED, and only the first was guarded before. Two comparisons, delib
 guide's `plane-inventory` region against a real `run_doctor` run, and the plane-name literals in
 `services/doctor.py` against that same run rather than against the guide, because a literal nobody
 calls is a dead branch and reporting it as a documentation gap would be a false alarm on the wrong
-surface. What all of that deliberately does not check is dated in `docs/known-limits.md`.
+surface. What all of that deliberately does not check is stated where it can be acted on: the parts
+an outside reader needs are dated in `docs/known-limits.md`, the rest sits in the docstring of the
+assertion it qualifies.
 
 ## Facility-agnostic guardrail (hard)
 
