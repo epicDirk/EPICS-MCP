@@ -42,40 +42,36 @@ setting those variables for *your* services, with no code change. This guide wal
    epics-doctor --probe-pv SIM:PS-01:Cur-RB   # also pass/fail the live PVA plane
    ```
 
-   Exit `0` = nothing failed and no identity probe failed; `1` = a configured plane HARD-failed
-   (including `config_error`, where the variables contradict each other, e.g. a retrieval URL with no
-   archiver URL, and `backend_down`, a reachable, identified plane whose backend is down, e.g. the
-   alarm logger's Elasticsearch); `2` = usage error; `3` = INCONCLUSIVE, a plane is reachable but
-   its identity
-   probe FAILED (a served non-2xx like a 401/404, a transport error, or a refused redirect on the
-   identity endpoint): not a hard failure, but not a silent all-clear either. A URL that ANSWERS
-   with a *different* known service's name is reported `unverified` (exit `0`) with that name in the
-   detail, not a failure (a path-based reverse proxy can serve the real API behind a base URL that
-   names another service, measured), but the name is your first clue if the config IS wrong. Fix
-   anything `epics-doctor` flags, then you are done; no need to ask us.
+   The exit code is the scriptable contract:
 
-   Each line that reports a problem carries its own remedy: what was observed, then what to change
-   about it. So the common cases need no lookup here, and the sections below are for when you want
-   the reasoning behind one. `!` (`identity_probe_failed`) carries one too, being inconclusive
-   rather than healthy. The exceptions are `?` (`unverified`) and `~` (`no_ingest`), honest states
-   with nothing to set, and they say what they measured instead.
+   | Exit | Meaning |
+   |------|---------|
+   | `0` | nothing failed, and no identity probe failed |
+   | `1` | a configured plane HARD-failed: `unreachable`, `ca_error`, `api_error`, `config_error` (the variables contradict each other, e.g. a retrieval URL with no archiver URL), `backend_down` (identified, but a backend it needs is down), or `disconnected` (only with `--probe-pv`) |
+   | `2` | usage error |
+   | `3` | INCONCLUSIVE: a plane is reachable but its identity probe FAILED, a served non-2xx like a 401/404, a transport error, or a refused redirect |
 
-   ⚠️ Read the `?` (`unverified`, exit `0`), `!` (`identity_probe_failed`, exit `3`) and `~`
-   (`no_ingest`, exit `0`) lines before
-   calling it done. `?` = "answered 2xx, but could not prove what it is": honest, not healthy. `!` =
-   "reachable, but the identity probe FAILED (401/404/redirect/...)": suspect, not a silent pass.
-   `~` = "proved what it is, and is not doing its job": an Archiver appliance holding channels with
-   none connected, or reporting one of its own webapps stopped. It is exit `0` on purpose, because
-   a freshly commissioned appliance is legitimately in that state, but it is a finding and worth
-   chasing before you call a deployment done.
+   Every line that reports a problem also carries its remedy: what was observed, then what to
+   change. So the common cases need no lookup here, and the sections below are for when you want
+   the reasoning behind one. Fix what `epics-doctor` flags and you are done.
+
+   ⚠️ Three states are honest rather than healthy, and none of them fails. Read them before
+   calling a deployment done. `?` (`unverified`) answered 2xx but could not prove what it is, exit
+   `0`. `!` (`identity_probe_failed`) is reachable but suspect, exit `3`, and it carries a remedy.
+   `~` (`no_ingest`) proved what it is and is measurably not doing its job, an Archiver appliance
+   holding channels with none connected or reporting one of its own webapps stopped; exit `0` on
+   purpose, because a freshly commissioned appliance is legitimately in that state. A URL that
+   answers with a *different* known service's name is `unverified` too rather than a failure, since
+   a path-based reverse proxy can serve the real API behind a base URL naming another service
+   (measured). The found name rides in the detail and is your first clue when the config IS wrong.
+
    Every plane has its own identity beacon (see the operator guide). Scripting this? Read
    `verification_complete` / `unverified_planes` / `inconclusive_identity_planes` /
-   `degraded_planes` from `--json` (a
-   failed probe lands in `inconclusive_identity_planes`, not `unverified_planes`; a degraded one in
-   `degraded_planes` and in neither of those); the exit code
-   alone says "nothing failed", not "everything confirmed", and for positive confirmation assert
-   `identified_planes` is non-empty (`verification_complete` is vacuously true on an empty config,
-   and a degraded plane is listed there too, since its identity IS proven).
+   `degraded_planes` from `--json`. A failed probe lands in `inconclusive_identity_planes`, not in
+   `unverified_planes`; a degraded one in `degraded_planes` and in neither of those. The exit code
+   alone says "nothing failed", not "everything confirmed", so for positive confirmation assert
+   `identified_planes` is non-empty: `verification_complete` is vacuously true on an empty config,
+   and a degraded plane is listed there too, since its identity IS proven.
 
 ## 2. The variables, by plane
 
@@ -89,6 +85,12 @@ Only set the planes you use. See `.env.example` for the full commented list and 
 | Alarm Logger | `EPICS_MCP_ALARM_URL` (+ `_AUTH`) | Phoebus Alarm Logger REST root. |
 | Naming Service | `EPICS_MCP_NAMING_URL` | No built-in host, so no egress unless set. |
 | Olog logbook | `EPICS_MCP_OLOG_URL` (+ `_AUTH`) | REST root incl. context path. Reads return the whole entry (title, text, author, attachments); the former read redaction was removed 2026-08-01, see `docs/safety.md`. |
+
+The table groups by SERVICE, which is how you configure them. The report and the `plane` field of
+`--json` group by CHECK and print seven names: `live`, `channelfinder`, `archiver`,
+`archiver_retrieval`, `alarm`, `naming`, `olog`. The Archiver is the one service holding two of
+them, probed separately so a correct management URL beside an unreachable retrieval one shows up as
+one healthy line and one failing line rather than as a single ambiguous verdict.
 
 Network posture: PV reach is decided by the launcher's EPICS search-path env: address lists, name
 servers, and the auto-addr search, which defaults to **ON** (subnet broadcast) when unset; a

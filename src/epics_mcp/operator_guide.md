@@ -61,7 +61,12 @@ operational knowledge (see the Knowledge Persistence Policy in `CLAUDE.md`).
   (it needs a 2xx to tell "reachable" from "wrong endpoint"), so it spends a token like any other
   read and `epics-doctor` can be denied on a tight limit. That archiver plane now spends **three**
   tokens per run, not two: `check_connectivity`, the identity beacon, and the ingest probe
-  (`getApplianceMetrics`) that the identity beacon leads to. The two multi-GET tools are measured
+  (`getApplianceMetrics`) that the identity beacon leads to. Sizing a limit for a WHOLE
+  `epics-doctor` run rather than for one plane, measured 2026-08-03: every configured REST plane
+  spends one token for its identity beacon, and the archiver spends FIVE all told, because its
+  reachability probe is a GET as well and its retrieval half is probed as a plane of its own even
+  when it falls back to the management URL. All six planes configured spend NINE; the archiver
+  alone already spends five. The two multi-GET tools are measured
   (2026-07-31) rather than estimated, and they do NOT behave alike, so size each from its own
   figure or the tool aborts mid-run with a loud `READ_RATE_LIMIT_EXCEEDED` (never a silent partial
   result):
@@ -79,8 +84,10 @@ operational knowledge (see the Knowledge Persistence Policy in `CLAUDE.md`).
 
 ## The planes
 
-For the canonical plane→source→tools table and the safety/network posture, see the README sections
-**"The planes it sees"** and **"Safety & network posture"**, the single source of truth. In short:
+The canonical plane→source→tools table is the README section **"The planes it sees"**; the safety
+and network posture is
+[docs/safety.md](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/safety.md). Those two are the
+single source of truth. In short:
 
 - **Live PV access** (p4p PVAccess/Channel Access), the *only* authority for connected/disconnected.
 - **ChannelFinder**: which IOC/host serves a PV, plus its tags/properties. `EPICS_MCP_CHANNELFINDER_URL`.

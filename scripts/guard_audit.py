@@ -419,10 +419,15 @@ def claiming_tests() -> dict[str, list[tuple[str, bool]]]:
 
     Known blind spot, stated rather than implied: a double installed OUTSIDE the test body is not
     seen here. That covers a pytest fixture and, measured on this tree, a plain module-level helper
-    and ``tests/test_olog_update.py`` installs one in ``_install_fake`` and 21 tests call it. Until
-    the criterion was read from the syntax tree, three of those 21 were counted, by accident: the
-    regex matched their METHOD patch onto the double. Consistently blind beats arbitrarily
-    half-sighted; widening the signal to helper-installed doubles is its own piece of work.
+    and ``tests/test_olog_update.py``, which installs one in ``_install_fake`` that nearly every
+    test in the module calls. Until the criterion was read from the syntax tree, three of them were
+    counted, by accident: the regex matched their METHOD patch onto the double. Consistently blind
+    beats arbitrarily half-sighted; widening the signal to helper-installed doubles is its own
+    piece of work.
+
+    The population is deliberately NOT written down as a figure. It is a count of the current tree
+    that nothing re-runs, and the previous wording carried the very error this audit exists to
+    find: it said 21, taken from a grep whose match set includes the ``def`` line.
 
     The docstring IS read, deliberately, but only for ``_EDGE_CLAIM``: a test whose prose says "the
     service answered and we could not read it" states the edge claim in words its name does not
