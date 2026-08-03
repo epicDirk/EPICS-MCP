@@ -560,9 +560,12 @@ async def find_channels(
     Optional MA-2 property/tag filters narrow the search server-side, and count_only returns the
     exact match count. CAVEATS: (1) property filtering is gated to the DS-privacy safe-property
     allowlist (a redacted property like accessGroup is refused, filtering it would reconstruct the
-    partition the projection hides); expand EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES to filter on
-    more. (2) An unknown/misspelled property name is NOT a server error, it narrows the result to
-    0, indistinguishable from a genuinely empty match. (3) The PROPERTY filters and count_only were
+    partition the projection hides). EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES REPLACES that
+    allowlist rather than extending it, and it also decides which properties the results carry, so
+    naming one extra property silently drops the built-in ones: list them alongside it to keep them.
+    (2) An unknown/misspelled property name is NOT a server error, it narrows the result to
+    0, indistinguishable from a genuinely empty match; list_channel_vocabulary names the keys this
+    instance actually accepts. (3) The PROPERTY filters and count_only were
     differentially live-verified (2026-07-22); the TAG filters (has_tags/lacks_tags) remain
     UNVERIFIED against a live server until a probe exercises them.
 
@@ -603,8 +606,10 @@ async def list_channel_vocabulary(
 
     properties is the allowlisted subset that actually exists in this ChannelFinder: it lists only
     the safe-property names find_channels accepts as filters (a non-allowlisted, person-bearing
-    property like ENGINEER is excluded and would be refused anyway), expand
-    EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES to surface more. tags is the full, ungated server
+    property like ENGINEER is excluded and would be refused anyway).
+    EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES REPLACES that allowlist rather than extending it, so
+    a comma-list naming one extra property silently drops the built-in ones: list them alongside it
+    to keep them. tags is the full, ungated server
     tag set. An empty list means the CF instance has no such names; enabled=false (with a note)
     means CF is not configured, the two are distinct. An unreadable/unreachable listing raises
     loudly rather than reporting an empty vocabulary.

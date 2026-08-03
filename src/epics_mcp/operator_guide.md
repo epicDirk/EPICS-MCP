@@ -193,8 +193,10 @@ Three consequences worth carrying:
    as a fact about the logbook.
 2. **Blank is not "no filter", and the two fields disagree about what it means.** Both are refused
    client-side before the request (`INVALID_INPUT`), neither server answer is usable.
-3. **`title` matches whole WORDS, not substrings**: the opposite of `find_channels`, whose bare
-   value is an anchored substring glob. A word fragment finds nothing unless wildcarded (`att*`).
+3. **`title` matches whole WORDS, not substrings**: a word fragment finds nothing unless wildcarded
+   (`att*`). `find_channels` fails the same way for a different reason: its glob is **anchored**,
+   so a bare substring matches nothing there either (wrap it in `*`). Same trap, different level,
+   words versus the whole name.
    `title` is also a separate axis from `text`/`desc`, which searches the **body** only and never
    the title.
 
@@ -258,8 +260,10 @@ own gate, distinct from `set_pv_value`, and it never touches `ALLOW_PV_WRITE`. F
 must line up before a write proceeds, each fail-closed and audited as `DENY` before the raise:
 
 - **Env gate.** `EPICS_MCP_ALLOW_OLOG_WRITE=true` (default false = every write denied).
-- **Test-server URL boundary.** Unlike PV write (bounded by its own gate + regex allowlist, with
-  reach decided by the launcher's EPICS search env), Olog speaks HTTP to an arbitrary URL. A write is refused unless the `OLOG_URL` host is
+- **Test-server URL boundary.** PV write bounds its reach IN-SERVER: enabling it forces a
+  loopback-only EPICS search reach, checked at boot, and the process refuses to start otherwise
+  (see the posture section above). Olog cannot work that way, because it speaks HTTP to an
+  arbitrary URL, so it gets an explicit boundary instead. A write is refused unless the `OLOG_URL` host is
   **loopback** (the local Olog), or the exact **https** base URL is in
   `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` **and** `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true`. A private
   (non-loopback) host, and any plain-http remote (Basic creds are cleartext), is refused by default;
@@ -337,9 +341,11 @@ the **UNION** of the entry's current and resulting logbooks, because moving an e
 pulling it OUT of one are both writes to that logbook; gating on either side alone leaves a hole. An
 omitted argument means "unchanged", the tool round-trips the whole entry and overlays only what was
 passed, so attachments and properties survive. Three server behaviours it has to compensate for:
-a body edit is written to **`source`**, never `description` (under `markup=commonmark` the server
-regenerates `description` FROM `source`, so a new description beside a stale source is silently
-overwritten and the edit vanishes); the update does **not** validate logbook/tag existence the way
+a body edit must carry the new text in **`source`**, which is the field of truth (under
+`markup=commonmark` the server regenerates `description` FROM `source`, so a new description beside
+a stale source is silently overwritten and the edit vanishes); the client sets **both** fields to
+the new text, so the two cannot disagree even if the markup step were skipped; the update does
+**not** validate logbook/tag existence the way
 create does, so unknown names are checked client-side or they become phantom references; and an
 empty title is **not** rejected server-side. Note also that the server re-sets `owner` to the write
 service account on EVERY update, the original author survives only in the archived version, and that
@@ -692,11 +698,16 @@ messages embed the full request URL, an internal host would leak into this file)
   (`has_properties`/`lacks_properties`/`not_property_values`/`has_tags`/`lacks_tags`) and `count_only`
   for an exact match count via `/count` without pulling the matches. Property filtering is gated to
   the DS-privacy safe-property allowlist (a redacted property like `accessGroup` is refused with
-  `INVALID_INPUT`); widen it with `EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES`. Two honesty rules:
+  `INVALID_INPUT`). `EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES` **REPLACES** that list, it does
+  not extend it: a comma-list becomes the whole allowlist, so naming one extra property silently
+  drops the built-in ones, and the same allowlist also decides which properties the RESULTS carry.
+  To keep the defaults, list them alongside the new name. Two honesty rules:
   the TAG filter semantics (`has_tags`/`lacks_tags`) are **UNVERIFIED** until a differential live
   probe (the property filters were live-verified 2026-07-22); and an unknown/misspelled property
   name is **not a server error**, it narrows the result to 0, indistinguishable from a genuinely
-  empty match (there is no vocabulary-discovery endpoint yet).
+  empty match. `list_channel_vocabulary` is what tells the two apart: it names this instance's
+  filterable property keys (the allowlisted subset `find_channels` accepts) and its full tag set,
+  so a 0 can be checked against the vocabulary instead of being read as a fact about the registry.
 - **Enumerate PVs by pattern?** `discover_pvs` with a wildcard (`*`/`?`) routes to ChannelFinder,
   the same registry `find_channels` queries, so hits are `registered` (registry membership, not a
   live connect; use `get_pvs`/`get_pv_value` for liveness). A concrete name instead does a live p4p
