@@ -132,9 +132,18 @@ _NUMBER = rf"(?<![-\w.])(?<!\d\.)(?:\d[\d_]*|{_alternation(_WORD_VALUES)})\b"
 # today's watched prose a truly case-sensitive class is INERT. Measured all three ways, any
 # letter, literal ``[A-Z]`` under ``re.IGNORECASE``, and ``[A-Z]`` forced case-sensitive with
 # ``(?-i:[A-Z])``, and all three find an IDENTICAL set of sites and keys. So nothing goes red if
-# someone makes the change; the risk is prospective, and that this reading behaviour is barely
-# pinned at all is recorded as its own limit (``docs/known-limits.md`` §8). Swapping ``[A-Z]`` for
-# the honest class was verified the same way and also changes nothing.
+# someone makes the change; the risk is prospective, and the decision is held by
+# ``tests/test_prose_numbers.py`` on constructed input, which is the only place the difference
+# exists. Swapping ``[A-Z]`` for the honest class was verified the same way and also changes
+# nothing.
+#
+# ⛔ MAKING THE CLASS CASE-SENSITIVE IS THE FORBIDDEN REPAIR, and the share is what carries that.
+# Counting a boundary as ``[.;:]`` + whitespace + a letter, inside the comment runs and docstring
+# paragraphs this module actually reads across the watched files, JUST OVER HALF are followed by a
+# lower-case word: an identifier, a quoted term, a continued clause. A capital-only rule stops
+# recognising those and re-introduces the cross-sentence pairing the look-ahead exists to prevent.
+# Re-derive the share over the blocks :func:`iter_blocks` returns, and count the LETTER rather than
+# any non-space: a terminator plus whitespace plus any non-space is a different, larger denominator.
 #
 # ⚠️ A BARE ``[A-Z]`` CANNOT EVEN ASK THE QUESTION: under ``re.IGNORECASE`` it matches lower case
 # too, so the only honest mutant, and the only red-proof for a test over this rule, is the SCOPED

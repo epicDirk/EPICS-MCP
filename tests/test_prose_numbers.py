@@ -2,7 +2,9 @@
 
 S37. The module had no test of its own. Its two recorded repairs, the sentence-boundary look-ahead
 and the rule that a gap word may not end in a terminator, could both be reverted with nothing going
-red, which is what ``docs/known-limits.md`` entry 8 records.
+red. This module is what closed that, and it is where the limit is now recorded: what these tests
+establish is what the module DOES with prose somebody wrote for them, never that the watched prose
+is read correctly, which is the comparing half's job.
 
 WHY SYNTHETIC, and not the watched tree: on the prose the guard actually reads, the three spellings
 of the boundary class (any letter; a literal ``[A-Z]`` under ``re.IGNORECASE``; and ``[A-Z]`` forced
@@ -14,8 +16,8 @@ the difference exists, so it is the only place the decision can be pinned.
 THE RED-PROOF, stated so it is not re-derived: the mutant that makes
 :func:`test_a_lower_case_word_after_a_terminator_still_ends_the_sentence` fail is the SCOPED
 ``(?![.;:]\\s+(?-i:[A-Z]))``. A bare ``[A-Z]`` is not a mutation at all, because ``re.IGNORECASE``
-makes it match lower case too; that is the trap entry 8 exists to describe, and it is easy to walk
-into while trying to test the rule.
+makes it match lower case too, so an author checking their own repair against it measures nothing
+and concludes it is safe. It is easy to walk into while trying to test the rule.
 
 SCOPE. This pins what the module DOES, including the limits its own docstring claims, so the scope
 statement stops being prose. It says nothing about whether the watched prose is correct; that is

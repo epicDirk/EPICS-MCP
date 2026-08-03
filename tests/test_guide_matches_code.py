@@ -400,8 +400,8 @@ _IN_THE_GLYPH_TABLE: frozenset[PlaneStatus] = frozenset(
 # EMPTY since QA-49 (2026-08-02), and the emptiness is a CONSEQUENCE rather than a decision: the
 # legend now names every status, so no status has the prose region as its only home. Both remaining
 # buckets are therefore empty, which makes two of this file's assertions structurally vacuous
-# (``missing`` and ``surfaced`` below); ``docs/known-limits.md`` section 14 records that and says
-# which guard carries their weight instead. What did NOT move into the vacuum: the prose region's
+# (``missing`` and ``surfaced`` below), which is recorded here rather than left to be
+# rediscovered. What did NOT move into the vacuum: the prose region's
 # presence guard, which is now DERIVED from ``doctor._FAILING_STATUSES`` rather than declared here
 # (``test_the_status_prose_still_names_every_failing_status``), and is twice as wide for it.
 _IN_THE_STATUS_PROSE: frozenset[PlaneStatus] = frozenset()
@@ -499,8 +499,7 @@ _CODE_SPAN_RE = re.compile(r"`([^`]*)`")
 #: which reads as the pairing nobody wrote. The example this comment used to give, "the ``ok``
 #: versus ``?`` distinction", does NOT exhibit it and was measured rather than assumed: the gap
 #: there is eight characters, well past the limit of three, so that sentence and its siblings
-#: (``vs``, ``, not``) read as nothing at all. The form is recorded in ``docs/known-limits.md``
-#: section 14.
+#: (``vs``, ``, not``) read as nothing at all.
 _GLYPH_CHARACTERS = frozenset("✓✗?!~·i")
 # The surfaces a pairing is EXPECTED on, and therefore the only ones carrying a per-surface floor.
 # Every other tracked docs page is READ, but not required to contain anything: measured, the other
@@ -1380,7 +1379,7 @@ def test_the_span_pass_matches_every_span_before_it_filters_on_tokens() -> None:
     shorter spelling, one regex requiring whitespace inside the span, skips a whitespace-free span
     and re-anchors on its closing backtick, so the prose BETWEEN two spans is read as a span. Both
     spellings agree on this tree, which is why no tree-driven guard can see the difference, and why
-    ``docs/known-limits.md`` carried the property as merely written down.
+    the property was merely written down until this test existed.
 
     The first assertion is the control and it is what makes the second one a finding: on this
     input the reverted spelling DOES invent the pairing, so the emptiness below is a statement
@@ -1411,7 +1410,7 @@ def test_the_span_pass_matches_every_span_before_it_filters_on_tokens() -> None:
 def test_the_span_pass_reads_a_span_of_exactly_two_tokens_and_no_longer_one() -> None:
     """The two-token filter, which this page called unpinnable for two rounds.
 
-    ``docs/known-limits.md`` listed it among the things NOT held and said it "cannot be reddened by
+    It was listed among the things NOT held, on the claim that it "cannot be reddened by
     any input". That is a universal built out of a TREE measurement, and the measurement it rests on
     says something narrower: relaxing the filter changes no result on this tree. Measured, the two
     rules disagree on constructed input at once, so the property is pinnable exactly like the eleven
@@ -1621,9 +1620,8 @@ def test_a_pairing_inside_one_code_span_is_read() -> None:
     this input, and on the whole tree it yields a byte-identical pairing list. The order of
     operations it breaks has its own pin,
     ``test_the_span_pass_matches_every_span_before_it_filters_on_tokens``, on an input where the
-    two spellings disagree. Until that one existed the order was recorded in
-    ``docs/known-limits.md`` section 14 and held by nothing, and the entry there said so for one
-    round and then said the opposite for one round; both are now the same statement.
+    two spellings disagree. Until that one existed the order was written down
+    and held by nothing.
     """
     found = _glyph_status_pairings("reported `✓ ok` for a dead container", cli_doctor._STATUS_MARK)
     assert ("ok", "✓") in found, (
@@ -1732,9 +1730,8 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
     ⚠️ Both of those buckets are EMPTY since QA-49, so both of those halves iterate over nothing.
     They are kept because they define what the buckets MEAN, and a future deliberate gap would
     reactivate them; what they no longer do is carry weight today. The third direction below does,
-    and it is what makes the marker printed above the prose region true. Which guard carries what
-    after QA-49, and which assertions are vacuous, is written down in ``docs/known-limits.md``
-    section 14 rather than left to be rediscovered.
+    and it is what makes the marker printed above the prose region true. Which guard carries what,
+    and which assertions are vacuous, is stated here rather than left to be rediscovered.
 
     The negative half is why the guide carries two marked regions instead of one. Searching the
     WHOLE guide was probed and rejected, and the argument rested on TWO of the three then
@@ -1780,7 +1777,7 @@ def test_the_declared_status_locations_still_describe_the_guide() -> None:
     Only the prose region, not the legend. The legend region carries ``degraded_planes`` and
     ``name``, so extending this half there would need two allowlist entries on the first day, and an
     allowlist that is needed immediately is an excuse rather than a promise. What this direction
-    does NOT catch, and what therefore stays in ``docs/known-limits.md``: a status name outside both
+    does NOT catch, and what therefore stays unheld: a status name outside both
     regions, one written without backticks, and one written with a capital.
 
     Red-proof: unbacktick a prose status name; write a declared-absent one into a region; remove a

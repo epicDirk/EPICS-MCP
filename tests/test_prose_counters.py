@@ -108,7 +108,8 @@ class _Claim:
     WHAT ``reads`` DOES AND DOES NOT PROVE. Traced, it establishes that the measure touched the
     object the claim names. It does not establish that the SENTENCE means that object, that stays a
     human reading, and it does not establish that the answer DEPENDS on what was touched: a measure
-    could read a constant and ignore it. Both limits are recorded in ``docs/known-limits.md``.
+    could read a constant and ignore it. Both limits are stated here because no construct closes
+    them.
     """
 
     label: str
@@ -285,8 +286,7 @@ def _provenance_faults(claim: _Claim) -> list[str]:
     * FILES are checked in one direction only. Two measures reach their file through
       ``_typed_dict_fields``, which parses the whole package, so "this file was parsed" cannot be
       told apart from "some file in ``src`` was parsed". Tightening that needs a third recorder over
-      the index's keys; until then it is written down in ``docs/known-limits.md`` rather than
-      implied away here.
+      the index's keys; until then it is stated here rather than implied away.
 
     FIRST it checks that the recorder did not change the measurement, and that check is here
     because it was needed: the first recorder written for this used ``__getattr__``, ``vars(ts)``
@@ -1616,7 +1616,7 @@ def test_every_claim_declares_which_source_it_reads() -> None:
       ``_typed_dict_fields``, nearly free: that index parses the whole package, so "this file was
       parsed" does not distinguish it from any other file under ``src``.
 
-    All three limits are written down in ``docs/known-limits.md`` rather than left to be discovered.
+    All three are stated here rather than left to be discovered.
 
     Cost, measured rather than estimated: about six seconds for the whole table. That is two cold
     measurement passes per claim, one traced, one not, because the recorder is compared against the
@@ -1841,11 +1841,17 @@ def test_no_claim_hard_codes_its_expectation() -> None:
     check on the SPELLING of the answer, one frame deep, and an outside QA measured all three of
     its blind spots: ``lambda: 20 + 2`` passes for an expected 22 (the answer is never spelled),
     ``lambda: _helper()`` passes whatever ``_helper`` returns (only the immediate frame is
-    inspected, 41 of the delivered derivations call a module helper), and a regex may split the
-    literal (``(1[1])`` captures an 11 the skeleton search cannot see). What it does catch is the
-    defect it was built for: a bare typed-in answer, in either half. Closing the rest needs a
+    inspected, and MOST of the delivered derivations call a module helper), and a regex may split
+    the literal (``(1[1])`` captures an 11 the skeleton search cannot see). What it does catch is
+    the defect it was built for: a bare typed-in answer, in either half. Closing the rest needs a
     different mechanism, not a wider regex, a claim declaring what it READS, which is separate
     work recorded as such.
+
+    ⚠️ No SHARE is printed here, deliberately, and the previous wording is why: it said 41 and had
+    drifted to 51 unnoticed, because nothing in this repository re-runs a figure written in prose.
+    Re-derive it by walking ``_CLAIMS``, parsing each ``measure``'s source and asking whether it
+    calls a module-level function of this module; the arithmetic blind spot is the same walk asking
+    for an ``ast.BinOp``.
 
     Doubles as the precondition for the rest of the module: a pattern that captures nothing would
     raise ``IndexError`` deep in the coverage scan, naming neither ``_CLAIMS`` nor the row.
