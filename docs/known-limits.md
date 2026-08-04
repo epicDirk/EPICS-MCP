@@ -256,12 +256,14 @@ PRIVATE repository that owns the engine checks THIS public one out and runs the 
 inverts which side needs a credential, which is to say it needs none: a public checkout is
 anonymous. Measured on its first run, all of it fresh rather than assumed: the checkout succeeded
 on nothing but the private repository's own default token; the leg WITHOUT the engine reproduced
-this CI exactly (1776 passed, 72 skipped); the leg WITH it reached 1884 passed, 64 skipped. The job
-asserts that DIFFERENCE, not a remembered total, because a noted expectation is not a guard and
-ages silently. It also asserts that the skip count falls rather than rises, which is the signal for
-tests that were collected and then skipped at run time.
+this CI's numbers exactly (1776 passed, 72 skipped, the figure both of its Python legs report);
+the leg WITH it reached 1884 passed, 64 skipped. The job asserts that DIFFERENCE, not a remembered
+total, because a noted expectation is not a guard and ages silently. Its sharper assertion is per
+module: each of the six has to appear in the run carrying tests, and not one of those tests may be
+skipped. That is the case a green report otherwise renders indistinguishable from a full one, and
+the guard has been driven red against it deliberately, not merely reasoned about.
 
-Two things that does not change, and they are why this entry stays open rather than retired. This
+Two things that do not change, and they are why this entry stays open rather than retired. This
 CI still cannot execute those tests, so the corollary below stands unaltered for anyone reading a
 green run here. And the coverage now sits where a reader of this page can neither open nor trigger
 it: a change made HERE cannot start that job, so the display tools can break in this repository and
