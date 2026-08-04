@@ -86,7 +86,8 @@ class EpicsConfig(BaseSettings):
     # Empty (default) = NO boundary: future-posture optionality, not "secured".
     # It stays dormant because the CALLER is trusted, not because the server is
     # "read-only and localhost-isolated"; neither half is unconditional (there is
-    # a gated write surface, and reach is the launcher's decision). See paths.py.
+    # a gated write surface, and READ reach is the launcher's decision, while PV
+    # write forces loopback-only at start). See paths.py.
     allowed_roots: str = ""
 
     # --- p4p ---

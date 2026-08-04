@@ -14,8 +14,9 @@ Two layers, in order:
    It stays dormant because the caller is trusted, and for no other reason: do
    NOT justify it with "the server is read-only and localhost-isolated". Neither
    half is unconditional any more, the server has a gated write surface (the
-   Olog logbook), and its network reach depends entirely on the launcher, which
-   can widen the EPICS address lists onto a real facility network. A deployment
+   Olog logbook), and its READ reach depends on the launcher, which can widen the
+   EPICS address lists onto a real facility network (PV write is the exception:
+   enabling it forces loopback-only and refuses to start otherwise). A deployment
    that opens either should consider enabling this boundary deliberately. The
    separator is OS-dependent (``os.pathsep``, ``;`` on Windows, ``:`` on Linux),
    so an ``EPICS_MCP_ALLOWED_ROOTS`` value is not 1:1 portable between the two.

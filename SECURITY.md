@@ -42,8 +42,10 @@ setting.
   carries free text (a title/description body, a filename).
 - **No network reach without configuration.** Each optional REST plane (ChannelFinder, Archiver,
   Alarm, Naming, Olog) stays disabled until its `*_URL` is set: unset means no client and no network
-  call. PV reach follows the standard EPICS search environment, which the launcher controls and this
-  server does not. Run `epics-doctor` to see what an instance actually reaches.
+  call. PV READ reach follows the standard EPICS search environment, which the launcher controls and
+  this server does not. PV WRITE is the exception: enabling it forces a loopback-only reach and the
+  process refuses to start otherwise, so that reach is not the launcher's to widen (see above). Run
+  `epics-doctor` to see what an instance actually reaches.
 - **Output redaction (ChannelFinder only).** ChannelFinder owners and property values pass a
   site-configurable allowlist. Olog entries come back WHOLE (title, text, author, attachments):
   the former Olog read redaction was removed 2026-08-01 as a deliberate prototype decision, see

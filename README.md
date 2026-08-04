@@ -40,10 +40,12 @@ which probes every configured plane read-only and tells you what your instance a
 MCP is a small, standard protocol that lets an AI assistant (Claude, or any MCP client) call
 *tools* you expose to it. This server is such a tool provider for EPICS.
 
-Its network reach is decided by the **launcher's EPICS search-path environment**, not by this
+Its READ reach is decided by the **launcher's EPICS search-path environment**, not by this
 server: the address lists, `EPICS_PVA_NAME_SERVERS` (TCP unicast, not subnet-bound), and the
 auto-address search, which EPICS defaults to **ON**. Even an empty environment broadcasts PV
 searches into the local subnets. The optional REST services stay off until their URLs are set.
+PV **write** is the one reach the launcher does not decide: enabling it forces a loopback-only
+search reach, and the process refuses to start otherwise.
 Do not assume isolation from this document. Run `epics-doctor` to see what an instance actually
 reaches, and read [Safety and network posture](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/safety.md).
 

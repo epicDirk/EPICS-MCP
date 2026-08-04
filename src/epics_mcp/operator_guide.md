@@ -703,9 +703,13 @@ messages embed the full request URL, an internal host would leak into this file)
   drops the built-in ones, and the same allowlist also decides which properties the RESULTS carry.
   To keep the defaults, list them alongside the new name. Two honesty rules:
   the TAG filter semantics (`has_tags`/`lacks_tags`) are **UNVERIFIED** until a differential live
-  probe (the property filters were live-verified 2026-07-22); and an unknown/misspelled property
-  name is **not a server error**, it narrows the result to 0, indistinguishable from a genuinely
-  empty match. `list_channel_vocabulary` is what tells the two apart: it names this instance's
+  probe (the property filters were live-verified 2026-07-22); and a silent 0 is not the same thing
+  as a refusal. A property name that is NOT on the allowlist, which every misspelling is, is
+  refused **client-side** with `INVALID_INPUT` before the request ever leaves. An **allowlisted**
+  name this instance does not carry is **not a server error**, it narrows the result to 0,
+  indistinguishable from a genuinely empty match. TAG names are never allowlisted at all, so a
+  misspelled tag is always that silent 0. `list_channel_vocabulary` is what tells them apart:
+  it names this instance's
   filterable property keys (the allowlisted subset `find_channels` accepts) and its full tag set,
   so a 0 can be checked against the vocabulary instead of being read as a fact about the registry.
 - **Enumerate PVs by pattern?** `discover_pvs` with a wildcard (`*`/`?`) routes to ChannelFinder,

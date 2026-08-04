@@ -3136,6 +3136,30 @@ async def test_field_descriptions_survive_the_strip() -> None:
 
 
 @pytest.mark.asyncio
+async def test_find_channels_description_separates_a_refusal_from_a_silent_zero() -> None:
+    """Description pin for the distinction _claim_property actually makes.
+
+    A property name off the allowlist, which every misspelling is, is refused client-side with
+    INVALID_INPUT before the request leaves; an ALLOWLISTED name this instance does not carry
+    narrows the result to 0. The description used to fold both into one "unknown/misspelled is
+    NOT a server error, it narrows to 0", which sent a reader hunting for a typo that would in
+    fact have raised. test_channelfinder.py proves the behaviour (a gate ValueError surfaces as
+    INVALID_INPUT before any network call); this pins that the description still says so, since
+    a wrong tool description is read as fact and nothing else guards this prose.
+    """
+    from epics_mcp.server import mcp
+
+    tools = {t.name: t for t in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    # Whitespace-normalised: the description is a wrapped docstring, so a phrase that reads as one
+    # line in the source is split by a newline plus indentation here. Asserting on the raw text
+    # would pin the line breaks rather than the claim, and go red on a harmless re-wrap.
+    description = " ".join((tools["find_channels"].description or "").split())
+    assert "INVALID_INPUT" in description, "the refusal half of the distinction is gone"
+    assert "ALLOWLISTED" in description, "the narrows-to-0 half of the distinction is gone"
+    assert "Tag names are never allowlisted" in description, "the tag exemption is gone"
+
+
+@pytest.mark.asyncio
 async def test_stripped_tool_still_returns_structured_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

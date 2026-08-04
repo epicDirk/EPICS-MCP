@@ -156,7 +156,10 @@ def build_instructions(display_tools_available: bool) -> str:
         "(verified/readback/tolerance) plus a READBACK audit event, so a wrong or not-landed value "
         "is surfaced, not silently accepted. "
         "REST-backed tools stay disabled until their *_URL env vars are set. "
-        "Network reach is decided by the LAUNCHER, not this server: a deployment may well point "
+        # READ, not "network": the WRITE reach is NOT the launcher's, it is forced loopback-only
+        # at start (stated above). This header has ~16 bytes of head-room under the 2048-byte
+        # cap, so the qualifier is one word here and the detail lives in epics-pv://guide.
+        "READ reach is decided by the LAUNCHER, not this server: a deployment may well point "
         "the EPICS env at a real facility, so do NOT assume isolation, run epics-doctor to see "
         "what this instance actually reaches. The write gates hold regardless of reach. "
         "File/dir tool arguments are canonicalized and existence-checked; an opt-in "
@@ -563,9 +566,12 @@ async def find_channels(
     partition the projection hides). EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES REPLACES that
     allowlist rather than extending it, and it also decides which properties the results carry, so
     naming one extra property silently drops the built-in ones: list them alongside it to keep them.
-    (2) An unknown/misspelled property name is NOT a server error, it narrows the result to
-    0, indistinguishable from a genuinely empty match; list_channel_vocabulary names the keys this
-    instance actually accepts. (3) The PROPERTY filters and count_only were
+    (2) A silent 0 is not the same thing as a refusal. A property name NOT on the allowlist,
+    which every misspelling is, is refused client-side with INVALID_INPUT before the request
+    leaves; an ALLOWLISTED name this instance does not carry is NOT a server error, it narrows
+    the result to 0, indistinguishable from a genuinely empty match. Tag names are never
+    allowlisted, so a misspelled tag is always that silent 0. list_channel_vocabulary names the
+    keys this instance actually accepts. (3) The PROPERTY filters and count_only were
     differentially live-verified (2026-07-22); the TAG filters (has_tags/lacks_tags) remain
     UNVERIFIED against a live server until a probe exercises them.
 
