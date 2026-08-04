@@ -247,13 +247,25 @@ PRIVATE repository that a runner cannot clone without a credential. Adding one i
 decision about the exposure surface of a public repository, not a technical detail, so it is not
 taken here.
 
-The tempting repair, probed and rejected for now: commit the extra job in commented-out form so it
-"only needs the secret". Rejected because commented-out YAML is dead code that nothing lints, runs
-or type-checks, and it rots against the next Actions schema change while looking ready. A second
-option a maintainer may prefer is a job in the PRIVATE repository that checks THIS public one out
-(a public checkout needs no credential at all) and runs the six modules with the engine it already
-has; that inverts which side needs the secret, which is to say it needs none. Neither is built, and
-neither is scheduled here.
+The tempting repair, probed and rejected: commit the extra job in commented-out form so it "only
+needs the secret". Rejected because commented-out YAML is dead code that nothing lints, runs or
+type-checks, and it rots against the next Actions schema change while looking ready.
+
+**The other option is built as of 2026-08-04, and it is not in this repository.** A job in the
+PRIVATE repository that owns the engine checks THIS public one out and runs the suite with it. That
+inverts which side needs a credential, which is to say it needs none: a public checkout is
+anonymous. Measured on its first run, all of it fresh rather than assumed: the checkout succeeded
+on nothing but the private repository's own default token; the leg WITHOUT the engine reproduced
+this CI exactly (1776 passed, 72 skipped); the leg WITH it reached 1884 passed, 64 skipped. The job
+asserts that DIFFERENCE, not a remembered total, because a noted expectation is not a guard and
+ages silently. It also asserts that the skip count falls rather than rises, which is the signal for
+tests that were collected and then skipped at run time.
+
+Two things that does not change, and they are why this entry stays open rather than retired. This
+CI still cannot execute those tests, so the corollary below stands unaltered for anyone reading a
+green run here. And the coverage now sits where a reader of this page can neither open nor trigger
+it: a change made HERE cannot start that job, so the display tools can break in this repository and
+stay green here until someone on the other side runs it.
 
 Corollary for a reader of a green CI run: it means "the standalone core passes", never "the display
 tools pass". The mutation proofs of the display tools are sharp only on a checkout that installed

@@ -35,7 +35,8 @@ EPICS_MCP_REQUIRE_DISPLAYS=1 uv run pytest        # engine missing -> refusal, n
 ```
 
 Use it whenever a change touches the display-aware tools, so a half-installed checkout cannot hand
-you a green run. Why CI itself still cannot execute them: `docs/known-limits.md`, entry 16.
+you a green run. Why CI itself still cannot execute them, and where their coverage comes from
+instead since 2026-08-04: `docs/known-limits.md`, entry 16.
 
 ## Definition of done
 
