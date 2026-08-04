@@ -707,8 +707,10 @@ messages embed the full request URL, an internal host would leak into this file)
   as a refusal. A property name that is NOT on the allowlist, which every misspelling is, is
   refused **client-side** with `INVALID_INPUT` before the request ever leaves. An **allowlisted**
   name this instance does not carry is **not a server error**, it narrows the result to 0,
-  indistinguishable from a genuinely empty match. TAG names are never allowlisted at all, so a
-  misspelled tag is always that silent 0. `list_channel_vocabulary` is what tells them apart:
+  indistinguishable from a genuinely empty match. TAG names are never allowlisted at all, so a tag
+  that is merely misspelled is that same silent 0; only a MALFORMED one is refused (blank, leading
+  `~`, trailing `!`, or the same tag in both `has_tags` and `lacks_tags`), and that is a syntax
+  check, not the allowlist. `list_channel_vocabulary` is what tells them apart:
   it names this instance's
   filterable property keys (the allowlisted subset `find_channels` accepts) and its full tag set,
   so a 0 can be checked against the vocabulary instead of being read as a fact about the registry.

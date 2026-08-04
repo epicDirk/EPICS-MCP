@@ -156,9 +156,11 @@ def build_instructions(display_tools_available: bool) -> str:
         "(verified/readback/tolerance) plus a READBACK audit event, so a wrong or not-landed value "
         "is surfaced, not silently accepted. "
         "REST-backed tools stay disabled until their *_URL env vars are set. "
-        # READ, not "network": the WRITE reach is NOT the launcher's, it is forced loopback-only
-        # at start (stated above). This header has ~16 bytes of head-room under the 2048-byte
-        # cap, so the qualifier is one word here and the detail lives in epics-pv://guide.
+        # READ, not "network": the PV-WRITE reach is not the launcher's, it is forced loopback-only
+        # at start (safety.py:77-89, stated above). Says PV because the OLOG write reach IS the
+        # launcher's, bounded by an env allowlist rather than by an assert. This header is capped at
+        # 2048 bytes with under 20 to spare, so the qualifier is one word and the detail lives in
+        # epics-pv://guide.
         "READ reach is decided by the LAUNCHER, not this server: a deployment may well point "
         "the EPICS env at a real facility, so do NOT assume isolation, run epics-doctor to see "
         "what this instance actually reaches. The write gates hold regardless of reach. "
@@ -570,7 +572,9 @@ async def find_channels(
     which every misspelling is, is refused client-side with INVALID_INPUT before the request
     leaves; an ALLOWLISTED name this instance does not carry is NOT a server error, it narrows
     the result to 0, indistinguishable from a genuinely empty match. Tag names are never
-    allowlisted, so a misspelled tag is always that silent 0. list_channel_vocabulary names the
+    allowlisted, so a merely misspelled tag is that same silent 0; only a MALFORMED one is
+    refused (blank, leading ~, trailing !, or the same tag in has_tags and lacks_tags), which is
+    a syntax check rather than the allowlist. list_channel_vocabulary names the
     keys this instance actually accepts. (3) The PROPERTY filters and count_only were
     differentially live-verified (2026-07-22); the TAG filters (has_tags/lacks_tags) remain
     UNVERIFIED against a live server until a probe exercises them.

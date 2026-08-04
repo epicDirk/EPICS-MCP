@@ -113,7 +113,10 @@ this PV was in alarm" is a join this server does not yet make.
 - The server **reads by default and mutates only through a gate.** `set_pv_value` is triple-gated,
   and the four Olog write tools (`create_log_entry`, `reply_to_log`, `add_log_attachment` and
   `update_log_entry`, the last two of which MUTATE an existing entry) sit behind their own,
-  separate gate. Their reach is NOT the launcher's to widen: enabling PV write forces a
-  loopback-only EPICS search reach and the process refuses to start otherwise, and the Olog gate is
-  bounded by its own test-server URL boundary. Read reach stays configuration. See
+  separate gate. The two differ in who bounds their reach, and the difference is load-bearing:
+  enabling PV write forces a loopback-only EPICS search reach and the process refuses to start
+  otherwise, so THAT reach is an invariant rather than configuration. The Olog gate has no such
+  assert: its target is whatever `OLOG_URL` the launcher sets, widened by an allowlist and an
+  allow-remote switch that are themselves launcher-set, so treat it as configuration. Read reach
+  is the launcher's throughout. See
   [Safety and network posture](docs/safety.md) and [SECURITY.md](SECURITY.md).

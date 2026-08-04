@@ -3154,9 +3154,20 @@ async def test_find_channels_description_separates_a_refusal_from_a_silent_zero(
     # line in the source is split by a newline plus indentation here. Asserting on the raw text
     # would pin the line breaks rather than the claim, and go red on a harmless re-wrap.
     description = " ".join((tools["find_channels"].description or "").split())
-    assert "INVALID_INPUT" in description, "the refusal half of the distinction is gone"
-    assert "ALLOWLISTED" in description, "the narrows-to-0 half of the distinction is gone"
-    assert "Tag names are never allowlisted" in description, "the tag exemption is gone"
+    lowered = description.lower()
+    # POSITIVE: each half by a phrase only THIS caveat carries. Bare "INVALID_INPUT" would not do:
+    # caveat (1) already contains it, so the refuted wording could return with every token still
+    # present. Case-folded, because the emphasis capitals are formatting, not the claim.
+    assert "not on the allowlist" in lowered, "the refusal half of the distinction is gone"
+    assert "refused client-side with invalid_input" in lowered, "the refusal lost its error code"
+    assert "name this instance does not carry" in lowered, "the narrows-to-0 half is gone"
+    assert "tag names are never allowlisted" in lowered, "the tag exemption is gone"
+    # NEGATIVE: the measured-false wording must not come back. It folded the two cases into one
+    # and sent a reader hunting a typo that would in fact have raised.
+    assert "misspelled property name is not a server error" not in lowered, (
+        "the refuted wording is back: a misspelled property name IS refused, see "
+        "channelfinder_client._claim_property"
+    )
 
 
 @pytest.mark.asyncio
