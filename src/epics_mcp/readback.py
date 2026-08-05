@@ -21,7 +21,19 @@ Design notes (the "why"):
 * **The written value arrives as a string** (``set_pv_value(value: str)``) while the readback is
   typed (e.g. float ``81.0`` for ``"81"``). A numeric readback compares after coercing the string
   to float; a string that cannot be coerced to a numeric readback is *not verifiable* (never a
-  false mismatch). A non-numeric readback compares exactly.
+  false mismatch). A non-numeric readback (a string PV) compares exactly.
+* **An enum readback is compared by INDEX, because the index is what the write path resolves to.**
+  ``services.epics_client._extract_value`` keeps the numeric index in ``value`` and the labels in a
+  separate ``enum`` block, so a written LABEL reaches neither compare above: ``float("On")`` raises,
+  and the exact compare never sees a string. Both a landed and a not-landed write came back "not
+  verifiable", which is the same answer for opposite facts. A written LABEL is therefore resolved
+  against the record's own ``choices`` the way ``p4p.nt.NTEnum.assign`` resolves it on the put:
+  case-sensitive, first match wins. Mirroring the write path is the point; resolving differently
+  here would verify something the IOC never saw. The mirror is deliberately partial and stops at
+  the label branch: ``assign`` falls back to ``int(py, 0)``, this module to ``float(written)``, so
+  a radix-prefixed index (``"0x1"``) lands at the IOC and is still reported as not verifiable,
+  exactly as before this stage existed. Closing that would mean mirroring a second p4p branch for
+  a spelling nobody was measured to use.
 """
 
 from __future__ import annotations
@@ -99,6 +111,66 @@ def _control_min_step(readback: Mapping[str, object]) -> float | None:
     return None
 
 
+def _enum_labels(readback: Mapping[str, object]) -> list[str] | None:
+    """The record's enum labels if the readback carries a usable ``enum`` block, else None.
+
+    Type-guarded like its siblings (:func:`_control_min_step`, ``bounds._finite_limit``) because
+    :func:`verify_readback` promises never to raise and its caller (``tools.write``) invokes it
+    bare, AFTER the ALLOW audit: an exception there would tear the terminal ``READBACK_*`` line out
+    of a completed write's audit trail.
+
+    Neither shape check is cosmetic, and each fails a different way (both measured). A ``choices``
+    that is a bare string is iterated CHARACTER by character, so a one-character label would resolve
+    against a record description that does not exist. And dropping a non-string entry instead of
+    refusing the whole block would SHIFT every label after it by one position, turning a landed
+    write into a reported mismatch. Both cases withhold rather than guess.
+    """
+    enum = readback.get("enum")
+    if not isinstance(enum, Mapping):
+        return None
+    choices = enum.get("choices")
+    if not isinstance(choices, list):
+        return None
+    labels = [choice for choice in choices if isinstance(choice, str)]
+    # A partially non-string choices list is not a record description we can resolve against;
+    # withholding beats guessing which entries to trust.
+    return labels if len(labels) == len(choices) else None
+
+
+def _verify_enum_label(written: str, index: int, labels: list[str]) -> ReadbackVerification | None:
+    """Verdict for a written enum LABEL, or None when *written* is not one of *labels*.
+
+    Returning None (rather than a verdict) is what keeps this additive: an index spelling such as
+    ``"1"`` is not a label, falls through, and is still answered by the numeric track exactly as
+    before.
+
+    The comparison is against the resolved INDEX, not against ``enum["label"]``: an index outside
+    the record's choices really does land (measured over PVA), and the readback then carries
+    ``label=None``, where a label-to-label compare would report "not verifiable" for what is a
+    genuine mismatch. Whether the index is read from ``value`` or from ``enum["index"]`` is not
+    observable, because ``_extract_value`` sets both from one local; no test can pin that choice
+    without hand-building a shape the client never emits, so it is stated here instead.
+    """
+    if written not in labels:
+        return None
+    expected = labels.index(written)  # first match wins, mirroring NTEnum.assign
+    matched = expected == index
+    actual = labels[index] if 0 <= index < len(labels) else None
+    # The note carries the label in BOTH directions, unlike the other tracks, which stay silent on
+    # a match. Here it is the only place the two alphabets meet: the result and the audit line pair
+    # a written label with a numeric readback ("written='On' readback=1"), and nothing else in
+    # either says that 1 IS 'On'.
+    return ReadbackVerification(
+        verified=matched,
+        readback=index,
+        note=(
+            f"written label {written!r} resolves to index {expected} (exact enum compare)"
+            if matched
+            else f"readback {actual!r} (index {index}) != written {written!r} (index {expected})"
+        ),
+    )
+
+
 def verify_readback(
     written: str, readback: Mapping[str, object], tolerance: float
 ) -> ReadbackVerification:
@@ -119,6 +191,19 @@ def verify_readback(
         note = readback.get(_NOTE_KEY)
         reason = str(note) if note else "readback value was None (not a live reading)"
         return ReadbackVerification(verified=None, readback=None, note=f"not verifiable: {reason}")
+
+    # Enum readback, BEFORE the numeric track: an enum value IS an int index, and every branch of
+    # that track returns, so a stage placed after it would be unreachable for exactly the records
+    # this one exists for. The int guard IS load-bearing: a float index would raise on the label
+    # lookup. The bool exclusion beside it is deliberate rather than load-bearing, and no test pins
+    # it, because it changes no answer: a bool readback carries no enum block, and forced together
+    # the two paths agree anyway (True == 1).
+    if isinstance(value, int) and not isinstance(value, bool):
+        labels = _enum_labels(readback)
+        if labels is not None:
+            verdict = _verify_enum_label(written, value, labels)
+            if verdict is not None:
+                return verdict
 
     # Numeric readback (bool is an int subclass → compared by value: True==1.0, False==0.0).
     if isinstance(value, (int, float)):
@@ -150,7 +235,8 @@ def verify_readback(
             ),
         )
 
-    # Non-numeric readback (string / enum label): exact compare, no tolerance.
+    # Non-numeric readback (a string PV): exact compare, no tolerance. An enum LABEL never arrives
+    # here, an enum readback carries an int index and is answered by the enum stage above.
     matched = str(value) == written
     return ReadbackVerification(
         verified=matched,

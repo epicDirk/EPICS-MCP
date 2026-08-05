@@ -332,6 +332,14 @@ async def set_pv_value(
     surfaced rather than accepted silently. Tolerance is the record's ``control.min_step`` when it
     has one (> 0), else ``EPICS_MCP_READBACK_TOLERANCE``.
 
+    On an enum PV a written LABEL is compared by index, exact and without a tolerance: it is
+    resolved against the record's own choices the way the write path resolves it (case-sensitive,
+    first match wins), and ``readback`` stays the index, as get_pv_value reports it. Writing the
+    INDEX instead stays on the numeric comparison above, tolerance included. One consequence to
+    expect on a command record that clears itself after the pulse: if it has already cleared when
+    the readback arrives, it reads back its idle state and the verdict is a mismatch, which is what
+    the readback saw rather than a statement that the command failed.
+
     Client-side consent hint (advisory, NOT a gate): the tools/list entry carries
     _meta["anthropic/requiresUserInteraction"]=true. A client that honours it prompts a human
     before every write - even under bypassPermissions - and, on a recognising client, fails closed:

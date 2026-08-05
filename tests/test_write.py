@@ -3,10 +3,11 @@
 import asyncio
 import logging
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from p4p.nt import NTEnum
 
 import epics_mcp.config as config_module
 import epics_mcp.safety as safety_module
@@ -18,7 +19,20 @@ from epics_mcp.errors import (
     RateLimitError,
 )
 from epics_mcp.safety import SafetyLayer
+from epics_mcp.services.epics_client import _format_value
 from epics_mcp.tools.write import _set_pv_value
+
+
+def _enum_readback(index: int, choices: Sequence[str]) -> dict[str, object]:
+    """A pv_get result in the shape the real client emits for an enum PV (index + enum block).
+
+    Built through p4p rather than typed out. It matters twice on this path: ``_set_pv_value`` hands
+    the PRE-read to ``check_value_in_bounds`` as well, so a hand-built pre-read would decide whether
+    the write is bounds-refused before it ever reaches the readback under test.
+    """
+    nt = NTEnum()
+    return _format_value("TEST:PV", nt.unwrap(nt.wrap({"index": index, "choices": list(choices)})))
+
 
 # E8: writes-ON SafetyLayer construction asserts the process EPICS search env is loopback-only.
 # The autouse strip leaves *_AUTO_ADDR_LIST unset = broadcast ON, so pin the loopback lane here.
@@ -412,6 +426,69 @@ class TestSetPvValueReadback:
         assert result["status"] == "success"
         assert result["verified"] is None
 
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
+    async def test_landed_enum_label_verifies_and_audits_ok(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """GB-32, the headline claim: writing a LABEL to an enum PV that lands is verified.
+
+        This lane has no other value safety net (a command record declares no drive limits, so the
+        bounds check fails open), which is why the readback verdict is the whole guard here.
+        """
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        mock_pv_get.side_effect = [
+            _enum_readback(0, ["Off", "On"]),  # pre-read: the switch is Off
+            _enum_readback(1, ["Off", "On"]),  # readback: "On" landed
+        ]
+        mock_pv_put.return_value = None
+
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
+            result = await _set_pv_value("TEST:PV", "On")
+
+        assert result["status"] == "success"
+        assert result["verified"] is True
+        assert result["readback"] == 1  # the index, as get_pv_value reports it
+        assert result["bounds_note"] is not None  # no drive limits on an enum record: fail-open
+        assert "event=READBACK_OK" in caplog.text
+
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
+    async def test_not_landed_enum_label_is_a_mismatch_and_audits_it(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The other half, and the reason the first one is not enough: the two outcomes have to be
+        DISTINGUISHABLE. Both answered verified=None before this change."""
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        mock_pv_get.side_effect = [
+            _enum_readback(0, ["Off", "On"]),  # pre-read: Off
+            _enum_readback(0, ["Off", "On"]),  # readback: still Off, the write did not land
+        ]
+        mock_pv_put.return_value = None
+
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
+            result = await _set_pv_value("TEST:PV", "On")
+
+        assert result["status"] == "success"  # the put itself was executed and ALLOW-audited
+        assert result["verified"] is False
+        assert result["readback"] == 0
+        assert "event=READBACK_MISMATCH" in caplog.text
+        assert "event=ALLOW" in caplog.text
+
 
 class TestSetPvValueBounds:
     """O2: before the put, the written value is checked against the record's drive limits. An
@@ -494,7 +571,9 @@ class TestSetPvValueBounds:
         mock_get_safety.return_value = SafetyLayer(
             EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
         )
-        # An enum-like record with NO control block → not bounds-checkable → fail-open.
+        # A record with NO control block → not bounds-checkable → fail-open. Deliberately a bare
+        # numeric shape rather than an enum one: an enum readback also carries an `enum` block (see
+        # _enum_readback), and this test is about the missing control block alone.
         mock_pv_get.side_effect = [
             {"pv_name": "TEST:PV", "value": 0},
             {"pv_name": "TEST:PV", "value": 1},
