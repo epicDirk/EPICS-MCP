@@ -7,6 +7,23 @@ carry breaking changes).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Writing a switch by its LABEL is verified again: landed and not-landed no longer give the same
+  answer.** `set_pv_value` reads every write back, but on an enum PV the value read back is the
+  numeric index while the label rides in a separate block, so a written label such as `On` matched
+  neither comparison: a landed and a not-landed write both came back `verified: null` with a
+  `READBACK_UNVERIFIED` audit line, which is one answer for opposite facts. A written label is now
+  resolved against the record's own choices, case-sensitively and first match wins, and compared by
+  index: `verified: true` when it landed, `verified: false` when it did not. Writing the index
+  instead was already correct and is unchanged, and `readback` still carries the index, exactly as
+  `get_pv_value` reports it. This matters most on a command or reset record, which declares no drive
+  limits: the pre-write bounds check does not cover it either, so the readback was its only value
+  safety net. One consequence to expect there: such a record often clears itself after the pulse,
+  and if it has already cleared when the readback arrives it reads back its idle state, so the write
+  is reported as a mismatch rather than as unverified. That is what the readback saw; judge the
+  effect of such a command from the record's own status.
+
 ## [0.5.0] - 2026-08-02
 
 ### Added

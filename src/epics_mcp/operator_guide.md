@@ -247,6 +247,18 @@ operation exists, and each is a single self-contained line. The stages:
   (> 0, the IOC's drive resolution), else `EPICS_MCP_READBACK_TOLERANCE` fed through a magnitude-safe
   `math.isclose`. The same verdict rides back in the tool result (`verified` true/false/null plus
   `readback`/`tolerance`/`note`), so a silent wrong-write cannot hide.
+  An **enum** record (a switch, a command, a reset) is compared differently, and this is the lane
+  where the verdict carries the most weight, because such a record declares no drive limits and so is
+  not bounds-checked either. Its value is the numeric index and its labels ride in a separate `enum`
+  block, so a written **label** is resolved against the record's own `choices` exactly as the write
+  path resolves it (case-sensitive, first match wins) and then compared by index, exact, with no
+  tolerance; `readback` stays the index. Writing the **index** instead stays on the numeric compare
+  described above, tolerance included. **Operator consequence:** a command record that clears itself
+  after the pulse may already have cleared by the time the readback arrives, in which case it reads
+  back its idle state and a command that executed correctly is reported as `READBACK_MISMATCH`
+  (whether it does depends on the pulse length against the round trip, so both verdicts occur). That
+  line says what the readback saw, not that the command failed: judge the effect of a self-clearing
+  command from the record's own status, not from its readback.
 
 Every terminal line **of a dispatched write** shares the `op=<id>` of its `ATTEMPT` (the
 `READBACK_*` line too), so an interrupted or misverified write is never a silent gap in the trail.

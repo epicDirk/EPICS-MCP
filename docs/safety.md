@@ -27,7 +27,14 @@ This is a controls tool, so the trust questions come first.
   `READBACK_MISMATCH` / `READBACK_UNVERIFIED` audit line follows the `ALLOW`. A mismatch is **not**
   an error (the put happened); it is a loud `verified=false` plus the audit line, the direct
   countermeasure to a silent wrong-write. Tolerance is the record's `control.min_step` (> 0) or
-  `EPICS_MCP_READBACK_TOLERANCE`.
+  `EPICS_MCP_READBACK_TOLERANCE`. On an **enum** PV (a switch, a command, a reset) a written
+  **label** is compared by index, exact and without a tolerance: it is resolved against the record's
+  own choices exactly as the write path resolves it, and `readback` stays the numeric index. Writing
+  the index instead stays on the numeric compare, tolerance included. This lane needs the readback
+  most, because a command record declares no drive limits and so is not bounds-checked either. One
+  consequence is worth knowing before you meet it: a command record that clears itself after the
+  pulse may already have cleared when the readback arrives, so it reads back its idle state and the
+  verdict is `verified=false`. That is what the readback saw, not a claim that the command failed.
 - **Writes enabled require a loopback-only search reach.** Enabling writes with the EPICS client
   search env able to reach beyond loopback makes the server **refuse to start** (`SafetyConfigError`):
   the name-pattern above scopes *what* may be written, this gate scopes *where* a write can
