@@ -766,14 +766,30 @@ messages embed the full request URL, an internal host would leak into this file)
   a fact about the file, not a refusal. To check a plain list of PVs with no display involved, pass
   `pv_names` instead; supplying both makes the list win and the file path is not looked at.
 - **`total: 0` is not the same as "this screen has no PVs", and the answer says which one it is.**
-  A `.bob` that only composes embedded fragments declares nothing itself, so the default file view
-  is empty while the display resolves plenty. The result therefore always carries
-  `shown_by_display` (plus `shown_by_display_capped`), and when the file view omits something a
-  note says how many channels it omits. Pass `view="display"` to check that set instead. Neither
-  view is the right one: `view="file"` asks what this file contributes wherever it is used, which
-  is what you want for a fragment; `view="display"` asks what an operator opening this screen would
-  see. A fragment answers 0 under `view="display"`, because its macros are unbound when it stands
-  alone, and that is correct rather than a failure.
+  There are TWO ways to get it, and they need different follow-ups. **One:** a `.bob` that only
+  composes embedded fragments declares nothing itself, so the default file view is empty while the
+  display resolves plenty. The result therefore always carries `shown_by_display` (plus
+  `shown_by_display_capped`), and when the file view omits something a note says how many channels
+  it omits. Pass `view="display"` to check that set instead. Neither view is the right one:
+  `view="file"` asks what this file contributes wherever it is used, which is what you want for a
+  fragment; `view="display"` asks what an operator opening this screen would see. A fragment
+  answers 0 under `view="display"`, because its macros are unbound when it stands alone, and that
+  is correct rather than a failure. **Two:** the file DOES declare PVs, but not one of them
+  resolved under the macro-context cap. Then a `notes` entry names the cap, and the 0 is a lower
+  bound rather than a fact about the file. ⚠ `validate_pvs` has **no** `context_cap` argument, so
+  the cap cannot be raised from here; `crossplane_check`, `coverage_audit` and `find_device` do
+  take one, and they walk the same inventory, so ask one of those when the fuller picture matters.
+- **The two `capped` signals answer different questions, and the display one is deliberately
+  pessimistic.** `shown_by_display_capped` is always the DISPLAY view's verdict. The `notes` cap
+  entry belongs to whichever view you asked for: under `view="file"` it is the file verdict, under
+  `view="display"` it is the display verdict, so the same sentence means two different things. They
+  disagree routinely and neither is a copy of the other. The **file** verdict only fires when the
+  file declares a **macro-templated** PV occurrence of its own, because an occurrence with no macro
+  resolves to the same channel whatever the budget, so its answer is exact at every cap. The
+  **display** verdict carries no such test: measured on a 257-display dataset, 42 displays answer
+  an empty display view and still report `shown_by_display_capped: true`, and quadrupling the cap
+  grows exactly one of them. So on the display side read a `true` as **"cannot be ruled out"**
+  rather than as "known to be incomplete", and read a `false` as the stronger statement of the two.
 - **`coverage_audit` refuses "alarm plane, no tree named" with `INVALID_INPUT`.** Same shape as
   above: the verdict follows from the arguments, so it is given before the display-PV walk rather
   than after it. Name the tree (`alarm_config`); there is no correct default, they are site-specific.

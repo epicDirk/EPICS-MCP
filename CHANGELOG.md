@@ -7,6 +7,20 @@ carry breaking changes).
 
 ## [Unreleased]
 
+### Changed
+
+- **`validate_pvs` no longer calls a file's PV list a lower bound when that list cannot grow.**
+  Under the default `view="file"`, the `notes` entry warning that the macro expansion hit the
+  per-display context cap now also requires that the file declares a **macro-templated** PV of its
+  own. A PV carrying no macro resolves to the same channel under every binding and is already
+  enumerated at every cap, so no larger budget can add anything through it and the file's answer is
+  exact. On a 257-display dataset the note stops firing on four files and no file whose list can
+  actually grow loses it. **Note for anyone comparing against 0.5.0:** that release said no file
+  which carried the note would lose it. Those four do, and losing it is the point.
+  Unchanged, and deliberately so: `shown_by_display_capped`, and the same note under
+  `view="display"`, carry the DISPLAY verdict, which gets no such test and stays the more cautious
+  of the two. Read a `true` there as "cannot be ruled out" rather than "known to be incomplete".
+
 ### Fixed
 
 - **Writing a switch by its LABEL is verified again: landed and not-landed no longer give the same

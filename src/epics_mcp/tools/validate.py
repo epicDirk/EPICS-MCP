@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 from typing import Literal, NamedTuple
 
+from opi_navigation.macros import contains_macros
 from opi_navigation.pv_analysis import analyze_pv_inventory, channel_name
 
 from epics_mcp.config import get_config
@@ -61,42 +62,80 @@ def _display_view_is_capped(rel: str, origins: set[str], capped_targets: frozens
     away. Testing membership of *rel* alone therefore asks the wrong question: it asks whether
     contexts INTO rel were dropped, which is a statement about the file view.
 
-    Measured with a cap lift from 256 to 1024, i.e. against which numbers actually grow when the
-    budget does: over the 54 affected files of a 257-display dataset, 8 are provably lower bounds.
-    Testing *rel* alone missed 4 of those 8. Adding the origins closes the gap to 0 missed, at the
-    price of 34 over-cautious hits out of 42. The over-cautious direction is the correct one, and it
-    matches what the sibling coverage_audit does with the same diagnostic (it consumes
-    ``context_capped`` as a global bool rather than as a per-display membership test).
+    BOTH terms carry, and that is measured rather than argued. Ground truth is a cap lift, i.e.
+    which display views actually grow when the budget does. On a 257-display dataset 11 grow, and
+    this predicate misses none; dropping *rel* leaves 51 flagged and misses 1 of the 11; dropping
+    the origins leaves 69 flagged and misses 4. Note the asymmetry with the sibling below, where a
+    term of the same shape IS redundant: do not "simplify" the two into one rule.
+
+    ⚠ Those figures SUPERSEDE an earlier reading recorded here, which counted only over the 54
+    files on which the two views disagree ("8 provably lower bounds, 34 over-cautious hits out of
+    42"). The population is now the whole dataset rather than that subset, which is why the flagged
+    count more than doubled; the predicate itself never changed. Elsewhere in this module and in
+    the tests, "42 of 54 affected files" still refers to that 54-file disagreement set.
 
     The origins term is sound because the cap only fires after ``context_cap`` contexts have already
     flowed into X under this top, so a capped X has necessarily contributed PVs here and is visible
-    among the origin files of this display's own events.
+    among the origin files of this display's own events. Being over-cautious is also the direction
+    the sibling plane takes with the same diagnostic: ``services/coverage.py`` consumes
+    ``context_capped`` as one global bool rather than as a per-display membership test.
+
+    THE PRICE, and why no sharper rule replaces it. On that dataset 42 displays answer an empty
+    display view and are still flagged, all 42 by the *rel* term alone, which is a consequence of
+    the construction rather than a finding (``origins`` is filled behind the same filter that fills
+    the display view, so an empty view implies empty origins). Quadrupling the cap leaves 41 of the
+    42 empty and grows exactly one, from 0 to 5576 channels. So the term buys one true lower bound
+    for 41 over-cautious ones. Read that as OVER-CAUTIOUS, not as "41 proven false": quadrupling is
+    a probe, not a bound, and 82 targets are still capped at the higher budget.
+
+    Three sharper candidates were measured against the same 11 and all three were rejected:
+    collecting the origins BEFORE the resolution filter, i.e. mirroring what the sibling does for
+    the file view, flags 164 instead of 93 with zero additional recall, so it is a pure precision
+    loss; an occurrence guard changes nothing (none of the 42 lacks occurrences); a macro-templated
+    guard silences 1 display of the 93 and cannot separate the 42, because all 42 carry a
+    macro-templated occurrence, the justified one included.
+
+    TWO limits on that verdict, stated so nobody re-derives them. It is dataset-narrow: on a
+    97-file dataset whose ground truth is SATURATED (no capped target left at SIXTEEN times the
+    default; four times still leaves 2) the *rel* term flags 9 displays on its own and none of them
+    grows, so there it is pure over-caution and the one saved case above is what keeps it. And it
+    covers the ``context_cap`` axis only; the glob cap is a second, separate source of
+    incompleteness that this measurement does not touch.
     """
     return rel in capped_targets or bool(origins & capped_targets)
 
 
-def _file_view_is_capped(rel: str, tops: set[str], capped_targets: frozenset[str]) -> bool:
+def _file_view_is_capped(rel: str, macro_tops: set[str], capped_targets: frozenset[str]) -> bool:
     """Is the file view of *rel* a lower bound, because an expansion feeding it was cut short?
 
-    *tops* is every ``top_level_display`` under which this file contributed a PV OCCURRENCE, taken
-    BEFORE the resolved/ca-pva filter. That placement is the repair, not a style choice, and the set
-    carries two facts at once.
+    *macro_tops* is every ``top_level_display`` under which this file contributed a MACRO-TEMPLATED
+    PV occurrence, taken BEFORE the resolved/ca-pva filter. Both properties are the repair, not a
+    style choice, and each answers a different half of the question.
 
-    An EMPTY set means the file declares no PV occurrence at all: ``pv_analysis/expansion.py`` seeds
-    every known file standalone, past the cap, and writes ``origin_file=source`` for each of its own
-    occurrences, so nothing else can produce an empty set. Such a file answers the same at every
-    cap, and calling its answer a lower bound would be a false statement. Measured on a 257-display
-    dataset: without this test the flag fires on 73 files, and 20 of the 24 newly flagged ones
-    declare no PV whatsoever.
+    An EMPTY set means the file declares nothing whose enumeration a larger budget could extend,
+    and that is a statement about the ENGINE rather than about a corpus. The expansion module seeds
+    every known file standalone, past the cap, and re-expands all of that file's occurrences on
+    every visit; a ``raw_pv`` carrying neither ``$(`` nor ``${`` expands to itself under any
+    binding. So a macro-free occurrence yields the same channel at every cap AND is already present
+    at every cap, and no dataset can produce a counter-example. Calling such an answer a lower bound
+    would be a false statement.
 
     A NON-EMPTY set makes the flag a lower-bound statement. The intersection says an expansion this
     file feeds was cut short, and BECAUSE the set is collected before the resolution filter it also
-    covers the empty-result path, where the previous in-loop flag could never fire: an occurrence
-    that has not resolved still puts its top in here. That, not the disjunct below, is what repairs
-    the defect. Measured with a cap lift from 256 to 1024: 9 files provably grow, the previous flag
-    missed 2 of them (both answering ``total: 0``, one resolving 5576 channels at the higher cap),
-    this one misses none, and no file flagged before stops being flagged. Collecting behind the
-    filter instead misses the same 2 again, because both resolve nothing at all at the lower cap.
+    covers the empty-result path, where the older in-loop flag could never fire: an occurrence that
+    has not resolved still puts its top in here. That, not the disjunct below, is what repairs the
+    original defect. Collecting behind the filter instead misses the two files that resolve nothing
+    at all at the lower cap.
+
+    Both directions measured, because a flag that REPORTS incompleteness can fail either way.
+    Recall, via a cap lift from 256 to 1024, i.e. which numbers actually grow when the budget does:
+    on a 257-display dataset 9 files provably grow and this test misses none of them; on a 97-file
+    and a 57-file dataset it misses none either. Precision: dropping the occurrence test altogether
+    fires on 73 files instead of 49, and 20 of the 24 newly flagged ones declare no PV whatsoever;
+    asking only for ANY occurrence rather than a macro-templated one fires on 53, and the 4 extra
+    files answer identically at cap 256 and at 1024. On the 97-file and the 57-file dataset the
+    macro test changes nothing at all, so its measured bite is one dataset wide while its
+    justification is not.
 
     ``rel in capped_targets`` says contexts INTO this file were dropped, which is the reading
     :func:`_display_view_is_capped` already records for this axis. On today's engine it is
@@ -104,23 +143,27 @@ def _file_view_is_capped(rel: str, tops: set[str], capped_targets: frozenset[str
     a top of its own, so a non-empty set always contains *rel* (measured over 284 files: no
     disagreement with the intersection alone, and no file where this term decides). It is kept
     because it states the question the file view actually asks, and because it is the term that
-    survives an engine which stops seeding standalone. Do not read it as the working half.
+    survives an engine which stops seeding standalone. Do not read it as the working half. Note the
+    asymmetry with the sibling, where the same-looking term is NOT redundant.
 
-    Two limits, named rather than papered over. The test is NECESSARY, not sufficient: an occurrence
-    carrying no macro yields the same channel in every context and can never add one, so a sharper
-    test would ask for a macro-templated occurrence. Measured, that would also silence 4 files that
-    are flagged today, i.e. a behaviour change beyond the defect repaired here, so it is not applied
-    and is recorded instead. And *tops* counts ``loc``/``sim`` occurrences too, because a macro can
-    supply the protocol prefix and the engine falls back to the raw protocol only when the expanded
-    string still STARTS with a macro.
+    Two limits, named rather than papered over. *macro_tops* counts ``loc``/``sim`` occurrences too,
+    because a macro can supply the protocol prefix and the engine falls back to the raw protocol
+    only when the expanded string still STARTS with a macro. And the empty-set guard short-circuits
+    the ``rel`` disjunct entirely, including in the very scenario the paragraph above keeps it for:
+    on an engine that stopped seeding standalone, a file left unreached at the low cap would have
+    no occurrences at all, so this would answer False before that term ever ran. Whoever removes
+    the standalone seed has to revisit the guard, not just the disjunct.
 
-    The sibling above deliberately does NOT carry this guard: on the display view the same test
-    would have to run over the whole embedded subtree, not over one file, so that view stays
-    over-cautious by design (its own docstring measures the price).
+    The sibling above deliberately does NOT carry this guard, and the reason is soundness rather
+    than price. Measured, it would silence 1 display of 93 there, so the price is not the argument.
+    The argument is that the display view's EVENT SET is itself cap-dependent: a larger budget can
+    bring in fragment events this display has never seen, so "no macro-templated occurrence today"
+    is not a statement about the engine there. On the file view the standalone seed enumerates a
+    file's own occurrences exhaustively at every cap, which is exactly what makes it one here.
     """
-    if not tops:
+    if not macro_tops:
         return False
-    return rel in capped_targets or bool(tops & capped_targets)
+    return rel in capped_targets or bool(macro_tops & capped_targets)
 
 
 def _run_validate(file_path: str, displays_dir: str | None, view: PvView = "file") -> _Extraction:
@@ -219,21 +262,25 @@ def _run_validate(file_path: str, displays_dir: str | None, view: PvView = "file
     seen: set[str] = set()
     file_channels: list[str] = []
     # Collected across the WHOLE inventory (a file's occurrences are attributed to every top that
-    # reaches it) and BEFORE the filter below. Both properties are load-bearing, see
-    # _file_view_is_capped, which turns this one set into the cap verdict.
-    file_tops: set[str] = set()
+    # reaches it), BEFORE the filter below, and only for MACRO-TEMPLATED occurrences. All three
+    # properties are load-bearing, see _file_view_is_capped, which turns this one set into the cap
+    # verdict. The macro test is what keeps the guard honest: an occurrence with no macro expands to
+    # itself under every binding, so no budget can make it contribute a channel it does not already
+    # contribute, and flagging its file as a lower bound would be a false statement.
+    file_macro_tops: set[str] = set()
     for display in inventory.displays:
         for ev in display.pvs:
             if ev.origin_file != rel:
                 continue
-            file_tops.add(ev.top_level_display)
+            if contains_macros(ev.raw_pv):
+                file_macro_tops.add(ev.top_level_display)
             if ev.resolution != "resolved" or ev.protocol not in ("ca", "pva"):
                 continue
             channel = channel_name(ev.pv)  # strip pva://... for the live read
             if channel not in seen:
                 seen.add(channel)
                 file_channels.append(channel)
-    file_capped = _file_view_is_capped(rel, file_tops, capped_targets)
+    file_capped = _file_view_is_capped(rel, file_macro_tops, capped_targets)
 
     # The DISPLAY view: what this file expands to as a display of its own. A single lookup rather
     # than a second sweep, and a None default rather than an index, because the inventory only
@@ -246,6 +293,10 @@ def _run_validate(file_path: str, displays_dir: str | None, view: PvView = "file
     for ev in target.pvs if target else ():
         if ev.resolution != "resolved" or ev.protocol not in ("ca", "pva"):
             continue
+        # BEHIND the filter, deliberately, and the opposite of what the file view does two loops
+        # up. Moving it before the filter is the obvious-looking mirror of that repair and was
+        # measured to be a pure precision loss (164 flagged instead of 93, zero additional recall),
+        # see _display_view_is_capped. A test pins this placement.
         origins.add(ev.origin_file)
         # Normalise here as well: the engine keeps the protocol prefix as written, so a display
         # referencing both `SIM:X` and `ca://SIM:X` yields two events for ONE channel.
@@ -282,7 +333,15 @@ async def _validate_pvs(
 
     Pass *displays_dir* = the dataset ROOT for full macro resolution; without it the file's own
     directory is used and fragments under-resolve. A ``notes`` entry flags when the PV list is a
-    lower bound (the macro expansion hit the context cap). A *file_path* that is not a ``.bob``, or
+    lower bound, and WHICH verdict that sentence carries follows the requested view. Under
+    ``view="file"`` it needs BOTH that the macro expansion hit the context cap AND that the file
+    declares a macro-templated PV occurrence of its own: a file whose occurrences carry no macro
+    answers the same at every cap, so calling it a lower bound would be a false statement (see
+    :func:`_file_view_is_capped`). Under ``view="display"`` the same sentence carries the DISPLAY
+    verdict, which has NO such test and is deliberately more cautious (see
+    :func:`_display_view_is_capped`); ``shown_by_display_capped`` reports that verdict under both
+    views. Do not read the macro condition as a property of the note itself.
+    A *file_path* that is not a ``.bob``, or
     that lies outside the walked root, is refused immediately (see :func:`_run_validate`); note
     this only applies when *file_path* is used, an explicit *pvs* list wins and skips the file path
     entirely, along with *view*. NOTE: a full inventory walk is ~60 s for

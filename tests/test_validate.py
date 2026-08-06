@@ -7,7 +7,7 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 from epics_mcp.errors import EpicsError
-from epics_mcp.tools.validate import _validate_pvs
+from epics_mcp.tools.validate import _display_view_is_capped, _validate_pvs
 
 # An operator-facing parent that embeds a fragment and binds its $(PRP) macro; the
 # fragment's PV is templated on $(PRP), so its resolved value is LIFTED to the parent
@@ -1101,4 +1101,343 @@ async def test_a_capped_top_of_a_foreign_file_does_not_make_this_file_a_lower_bo
     assert isinstance(notes, list) and len(notes) == 1, notes
     assert not any("per-display context cap" in str(n) for n in notes), (
         "neither a foreign top nor an origin of the DISPLAY view is a statement about this file"
+    )
+
+
+# --- GB-31: the two cap verdicts, their difference, and the view switch between them -------------
+#
+# Four mutations survived the whole suite before this block existed (each proven green on its own,
+# full-suite, restored from a copy in between): dropping the ``rel`` term of
+# ``_display_view_is_capped``; nailing the view switch to ``file_capped``; moving the display
+# view's ``origins`` in front of the resolution filter; and answering the file view's macro test
+# with a constant True. The same forbidden-fragment rule as the block above applies here:
+# ``"lower bound"`` appears in BOTH notes, so the cap note is identified by
+# ``"per-display context cap"`` and never by that phrase.
+
+
+def _unresolved_only_inventory(rel: str, *, capped: tuple[str, ...]) -> object:
+    """A display whose single own occurrence does NOT resolve, and which embeds nothing.
+
+    Its DISPLAY view is therefore empty, and so is ``origins``, because that set is filled behind
+    the same resolution filter that fills the view. The display's cap verdict can then come from
+    the ``rel`` term and from nothing else, which is the shape this file otherwise never builds:
+    every cap fixture above hands the display a RESOLVED fragment channel, so its origins are
+    never empty and the ``rel`` term never decides alone.
+
+    Engine-shaped: an unbound macro leaves the string as written, so ``pv`` still carries the macro
+    and the protocol falls back to the raw one (``pv_analysis/expansion.py``).
+    """
+    from opi_navigation.pv_analysis import (
+        DisplayPvInventory,
+        ExpandedPv,
+        PvDiagnostics,
+        PvInventory,
+    )
+
+    return PvInventory(
+        repo_root="/nowhere",
+        displays=(
+            DisplayPvInventory(
+                display_path=rel,
+                operator_facing=True,
+                pvs=(
+                    ExpandedPv(
+                        pv="$(P):X",
+                        raw_pv="$(P):X",
+                        resolution="dynamic",
+                        role="read",
+                        protocol="ca",
+                        top_level_display=rel,
+                        origin_file=rel,
+                    ),
+                ),
+            ),
+        ),  # type: ignore[arg-type]
+        diagnostics=PvDiagnostics(context_capped=capped),
+    )
+
+
+def _unresolved_fragment_inventory(rel: str, *, capped: tuple[str, ...]) -> object:
+    """A display that resolves a channel of its OWN and holds an UNRESOLVED fragment occurrence.
+
+    The fragment's file is what *capped* names. Collected behind the resolution filter, as the code
+    does, the fragment never reaches ``origins`` and the display view is NOT called a lower bound.
+    Collected in front of it, which is what the file view deliberately does one function away, it
+    would. That single difference is the whole point of this fixture.
+
+    Engine-shaped for the same reason as the sibling above: the fragment's macro is unbound here.
+    """
+    from opi_navigation.pv_analysis import (
+        DisplayPvInventory,
+        ExpandedPv,
+        PvDiagnostics,
+        PvInventory,
+    )
+
+    return PvInventory(
+        repo_root="/nowhere",
+        displays=(
+            DisplayPvInventory(
+                display_path=rel,
+                operator_facing=True,
+                pvs=(
+                    ExpandedPv(
+                        pv="ca://SYSX:OWN",
+                        raw_pv="$(P):OWN",
+                        resolution="resolved",
+                        role="read",
+                        protocol="ca",
+                        top_level_display=rel,
+                        origin_file=rel,
+                    ),
+                    ExpandedPv(
+                        pv="$(Q):X",
+                        raw_pv="$(Q):X",
+                        resolution="dynamic",
+                        role="read",
+                        protocol="ca",
+                        top_level_display=rel,
+                        origin_file="frag.bob",
+                    ),
+                ),
+            ),
+        ),  # type: ignore[arg-type]
+        diagnostics=PvDiagnostics(context_capped=capped),
+    )
+
+
+def _single_occurrence_inventory(rel: str, *, capped: tuple[str, ...], raw_pv: str) -> object:
+    """A display with exactly ONE resolved occurrence of its own, written as *raw_pv*.
+
+    The negative control for the macro test is *raw_pv* without a macro: such a file resolves the
+    same channel at every cap and is present at every cap, so its file view is exact however capped
+    the file is as an embed target. No other fixture in this module can serve as one, because all
+    five cap fixtures above write a macro-templated ``raw_pv``, which is why answering the macro
+    test with a constant True left the entire suite green.
+
+    ⚠ For a macro-FREE occurrence the engine yields ``pv == raw_pv`` byte for byte: nothing can
+    inject a protocol prefix into a string that has no macro to expand, and that is the very
+    invariant the macro test rests on. Writing a ``ca://`` prefix beside a concrete ``raw_pv``
+    would contradict it inside the fixture that exists to pin it, so this builder derives ``pv``
+    from the spelling instead of taking it as a second, freely settable argument.
+    """
+    from opi_navigation.pv_analysis import (
+        DisplayPvInventory,
+        ExpandedPv,
+        PvDiagnostics,
+        PvInventory,
+    )
+
+    templated = "$(" in raw_pv or "${" in raw_pv
+    return PvInventory(
+        repo_root="/nowhere",
+        displays=(
+            DisplayPvInventory(
+                display_path=rel,
+                operator_facing=True,
+                pvs=(
+                    ExpandedPv(
+                        pv="ca://SIM:EXPANDED:Val" if templated else raw_pv,
+                        raw_pv=raw_pv,
+                        resolution="resolved",
+                        role="read",
+                        protocol="ca",
+                        top_level_display=rel,
+                        origin_file=rel,
+                    ),
+                ),
+            ),
+        ),  # type: ignore[arg-type]
+        diagnostics=PvDiagnostics(context_capped=capped),
+    )
+
+
+def test_the_display_cap_verdict_reads_the_rel_term_on_its_own() -> None:
+    """The predicate itself, called directly, because the tool-level sibling can be masked.
+
+    Two mutations TOGETHER (dropping this term and moving ``origins`` in front of the resolution
+    filter) leave ``test_a_capped_display_with_an_empty_view_is_still_a_lower_bound`` GREEN: the
+    unresolved own occurrence then reaches ``origins``, its file is the capped one, and the
+    intersection answers True for the wrong reason. Measured. A direct call is immune, because it
+    takes the origins as an argument.
+
+    ⚠ Do not read that as "only this test catches the pair". The neighbour that pins the filter
+    placement goes red on the same combination, so the pair is caught either way; what this test
+    adds is that it names WHICH of the two terms was lost, rather than leaving a reader to infer it
+    from a second test's failure.
+    """
+    assert _display_view_is_capped("d.bob", set(), frozenset({"d.bob"})) is True, (
+        "contexts INTO this display were dropped, which is what the rel term is for"
+    )
+    assert _display_view_is_capped("d.bob", set(), frozenset({"other.bob"})) is False, (
+        "a capped target this display neither is nor is fed by says nothing about it"
+    )
+    assert _display_view_is_capped("d.bob", {"frag.bob"}, frozenset({"frag.bob"})) is True, (
+        "and the origins term still carries on its own"
+    )
+
+
+async def test_a_capped_display_with_an_empty_view_is_still_a_lower_bound(tmp_path: Path) -> None:
+    """The same verdict through the tool, on the one real shape where the rel term decides alone.
+
+    Measured on a 257-display dataset: 42 displays answer an empty display view and are flagged by
+    this term alone, and quadrupling the cap grows exactly one of them, from 0 to 5576 channels.
+    That one case is why the term stays; the price is recorded in the predicate's docstring.
+
+    ⚠ The assertion sits on ``shown_by_display_capped`` and NOT on ``notes``: the FILE view of this
+    fixture is capped too (its own occurrence is macro-templated and its file is the capped
+    target), so a note fires either way and would hide the mutation.
+    """
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
+    with patch(
+        "epics_mcp.tools.validate.analyze_pv_inventory",
+        return_value=_unresolved_only_inventory("d.bob", capped=("d.bob",)),
+    ):
+        result = await _validate_pvs(file_path=str(root / "d.bob"), displays_dir=str(root))
+
+    assert result["total"] == 0, "nothing of this display resolves at this cap"
+    assert result["shown_by_display"] == 0, "and its display view is empty for the same reason"
+    assert result["shown_by_display_capped"] is True
+
+
+async def test_an_unresolved_capped_fragment_does_not_reach_the_display_verdict(
+    tmp_path: Path,
+) -> None:
+    """``origins`` is collected BEHIND the resolution filter, and that placement is a decision.
+
+    Mirroring what the file view does one function away, i.e. collecting in front of the filter,
+    is the obvious-looking repair and was measured to be a pure precision loss: 164 displays
+    flagged instead of 93 on a 257-display dataset, with not one additional case of the 11 that
+    provably grow. Without this test that mutation survives the whole suite and the decision has
+    no holder.
+    """
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
+    with (
+        patch(
+            "epics_mcp.tools.validate.analyze_pv_inventory",
+            return_value=_unresolved_fragment_inventory("d.bob", capped=("frag.bob",)),
+        ),
+        patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all),
+    ):
+        result = await _validate_pvs(file_path=str(root / "d.bob"), displays_dir=str(root))
+
+    assert result["total"] == 1, "the display's own channel resolves"
+    assert result["shown_by_display_capped"] is False, (
+        "the capped fragment contributed no resolved channel here, so it is not evidence that a "
+        "larger budget would extend THIS display's view"
+    )
+
+
+async def test_the_view_switch_answers_with_the_display_verdict(tmp_path: Path) -> None:
+    """``view="display"`` must report the DISPLAY view's cap verdict, not the file view's.
+
+    The fixture makes the two disagree: the file is not a capped target and its own top is not
+    capped (so the file view is exact), while the fragment feeding the display IS capped. No cap
+    fixture in this file called with ``view="display"`` before, so nailing the switch to
+    ``file_capped`` survived the entire suite.
+
+    ⚠ The ``view="file"`` half below is NOT new coverage: four tests above already redden a switch
+    nailed the other way. It is kept because the two directions belong on one screen, and saying so
+    here is cheaper than a reader re-deriving it.
+    """
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
+    inventory = _capped_inventory("d.bob", declared=True, capped=("frag.bob",))
+    with (
+        patch("epics_mcp.tools.validate.analyze_pv_inventory", return_value=inventory),
+        patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all),
+    ):
+        shown = await _validate_pvs(
+            file_path=str(root / "d.bob"), displays_dir=str(root), view="display"
+        )
+        by_file = await _validate_pvs(file_path=str(root / "d.bob"), displays_dir=str(root))
+
+    assert shown["total"] == 2, "the display view holds its own channel and the fragment's"
+    notes = shown["notes"]
+    assert isinstance(notes, list) and len(notes) == 1, notes
+    assert "per-display context cap" in str(notes[0]), notes
+
+    assert by_file["total"] == 1
+    file_notes = by_file["notes"]
+    assert isinstance(file_notes, list)
+    assert not any("per-display context cap" in str(n) for n in file_notes), (
+        "the file view of this fixture is exact, and the switch must not hand it the other verdict"
+    )
+
+
+async def test_a_file_whose_pvs_carry_no_macro_is_never_called_a_lower_bound(
+    tmp_path: Path,
+) -> None:
+    """The macro test, and the only fixture in this file that can go red when it disappears.
+
+    A concrete occurrence expands to itself under every binding and is already present at every
+    cap, so no budget can make it contribute a channel it does not contribute now: the file view is
+    exact however capped the file is as an embed target. Answering the macro test with a constant
+    True left all 1904 tests green before this one existed, because every other cap fixture here
+    writes a macro-templated ``raw_pv``.
+
+    Measured on a 257-display dataset: the test drops the verdict from 53 files to 49, the four it
+    silences answer identically at cap 256 and at 1024, and none of the 9 files that provably grow
+    is lost.
+    """
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
+    with (
+        patch(
+            "epics_mcp.tools.validate.analyze_pv_inventory",
+            return_value=_single_occurrence_inventory(
+                "d.bob", capped=("d.bob",), raw_pv="SIM:CONCRETE:Val"
+            ),
+        ),
+        patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all),
+    ):
+        result = await _validate_pvs(file_path=str(root / "d.bob"), displays_dir=str(root))
+
+    assert result["total"] == 1
+    # Deliberately narrower than ``"notes" not in result``: the view note is structurally silent in
+    # this fixture (one channel in both views), so the broader form would also go red for a reason
+    # that has nothing to do with the macro test.
+    notes = result.get("notes", [])
+    assert isinstance(notes, list)
+    assert not any("per-display context cap" in str(n) for n in notes), (
+        "the file declares only concrete PVs, so its answer is exact at every cap"
+    )
+    assert result["shown_by_display_capped"] is True, (
+        "and the DISPLAY axis is deliberately untouched by this: it stays over-cautious, so a "
+        "change that leaked across the two verdicts is red here"
+    )
+
+
+@pytest.mark.parametrize("raw_pv", ["$(P):X", "${P}:X"])
+async def test_both_macro_spellings_keep_the_lower_bound_note(tmp_path: Path, raw_pv: str) -> None:
+    """The positive control, over BOTH macro spellings the engine understands.
+
+    ``contains_macros`` recognises ``$(NAME)`` and ``${NAME}``, and every other fixture in this
+    module writes only the first. Measured: replacing the call with ``"$(" in ev.raw_pv`` left the
+    whole suite green, so a file templated exclusively in the brace form would have lost its note
+    in silence. This parametrisation is what makes that mutation red.
+    """
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
+    with (
+        patch(
+            "epics_mcp.tools.validate.analyze_pv_inventory",
+            return_value=_single_occurrence_inventory("d.bob", capped=("d.bob",), raw_pv=raw_pv),
+        ),
+        patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all),
+    ):
+        result = await _validate_pvs(file_path=str(root / "d.bob"), displays_dir=str(root))
+
+    assert result["total"] == 1
+    notes = result.get("notes", [])
+    assert isinstance(notes, list)
+    assert any("per-display context cap" in str(n) for n in notes), (
+        f"{raw_pv} is macro-templated, so a larger budget could extend this file's list"
     )

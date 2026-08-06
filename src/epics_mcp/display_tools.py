@@ -70,7 +70,14 @@ async def validate_pvs(
             "declares nothing itself and answers total 0 under 'file' while resolving thousands "
             "under 'display'; a fragment is the reverse, because its macros are unbound when it "
             "stands alone. The result always reports shown_by_display, and under 'file' a note "
-            "says how many channels the display view adds. Ignored when pv_names is given."
+            "says how many channels the display view adds. Ignored when pv_names is given. "
+            "A 'lower bound' note means the macro expansion hit the per-display context cap, and "
+            "it carries the verdict of the view you asked for: the FILE verdict additionally "
+            "requires that the file declares a macro-templated PV of its own (one with no macro "
+            "resolves the same at every cap, so its list cannot grow), while the DISPLAY verdict, "
+            "also reported as shown_by_display_capped under both views, has no such test and is "
+            "deliberately pessimistic, so read a true there as 'cannot be ruled out'. Neither cap "
+            "is adjustable from this tool."
         ),
     ] = "file",
     displays_dir: Annotated[
