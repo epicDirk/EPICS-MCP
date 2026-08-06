@@ -641,6 +641,47 @@ which cannot carry them → rejected), and `millis` means **minutes** to Olog's 
 `ms`). Always send `tz` with a wall clock, without it Olog reads the string in the **server's**
 default zone, so a window is silently offset against any deployment not on UTC.
 
+### Discover the alarm config-tree names
+
+`is_alarm_configured` and `coverage_audit` both REQUIRE a config-tree name and neither has a default,
+the trees being site-specific. No tool enumerates them: the ChannelFinder, Olog and log-level planes
+each have a listing sibling, the alarm plane has none. Derive the names from the history stream.
+
+Call `get_alarm_history` **without** `root`, which leaves the search across all trees, and read the
+`config` field of each returned event. **Its first path segment is the tree name: split on `/` and
+take index 1.** Split on the slash and never on the colon, because a PV name carries colons of its
+own, so `"state:/MyTree/Sub/SIM:PS-01:Cur-RB"` splits into
+`["state:", "MyTree", "Sub", "SIM:PS-01:Cur-RB"]`.
+
+Three document kinds share that stream, and all three carry the tree in the same position: a state
+change (`state:`), a configuration change (`config:`), and an operator acknowledgement (`command:`,
+which also carries `user` and `host`). Measured live 2026-08-06. Only the first two were on record
+here before, so do not read a two-way state-versus-config split elsewhere in this repository as a
+closed set.
+
+**Round-trip the name before trusting it**, positive and negative control in one pass (measured live
+2026-08-06): the derived spelling answered `configured: true` for a PV taken out of the same event,
+while that same name lower-cased answered `configured: null`. Case matters here and fails quietly.
+
+Four limits, because this returns a SAMPLE and not an enumeration:
+
+- `pv_name` is required and matches as a wildcard substring of the config path, so you see only the
+  trees in which that fragment occurs. A short fragment widens the sample deliberately; a tree with
+  no activity inside the window stays invisible whatever you pass.
+- The window is required as well, and events come newest first under `max_events`. One busy tree can
+  fill the page and crowd the others out, which makes a single call a skewed sample. A `capped` of
+  true is the signal to narrow the window rather than to raise the cap.
+- ⚠ **The derived name comes from a different index than the one it is usually spent on.** The
+  history stream is the STATE index (`/search/alarm`), while `is_alarm_configured` queries the CONFIG
+  index (`/search/alarm/config`), and the two are populated independently. A tree that is rich in
+  state events can hold nothing in the config index, and a CORRECTLY spelled name then still answers
+  `configured: null` under a note that reads like a spelling complaint. Read that note as "the tree
+  returned nothing", not as "you got the name wrong".
+- Feeding the derived name back into `root` as a cross-check is itself server-decided and UNVERIFIED
+  (see the alarm-history filters below): a logger that does not support the parameter ignores it and
+  BROADENS the result instead of failing, so that check counts only differentially, with one value
+  that must match and one that must not.
+
 ## Error signatures → which tool answers
 
 Illustrate signatures by the exception **class and shape**, never a copied runtime string (error
@@ -679,7 +720,8 @@ messages embed the full request URL, an internal host would leak into this file)
   "always present"). A served **404** here means the wrong endpoint, the retrieval webapp serves
   `/retrieval/bpl`, not `/mgmt/bpl`, and propagates as an error, never a false empty answer.
 - **Alarm configured / history?** `is_alarm_configured` (`configured` is `true`/`false`/`null`;
-  `null` = withheld, see the config-tree recipe below) / `get_alarm_history` (`start` + `end`
+  `null` = withheld; the recipe "Discover the alarm config-tree names" above says where a tree name
+  comes from, and why a correct one can still be withheld) / `get_alarm_history` (`start` + `end`
   required; `pv_name` is matched as a wildcard SUBSTRING of the config path, `Value` matches both
   `...:Temp1Value` and `...:12VValue`). A `false` is a true negative only if the Alarm Logger was
   running at config-import time, otherwise treat it as unreliable; the tool cannot flag this.

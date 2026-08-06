@@ -213,7 +213,9 @@ async def coverage_audit(
             description=(
                 "alarm config-tree name, REQUIRED when the alarm plane is active (query_alarm AND "
                 "its URL set); no default (site-specific trees), so opting into the alarm plane "
-                "without naming a tree is a loud INVALID_INPUT, not a silent wrong scan"
+                "without naming a tree is a loud INVALID_INPUT, not a silent wrong scan. Names "
+                "unknown? Call get_alarm_history WITHOUT root and read the first path segment of "
+                "each event's config field (guide: Discover the alarm config-tree names)"
             )
         ),
     ] = None,

@@ -879,7 +879,10 @@ async def is_alarm_configured(
                 "Alarm config-tree name: REQUIRED, no default (the trees are site-specific, so "
                 "there is no correct universal default; a guessed one silently matches nothing). "
                 "Top-level topic selecting the ES index. CASE-SENSITIVE: a wrong or mis-cased name "
-                "yields configured=null (withheld), never false."
+                "yields configured=null (withheld), never false. Names unknown? Call "
+                "get_alarm_history WITHOUT root and read the first path segment of each event's "
+                "config field; see the guide recipe 'Discover the alarm config-tree names', which "
+                "also says why a correct name can still be withheld."
             )
         ),
     ],

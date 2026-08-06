@@ -3245,12 +3245,16 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 63_017 and the full lane
-    72_508 (re-measured 2026-08-02 on both lanes, when GB-4 gave ``validate_pvs`` its ``view``
-    parameter. The core lane came back byte-identical, which is the expected result and doubles as
-    a check on the measurement: ``validate_pvs`` is display-gated, so a change to it cannot reach
-    the core wire at all. The full lane grew by 763, of which the enum itself is a small part and
-    the rest is description text); a new
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 64_719 and the full lane
+    74_899 (re-measured 2026-08-06 on both lanes, when GB-6 pointed ``is_alarm_configured`` and
+    ``coverage_audit`` at the config-tree discovery recipe: +232 core and +391 full, every char of
+    it description text, which is exactly the case the instruction above calls out as reaching the
+    wire without touching a schema. Unlike the GB-4 edit before it, this one moves BOTH lanes,
+    because ``is_alarm_configured`` is a core tool while ``coverage_audit`` is display-gated.
+    NOTE, and this is why the sentence is re-measured rather than trusted: both figures had
+    ALREADY drifted before this edit. The pre-edit tree measured 64_487 and 74_508 against a prose
+    still claiming 63_017 and 72_508 from 2026-08-02, so about 1_500 and 2_000 chars had
+    accumulated here unrecorded. A ``<=`` ceiling cannot notice that by construction); a new
     tool or an SDK change that
     inflates the wire could grow that UNNOTICED with an otherwise green suite. This is that guard,
     now a soft catastrophe-ceiling at 200_000 (see the constant's comment for the raise rationale).
