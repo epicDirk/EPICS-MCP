@@ -3227,8 +3227,9 @@ async def test_stripped_tool_still_returns_structured_content(
 # machine-readable (the core value of S29) and cost only ~1% more context per agent turn, so the
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
-# RELATIONAL (a ``<=`` check) so both lanes pass. Measured after adding validate_pvs' view
-# parameter (GB-4): the core lane is 63_017 and the full lane 72_508. Re-MEASURE these two after
+# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-06 after the GB-6 pointers: the
+# core lane is 64_719 and the full lane 74_899 (the docstring below carries the deltas, and the
+# earlier pair 63_017 / 72_508 from 2026-08-02 is superseded). Re-MEASURE these two after
 # ANY change that can reach the wire, a schema OR a description edit; the split below is why the
 # narrower wording was a gap. They are prose, nothing asserts them, and an estimate written
 # instead of a measurement had to be

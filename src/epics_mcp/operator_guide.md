@@ -645,10 +645,10 @@ default zone, so a window is silently offset against any deployment not on UTC.
 
 Two tools spend a config-tree name and neither can fall back on a guess, the trees being
 site-specific: `is_alarm_configured` REQUIRES one outright (no default at all), and `coverage_audit`
-refuses loudly as soon as its alarm plane is active without one. No tool enumerates them. Every
-other plane has a listing sibling (`list_channel_vocabulary`, `list_logbooks`, `list_tags`,
-`list_log_levels`, `list_archived_pvs`); the alarm plane has none. Derive the names from the history
-stream instead.
+refuses loudly as soon as its alarm plane is active without one. No tool enumerates them. The planes
+that do have a listing sibling are ChannelFinder (`list_channel_vocabulary`), Olog (`list_logbooks`,
+`list_tags`, `list_log_levels`) and the archiver (`list_archived_pvs`); alarm and naming have none.
+Derive the names from the history stream instead.
 
 Call `get_alarm_history` **without** `root`, which leaves the search across all trees, and read the
 `config` field of each returned event. **Its first path segment is the tree name: split on `/` and
@@ -671,19 +671,25 @@ Four limits, because this returns a SAMPLE and not an enumeration:
 - `pv_name` is required and matches as a wildcard substring of the config path, so you see only the
   trees in which that fragment occurs. A short fragment widens the sample deliberately; a tree with
   no activity inside the window stays invisible whatever you pass.
-- The window is required as well, and events come newest first under `max_events`. One busy tree can
-  fill the page and crowd the others out, which makes a single call a skewed sample. A `capped` of
-  true is the signal to narrow the window rather than to raise the cap.
-- ⚠ **The derived name comes from a different index than the one it is usually spent on.** The
-  history stream is the STATE index (`/search/alarm`), while `is_alarm_configured` queries the CONFIG
-  index (`/search/alarm/config`), and the two are populated independently. A tree that is rich in
-  state events can hold nothing in the config index, and a CORRECTLY spelled name then still answers
-  `configured: null` under a note that reads like a spelling complaint. Read that note as "the tree
-  returned nothing", not as "you got the name wrong".
+- The window is required as well, and events come newest first under `max_events` (default 100,
+  ceiling 999). One busy tree can fill the page and crowd the others out, which makes a single call a
+  skewed sample. ⚠ SHORTENING the window does not cure that, and reaching for it first is the natural
+  mistake: the sort is by time descending, so with `end` at now a later `start` returns the very same
+  newest page. Raise `max_events` first, which is monotone and has a factor of ten of headroom, then
+  MOVE the window backwards rather than trimming it.
+- ⚠ **Where the name came from decides whether it round-trips.** Without `root` the history search
+  sets no index restriction at all and therefore reads every alarm index, while
+  `is_alarm_configured` is pinned to the config index alone. So a name lifted out of a `config:`
+  event is proven to live there and round-trips; a name lifted out of a `state:` or `command:` event
+  is not, because that tree may hold nothing in the config index. A CORRECTLY spelled name then
+  answers `configured: null` all the same. The note lists "or an empty tree" as its third cause, so
+  read it to the end instead of re-typing the name.
 - Feeding the derived name back into `root` as a cross-check is itself server-decided and UNVERIFIED
   (see the alarm-history filters below): a logger that does not support the parameter ignores it and
   BROADENS the result instead of failing, so that check counts only differentially, with one value
-  that must match and one that must not.
+  that must match and one that must not. ⚠ It is also blind to one of the three kinds: the server ORs
+  `root` over `state:/<tree>*` and `config:/<tree>*` only, so a `command:` document never matches it,
+  and a name derived from one can look wrong under `root` while being perfectly right.
 
 ## Error signatures → which tool answers
 
@@ -783,7 +789,12 @@ messages embed the full request URL, an internal host would leak into this file)
   and **case-sensitive** in the query even though the server lower-cases it to pick the index, so a
   mis-cased name (`mytree` vs `MyTree`) selects the right index yet matches nothing. Re-run with the
   tree spelled exactly as the logger stores it. The `config` field in the response echoes your input;
-  it is not the server confirming the tree.
+  it is not the server confirming the tree. ⚠ **Spelling is not the only way to land here, so do not
+  stop at re-typing the name**, and the note says as much with its third cause, "or an empty tree".
+  This tool is pinned to the config index, while the discovery recipe reads every alarm index, so a
+  correctly spelled tree that simply holds nothing in the config index answers `null` too. Which of
+  the two you have follows from where the name came from: see "Discover the alarm config-tree names"
+  above.
 - **A ChannelFinder glob finds nothing / finds odd casing.** The glob is **anchored**: a bare
   substring (`Ctrl-EVR-01`) matches 0, wrap it in stars (`*Ctrl-EVR-01*`). And it is
   **case-insensitive**: `*Temp*` legitimately matches `...MorTemPrd`, so a hit may differ in case
