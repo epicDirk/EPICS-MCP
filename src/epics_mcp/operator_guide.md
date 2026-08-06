@@ -643,9 +643,12 @@ default zone, so a window is silently offset against any deployment not on UTC.
 
 ### Discover the alarm config-tree names
 
-`is_alarm_configured` and `coverage_audit` both REQUIRE a config-tree name and neither has a default,
-the trees being site-specific. No tool enumerates them: the ChannelFinder, Olog and log-level planes
-each have a listing sibling, the alarm plane has none. Derive the names from the history stream.
+Two tools spend a config-tree name and neither can fall back on a guess, the trees being
+site-specific: `is_alarm_configured` REQUIRES one outright (no default at all), and `coverage_audit`
+refuses loudly as soon as its alarm plane is active without one. No tool enumerates them. Every
+other plane has a listing sibling (`list_channel_vocabulary`, `list_logbooks`, `list_tags`,
+`list_log_levels`, `list_archived_pvs`); the alarm plane has none. Derive the names from the history
+stream instead.
 
 Call `get_alarm_history` **without** `root`, which leaves the search across all trees, and read the
 `config` field of each returned event. **Its first path segment is the tree name: split on `/` and
