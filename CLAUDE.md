@@ -286,6 +286,22 @@ advertised to users who cannot install it. Changes internal to this server do **
 pin; only a change that needs a newer `opi_navigation` does (then move the pin and the lockfile
 together).
 
+⚠️ **That last sentence is this repository's half of a rule whose other half lives upstream, and
+the two do not agree.** The producing workspace states the duty the other way round: any change to
+the engine, in EITHER of the two packages its wheel carries, moves the pin, always. Its wording
+names the sibling server rather than this one, which is how the gap opened in the first place.
+Read only the sentence above and the pin drifts without anyone doing anything wrong, and that is
+what happened: it was pulled once, a day after it was first written, and has stood still since.
+
+Two guards exist, and they answer different questions. `tests/test_dependency_pin.py` (here)
+checks that `pyproject.toml` and `uv.lock` name the SAME revision, which is the failure a half-done
+bump produces. It cannot say whether that revision is the RIGHT one. That second question is not
+answerable in this repository at all: the engine lives in a private repository this public CI
+cannot clone, which is also why the Dependabot run fails on it. It is measured on the producing
+side, by a ratchet workflow that turns red when the distance grows, and reported locally by
+`parallel_lint --context`. Neither guard replaces an install check: this CI syncs without
+`--group displays` and therefore never resolves the engine at all.
+
 ## What is NOT persistence
 
 Commit bodies (read, rarely found later), plan snapshots, personal assistant memory, and session

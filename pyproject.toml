@@ -115,7 +115,16 @@ displays = ["opi-navigation"]
 
 # The git pin lives here rather than in the requirement itself: tool.uv.sources is resolution-time
 # information and is NOT part of the built distribution's metadata. A bump moves this rev and
-# `uv lock` together (CI runs `uv sync --frozen`).
+# `uv lock` together, and tests/test_dependency_pin.py fails when only one of the two moves.
+#
+# That test exists because the sentence here used to name `uv sync --frozen` as the thing enforcing
+# it, and measured against `uv help sync` that flag enforces the opposite: it "uses the versions in
+# the lockfile as the source of truth", and changes in pyproject.toml that are not in the lockfile
+# yet "will not be present in the environment". So a half-done bump resolved the OLD engine in
+# silence. (`--locked` would have caught it. Swapping the flag is a wider change than pinning the
+# promise with a test, so the promise got the test.) Note also that this CI syncs without
+# `--group displays` and therefore never resolves this dependency at all: the lock entry is checked
+# here, not exercised there.
 [tool.uv.sources]
 opi-navigation = { git = "https://github.com/epicDirk/opi-foundry.git", rev = "8fad86766891aeac177050449f73a3a4fbf554cc" }
 
