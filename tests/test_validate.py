@@ -725,6 +725,7 @@ def _capped_inventory(
     own_unresolved: bool = False,
     foreign_top: str | None = None,
     foreign_first: bool = False,
+    glob_capped: tuple[tuple[str, str], ...] = (),
 ) -> object:
     """An inventory whose display *rel* embeds a fragment, with *capped* naming what was capped.
 
@@ -745,6 +746,10 @@ def _capped_inventory(
     decides which test can see it: the top term needs a path that is a ``top_level_display`` of
     *rel*'s own events, the ``rel`` term needs *rel* itself and fires with no event at all, and the
     display view's own term also matches the origins of the display's events.
+
+    *glob_capped* goes into the field of the same name, engine-shaped as ``(source, raw_target)``
+    pairs. It is a THIRD axis and no predicate reads it, so unlike *capped* its contents do not
+    have to line up with *rel*; only the count reaches the answer.
     """
     from opi_navigation.pv_analysis import (
         DisplayPvInventory,
@@ -798,7 +803,55 @@ def _capped_inventory(
         repo_root="/nowhere",
         displays=tuple(displays),
         # The engine records the capped TARGET, not the top it was capped under.
-        diagnostics=PvDiagnostics(context_capped=capped),
+        diagnostics=PvDiagnostics(context_capped=capped, glob_capped=glob_capped),
+    )
+
+
+async def test_glob_cap_is_reported_although_no_context_cap_fired(tmp_path: Path) -> None:
+    """GB-29: the second incompleteness source reaches the caller, and it does so on its own.
+
+    ``context_capped`` is deliberately EMPTY here. That is the whole point: before this, a caller
+    seeing no lower-bound note read the list as complete, and a capped glob makes that false while
+    leaving both context-cap verdicts at False. So the silence was the defect, not a missing detail
+    in an existing sentence.
+
+    Measured, and this is why it is not a hypothetical: on a 2878-display dataset the default glob
+    cap fires 16 times across 4 source displays, one of them a synoptic overview that embeds its
+    sections through a glob. On four smaller datasets (13 to 485 displays) it never fires, which is
+    what the earlier "damage is zero" reading was based on.
+
+    The two flags must stay untouched: the glob count carries no per-file verdict, so letting it
+    move ``shown_by_display_capped`` would claim something the engine did not say. Provably red:
+    drop the ``glob_capped_count`` block from ``_validate_pvs``.
+    """
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
+    with (
+        patch(
+            "epics_mcp.tools.validate.analyze_pv_inventory",
+            return_value=_capped_inventory(
+                "d.bob",
+                declared=True,
+                capped=(),
+                glob_capped=(("ov.bob", "sections/*.bob"), ("ov.bob", "elements/*.bob")),
+            ),
+        ),
+        patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all),
+    ):
+        result = await _validate_pvs(file_path=str(root / "d.bob"), displays_dir=str(root))
+
+    assert result["shown_by_display_capped"] is False, "the glob count is not a display verdict"
+    notes = result["notes"]
+    assert isinstance(notes, list)
+    glob_notes = [str(n) for n in notes if "glob cap" in str(n)]
+    assert len(glob_notes) == 1, notes
+    assert "2 template <file> reference(s)" in glob_notes[0], glob_notes
+    # Said as a property of the walk, not of this file. The count is a total over the dataset, so a
+    # sentence blaming the queried file would be a claim the engine never made.
+    assert "about the walk, not about this file" in glob_notes[0], glob_notes
+    assert not any("context cap" in str(n) for n in notes), (
+        "no context cap fired here, so no note may say one did"
     )
 
 

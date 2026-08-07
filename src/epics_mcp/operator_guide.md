@@ -851,6 +851,18 @@ messages embed the full request URL, an internal host would leak into this file)
   an empty display view and still report `shown_by_display_capped: true`, and quadrupling the cap
   grows exactly one of them. So on the display side read a `true` as **"cannot be ruled out"**
   rather than as "known to be incomplete", and read a `false` as the stronger statement of the two.
+- **There is a THIRD incompleteness source, and it is why no absence of notes means "complete".**
+  Beside the per-display context cap the walk has a **glob cap**: a `<file>` reference that still
+  carries a macro is resolved by globbing the known displays, and past the cap the surplus matches
+  are dropped. That removes whole embedded SCREENS rather than instances, so it can shrink either
+  view while both `capped` verdicts above stay `false`. `validate_pvs`, `coverage_audit` and
+  `crossplane_check` each report it as its own `notes` entry, worded as a statement about the
+  **walked dataset** rather than about the queried file, because the engine records the SOURCE
+  display of a capped glob and none of the three turns that into a per-file verdict. Measured, so
+  the size is known: on a 2878-display dataset it fires 16 times across 4 source displays, one of
+  them a synoptic overview embedding its sections through a glob; on four datasets between 13 and
+  485 displays it never fires. Neither cap is adjustable from `validate_pvs`; the other three
+  display tools take a `context_cap`, and none takes a glob cap.
 - **`coverage_audit` refuses "alarm plane, no tree named" with `INVALID_INPUT`.** Same shape as
   above: the verdict follows from the arguments, so it is given before the display-PV walk rather
   than after it. Name the tree (`alarm_config`); there is no correct default, they are site-specific.

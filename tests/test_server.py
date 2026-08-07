@@ -3247,11 +3247,13 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
     FastMCP's native-lean schemas plus the S29 typing keep the core lane 64_719 and the full lane
-    75_176 (re-measured 2026-08-08 on both lanes, when GB-28 made the ``file_path`` echo a
-    file-mode field of ``validate_pvs`` and said so in three of its argument descriptions: +277
-    full and +0 core, every char of it description text. The zero is the informative half: unlike
-    the GB-6 edit below, this one touches a display-gated tool only, so the core lane cannot move,
-    and a nonzero core delta here would have meant the edit landed somewhere it was not aimed.
+    75_434 (re-measured 2026-08-08 on both lanes, twice, for two edits to the same display-gated
+    tool: GB-28 made the ``file_path`` echo a file-mode field of ``validate_pvs`` and said so in
+    three of its argument descriptions, 74_899 -> 75_176 (+277 full, +0 core), and GB-29 gave the
+    glob cap its own sentence in the view description, 75_176 -> 75_434 (+258 full, +0 core). Every
+    char of both is description text. The two zeros are the informative half: unlike
+    the GB-6 edit below, these touch a display-gated tool only, so the core lane cannot move,
+    and a nonzero core delta would have meant the edit landed somewhere it was not aimed.
     The previous figures were core 64_719 and full 74_899, re-measured 2026-08-06 on both lanes,
     when GB-6 pointed ``is_alarm_configured`` and
     ``coverage_audit`` at the config-tree discovery recipe: +232 core and +391 full, every char of

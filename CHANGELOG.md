@@ -20,6 +20,20 @@ carry breaking changes).
   while the field names the link. Purely additive: no existing field changes meaning, and the only
   visible difference on the empty-result answer is where the key sits in the object.
 
+- **`validate_pvs` reports the glob cap, so the absence of a lower-bound note stops meaning
+  "complete".** The display walk has two ways of running out of budget, and this tool only ever
+  named one of them. Beside the per-display context cap there is a glob cap: a `<file>` reference
+  that still carries a macro is resolved by globbing the known displays, and past the cap the
+  surplus matches are dropped, which removes whole embedded SCREENS rather than instances. It can
+  therefore shrink either view while both `capped` verdicts stay `false`, and a caller reading the
+  quiet answer as complete was reading it wrong. A separate `notes` entry now names it, worded as a
+  statement about the walked dataset rather than about the queried file, because the engine records
+  the source display of a capped glob and this tool does not turn that into a per-file verdict.
+  `coverage_audit` and `crossplane_check` have reported the same signal since they shipped; this
+  brings the third display tool in line and adds the regression test `coverage_audit` never had.
+  How much this is worth is measured rather than assumed: on a 2878-display dataset the cap fires
+  16 times across 4 source displays, on four datasets between 13 and 485 displays it never fires.
+
 ### Changed
 
 - **`validate_pvs` no longer calls a file's PV list a lower bound when that list cannot grow.**

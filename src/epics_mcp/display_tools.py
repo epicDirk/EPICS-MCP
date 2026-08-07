@@ -80,8 +80,11 @@ async def validate_pvs(
             "requires that the file declares a macro-templated PV of its own (one with no macro "
             "resolves the same at every cap, so its list cannot grow), while the DISPLAY verdict, "
             "also reported as shown_by_display_capped under both views, has no such test and is "
-            "deliberately pessimistic, so read a true there as 'cannot be ruled out'. Neither cap "
-            "is adjustable from this tool."
+            "deliberately pessimistic, so read a true there as 'cannot be ruled out'. A SEPARATE "
+            "note reports the glob cap, which drops embedded screens from the walk and can shrink "
+            "either view while both context-cap verdicts stay false; it is a statement about the "
+            "walked dataset, not about this file, so no absence of notes means 'complete'. "
+            "Neither cap is adjustable from this tool."
         ),
     ] = "file",
     displays_dir: Annotated[

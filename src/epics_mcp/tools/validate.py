@@ -52,6 +52,10 @@ class _Extraction(NamedTuple):
     #: True when the DISPLAY view is a lower bound. See _display_view_is_capped for why this is not
     #: the same question as *capped*.
     shown_capped: bool
+    #: How many ``<file>`` references hit the GLOB cap anywhere in the walk. A third incompleteness
+    #: source, and the only one here that is a property of the walked dataset rather than of this
+    #: file: it is a plain count, not a verdict, and the two flags above say nothing about it.
+    glob_capped_count: int
 
 
 def _display_view_is_capped(rel: str, origins: set[str], capped_targets: frozenset[str]) -> bool:
@@ -101,6 +105,20 @@ def _display_view_is_capped(rel: str, origins: set[str], capped_targets: frozens
     grows, so there it is pure over-caution and the one saved case above is what keeps it. And it
     covers the ``context_cap`` axis only; the glob cap is a second, separate source of
     incompleteness that this measurement does not touch.
+
+    THAT SECOND SOURCE IS NOW REPORTED, as a count and deliberately not as a verdict, and the
+    reason belongs here beside the two predicates rather than in a status file. It is a third axis:
+    ``context_capped`` holds the capped TARGET, the predicates above live on the TOP, and
+    ``glob_capped`` holds the SOURCE display of the capped glob paired with its raw target. A
+    per-file predicate on it is buildable (the source is exactly the display whose embedded screens
+    were dropped, so unlike the target axis no term has to be inferred), and it is not built here
+    because its precision has not been measured the way both predicates above were, by a cap lift
+    against ground truth. What IS measured is that the case is real rather than theoretical: at the
+    default cap of 50 it fires 16 times across 4 source displays on a 2878-display dataset, one of
+    them a synoptic overview that embeds its sections through a glob, while four datasets between
+    13 and 485 displays produce none at all. Whoever builds the predicate: lift ``glob_cap`` on the
+    large dataset and check which display views actually grow, exactly as the figures above were
+    obtained for the other axis.
     """
     return rel in capped_targets or bool(origins & capped_targets)
 
@@ -312,6 +330,11 @@ def _run_validate(file_path: str, displays_dir: str | None, view: PvView = "file
         shown_by_display=len(display_channels),
         shown_only=len(display_seen - seen),
         shown_capped=display_capped,
+        # Counted, not tested against *rel*. The engine records the SOURCE display of a capped
+        # glob, which is a third axis again: neither the capped TARGET the two predicates above
+        # consume, nor the top they live on. A per-file predicate on it is buildable and is NOT
+        # built here, see the note in _display_view_is_capped for the measurement that decides it.
+        glob_capped_count=len(inventory.diagnostics.glob_capped),
     )
 
 
@@ -341,6 +364,12 @@ async def _validate_pvs(
     verdict, which has NO such test and is deliberately more cautious (see
     :func:`_display_view_is_capped`); ``shown_by_display_capped`` reports that verdict under both
     views. Do not read the macro condition as a property of the note itself.
+
+    A SECOND ``notes`` entry reports the GLOB cap, which is a different source and not a variant of
+    the first: a capped glob drops embedded screens from the walk, so it can shrink both views
+    while leaving both context-cap verdicts False. It is phrased as a statement about the walked
+    dataset rather than about this file, because the engine records the SOURCE of a capped glob and
+    no predicate here turns that into a per-file verdict.
     The file-mode fields are ``file_path``, ``shown_by_display`` and ``shown_by_display_capped``,
     and all three appear together on BOTH file-mode returns (the normal one and the empty-result
     one) or on neither. They are absent under an explicit list, where no file was opened: an echo
@@ -388,6 +417,18 @@ async def _validate_pvs(
             notes.append(
                 "PV list is a lower bound: this file's macro expansion hit the per-display "
                 "context cap, so some instances were not enumerated."
+            )
+        if found.glob_capped_count:
+            # The SECOND incompleteness source, and the reason it is worth a sentence of its own:
+            # without it, the absence of the context-cap note above reads as "this list is
+            # complete", which the glob cap can make false. Deliberately phrased as a statement
+            # about the WALK rather than about this file, because the count carries no per-file
+            # verdict (see _Extraction.glob_capped_count and _display_view_is_capped).
+            notes.append(
+                f"{found.glob_capped_count} template <file> reference(s) hit the glob cap while "
+                "walking this dataset, so some embedded screens were dropped from the inventory "
+                "and both views may be a lower bound. Unlike the context-cap note this one is "
+                "about the walk, not about this file."
             )
         if view == "file" and found.shown_only:
             # The whole point of the note is that the OTHER view exists and is bigger. It reports

@@ -231,6 +231,35 @@ def test_context_capped_withholds_has_display() -> None:
     assert any("context cap" in n for n in report.notes)
 
 
+def test_glob_capped_is_reported_as_a_lower_bound() -> None:
+    """The inventory's SECOND incompleteness signal reaches the caller, not just the first.
+
+    ``context_capped`` has had the test above since this audit shipped; the glob cap has been
+    wired the whole time and pinned nowhere, while its twin in the sibling service IS pinned
+    (``test_crossplane.py::test_notes_glob_capped_and_needs_msi``). That asymmetry is the defect:
+    two services emit the same sentence from the same adapter value, and only one of them would
+    have noticed the sentence disappearing.
+
+    Deliberately a note and not a withhold, unlike the context cap above. A capped glob drops
+    embedded SCREENS, so it shrinks the display set D as a whole rather than making one named
+    display's PV list incomplete; there is no per-PV verdict to withhold, and D is reported as a
+    lower bound instead. Provably red: drop the ``glob_capped_count`` block from
+    :func:`_coverage_notes`.
+    """
+    report = audit_coverage(
+        [_row("DEV:A")],
+        scope="DEV:",
+        channelfinder=_FakeCF({"DEV:A"}),
+        cf_requested=True,
+        glob_capped_count=2,
+    )
+    assert any("glob cap" in n for n in report.notes), report.notes
+    assert any("lower bound" in n for n in report.notes), report.notes
+    # The two signals are independent: no display hit the context cap here, so the count must not
+    # leak into the field that names capped displays.
+    assert report.displays_incomplete == ()
+
+
 def test_ratio_caveat_fires_at_half() -> None:
     index = [_row("DEV:A"), _row("DEV:B"), _row("DEV:C"), _row("DEV:D")]  # D = 4
     report = audit_coverage(
