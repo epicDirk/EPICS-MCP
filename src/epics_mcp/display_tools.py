@@ -45,7 +45,9 @@ async def validate_pvs(
         list[str] | None,
         Field(
             description="List of PV names to validate. Takes precedence: supply this together "
-            "with file_path and the list wins, the file is not looked at (and not refused)."
+            "with file_path and the list wins, the file is not looked at (and not refused). The "
+            "answer then carries no file_path/shown_by_display fields either, because no file was "
+            "opened to report about."
         ),
     ] = None,
     file_path: Annotated[
@@ -57,7 +59,8 @@ async def validate_pvs(
             "is not a .bob, or that lies outside "
             "displays_dir, is refused straight away with INVALID_INPUT: the inventory reads "
             "only .bob files, so such a call can only ever come back empty, and it used to "
-            "take a full inventory walk to say so."
+            "take a full inventory walk to say so. Echoed back as the file_path field of the "
+            "answer, as passed rather than resolved, on every file-mode result."
         ),
     ] = None,
     view: Annotated[
@@ -69,8 +72,9 @@ async def validate_pvs(
             "fragments included. These differ a lot: a parent that only composes fragments "
             "declares nothing itself and answers total 0 under 'file' while resolving thousands "
             "under 'display'; a fragment is the reverse, because its macros are unbound when it "
-            "stands alone. The result always reports shown_by_display, and under 'file' a note "
-            "says how many channels the display view adds. Ignored when pv_names is given. "
+            "stands alone. Every file-mode result reports shown_by_display (and file_path), and "
+            "under 'file' a note says how many channels the display view adds. Ignored when "
+            "pv_names is given, which drops those fields with it. "
             "A 'lower bound' note means the macro expansion hit the per-display context cap, and "
             "it carries the verdict of the view you asked for: the FILE verdict additionally "
             "requires that the file declares a macro-templated PV of its own (one with no macro "

@@ -825,8 +825,13 @@ messages embed the full request URL, an internal host would leak into this file)
   There are TWO ways to get it, and they need different follow-ups. **One:** a `.bob` that only
   composes embedded fragments declares nothing itself, so the default file view is empty while the
   display resolves plenty. The result therefore always carries `shown_by_display` (plus
-  `shown_by_display_capped`), and when the file view omits something a note says how many channels
-  it omits. Pass `view="display"` to check that set instead. Neither view is the right one:
+  `shown_by_display_capped` and `file_path`), and when the file view omits something a note says
+  how many channels it omits. Pass `view="display"` to check that set instead.
+  Those three fields are the FILE-MODE fields: they travel together on both file-mode answers, the
+  empty one included, and they are absent when an explicit `pv_names` list wins, because then no
+  file was opened to report about. `file_path` comes back exactly as passed, so an answer can be
+  matched to its call; it is not a statement about the file on disk (with a symlink the numbers
+  describe the target while the field names the link). Neither view is the right one:
   `view="file"` asks what this file contributes wherever it is used, which is what you want for a
   fragment; `view="display"` asks what an operator opening this screen would see. A fragment
   answers 0 under `view="display"`, because its macros are unbound when it stands alone, and that

@@ -341,6 +341,13 @@ async def _validate_pvs(
     verdict, which has NO such test and is deliberately more cautious (see
     :func:`_display_view_is_capped`); ``shown_by_display_capped`` reports that verdict under both
     views. Do not read the macro condition as a property of the note itself.
+    The file-mode fields are ``file_path``, ``shown_by_display`` and ``shown_by_display_capped``,
+    and all three appear together on BOTH file-mode returns (the normal one and the empty-result
+    one) or on neither. They are absent under an explicit list, where no file was opened: an echo
+    there would say the answer came from that file. ``file_path`` is the argument as passed, not
+    the resolved path, deliberately differing from the refusal below, which names the resolved one
+    (that statement is about the disk, this one is a correlation key for the caller).
+
     A *file_path* that is not a ``.bob``, or
     that lies outside the walked root, is refused immediately (see :func:`_run_validate`); note
     this only applies when *file_path* is used, an explicit *pvs* list wins and skips the file path
@@ -350,14 +357,30 @@ async def _validate_pvs(
     so a disconnected channel no longer serialises the whole check (M6).
     """
     notes: list[str] = []
-    # Set only in file_path mode: with an explicit list there is no display to report about.
-    view_fields: dict[str, object] = {}
+    # Set only in file_path mode: with an explicit list there is no display to report about, and
+    # no file was read either, so nothing in here may be claimed.
+    file_mode_fields: dict[str, object] = {}
     if file_path and not pvs:
         found = await asyncio.to_thread(_run_validate, file_path, displays_dir, view)
         extracted = found.channels
         # Always reported, not only when the note fires: a caller comparing the two views needs
         # the number in both cases, and a field that appears conditionally cannot be relied on.
-        view_fields = {
+        #
+        # ``file_path`` rides in the SAME dict for the same reason, and that is the repair: it used
+        # to be spelled out on the empty-result return only, so ONE mode answered with two key sets
+        # and a caller had no stable one. Which MODE a field belongs to is the rule the repo
+        # follows elsewhere (``discover_pvs`` echoes ``pattern`` even on its wildcard-stub return,
+        # because that answer is still ABOUT the pattern). The list mode is not this mode: there
+        # the file is provably not opened, so echoing the path would misstate where the list came
+        # from. A test pins each half.
+        #
+        # The RAW argument, not the resolved path, and the refusal above deliberately does the
+        # opposite. That is not a contradiction, they answer different questions: the refusal makes
+        # a statement about the disk (which file carries the wrong suffix), this field is a
+        # correlation key for the caller (which call am I answering). With a symlink the numbers
+        # describe the target while this names the link. Do not "unify" the two.
+        file_mode_fields = {
+            "file_path": file_path,
             "shown_by_display": found.shown_by_display,
             "shown_by_display_capped": found.shown_capped,
         }
@@ -388,12 +411,11 @@ async def _validate_pvs(
             # This is also where a pure container lands under the file view, so it is where the
             # note above matters most (measured: 42 of 54 affected files in one dataset).
             empty: dict[str, object] = {
-                "file_path": file_path,
                 "total": 0,
                 "connected": 0,
                 "disconnected": 0,
                 "pvs": [],
-                **view_fields,
+                **file_mode_fields,
             }
             if notes:
                 empty["notes"] = notes
@@ -441,7 +463,7 @@ async def _validate_pvs(
         "connected": connected,
         "disconnected": disconnected,
         "pvs": results,
-        **view_fields,
+        **file_mode_fields,
     }
     if notes:
         final["notes"] = notes

@@ -52,7 +52,9 @@ epics-crossplane --displays . --st-cmd <path-to-st.cmd>
 or `validate_pvs(file_path="examples/sample_display.bob")` from an MCP client. That default answers
 what the file itself declares; add `view="display"` to ask what it resolves to when opened as a
 display, fragments included. The two differ as soon as a screen embeds anything, and the answer
-always reports `shown_by_display` so you can see which question you asked.
+always reports `shown_by_display` so you can see which question you asked, next to a `file_path`
+echo naming the call it answers. Both belong to file mode: pass `pv_names` instead and they are
+gone, because no file was opened.
 
 > The `.bob`-handling comes from the `opi_navigation` library (the optional `displays`
 > dependency group), **not** from any Claude skill; the server itself runs standalone. If you don't

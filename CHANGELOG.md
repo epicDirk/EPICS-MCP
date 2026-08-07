@@ -7,6 +7,19 @@ carry breaking changes).
 
 ## [Unreleased]
 
+### Added
+
+- **Every `validate_pvs` file-mode answer now names the file it is about.** The `file_path` echo used
+  to appear on the empty-result answer only, so one mode came back with two different key sets and a
+  client reading both had no stable key to match a result to its call. It now travels with
+  `shown_by_display` and `shown_by_display_capped` as one group of file-mode fields, present together
+  on both file-mode answers or on neither. Passing `pv_names` still drops all three, and that is the
+  point rather than an omission: the list wins, no file is opened, and echoing a path there would say
+  the answer came from a file that was never read. The value is the argument as passed, not the
+  resolved path, so it matches what the caller sent; with a symlink the counts describe the target
+  while the field names the link. Purely additive: no existing field changes meaning, and the only
+  visible difference on the empty-result answer is where the key sits in the object.
+
 ### Changed
 
 - **`validate_pvs` no longer calls a file's PV list a lower bound when that list cannot grow.**

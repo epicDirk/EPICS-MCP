@@ -3247,10 +3247,16 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
     FastMCP's native-lean schemas plus the S29 typing keep the core lane 64_719 and the full lane
-    74_899 (re-measured 2026-08-06 on both lanes, when GB-6 pointed ``is_alarm_configured`` and
+    75_176 (re-measured 2026-08-08 on both lanes, when GB-28 made the ``file_path`` echo a
+    file-mode field of ``validate_pvs`` and said so in three of its argument descriptions: +277
+    full and +0 core, every char of it description text. The zero is the informative half: unlike
+    the GB-6 edit below, this one touches a display-gated tool only, so the core lane cannot move,
+    and a nonzero core delta here would have meant the edit landed somewhere it was not aimed.
+    The previous figures were core 64_719 and full 74_899, re-measured 2026-08-06 on both lanes,
+    when GB-6 pointed ``is_alarm_configured`` and
     ``coverage_audit`` at the config-tree discovery recipe: +232 core and +391 full, every char of
     it description text, which is exactly the case the instruction above calls out as reaching the
-    wire without touching a schema. Unlike the GB-4 edit before it, this one moves BOTH lanes,
+    wire without touching a schema. Unlike the GB-4 edit before it, that one moved BOTH lanes,
     because ``is_alarm_configured`` is a core tool while ``coverage_audit`` is display-gated.
     NOTE, and this is why the sentence is re-measured rather than trusted: both figures had
     ALREADY drifted before this edit. The pre-edit tree measured 64_487 and 74_508 against a prose

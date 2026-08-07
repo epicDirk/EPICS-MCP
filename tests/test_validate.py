@@ -619,7 +619,7 @@ async def test_one_channel_written_two_ways_counts_once(tmp_path: Path) -> None:
 
 
 async def test_an_explicit_list_wins_over_file_path_and_view(tmp_path: Path) -> None:
-    """``pv_names`` short-circuits the file, so the view fields have nothing to describe."""
+    """``pv_names`` short-circuits the file, so the file-mode fields have nothing to describe."""
     root = _views_dataset(tmp_path)
     spy = Mock(side_effect=AssertionError("the inventory must not run when a list is given"))
     with (
@@ -634,6 +634,10 @@ async def test_an_explicit_list_wins_over_file_path_and_view(tmp_path: Path) -> 
 
     assert result["total"] == 1
     assert "shown_by_display" not in result, "no display was consulted, so nothing may be claimed"
+    # Same rule for the path echo, and this is the half that is easy to get wrong: file_path WAS
+    # supplied here, it just lost to the list. Echoing it would say the answer came from that file
+    # when the spy above proves the file was never opened.
+    assert "file_path" not in result, "the file was not read, so the answer is not about it"
     spy.assert_not_called()
 
 
@@ -669,6 +673,48 @@ async def test_the_wire_default_is_the_file_view(tmp_path: Path) -> None:
     # user-visible part of the answer, and the registered wrapper is a layer the inner tests never
     # execute; without this line a wrapper that dropped them would pass the whole suite.
     assert "notes" in payload, "the honesty notes must survive the registered tool wrapper"
+    # Same argument for the path echo: the two tests below assert it on the inner function, which
+    # cannot see a wrapper that drops or rewrites a key on its way out.
+    assert payload["file_path"] == str(root / "owner.bob")
+
+
+async def test_file_path_is_echoed_on_the_normal_path(tmp_path: Path) -> None:
+    """GB-28: the answer names the file it is about, and it does so on BOTH file-mode returns.
+
+    This one is the repair. The echo used to sit on the empty-result return only, so one mode
+    answered with two different key sets and a caller reading them had no stable one to key on.
+    Nothing pinned that: there is no output schema for this tool (registered with
+    ``output_schema=None``) and no test looked at the key, so the split could not go red.
+
+    Asserted on the parent that owns a channel, because that is the display which takes the normal
+    return; the sibling test below takes the other one. Provably red on the pre-fix code, where
+    the normal return carried no ``file_path`` at all.
+    """
+    root = _views_dataset(tmp_path)
+    owner = root / "owner.bob"
+    with patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all):
+        result = await _validate_pvs(file_path=str(owner), displays_dir=str(root))
+
+    assert result["total"] == 1, "the fixture must take the NORMAL return, not the empty one"
+    assert result["file_path"] == str(owner)
+
+
+async def test_file_path_is_echoed_on_the_empty_path_too(tmp_path: Path) -> None:
+    """The other file-mode return keeps the echo, which is the half that was already right.
+
+    A pure container declares nothing itself, so it answers ``total: 0`` and lands on the
+    empty-result return. Since GB-4 that is the PRIMARY answer for such a screen and it carries the
+    note that matters most, which is why the two returns disagreeing was worth repairing rather
+    than leaving as cosmetics. Kept as its own test rather than folded into the one above: the
+    fields now come from one shared dict, and a single test would not say which return it walked.
+    """
+    root = _views_dataset(tmp_path)
+    container = root / "container.bob"
+    result = await _validate_pvs(file_path=str(container), displays_dir=str(root))
+
+    assert result["total"] == 0, "the fixture must take the EMPTY return, not the normal one"
+    assert result["pvs"] == []
+    assert result["file_path"] == str(container)
 
 
 def _capped_inventory(
