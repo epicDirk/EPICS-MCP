@@ -539,3 +539,59 @@ def test_cf_render_markdown_block() -> None:
     assert "**Unregistered in ChannelFinder (linked PV, not in CF):** 1 of 1 registered" in markdown
     assert "of which writable: 1" in markdown
     assert "DEV-TEST01:Ctrl-EVR-01:CmdMiss" in markdown
+
+
+# --- GB-65: two honest-residue notes that no test held ---
+
+
+def test_the_indeterminate_note_names_distinct_pvs_and_their_references() -> None:
+    """The "honest residue" note, pinned by no test until GB-65.
+
+    The FIELDS behind it (``pvs_indeterminate``, ``pvs_indeterminate_occurrences``) are pinned
+    several times over, and the markdown carries a summary line built from them, but the note that
+    states what they MEAN, that these PVs are residue and are never judged, was held by nothing.
+    Both numbers are asserted because the note carries two different denominators and getting them
+    the wrong way round is the mistake it exists to prevent. Provably red: drop the
+    ``indeterminate_pvs`` branch from the notes block of :func:`crossplane_check`.
+    """
+    join = [
+        _jp("a.bob", "SYS:Status", resolution="dynamic"),
+        _jp("b.bob", "SYS:Status", resolution="dynamic"),
+    ]
+    report = crossplane_check(join, _st())
+
+    assert any("could not be resolved to a concrete channel" in n for n in report.notes), (
+        report.notes
+    )
+    assert any("1 distinct display PV(s) (2 reference(s))" in n for n in report.notes), report.notes
+    assert any("never judged here" in n for n in report.notes), report.notes
+
+
+def test_the_too_narrow_directory_note_fires_when_nothing_concrete_resolved() -> None:
+    """The note that tells a caller their displays_dir was cut too small, held by no test.
+
+    It is the most actionable note this report has: the usual cause of an all-indeterminate answer
+    is a per-IOC subdirectory instead of the dataset ROOT, and without the note the result looks
+    like a finding about the machine rather than about the argument. Provably red: drop the
+    ``not linked_pvs and not other_prefix_pvs`` branch from the notes block.
+    """
+    report = crossplane_check([_jp("a.bob", "SYS:Dyn", resolution="dynamic")], _st())
+
+    assert any("displays directory may be too narrow" in n for n in report.notes), report.notes
+    assert any("pass the project/dataset ROOT" in n for n in report.notes), report.notes
+
+
+def test_the_too_narrow_note_stays_away_once_something_concrete_resolves() -> None:
+    """The other half of the pair: one concrete linked PV is enough to silence it.
+
+    Without this, the note above would also pass on an implementation that emits it always, and a
+    permanent warning is one nobody reads.
+    """
+    join = [
+        _jp("a.bob", "SYS:Dyn", resolution="dynamic"),
+        _jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:x"),
+    ]
+    report = crossplane_check(join, _st())
+
+    assert report.pvs_linked == ("DEV-TEST01:Ctrl-EVR-01:x",)
+    assert not any("too narrow" in n for n in report.notes), report.notes

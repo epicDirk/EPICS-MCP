@@ -54,6 +54,23 @@ class _FakeAlarm:
         return pv in self._alarmed
 
 
+class _PerPvRaisingAlarm:
+    """The Alarm twin of :class:`_PerPvRaisingArchiver`, absent until GB-65.
+
+    Its absence is why ``_coverage_notes``' ``alarm_withheld`` branch had never been executed by
+    any test: every alarm double here answers cleanly, so a per-PV alarm failure could not be
+    expressed at all, and the note that reports it could have been deleted unnoticed.
+    """
+
+    def __init__(self, fail_pv: str) -> None:
+        self._fail_pv = fail_pv
+
+    def is_alarm_configured(self, pv: str) -> bool:
+        if pv == self._fail_pv:
+            raise RuntimeError("timeout")
+        return True
+
+
 # --- set-diff matrix ---
 
 
@@ -136,7 +153,11 @@ def test_per_pv_archiver_failure_withheld_not_a_gap() -> None:
     assert "DEV:A" not in report.critical_uncovered  # only withheld gap, no proven gap
     assert "DEV:A" not in report.unarchived
     assert "archiver" in report.planes_live  # plane is still live (partial failure)
-    assert any("withheld for 1 PV" in n for n in report.notes)
+    # GB-65: anchored on the PLANE, not just on "withheld for 1 PV". That substring matches
+    # the alarm note word for word, so it could not tell the two apart, and the alarm one had
+    # no test of its own to notice.
+    assert any("'archived' withheld for 1 PV(s)" in n for n in report.notes), report.notes
+    assert not any("'alarmed' withheld" in n for n in report.notes), report.notes
 
 
 def test_plane_disabled_all_withheld_not_a_gap() -> None:
@@ -283,3 +304,71 @@ def test_unscoped_warns_cap_risk() -> None:
         [_row("DEV:A")], scope="", channelfinder=_FakeCF({"DEV:A"}), cf_requested=True
     )
     assert any("Unscoped audit" in n for n in report.notes)
+
+
+# --- GB-65: three honest-caveat notes that no test held ---
+
+
+def test_cf_requested_without_a_checker_names_the_unset_url() -> None:
+    """The "requested but not configured" note, which no test had ever REACHED.
+
+    Measured before GB-65: every ``cf_requested=True`` call in this file also passes a checker, so
+    the branch that fires when ChannelFinder was asked for and no URL is set had never executed.
+    It is a different statement from the "disabled" note below it, and conflating the two is the
+    exact confusion the split exists to prevent: one says "you asked and it is not configured",
+    the other "you did not ask". Provably red: drop the ``cf_requested`` branch from
+    :func:`_coverage_notes`.
+    """
+    report = audit_coverage([_row("DEV:A")], scope="DEV:", cf_requested=True)
+
+    assert any("ChannelFinder check requested" in n for n in report.notes), report.notes
+    assert any("EPICS_MCP_CHANNELFINDER_URL is unset" in n for n in report.notes), report.notes
+    # NOT the other branch: "requested but unset" and "disabled" must stay distinguishable.
+    assert not any("ChannelFinder disabled" in n for n in report.notes), report.notes
+
+
+def test_per_pv_alarm_failure_gets_its_own_withheld_note() -> None:
+    """The alarm half of the per-PV withhold, which had no test and no test DOUBLE.
+
+    Its archiver twin has been pinned since this audit shipped; this one could not even be
+    expressed, because every alarm double in this file answers cleanly (see
+    :class:`_PerPvRaisingAlarm`). The asymmetry IS the defect, the same shape GB-29 found on the
+    glob-cap note. Provably red: drop the ``alarm_withheld`` branch from :func:`_coverage_notes`.
+    """
+    report = audit_coverage(
+        [_row("DEV:A")],
+        scope="DEV:",
+        channelfinder=_FakeCF({"DEV:A"}),
+        cf_requested=True,
+        alarmed=_PerPvRaisingAlarm(fail_pv="DEV:A"),
+        alarm_requested=True,
+    )
+
+    assert report.rows[0].alarmed == "withheld"
+    assert any("'alarmed' withheld for 1 PV(s)" in n for n in report.notes), report.notes
+    # The archiver plane was not asked here, so its twin note must NOT appear.
+    assert not any("'archived' withheld" in n for n in report.notes), report.notes
+
+
+def test_a_withheld_gap_is_named_as_excluded_from_critical_uncovered() -> None:
+    """The note behind the H2 rule "a withheld cell is never a gap".
+
+    The rule itself is pinned by ``test_per_pv_archiver_failure_withheld_not_a_gap`` through the
+    FIELD (``critical_uncovered``); the sentence that tells a reader WHY the PV is absent from
+    that list was not. Deleting it leaves a report whose exclusion is invisible. Provably red:
+    drop the ``withheld_gap_excluded`` branch from :func:`_coverage_notes`.
+    """
+    report = audit_coverage(
+        [_row("DEV:A")],
+        scope="DEV:",
+        channelfinder=_FakeCF({"DEV:A"}),
+        cf_requested=True,
+        archived=_PerPvRaisingArchiver(fail_pv="DEV:A"),
+        archive_requested=True,
+        alarmed=_FakeAlarm({"DEV:A"}),
+        alarm_requested=True,
+    )
+
+    assert "DEV:A" not in report.critical_uncovered
+    assert any("have a withheld gap and no proven gap" in n for n in report.notes), report.notes
+    assert any("1 delivered PV(s)" in n for n in report.notes), report.notes
