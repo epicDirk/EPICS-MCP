@@ -83,6 +83,24 @@ carry breaking changes).
   is reported as a mismatch rather than as unverified. That is what the readback saw; judge the
   effect of such a command from the record's own status.
 
+- **The display tools no longer miss what sits inside a tabbed widget.** All four display-aware
+  tools (`validate_pvs`, `coverage_audit`, `crossplane_check`, `find_device`) read the display tree
+  through the shared navigation engine, and that engine walked a display's widgets flatly. A tabbed
+  widget does not hang its content as a direct child: the display format nests it one level deeper,
+  under the tab container. Everything inside a tab was therefore invisible, so navigation targets
+  reached only from a tab were reported as unreferenced, and PVs that live only on a tab page were
+  absent from the answer. Measured on a 97-display set, restoring the descent raises the edge count
+  from 1493 to 1605 and the `open_display` edges from 92 to 204; across a larger corpus it recovers
+  253 `open_display` actions and 36 navigation widgets spread over 23 files, one of them an operator
+  entry point. Nothing warned about it, and that is the part worth knowing: a target made
+  unreachable this way still counts as having no incoming link, and a display with no incoming link
+  is seeded as an entry point, so the reachability ratio stayed at a clean 1.0 while the edges were
+  missing. Expect a display set to report MORE references and MORE PVs than before, not fewer.
+  Two further engine fixes ride along: a display whose glob-resolved reference matched its own file
+  no longer loses its entry-point status over that guessed self-link, and the inventory walk itself
+  got substantially faster on large sets. Server behaviour and every wire field are unchanged; only
+  the completeness of the underlying analysis improves.
+
 ## [0.5.0] - 2026-08-02
 
 ### Added
