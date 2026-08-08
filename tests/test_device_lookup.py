@@ -465,7 +465,10 @@ def test_context_cap_reaches_the_caller_as_a_lower_bound_note() -> None:
     """
     report = _report_with_caps(context_capped=("a.bob", "b.bob"))
 
-    assert any("context cap" in note for note in report.notes), report.notes
+    # The full wording, not the bare substring this used to accept (GB-72): the docstring above
+    # already called it the per-display context cap while the assertion would have passed on any
+    # other name, so the one thing stating the wording was the prose nobody executes.
+    assert any("hit the per-display context cap" in note for note in report.notes), report.notes
     assert any("2 display(s)" in note for note in report.notes), report.notes
     assert any("LOWER BOUND" in note for note in report.notes), report.notes
     # The two signals are independent: no glob cap fired here, so no glob note may appear.

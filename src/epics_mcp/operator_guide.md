@@ -839,7 +839,7 @@ messages embed the full request URL, an internal host would leak into this file)
   fragment; `view="display"` asks what an operator opening this screen would see. A fragment
   answers 0 under `view="display"`, because its macros are unbound when it stands alone, and that
   is correct rather than a failure. **Two:** the file DOES declare PVs, but not one of them
-  resolved under the macro-context cap. Then a `notes` entry names the cap, and the 0 is a lower
+  resolved under the per-display context cap. Then a `notes` entry names the cap, and the 0 is a lower
   bound rather than a fact about the file. ⚠ `validate_pvs` has **no** `context_cap` argument, so
   the cap cannot be raised from here; `crossplane_check`, `coverage_audit` and `find_device` do
   take one, and they walk the same inventory, so ask one of those when the fuller picture matters.

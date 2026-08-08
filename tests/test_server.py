@@ -3251,14 +3251,19 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
     FastMCP's native-lean schemas plus the S29 typing keep the core lane 64_719 and the full lane
-    75_853 (re-measured 2026-08-08 on both lanes, four times, for four edits to display-gated
+    76_937 (re-measured 2026-08-09 on both lanes, five times, for five edits to display-gated
     tools: GB-28 made the ``file_path`` echo a file-mode field of ``validate_pvs`` and said so in
     three of its argument descriptions, 74_899 -> 75_176 (+277 full, +0 core); GB-29 gave the
     glob cap its own sentence in the view description, 75_176 -> 75_434 (+258 full, +0 core);
     the post-build review corrected both of those plus ``find_device``'s completeness claim,
-    75_434 -> 75_699 (+265 full, +0 core); and GB-65 replaced that tool's "does not report the
-    walk caps" with what it now reports, 75_699 -> 75_853 (+154 full, +0 core). Every
-    char of all four is description text. The four zeros are the informative half: unlike
+    75_434 -> 75_699 (+265 full, +0 core); GB-65 replaced that tool's "does not report the
+    walk caps" with what it now reports, 75_699 -> 75_853 (+154 full, +0 core); and GB-72 gave
+    every display tool's ``context_cap`` description one wording for both limits of the walk:
+    ``crossplane_check`` and ``coverage_audit`` described the context cap without ever naming it
+    and said nothing at all about the glob cap although both emit a note about it, and
+    ``find_device`` called it a third thing again, 75_853 -> 76_937 (+1084 full, +0
+    core). Every
+    char of all five is description text. The five zeros are the informative half: unlike
     the GB-6 edit below, these touch display-gated tools only, so the core lane cannot move,
     and a nonzero core delta would have meant the edit landed somewhere it was not aimed.
     The previous figures were core 64_719 and full 74_899, re-measured 2026-08-06 on both lanes,

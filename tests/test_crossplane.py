@@ -326,6 +326,52 @@ def test_notes_glob_capped_and_needs_msi() -> None:
     assert any("needs msi" in note for note in msi.notes)
 
 
+def test_notes_context_capped_names_the_cap_the_way_every_sibling_does() -> None:
+    """The OTHER walk cap reaches the caller, and by the one agreed name (GB-72).
+
+    Its twin above has been pinned since this join shipped, this one was pinned nowhere: of the
+    four display tools, this was the only one whose context-cap note no test looked at, and it was
+    also the only one that got the name wrong. It said "the inventory's per-instance context cap",
+    but per-instance is what this module calls the INVENTORY (see the module docstring), while the
+    cap counts reachability contexts per FILE, so the note named the thing the cap shortens.
+
+    Provably red: restore either wording, or drop the ``context_capped`` block from the notes.
+    """
+    report = crossplane_check(
+        [_jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:x")], _st(), context_capped=("a.bob", "b.bob")
+    )
+
+    assert any("hit the per-display context cap" in note for note in report.notes), report.notes
+    assert any("2 display(s)" in note for note in report.notes), report.notes
+    # The two signals are independent: no glob cap fired here, so no glob note may appear.
+    assert not any("glob cap" in note for note in report.notes), report.notes
+
+
+def test_the_second_context_cap_note_uses_the_same_name_as_the_first() -> None:
+    """This service names the cap TWICE, and the two used to disagree with each other.
+
+    The ``cf_unregistered`` lower-bound note is the second place, and it said "the inventory
+    context cap" against the first note's "per-instance context cap", so the wording diverged
+    inside a single service before it ever diverged between tools. Neither line-wise grep found
+    it, because the phrase straddles the line break; the AST guard in test_diagnostics_tail.py
+    did. Pinned here as well, beside the behaviour, because that guard is about a fifth place
+    inventing a name and this is about what this service emits.
+
+    Provably red: restore "inventory context cap" in the cf_unregistered note.
+    """
+    report = crossplane_check(
+        [_jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:x")],
+        _st(),
+        channelfinder=_FakeCF(set()),
+        cf_requested=True,
+        context_capped=("a.bob",),
+    )
+
+    assert report.cf_unregistered, "the cf_unregistered note needs an unregistered PV to fire"
+    cf_note = next(note for note in report.notes if "cf_unregistered is a LOWER BOUND" in note)
+    assert "hit the per-display context cap" in cf_note, cf_note
+
+
 # --- cf_unregistered (ChannelFinder plane) -------------------------------------------------------
 
 

@@ -46,6 +46,23 @@ carry breaking changes).
 
 ### Changed
 
+- **The four display tools now call the inventory walk's context cap by ONE name, and two of them
+  stop hiding its second limit.** The same cap was named three ways across the four
+  (`per-display context cap`, `per-instance context cap`, and the bare `the context cap`), and a
+  fourth way turned up inside `crossplane_check` beside its own, so one service named it two ways.
+  This breaks a reader rather than a computation: an assistant that has read a tool's `context_cap`
+  description and then searches the notes for that wording did not find it, on the very tool it had
+  just read. One of the four was also wrong. `per-instance` is what `crossplane_check` calls the
+  INVENTORY, while the cap counts reachability contexts per FILE, so that note named the thing the
+  cap shortens instead of the cap. Every note now reads `hit the per-display context cap`, the
+  wording all four argument descriptions, both CLI help texts and the shipped operator guide
+  already used. Separately, the `context_cap` descriptions of `crossplane_check` and
+  `coverage_audit` now also name the GLOB cap: both tools emit a note about it, but neither
+  description mentioned it, so the only two limits a caller could learn about from those two tools
+  were one each. No behaviour change, no field changed, and the counts are untouched: this is the
+  wording beside the numbers that were pinned together in the previous release entry. Wording is
+  now pinned too, across every place a tool names the cap.
+
 - **`find_device` no longer claims its screen list is complete, because it cannot know that.** Three
   notes and the tool description said "the screen list is complete" beside a capped live read. What
   they meant is true and now says so: the LIVE cap does not shorten the screen list. What they

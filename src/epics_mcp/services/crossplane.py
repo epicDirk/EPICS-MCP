@@ -159,7 +159,7 @@ class CrossPlaneReport(BaseModel):
     pvs_unresolved: tuple[str, ...] = ()
     #: Distinct non-channel references (loc/sim/sys/other) excluded from the IOC join.
     pvs_non_channel: tuple[str, ...] = ()
-    #: Operator-facing displays whose per-instance PVs are incomplete (inventory context cap):
+    #: Operator-facing displays whose per-instance PVs are incomplete (per-display context cap):
     #: their linked/other counts are a LOWER BOUND.
     displays_incomplete: tuple[str, ...] = ()
     #: IOC .db PV counts (only when a .db set was supplied; module repos deferred).
@@ -331,8 +331,15 @@ def crossplane_check(
             "excluded from the IOC join, not real EPICS channels."
         )
     if context_capped:
+        # "per-display", not "per-instance", and the distinction is this module's own to get
+        # wrong: "per-instance" is what THIS file calls the inventory (see the module docstring
+        # and ``displays_incomplete``), while the cap counts reachability contexts PER FILE
+        # (``opi_navigation`` expansion, budget per (target, top)). Saying "per-instance context
+        # cap" names the thing the cap shortens instead of the cap, and it made this the one
+        # tool of the four whose note disagreed with its own ``context_cap`` argument
+        # description. One wording across all four, pinned in tests/test_diagnostics_tail.py.
         notes.append(
-            f"{len(context_capped)} display(s) hit the inventory's per-instance context cap, "
+            f"{len(context_capped)} display(s) hit the per-display context cap, "
             "their resolved PVs are a LOWER BOUND; 'linked'/'other-prefix' may undercount "
             "(re-run with a higher context cap)."
         )
@@ -381,9 +388,13 @@ def crossplane_check(
             "proven unregistered against an unavailable registry."
         )
     if cf_unregistered and context_capped:
+        # The SECOND place this one service names the cap, and it used to name it differently
+        # from the note above ("inventory context cap" against "per-instance context cap"), so
+        # the wording diverged inside a single tool and not just between the four. Invisible to
+        # a line-wise grep, because the phrase straddles the line break: found by the AST guard.
         notes.append(
-            "cf_unregistered is a LOWER BOUND, some operator displays hit the inventory context "
-            "cap, so the linked set (and thus cf_unregistered) may undercount."
+            "cf_unregistered is a LOWER BOUND, some operator displays hit the per-display "
+            "context cap, so the linked set (and thus cf_unregistered) may undercount."
         )
     if (
         cf_unregistered

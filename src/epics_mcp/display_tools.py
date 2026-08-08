@@ -153,7 +153,13 @@ async def crossplane_check(
         Field(
             description="Max per-display reachability contexts the PV-inventory explores (higher "
             "= more complete, slower; a large dataset like fbis takes ~60 s at the default). "
-            "Capped displays are reported as a lower bound in 'displays_incomplete'.",
+            "Capped displays are reported as a lower bound in 'displays_incomplete', and the "
+            "notes call this limit the per-display context cap. The walk "
+            "has a SECOND limit this argument cannot raise, the glob cap: a <file> reference "
+            "still carrying a macro is resolved by globbing the known displays, and past that "
+            "cap the surplus matches are dropped, which leaves out whole embedded screens. Each "
+            "cap fires its own notes entry naming its count; the absence of such an entry means "
+            "no cap fired on this run, never 'complete'.",
             ge=1,
         ),
     ] = DEFAULT_PV_CONTEXT_CAP,
@@ -230,7 +236,17 @@ async def coverage_audit(
     ] = None,
     context_cap: Annotated[
         int,
-        Field(description="max per-display reachability contexts the PV-inventory explores", ge=1),
+        Field(
+            description="max per-display reachability contexts the PV-inventory explores; the "
+            "notes call this limit the per-display context cap. The "
+            "walk has a SECOND limit this argument cannot raise, the glob cap: a <file> "
+            "reference still carrying a macro is resolved by globbing the known displays, and "
+            "past that cap the surplus matches are dropped, leaving out whole embedded screens "
+            "and making the display set D a lower bound. Each cap fires its own notes entry "
+            "naming its count; the absence of such an entry means no cap fired on this run, "
+            "never 'complete'.",
+            ge=1,
+        ),
     ] = DEFAULT_PV_CONTEXT_CAP,
     windows_paths: Annotated[
         bool, Field(description="resolve embedded <file> refs case-insensitively (Windows host)")
@@ -268,7 +284,12 @@ async def find_device(
     timeout: Annotated[float, Field(description="Live-read timeout in seconds", gt=0)] = 5.0,
     context_cap: Annotated[
         int,
-        Field(description="Per-display macro-context cap (higher = more complete, slower)", ge=1),
+        Field(
+            description="Per-display context cap: max reachability contexts the PV-inventory "
+            "explores per display (higher = more complete, slower). The walk has a SECOND limit "
+            "this argument cannot raise, the glob cap; both are named in their own notes entry.",
+            ge=1,
+        ),
     ] = DEFAULT_PV_CONTEXT_CAP,
     windows_paths: Annotated[
         bool, Field(description="Resolve embedded <file> refs case-insensitively (Windows host)")

@@ -30,11 +30,41 @@ number for the same walk, and it is exactly the mutant this file exists to catch
 vectors below therefore carry more pairs than sources, and a third test asserts that property of
 the fixtures themselves: a blind fixture (one pair per source) would leave the mutant green while
 looking like a test.
+
+**A third half, added by GB-72: the WORDING.** Equality and uniqueness both concern the numbers,
+and the numbers were only ever half the promise. The same cap was NAMED three different ways
+across the four tools (``per-display context cap``, ``per-instance context cap``, and the bare
+``the context cap``), which breaks a reader rather than a computation: an assistant that has read
+one tool's description searches the notes for the phrase that description uses, and does not find
+it. Worse, one of the three was wrong. ``per-instance`` is what ``services/crossplane.py`` calls
+the INVENTORY, while the cap counts reachability contexts per FILE, so that note named the thing
+the cap shortens instead of the cap. The guard below fixes ``per-display context cap`` as the one
+wording and holds every place that names the cap to it.
+
+⚠ Three properties of that guard are load-bearing, and each was measured rather than assumed.
+It reads the AST and not the lines, because two of the seven mentions straddle a line break and a
+line-wise ``grep`` misses both, INCLUDING a fourth wording that lived inside ``crossplane_check``
+beside its own second one, so that one service named the cap two ways. It renders an f-string
+WHOLE, with a placeholder per insertion, so that a qualifier assembled at runtime
+(``f"hit the {qual} context cap"``) reads as ``hit the {} context cap`` and is rejected rather
+than passing unseen between two constant segments. And it anchors on ``hit the ... context cap``,
+the construction with which a note REPORTS the cap, so the advice ``re-run with a higher context
+cap`` at the end of two of those same notes stays untouched: that is the argument, not a second
+name for the cap.
+
+⚠ Named blind spots, in the same spirit as the one on :func:`_tail_reads`. A note that announces
+the cap some other way ("was cut short by the context cap") is not this construction and is
+invisible here. COMMENTS are invisible too, because an AST carries none: the two ``#:`` field
+comments that also name the cap were brought along by hand and nothing holds them there. And the
+guard is about the WORD, never about whether a tool emits it at all. That each tool really does
+emit it is pinned per tool, beside the behaviour it belongs to, in ``test_validate.py``,
+``test_coverage.py``, ``test_crossplane.py`` and ``test_device_lookup.py``.
 """
 
 from __future__ import annotations
 
 import ast
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
@@ -403,3 +433,260 @@ def test_the_detector_recognises_a_read_and_ignores_a_pass_on() -> None:
     assert _tail_reads("x = other.context_capped") == []
     # The diagnostics object itself, without reaching into the tail.
     assert _tail_reads("d = inventory.diagnostics") == []
+
+
+# --------------------------------------------------------------------------------------------
+# The wording half (GB-72): one name for the cap, everywhere a tool names it.
+# --------------------------------------------------------------------------------------------
+
+#: The one qualifier a note may carry when it REPORTS the context cap. It is the engine's own
+#: unit of measure (``opi_navigation`` budgets reachability contexts per file), and it is already
+#: what all four ``context_cap`` argument descriptions, both CLI help texts and the shipped
+#: operator guide say, so this pins the majority wording rather than inventing a new one.
+_CAP_QUALIFIER = "per-display "
+
+#: The construction a note uses to REPORT the cap. Deliberately not "any mention of the cap":
+#: ``re-run with a higher context cap`` is advice about the ARGUMENT and is left alone.
+_CAP_MENTION = re.compile(r"hit the (.*?)context cap", re.S)
+
+#: What an f-string insertion renders as, so a qualifier computed at runtime shows up as a
+#: qualifier that is not :data:`_CAP_QUALIFIER`, rather than vanishing between two segments.
+_INSERTION = "{}"
+
+#: The modules that must each name the cap. Not a count: a count says nothing about WHICH tool
+#: fell out of the population, and a tool dropping its note entirely is how this defect class
+#: began (see ``find_device`` before GB-65).
+_CAP_NAMING_MODULES = frozenset(
+    {
+        Path("display_tools.py"),
+        Path("services") / "coverage.py",
+        Path("services") / "crossplane.py",
+        Path("services") / "device_lookup.py",
+        Path("tools") / "validate.py",
+    }
+)
+
+
+def _rendered_strings(tree: ast.AST) -> list[str]:
+    """Return every string literal in *tree*, with an f-string rendered WHOLE.
+
+    An f-string is one :class:`ast.JoinedStr` holding constant segments and insertions. Walking
+    for :class:`ast.Constant` alone would see the segments separately, so a phrase split by an
+    insertion would be invisible; each insertion therefore renders as :data:`_INSERTION` and the
+    JoinedStr is not descended into. Implicit concatenation needs no handling: Python already
+    joins ``"a" "b"`` into one node at parse time, which is why the two mentions that straddle a
+    line break are seen here and are missed by a line-wise search.
+    """
+    found: list[str] = []
+
+    class _Visitor(ast.NodeVisitor):
+        def visit_JoinedStr(self, node: ast.JoinedStr) -> None:
+            parts = [
+                part.value
+                if isinstance(part, ast.Constant) and isinstance(part.value, str)
+                else _INSERTION
+                for part in node.values
+            ]
+            found.append("".join(parts))
+            # No generic_visit: its constant segments are already accounted for above, and
+            # descending would report the same phrase twice and split ones not at all.
+
+        def visit_Constant(self, node: ast.Constant) -> None:
+            if isinstance(node.value, str):
+                found.append(node.value)
+
+    _Visitor().visit(tree)
+    return found
+
+
+def _cap_qualifiers(source: str) -> list[str]:
+    """Return the qualifier of every "hit the ... context cap" in *source*, in source order."""
+    return [
+        match.group(1)
+        for text in _rendered_strings(ast.parse(source))
+        for match in _CAP_MENTION.finditer(text)
+    ]
+
+
+def test_every_place_that_names_the_context_cap_uses_the_same_words() -> None:
+    """One cap, one name, so a phrase from any tool's description finds the matching note.
+
+    This is a guard about READERS, not about numbers, and it is the half the equality tests above
+    cannot express: four tools can agree perfectly on what they counted and still call it three
+    different things, which is exactly the state GB-72 found. An assistant that reads
+    ``crossplane_check``'s description ("per-display reachability contexts") and then greps the
+    notes for that wording used to come up empty on the very tool it had just read.
+
+    Provably red: put ``per-instance`` back into either crossplane note, or drop the qualifier
+    from the coverage one.
+    """
+    offenders = {
+        f"{path.relative_to(_SRC).as_posix()}: {qualifier!r}"
+        for path in sorted(_SRC.rglob("*.py"))
+        for qualifier in _cap_qualifiers(path.read_text(encoding="utf-8"))
+        if qualifier != _CAP_QUALIFIER
+    }
+    assert not offenders, (
+        f"the context cap is named in more than one way: {sorted(offenders)}. Every note that "
+        f"reports it says 'hit the {_CAP_QUALIFIER}context cap', because that is the engine's "
+        "own unit (contexts per file) and what every argument description already says. See "
+        "GB-72."
+    )
+
+
+def test_every_display_tool_actually_names_the_cap() -> None:
+    """The non-vacuity floor: a guard phrased as "all of them agree" also passes on silence.
+
+    Sameness over an empty population is free, and the cheapest way to satisfy the test above is
+    for a tool to stop mentioning the cap at all, which is the WORSE defect and the one this
+    repository has really had. So the population is named per module rather than counted: a
+    module dropping out is reported by name.
+    """
+    naming = {
+        path.relative_to(_SRC)
+        for path in sorted(_SRC.rglob("*.py"))
+        if _cap_qualifiers(path.read_text(encoding="utf-8"))
+    }
+    assert naming == _CAP_NAMING_MODULES, (
+        f"modules naming the context cap changed: missing {_CAP_NAMING_MODULES - naming}, "
+        f"unexpected {naming - _CAP_NAMING_MODULES}. A tool that stopped naming the cap is a "
+        "silent lower bound, not a tidy-up; a NEW one belongs in this set."
+    )
+
+
+def test_the_wording_detector_sees_a_split_phrase_and_ignores_the_advice() -> None:
+    """The detector itself, on synthetic sources, including the two shapes it exists for.
+
+    Without this, "no offenders" is as much a claim about the detector as about the tree, and the
+    two hard cases are precisely the ones a naive detector gets wrong in the SAFE-looking
+    direction: it reports nothing and reads as a clean repository.
+    """
+    # The plain case, and the qualifier is returned rather than merely matched.
+    assert _cap_qualifiers('x = "hit the per-display context cap"') == ["per-display "]
+    assert _cap_qualifiers('x = "hit the per-instance context cap"') == ["per-instance "]
+    # Implicit concatenation across a line break: one node at parse time, one match here. This is
+    # the shape a line-wise search misses, and two of the real mentions have it.
+    assert _cap_qualifiers('x = ("hit the per-display context " "cap, so on")') == ["per-display "]
+    # An f-string: the count in front must not hide the phrase behind it.
+    assert _cap_qualifiers('x = f"{n} display(s) hit the per-display context cap"') == [
+        "per-display "
+    ]
+    # A qualifier assembled at runtime is a qualifier nobody pinned, so it must NOT read as clean.
+    assert _cap_qualifiers('x = f"hit the {qual} context cap"') == [f"{_INSERTION} "]
+    # The advice at the end of two real notes talks about the argument, not about the cap's name.
+    assert _cap_qualifiers('x = "(re-run with a higher context cap)."') == []
+    # A mention that is not this construction: out of reach by design, see the file docstring.
+    assert _cap_qualifiers('x = "was cut short by the context cap"') == []
+
+
+#: Every display tool has to name BOTH limits of the walk on the wire, in the words its notes use.
+#: Two phrases rather than one: naming one limit while staying silent about the other is exactly
+#: the state GB-72 found, and it reads as "there is one limit" to a caller.
+#:
+#: The context-cap phrase is the full one, deliberately identical to :data:`_CAP_QUALIFIER` plus
+#: the noun, because matching the notes is the whole point. Measured: describing the cap without
+#: naming it is its own failure, and two tools were in it. Their descriptions said "per-display
+#: reachability contexts the PV-inventory explores", which explains the cap perfectly and cannot
+#: be found by anyone searching for the phrase the notes and the sibling tools use. The argument
+#: is called ``context_cap`` with an underscore, so it does not match either.
+_WIRE_CAP_PHRASES = (f"{_CAP_QUALIFIER}context cap", "glob cap")
+
+#: The tools whose descriptions carry that duty, i.e. the four fed by the inventory walk.
+_DISPLAY_TOOLS = frozenset({"validate_pvs", "crossplane_check", "coverage_audit", "find_device"})
+
+
+async def test_every_display_tool_names_both_walk_limits_on_the_wire() -> None:
+    """The DESCRIPTION side of the same promise, checked where a caller actually reads it.
+
+    The guards above hold the notes to one wording; this one holds the descriptions to naming the
+    thing at all. It is the other half of the same defect and it needs its own test, measured
+    rather than assumed: removing either sentence added by GB-72 leaves the entire suite green,
+    so nothing but this stops the descriptions from falling silent again. Both
+    ``crossplane_check`` and ``coverage_audit`` emitted a glob-cap note while their descriptions
+    named only the context cap, which is the worse direction of the two, because a caller who
+    reads a description and sees one limit has been told there is one.
+
+    Read off the wire (``mcp.list_tools()``) rather than out of the source, because the wire is
+    what an assistant sees: a sentence in a docstring nobody serialises would satisfy a source
+    check and help no one. The whole serialised tool is searched, not one argument, so moving the
+    sentence between the docstring and a field description is free, as it should be.
+
+    Provably red: drop the glob-cap sentence from either tool's ``context_cap`` description.
+    """
+    from mcp.types import ListToolsResult
+
+    from epics_mcp.server import mcp
+
+    tools = {t.name: t for t in await mcp.list_tools() if t.name in _DISPLAY_TOOLS}
+    assert set(tools) == _DISPLAY_TOOLS, (
+        f"expected the four display tools on the wire, found {sorted(tools)}. Running without the "
+        "displays group? Then this test cannot make its statement and must not pass quietly."
+    )
+
+    silent = {
+        name: [phrase for phrase in _WIRE_CAP_PHRASES if phrase not in serialised]
+        for name, tool in tools.items()
+        if (
+            serialised := ListToolsResult(tools=[tool.to_mcp_tool()]).model_dump_json(
+                by_alias=True, exclude_none=True
+            )
+        )
+        and any(phrase not in serialised for phrase in _WIRE_CAP_PHRASES)
+    }
+    assert not silent, (
+        f"display tools that do not name both limits of the inventory walk: {silent}. A tool that "
+        "emits a note about a cap and never mentions it in its description leaves the reader to "
+        "discover the limit from an answer, see GB-72."
+    )
+
+
+#: The names this repository has really given the context cap besides the agreed one, each of them
+#: removed by GB-72. A denylist alongside the phrase guard above, because these three sat OUTSIDE
+#: the "hit the ... context cap" construction it anchors on: in ``find_device``'s ``context_cap``
+#: field, in the shipped operator guide, and in a table row of ``docs/tools.md``. Honest about what
+#: it is: a guard against a REPEAT, not against a name nobody has thought of yet. Its warrant is
+#: the same as every other guard here, that this is the wording history the repository actually
+#: has, and the three would otherwise be the only reworded places with nothing holding them.
+_RETIRED_CAP_NAMES = ("per-instance context cap", "inventory context cap", "macro-context cap")
+
+#: Where the cap can be named at a READER: the served surfaces. Comments are out of scope by the
+#: same rule as the phrase guard (an AST has none), and so are ``tests/``, where these names are
+#: quoted on purpose to say what was wrong.
+_SERVED_MARKDOWN = (Path("src") / "epics_mcp", Path("docs"))
+
+
+def test_no_served_surface_uses_a_retired_name_for_the_cap() -> None:
+    """The three places the phrase guard cannot see, held by name.
+
+    ``hit the ... context cap`` is how a NOTE reports the cap; a description or a guide names it in
+    running prose ("Per-display macro-context cap", "resolved under the macro-context cap"), and
+    those are exactly where the last two wordings survived the first pass of GB-72. The guide is
+    the worse of the two, because it ships as the ``epics-pv://guide`` resource: an assistant reads
+    a name there and then greps the notes for it.
+
+    Provably red: put "macro-context cap" back into either the ``find_device`` field description or
+    the guide.
+    """
+    root = _SRC.parent.parent
+    offenders: dict[str, list[str]] = {}
+
+    for path in sorted(_SRC.rglob("*.py")):
+        hits = [
+            name
+            for text in _rendered_strings(ast.parse(path.read_text(encoding="utf-8")))
+            for name in _RETIRED_CAP_NAMES
+            if name in text
+        ]
+        if hits:
+            offenders[path.relative_to(root).as_posix()] = sorted(set(hits))
+
+    for base in _SERVED_MARKDOWN:
+        for path in sorted((root / base).rglob("*.md")):
+            text = path.read_text(encoding="utf-8")
+            if hits := [name for name in _RETIRED_CAP_NAMES if name in text]:
+                offenders[path.relative_to(root).as_posix()] = sorted(set(hits))
+
+    assert not offenders, (
+        f"retired names for the context cap are back: {offenders}. The cap is called "
+        f"'{_CAP_QUALIFIER}context cap' everywhere a reader meets it, see GB-72."
+    )

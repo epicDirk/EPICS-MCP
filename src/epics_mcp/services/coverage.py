@@ -129,7 +129,7 @@ class CoverageReport(BaseModel):
     cf_registered: int = 0
     #: True when the ChannelFinder query hit the result cap → all cf verdicts withheld.
     cf_capped: bool = False
-    #: Operator displays whose per-instance PVs are incomplete (inventory context cap), a
+    #: Operator displays whose per-instance PVs are incomplete (per-display context cap), a
     #: not-in-D PV may sit on a capped one → ``has_display`` withheld, never a false ``no``.
     displays_incomplete: tuple[str, ...] = ()
     #: Honest caveats (lower bounds, withholds, skipped planes).
@@ -403,10 +403,15 @@ def _coverage_notes(
             "was running at config-import time (the config index is a change-log)."
         )
     if context_capped:
+        # Named in full ("per-display"), not shortened to "the context cap": a caller who has
+        # read one of the sibling tools searches for the phrase its description uses, and the
+        # bare form is the one that cannot be found that way. Pinned across all four in
+        # tests/test_diagnostics_tail.py. The "higher context cap" at the end is the ARGUMENT,
+        # a piece of advice rather than a second name for the cap, and stays as it is.
         notes.append(
-            f"{len(context_capped)} display(s) hit the context cap, a not-shown PV could "
-            "sit on a not-fully-expanded display, so 'has_display=no'/blind_spots are WITHHELD for "
-            "those (a lower bound; re-run with a higher context cap)."
+            f"{len(context_capped)} display(s) hit the per-display context cap, a not-shown PV "
+            "could sit on a not-fully-expanded display, so 'has_display=no'/blind_spots are "
+            "WITHHELD for those (a lower bound; re-run with a higher context cap)."
         )
     if glob_capped_count:
         notes.append(

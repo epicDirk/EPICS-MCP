@@ -427,8 +427,9 @@ async def _validate_pvs(
     Pass *displays_dir* = the dataset ROOT for full macro resolution; without it the file's own
     directory is used and fragments under-resolve. A ``notes`` entry flags when the PV list is a
     lower bound, and WHICH verdict that sentence carries follows the requested view. Under
-    ``view="file"`` it needs BOTH that the macro expansion hit the context cap AND that the file
-    declares a macro-templated PV occurrence of its own: a file whose occurrences carry no macro
+    ``view="file"`` it needs BOTH that the macro expansion hit the per-display context cap AND
+    that the file declares a macro-templated PV occurrence of its own: a file whose occurrences
+    carry no macro
     answers the same at every cap, so calling it a lower bound would be a false statement (see
     :func:`_file_view_is_capped`). Under ``view="display"`` the same sentence carries the DISPLAY
     verdict, which has NO such test and is deliberately more cautious (see

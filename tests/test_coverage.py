@@ -249,7 +249,13 @@ def test_context_capped_withholds_has_display() -> None:
     assert "DEV:B" not in report.blind_spots
     assert "DEV:B" not in report.critical_uncovered
     assert report.displays_incomplete == ("capped.bob",)
-    assert any("context cap" in n for n in report.notes)
+    # The full wording, not the bare substring "context cap" this used to accept (GB-72). This
+    # note said only "the context cap" while every sibling tool and this tool's own context_cap
+    # description said "per-display", so a reader searching for the documented phrase missed it.
+    # A substring assertion survives any rewording that keeps two words, which is why the one
+    # wording is pinned here as well as in tests/test_diagnostics_tail.py: that file guards
+    # against a FIFTH place inventing a name, this line guards what this tool really emits.
+    assert any("hit the per-display context cap" in n for n in report.notes), report.notes
 
 
 def test_glob_capped_is_reported_as_a_lower_bound() -> None:
