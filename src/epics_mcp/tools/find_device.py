@@ -110,14 +110,15 @@ async def _find_device(
             "results": [],
             "errors": [],
             "note": "Live values unavailable, the EPICS provider returned a malformed batch. "
-            "The screen list is complete; live values could not be read.",
+            "Only the live half failed; the screen list is unaffected by it.",
         }
 
     # ChannelFinder source-IOC join with a match-aware glob: a substring match need not start with
     # the query, so broaden to ``*stem*``; prefix/exact stay anchored at ``stem*``. The exact-name
     # join in build_device_report filters the (over-broad) fetch. Best-effort, a CF outage must not
     # sink the screens+live result (mirrors the live-read handling above: a provider-contract breach
-    # degrades the live part, screens stay complete).
+    # degrades the live part and leaves the screen list untouched; "untouched by THIS failure" is
+    # the claim, not "complete", see DeviceLookupReport for the walk caps nobody reports here).
     stem = channel_name(cleaned).rstrip(":")
     glob = f"*{stem}*" if match == "substring" else f"{stem}*"
     try:

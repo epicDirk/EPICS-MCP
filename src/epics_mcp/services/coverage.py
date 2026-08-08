@@ -410,8 +410,8 @@ def _coverage_notes(
         )
     if glob_capped_count:
         notes.append(
-            f"{glob_capped_count} template <file> reference(s) hit the glob cap, some embedded "
-            "screens were dropped; the display set D is a lower bound."
+            f"{glob_capped_count} globbed <file> reference(s) hit the glob cap, some embedded "
+            "screens were left out of the expansion; the display set D is a lower bound."
         )
     if withheld_gap_excluded:
         notes.append(

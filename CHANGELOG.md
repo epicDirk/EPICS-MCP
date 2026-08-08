@@ -13,9 +13,10 @@ carry breaking changes).
   to appear on the empty-result answer only, so one mode came back with two different key sets and a
   client reading both had no stable key to match a result to its call. It now travels with
   `shown_by_display` and `shown_by_display_capped` as one group of file-mode fields, present together
-  on both file-mode answers or on neither. Passing `pv_names` still drops all three, and that is the
-  point rather than an omission: the list wins, no file is opened, and echoing a path there would say
-  the answer came from a file that was never read. The value is the argument as passed, not the
+  on both file-mode answers or on neither. Passing a NON-EMPTY `pv_names` still drops all three, and
+  that is the point rather than an omission: the list wins, no file is opened, and echoing a path
+  there would say the answer came from a file that was never read. An EMPTY list does not win, so
+  the file is read as usual and the fields come back. The value is the argument as passed, not the
   resolved path, so it matches what the caller sent; with a symlink the counts describe the target
   while the field names the link. Purely additive: no existing field changes meaning, and the only
   visible difference on the empty-result answer is where the key sits in the object.
@@ -31,10 +32,27 @@ carry breaking changes).
   the source display of a capped glob and this tool does not turn that into a per-file verdict.
   `coverage_audit` and `crossplane_check` have reported the same signal since they shipped; this
   brings the third display tool in line and adds the regression test `coverage_audit` never had.
-  How much this is worth is measured rather than assumed: on a 2878-display dataset the cap fires
-  16 times across 4 source displays, on four datasets between 13 and 485 displays it never fires.
+  How much this is worth is measured rather than assumed: on a 2878-display dataset the diagnostic
+  holds 16 distinct source/target pairs across 4 source displays, and lifting the cap grows 7
+  display views (the largest by 651 channels). On four datasets between 13 and 485 displays it
+  never fires at all. Those same figures are why the note names no file: only 3 of the 7 growing
+  views appear among the reported sources, so a per-file flag built on that field would miss the
+  majority of the damage while looking precise.
+  All three notes also stop calling the dropped references "template" ones. Measured against the
+  engine, the diagnostic is fed by every glob-resolved `<file>` reference EXCEPT the template
+  ones (embedded, navtabs, open_display and the rule edges), which is the opposite of what the
+  wording said; the sentence has been wrong in `coverage_audit` and `crossplane_check` since they
+  shipped and is corrected in all three.
 
 ### Changed
+
+- **`find_device` no longer claims its screen list is complete, because it cannot know that.** Three
+  notes and the tool description said "the screen list is complete" beside a capped live read. What
+  they meant is true and now says so: the LIVE cap does not shorten the screen list. What they
+  claimed is not: the screen list comes from the same inventory walk as `validate_pvs`, that walk
+  has two caps of its own, and this tool reads neither, so a screen dropped by the glob cap is
+  missing with nothing saying so. Wording only, no behaviour change; reporting those caps here is a
+  separate open item.
 
 - **`validate_pvs` no longer calls a file's PV list a lower bound when that list cannot grow.**
   Under the default `view="file"`, the `notes` entry warning that the macro expansion hit the

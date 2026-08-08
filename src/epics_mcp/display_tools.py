@@ -44,10 +44,11 @@ async def validate_pvs(
     pv_names: Annotated[
         list[str] | None,
         Field(
-            description="List of PV names to validate. Takes precedence: supply this together "
-            "with file_path and the list wins, the file is not looked at (and not refused). The "
-            "answer then carries no file_path/shown_by_display fields either, because no file was "
-            "opened to report about."
+            description="List of PV names to validate. Takes precedence: supply a NON-EMPTY list "
+            "together with file_path and the list wins, the file is not looked at (and not "
+            "refused), and the answer then carries no file_path/shown_by_display fields either, "
+            "because no file was opened to report about. An EMPTY list does not win: the file is "
+            "read as usual and those fields come back."
         ),
     ] = None,
     file_path: Annotated[
@@ -73,18 +74,19 @@ async def validate_pvs(
             "declares nothing itself and answers total 0 under 'file' while resolving thousands "
             "under 'display'; a fragment is the reverse, because its macros are unbound when it "
             "stands alone. Every file-mode result reports shown_by_display (and file_path), and "
-            "under 'file' a note says how many channels the display view adds. Ignored when "
-            "pv_names is given, which drops those fields with it. "
+            "under 'file' a note says how many channels the display view adds. Ignored when a "
+            "non-empty pv_names is given, which drops those fields with it. "
             "A 'lower bound' note means the macro expansion hit the per-display context cap, and "
             "it carries the verdict of the view you asked for: the FILE verdict additionally "
             "requires that the file declares a macro-templated PV of its own (one with no macro "
             "resolves the same at every cap, so its list cannot grow), while the DISPLAY verdict, "
             "also reported as shown_by_display_capped under both views, has no such test and is "
             "deliberately pessimistic, so read a true there as 'cannot be ruled out'. A SEPARATE "
-            "note reports the glob cap, which drops embedded screens from the walk and can shrink "
-            "either view while both context-cap verdicts stay false; it is a statement about the "
-            "walked dataset, not about this file, so no absence of notes means 'complete'. "
-            "Neither cap is adjustable from this tool."
+            "note reports the glob cap, which leaves embedded screens out of the expansion and "
+            "can shrink either view while both context-cap verdicts stay false; it counts pairs "
+            "across the whole walk and names no file, so it is a statement about the dataset and "
+            "the absence of notes never means 'complete'. Neither cap is adjustable from this "
+            "tool."
         ),
     ] = "file",
     displays_dir: Annotated[
@@ -278,7 +280,9 @@ async def find_device(
     operator screens reference the device, is offline + macro-aware. Live values come from p4p;
     reach follows the launcher's EPICS search env (address lists / name servers / auto-addr search,
     run epics-doctor for the effective posture); the live read is capped to max_batch_size
-    channels (honest note; screens stay complete). Source IOC comes from ChannelFinder, disabled
+    channels (honest note; the screen list is not shortened by that cap, though it inherits the
+    inventory walk's own caps, which this tool does not report). Source IOC comes from
+    ChannelFinder, disabled
     by default (empty EPICS_MCP_CHANNELFINDER_URL → no source IOC, honest note); a CAPPED
     ChannelFinder fetch adds a
     note that the source-IOC join may be incomplete, a channel without source_ioc may simply have

@@ -338,8 +338,8 @@ def crossplane_check(
         )
     if glob_capped_count:
         notes.append(
-            f"{glob_capped_count} template <file> reference(s) hit the glob cap, some embedded "
-            "targets were dropped; coverage is a lower bound."
+            f"{glob_capped_count} globbed <file> reference(s) hit the glob cap, some embedded "
+            "targets were left out of the expansion; coverage is a lower bound."
         )
     if not linked_pvs and not other_prefix_pvs and indeterminate_pvs:
         notes.append(

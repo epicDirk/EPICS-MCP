@@ -66,9 +66,16 @@ class ChannelStatus(_Model):
 class DeviceLookupReport(_Model):
     """Device lookup: which screens show the device, is it live, and which IOC serves it.
 
-    ``channels`` covers only the LIVE-QUERIED (capped) channel subset; ``screens`` is complete (the
-    reverse-lookup is cheap). ``live_capped`` + the matching note flag when the device matched more
-    channels than were read live (``total_matched_channels`` is the full count).
+    ``channels`` covers only the LIVE-QUERIED (capped) channel subset; ``screens`` is unaffected by
+    that cap (the reverse-lookup is cheap). ``live_capped`` + the matching note flag when the device
+    matched more channels than were read live (``total_matched_channels`` is the full count).
+
+    ⚠ "Unaffected by that cap" is not "complete", and the wording is deliberate. This report is
+    built from the same inventory walk as ``validate_pvs``, and that walk has two caps of its own
+    (per-display context and glob). Neither is read here: ``inventory.diagnostics`` is never
+    touched on this path, so a screen dropped by the glob cap is missing from ``screens`` with no
+    note saying so. Reporting them is an open item; until then do not restore an unconditional
+    "the screen list is complete" anywhere in this file or in ``tools/find_device.py``.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -206,7 +213,8 @@ def build_device_report(
         # undercounts when fewer come back than were attempted (e.g. a degraded live read).
         notes.append(
             f"Live status shown for {live_read} of {total_matched} matched channels "
-            "(read capped), refine the query for full live coverage. The screen list is complete."
+            "(read capped), refine the query for full live coverage. The screen list is not "
+            "shortened by that cap."
         )
     # A degraded live read (best-effort at the find_device edge) carries a "note" on the live
     # envelope. Surface it so an empty channel list is explained (mirrors the ChannelFinder note).

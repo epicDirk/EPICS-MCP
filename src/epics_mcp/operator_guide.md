@@ -819,17 +819,20 @@ messages embed the full request URL, an internal host would leak into this file)
   same collected set, so nothing else can ever contribute a PV. The suffix comparison folds case,
   `UPPER.BOB` is a display. ⚠ Do NOT read this as "an empty answer means a bad path": a genuine
   `.bob` that declares no real `ca`/`pva` channels of its own still answers `total: 0`, and that is
-  a fact about the file, not a refusal. To check a plain list of PVs with no display involved, pass
-  `pv_names` instead; supplying both makes the list win and the file path is not looked at.
+  a statement about the file rather than a refusal (though not always a complete one, see the two
+  caps below). To check a plain list of PVs with no display involved, pass
+  `pv_names` instead; supplying a NON-EMPTY one makes the list win and the file path is not looked
+  at. An empty list does not win, the file is read as usual.
 - **`total: 0` is not the same as "this screen has no PVs", and the answer says which one it is.**
-  There are TWO ways to get it, and they need different follow-ups. **One:** a `.bob` that only
+  There are THREE ways to get it, and they need different follow-ups. **One:** a `.bob` that only
   composes embedded fragments declares nothing itself, so the default file view is empty while the
-  display resolves plenty. The result therefore always carries `shown_by_display` (plus
+  display resolves plenty. Every file-mode result therefore carries `shown_by_display` (plus
   `shown_by_display_capped` and `file_path`), and when the file view omits something a note says
   how many channels it omits. Pass `view="display"` to check that set instead.
   Those three fields are the FILE-MODE fields: they travel together on both file-mode answers, the
-  empty one included, and they are absent when an explicit `pv_names` list wins, because then no
-  file was opened to report about. `file_path` comes back exactly as passed, so an answer can be
+  empty one included, and they are absent when a NON-EMPTY `pv_names` list wins, because then no
+  file was opened to report about. An EMPTY list does not win, so the file is read and the fields
+  come back. `file_path` comes back exactly as passed, so an answer can be
   matched to its call; it is not a statement about the file on disk (with a symlink the numbers
   describe the target while the field names the link). Neither view is the right one:
   `view="file"` asks what this file contributes wherever it is used, which is what you want for a
@@ -840,6 +843,9 @@ messages embed the full request URL, an internal host would leak into this file)
   bound rather than a fact about the file. ⚠ `validate_pvs` has **no** `context_cap` argument, so
   the cap cannot be raised from here; `crossplane_check`, `coverage_audit` and `find_device` do
   take one, and they walk the same inventory, so ask one of those when the fuller picture matters.
+  **Three:** a glob cap left the embedded screens out of the expansion, so the file was never
+  reached through the parent that binds its macros. That one has its own `notes` entry (next
+  bullet), and ⚠ raising the `context_cap` does NOT help against it: no tool exposes a glob cap.
 - **The two `capped` signals answer different questions, and the display one is deliberately
   pessimistic.** `shown_by_display_capped` is always the DISPLAY view's verdict. The `notes` cap
   entry belongs to whichever view you asked for: under `view="file"` it is the file verdict, under
@@ -854,15 +860,18 @@ messages embed the full request URL, an internal host would leak into this file)
 - **There is a THIRD incompleteness source, and it is why no absence of notes means "complete".**
   Beside the per-display context cap the walk has a **glob cap**: a `<file>` reference that still
   carries a macro is resolved by globbing the known displays, and past the cap the surplus matches
-  are dropped. That removes whole embedded SCREENS rather than instances, so it can shrink either
+  are left out. That drops whole embedded SCREENS rather than instances, so it can shrink either
   view while both `capped` verdicts above stay `false`. `validate_pvs`, `coverage_audit` and
-  `crossplane_check` each report it as its own `notes` entry, worded as a statement about the
-  **walked dataset** rather than about the queried file, because the engine records the SOURCE
-  display of a capped glob and none of the three turns that into a per-file verdict. Measured, so
-  the size is known: on a 2878-display dataset it fires 16 times across 4 source displays, one of
-  them a synoptic overview embedding its sections through a glob; on four datasets between 13 and
-  485 displays it never fires. Neither cap is adjustable from `validate_pvs`; the other three
-  display tools take a `context_cap`, and none takes a glob cap.
+  `crossplane_check` each report it as its own `notes` entry, and none of them turns it into a
+  per-file verdict. **That restraint is measured, not caution.** The engine records the SOURCE
+  display of a capped glob, and testing membership in that set looks like the obvious per-file
+  flag while missing most of the damage: a cap lift from 50 to 200 on a 2878-display dataset grows
+  **7** display views and only **3** of them are named as a source, the largest miss gaining 651
+  channels, because a capped glob inside a fragment shrinks every top that embeds it while the
+  diagnostic names the fragment. The count itself is 16 distinct (source, target) pairs across 4
+  source displays there; on four datasets between 13 and 485 displays the cap never fires at all.
+  ⚠ Do not read the entry as "this file is affected" and do not expect a cap argument to help:
+  `validate_pvs` exposes neither cap, and the other three display tools take a `context_cap` only.
 - **`coverage_audit` refuses "alarm plane, no tree named" with `INVALID_INPUT`.** Same shape as
   above: the verdict follows from the arguments, so it is given before the display-PV walk rather
   than after it. Name the tree (`alarm_config`); there is no correct default, they are site-specific.

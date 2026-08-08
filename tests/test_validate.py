@@ -1,5 +1,6 @@
 """Tests for epics_mcp.tools.validate."""
 
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -846,13 +847,87 @@ async def test_glob_cap_is_reported_although_no_context_cap_fired(tmp_path: Path
     assert isinstance(notes, list)
     glob_notes = [str(n) for n in notes if "glob cap" in str(n)]
     assert len(glob_notes) == 1, notes
-    assert "2 template <file> reference(s)" in glob_notes[0], glob_notes
+    assert "2 globbed <file> reference(s)" in glob_notes[0], glob_notes
     # Said as a property of the walk, not of this file. The count is a total over the dataset, so a
     # sentence blaming the queried file would be a claim the engine never made.
     assert "about the walk, not about this file" in glob_notes[0], glob_notes
     assert not any("context cap" in str(n) for n in notes), (
         "no context cap fired here, so no note may say one did"
     )
+
+
+async def test_both_caps_at_once_keep_their_order_and_the_glob_note_reaches_the_empty_path(
+    tmp_path: Path,
+) -> None:
+    """The one case where the new note can displace an existing one, on the return it is scarcest.
+
+    Two guards in one fixture, because they need the same rare setup. FIRST, ordering: the sibling
+    test below pins ``notes[0]``/``notes[1]`` with the reasoning that order is what a model reads
+    first, and the glob note inserts itself between the context-cap note and the view note. Nothing
+    saw that, because every ordering test defaults ``glob_capped`` to empty and this test is the
+    only one that sets both. SECOND, the empty-result return: ``declared=False`` takes it, and the
+    glob note has to survive there too, which is exactly the asymmetry GB-28 removed for
+    ``file_path`` one function up.
+
+    ``own_unresolved=True`` is load-bearing rather than decoration, and getting it wrong is how
+    this test first failed: on the empty path with no occurrence of its own,
+    :func:`_file_view_is_capped` answers False by design (GB-26), so the context-cap note never
+    fires and there is no ordering to check. The file has to declare something that did not
+    resolve.
+
+    Provably red both ways: swap the two ``notes.append`` blocks in ``_validate_pvs`` (order), or
+    move the glob block behind the ``if not extracted:`` return (empty path).
+    """
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
+    with patch(
+        "epics_mcp.tools.validate.analyze_pv_inventory",
+        return_value=_capped_inventory(
+            "d.bob",
+            declared=False,
+            own_unresolved=True,
+            capped=("d.bob", "frag.bob"),
+            glob_capped=(("ov.bob", "sections/*.bob"),),
+        ),
+    ):
+        result = await _validate_pvs(file_path=str(root / "d.bob"), displays_dir=str(root))
+
+    assert result["total"] == 0, "the fixture must take the empty-result return"
+    assert result["file_path"] == str(root / "d.bob")
+    notes = result["notes"]
+    assert isinstance(notes, list) and len(notes) == 3, notes
+    assert "context cap" in str(notes[0]), "the pre-existing cap note must keep coming first"
+    assert "glob cap" in str(notes[1]), "the glob note sits between the cap note and the view note"
+    assert "further channel(s)" in str(notes[2]), notes
+
+
+async def test_file_path_is_echoed_exactly_as_passed_not_resolved(tmp_path: Path) -> None:
+    """The echo is a correlation key, so it must come back byte-identical, not canonicalised.
+
+    Every other echo test hands in an already absolute, already resolved ``tmp_path`` string, where
+    the raw and the resolved form are equal and a mutant echoing ``str(f)`` stays green. A RELATIVE
+    path separates them, and it is not a contrived one: ``examples/README.md`` teaches exactly that
+    call. The refusal in ``_run_validate`` deliberately reports the RESOLVED path instead, so the
+    two readings live side by side in one function and this is the guard that keeps them apart.
+
+    Provably red: echo ``str(f)`` (or ``str(resolve_user_path(file_path, ...))``) instead of the
+    argument.
+    """
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
+    relative = os.path.relpath(root / "d.bob", Path.cwd())
+    assert not Path(relative).is_absolute(), "the fixture only proves anything on a relative path"
+
+    with patch(
+        "epics_mcp.tools.validate.analyze_pv_inventory",
+        return_value=_capped_inventory("d.bob", declared=False, capped=()),
+    ):
+        result = await _validate_pvs(file_path=relative, displays_dir=str(root))
+
+    assert result["file_path"] == relative, "the argument, not the canonicalised path"
+    assert result["file_path"] != str(root / "d.bob"), "the two forms must actually differ here"
 
 
 async def test_capped_fragment_makes_the_display_figure_a_lower_bound(tmp_path: Path) -> None:

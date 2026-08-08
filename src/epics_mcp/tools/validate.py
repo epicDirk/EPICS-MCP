@@ -52,9 +52,12 @@ class _Extraction(NamedTuple):
     #: True when the DISPLAY view is a lower bound. See _display_view_is_capped for why this is not
     #: the same question as *capped*.
     shown_capped: bool
-    #: How many ``<file>`` references hit the GLOB cap anywhere in the walk. A third incompleteness
-    #: source, and the only one here that is a property of the walked dataset rather than of this
-    #: file: it is a plain count, not a verdict, and the two flags above say nothing about it.
+    #: How many DISTINCT ``(source display, raw <file> target)`` pairs hit the GLOB cap anywhere in
+    #: the walk. Not a count of references and not one of cap events: the engine keeps a set, so a
+    #: reference re-resolved under many contexts collapses to one entry, and two widgets of one file
+    #: naming the same target collapse too. A third incompleteness source, and the only one here
+    #: that is a property of the walked dataset rather than of this file: a plain count, not a
+    #: verdict, and the two flags above say nothing about it.
     glob_capped_count: int
 
 
@@ -106,19 +109,26 @@ def _display_view_is_capped(rel: str, origins: set[str], capped_targets: frozens
     covers the ``context_cap`` axis only; the glob cap is a second, separate source of
     incompleteness that this measurement does not touch.
 
-    THAT SECOND SOURCE IS NOW REPORTED, as a count and deliberately not as a verdict, and the
-    reason belongs here beside the two predicates rather than in a status file. It is a third axis:
-    ``context_capped`` holds the capped TARGET, the predicates above live on the TOP, and
-    ``glob_capped`` holds the SOURCE display of the capped glob paired with its raw target. A
-    per-file predicate on it is buildable (the source is exactly the display whose embedded screens
-    were dropped, so unlike the target axis no term has to be inferred), and it is not built here
-    because its precision has not been measured the way both predicates above were, by a cap lift
-    against ground truth. What IS measured is that the case is real rather than theoretical: at the
-    default cap of 50 it fires 16 times across 4 source displays on a 2878-display dataset, one of
-    them a synoptic overview that embeds its sections through a glob, while four datasets between
-    13 and 485 displays produce none at all. Whoever builds the predicate: lift ``glob_cap`` on the
-    large dataset and check which display views actually grow, exactly as the figures above were
-    obtained for the other axis.
+    THAT SECOND SOURCE IS NOW REPORTED, as a global count and deliberately NOT as a per-file
+    verdict, and the measurement that settles it belongs here beside the two predicates rather than
+    in a status file. It is a third axis: ``context_capped`` holds the capped TARGET, the
+    predicates above live on the TOP, and ``glob_capped`` holds the SOURCE display of the capped
+    glob paired with its raw target.
+
+    A source-membership predicate looks obvious and MISSES MOST OF THE CASES, which is why there is
+    no per-file flag. Ground truth is a cap lift, 50 to 200, on a 2878-display dataset: 7 display
+    views grow, and only 3 of them are named as a source. The 4 it would miss are not marginal, the
+    largest gains 651 channels, because a capped glob inside an embedded fragment shrinks the view
+    of every TOP that embeds it while the diagnostic names the FRAGMENT. So the top axis is lost
+    here exactly as it is on the target axis, and closing that gap needs an origins term of the
+    same kind as the one this function already carries, not a membership test. Precision at the
+    same time is 3 of 4. Do not "tighten" the note into a per-file flag on the strength of the
+    source field alone.
+
+    That the case is real rather than theoretical is measured too: at the default cap of 50 the
+    diagnostic holds 16 distinct (source, raw target) pairs across 4 source displays on that
+    dataset, one of them a synoptic overview that embeds its sections through a glob, while four
+    datasets between 13 and 485 displays produce none at all.
     """
     return rel in capped_targets or bool(origins & capped_targets)
 
@@ -351,8 +361,8 @@ async def _validate_pvs(
     resolved ca/pva channels, under one of two views (see :func:`_run_validate`): ``view="file"``
     (default) takes what the file itself declares, aggregated by ``origin_file`` so embedded
     fragments work too; ``view="display"`` takes what the file resolves to when opened as a
-    display, fragments included. The two differ a lot in practice, so the result always reports
-    ``shown_by_display`` and, when the file view omits something, says so in ``notes``.
+    display, fragments included. The two differ a lot in practice, so every file-mode result
+    reports ``shown_by_display`` and, when the file view omits something, says so in ``notes``.
 
     Pass *displays_dir* = the dataset ROOT for full macro resolution; without it the file's own
     directory is used and fragments under-resolve. A ``notes`` entry flags when the PV list is a
@@ -372,8 +382,10 @@ async def _validate_pvs(
     no predicate here turns that into a per-file verdict.
     The file-mode fields are ``file_path``, ``shown_by_display`` and ``shown_by_display_capped``,
     and all three appear together on BOTH file-mode returns (the normal one and the empty-result
-    one) or on neither. They are absent under an explicit list, where no file was opened: an echo
-    there would say the answer came from that file. ``file_path`` is the argument as passed, not
+    one) or on neither. They are absent when a NON-EMPTY *pvs* list wins, because then no file was
+    opened and an echo would say the answer came from that file. The emphasis is measured, not
+    decorative: the branch below tests ``not pvs``, so an EMPTY list does not win, the file is read
+    as usual and all three fields appear. ``file_path`` is the argument as passed, not
     the resolved path, deliberately differing from the refusal below, which names the resolved one
     (that statement is about the disk, this one is a correlation key for the caller).
 
@@ -425,8 +437,8 @@ async def _validate_pvs(
             # about the WALK rather than about this file, because the count carries no per-file
             # verdict (see _Extraction.glob_capped_count and _display_view_is_capped).
             notes.append(
-                f"{found.glob_capped_count} template <file> reference(s) hit the glob cap while "
-                "walking this dataset, so some embedded screens were dropped from the inventory "
+                f"{found.glob_capped_count} globbed <file> reference(s) hit the glob cap while "
+                "walking this dataset, so some embedded screens were left out of the expansion "
                 "and both views may be a lower bound. Unlike the context-cap note this one is "
                 "about the walk, not about this file."
             )
