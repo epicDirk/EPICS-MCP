@@ -15,8 +15,14 @@ Two halves, and they secure different things:
 * **Equality.** One walk, one tail, four consumers, same numbers. Parametrised over two vectors
   whose numbers differ, because a single vector cannot tell a value that is passed through from one
   that happens to be hard-coded.
-* **Uniqueness.** A source guard that keeps the read in one place, so a fifth consumer cannot grow
-  its own copy and drift again. Equality alone would not survive the next tool.
+* **Uniqueness.** Source guards that keep both the READ and the CALL in one place, so a fifth
+  consumer cannot grow its own copy and drift again. Equality alone would not survive the next tool.
+
+⚠ The uniqueness half needs BOTH guards, and the second was missing from the first version of this
+file (found by GB-71's own post-build review). A read guard catches a second reading drifting from
+the first. It is blind to the failure that actually happened: a consumer that runs the walk itself
+and reports no tail AT ALL leaves nothing for a read guard to see. That was ``find_device`` until
+GB-65, and a drift guard would have passed it every day it was broken.
 
 ⚠ ``glob_capped`` is a tuple of ``(source display, raw <file> target)`` PAIRS, and every tool
 counts PAIRS. Counting distinct SOURCES is the plausible-looking alternative that reports a smaller
@@ -256,6 +262,10 @@ _COLLECTION_POINT = Path("services") / "inventory_adapter.py"
 #: drift from the first, which is the defect GB-71 removed.
 _TAIL_FIELDS = frozenset({"context_capped", "glob_capped"})
 
+#: The engine entry point that produces a tail. Called anywhere else, a consumer holds an inventory
+#: the collection point never saw, and may report no tail at all.
+_ENGINE_CALL = "analyze_pv_inventory"
+
 
 def _tail_reads(source: str) -> list[str]:
     """Return the ``<something>.diagnostics.<tail field>`` reads in *source*.
@@ -277,6 +287,72 @@ def _tail_reads(source: str) -> list[str]:
         if isinstance(parent, ast.Attribute) and parent.attr == "diagnostics":
             found.append(f"{node.attr}")
     return found
+
+
+def _engine_calls(source: str) -> list[str]:
+    """Return the ``analyze_pv_inventory(...)`` CALL sites in *source*, plain and dotted.
+
+    The call rather than the import: an import with no call is dead code that ruff already reports,
+    while a call is a consumer holding an inventory of its own.
+    """
+    found: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = (
+            func.id
+            if isinstance(func, ast.Name)
+            else func.attr
+            if isinstance(func, ast.Attribute)
+            else None
+        )
+        if name == _ENGINE_CALL:
+            found.append(name)
+    return found
+
+
+def test_only_the_collection_point_runs_the_engine() -> None:
+    """No module outside the collection point calls the engine, so no tail can go unreported.
+
+    This is the OTHER half of the defect class, and the one that actually happened. The read guard
+    below catches a second reading DRIFTING from the first; it is blind to a consumer that runs the
+    walk and reports no tail at all, because there is nothing to see. That is precisely what
+    ``find_device`` did until GB-65: it called the engine directly and simply never mentioned either
+    cap. A guard against drift would have passed it every single day.
+
+    Found by the post-build review of GB-71 itself, in the guard built to close GB-71.
+    """
+    offenders = {
+        str(path.relative_to(_SRC)): calls
+        for path in sorted(_SRC.rglob("*.py"))
+        if path.relative_to(_SRC) != _COLLECTION_POINT
+        and (calls := _engine_calls(path.read_text(encoding="utf-8")))
+    }
+    assert not offenders, (
+        f"{_ENGINE_CALL} is called outside the collection point "
+        f"({_COLLECTION_POINT.as_posix()}): {offenders}. A consumer holding its own inventory owes "
+        "the caller the diagnostics tail and nothing checks that it pays. Project through "
+        "inventory_adapter.analyze_inventory instead, see GB-71."
+    )
+
+
+def test_the_collection_point_really_does_run_the_engine() -> None:
+    """The non-vacuity floor for the call guard, same reasoning as for the read guard."""
+    calls = _engine_calls((_SRC / _COLLECTION_POINT).read_text(encoding="utf-8"))
+    assert calls == [_ENGINE_CALL], (
+        f"the collection point makes {len(calls)} engine calls, expected 1"
+    )
+
+
+def test_the_call_detector_separates_a_call_from_an_import() -> None:
+    """The detector itself, on synthetic sources."""
+    assert _engine_calls("inv = analyze_pv_inventory(root, context_cap=1)") == [_ENGINE_CALL]
+    assert _engine_calls("inv = pv_analysis.analyze_pv_inventory(root)") == [_ENGINE_CALL]
+    # An import alone is not a consumer; ruff reports it if nothing uses it.
+    assert _engine_calls("from opi_navigation.pv_analysis import analyze_pv_inventory") == []
+    # A different engine entry point, which produces no tail and is free to be called anywhere.
+    assert _engine_calls("x = find_displays(inv, q)") == []
 
 
 def test_only_the_collection_point_reads_the_diagnostics_tail() -> None:
