@@ -23,11 +23,11 @@ from pathlib import Path
 
 from opi_navigation.pv_analysis import (
     DEFAULT_PV_CONTEXT_CAP,
-    analyze_pv_inventory,
     channel_name,
     find_displays,
 )
 from opi_navigation.pv_analysis.lookup import MatchMode, PvLookupResult
+from opi_navigation.pv_analysis.models import PvInventory
 
 from epics_mcp.config import get_config
 from epics_mcp.errors import EpicsError
@@ -39,6 +39,7 @@ from epics_mcp.services.device_lookup import (
     render_markdown,
 )
 from epics_mcp.services.epics_client import pv_get_batch
+from epics_mcp.services.inventory_adapter import analyze_inventory
 
 logger = logging.getLogger(__name__)
 
@@ -56,22 +57,25 @@ def _run_lookup(
     operator top-levels there, a narrow per-IOC subdirectory under-resolves, like ``crossplane``).
 
     Returns ``(lookup, channels, context_capped, glob_capped_count)``. The last two are the walk's
-    own incompleteness signals, and they are returned HERE because this is the only place that
-    still holds the ``PvInventory``: ``find_displays`` projects it down to matched displays, so a
-    caller downstream can no longer ask. They are the same two values
-    :func:`~epics_mcp.services.inventory_adapter.analyze_display_pvs` hands its consumers, read
-    from the same fields, so the four display tools count the same thing (GB-65).
+    own incompleteness signals, and they have to be returned HERE because ``find_displays`` projects
+    the inventory down to the matched displays, so a caller downstream can no longer ask.
+
+    They are not read here, though. :func:`~epics_mcp.services.inventory_adapter.analyze_inventory`
+    runs the walk and hands the tail back beside whatever the projection returned, so this tool
+    counts the same thing as the other three by construction rather than by agreement (GB-71). It
+    used to call the engine itself and read both fields off the inventory, which is precisely how
+    it managed to forget them altogether until GB-65.
     """
-    inventory = analyze_pv_inventory(
-        Path(displays_dir), context_cap=context_cap, windows_paths=windows_paths
+
+    def project(inventory: PvInventory) -> tuple[PvLookupResult, tuple[str, ...]]:
+        """The reverse-lookup plus its channel list, both out of the SAME walk."""
+        lookup = find_displays(inventory, query, match=match)
+        return lookup, collect_channels(lookup)
+
+    (lookup, channels), context_capped, glob_capped_count = analyze_inventory(
+        Path(displays_dir), project, context_cap=context_cap, windows_paths=windows_paths
     )
-    lookup = find_displays(inventory, query, match=match)
-    return (
-        lookup,
-        collect_channels(lookup),
-        inventory.diagnostics.context_capped,
-        len(inventory.diagnostics.glob_capped),
-    )
+    return lookup, channels, context_capped, glob_capped_count
 
 
 async def _find_device(

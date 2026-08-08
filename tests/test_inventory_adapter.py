@@ -168,7 +168,12 @@ def test_analyze_adapters_smoke_over_real_bob(tmp_path: Path) -> None:
 
     Fails LOUD if the SHA-pinned opi_navigation renames/removes a consumed field or changes the
     analyze_pv_inventory API/return shape, the seam the hand-built model tests above cannot catch
-    (they construct the models directly instead of running the analyzer)."""
+    (they construct the models directly instead of running the analyzer).
+
+    ⚠ The two ``isinstance`` assertions on the diagnostics tail below are a SHAPE check and nothing
+    more: they were the only thing asserted about those values until GB-71, and a consumer counting
+    them differently satisfies them perfectly. What the four display tools actually report, and that
+    they all report the same, is in ``tests/test_diagnostics_tail.py``."""
     root = tmp_path / "ds"
     root.mkdir()
     (root / "panel.bob").write_text(

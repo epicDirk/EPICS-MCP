@@ -311,7 +311,9 @@ async def test_the_walk_caps_travel_from_the_inventory_into_the_report(
             }
         )
 
-    monkeypatch.setattr("epics_mcp.tools.find_device.analyze_pv_inventory", _inventory_with_caps)
+    monkeypatch.setattr(
+        "epics_mcp.services.inventory_adapter.analyze_pv_inventory", _inventory_with_caps
+    )
     result = await _find_device(
         "DEV-TEST01:Ctrl-EVR-01", str(_displays(tmp_path)), context_cap=17, windows_paths=True
     )

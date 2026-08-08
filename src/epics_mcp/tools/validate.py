@@ -7,13 +7,15 @@ from pathlib import Path
 from typing import Literal, NamedTuple
 
 from opi_navigation.macros import contains_macros
-from opi_navigation.pv_analysis import analyze_pv_inventory, channel_name
+from opi_navigation.pv_analysis import DEFAULT_PV_CONTEXT_CAP, channel_name
+from opi_navigation.pv_analysis.models import PvInventory
 
 from epics_mcp.config import get_config
 from epics_mcp.display_files import DISPLAY_SUFFIX
 from epics_mcp.errors import EpicsError
 from epics_mcp.paths import resolve_user_path
 from epics_mcp.services.epics_client import pv_get_batch
+from epics_mcp.services.inventory_adapter import analyze_inventory
 
 #: ⚠ What this check and the engine agree on is NOT the file name. ``find_bob_files`` deliberately
 #: does not resolve symlinks, ``resolve_user_path`` here does, so a ``link.bob`` pointing at a
@@ -194,6 +196,95 @@ def _file_view_is_capped(rel: str, macro_tops: set[str], capped_targets: frozens
     return rel in capped_targets or bool(macro_tops & capped_targets)
 
 
+class _Sweep(NamedTuple):
+    """What one inventory walk yields about a display file, BEFORE any cap verdict is formed.
+
+    Deliberately verdict-free. Both cap verdicts need ``diagnostics.context_capped``, and that
+    field is read in exactly one place, the collection point
+    :func:`~epics_mcp.services.inventory_adapter.analyze_inventory` (GB-71); forming them in here
+    would mean reading it a second time, right beside the first, with nothing keeping the two
+    readings equal.
+    """
+
+    #: Every resolved real (ca/pva) channel whose physical origin is this file, in document order.
+    file_channels: list[str]
+    #: Every ``top_level_display`` under which this file contributed a MACRO-TEMPLATED occurrence,
+    #: taken BEFORE the resolution filter. Consumed by :func:`_file_view_is_capped`, whose docstring
+    #: says why both properties are load-bearing.
+    file_macro_tops: set[str]
+    #: The display view: what this file expands to as a display of its own, in document order.
+    display_channels: list[str]
+    #: Channels the display view holds and the file view does not. A set difference rather than a
+    #: size comparison, because the two views are not nested (see :class:`_Extraction`).
+    shown_only: int
+    #: The origin files behind the display view's channels, collected BEHIND the resolution filter.
+    #: Consumed by :func:`_display_view_is_capped`, which measures why that placement is the right
+    #: one and a test pins it.
+    origins: set[str]
+
+
+def _sweep_display_file(inventory: PvInventory, rel: str) -> _Sweep:
+    """Read BOTH views of *rel* out of one walk. The projection :func:`_run_validate` hands on.
+
+    Both views come out of the SAME inventory object, so the second one costs a second pass over
+    already-parsed events rather than a second walk (see :class:`_Extraction` for the measurement).
+    """
+    # The FILE view, unchanged: every resolved real PV whose physical origin is this file, across
+    # all top-levels, in document order.
+    seen: set[str] = set()
+    file_channels: list[str] = []
+    # Collected across the WHOLE inventory (a file's occurrences are attributed to every top that
+    # reaches it), BEFORE the filter below, and only for MACRO-TEMPLATED occurrences. All three
+    # properties are load-bearing, see _file_view_is_capped, which turns this one set into the cap
+    # verdict. The macro test is what keeps the guard honest: an occurrence with no macro expands to
+    # itself under every binding, so no budget can make it contribute a channel it does not already
+    # contribute, and flagging its file as a lower bound would be a false statement.
+    file_macro_tops: set[str] = set()
+    for display in inventory.displays:
+        for ev in display.pvs:
+            if ev.origin_file != rel:
+                continue
+            if contains_macros(ev.raw_pv):
+                file_macro_tops.add(ev.top_level_display)
+            if ev.resolution != "resolved" or ev.protocol not in ("ca", "pva"):
+                continue
+            channel = channel_name(ev.pv)  # strip pva://... for the live read
+            if channel not in seen:
+                seen.add(channel)
+                file_channels.append(channel)
+
+    # The DISPLAY view: what this file expands to as a display of its own. A single lookup rather
+    # than a second sweep, and a None default rather than an index, because the inventory only
+    # holds files that yielded at least one PV occurrence (measured: 284 .bob on disk, 257 entries),
+    # and an existing test mocks an inventory that does not contain the queried file at all.
+    target = next((d for d in inventory.displays if d.display_path == rel), None)
+    display_seen: set[str] = set()
+    display_channels: list[str] = []
+    origins: set[str] = set()
+    for ev in target.pvs if target else ():
+        if ev.resolution != "resolved" or ev.protocol not in ("ca", "pva"):
+            continue
+        # BEHIND the filter, deliberately, and the opposite of what the file view does two loops
+        # up. Moving it before the filter is the obvious-looking mirror of that repair and was
+        # measured to be a pure precision loss (164 flagged instead of 93, zero additional recall),
+        # see _display_view_is_capped. A test pins this placement.
+        origins.add(ev.origin_file)
+        # Normalise here as well: the engine keeps the protocol prefix as written, so a display
+        # referencing both `SIM:X` and `ca://SIM:X` yields two events for ONE channel.
+        channel = channel_name(ev.pv)
+        if channel not in display_seen:
+            display_seen.add(channel)
+            display_channels.append(channel)
+
+    return _Sweep(
+        file_channels=file_channels,
+        file_macro_tops=file_macro_tops,
+        display_channels=display_channels,
+        shown_only=len(display_seen - seen),
+        origins=origins,
+    )
+
+
 def _run_validate(file_path: str, displays_dir: str | None, view: PvView = "file") -> _Extraction:
     """Extract the resolved, real (ca/pva) channels of *file_path* under the requested *view*.
 
@@ -274,8 +365,18 @@ def _run_validate(file_path: str, displays_dir: str | None, view: PvView = "file
         ) from exc
     # windows_paths=True: this server runs on a Windows host, so embedded <file>
     # refs resolve case-insensitively. It does NOT affect the origin_file/rel match
-    # below (always posix), only cross-file embed resolution.
-    inventory = analyze_pv_inventory(root, windows_paths=True)
+    # in the sweep (always posix), only cross-file embed resolution.
+    #
+    # The walk runs through the shared collection point, which is the ONE place that reads the
+    # inventory's diagnostics tail (GB-71). context_cap is passed explicitly although it is the
+    # engine's own default: this call took that default implicitly before, and the collection point
+    # deliberately has no default of its own, so every caller's budget is visible at its call site.
+    sweep, context_capped, glob_capped_count = analyze_inventory(
+        root,
+        lambda inventory: _sweep_display_file(inventory, rel),
+        context_cap=DEFAULT_PV_CONTEXT_CAP,
+        windows_paths=True,
+    )
 
     # Named for what the engine actually puts in here: the TARGET of a capped enqueue, not the top
     # it was capped under (expansion.py adds ``target`` while the cap key is the pair). The old name
@@ -283,68 +384,27 @@ def _run_validate(file_path: str, displays_dir: str | None, view: PvView = "file
     # _display_view_is_capped exists to avoid. BOTH membership tests below rest on that reading:
     # ``rel`` asks whether contexts INTO this file were dropped, which is a statement about the file
     # view, while a top set asks whether a display the file feeds was itself cut short.
-    capped_targets = frozenset(inventory.diagnostics.context_capped)
-
-    # The FILE view, unchanged: every resolved real PV whose physical origin is this file, across
-    # all top-levels, in document order.
-    seen: set[str] = set()
-    file_channels: list[str] = []
-    # Collected across the WHOLE inventory (a file's occurrences are attributed to every top that
-    # reaches it), BEFORE the filter below, and only for MACRO-TEMPLATED occurrences. All three
-    # properties are load-bearing, see _file_view_is_capped, which turns this one set into the cap
-    # verdict. The macro test is what keeps the guard honest: an occurrence with no macro expands to
-    # itself under every binding, so no budget can make it contribute a channel it does not already
-    # contribute, and flagging its file as a lower bound would be a false statement.
-    file_macro_tops: set[str] = set()
-    for display in inventory.displays:
-        for ev in display.pvs:
-            if ev.origin_file != rel:
-                continue
-            if contains_macros(ev.raw_pv):
-                file_macro_tops.add(ev.top_level_display)
-            if ev.resolution != "resolved" or ev.protocol not in ("ca", "pva"):
-                continue
-            channel = channel_name(ev.pv)  # strip pva://... for the live read
-            if channel not in seen:
-                seen.add(channel)
-                file_channels.append(channel)
-    file_capped = _file_view_is_capped(rel, file_macro_tops, capped_targets)
-
-    # The DISPLAY view: what this file expands to as a display of its own. A single lookup rather
-    # than a second sweep, and a None default rather than an index, because the inventory only
-    # holds files that yielded at least one PV occurrence (measured: 284 .bob on disk, 257 entries),
-    # and an existing test mocks an inventory that does not contain the queried file at all.
-    target = next((d for d in inventory.displays if d.display_path == rel), None)
-    display_seen: set[str] = set()
-    display_channels: list[str] = []
-    origins: set[str] = set()
-    for ev in target.pvs if target else ():
-        if ev.resolution != "resolved" or ev.protocol not in ("ca", "pva"):
-            continue
-        # BEHIND the filter, deliberately, and the opposite of what the file view does two loops
-        # up. Moving it before the filter is the obvious-looking mirror of that repair and was
-        # measured to be a pure precision loss (164 flagged instead of 93, zero additional recall),
-        # see _display_view_is_capped. A test pins this placement.
-        origins.add(ev.origin_file)
-        # Normalise here as well: the engine keeps the protocol prefix as written, so a display
-        # referencing both `SIM:X` and `ca://SIM:X` yields two events for ONE channel.
-        channel = channel_name(ev.pv)
-        if channel not in display_seen:
-            display_seen.add(channel)
-            display_channels.append(channel)
-    display_capped = _display_view_is_capped(rel, origins, capped_targets)
+    #
+    # Formed HERE rather than inside the sweep, and that placement is the point of GB-71: a
+    # frozenset built in the sweep would be a second reading of the tail, sitting next to the one in
+    # the collection point and free to drift from it. The sweep stays verdict-free; the verdicts are
+    # formed from what the collection point hands back.
+    capped_targets = frozenset(context_capped)
+    file_capped = _file_view_is_capped(rel, sweep.file_macro_tops, capped_targets)
+    display_capped = _display_view_is_capped(rel, sweep.origins, capped_targets)
 
     return _Extraction(
-        channels=display_channels if view == "display" else file_channels,
+        channels=sweep.display_channels if view == "display" else sweep.file_channels,
         capped=display_capped if view == "display" else file_capped,
-        shown_by_display=len(display_channels),
-        shown_only=len(display_seen - seen),
+        shown_by_display=len(sweep.display_channels),
+        shown_only=sweep.shown_only,
         shown_capped=display_capped,
         # Counted, not tested against *rel*. The engine records the SOURCE display of a capped
         # glob, which is a third axis again: neither the capped TARGET the two predicates above
         # consume, nor the top they live on. A per-file predicate on it is buildable and is NOT
         # built here, see the note in _display_view_is_capped for the measurement that decides it.
-        glob_capped_count=len(inventory.diagnostics.glob_capped),
+        # The count itself comes from the collection point, which counts PAIRS, see its docstring.
+        glob_capped_count=glob_capped_count,
     )
 
 

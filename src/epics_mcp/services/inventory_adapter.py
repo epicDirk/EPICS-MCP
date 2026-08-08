@@ -7,8 +7,17 @@ ROOT and translates each **operator-facing** display's ``ExpandedPv`` instances 
 out HERE, so they never reach the join (otherwise fragment paths would be mis-attributed as
 "displays" and the per-instance count would double via lift+seed).
 
-This is the ONLY module that imports ``opi_navigation``; the join (:mod:`~.crossplane`) stays
-standalone + offline-testable. The build-once PV engine is consumed, never rebuilt.
+This is the ONLY module that RUNS the engine: every ``analyze_pv_inventory`` call in ``src/`` goes
+through :func:`analyze_inventory` below, so the walk and its diagnostics tail are read once, in one
+place, for all four display tools. The join (:mod:`~.crossplane`) stays standalone +
+offline-testable. The build-once PV engine is consumed, never rebuilt.
+
+⚠ "Runs the engine", not "imports ``opi_navigation``". The sentence here used to claim the latter
+and it was measurably false: ``services/device_lookup.py``, ``display_tools.py``,
+``tools/validate.py`` and ``tools/find_device.py`` all import from the engine as well, for
+``channel_name``, ``contains_macros`` and the lookup types. Those are pure helpers with no walk and
+no diagnostics behind them; the claim that carries is about the CALL, and
+``tests/test_diagnostics_tail.py`` enforces exactly that one.
 """
 
 from __future__ import annotations
@@ -26,6 +35,7 @@ __all__ = [
     "DEFAULT_PV_CONTEXT_CAP",
     "analyze_display_index",
     "analyze_display_pvs",
+    "analyze_inventory",
     "inventory_join_pvs",
 ]
 
@@ -60,16 +70,42 @@ def inventory_join_pvs(inventory: PvInventory) -> list[JoinPv]:
     ]
 
 
-def _analyze[T](
+def analyze_inventory[T](
     repo_root: Path,
-    project: Callable[[PvInventory], list[T]],
+    project: Callable[[PvInventory], T],
     *,
     context_cap: int,
     windows_paths: bool,
-) -> tuple[list[T], tuple[str, ...], int]:
-    """Run the Wedge-0 inventory ONCE and pair *project*'s rows with the shared incompleteness
-    signals, the common body of :func:`analyze_display_pvs` / :func:`analyze_display_index` that
-    used to be copied verbatim (same inventory call + same diagnostics tail; S4-5)."""
+) -> tuple[T, tuple[str, ...], int]:
+    """Run the Wedge-0 inventory ONCE, project it, and pair the result with the DIAGNOSTICS TAIL.
+
+    **The one place that reads the tail.** Every tool that reports the inventory's incompleteness
+    signals goes through here, so the four display tools (``crossplane_check``, ``coverage_audit``,
+    ``validate_pvs``, ``find_device``) cannot drift apart in what they count. They had three
+    separate copies of this read before, and one of them, ``find_device``, had simply forgotten it
+    (GB-65). Nothing detected that, because the only assertion on the two values was an
+    ``isinstance`` check.
+
+    *project* is unconstrained in its return type on purpose: a caller that needs rows gets rows
+    (``inventory_join_pvs``, :func:`_index_rows`), one that needs a lookup result or the raw sweep
+    of a single file returns that instead. Narrowing it to ``list[T]``, as it was, is what forced
+    the two tools to call the engine directly and grow their own copy of the read.
+
+    Returns ``(projected, context_capped, glob_capped_count)``.
+
+    ⚠ ``glob_capped_count`` counts **PAIRS**, not source displays. The engine records
+    ``(source display, raw <file> target)``, and one source can cap several distinct targets, so
+    counting sources reports a smaller number for the same walk. Both readings are defensible in
+    isolation and only one may be reported, because two denominators for one category inside one
+    report are the second truth the project forbids. The pair reading is the one every tool has
+    always shipped; ``tests/test_inventory_adapter.py`` pins the four against each other with a
+    fixture whose pair count and source count deliberately differ.
+
+    ⚠ ``context_capped`` is handed on as the engine's TUPLE, not as a set or a bool. Callers read
+    it differently on purpose: the coverage plane collapses it to one global flag, while
+    ``validate_pvs`` tests membership per file. Deciding that here would silently pick one of those
+    questions for everybody.
+    """
     inventory = analyze_pv_inventory(
         repo_root, context_cap=context_cap, windows_paths=windows_paths
     )
@@ -109,7 +145,7 @@ def analyze_display_pvs(
     honest lower-bound signals into the report. ``windows_paths`` resolves paths case-insensitively
     (Windows hosts); default Linux (= the ESS-console / CI truth, deterministic).
     """
-    return _analyze(
+    return analyze_inventory(
         repo_root, inventory_join_pvs, context_cap=context_cap, windows_paths=windows_paths
     )
 
@@ -128,4 +164,6 @@ def analyze_display_index(
     ROOT (the operator top-levels there bind the display macros). Returns ``(index_rows,
     context_capped, glob_capped_count)``; the latter two carry the inventory's lower-bound signals.
     """
-    return _analyze(repo_root, _index_rows, context_cap=context_cap, windows_paths=windows_paths)
+    return analyze_inventory(
+        repo_root, _index_rows, context_cap=context_cap, windows_paths=windows_paths
+    )

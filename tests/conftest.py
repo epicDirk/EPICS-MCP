@@ -36,6 +36,7 @@ ENGINE_COUPLED_MODULES = (
     "test_find_device_tool.py",
     "test_device_lookup.py",
     "test_inventory_adapter.py",
+    "test_diagnostics_tail.py",
 )
 
 _DECISION = engine_collection_decision(

@@ -246,7 +246,7 @@ async def test_non_bob_file_path_is_refused_without_running_the_inventory(tmp_pa
 
     spy = Mock(side_effect=AssertionError("the inventory walk must not run for a non-.bob file"))
     with (
-        patch("epics_mcp.tools.validate.analyze_pv_inventory", spy),
+        patch("epics_mcp.services.inventory_adapter.analyze_pv_inventory", spy),
         pytest.raises(EpicsError) as exc_info,
     ):
         await _validate_pvs(file_path=str(other), displays_dir=str(root))
@@ -307,7 +307,7 @@ async def test_bob_outside_displays_dir_is_refused_without_running_the_inventory
 
     spy = Mock(side_effect=AssertionError("the inventory walk must not run for an outside file"))
     with (
-        patch("epics_mcp.tools.validate.analyze_pv_inventory", spy),
+        patch("epics_mcp.services.inventory_adapter.analyze_pv_inventory", spy),
         pytest.raises(EpicsError) as exc_info,
     ):
         await _validate_pvs(file_path=str(outside), displays_dir=str(root))
@@ -624,7 +624,7 @@ async def test_an_explicit_list_wins_over_file_path_and_view(tmp_path: Path) -> 
     root = _views_dataset(tmp_path)
     spy = Mock(side_effect=AssertionError("the inventory must not run when a list is given"))
     with (
-        patch("epics_mcp.tools.validate.analyze_pv_inventory", spy),
+        patch("epics_mcp.services.inventory_adapter.analyze_pv_inventory", spy),
         patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all),
     ):
         result = await _validate_pvs(
@@ -830,7 +830,7 @@ async def test_glob_cap_is_reported_although_no_context_cap_fired(tmp_path: Path
     (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
     with (
         patch(
-            "epics_mcp.tools.validate.analyze_pv_inventory",
+            "epics_mcp.services.inventory_adapter.analyze_pv_inventory",
             return_value=_capped_inventory(
                 "d.bob",
                 declared=True,
@@ -882,7 +882,7 @@ async def test_both_caps_at_once_keep_their_order_and_the_glob_note_reaches_the_
     root.mkdir()
     (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
     with patch(
-        "epics_mcp.tools.validate.analyze_pv_inventory",
+        "epics_mcp.services.inventory_adapter.analyze_pv_inventory",
         return_value=_capped_inventory(
             "d.bob",
             declared=False,
@@ -921,7 +921,7 @@ async def test_file_path_is_echoed_exactly_as_passed_not_resolved(tmp_path: Path
     assert not Path(relative).is_absolute(), "the fixture only proves anything on a relative path"
 
     with patch(
-        "epics_mcp.tools.validate.analyze_pv_inventory",
+        "epics_mcp.services.inventory_adapter.analyze_pv_inventory",
         return_value=_capped_inventory("d.bob", declared=False, capped=()),
     ):
         result = await _validate_pvs(file_path=relative, displays_dir=str(root))
@@ -949,7 +949,7 @@ async def test_capped_fragment_makes_the_display_figure_a_lower_bound(tmp_path: 
     (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
     with (
         patch(
-            "epics_mcp.tools.validate.analyze_pv_inventory",
+            "epics_mcp.services.inventory_adapter.analyze_pv_inventory",
             return_value=_capped_inventory("d.bob", declared=True, capped=("d.bob", "frag.bob")),
         ),
         patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all),
@@ -983,7 +983,7 @@ async def test_capped_is_seen_on_the_empty_path_where_the_old_flag_is_blind(
     root.mkdir()
     (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
     with patch(
-        "epics_mcp.tools.validate.analyze_pv_inventory",
+        "epics_mcp.services.inventory_adapter.analyze_pv_inventory",
         return_value=_capped_inventory("d.bob", declared=False, capped=("frag.bob",)),
     ):
         result = await _validate_pvs(file_path=str(root / "d.bob"), displays_dir=str(root))
@@ -1040,7 +1040,7 @@ async def test_validate_pvs_file_path_context_capped_note(tmp_path: Path) -> Non
         return_value={"results": [{"pv_name": "SYSX:X", "value": 1}], "errors": []}
     )
     with (
-        patch("epics_mcp.tools.validate.analyze_pv_inventory", return_value=fake),
+        patch("epics_mcp.services.inventory_adapter.analyze_pv_inventory", return_value=fake),
         patch("epics_mcp.tools.validate.pv_get_batch", mock_batch),
     ):
         result = await _validate_pvs(file_path=str(frag), displays_dir=str(root))
@@ -1147,7 +1147,7 @@ async def test_capped_file_alone_is_a_lower_bound_on_the_normal_path(tmp_path: P
     )
     with (
         patch(
-            "epics_mcp.tools.validate.analyze_pv_inventory",
+            "epics_mcp.services.inventory_adapter.analyze_pv_inventory",
             return_value=_own_pv_inventory(
                 "sub/frag.bob", capped=("sub/frag.bob",), foreign_first=True
             ),
@@ -1187,7 +1187,7 @@ async def test_capped_file_with_only_unresolved_pvs_of_its_own_says_it_is_a_lowe
     spy = AsyncMock(side_effect=_connect_all)
     with (
         patch(
-            "epics_mcp.tools.validate.analyze_pv_inventory",
+            "epics_mcp.services.inventory_adapter.analyze_pv_inventory",
             return_value=_capped_inventory(
                 "d.bob",
                 declared=False,
@@ -1227,7 +1227,7 @@ async def test_capped_file_that_declares_no_pv_at_all_is_not_called_a_lower_boun
     root.mkdir()
     (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
     with patch(
-        "epics_mcp.tools.validate.analyze_pv_inventory",
+        "epics_mcp.services.inventory_adapter.analyze_pv_inventory",
         return_value=_capped_inventory("d.bob", declared=False, capped=("d.bob",)),
     ):
         result = await _validate_pvs(file_path=str(root / "d.bob"), displays_dir=str(root))
@@ -1258,7 +1258,7 @@ async def test_a_capped_top_of_a_foreign_file_does_not_make_this_file_a_lower_bo
     (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
     with (
         patch(
-            "epics_mcp.tools.validate.analyze_pv_inventory",
+            "epics_mcp.services.inventory_adapter.analyze_pv_inventory",
             return_value=_capped_inventory(
                 "d.bob",
                 declared=True,
@@ -1466,7 +1466,7 @@ async def test_a_capped_display_with_an_empty_view_is_still_a_lower_bound(tmp_pa
     root.mkdir()
     (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
     with patch(
-        "epics_mcp.tools.validate.analyze_pv_inventory",
+        "epics_mcp.services.inventory_adapter.analyze_pv_inventory",
         return_value=_unresolved_only_inventory("d.bob", capped=("d.bob",)),
     ):
         result = await _validate_pvs(file_path=str(root / "d.bob"), displays_dir=str(root))
@@ -1492,7 +1492,7 @@ async def test_an_unresolved_capped_fragment_does_not_reach_the_display_verdict(
     (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
     with (
         patch(
-            "epics_mcp.tools.validate.analyze_pv_inventory",
+            "epics_mcp.services.inventory_adapter.analyze_pv_inventory",
             return_value=_unresolved_fragment_inventory("d.bob", capped=("frag.bob",)),
         ),
         patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all),
@@ -1523,7 +1523,7 @@ async def test_the_view_switch_answers_with_the_display_verdict(tmp_path: Path) 
     (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
     inventory = _capped_inventory("d.bob", declared=True, capped=("frag.bob",))
     with (
-        patch("epics_mcp.tools.validate.analyze_pv_inventory", return_value=inventory),
+        patch("epics_mcp.services.inventory_adapter.analyze_pv_inventory", return_value=inventory),
         patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all),
     ):
         shown = await _validate_pvs(
@@ -1564,7 +1564,7 @@ async def test_a_file_whose_pvs_carry_no_macro_is_never_called_a_lower_bound(
     (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
     with (
         patch(
-            "epics_mcp.tools.validate.analyze_pv_inventory",
+            "epics_mcp.services.inventory_adapter.analyze_pv_inventory",
             return_value=_single_occurrence_inventory(
                 "d.bob", capped=("d.bob",), raw_pv="SIM:CONCRETE:Val"
             ),
@@ -1602,7 +1602,7 @@ async def test_both_macro_spellings_keep_the_lower_bound_note(tmp_path: Path, ra
     (root / "d.bob").write_text('<display version="2.0.0"><name>D</name></display>', "utf-8")
     with (
         patch(
-            "epics_mcp.tools.validate.analyze_pv_inventory",
+            "epics_mcp.services.inventory_adapter.analyze_pv_inventory",
             return_value=_single_occurrence_inventory("d.bob", capped=("d.bob",), raw_pv=raw_pv),
         ),
         patch("epics_mcp.tools.validate.pv_get_batch", side_effect=_connect_all),
