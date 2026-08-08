@@ -72,10 +72,17 @@ class DeviceLookupReport(_Model):
 
     ⚠ "Unaffected by that cap" is not "complete", and the wording is deliberate. This report is
     built from the same inventory walk as ``validate_pvs``, and that walk has two caps of its own
-    (per-display context and glob). Neither is read here: ``inventory.diagnostics`` is never
-    touched on this path, so a screen dropped by the glob cap is missing from ``screens`` with no
-    note saying so. Reporting them is an open item; until then do not restore an unconditional
-    "the screen list is complete" anywhere in this file or in ``tools/find_device.py``.
+    (per-display context and glob). **Both are reported since GB-65**, as their own ``notes``
+    entries built from ``context_capped``/``glob_capped_count``, which ``tools/find_device.py``
+    reads off the inventory and hands over. Before that, a screen dropped by the glob cap was
+    missing from ``screens`` with nothing saying so.
+
+    ⚠ That does NOT make an unconditional "the screen list is complete" true, and it stays banned
+    in this file and in ``tools/find_device.py``. Two reasons, both load-bearing: the absence of a
+    note never means "complete" (it means no cap FIRED during this run, and the walk has limits
+    beyond its two caps), and a note that DID fire is a statement about the run, not a verdict on
+    this query, because neither cap records the screen a device lookup returns. Say what is true
+    instead: the LIVE cap does not shorten the screen list.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -160,6 +167,8 @@ def build_device_report(
     live_read: int,
     live_capped: bool,
     channelfinder_enabled: bool,
+    context_capped: tuple[str, ...] = (),
+    glob_capped_count: int = 0,
 ) -> DeviceLookupReport:
     """Merge reverse-lookup + p4p batch read + ChannelFinder result, pure, deterministic.
 
@@ -207,6 +216,26 @@ def build_device_report(
     notes: list[str] = []
     if not lookup.displays:
         notes.append("No operator-facing screen references this device/query.")
+    # GB-65: the two caps of the inventory WALK, reported right beside the screen count because
+    # that is what they shorten. They sit here rather than further down on purpose: the note above
+    # ("no screen references this device") is the one a capped walk can make FALSE, so a reader who
+    # stops after the first line still sees why an empty list may not mean "nothing shows it".
+    # Both are statements about the RUN, not about this query: unlike validate_pvs' file view there
+    # is no per-screen membership test to make (the engine records the capped TARGET and the SOURCE
+    # display of a capped glob, neither of which is the screen a device lookup returns), so neither
+    # cap is turned into a per-screen verdict. Deliberately notes, never a withhold.
+    if context_capped:
+        notes.append(
+            f"{len(context_capped)} display(s) hit the inventory's per-instance context cap, so "
+            "their resolved PVs are a LOWER BOUND and a screen showing this device can be missing "
+            "from the list (re-run with a higher context cap)."
+        )
+    if glob_capped_count:
+        notes.append(
+            f"{glob_capped_count} globbed <file> reference(s) hit the glob cap, so some embedded "
+            "screens were left out of the expansion and the screen list is a lower bound. This "
+            "cap cannot be raised from here."
+        )
     if live_capped:
         # S7-5: report the number of channels the live read ATTEMPTED (live_read, known in
         # find_device as len(read)), not len(channels), the latter counts p4p RESPONSES and

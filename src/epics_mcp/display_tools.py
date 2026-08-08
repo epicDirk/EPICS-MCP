@@ -280,8 +280,10 @@ async def find_device(
     operator screens reference the device, is offline + macro-aware. Live values come from p4p;
     reach follows the launcher's EPICS search env (address lists / name servers / auto-addr search,
     run epics-doctor for the effective posture); the live read is capped to max_batch_size
-    channels (honest note; the screen list is not shortened by that cap, though it inherits the
-    inventory walk's own caps, which this tool does not report). Source IOC comes from
+    channels (honest note; the screen list is not shortened by that cap). The screen list has its
+    own two limits, the inventory walk's per-display context cap and its glob cap, and each fires
+    its own notes entry naming the count; the absence of such a note means no cap fired on this
+    run, never "complete". Source IOC comes from
     ChannelFinder, disabled
     by default (empty EPICS_MCP_CHANNELFINDER_URL → no source IOC, honest note); a CAPPED
     ChannelFinder fetch adds a

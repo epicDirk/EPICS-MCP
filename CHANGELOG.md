@@ -51,8 +51,17 @@ carry breaking changes).
   they meant is true and now says so: the LIVE cap does not shorten the screen list. What they
   claimed is not: the screen list comes from the same inventory walk as `validate_pvs`, that walk
   has two caps of its own, and this tool reads neither, so a screen dropped by the glob cap is
-  missing with nothing saying so. Wording only, no behaviour change; reporting those caps here is a
-  separate open item.
+  missing with nothing saying so. Wording only, no behaviour change; the caps themselves are now
+  reported, see the next entry.
+
+- **`find_device` now reports the two caps of the inventory walk, like its three sibling display
+  tools.** Its screen list comes from the same macro-aware walk as `validate_pvs`,
+  `coverage_audit` and `crossplane_check`, and that walk has a per-display context cap and a glob
+  cap. `find_device` was the only one of the four that read neither, so a screen left out by
+  either cap was simply absent from the answer. Two new `notes` entries name the count and state
+  that the screen list is a lower bound. Both are statements about the run rather than a verdict
+  on the query, because neither cap records the screen a device lookup returns, and the absence of
+  a note means no cap fired on that run, never "complete".
 
 - **`validate_pvs` no longer calls a file's PV list a lower bound when that list cannot grow.**
   Under the default `view="file"`, the `notes` entry warning that the macro expansion hit the

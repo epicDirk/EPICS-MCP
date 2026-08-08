@@ -9,7 +9,9 @@ split: the offline ``find_screen`` stays EPICS-free, the live enrichment lives h
 The blocking offline part (macro-aware inventory + reverse-lookup) runs off the event loop in a
 thread; the p4p batch read and the ChannelFinder GET are awaited in the wrapper. The live read is
 capped to ``max_batch_size`` channels (a device prefix matches hundreds-to-thousands; one batch
-over that cap raises ``BATCH_TOO_LARGE``), the screen list stays complete, only the live is capped.
+over that cap raises ``BATCH_TOO_LARGE``), and that cap does not shorten the screen list. The
+screen list has its own two limits, the inventory walk's context and glob caps, and both are
+reported as ``notes`` since GB-65.
 """
 
 from __future__ import annotations
@@ -47,17 +49,29 @@ def _run_lookup(
     match: MatchMode,
     context_cap: int,
     windows_paths: bool,
-) -> tuple[PvLookupResult, tuple[str, ...]]:
+) -> tuple[PvLookupResult, tuple[str, ...], tuple[str, ...], int]:
     """Blocking offline part (run in a thread): macro-aware inventory → reverse-lookup → channels.
 
     *displays_dir* must be the project/dataset ROOT (the inventory binds display macros via the
     operator top-levels there, a narrow per-IOC subdirectory under-resolves, like ``crossplane``).
+
+    Returns ``(lookup, channels, context_capped, glob_capped_count)``. The last two are the walk's
+    own incompleteness signals, and they are returned HERE because this is the only place that
+    still holds the ``PvInventory``: ``find_displays`` projects it down to matched displays, so a
+    caller downstream can no longer ask. They are the same two values
+    :func:`~epics_mcp.services.inventory_adapter.analyze_display_pvs` hands its consumers, read
+    from the same fields, so the four display tools count the same thing (GB-65).
     """
     inventory = analyze_pv_inventory(
         Path(displays_dir), context_cap=context_cap, windows_paths=windows_paths
     )
     lookup = find_displays(inventory, query, match=match)
-    return lookup, collect_channels(lookup)
+    return (
+        lookup,
+        collect_channels(lookup),
+        inventory.diagnostics.context_capped,
+        len(inventory.diagnostics.glob_capped),
+    )
 
 
 async def _find_device(
@@ -75,7 +89,8 @@ async def _find_device(
     *displays_dir* is the project/dataset ROOT. Live values come from p4p; reach follows the
     launcher's EPICS search env (address lists / name servers / auto-addr search, run
     ``epics-doctor`` for the effective posture); the live read is capped to ``max_batch_size``
-    channels with an honest note (the screen list stays complete). Source IOC comes from
+    channels with an honest note, and that cap does not shorten the screen list; the walk's own
+    context and glob caps do, and each carries its own note. Source IOC comes from
     ChannelFinder, disabled by default (empty ``EPICS_MCP_CHANNELFINDER_URL`` → no source IOC,
     honest note). ``ca``-only PVs are not read
     under the single ``pva`` provider. Returns ``{"report": <JSON>, "markdown": <rendered>}``.
@@ -87,12 +102,13 @@ async def _find_device(
     # Canonicalize + existence-check + opt-in allowed_roots boundary (G3).
     resolve_user_path(displays_dir, kind="dir", label="displays_dir")
 
-    lookup, channels = await asyncio.to_thread(
+    lookup, channels, context_capped, glob_capped_count = await asyncio.to_thread(
         _run_lookup, displays_dir, cleaned, match, context_cap, windows_paths
     )
 
     # Live read, capped to one batch (a device prefix matches hundreds-to-thousands of channels;
-    # >max_batch_size raises BATCH_TOO_LARGE). Screens stay complete; only the live part samples.
+    # >max_batch_size raises BATCH_TOO_LARGE). THIS cap only samples the live part; the screen list
+    # is untouched by it (its own limits are the walk caps above, each with its own note).
     cfg = get_config()
     read = channels[: cfg.max_batch_size]
     live_capped = len(channels) > len(read)
@@ -118,7 +134,8 @@ async def _find_device(
     # join in build_device_report filters the (over-broad) fetch. Best-effort, a CF outage must not
     # sink the screens+live result (mirrors the live-read handling above: a provider-contract breach
     # degrades the live part and leaves the screen list untouched; "untouched by THIS failure" is
-    # the claim, not "complete", see DeviceLookupReport for the walk caps nobody reports here).
+    # the claim, not "complete", and the walk caps are a separate matter that IS reported, see
+    # DeviceLookupReport).
     stem = channel_name(cleaned).rstrip(":")
     glob = f"*{stem}*" if match == "substring" else f"{stem}*"
     try:
@@ -143,5 +160,7 @@ async def _find_device(
         live_read=len(read),
         live_capped=live_capped,
         channelfinder_enabled=bool(iocs.get("enabled")),
+        context_capped=context_capped,
+        glob_capped_count=glob_capped_count,
     )
     return {"report": report.model_dump(mode="json"), "markdown": render_markdown(report)}

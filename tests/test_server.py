@@ -3227,9 +3227,10 @@ async def test_stripped_tool_still_returns_structured_content(
 # machine-readable (the core value of S29) and cost only ~1% more context per agent turn, so the
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
-# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-08 after GB-29: the
-# core lane is 64_719 and the full lane 75_699 (the docstring below carries the deltas, and the
-# pairs 64_719 / 74_899 from 2026-08-06 and 63_017 / 72_508 from 2026-08-02 are superseded).
+# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-08 after GB-65: the
+# core lane is 64_719 and the full lane 75_853 (the docstring below carries the deltas, and the
+# pairs 64_719 / 75_699 from earlier the same day, 64_719 / 74_899 from 2026-08-06 and
+# 63_017 / 72_508 from 2026-08-02 are superseded).
 # ⚠ This sentence and the docstring's are TWO copies of the same measurement and they have
 # drifted apart once already, in the very commit that added the third figure: keep them in one
 # edit. Re-MEASURE these two after
@@ -3250,13 +3251,14 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
     FastMCP's native-lean schemas plus the S29 typing keep the core lane 64_719 and the full lane
-    75_699 (re-measured 2026-08-08 on both lanes, three times, for three edits to display-gated
+    75_853 (re-measured 2026-08-08 on both lanes, four times, for four edits to display-gated
     tools: GB-28 made the ``file_path`` echo a file-mode field of ``validate_pvs`` and said so in
     three of its argument descriptions, 74_899 -> 75_176 (+277 full, +0 core); GB-29 gave the
-    glob cap its own sentence in the view description, 75_176 -> 75_434 (+258 full, +0 core); and
+    glob cap its own sentence in the view description, 75_176 -> 75_434 (+258 full, +0 core);
     the post-build review corrected both of those plus ``find_device``'s completeness claim,
-    75_434 -> 75_699 (+265 full, +0 core). Every
-    char of all three is description text. The three zeros are the informative half: unlike
+    75_434 -> 75_699 (+265 full, +0 core); and GB-65 replaced that tool's "does not report the
+    walk caps" with what it now reports, 75_699 -> 75_853 (+154 full, +0 core). Every
+    char of all four is description text. The four zeros are the informative half: unlike
     the GB-6 edit below, these touch display-gated tools only, so the core lane cannot move,
     and a nonzero core delta would have meant the edit landed somewhere it was not aimed.
     The previous figures were core 64_719 and full 74_899, re-measured 2026-08-06 on both lanes,

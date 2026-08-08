@@ -861,9 +861,11 @@ messages embed the full request URL, an internal host would leak into this file)
   Beside the per-display context cap the walk has a **glob cap**: a `<file>` reference that still
   carries a macro is resolved by globbing the known displays, and past the cap the surplus matches
   are left out. That drops whole embedded SCREENS rather than instances, so it can shrink either
-  view while both `capped` verdicts above stay `false`. `validate_pvs`, `coverage_audit` and
-  `crossplane_check` each report it as its own `notes` entry, and none of them turns it into a
-  per-file verdict. **That restraint is measured, not caution.** The engine records the SOURCE
+  view while both `capped` verdicts above stay `false`. All **four** display tools report it as
+  its own `notes` entry, and none of them turns it into a per-file verdict. ⚠ `find_device` was
+  the exception until GB-65: it ran the same walk and read neither cap, so a screen dropped by the
+  glob cap was simply absent from its answer with nothing saying so. **That restraint is measured,
+  not caution.** The engine records the SOURCE
   display of a capped glob, and testing membership in that set looks like the obvious per-file
   flag while missing most of the damage: a cap lift from 50 to 200 on a 2878-display dataset grows
   **7** display views and only **3** of them are named as a source, the largest miss gaining 651

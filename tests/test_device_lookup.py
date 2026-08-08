@@ -11,6 +11,7 @@ from opi_navigation.pv_analysis.lookup import DisplayMatch, PvLookupResult
 
 from epics_mcp.services.device_lookup import (
     _VALUE_CAP,
+    DeviceLookupReport,
     _format_channel_value,
     build_device_report,
     collect_channels,
@@ -428,3 +429,130 @@ def test_render_markdown_summarises_waveform_value() -> None:
     assert "5000 values" in markdown  # element count named
     assert "4999" not in markdown  # NOT the full dump
     assert all(len(line) < 200 for line in markdown.splitlines())  # no runaway line
+
+
+# --- GB-65: the inventory walk's own two caps, reported beside the screen list ---
+
+
+def _report_with_caps(
+    *,
+    context_capped: tuple[str, ...] = (),
+    glob_capped_count: int = 0,
+    live_capped: bool = False,
+    lookup: PvLookupResult | None = None,
+) -> DeviceLookupReport:
+    """A minimal report whose ONLY interesting input is the pair of walk-cap signals."""
+    return build_device_report(
+        lookup if lookup is not None else _lookup(),
+        {"results": [], "errors": []},
+        {"enabled": False, "channels": []},
+        total_matched=2,
+        live_read=0,
+        live_capped=live_capped,
+        channelfinder_enabled=False,
+        context_capped=context_capped,
+        glob_capped_count=glob_capped_count,
+    )
+
+
+def test_context_cap_reaches_the_caller_as_a_lower_bound_note() -> None:
+    """The per-display context cap is reported, not swallowed.
+
+    find_device runs the SAME inventory walk as its three sibling display tools, and until GB-65 it
+    was the only one of the four that read neither of the walk's two caps: a screen whose PVs were
+    cut short simply did not appear, with nothing saying so. Provably red: drop the
+    ``context_capped`` block from :func:`build_device_report`.
+    """
+    report = _report_with_caps(context_capped=("a.bob", "b.bob"))
+
+    assert any("context cap" in note for note in report.notes), report.notes
+    assert any("2 display(s)" in note for note in report.notes), report.notes
+    assert any("LOWER BOUND" in note for note in report.notes), report.notes
+    # The two signals are independent: no glob cap fired here, so no glob note may appear.
+    assert not any("glob cap" in note for note in report.notes), report.notes
+
+
+def test_glob_cap_reaches_the_caller_as_a_lower_bound_note() -> None:
+    """The glob cap is reported too, and it says the screen LIST is the lower bound.
+
+    It is the cap that removes whole embedded SCREENS rather than instances, so it is exactly the
+    one a device lookup must confess: the answer to "which screens show this device" gets shorter.
+    Provably red: drop the ``glob_capped_count`` block from :func:`build_device_report`.
+    """
+    report = _report_with_caps(glob_capped_count=3)
+
+    assert any("glob cap" in note for note in report.notes), report.notes
+    assert any("3 globbed <file> reference(s)" in note for note in report.notes), report.notes
+    assert any("lower bound" in note for note in report.notes), report.notes
+    assert not any("context cap" in note for note in report.notes), report.notes
+
+
+def test_the_glob_note_says_globbed_not_template() -> None:
+    """The word is ``globbed``, and that is a correction this repo already had to make once.
+
+    ``05b5fc2`` replaced "template <file> reference(s)" with "globbed" in all three tools that had
+    it, because the engine fills ``glob_capped`` from every OTHER glob-resolved reference and skips
+    template edges in that branch. Those three fixes are pinned per file, so a FOURTH note carrying
+    the old word would be caught by none of them. This is that fourth pin.
+    """
+    report = _report_with_caps(glob_capped_count=1)
+
+    glob_note = next(note for note in report.notes if "glob cap" in note)
+    assert "globbed <file>" in glob_note
+    assert "template" not in glob_note
+
+
+def test_both_walk_caps_report_side_by_side() -> None:
+    """Both caps firing at once yields BOTH notes, not one that displaces the other.
+
+    ``05b5fc2`` found the untested-combination gap on the validate_pvs side (a new note inserting
+    itself at ``notes[1]`` displaced the view note, and the only test pinning that order defaulted
+    the other cap to empty). Provably red: make either block an ``elif``.
+    """
+    report = _report_with_caps(context_capped=("a.bob",), glob_capped_count=2)
+
+    assert any("context cap" in note for note in report.notes), report.notes
+    assert any("glob cap" in note for note in report.notes), report.notes
+
+
+def test_walk_cap_notes_sit_between_the_screen_note_and_the_live_note() -> None:
+    """The note ORDER is pinned, because the caps explain the line above them.
+
+    A capped walk is what can make "No operator-facing screen references this device" FALSE, so
+    the cap notes must follow it immediately and precede the live-read note, which is about a
+    different half of the answer. Nothing pinned any order in this report before GB-65 (measured:
+    zero ``notes[...]`` accesses in either device test file), and the sibling report lost exactly
+    that bet once. Provably red: move either block below the ``live_capped`` block.
+    """
+    empty = PvLookupResult(query="NOPE", match="prefix", total_pvs_matched=0, displays=())
+    report = _report_with_caps(
+        context_capped=("a.bob",), glob_capped_count=1, live_capped=True, lookup=empty
+    )
+
+    assert "No operator-facing screen" in report.notes[0]
+    assert "context cap" in report.notes[1]
+    assert "glob cap" in report.notes[2]
+    assert "read capped" in report.notes[3]
+
+
+def test_an_empty_screen_list_under_a_cap_is_not_reported_as_a_clean_no() -> None:
+    """The combination that matters most: no screens found AND the walk was cut short.
+
+    On its own, "No operator-facing screen references this device" reads as a proven absence. Under
+    a fired cap it is not one, and the reader must be able to see that from the same answer.
+    """
+    empty = PvLookupResult(query="NOPE", match="prefix", total_pvs_matched=0, displays=())
+    report = _report_with_caps(glob_capped_count=4, lookup=empty)
+
+    assert report.screens == ()
+    assert any("No operator-facing screen" in note for note in report.notes)
+    assert any("lower bound" in note for note in report.notes), report.notes
+
+
+def test_the_walk_cap_notes_are_rendered_into_the_markdown() -> None:
+    """The notes reach the human-facing half too, not just the JSON."""
+    report = _report_with_caps(context_capped=("a.bob",), glob_capped_count=1)
+
+    markdown = render_markdown(report)
+    assert "context cap" in markdown
+    assert "glob cap" in markdown

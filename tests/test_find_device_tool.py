@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from opi_navigation.pv_analysis import PvDiagnostics, PvInventory, analyze_pv_inventory
 
 from epics_mcp.errors import EpicsConnectionError, EpicsError
 from epics_mcp.tools.find_device import _find_device
@@ -84,7 +85,8 @@ async def test_find_device_tool_live_capped(
     mock_batch: AsyncMock, _mock_cfg: object, tmp_path: Path
 ) -> None:
     """With max_batch_size=1 and 2 matched channels, the live read is capped to one and an honest
-    'N of M' note is emitted; the screen list stays complete."""
+    'N of M' note is emitted; THIS cap does not shorten the screen list (the walk's own two caps
+    can, and they carry their own notes since GB-65)."""
     mock_batch.return_value = {"results": [{"pv_name": _CMD, "value": 0}], "errors": []}
     result = await _find_device("DEV-TEST01:Ctrl-EVR-01", str(_displays(tmp_path)))
     report = result["report"]
@@ -92,7 +94,7 @@ async def test_find_device_tool_live_capped(
     assert report["live_capped"] is True
     assert report["total_matched_channels"] == 2
     assert len(report["channels"]) == 1  # only one channel read live
-    assert len(report["screens"]) == 1  # screens complete regardless of the live cap
+    assert len(report["screens"]) == 1  # untouched by the LIVE cap (not a completeness claim)
     assert any("1 of 2 matched channels" in note for note in report["notes"])
     # Exactly one channel (the cap) was read.
     assert mock_batch.await_args is not None
@@ -256,3 +258,53 @@ async def test_find_device_live_read_contract_error_degrades(
     assert any("Live values unavailable" in note for note in report["notes"])
     # The live read WAS attempted (the wrap caught a real call, not a no-op because read was empty).
     mock_batch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("epics_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
+async def test_the_walk_caps_travel_from_the_inventory_into_the_report(
+    mock_batch: AsyncMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GB-65: the two cap signals survive the WIRING, not just the merge.
+
+    ``test_device_lookup.py`` proves the notes are built when the values arrive; nothing proved
+    they arrive. Measured with two mutants, both of which left all 37 tests of the pair green:
+    returning ``((), 0)`` from ``_run_lookup``, and passing empty values for both keywords at the
+    ``build_device_report`` call. Either one restores the exact silence GB-65 removes, while the
+    suite reports success. This test is the seam those mutants cross.
+
+    The inventory RUN is the only thing replaced (its diagnostics are swapped for known values);
+    ``find_displays``, the channel collection and the whole report assembly stay real, because the
+    claim under test is that ``_run_lookup`` reads the diagnostics off the inventory and hands them
+    on. Faking any further out would test the fake. The narrow keyword signature is deliberate: it
+    is the set ``_find_device`` actually passes, so a silently added argument reddens this too.
+    """
+    mock_batch.return_value = {"results": [], "errors": []}
+
+    def _inventory_with_caps(
+        repo_root: Path, *, context_cap: int, windows_paths: bool
+    ) -> PvInventory:
+        real = analyze_pv_inventory(repo_root, context_cap=context_cap, windows_paths=windows_paths)
+        return real.model_copy(
+            update={
+                "diagnostics": PvDiagnostics(
+                    context_capped=("panel.bob",),
+                    glob_capped=(("panel.bob", "../a/*.bob"), ("panel.bob", "../b/*.bob")),
+                )
+            }
+        )
+
+    monkeypatch.setattr("epics_mcp.tools.find_device.analyze_pv_inventory", _inventory_with_caps)
+    result = await _find_device("DEV-TEST01:Ctrl-EVR-01", str(_displays(tmp_path)))
+
+    report = result["report"]
+    assert isinstance(report, dict)
+    notes = report["notes"]
+    # The COUNTS are pinned, not just the presence of a note: a wiring that passed a constant
+    # would satisfy "a note exists" while reporting a number nobody measured.
+    assert any("1 display(s) hit the inventory's per-instance context cap" in n for n in notes), (
+        notes
+    )
+    assert any("2 globbed <file> reference(s) hit the glob cap" in n for n in notes), notes
+    # The screens themselves still come through: the caps are notes, never a withhold.
+    assert len(report["screens"]) == 1
