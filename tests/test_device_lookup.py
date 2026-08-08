@@ -556,3 +556,22 @@ def test_the_walk_cap_notes_are_rendered_into_the_markdown() -> None:
     markdown = render_markdown(report)
     assert "context cap" in markdown
     assert "glob cap" in markdown
+
+
+def test_the_cap_notes_stay_within_this_file_s_own_rendered_line_budget() -> None:
+    """The 200-char line rule this file asserts elsewhere, applied to the notes that can be longest.
+
+    ``test_render_markdown_summarises_waveform_value`` pins ``len(line) < 200`` for every rendered
+    line, but it runs without any cap note, so the longest text this report can produce was outside
+    its reach. Measured: the first draft of the context-cap note rendered to 198 characters at a
+    one-digit count and would have hit exactly 200 at a three-digit one, quietly breaking a rule
+    this very file sets. Four digits is the guard, not the expectation.
+    """
+    report = _report_with_caps(
+        context_capped=tuple(f"d{i}.bob" for i in range(1234)), glob_capped_count=5678
+    )
+
+    lines = render_markdown(report).splitlines()
+    assert any("context cap" in line for line in lines)  # the long notes ARE in this render
+    assert any("glob cap" in line for line in lines)
+    assert all(len(line) < 200 for line in lines), max(lines, key=len)

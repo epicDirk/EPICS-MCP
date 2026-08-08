@@ -79,10 +79,16 @@ class DeviceLookupReport(_Model):
 
     ⚠ That does NOT make an unconditional "the screen list is complete" true, and it stays banned
     in this file and in ``tools/find_device.py``. Two reasons, both load-bearing: the absence of a
-    note never means "complete" (it means no cap FIRED during this run, and the walk has limits
-    beyond its two caps), and a note that DID fire is a statement about the run, not a verdict on
-    this query, because neither cap records the screen a device lookup returns. Say what is true
-    instead: the LIVE cap does not shorten the screen list.
+    note means no cap FIRED on this run, never "complete" (the walk has limits its two caps do not
+    measure, the case-sensitivity of path resolution among them), and a note that DID fire is a
+    statement about the run, not a verdict on this query, because neither cap records the screen a
+    device lookup returns. Say what is true instead: the LIVE cap does not shorten the screen list.
+
+    ⚠ ``PvDiagnostics`` carries a THIRD field, ``excluded_by_protocol``, and it is deliberately not
+    read here: measured, it cannot shorten this list. It counts the ``loc``/``sim``/``sys``/other
+    references dropped from the CO-REFERENCE, and ``find_displays`` filters every display's PVs
+    through ``is_real_resolved`` before matching, so such a channel can never reach ``screens`` in
+    the first place. Reporting it would answer a question this tool does not ask.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -224,17 +230,20 @@ def build_device_report(
     # is no per-screen membership test to make (the engine records the capped TARGET and the SOURCE
     # display of a capped glob, neither of which is the screen a device lookup returns), so neither
     # cap is turned into a per-screen verdict. Deliberately notes, never a withhold.
+    # Kept SHORT on purpose: render_markdown prefixes "- ", and this file's own
+    # test_render_markdown_summarises_waveform_value asserts every rendered line stays under 200
+    # characters. The first draft was 196 and would have crossed that at a three-digit count.
     if context_capped:
         notes.append(
-            f"{len(context_capped)} display(s) hit the inventory's per-instance context cap, so "
-            "their resolved PVs are a LOWER BOUND and a screen showing this device can be missing "
-            "from the list (re-run with a higher context cap)."
+            f"{len(context_capped)} display(s) hit the per-display context cap, their resolved "
+            "PVs are a LOWER BOUND, so a screen showing this device can be missing (raise "
+            "context_cap)."
         )
     if glob_capped_count:
         notes.append(
-            f"{glob_capped_count} globbed <file> reference(s) hit the glob cap, so some embedded "
-            "screens were left out of the expansion and the screen list is a lower bound. This "
-            "cap cannot be raised from here."
+            f"{glob_capped_count} globbed <file> reference(s) hit the glob cap, so embedded "
+            "screens were left out and the screen list is a lower bound. This cap cannot be "
+            "raised from here."
         )
     if live_capped:
         # S7-5: report the number of channels the live read ATTEMPTED (live_read, known in

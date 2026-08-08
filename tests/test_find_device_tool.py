@@ -261,9 +261,14 @@ async def test_find_device_live_read_contract_error_degrades(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("n_context", "n_glob"), [(1, 2), (3, 1)])
 @patch("epics_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
 async def test_the_walk_caps_travel_from_the_inventory_into_the_report(
-    mock_batch: AsyncMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    mock_batch: AsyncMock,
+    n_context: int,
+    n_glob: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """GB-65: the two cap signals survive the WIRING, not just the merge.
 
@@ -273,38 +278,75 @@ async def test_the_walk_caps_travel_from_the_inventory_into_the_report(
     ``build_device_report`` call. Either one restores the exact silence GB-65 removes, while the
     suite reports success. This test is the seam those mutants cross.
 
+    ⚠ TWO input vectors, and the second one is not decoration. With a single vector this test
+    still passed a wiring that returned a CONSTANT ``("x",), 2``, and one that truncated with
+    ``context_capped[:1]`` (invisible at cardinality 1). Both were measured green against the
+    one-vector version by the post-build review, which is exactly the "a constant cannot pass"
+    claim this docstring used to make and could not keep. The counts differ per vector AND differ
+    from each other within a vector, so no constant and no truncation satisfies both rows.
+
     The inventory RUN is the only thing replaced (its diagnostics are swapped for known values);
     ``find_displays``, the channel collection and the whole report assembly stay real, because the
     claim under test is that ``_run_lookup`` reads the diagnostics off the inventory and hands them
     on. Faking any further out would test the fake. The narrow keyword signature is deliberate: it
-    is the set ``_find_device`` actually passes, so a silently added argument reddens this too.
+    is the set ``_find_device`` actually passes, so a silently added argument reddens this too, and
+    the fake now RECORDS what it received, because a signature pins the argument NAMES and says
+    nothing about the values reaching the engine (CLAUDE.md, evidence discipline, point 8).
     """
     mock_batch.return_value = {"results": [], "errors": []}
+    seen: dict[str, object] = {}
 
     def _inventory_with_caps(
         repo_root: Path, *, context_cap: int, windows_paths: bool
     ) -> PvInventory:
+        seen["context_cap"] = context_cap
+        seen["windows_paths"] = windows_paths
         real = analyze_pv_inventory(repo_root, context_cap=context_cap, windows_paths=windows_paths)
         return real.model_copy(
             update={
                 "diagnostics": PvDiagnostics(
-                    context_capped=("panel.bob",),
-                    glob_capped=(("panel.bob", "../a/*.bob"), ("panel.bob", "../b/*.bob")),
+                    context_capped=tuple(f"capped{i}.bob" for i in range(n_context)),
+                    glob_capped=tuple(("panel.bob", f"../{i}/*.bob") for i in range(n_glob)),
                 )
             }
         )
 
     monkeypatch.setattr("epics_mcp.tools.find_device.analyze_pv_inventory", _inventory_with_caps)
+    result = await _find_device(
+        "DEV-TEST01:Ctrl-EVR-01", str(_displays(tmp_path)), context_cap=17, windows_paths=True
+    )
+
+    # The caller's knobs reach the engine, not just its parameter names.
+    assert seen == {"context_cap": 17, "windows_paths": True}
+
+    report = result["report"]
+    assert isinstance(report, dict)
+    notes = report["notes"]
+    assert any(f"{n_context} display(s) hit the per-display context cap" in n for n in notes), notes
+    assert any(f"{n_glob} globbed <file> reference(s) hit the glob cap" in n for n in notes), notes
+    # The screens themselves still come through: the caps are notes, never a withhold.
+    assert len(report["screens"]) == 1
+
+
+@pytest.mark.asyncio
+@patch("epics_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
+async def test_an_uncapped_run_carries_no_cap_note_at_all(
+    mock_batch: AsyncMock, tmp_path: Path
+) -> None:
+    """The negative control the wiring test needs, on the REAL inventory.
+
+    Without it, an implementation that emits both notes unconditionally would satisfy every
+    positive assertion above, and a permanent warning is one nobody reads. The sibling commit
+    demands exactly this for the "too narrow" note; the wiring half had no such control until the
+    post-build review pointed at the asymmetry. The fixture is a single .bob with no embeds, so
+    neither cap can fire, and both notes must be absent.
+    """
+    mock_batch.return_value = {"results": [], "errors": []}
     result = await _find_device("DEV-TEST01:Ctrl-EVR-01", str(_displays(tmp_path)))
 
     report = result["report"]
     assert isinstance(report, dict)
     notes = report["notes"]
-    # The COUNTS are pinned, not just the presence of a note: a wiring that passed a constant
-    # would satisfy "a note exists" while reporting a number nobody measured.
-    assert any("1 display(s) hit the inventory's per-instance context cap" in n for n in notes), (
-        notes
-    )
-    assert any("2 globbed <file> reference(s) hit the glob cap" in n for n in notes), notes
-    # The screens themselves still come through: the caps are notes, never a withhold.
-    assert len(report["screens"]) == 1
+    assert len(report["screens"]) == 1  # the walk DID find the screen, so this is not a null run
+    assert not any("context cap" in n for n in notes), notes
+    assert not any("glob cap" in n for n in notes), notes
