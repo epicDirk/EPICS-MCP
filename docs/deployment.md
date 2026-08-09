@@ -39,7 +39,7 @@ setting those variables for *your* services, with no code change. This guide wal
    ```bash
    epics-doctor            # probes every configured plane, read-only
    epics-doctor --json     # machine-readable, for CI
-   epics-doctor --probe-pv SIM:PS-01:Cur-RB   # also pass/fail the live PVA plane
+   epics-doctor --probe-pv <a-connected-pv>   # also pass/fail the live PVA plane
    ```
 
    The exit code is the scriptable contract:

@@ -33,7 +33,7 @@ Usage::
 
     epics-init --list
     epics-init --preset sandbox
-    epics-init --preset sandbox --probe-pv SIM:PS-01:Cur-RB
+    epics-init --preset sandbox --probe-pv TEST:Temperature
     epics-init --preset ioc-archiver --set EPICS_MCP_ARCHIVER_URL=http://arch:17665
     epics-init --preset full --no-check > .mcp.json
 """

@@ -84,3 +84,11 @@ restart) and unless the EPICS client search reach is loopback-only, so that enab
 silently arm a process that reaches a real facility network. Point the audit path somewhere your
 server user can write.
 
+## Then restart the client (this applies to every block above)
+
+A client reads this file when it starts and launches the server itself, so **a block you just
+pasted changes nothing until the client reloads it**. Restart the client, or use its reconnect
+command if it has one. Until then the tools are simply absent, and most clients report nothing at
+all rather than "not loaded yet", which is indistinguishable from a configuration that is wrong.
+So make the restart the step you take before you start diagnosing.
+
