@@ -27,7 +27,7 @@ standalone core a public user gets. The `opi_navigation`-coupled test modules ar
 collection when the package is absent, so the core suite stays green.
 
 **That drop is no longer silent (GB-27).** A green report over a hundred tests that never ran is
-indistinguishable from a full one, so a run that drops those six modules now says so in its report
+indistinguishable from a full one, so a run that drops those modules now says so in its report
 header, and a run that DEMANDS them refuses instead:
 
 ```bash

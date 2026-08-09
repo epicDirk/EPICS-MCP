@@ -23,9 +23,13 @@ because it has a USER to report to and two different exit codes to report with. 
 has two exits, collect or do not collect, so the two finder failures below collapse. What does
 NOT collapse, and is the reason the collapse is safe: a **broken** engine, one whose ``find_spec``
 answers and whose import then fails, still makes this return ``True``, so its modules are
-collected and fail loudly at import. Measured against a finder that answers with a spec whose
-loader raises: 1705 tests collected, **6 collection errors** on exactly the six engine-coupled
-modules, exit 2. That is the direction a broken environment should fail in. Only a finder that
+collected and fail loudly at import. Measured 2026-07-31, when the list held six, against a finder
+that answers with a spec whose loader raises: 1705 tests collected, **6 collection errors** on
+exactly the engine-coupled modules, exit 2. Those figures are that probe's and are not re-derived
+here, which is why the count sits in the date rather than in the sentence:
+``ENGINE_COUPLED_MODULES`` in ``tests/conftest.py`` is longer today, and a number repeated beside
+a list it does not read is how this paragraph drifted in the first place. That is the direction a
+broken environment should fail in. Only a finder that
 cannot answer at all is treated as "not there", because there is nothing to collect then and no
 way to say so from a ``collect_ignore`` list.
 
@@ -106,7 +110,7 @@ def displays_demanded(env: Mapping[str, str]) -> bool:
 
 
 def engine_collection_decision(*, available: bool, demanded: bool) -> str:
-    """What ``tests/conftest.py`` should do about the six engine-coupled modules.
+    """What ``tests/conftest.py`` should do about its engine-coupled modules.
 
     ``"collect"``  the engine is there, run them.
     ``"ignore"``   it is absent and nobody asked, skip them (the standalone-core case a public

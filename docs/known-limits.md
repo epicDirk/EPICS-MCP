@@ -232,10 +232,12 @@ are whole. It is not scheduled here.
 Measured 2026-08-03, while closing the silent half of the same gap (GB-27).
 
 `.github/workflows/ci.yml` syncs with `uv sync --extra dev --frozen` and passes no `--group`, so
-the six `opi_navigation`-coupled test modules are not collected there. That is a decision with a
+the `opi_navigation`-coupled test modules listed in `tests/conftest.py` are not collected there.
+That is a decision with a
 reason, stated in `pyproject.toml` next to the `displays` group and in `CONTRIBUTING.md`: CI tests
 exactly the standalone core a public user gets. What was wrong is a different thing, and it is
-fixed: the green report said nothing about the **100 tests** (measured 2026-08-03) it had not run,
+fixed: the green report said nothing about the **145 tests** (measured 2026-08-09 with
+`pytest --collect-only` over that list) it had not run,
 so a reader could not tell a full run from a partial one. Every run that drops those modules now
 carries a gap line in its report header, and `EPICS_MCP_REQUIRE_DISPLAYS=1` turns the silent skip
 into a refusal for anyone who demands the full suite locally.
@@ -259,7 +261,8 @@ on nothing but the private repository's own default token; the leg WITHOUT the e
 this CI's numbers exactly (1776 passed, 72 skipped, the figure both of its Python legs report);
 the leg WITH it reached 1884 passed, 64 skipped. The job asserts that DIFFERENCE, not a remembered
 total, because a noted expectation is not a guard and ages silently. Its sharper assertion is per
-module: each of the six has to appear in the run carrying tests, and not one of those tests may be
+module: each module of the list it derives from `tests/conftest.py` has to appear in the run
+carrying tests, and not one of those tests may be
 skipped. That is the case a green report otherwise renders indistinguishable from a full one, and
 the guard has been driven red against it deliberately, not merely reasoned about.
 

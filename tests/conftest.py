@@ -28,7 +28,7 @@ from tests.engine_gate import (
 #
 # Through engine_gate rather than a bare find_spec (QA-48): this line runs at COLLECTION time, so
 # a finder that RAISES took the entire run down with an ImportError on this conftest instead of
-# skipping the six modules below. Measured before the repair: exit 4, nothing collected.
+# skipping the modules below. Measured before the repair: exit 4, nothing collected.
 ENGINE_COUPLED_MODULES = (
     "test_validate.py",
     "test_crossplane_tool.py",
@@ -51,7 +51,7 @@ def pytest_configure(config: pytest.Config, decision: str = _DECISION) -> None:
     """Refuse a DEMANDED display run that cannot happen, instead of reporting it green (GB-27).
 
     Without this, ``EPICS_MCP_REQUIRE_DISPLAYS=1`` on an engine-less checkout produced exactly the
-    report of a healthy run: the six modules above were dropped at collection and nothing said so.
+    report of a healthy run: the modules above were dropped at collection and nothing said so.
     A hundred tests, silently absent. ``UsageError`` rather than an assertion because that is what
     it is, a run asking for something this environment cannot deliver; it prints one line, without
     a traceback, and exits 4.

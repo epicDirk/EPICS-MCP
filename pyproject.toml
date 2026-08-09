@@ -105,7 +105,7 @@ dev = [
 # Local full run: `uv sync --extra dev --group displays`, and then
 # `EPICS_MCP_REQUIRE_DISPLAYS=1 uv run pytest tests/`, which refuses instead of silently skipping
 # if the engine is missing after all (GB-27). CI deliberately does NOT pass --group, so it tests
-# exactly the standalone core a public user gets (conftest.py drops the 6 display test modules
+# exactly the standalone core a public user gets (conftest.py drops the display test modules it lists
 # when opi_navigation is absent). That skip is no longer silent: a run that drops them says so in
 # its report header, because a green report over 100 tests that never ran is indistinguishable
 # from a full one. Why CI cannot simply run them, and where they DO run since 2026-08-04:
