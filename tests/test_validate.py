@@ -26,6 +26,16 @@ _FRAGMENT = (
     "<pv_name>$(PRP):Val</pv_name></widget></display>"
 )
 
+#: A Data Browser trend configuration: the file kind the engine learned to read next to the
+#: displays. It exists here so the coupling guard below can ask a question the pinned engine
+#: and a newer one answer differently; while the pin stands, the inventory ignores it.
+_TREND = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    "<databrowser><title>Trend</title><pvlist><pv>"
+    "<name>SIM:PS-01:Cur-RB</name><visible>true</visible><axis>0</axis>"
+    "</pv></pvlist></databrowser>"
+)
+
 
 def _dataset(tmp_path: Path) -> tuple[Path, Path]:
     """Write an operator parent embedding a templated fragment; return (root, fragment)."""
@@ -351,48 +361,82 @@ async def test_a_bad_displays_dir_is_still_reported_as_such_for_a_non_bob_file(
         config_module._config = None
 
 
-def test_our_display_suffix_is_the_engines_own_constant() -> None:
-    """The COUPLING, nailed to the engine's own rule rather than to a sample of file names.
+def test_the_display_suffix_is_the_engines_only_collecting_suffix() -> None:
+    """The COUPLING: is ours the ONLY suffix the engine collects, not merely one of them?
 
-    The first version of this guard wrote five names into a tmp directory and compared the
-    collected set. That is blind in the direction that matters: widening the engine to also accept
-    ``.opi`` leaves every one of those five names classified exactly as before, so we would start
-    refusing files the inventory reads and no test would notice.
+    ⚠️ **The previous version of this guard could not go red, and its docstring said the
+    opposite.** It compared ``DISPLAY_SUFFIX == _BOB_SUFFIX`` and claimed to be "the only
+    assertion that goes red for a widening". Both constants stay ``".bob"`` through the
+    widening that actually happened: the engine put ``_PLT_SUFFIX`` NEXT TO ``_BOB_SUFFIX``
+    rather than replacing it, so equality survives a change that makes the refusal in
+    ``_run_validate`` wrong. Its example was ``.opi``, which is not the widening that came.
+    By this repository's own rule (CLAUDE.md, evidence discipline 5), a guard that cannot go
+    red is the defect it was meant to remove.
 
-    Reading the engine's private constant is deliberate. A test may reach where production code
-    should not, and this is the only assertion that goes red for a widening. If the engine ever
-    replaces the constant with a set, the import fails loudly here, which is the correct outcome:
-    the refusal in ``_run_validate`` would then need rewriting anyway.
+    What is asked instead is the question the refusal really rests on. ``_run_validate``
+    rejects everything but ``DISPLAY_SUFFIX`` on the grounds that the inventory "can only ever
+    come back empty" for anything else. That reasoning holds exactly as long as the engine has
+    ONE collecting suffix. So: enumerate the engine's suffix constants and require ours to be
+    the only one.
+
+    Measuring the module's attributes rather than importing a named constant is deliberate: a
+    second suffix arrives under a name this test cannot know in advance, and a named import
+    would have to be edited before it could notice anything.
+
+    Red-provable WITHOUT moving the pin, which is the point: run this file with
+    ``PYTHONPATH`` pointing at the engine's source checkout and the newer engine shadows the
+    pinned install. Measured there, the attribute set is ``{_BOB_SUFFIX, _PLT_SUFFIX}`` and
+    this assertion fails, naming [GB-79] as the follow-up.
     """
-    from opi_navigation.discovery import _BOB_SUFFIX
+    import opi_navigation.discovery as discovery
 
     from epics_mcp.display_files import DISPLAY_SUFFIX
 
-    assert DISPLAY_SUFFIX == _BOB_SUFFIX, (
-        "the display-PV engine no longer selects files by this suffix; the refusal in "
-        "_run_validate now rejects files the inventory would read"
+    suffixes = {
+        name: getattr(discovery, name)
+        for name in dir(discovery)
+        if name.endswith("_SUFFIX") and isinstance(getattr(discovery, name), str)
+    }
+    assert set(suffixes.values()) == {DISPLAY_SUFFIX}, (
+        "the display-PV engine now collects more than one file suffix "
+        f"({sorted(suffixes.items())}); the refusal in _run_validate rejects files the "
+        "inventory would read, and its reasoning ('can only ever come back empty') no longer "
+        "holds. Follow-up: roadmap item GB-79 in the producing workspace."
     )
 
 
-def test_the_engine_really_ignores_every_suffix_but_bob(tmp_path: Path) -> None:
-    """The same coupling from the behaviour side: what the engine actually collects.
+def test_the_inventory_really_reads_nothing_but_displays(tmp_path: Path) -> None:
+    """The same coupling from the behaviour side: what the INVENTORY actually reads.
 
-    Complements the constant check above, which cannot see a change in HOW the suffix is compared
-    (a mutant making ``find_bob_files`` case-sensitive keeps the constant equal). Deliberately
-    calls the genuine ``find_bob_files`` rather than restating its logic: a test that
-    re-implements the rule it checks proves only that the author is consistent.
+    ⚠️ **This guard used to measure the wrong function, and it was blind three times over.**
+    It called ``find_bob_files``, which (a) the PV surface no longer calls at all, (b) still
+    returns only ``.bob`` in the newer engine, so it stays green through the widening, and
+    (c) was checked against a name list that contained no trend file, so even feeding it the
+    widened function would have changed nothing.
+
+    ``analyze_pv_inventory`` is the function whose behaviour the refusal in ``_run_validate``
+    actually cites, so it is the one asked here. The tree holds a display AND a trend file:
+    while the pin stands, the inventory reports one top level; once the engine widens, it
+    reports the trend too and this assertion fails.
+
+    The case folding stays measured rather than restated (``UPPER.BOB`` is a display), because
+    a test that re-implements the rule it checks proves only that the author is consistent.
     """
-    from opi_navigation.discovery import find_bob_files
+    from opi_navigation.pv_analysis import analyze_pv_inventory
 
     from epics_mcp.display_files import DISPLAY_SUFFIX
 
-    for name in ("kept.bob", "KEPT2.BOB", "skipped.txt", "skipped.opi", "skipped.bob.bak", "x"):
-        (tmp_path / name).write_text(_FRAGMENT, encoding="utf-8")
+    (tmp_path / "kept.bob").write_text(_FRAGMENT, encoding="utf-8")
+    (tmp_path / "KEPT2.BOB").write_text(_FRAGMENT, encoding="utf-8")
+    (tmp_path / "skipped.txt").write_text(_FRAGMENT, encoding="utf-8")
+    (tmp_path / "skipped.opi").write_text(_FRAGMENT, encoding="utf-8")
+    (tmp_path / "trend.plt").write_text(_TREND, encoding="utf-8")
 
-    collected = set(find_bob_files(tmp_path))
+    collected = {entry.display_path for entry in analyze_pv_inventory(tmp_path).displays}
     assert collected == {"kept.bob", "KEPT2.BOB"}, (
-        "the engine's file selection changed; DISPLAY_SUFFIX and the refusal in _run_validate "
-        f"have to follow it (collected: {sorted(collected)})"
+        "the display-PV inventory no longer reads .bob files only; the refusal in "
+        f"_run_validate now rejects files it would read (collected: {sorted(collected)}). "
+        "Follow-up: roadmap item GB-79 in the producing workspace."
     )
     assert all(Path(name).suffix.lower() == DISPLAY_SUFFIX for name in collected)
 

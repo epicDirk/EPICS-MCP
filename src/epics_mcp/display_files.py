@@ -13,14 +13,22 @@ importing it would drag the optional engine into a core-only install, which is e
 from __future__ import annotations
 
 #: The suffix a display file carries. This mirrors the collection rule of the display-PV engine:
-#: ``opi_navigation``'s ``find_bob_files`` keeps a candidate only when ``suffix.lower()`` equals
-#: this. Measured rather than read off the source: a ``.txt`` holding valid display XML AND
-#: embedded by a ``.bob`` never surfaces as an ``origin_file``, while ``UPPER.BOB`` does, which is
-#: why every comparison here folds case.
+#: ``opi_navigation`` keeps a candidate only when ``suffix.lower()`` equals this. Measured rather
+#: than read off the source: a ``.txt`` holding valid display XML AND embedded by a ``.bob`` never
+#: surfaces as an ``origin_file``, while ``UPPER.BOB`` does, which is why every comparison here
+#: folds case.
 #:
 #: Deliberately not an import of the engine's private ``_BOB_SUFFIX``;
 #: ``tests/test_validate.py`` pins the coupling against the engine itself instead, so a drift is a
 #: red test rather than a silent disagreement.
+#:
+#: ⚠ That last sentence was FALSE for the drift that actually happened, and the correction is the
+#: point of this note. The guard asked whether our constant EQUALS the engine's, and the engine
+#: widened by putting a second suffix (``.plt``, Data Browser trend files) NEXT TO the first
+#: rather than replacing it, so equality survived a change that makes the refusal in
+#: ``tools/validate.py`` wrong. The guard now asks whether ours is the engine's ONLY collecting
+#: suffix, and a sibling guard asks what the inventory really reads; both are red-provable against
+#: the newer engine without moving the pin, and both name roadmap item GB-79 as the follow-up.
 DISPLAY_SUFFIX = ".bob"
 
 

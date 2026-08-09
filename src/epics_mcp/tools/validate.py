@@ -17,12 +17,20 @@ from epics_mcp.paths import resolve_user_path
 from epics_mcp.services.epics_client import pv_get_batch
 from epics_mcp.services.inventory_adapter import analyze_inventory
 
-#: ⚠ What this check and the engine agree on is NOT the file name. ``find_bob_files`` deliberately
-#: does not resolve symlinks, ``resolve_user_path`` here does, so a ``link.bob`` pointing at a
-#: ``.txt`` IS collected by the engine (under the link's own name) and is refused below. Refusing
-#: it stays correct for the OTHER reason: the lookup key ``rel`` is built from the resolved path
-#: too, so it could never match that entry, and the previous code answered empty after a full
-#: walk. Do not simplify the comment on the refusal to "the engine would ignore it".
+#: ⚠ What this check and the engine agree on is NOT the file name. The engine's collection
+#: deliberately does not resolve symlinks, ``resolve_user_path`` here does, so a ``link.bob``
+#: pointing at a ``.txt`` IS collected by the engine (under the link's own name) and is refused
+#: below. Refusing it stays correct for the OTHER reason: the lookup key ``rel`` is built from the
+#: resolved path too, so it could never match that entry, and the previous code answered empty
+#: after a full walk. Do not simplify the comment on the refusal to "the engine would ignore it".
+#:
+#: ⚠ The refusal rests on the engine collecting ONE suffix, and that is a pinned fact, not a
+#: permanent one: the newer engine reads Data Browser ``.plt`` trend files as well, so the moment
+#: the ``opi_navigation`` pin moves, this refusal starts rejecting files the inventory would read.
+#: Two guards in ``tests/test_validate.py`` go red in that second and name the follow-up (roadmap
+#: item GB-79). Naming ``find_bob_files`` here would be worse than vague: the PV surface stopped
+#: calling it, and it keeps returning only ``.bob`` in the newer engine, so a reader would take
+#: reassurance from a function that has nothing to do with the answer any more.
 _DISPLAY_SUFFIX = DISPLAY_SUFFIX
 
 #: Which of the two legitimate questions about a ``.bob`` the caller is asking. They are different
