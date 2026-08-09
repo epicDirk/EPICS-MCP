@@ -320,7 +320,10 @@ def test_render_markdown_broken_db_and_unregistered_naming() -> None:
 def test_notes_glob_capped_and_needs_msi() -> None:
     # The two honest lower-bound notes: glob cap (adapter) and needs-msi (.db substitution).
     glob = crossplane_check([_jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:x")], _st(), glob_capped_count=2)
-    assert any("glob cap" in note for note in glob.notes)
+    # The full opening, not the bare substring this used to accept (GB-78): "globbed" replaced a
+    # wrong "template" in 05b5fc2 (the engine skips template edges when filling glob_capped), and
+    # a substring assertion cannot tell the two apart.
+    assert any("globbed <file> reference(s) hit the glob cap" in note for note in glob.notes)
     msi = crossplane_check([], _st(), ioc_db=(set[str](), {"DEV-TEST01:Ctrl-EVR-01:$(R)"}))
     assert msi.ioc_db_needs_msi == 1
     assert any("needs msi" in note for note in msi.notes)

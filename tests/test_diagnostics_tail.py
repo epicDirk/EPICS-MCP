@@ -447,7 +447,14 @@ _CAP_QUALIFIER = "per-display "
 
 #: The construction a note uses to REPORT the cap. Deliberately not "any mention of the cap":
 #: ``re-run with a higher context cap`` is advice about the ARGUMENT and is left alone.
-_CAP_MENTION = re.compile(r"hit the (.*?)context cap", re.S)
+#:
+#: A qualifier is an attribute, never a sentence, so it may not contain sentence punctuation. That
+#: is not cosmetic: a bare ``.*?`` spans anything between the two anchors, and the ``view``
+#: description of ``validate_pvs`` says "hit the per-display context cap" early and "reports the
+#: glob cap" some 400 characters later, so the glob pattern below matched that whole paragraph and
+#: reported a description as a malformed note. Measured after narrowing: the context pattern keeps
+#: exactly the same seven matches, and the glob one drops to the four notes it is about.
+_CAP_MENTION = re.compile(r"hit the ([^.,:;]*?)context cap", re.S)
 
 #: What an f-string insertion renders as, so a qualifier computed at runtime shows up as a
 #: qualifier that is not :data:`_CAP_QUALIFIER`, rather than vanishing between two segments.
@@ -499,13 +506,23 @@ def _rendered_strings(tree: ast.AST) -> list[str]:
     return found
 
 
+def _mentions(source: str, mention: re.Pattern[str]) -> list[tuple[str, str]]:
+    """Return ``(whole literal, qualifier)`` for every match of *mention* in *source*.
+
+    One detector for both caps rather than a copy per cap, which is the same build-once rule the
+    collection point above follows: the two guards ask different questions of the result (one
+    reads the qualifier, the other the literal that carries it) and share the AST walk.
+    """
+    return [
+        (text, match.group(1))
+        for text in _rendered_strings(ast.parse(source))
+        for match in mention.finditer(text)
+    ]
+
+
 def _cap_qualifiers(source: str) -> list[str]:
     """Return the qualifier of every "hit the ... context cap" in *source*, in source order."""
-    return [
-        match.group(1)
-        for text in _rendered_strings(ast.parse(source))
-        for match in _CAP_MENTION.finditer(text)
-    ]
+    return [qualifier for _, qualifier in _mentions(source, _CAP_MENTION)]
 
 
 def test_every_place_that_names_the_context_cap_uses_the_same_words() -> None:
@@ -689,4 +706,109 @@ def test_no_served_surface_uses_a_retired_name_for_the_cap() -> None:
     assert not offenders, (
         f"retired names for the context cap are back: {offenders}. The cap is called "
         f"'{_CAP_QUALIFIER}context cap' everywhere a reader meets it, see GB-72."
+    )
+
+
+# --------------------------------------------------------------------------------------------
+# The same for the OTHER cap (GB-78): the glob cap, whose wording was uniform and held by nothing.
+# --------------------------------------------------------------------------------------------
+
+#: How a note REPORTS the glob cap. Same construction as :data:`_CAP_MENTION`, same reason for
+#: anchoring on ``hit the``: the tool descriptions mention the glob cap too (GB-72 put it there),
+#: but never with this verb, and they are not notes.
+_GLOB_MENTION = re.compile(r"hit the ([^.,:;]*?)glob cap", re.S)
+
+#: The opening every glob-cap note carries, measured byte-identical across all four tools. Pinning
+#: the whole opening rather than a qualifier covers BOTH failures this repository has had here in
+#: ONE assertion: a wrong qualifier cannot appear (the phrase fixes it as empty), and the word
+#: ``globbed`` cannot silently revert.
+#:
+#: That word is the reason this guard exists. ``05b5fc2`` had to replace "template <file>
+#: reference(s)" with "globbed" in three tools, because the engine fills ``glob_capped`` from
+#: glob-resolved references and skips template edges, so the old word named the wrong thing. Those
+#: three fixes were pinned per file, and ``test_device_lookup.py`` says in its own docstring that a
+#: FOURTH note carrying the old word would be caught by none of them. It was right, and it stayed
+#: right until this guard.
+_GLOB_NOTE_OPENING = "globbed <file> reference(s) hit the glob cap"
+
+#: The modules that must each report the glob cap, named rather than counted, for the same reason
+#: as :data:`_CAP_NAMING_MODULES`. Shorter than that set by exactly one: ``display_tools.py``
+#: DESCRIBES both caps but reports neither, because a description is not a note.
+_GLOB_NAMING_MODULES = frozenset(
+    {
+        Path("services") / "coverage.py",
+        Path("services") / "crossplane.py",
+        Path("services") / "device_lookup.py",
+        Path("tools") / "validate.py",
+    }
+)
+
+
+def test_every_glob_cap_note_opens_with_the_same_words() -> None:
+    """The second cap, held to one opening, so the twin of GB-72 cannot drift either.
+
+    The four notes are byte-identical today and were held by nothing central: three tools pinned
+    the wording in their own test file and two pinned only the substring "glob cap", which
+    survives any rewording that keeps those two words. That is the same shape, and the same two
+    files, as the gap GB-72 found on the context cap.
+
+    Provably red in both directions the repository has really seen: put "template" back in place
+    of "globbed" in any note, or slip a qualifier into "hit the ... glob cap".
+    """
+    offenders = {
+        f"{path.relative_to(_SRC).as_posix()}: {qualifier!r}"
+        for path in sorted(_SRC.rglob("*.py"))
+        for literal, qualifier in _mentions(path.read_text(encoding="utf-8"), _GLOB_MENTION)
+        if _GLOB_NOTE_OPENING not in literal
+    }
+    assert not offenders, (
+        f"glob-cap notes that do not open with the agreed words: {sorted(offenders)}. Every one of "
+        f"them reads '{{n}} {_GLOB_NOTE_OPENING}'. The count is of globbed <file> references, not "
+        "of template edges, which the engine does not put in glob_capped, see GB-78 and 05b5fc2."
+    )
+
+
+def test_every_tool_that_walks_the_inventory_reports_the_glob_cap() -> None:
+    """The non-vacuity floor for the guard above, and the failure it is really about.
+
+    A tool silently dropping its glob-cap note satisfies "all remaining notes agree" perfectly,
+    and it is the worse defect: the caller then reads a shortened answer as a complete one. That
+    is not hypothetical either, it is what ``find_device`` did until GB-65.
+    """
+    reporting = {
+        path.relative_to(_SRC)
+        for path in sorted(_SRC.rglob("*.py"))
+        if _mentions(path.read_text(encoding="utf-8"), _GLOB_MENTION)
+    }
+    assert reporting == _GLOB_NAMING_MODULES, (
+        f"modules reporting the glob cap changed: missing {_GLOB_NAMING_MODULES - reporting}, "
+        f"unexpected {reporting - _GLOB_NAMING_MODULES}. A tool that walks the inventory and stays "
+        "quiet about the glob cap returns a lower bound that reads as complete."
+    )
+
+
+def test_the_glob_detector_ignores_a_description_that_merely_mentions_the_cap() -> None:
+    """The detector itself, and this one is a correction rather than a formality.
+
+    A bare ``.*?`` between the two anchors spans whole paragraphs. The ``view`` description of
+    ``validate_pvs`` names the context cap early and the glob cap some 400 characters later, so
+    the first draft of this pattern matched that entire description and reported it as a
+    malformed note. Excluding sentence punctuation from the qualifier fixes it, because a
+    qualifier is an attribute and never a sentence.
+    """
+    note = 'x = f"{n} globbed <file> reference(s) hit the glob cap, so some screens were left out"'
+    assert _mentions(note, _GLOB_MENTION) and all(
+        _GLOB_NOTE_OPENING in literal for literal, _ in _mentions(note, _GLOB_MENTION)
+    )
+    # The two real failure shapes.
+    assert _mentions('x = "{} template <file> reference(s) hit the glob cap"', _GLOB_MENTION)
+    assert _mentions('x = "hit the file-glob cap"', _GLOB_MENTION) == [
+        ("hit the file-glob cap", "file-")
+    ]
+    # A description that names both caps in one paragraph is NOT a note and must not be read as
+    # one. This is the case that made the narrowing necessary.
+    assert not _mentions(
+        'x = "a note fires when you hit the per-display context cap, and a SEPARATE one '
+        'reports the glob cap"',
+        _GLOB_MENTION,
     )

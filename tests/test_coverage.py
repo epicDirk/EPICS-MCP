@@ -280,7 +280,14 @@ def test_glob_capped_is_reported_as_a_lower_bound() -> None:
         cf_requested=True,
         glob_capped_count=2,
     )
-    assert any("glob cap" in n for n in report.notes), report.notes
+    # The full opening, not the bare substring "glob cap" this used to accept (GB-78). The word
+    # "globbed" is load-bearing and has been wrong once: 05b5fc2 had to replace "template <file>
+    # reference(s)" here and in two siblings, because the engine fills glob_capped from
+    # glob-resolved references and skips template edges. A substring assertion would have passed
+    # throughout. The wording across all four is pinned in tests/test_diagnostics_tail.py.
+    assert any("globbed <file> reference(s) hit the glob cap" in n for n in report.notes), (
+        report.notes
+    )
     assert any("lower bound" in n for n in report.notes), report.notes
     # The two signals are independent: no display hit the context cap here, so the count must not
     # leak into the field that names capped displays.
