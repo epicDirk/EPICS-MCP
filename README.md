@@ -24,9 +24,9 @@ stack. `mypy --strict` covers `src`, `tests` and `scripts`, and the package ship
 
 ## Where to start
 
-**I want to try it, and I have no control system.** Follow [Quick start](#quick-start) below. A
-`softIocPVA` and the sample database in [`examples/`](https://github.com/epicDirk/EPICS-MCP/tree/main/examples/) give you a working PV in about
-five minutes; no facility, no ChannelFinder, no archiver.
+**I want to try it, and I have no control system.** Install it (below), then follow
+[Quick start](#quick-start). `epics-testpv` serves the PV for you, so there is nothing else to
+obtain: no facility, no IOC, no EPICS Base, no ChannelFinder, no archiver.
 
 **I want to point it at my facility.** Start with `epics-init --list`, pick the shape that matches
 what you run, and let `epics-init --preset <shape> --out .mcp.json` write the client-configuration
@@ -75,8 +75,8 @@ configured.
 - **Python 3.12+**
 - **[p4p](https://mdavidsaver.github.io/p4p/)** ≥ 4.2, installed automatically. It bundles the
   EPICS libraries, so no separate EPICS Base build is needed for the client.
-- A reachable EPICS PV: an IOC, a `softIocPVA`, or your control system once you widen the
-  address list.
+- A reachable EPICS PV. Your control system once you widen the address list, an IOC of your own, or
+  the synthetic one `epics-testpv` serves, which needs nothing beyond this package.
 
 ## Installation
 
@@ -105,45 +105,61 @@ The last two are **display-aware** and need the `opi_navigation` engine, which i
 package: they refuse with an explanation rather than running. Everything else works without it.
 See [Related and roadmap](#related-and-roadmap).
 
+**Check the commands are on your PATH before anything else**, because the failure otherwise arrives
+much later and somewhere unhelpful:
+
+```bash
+epics-doctor --version    # or: which epics-doctor   /   where.exe epics-doctor
+```
+
+Every command answers `--help` and `--version` with its own name and the installed version, the one
+a bug report asks for, on a core-only install as well. If nothing is found, add the tool directory
+your installer used to your PATH (`uv tool update-shell` does that for uv). Two related notes: a
+current Linux distribution refuses a system-wide `pip install`, so use a virtual environment or
+`uv tool install`; and if the install ends in compiler output instead, `p4p` had no prebuilt wheel
+for your platform and fell back to building from source, see [Compatibility](#compatibility).
+
 ## Quick start
 
-1. **Start a test PV.** No real IOC needed. Create `test.db`:
+Three commands, and nothing to obtain beyond the install above.
 
-   ```
-   record(ai, "TEST:Temperature") { field(VAL, "21.5") field(EGU, "C") }
-   ```
-
-   and serve it over PVAccess:
+1. **Serve a test PV**, in a terminal of its own. It runs until Ctrl-C and binds loopback only:
 
    ```bash
-   softIocPVA -d test.db
+   epics-testpv
    ```
 
-   A ready-to-run version lives in [`examples/`](https://github.com/epicDirk/EPICS-MCP/tree/main/examples/). `softIocPVA` ships with EPICS Base
-   and is **not** installed by this package.
-
-2. **Run the server** over stdio:
+2. **Write the client configuration, and check it in the same step.** `--out` writes the file
+   itself, which a shell redirect cannot do reliably: on Windows it produces bytes no JSON parser
+   accepts.
 
    ```bash
-   epics-mcp
+   epics-init --preset sandbox --out .mcp.json --probe-pv TEST:Temperature
    ```
 
-   `epics-mcp --help` explains the invocation, and every console command answers
-   `--help` and `--version` with its own name and the installed version (the one a bug report
-   asks for), on a core-only install as well. `epics-crossplane` and `epics-coverage` still
-   need the display engine to RUN, and say so when asked to. The server itself is configured
-   through `EPICS_MCP_*` environment variables, not through options.
+   The block goes to stdout, the check to stderr, and a `live ok` line means the server reached the
+   PV from step 1. Without `--probe-pv` no PV is contacted, so a clean report would say only that
+   nothing is misconfigured.
 
-3. **Wire it into an MCP client**, see [MCP client integration](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/mcp-clients.md). Then ask
-   the assistant to read `TEST:Temperature`, or skip the assistant entirely:
+3. **Point your MCP client at that file and restart it**, see
+   [MCP client integration](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/mcp-clients.md): a client reads its configuration at startup, so
+   until it is restarted the tools are simply absent. Then ask the assistant to read
+   `TEST:Temperature`. Or skip the assistant entirely:
 
    ```bash
    epics-diagnose TEST:Temperature
    ```
 
-To reach a real control system, set the address list in the launcher's environment, for example
-`EPICS_PVA_ADDR_LIST=<gateway-or-ioc-host>`, and then follow the
-[deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md).
+   which prints the state, the likely cause and the value, four lines beginning `PV:` and ending in
+   `connected, value=21.5`.
+
+⚠️ Note what step 1 is: a PVAccess server, and its second PV accepts writes. It binds loopback
+unless you pass `--interface`, and it says which port it got, which is not the default one when that
+is already taken.
+
+To reach a real control system instead, pick the matching preset and follow the
+[deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md), which walks the variables plane by plane and ends at the
+same self-check.
 
 ## Documentation
 
@@ -152,8 +168,10 @@ To reach a real control system, set the address list in the launcher's environme
 | [Tools, CLIs, resources and prompts](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/tools.md) | What can it actually do? Every tool by plane, the standalone CLIs, the resources and prompts |
 | [Configuration](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/configuration.md) | Every `EPICS_MCP_*` variable, including TLS trust and the EPICS network block |
 | [Safety and network posture](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/safety.md) | What is gated, what is audited, what decides network reach |
-| [MCP client integration](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/mcp-clients.md) | Ready-to-paste `.mcp.json` blocks |
+| [MCP client integration](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/mcp-clients.md) | Ready-to-paste `.mcp.json` blocks, where they go, and the restart that finishes the job |
 | [Deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md) | Bringing it up in **your** facility, plane by plane, with `epics-doctor` |
+| [Troubleshooting](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md#6-troubleshooting) | It did not work: symptom first, from "the client says nothing" to a rejected config file |
+| [Write-gate contract](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/write-gate-contract.md) | What every in-server write gate must satisfy, and what a gate is deliberately not |
 | [Operating guide](https://github.com/epicDirk/EPICS-MCP/blob/main/OPERATING.md) | The operational cookbook: service landscape, recipes, error signatures. Also served to an assistant as `epics-pv://guide` |
 | [Architecture](https://github.com/epicDirk/EPICS-MCP/blob/main/ARCHITECTURE.md) | The `server → tools → services → clients` layering and the plane model |
 | [Security policy](https://github.com/epicDirk/EPICS-MCP/blob/main/SECURITY.md) | Reporting a vulnerability, and an honest statement of what the write gates are **not** |
