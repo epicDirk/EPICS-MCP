@@ -2,26 +2,53 @@
 # The hooks delegate to the uv-managed tools pinned exactly in uv.lock, so versions and config
 # are identical to the dev and CI runs. CI calls `pre-commit run --all-files`. The scope comes
 # from pyproject.toml ([tool.ruff] select / per-file-ignores, [tool.mypy] files).
+#
+# CHOSEN DIRECTION for GB-83, argued here rather than merely configured:
+# Until 2026-08-09 all three hooks carried `pass_filenames: false`, so their tools walked the
+# WORKING TREE. A single untracked file belonging to a parallel window therefore blocked EVERY
+# commit in the repository, including commits that did not touch it. That happened twice, and the
+# second time it was mutual: two windows held each other, each recording the other as the cause,
+# so waiting was not a way out. CI never had the problem, because it runs on a clean checkout.
+# The local gate was, in other words, stricter than CI at a place unrelated to the commit.
+#
+# The fix differs per tool, because the tools differ:
+#
+#   ruff -> `pass_filenames: true`. Every rule family selected here is PER FILE exact; ruff has no
+#   cross-file analysis, and pre-commit stashes unstaged changes to tracked files anyway. Nothing
+#   is lost, and a foreign untracked file can no longer reach these hooks at all. `--force-exclude`
+#   is mandatory, not decoration: without it ruff checks a file handed to it even when the
+#   configuration excludes it (measured).
+#
+#   mypy -> stays repository-wide, but runs over the materialised INDEX instead of the working
+#   tree (`scripts/mypy_on_index.py`). mypy analyses across modules, so a subset of files would be
+#   a real loss of coverage; the index is constructively the set CI checks out.
+#
+# REJECTED, and measured rather than assumed: subtracting the untracked files with `--exclude`.
+# mypy's `--exclude` is an UNANCHORED regular expression and ruff's exclude without a slash is a
+# BASENAME glob, so excluding an untracked `utils.py` also silences a tracked `src/utils.py` and
+# the gate reports success on staged, broken code. On top of that `ruff format` has no
+# `--extend-exclude` at all. That route would not have been stricter, it would have been silently
+# blind. Cost and the rest of the reasoning: the module header of the script.
 repos:
   - repo: local
     hooks:
       - id: ruff-check
         name: ruff check
-        entry: uv run ruff check src tests scripts
+        entry: uv run ruff check --force-exclude
         language: system
         types: [python]
-        pass_filenames: false
+        pass_filenames: true
         require_serial: true
       - id: ruff-format
         name: ruff format (check)
-        entry: uv run ruff format --check src tests scripts
+        entry: uv run ruff format --check --force-exclude
         language: system
         types: [python]
-        pass_filenames: false
+        pass_filenames: true
         require_serial: true
       - id: mypy
-        name: mypy --strict
-        entry: uv run mypy
+        name: mypy --strict (over the git index)
+        entry: uv run python scripts/mypy_on_index.py
         language: system
         types: [python]
         pass_filenames: false

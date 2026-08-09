@@ -256,6 +256,7 @@ module = [
     "urllib3",
     "urllib3.*",
     "opi_navigation.*",
+    "yaml",
 ]
 ignore_missing_imports = true
 
