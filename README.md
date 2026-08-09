@@ -97,9 +97,9 @@ For the development version, install straight from the repository
 (`uv tool install git+https://github.com/epicDirk/EPICS-MCP`); from a local checkout,
 `uv tool install .` and `pip install .` do the same thing.
 
-This installs the **core** server: live PV access, diagnosis, and the REST-service planes, plus six
-commands (`epics-mcp`, `epics-init`, `epics-doctor`, `epics-diagnose`, `epics-crossplane`,
-`epics-coverage`).
+This installs the **core** server: live PV access, diagnosis, and the REST-service planes, plus seven
+commands (`epics-mcp`, `epics-init`, `epics-testpv`, `epics-doctor`, `epics-diagnose`,
+`epics-crossplane`, `epics-coverage`).
 
 The last two are **display-aware** and need the `opi_navigation` engine, which is not part of the
 package: they refuse with an explanation rather than running. Everything else works without it.

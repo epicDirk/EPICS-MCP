@@ -451,6 +451,14 @@ placeholder you typed yourself in any case (`<ARCHIVER-HOST>`, `<archiver_host>`
 does not fire on a named regex group (`(?P<dev>...)`), which a write-gate pattern legitimately
 carries.
 
+**If the user has no PV to point at yet, they have one:** `epics-testpv` (core install) serves
+`TEST:Temperature`, an analogue reading with a unit, and `TEST:Heater`, a writable switch, over
+PVAccess until Ctrl-C. It needs no EPICS Base and no IOC, since p4p ships with this package, which
+makes it the thing to suggest before `--probe-pv` on a machine with nothing else running. It binds
+LOOPBACK unless `--interface` says otherwise, and it prints the port it actually bound, which is not
+the default one when that is already taken. Say that port out loud if you relay its output: a client
+configured with `EPICS_PVA_NAME_SERVERS` alone will not find a server that fell back.
+
 **A loopback preset has to search BOTH ways, and `sandbox` does.** `EPICS_PVA_ADDR_LIST=127.0.0.1`
 searches by UDP broadcast on the PVA search port (5076), which an IOC started directly on the host
 answers. A containerised IOC usually publishes only its PVA **TCP** port (commonly 5075) and no UDP

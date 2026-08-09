@@ -192,6 +192,7 @@ epics-coverage = "epics_mcp.cli_coverage:main"
 epics-diagnose = "epics_mcp.cli_diagnose:main"
 epics-doctor = "epics_mcp.cli_doctor:main"
 epics-init = "epics_mcp.cli_init:main"
+epics-testpv = "epics_mcp.cli_testpv:main"
 
 # No [tool.hatch.metadata] allow-direct-references any more: it existed solely for the
 # opi-navigation git requirement, which is now a dependency group with its source in

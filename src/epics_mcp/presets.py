@@ -156,11 +156,12 @@ PRESETS: Mapping[str, Preset] = {
     "sandbox": Preset(
         name="sandbox",
         summary=(
-            "Loopback only: a local soft IOC, no REST planes. The workshop and summer-school "
-            "shape, and the one preset with no value left to fill in. It searches both ways a "
-            "PVA client can, UDP broadcast to 127.0.0.1 and TCP unicast to 127.0.0.1:5075, so it "
-            "reaches a soft IOC running natively on this host AND one in a container, which "
-            "usually publishes only its TCP port. Change the port if your IOC serves another."
+            "Loopback only: a PV server on this machine, no REST planes. The shape to start with, "
+            "and the one preset with no value left to fill in. Run 'epics-testpv' for something "
+            "to talk to if you have no IOC yet. It searches both ways a PVA client can, UDP "
+            "broadcast to 127.0.0.1 and TCP unicast to 127.0.0.1:5075, so it reaches a server "
+            "running natively on this host AND one in a container, which usually publishes only "
+            "its TCP port. Change the port if yours serves another."
         ),
         env=dict(_LOOPBACK_SEARCH),
     ),

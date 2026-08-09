@@ -68,6 +68,7 @@ The cross-plane analyses are also standalone CLIs, useful in a terminal or CI, w
 MCP client involved:
 
 ```bash
+epics-testpv                                            # serve two test PVs, loopback, until Ctrl-C
 epics-init       --list                                 # emit a client configuration, then check it
 epics-doctor                                            # read-only config self-check (all planes)
 epics-diagnose   TEST:Temperature                       # connection diagnosis
@@ -84,9 +85,18 @@ produce bytes a strict JSON parser rejects). `--out` refuses an existing file un
 given, and writes nothing at all while placeholders remain. `--absolute-command` names the installed
 server by its resolved path instead of a bare name, for a client that does not inherit your `PATH`.
 
-`epics-init`, `epics-doctor` and `epics-diagnose` are part of the core install; `epics-crossplane`
-and `epics-coverage` need the `opi_navigation` engine, which a published install cannot obtain
-(see above). All are read-only.
+`epics-testpv` serves two synthetic PVs so the quick start needs no control system at all:
+`TEST:Temperature`, an analogue reading with a unit, and `TEST:Heater`, a writable switch, which is
+what the write-enabled example needs a target for. Nothing extra has to be installed, since p4p is
+already a dependency of this package. It binds LOOPBACK by default, deliberately: a PVA server is a
+network service and that switch accepts writes. `--interface` widens the reach, and the command
+prints what it is listening on, including the port it actually got, which is not always the one it
+asked for.
+
+`epics-testpv`, `epics-init`, `epics-doctor` and `epics-diagnose` are part of the core install;
+`epics-crossplane` and `epics-coverage` need the `opi_navigation` engine, which a published install
+cannot obtain (see above). None of them writes to a service of yours: the only things written
+anywhere are the file `epics-init --out` names and the PVs `epics-testpv` serves itself.
 
 Every console command answers `--help` and `--version` with its own name and the package version, on a
 core-only install as well: they parse their arguments before asking for the display engine, so the
