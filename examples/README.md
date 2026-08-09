@@ -56,6 +56,12 @@ file-mode answer reports `shown_by_display` so you can see which question you as
 `file_path` echo naming the call it answers. Both belong to file mode: pass a non-empty `pv_names`
 instead and they are gone, because no file was opened.
 
-> The `.bob`-handling comes from the `opi_navigation` library (the optional `displays`
+A `.plt` Data Browser trend is a valid `file_path` too: the same engine collects it, and its trace
+PVs are checked like any other channel. Which view finds them depends on how the trend is reached,
+not on the file: embedded in a screen through a `databrowser` widget its traces are attributed to
+that screen, so the trend's own file view is the one that finds them; opened by an `open_file`
+button the trend is a top level of its own and either view answers.
+
+> The display-file handling comes from the `opi_navigation` library (the optional `displays`
 > dependency group), **not** from any Claude skill; the server itself runs standalone. If you don't
 > use Phoebus/CS-Studio, ignore this example; the core PV tools need none of it.

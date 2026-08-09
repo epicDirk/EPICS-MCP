@@ -62,7 +62,7 @@ in these terms. Full descriptions are in [the tool reference](https://github.com
 | **Alarm** | Phoebus Alarm Logger | `is_alarm_configured`, `get_alarm_history` |
 | **Naming** | ESS Naming Service | `lookup_device_name`, `diagnose_connection`, `crossplane_check` |
 | **Logbook** | Phoebus Olog | `search_logbook`, `get_log_entry`, `list_logbooks`, `list_tags`, `list_log_levels`, `create_log_entry`, `reply_to_log`, `update_log_entry`, `add_log_attachment`, `list_log_attachments`, `download_log_attachment` |
-| **Display** | `.bob` operator screens (CS-Studio / Phoebus) | `validate_pvs`, `crossplane_check`, `coverage_audit`, `find_device` |
+| **Display** | `.bob` operator screens and `.plt` Data Browser trends (CS-Studio / Phoebus) | `validate_pvs`, `crossplane_check`, `coverage_audit`, `find_device` |
 | **IOC** | e3 `st.cmd` (+ optional `.db`) | `crossplane_check` |
 
 The Live plane is the **only** authority for connected or disconnected. Every other plane is
@@ -216,7 +216,8 @@ Live tests that need a running EPICS stack are opt-in and skip by default. See
 ## Related and roadmap
 
 The display-aware tools join live PVs with the *display* plane, the macro-expanded PV inventory
-of `.bob` operator screens, through the `opi_navigation` PV engine. The core PV server installs
+of `.bob` operator screens and the `.plt` Data Browser trends reached from them, through the
+`opi_navigation` PV engine. The core PV server installs
 and runs fully **without** them.
 
 ⚠️ **Those four tools are not available in a published install today.** `opi_navigation` lives

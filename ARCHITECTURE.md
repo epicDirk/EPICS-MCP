@@ -61,7 +61,7 @@ graph LR
       olog["Logbook · Phoebus Olog"]
     end
     subgraph files["offline files"]
-      disp["Display · .bob screens"]
+      disp["Display · .bob screens + .plt trends"]
       ioc["IOC · st.cmd + .db"]
     end
 

@@ -7,6 +7,31 @@ carry breaking changes).
 
 ## [Unreleased]
 
+### Changed
+
+- **`validate_pvs` accepts a `.plt` Data Browser trend, where it used to refuse one.** The
+  display-PV engine collects two kinds of file, `.bob` operator screens and `.plt` trends, and this
+  server was pinned to a revision from before that second kind existed. While that pin stood, the
+  refusal "the inventory reads `.bob` files only, so this call can only come back empty" was simply
+  true. The pin has now moved, and with it the refusal would have become a malfunction wearing the
+  clothes of a safety check: a rejection whose stated reason had stopped being the case. Passing a
+  trend now returns its trace channels with their connectivity, exactly like a display.
+  **Nothing that worked before changes**: a `.bob` behaves as it always did, and every other suffix
+  is still refused up front with `INVALID_INPUT`, before the inventory walk, for the same reason as
+  before. The refusal message now names both readable kinds instead of one, so a client that
+  guessed wrong learns what else it could have passed.
+
+  **Which view finds a trend depends on how the trend is REACHED, and that is worth knowing before
+  the call.** A trend embedded in a screen through a `databrowser` widget has its traces attributed
+  to that screen, so only the trend's own `view="file"` finds them here; a trend opened by an
+  `open_file` button is a top level in its own right and answers under either view. A trend is not
+  a screen and is not reported as one: the inventory carries the kind as its own field.
+
+  Two consequences for the other display-aware tools, neither of them a change to those tools:
+  `coverage_audit` and `crossplane_check` now see the trace PVs of trends under their
+  `displays_dir` root, and `find_device` can return a button-opened trend among the screens that
+  show a device.
+
 ### Added
 
 - **Every `validate_pvs` file-mode answer now names the file it is about.** The `file_path` echo used

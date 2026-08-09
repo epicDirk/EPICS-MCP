@@ -1,6 +1,7 @@
 """CLI for the cross-plane PV provenance check (Display ↔ e3 IOC ↔ Naming).
 
-Reads a project/dataset ROOT of ``.bob`` displays and an e3 ``st.cmd`` (both local files), joins
+Reads a project/dataset ROOT of ``.bob`` displays (``.plt`` Data Browser trends found there
+contribute their trace PVs too) and an e3 ``st.cmd`` (both local files), joins
 the macro-expanded per-instance display PVs (``opi_navigation`` Wedge-0 inventory) with the IOC
 prefix, and writes a Markdown provenance report to stdout. The live ESS Naming Service is queried
 only with ``--naming`` (a read-only GET); without it the check is fully offline.
@@ -48,8 +49,8 @@ def main(argv: list[str] | None = None) -> int:
         "--displays",
         required=True,
         type=Path,
-        help="project/dataset ROOT of .bob displays (not a narrow per-IOC subdirectory, "
-        "macros are bound by the operator top-levels there)",
+        help="project/dataset ROOT of .bob displays and .plt trends (not a narrow per-IOC "
+        "subdirectory, macros are bound by the operator top-levels there)",
     )
     parser.add_argument("--st-cmd", required=True, type=Path, help="e3 IOC st.cmd file")
     parser.add_argument(

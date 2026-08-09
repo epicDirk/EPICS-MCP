@@ -1,4 +1,4 @@
-"""Cross-plane PV provenance: Display (.bob) ↔ e3 IOC (st.cmd/.db) ↔ ESS Naming Service.
+"""Cross-plane PV provenance: Display (.bob/.plt) ↔ e3 IOC (st.cmd/.db) ↔ ESS Naming Service.
 
 The first thread of the "connective tissue": join the **macro-expanded, per-instance** PVs a set
 of displays reference (Wedge 0 / ``opi_navigation`` PV-inventory, fed in as :class:`JoinPv` rows by

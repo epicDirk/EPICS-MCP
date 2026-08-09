@@ -1,6 +1,7 @@
 """CLI for the cross-plane coverage audit (Display ↔ ChannelFinder ↔ Archiver ↔ Alarm).
 
-Reads a project/dataset ROOT of ``.bob`` displays, joins the macro-expanded display-PV index
+Reads a project/dataset ROOT of ``.bob`` displays (and the ``.plt`` Data Browser trends found
+there, whose trace PVs the inventory collects too), joins the macro-expanded display-PV index
 (``opi_navigation`` Wedge-0) with the runtime planes: ChannelFinder (delivered PVs), Archiver,
 Phoebus Alarm, and writes a Markdown coverage report to stdout. Each runtime plane is queried only
 with its flag AND its ``*_URL`` set; without any, only the raw display set is shown.
@@ -51,8 +52,8 @@ def main(argv: list[str] | None = None) -> int:
         "--displays",
         required=True,
         type=Path,
-        help="project/dataset ROOT of .bob displays (not a narrow per-IOC subdirectory, "
-        "macros are bound by the operator top-levels there)",
+        help="project/dataset ROOT of .bob displays and .plt trends (not a narrow per-IOC "
+        "subdirectory, macros are bound by the operator top-levels there)",
     )
     parser.add_argument(
         "--scope",
