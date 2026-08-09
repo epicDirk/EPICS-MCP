@@ -22,8 +22,11 @@ requires-python = ">=3.12"
 #     formality, so it is made here deliberately rather than copied from a template.
 #   * "OS Independent" is measured, not assumed: the suite runs on Windows locally and on Linux in
 #     CI, and p4p ships wheels for both.
-#   * "Typing :: Typed" requires a py.typed marker to be true. It exists and ships in the wheel
-#     (asserted by tests/test_packaging.py's wheel-content check for package data).
+#   * "Typing :: Typed" requires a py.typed marker to be true. It exists and ships in the wheel,
+#     asserted by name in tests/test_packaging.py::test_package_data_ships_in_the_wheel. That
+#     assertion was added when this comment was found citing a check that only covered the
+#     operator guide (QA-37): no code here reads the marker, so nothing else can notice it going
+#     missing.
 #   * 3.12 and 3.13 are exactly the versions the CI matrix runs. No 3.14 row until one does.
 classifiers = [
     "Development Status :: 4 - Beta",

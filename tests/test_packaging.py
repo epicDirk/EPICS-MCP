@@ -221,14 +221,24 @@ def test_the_sdist_carries_what_it_declares_and_nothing_stray(tmp_path: Path) ->
     )
 
 
-def test_operator_guide_ships_in_the_wheel(tmp_path: Path) -> None:
-    """The ``epics-pv://guide`` resource reads ``operator_guide.md`` as package data. The
-    ``importlib.resources`` load test passes off the *source tree* in an editable install, so it
-    cannot catch a wheel-exclusion regression (a stray ``[tool.hatch.build]`` include that forgets
-    ``*.md``, a move/rename). This builds an actual wheel and asserts the file is inside it, the
-    real inclusion guard for E1's ``pip install`` distribution DoD. Skipped only if the build
-    TOOLCHAIN/ENVIRONMENT is unavailable (missing uv, timeout, offline resolver signature); a
-    build that fails for any other reason is a real packaging defect and FAILS."""
+def test_package_data_ships_in_the_wheel(tmp_path: Path) -> None:
+    """Both package-data files have to be INSIDE the wheel, and neither is checkable from the
+    source tree.
+
+    ``operator_guide.md`` is read by the ``epics-pv://guide`` resource through
+    ``importlib.resources``, which in an editable install passes off the *source tree*, so that
+    load test cannot catch a wheel-exclusion regression (a stray ``[tool.hatch.build]`` include
+    that forgets ``*.md``, a move/rename). ``py.typed`` is worse off: it has no load test at all,
+    because it is read by a CONSUMER's type checker and never by this package, so its absence
+    would go unnoticed here indefinitely. ``pyproject.toml`` cites THIS check as the reason the
+    ``Typing :: Typed`` classifier is a fact rather than an aspiration, so the citation and the
+    assertion have to stay together: the classifier was carrying that reference for a check that
+    covered only the guide (QA-37).
+
+    This builds an actual wheel and asserts both files are inside it, the real inclusion guard
+    for E1's ``pip install`` distribution DoD. Skipped only if the build TOOLCHAIN/ENVIRONMENT is
+    unavailable (missing uv, timeout, offline resolver signature); a build that fails for any
+    other reason is a real packaging defect and FAILS."""
     repo_root = Path(epics_mcp.__file__).resolve().parent.parent.parent  # .../EPICS-MCP-Server
     try:
         result = subprocess.run(
@@ -254,8 +264,13 @@ def test_operator_guide_ships_in_the_wheel(tmp_path: Path) -> None:
     assert wheels, "uv build produced no wheel"
     with zipfile.ZipFile(wheels[0]) as wheel:
         names = wheel.namelist()
+    shipped = sorted(n for n in names if n.startswith("epics_mcp/"))
     assert "epics_mcp/operator_guide.md" in names, (
         "operator_guide.md missing from the wheel, the guide resource would raise "
-        f"FileNotFoundError in a pip-installed server. Package files: "
-        f"{sorted(n for n in names if n.startswith('epics_mcp/'))}"
+        f"FileNotFoundError in a pip-installed server. Package files: {shipped}"
+    )
+    assert "epics_mcp/py.typed" in names, (
+        "py.typed missing from the wheel, so the Typing :: Typed classifier in pyproject.toml is "
+        "false and a consumer's type checker treats this package as untyped. Nothing else would "
+        f"notice: no code here reads the marker. Package files: {shipped}"
     )
