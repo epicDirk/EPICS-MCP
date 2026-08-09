@@ -102,7 +102,7 @@ disconnect or a broken link is a result, not a crash. **`epics-doctor` is the de
 exception**, a scriptable pass/fail with four exit codes: `0` clean, `1` a configured plane
 hard-failed, `2` a usage error, `3` inconclusive. The full contract, the six failing statuses, the
 remedies and the `--json` keys a script must read are in
-[the deployment guide](deployment.md#1-quick-start). Run it first in a new facility.
+[the deployment guide](deployment.md#1-bring-it-up). Run it first in a new facility.
 
 Each plane is also asked to **name itself**, because reachable is not identified: the transport probe
 counts any HTTP response as reachable, so a URL aimed at the wrong host can look alive (measured: a
