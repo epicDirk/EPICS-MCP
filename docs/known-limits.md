@@ -259,8 +259,13 @@ inverts which side needs a credential, which is to say it needs none: a public c
 anonymous. Measured on its first run, all of it fresh rather than assumed: the checkout succeeded
 on nothing but the private repository's own default token; the leg WITHOUT the engine reproduced
 this CI's numbers exactly (1776 passed, 72 skipped, the figure both of its Python legs report);
-the leg WITH it reached 1884 passed, 64 skipped. The job asserts that DIFFERENCE, not a remembered
-total, because a noted expectation is not a guard and ages silently. Its sharper assertion is per
+the leg WITH it reached 1884 passed, 64 skipped. **Those are the figures of 2026-08-04 and they
+have moved; the latest measured run is 2026-08-09, 1817/72 against 1973/64, a difference of 156
+over 148 collected display tests, none skipped.** Both readings are kept rather than one
+overwritten, because the pair is the point: a total is a fact about a day, which is exactly why
+the job asserts the DIFFERENCE and a per-module floor instead of a remembered total. A noted
+expectation is not a guard and ages silently, as these two lines demonstrate on themselves. Its
+sharper assertion is per
 module: each module of the list it derives from `tests/conftest.py` has to appear in the run
 carrying tests, and not one of those tests may be
 skipped. That is the case a green report otherwise renders indistinguishable from a full one, and
