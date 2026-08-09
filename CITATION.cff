@@ -2,13 +2,15 @@ cff-version: 1.2.0
 message: "If you use this software in published work, please cite it as below."
 title: "EPICS MCP"
 abstract: >-
-  A read-only Model Context Protocol (MCP) server that gives an AI assistant
-  diagnosable access to an EPICS control system: live process-variable values
-  over PVAccess and Channel Access, connection diagnosis with a per-plane
+  A read-by-default Model Context Protocol (MCP) server that gives an AI
+  assistant diagnosable access to an EPICS control system: live process-variable
+  values over PVAccess and Channel Access, connection diagnosis with a per-plane
   explanation, and cross-plane provenance joining ChannelFinder, the EPICS
-  Archiver Appliance, the Phoebus Alarm Logger, a naming service, the Phoebus
-  Olog logbook and CS-Studio operator screens. Mutating operations sit behind
-  independent, audited gates that are disabled by default.
+  Archiver Appliance, the Phoebus Alarm Logger, a naming service, IOC startup
+  files and CS-Studio operator screens. It also reads and writes the Phoebus
+  Olog logbook, which is a plane of its own that no analysis joins yet.
+  Mutating operations sit behind independent, audited gates that are disabled
+  by default.
 type: software
 authors:
   - family-names: Nordt

@@ -11,25 +11,30 @@ A one-way dependency flow, `server → tools → services → clients`. Nothing 
 graph TD
     A["<b>server.py</b><br/>@mcp.tool · @mcp.resource · @mcp.prompt<br/>applies @translate_epics_errors"]
     B["<b>tools/</b><br/>thin adapters: translate arguments, shape results<br/>no protocol logic"]
-    C["<b>services/</b> · pure analysis cores<br/>crossplane · coverage · diagnose<br/>same input, same output, no clock/random/network"]
+    C["<b>services/</b> · pure analysis cores<br/>crossplane · coverage<br/>same input, same output, no clock/random/network"]
     D["<b>services/</b> · protocol clients<br/>epics_client (p4p) · *_client (REST)"]
+    E["<b>services/</b> · diagnose<br/>the declared exception: it probes the planes itself"]
 
     A --> B
     B --> C
     B --> D
+    B --> E
+    E --> D
     D -. "injected as checker callables" .-> C
 
     %% EPICS palette: #18334B is the single colour of the official EPICS logo, the greens and
     %% grey-blues are taken from epics-controls.org (link, button and secondary-text colours).
     classDef layer fill:#E7ECF1,stroke:#18334B,stroke-width:1px,color:#18334B
     classDef core fill:#EDF3DF,stroke:#61A229,stroke-width:2px,color:#33500F
-    class A,B,D layer
+    class A,B,D,E layer
     class C core
 ```
 
-The dotted edge is the load-bearing one. The analysis cores never import a client; they receive
+The dotted edge is the load-bearing one. The two **pure** cores never import a client; they receive
 protocol access as **injected checker callables**, which is what makes them testable with no
-network and deterministic by construction.
+network and deterministic by construction. `diagnose` is the declared exception, and it has its own
+box for that reason: a connection diagnosis IS a live probe, so it calls `pv_get` and constructs the
+naming client itself, and gathers all five planes in one `asyncio.gather`.
 
 - **`server.py`** is the MCP entry point. It declares the tool, resource and prompt surface and
   delegates. Nothing here talks to EPICS directly.
@@ -38,7 +43,7 @@ network and deterministic by construction.
   That engine is a LOCAL dependency group, not a published extra: see `pyproject.toml`.
 - **`tools/`** are thin MCP adapters. They translate arguments and shape results.
 - **`services/`** is the substance: the p4p client (`epics_client.py`), the REST clients
-  (`*_client.py`), and the pure analysis cores.
+  (`*_client.py`), the two pure analysis cores, and `diagnose`, which probes directly.
 - **Cross-cutting:** `config.py` (env-var settings, fail-fast validation), `safety.py` and
   `olog_safety.py` (the two write gates plus audit), `errors.py` (machine-readable error
   hierarchy), `tool_errors.py` (the error to ToolError decorator), `paths.py` (path boundary).
@@ -65,12 +70,12 @@ graph LR
       ioc["IOC · st.cmd + .db"]
     end
 
-    live --> diag[diagnose_connection]
-    cf --> diag & cov[coverage_audit] & xp[crossplane_check]
-    arch --> cov
-    alarm --> cov
+    live --> diag[diagnose_connection] & fd[find_device] & val[validate_pvs]
+    cf --> diag & cov[coverage_audit] & xp[crossplane_check] & fd
+    arch --> cov & diag
+    alarm --> cov & diag
     naming --> diag & xp
-    disp --> cov & xp & fd[find_device] & val[validate_pvs]
+    disp --> cov & xp & fd & val
     ioc --> xp
     olog -.-> logtools["11 logbook tools<br/>(no cross-plane join yet)"]
 
@@ -108,8 +113,10 @@ this PV was in alarm" is a join this server does not yet make.
   *explanatory*: it can inform `likely_cause` or coverage, but never flips the verdict.
 - A plane whose service URL is unset is **withheld**, never reported as a false negative
   (`withheld ≠ no`).
-- Analysis cores are **pure and deterministic**: same input, same output, no hidden clock, random
-  source or network. Protocol access arrives as injected checker callables.
+- The **pure** analysis cores (`crossplane`, `coverage`) are deterministic: same input, same output,
+  no hidden clock, random source or network. Protocol access arrives as injected checker callables.
+  `diagnose` is the one declared exception: it probes the planes itself, because that probe is the
+  answer it exists to give.
 - The server **reads by default and mutates only through a gate.** `set_pv_value` is triple-gated,
   and the four Olog write tools (`create_log_entry`, `reply_to_log`, `add_log_attachment` and
   `update_log_entry`, the last two of which MUTATE an existing entry) sit behind their own,
