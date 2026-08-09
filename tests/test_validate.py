@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from fastmcp.exceptions import ToolError
 
+from epics_mcp.display_files import INVENTORY_SUFFIXES
 from epics_mcp.errors import EpicsError
 from epics_mcp.tools.validate import _display_view_is_capped, _validate_pvs
 
@@ -26,9 +27,9 @@ _FRAGMENT = (
     "<pv_name>$(PRP):Val</pv_name></widget></display>"
 )
 
-#: A Data Browser trend configuration: the file kind the engine learned to read next to the
-#: displays. It exists here so the coupling guard below can ask a question the pinned engine
-#: and a newer one answer differently; while the pin stands, the inventory ignores it.
+#: A Data Browser trend configuration: the second file kind the engine collects, next to the
+#: displays. Since the GB-79 pin move the inventory READS it, so this fixture carries the two
+#: coupling guards below AND the behaviour tests that prove the refusal was really opened.
 _TREND = (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
     "<databrowser><title>Trend</title><pvlist><pv>"
@@ -241,20 +242,32 @@ async def test_validate_pvs_no_displays_dir_honors_allowed_roots(
         config_module._config = None
 
 
-async def test_non_bob_file_path_is_refused_without_running_the_inventory(tmp_path: Path) -> None:
-    """QA-33: the walk is the expensive half, and for a non-.bob file its outcome is settled.
+@pytest.mark.parametrize("name", ["notes.txt", "legacy.opi"])
+async def test_an_uncollected_suffix_is_refused_without_running_the_inventory(
+    tmp_path: Path, name: str
+) -> None:
+    """QA-33: the walk is the expensive half, and for a file it never opens the outcome is settled.
 
     Asserted on the CAUSE (the inventory was never run), not on elapsed time: a duration
     assertion would be flaky on a loaded machine and would still pass if the walk merely got
     faster. The spy also proves the refusal sits BEFORE the walk rather than merely somewhere.
     That this patch reaches the code despite ``asyncio.to_thread`` is not assumed either, the
     pre-existing ``test_validate_pvs_file_path_context_capped_note`` patches the same name.
+
+    THE NEGATIVE CONTROL OF GB-79, which is why it is parametrised over two suffixes now. Opening
+    the refusal to trend files is one edit away from opening it to everything, and "everything is
+    accepted" would satisfy every positive test in this file while destroying the guarantee. The
+    ``.opi`` case is the sharper of the two: it is a real CS-Studio display format that this engine
+    still does not collect, so accepting it would look plausible rather than obviously wrong.
+
+    The message must name BOTH collected kinds, not just the one the caller missed: a reader who
+    passed a ``.csv`` needs to know that a trend would have worked too.
     """
     root, _ = _dataset(tmp_path)
-    other = root / "notes.txt"
-    other.write_text(_FRAGMENT, encoding="utf-8")  # valid display XML, wrong suffix
+    other = root / name
+    other.write_text(_FRAGMENT, encoding="utf-8")  # valid display XML, uncollected suffix
 
-    spy = Mock(side_effect=AssertionError("the inventory walk must not run for a non-.bob file"))
+    spy = Mock(side_effect=AssertionError("the inventory walk must not run for this file"))
     with (
         patch("epics_mcp.services.inventory_adapter.analyze_pv_inventory", spy),
         pytest.raises(EpicsError) as exc_info,
@@ -262,7 +275,8 @@ async def test_non_bob_file_path_is_refused_without_running_the_inventory(tmp_pa
         await _validate_pvs(file_path=str(other), displays_dir=str(root))
 
     assert exc_info.value.error_code == "INVALID_INPUT"
-    assert ".bob" in str(exc_info.value), "the message must name the suffix it wants"
+    for suffix in INVENTORY_SUFFIXES:
+        assert suffix in str(exc_info.value), f"the message must name {suffix}, the kind it reads"
     assert "pv_names" in str(exc_info.value), "the message must name the way out"
     spy.assert_not_called()
 
@@ -270,7 +284,12 @@ async def test_non_bob_file_path_is_refused_without_running_the_inventory(tmp_pa
 async def test_uppercase_bob_suffix_is_accepted_because_the_engine_accepts_it(
     tmp_path: Path,
 ) -> None:
-    """The suffix comparison folds case, because ``find_bob_files`` does (``suffix.lower()``).
+    """The suffix comparison folds case, because the engine's collection does (``suffix.lower()``).
+
+    ⚠️ This line used to credit ``find_bob_files`` for the rule. That was misleading in the one
+    direction that matters: the PV surface stopped calling it, and it still returns only ``.bob``,
+    so a reader would have taken reassurance about the case fold from a function that has nothing
+    to do with this answer. The rule lives in the engine's own collection walk.
 
     Measured before this was written: a file named ``UPPER.BOB`` IS collected by the engine, so
     rejecting it would refuse a file the inventory happily reads. The naive ``endswith('.bob')``
@@ -361,84 +380,172 @@ async def test_a_bad_displays_dir_is_still_reported_as_such_for_a_non_bob_file(
         config_module._config = None
 
 
-def test_the_display_suffix_is_the_engines_only_collecting_suffix() -> None:
-    """The COUPLING: is ours the ONLY suffix the engine collects, not merely one of them?
+def test_our_suffixes_are_exactly_the_engines_collecting_suffixes() -> None:
+    """The COUPLING, as a set equality in BOTH directions.
 
-    ⚠️ **The previous version of this guard could not go red, and its docstring said the
-    opposite.** It compared ``DISPLAY_SUFFIX == _BOB_SUFFIX`` and claimed to be "the only
-    assertion that goes red for a widening". Both constants stay ``".bob"`` through the
-    widening that actually happened: the engine put ``_PLT_SUFFIX`` NEXT TO ``_BOB_SUFFIX``
-    rather than replacing it, so equality survives a change that makes the refusal in
-    ``_run_validate`` wrong. Its example was ``.opi``, which is not the widening that came.
-    By this repository's own rule (CLAUDE.md, evidence discipline 5), a guard that cannot go
-    red is the defect it was meant to remove.
+    ⚠️ **Two earlier shapes of this guard were wrong, in opposite ways, and the second one is
+    the interesting failure.** The first compared ``DISPLAY_SUFFIX == _BOB_SUFFIX`` and claimed
+    to be "the only assertion that goes red for a widening": both constants stay ``".bob"``
+    through a widening that puts a second suffix NEXT TO the first, so it survived exactly the
+    change it advertised. The second asked whether ours was the engine's ONLY collecting suffix.
+    That one DID go red for the widening, which is how GB-79 was signalled at all, but it was
+    unrepairable by construction: once we legitimately collect two, "is there only one" has no
+    correct answer, and keeping it would have meant deleting a guard rather than fixing it.
 
-    What is asked instead is the question the refusal really rests on. ``_run_validate``
-    rejects everything but ``DISPLAY_SUFFIX`` on the grounds that the inventory "can only ever
-    come back empty" for anything else. That reasoning holds exactly as long as the engine has
-    ONE collecting suffix. So: enumerate the engine's suffix constants and require ours to be
-    the only one.
+    What is asked now is neither, and it survives the next widening as well: our set IS the
+    engine's set. A suffix the ENGINE gains reddens it, because we would then refuse files the
+    inventory reads, which is the GB-79 defect itself. A suffix WE accept and the engine does not
+    reddens it too, because we would run a full walk for an answer that was already settled. Only
+    an equality states both halves, and only the second half is new.
 
-    Measuring the module's attributes rather than importing a named constant is deliberate: a
-    second suffix arrives under a name this test cannot know in advance, and a named import
+    Measuring the module's attributes rather than importing named constants is deliberate: a
+    further suffix arrives under a name this test cannot know in advance, and a named import
     would have to be edited before it could notice anything.
 
-    Red-provable WITHOUT moving the pin, which is the point: run this file with
-    ``PYTHONPATH`` pointing at the engine's source checkout and the newer engine shadows the
-    pinned install. Measured there, the attribute set is ``{_BOB_SUFFIX, _PLT_SUFFIX}`` and
-    this assertion fails, naming [GB-79] as the follow-up.
+    Red-proven in both directions before this was committed, not merely reasoned about: removing
+    ``TREND_SUFFIX`` from ``INVENTORY_SUFFIXES`` fails naming ``.plt`` as the engine's surplus,
+    and adding a suffix the engine does not collect fails naming it as ours.
     """
     import opi_navigation.discovery as discovery
 
-    from epics_mcp.display_files import DISPLAY_SUFFIX
-
-    suffixes = {
+    engine_suffixes = {
         name: getattr(discovery, name)
         for name in dir(discovery)
         if name.endswith("_SUFFIX") and isinstance(getattr(discovery, name), str)
     }
-    assert set(suffixes.values()) == {DISPLAY_SUFFIX}, (
-        "the display-PV engine now collects more than one file suffix "
-        f"({sorted(suffixes.items())}); the refusal in _run_validate rejects files the "
-        "inventory would read, and its reasoning ('can only ever come back empty') no longer "
-        "holds. Follow-up: roadmap item GB-79 in the producing workspace."
+    assert set(engine_suffixes.values()) == set(INVENTORY_SUFFIXES), (
+        "the display-PV engine and this server disagree about which files the inventory reads. "
+        f"engine: {sorted(engine_suffixes.items())}, ours: {sorted(INVENTORY_SUFFIXES)}. "
+        "A suffix only the ENGINE has means the refusal in _run_validate rejects files the "
+        "inventory would read; a suffix only WE have means it accepts files that can only ever "
+        "come back empty after a full walk."
     )
 
 
-def test_the_inventory_really_reads_nothing_but_displays(tmp_path: Path) -> None:
+def test_the_inventory_reads_exactly_the_suffixes_we_accept(tmp_path: Path) -> None:
     """The same coupling from the behaviour side: what the INVENTORY actually reads.
 
     ⚠️ **This guard used to measure the wrong function, and it was blind three times over.**
     It called ``find_bob_files``, which (a) the PV surface no longer calls at all, (b) still
-    returns only ``.bob`` in the newer engine, so it stays green through the widening, and
-    (c) was checked against a name list that contained no trend file, so even feeding it the
+    returns only ``.bob`` even in the widened engine, so it stayed green through the widening,
+    and (c) was checked against a name list that contained no trend file, so even feeding it the
     widened function would have changed nothing.
 
     ``analyze_pv_inventory`` is the function whose behaviour the refusal in ``_run_validate``
-    actually cites, so it is the one asked here. The tree holds a display AND a trend file:
-    while the pin stands, the inventory reports one top level; once the engine widens, it
-    reports the trend too and this assertion fails.
+    actually cites, so it is the one asked here. Its sibling above compares CONSTANTS, which a
+    reader could satisfy by editing two files in step while the engine does something else
+    entirely; this one compares what the walk really returns.
+
+    THE EXPECTATION IS DERIVED FROM ``INVENTORY_SUFFIXES``, not typed out, and that is what makes
+    the pair red-provable from one edit: shrink our set and the derived expectation stops naming
+    the trend while the engine keeps collecting it. A typed ``{"kept.bob", "KEPT2.BOB",
+    "trend.plt"}`` would go green again the moment someone "fixed" it to match the shrunken set.
+
+    Every fixture file declares a PV on purpose. The inventory only holds files that yielded at
+    least one PV occurrence, so a silent, PV-less file would drop out of ``collected`` for a
+    reason that has nothing to do with its suffix and would read as a suffix verdict.
 
     The case folding stays measured rather than restated (``UPPER.BOB`` is a display), because
     a test that re-implements the rule it checks proves only that the author is consistent.
     """
     from opi_navigation.pv_analysis import analyze_pv_inventory
 
-    from epics_mcp.display_files import DISPLAY_SUFFIX
+    written = {
+        "kept.bob": _FRAGMENT,
+        "KEPT2.BOB": _FRAGMENT,
+        "trend.plt": _TREND,
+        "skipped.txt": _FRAGMENT,
+        "skipped.opi": _FRAGMENT,
+    }
+    for name, body in written.items():
+        (tmp_path / name).write_text(body, encoding="utf-8")
+    expected = {name for name in written if Path(name).suffix.lower() in INVENTORY_SUFFIXES}
 
-    (tmp_path / "kept.bob").write_text(_FRAGMENT, encoding="utf-8")
-    (tmp_path / "KEPT2.BOB").write_text(_FRAGMENT, encoding="utf-8")
-    (tmp_path / "skipped.txt").write_text(_FRAGMENT, encoding="utf-8")
-    (tmp_path / "skipped.opi").write_text(_FRAGMENT, encoding="utf-8")
-    (tmp_path / "trend.plt").write_text(_TREND, encoding="utf-8")
-
-    collected = {entry.display_path for entry in analyze_pv_inventory(tmp_path).displays}
-    assert collected == {"kept.bob", "KEPT2.BOB"}, (
-        "the display-PV inventory no longer reads .bob files only; the refusal in "
-        f"_run_validate now rejects files it would read (collected: {sorted(collected)}). "
-        "Follow-up: roadmap item GB-79 in the producing workspace."
+    inventory = analyze_pv_inventory(tmp_path)
+    collected = {entry.display_path for entry in inventory.displays}
+    assert collected == expected, (
+        "the display-PV inventory does not read the set of suffixes this server accepts "
+        f"(collected: {sorted(collected)}, accepted: {sorted(expected)}). A surplus on the "
+        "inventory side means _run_validate refuses files it would read."
     )
-    assert all(Path(name).suffix.lower() == DISPLAY_SUFFIX for name in collected)
+
+    # A trend is COLLECTED and is still not a display, and the engine says which is which itself.
+    # Asserting that here keeps the widening from being read as "a .plt is a screen now": the
+    # kind comes back as a field, never from the suffix, because a .plt is not even a reliable
+    # candidate (measured upstream: the .plt files under an epics-base checkout are Perl scripts).
+    kinds = {entry.display_path: entry.node_kind for entry in inventory.displays}
+    assert kinds["trend.plt"] == "trend", (
+        f"the trend file came back as {kinds['trend.plt']!r}; the server's prose distinguishes a "
+        "display from a trend on this field, so it must not silently become 'display'"
+    )
+    assert kinds["kept.bob"] == "display"
+
+
+async def test_a_standalone_trend_is_answered_rather_than_refused(tmp_path: Path) -> None:
+    """GB-79, the whole point: a trend file comes back with its traces instead of INVALID_INPUT.
+
+    The two guards above compare a constant and a walk. Neither of them calls the tool, so both
+    would stay green if the refusal itself were left untouched, and that refusal is the thing the
+    widening breaks. This is the end-to-end half.
+
+    A CONCRETE channel is asserted, never ``total == 0``: zero is what you get whether the file
+    was READ or IGNORED, which is the trap an earlier sibling in this file fell into. Only a
+    non-empty expected value can be produced by actually parsing the trend.
+
+    Red-proven on the pre-fix code: it raised ``EpicsError(INVALID_INPUT)`` naming ``.bob``.
+    """
+    root = tmp_path / "ds"
+    root.mkdir()
+    trend = root / "trend.plt"
+    trend.write_text(_TREND, encoding="utf-8")
+
+    mock = AsyncMock(
+        return_value={"results": [{"pv_name": "SIM:PS-01:Cur-RB", "value": 1}], "errors": []}
+    )
+    with patch("epics_mcp.tools.validate.pv_get_batch", mock):
+        result = await _validate_pvs(file_path=str(trend), displays_dir=str(root))
+
+    assert result["total"] == 1, "the trend was not parsed at all"
+    mock.assert_awaited_once_with(["SIM:PS-01:Cur-RB"], None)
+
+
+async def test_an_embedded_trend_is_found_through_the_file_view(tmp_path: Path) -> None:
+    """The OTHER route into a trend, and the one that could have needed a code change.
+
+    A trend reaches the inventory two ways, and they are not the same event. Opened by an
+    ``open_file`` button it becomes a top level of its own, which is the sibling above. Embedded
+    in a screen through a ``databrowser`` widget it never becomes one: its traces are attributed
+    to the EMBEDDING screen and keep the trend only as their ``origin_file``. The file view is
+    built on exactly that field, so this is the case that decides whether ``_sweep_display_file``
+    needed widening at all.
+
+    Measured before the refusal was opened: it did not. The sweep matches on ``origin_file``
+    without ever looking at a suffix, so the roll-up carried the trace through untouched. This
+    test is what keeps that true, because a future sweep that starts filtering by kind would
+    break this route while leaving the standalone one green.
+    """
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "parent.bob").write_text(
+        '<display version="2.0.0"><name>Parent</name>'
+        '<widget type="databrowser" version="2.0.0"><name>db</name>'
+        "<file>trend.plt</file></widget></display>",
+        encoding="utf-8",
+    )
+    trend = root / "trend.plt"
+    trend.write_text(_TREND, encoding="utf-8")
+
+    mock = AsyncMock(
+        return_value={"results": [{"pv_name": "SIM:PS-01:Cur-RB", "value": 1}], "errors": []}
+    )
+    with patch("epics_mcp.tools.validate.pv_get_batch", mock):
+        result = await _validate_pvs(file_path=str(trend), displays_dir=str(root), view="file")
+
+    assert result["total"] == 1, (
+        "the file view lost the trace of an EMBEDDED trend; its PVs are attributed to the parent "
+        "screen and only origin_file points back here"
+    )
+    mock.assert_awaited_once_with(["SIM:PS-01:Cur-RB"], None)
 
 
 async def test_the_refusal_reaches_a_client_over_the_wire(tmp_path: Path) -> None:

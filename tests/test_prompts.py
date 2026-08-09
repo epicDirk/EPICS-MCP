@@ -58,13 +58,22 @@ def test_compare_machine_state_does_not_teach_validate_pvs_for_a_non_display(
     assert "yourself" in result
 
 
-@pytest.mark.parametrize("reference_file", ["status.bob", "STATUS.BOB"])
-def test_compare_machine_state_still_teaches_validate_pvs_for_a_display(
+@pytest.mark.parametrize("reference_file", ["status.bob", "STATUS.BOB", "beam.plt", "BEAM.PLT"])
+def test_compare_machine_state_still_teaches_validate_pvs_for_a_readable_file(
     reference_file: str,
 ) -> None:
-    """The negative control for the test above: a display, in either case, keeps the tool path.
+    """The negative control for the test above: a file the tool READS, in either case, keeps it.
 
     Without this, dropping the branch entirely would look like a fix.
+
+    The ``.plt`` rows are GB-79: the tool now answers a Data Browser trend instead of refusing it,
+    so sending the client down the read-it-yourself path would waste a call the server can make.
+    The prompt reaches this branch through ``display_files.is_inventory_file``, so the two stay in
+    step by construction rather than by anyone remembering to edit both.
+
+    This module is deliberately NOT engine-coupled and must stay that way: ``prompts.py`` imports
+    only ``display_files``, which imports nothing, so these rows keep running in the core-only CI
+    lane where ``opi_navigation`` is absent.
     """
     result = compare_machine_state(
         "MPS:", reference_file=reference_file, display_tools_available=True

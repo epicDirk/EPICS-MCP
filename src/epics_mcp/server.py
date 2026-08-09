@@ -128,7 +128,14 @@ def build_instructions(display_tools_available: bool) -> str:
         # "file or display view" earns its bytes: without it this clause reads as a promise that
         # the tool reports what a display SHOWS, which is not the view it takes by default. The
         # byte budget below leaves no room to spell that out; the tool description does.
-        "validate the PVs of a .bob display (file or display view), cross-plane provenance, "
+        #
+        # GB-79 named the second file kind here for ZERO net bytes, and the wording was measured
+        # rather than chosen: ".bob display" -> ".bob or .plt" is the only candidate that keeps
+        # all 19 bytes of head-room the budget had (spelling it out as ".bob display or .plt
+        # trend" costs 14 of them, and this guard exists to keep room for new tool lines). Which
+        # kind is which, and that a trend answers the two views by different routes, is the tool
+        # description's job under the division of labour the paragraph above states.
+        "validate the PVs of a .bob or .plt (file or display view), cross-plane provenance, "
         "device lookup (screens + live + source IOC), "
         if display_tools_available
         else ""

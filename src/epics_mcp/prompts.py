@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from epics_mcp.display_files import is_display_file
+from epics_mcp.display_files import is_inventory_file
 from epics_mcp.presets import Preset
 
 
@@ -38,7 +38,7 @@ def compare_machine_state(
     real capability, the prompt would silently re-instruct the missing tool. Required → a mis-wired
     wrapper is a loud TypeError in a test, not a silent regression.
     """
-    if reference_file and is_display_file(reference_file) and display_tools_available:
+    if reference_file and is_inventory_file(reference_file) and display_tools_available:
         # S1-3: pass the dataset ROOT as displays_dir too, without it validate_pvs walks the
         # file's own directory and under-resolves embedded fragments (consistent with the tool's
         # own description).
@@ -46,6 +46,11 @@ def compare_machine_state(
         # everything that screen shows, and the tool's default is the other question (what the file
         # declares). On a screen that only composes fragments the default answers total 0, so a
         # prompt that omits the view teaches a call which silently finds nothing.
+        #
+        # GB-79: this branch is reached by a .plt Data Browser trend as well, and the advice holds
+        # unchanged there. A trend embedded in a screen answers under the file view, one opened by
+        # a button answers under the display view, and asking for the display view costs nothing in
+        # the first case, so naming one view keeps the prompt short without being wrong.
         file_note = (
             f'\n1. Extract PVs from "{reference_file}" using '
             f'validate_pvs(file_path="{reference_file}", displays_dir="<dataset ROOT>", '
@@ -55,27 +60,33 @@ def compare_machine_state(
             "asks only what this file declares itself)\n"
         )
     elif reference_file and display_tools_available:
-        # QA-33: the tool now REFUSES a non-.bob file_path outright (INVALID_INPUT), where it used
-        # to answer an empty result. Naming it for, say, a CSV would teach a call that is certain
-        # to fail, and this prompt has been that surface once before (the pv_names rename). The
-        # display tools exist here, they just do not parse this KIND of file.
+        # QA-33: the tool REFUSES a file_path it cannot read outright (INVALID_INPUT), where it
+        # used to answer an empty result. Naming it for, say, a CSV would teach a call that is
+        # certain to fail, and this prompt has been that surface once before (the pv_names
+        # rename). The display tools exist here, they just do not parse this KIND of file.
+        #
+        # GB-79 narrowed which kinds land here: a .plt trend now takes the branch above, so this
+        # one is for everything the inventory still does not collect. The sentence below names
+        # both readable kinds rather than only .bob, because a client told "displays only" would
+        # not think to retry with the trend it also has.
         file_note = (
             f'\n1. Read "{reference_file}" yourself and collect the PV names it references '
-            "(or ask the user for the PV list); validate_pvs reads .bob displays only and "
-            "refuses any other file\n"
+            "(or ask the user for the PV list); validate_pvs reads .bob displays and .plt Data "
+            "Browser trends only, and refuses any other file\n"
         )
     elif reference_file:
-        # Core-only: no MCP tool parses a .bob here (the .bob-parsing tool is display-gated and not
-        # registered). Do NOT name an unavailable tool, tell the client to read the file itself.
+        # Core-only: no MCP tool parses a display or trend file here (the parsing tool is
+        # display-gated and not registered). Do NOT name an unavailable tool, tell the client to
+        # read the file itself.
         file_note = (
             f'\n1. Read "{reference_file}" yourself and collect the PV names it references '
-            "(or ask the user for the PV list), no MCP tool parses a .bob in this core-only "
-            "install\n"
+            "(or ask the user for the PV list), no MCP tool parses a display or trend file in "
+            "this core-only install\n"
         )
     else:
         file_note = (
             f'\n1. Collect PVs with prefix "{pv_prefix}" '
-            "; ask the user for the PV list or .bob file\n"
+            "; ask the user for the PV list, a .bob display or a .plt trend\n"
         )
 
     return (

@@ -126,7 +126,7 @@ displays = ["opi-navigation"]
 # `--group displays` and therefore never resolves this dependency at all: the lock entry is checked
 # here, not exercised there.
 [tool.uv.sources]
-opi-navigation = { git = "https://github.com/epicDirk/opi-foundry.git", rev = "9b72d4b20dafa53a8106288d42b989ee7723e24a" }
+opi-navigation = { git = "https://github.com/epicDirk/opi-foundry.git", rev = "0ab0d736db6d3bf92fd325d1fd69992d2ff62e92" }
 
 [project.urls]
 Homepage = "https://github.com/epicDirk/EPICS-MCP"

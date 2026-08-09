@@ -173,7 +173,15 @@ def test_analyze_adapters_smoke_over_real_bob(tmp_path: Path) -> None:
     ⚠ The two ``isinstance`` assertions on the diagnostics tail below are a SHAPE check and nothing
     more: they were the only thing asserted about those values until GB-71, and a consumer counting
     them differently satisfies them perfectly. What the four display tools actually report, and that
-    they all report the same, is in ``tests/test_diagnostics_tail.py``."""
+    they all report the same, is in ``tests/test_diagnostics_tail.py``.
+
+    ⚠ THE TREE HOLDS A TREND FILE SINCE GB-79, and the reason is that this guard could not see the
+    engine's last widening. It laid a single ``.bob`` in the tree, so when the engine started
+    collecting ``.plt`` files as well, nothing here changed and nothing went red: a drift guard
+    whose fixture cannot express the drift is reporting on a question it never asked. The trend
+    reaches BOTH adapters through the same seam as a display, so its trace channel is asserted the
+    same way, and a future engine that stopped lifting trend PVs into the join would be caught
+    here rather than in production."""
     root = tmp_path / "ds"
     root.mkdir()
     (root / "panel.bob").write_text(
@@ -182,7 +190,25 @@ def test_analyze_adapters_smoke_over_real_bob(tmp_path: Path) -> None:
         "<pv_name>DEV-TEST01:Ctrl-EVR-01:status</pv_name></widget></display>",
         encoding="utf-8",
     )
+    # Opened by a button rather than embedded, deliberately: an open_file target is a top level of
+    # its own and therefore operator-facing, and inventory_join_pvs keeps operator-facing top
+    # levels only. An embedded trend would roll up into panel.bob and prove nothing about the seam.
+    (root / "menu.bob").write_text(
+        '<display version="2.0.0"><name>Menu</name>'
+        '<widget type="action_button" version="3.0.0"><name>b</name><actions>'
+        '<action type="open_file"><file>beam.plt</file><description>Trend</description></action>'
+        "</actions></widget></display>",
+        encoding="utf-8",
+    )
+    (root / "beam.plt").write_text(
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        "<databrowser><title>Beam</title><pvlist><pv>"
+        "<name>DEV-TEST01:Ctrl-EVR-01:trend</name><visible>true</visible><axis>0</axis>"
+        "</pv></pvlist></databrowser>",
+        encoding="utf-8",
+    )
     channel = "DEV-TEST01:Ctrl-EVR-01:status"
+    trend_channel = "DEV-TEST01:Ctrl-EVR-01:trend"
 
     join_pvs, context_capped, glob_capped = analyze_display_pvs(root)
     assert isinstance(context_capped, tuple)
@@ -194,6 +220,17 @@ def test_analyze_adapters_smoke_over_real_bob(tmp_path: Path) -> None:
     assert jp.protocol in ("ca", "pva")
     assert jp.role in ("read", "write")
 
+    trend_jp = next((p for p in join_pvs if p.pv == trend_channel), None)
+    assert trend_jp is not None, (
+        "the trend's trace never reached the join; since GB-79 the engine collects .plt files, "
+        "and a button-opened trend is a top level of its own"
+    )
+    assert trend_jp.display == "beam.plt"
+    assert trend_jp.resolution == "resolved"
+    # A Data Browser shows histories and never writes, so the engine reports read. Asserted rather
+    # than accepted as "read or write" like the display row above: here the value is decidable.
+    assert trend_jp.role == "read"
+
     index_rows, index_capped, index_glob = analyze_display_index(root)
     assert isinstance(index_capped, tuple)
     assert isinstance(index_glob, int)
@@ -201,3 +238,7 @@ def test_analyze_adapters_smoke_over_real_bob(tmp_path: Path) -> None:
     assert isinstance(ir, IndexRow)
     assert "panel.bob" in ir.displays
     assert ir.roles  # non-empty roles tuple
+
+    trend_ir = next((r for r in index_rows if r.pv == trend_channel), None)
+    assert trend_ir is not None, "the PV -> [displays] index dropped the trend's trace"
+    assert "beam.plt" in trend_ir.displays

@@ -549,13 +549,18 @@ def test_compare_machine_state_prompt_hides_capability_arg() -> None:
 def test_build_instructions_omits_display_claims_core_only() -> None:
     """Guard C (S26): the instructions advertise the display-gated capabilities only when
     the extra is available, a core-only install must not over-claim them. Both branches by direct
-    call of the pure builder."""
+    call of the pure builder.
+
+    The quoted phrase tracks the clause verbatim, which is the point: it is a SURFACE that
+    describes the tool, and this assertion is what made GB-79 enumerate it rather than recall it.
+    The clause now reads ".bob or .plt" because the inventory collects Data Browser trends too,
+    and the wording was picked to cost zero of the 19 bytes the size budget had left."""
     from epics_mcp.server import build_instructions
 
     full = build_instructions(True)
     core = build_instructions(False)
-    assert "validate the PVs of a .bob display" in full
-    assert "validate the PVs of a .bob display" not in core
+    assert "validate the PVs of a .bob or .plt" in full
+    assert "validate the PVs of a .bob or .plt" not in core
     assert "device lookup (screens + live + source IOC)" not in core
     # the core capabilities remain in both
     assert "ChannelFinder lookups" in core

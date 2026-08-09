@@ -2,7 +2,10 @@
 
 These four tools (``validate_pvs``, ``crossplane_check``, ``coverage_audit``,
 ``find_device``) join live EPICS PVs with the *display* plane: the macro-expanded,
-per-instance PV inventory of ``.bob`` operator screens. That inventory comes from the
+per-instance PV inventory of ``.bob`` operator screens AND the ``.plt`` Data Browser trends
+reached from them (GB-79). A trend is not a screen and the inventory does not pretend it is: it
+reports the kind on its own field, and a trend opened by a button counts as a top level of its
+own while one embedded in a screen contributes to that screen. That inventory comes from the
 ``opi_navigation`` package (the build-once Wedge-0 PV engine), which is an **optional**
 dependency: the ``displays`` dependency group (``uv sync --extra dev --group displays``), a
 local-checkout surface that never reaches the published package.
@@ -54,14 +57,19 @@ async def validate_pvs(
     file_path: Annotated[
         str | None,
         Field(
-            description="Path to a .bob file. Extracts the concrete, macro-resolved "
+            description="Path to a .bob display or a .plt Data Browser trend. Extracts the "
+            "concrete, macro-resolved "
             "ca/pva channels it references (via the opi_navigation inventory) and "
-            "checks their connectivity; which channels those are depends on view. A path that "
-            "is not a .bob, or that lies outside "
+            "checks their connectivity; which channels those are depends on view. A path with "
+            "any other suffix, or one that lies outside "
             "displays_dir, is refused straight away with INVALID_INPUT: the inventory reads "
-            "only .bob files, so such a call can only ever come back empty, and it used to "
-            "take a full inventory walk to say so. Echoed back as the file_path field of the "
-            "answer, as passed rather than resolved, on every file-mode result."
+            "only those two kinds, so such a call can only ever come back empty, and it used to "
+            "take a full inventory walk to say so. A trend answers under both views but by "
+            "different routes: embedded in a screen through a databrowser widget its traces are "
+            "attributed to that screen and only the file view finds them here, while a trend "
+            "opened by an open_file button is a top level of its own. Echoed back as the "
+            "file_path field of the answer, as passed rather than resolved, on every file-mode "
+            "result."
         ),
     ] = None,
     view: Annotated[
@@ -107,7 +115,7 @@ async def validate_pvs(
         Field(description="Timeout in seconds per PV (default: EPICS_MCP_DEFAULT_TIMEOUT)", gt=0),
     ] = None,
 ) -> dict[str, object]:
-    """Check PV connectivity. Provide a PV list or a .bob file path (+ displays_dir ROOT)."""
+    """Check PV connectivity. Provide a PV list, or a .bob/.plt path (+ displays_dir ROOT)."""
     return await _validate_pvs(
         pvs=pv_names,
         file_path=file_path,
@@ -122,7 +130,8 @@ async def crossplane_check(
     displays_dir: Annotated[
         str,
         Field(
-            description="Project/dataset ROOT directory of .bob displays (searched recursively). "
+            description="Project/dataset ROOT directory of .bob displays (searched recursively; "
+            ".plt Data Browser trends found there contribute their trace PVs too). "
             "Must be the root, not a narrow per-IOC subdirectory: display macros are bound by the "
             "operator top-levels found here, so a too-narrow scope leaves PVs unresolved."
         ),
@@ -205,7 +214,13 @@ async def crossplane_check(
 
 @translate_epics_errors
 async def coverage_audit(
-    displays_dir: Annotated[str, Field(description="project/dataset ROOT of .bob displays")],
+    displays_dir: Annotated[
+        str,
+        Field(
+            description="project/dataset ROOT of .bob displays (.plt Data Browser trends found "
+            "there contribute their trace PVs too)"
+        ),
+    ],
     scope: Annotated[
         str,
         Field(
@@ -276,7 +291,12 @@ async def coverage_audit(
 async def find_device(
     query: Annotated[str, Field(description="Device / PV channel (protocol prefix optional)")],
     displays_dir: Annotated[
-        str, Field(description="Project/dataset ROOT holding the .bob displays")
+        str,
+        Field(
+            description="Project/dataset ROOT holding the .bob displays. A .plt Data Browser "
+            "trend opened by a button is a screen in its own right here, so it can be returned "
+            "among the screens that show the device."
+        ),
     ],
     match: Annotated[
         MatchMode, Field(description="Match mode against the protocol-stripped channel")

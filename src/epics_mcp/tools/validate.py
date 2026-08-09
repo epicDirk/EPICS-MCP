@@ -11,7 +11,7 @@ from opi_navigation.pv_analysis import DEFAULT_PV_CONTEXT_CAP, channel_name
 from opi_navigation.pv_analysis.models import PvInventory
 
 from epics_mcp.config import get_config
-from epics_mcp.display_files import DISPLAY_SUFFIX
+from epics_mcp.display_files import DISPLAY_SUFFIX, INVENTORY_SUFFIXES, TREND_SUFFIX
 from epics_mcp.errors import EpicsError
 from epics_mcp.paths import resolve_user_path
 from epics_mcp.services.epics_client import pv_get_batch
@@ -24,16 +24,25 @@ from epics_mcp.services.inventory_adapter import analyze_inventory
 #: resolved path too, so it could never match that entry, and the previous code answered empty
 #: after a full walk. Do not simplify the comment on the refusal to "the engine would ignore it".
 #:
-#: ⚠ The refusal rests on the engine collecting ONE suffix, and that is a pinned fact, not a
-#: permanent one: the newer engine reads Data Browser ``.plt`` trend files as well, so the moment
-#: the ``opi_navigation`` pin moves, this refusal starts rejecting files the inventory would read.
-#: Two guards in ``tests/test_validate.py`` go red in that second and name the follow-up (roadmap
-#: item GB-79). Naming ``find_bob_files`` here would be worse than vague: the PV surface stopped
-#: calling it, and it keeps returning only ``.bob`` in the newer engine, so a reader would take
-#: reassurance from a function that has nothing to do with the answer any more.
-_DISPLAY_SUFFIX = DISPLAY_SUFFIX
+#: ⚠ THE REFUSAL RESTS ON A SET, NOT ON A SUFFIX, and that is the repair GB-79 made. It used to
+#: compare against ``.bob`` alone, on the stated grounds that the inventory "can only ever come
+#: back empty" for anything else. The engine then widened to Data Browser ``.plt`` trend files, and
+#: the pin move brought that here: the refusal began rejecting files the inventory reads, which is
+#: a malfunction wearing the clothes of a safety check. Two guards in ``tests/test_validate.py``
+#: hold the two sets equal in BOTH directions, so a third suffix reddens them just as the second
+#: one did. Naming ``find_bob_files`` here would be worse than vague: the PV surface stopped
+#: calling it, and it still returns only ``.bob``, so a reader would take reassurance from a
+#: function that has nothing to do with the answer any more.
+#:
+#: ⚠ What does NOT change with the widening is the SWEEP, and that was measured rather than
+#: assumed before the refusal was opened. The file view matches on ``ev.origin_file`` and the
+#: display view on ``display_path``, and a trend answers both: reached through a ``databrowser``
+#: widget its trace PVs roll up to the EMBEDDING top level while keeping the trend as their
+#: ``origin_file``, and opened by an ``open_file`` button the trend IS the top level. Neither view
+#: needed a line changed for a ``.plt``.
+_INVENTORY_SUFFIXES = INVENTORY_SUFFIXES
 
-#: Which of the two legitimate questions about a ``.bob`` the caller is asking. They are different
+#: Which of the two legitimate questions about the file the caller is asking. They are different
 #: questions with different answers, and answering one while the caller meant the other is what this
 #: parameter exists to prevent (measured on a 257-display dataset: 54 files where the display view
 #: is larger, 42 of them answering ``total: 0`` under the file view while the display resolves up to
@@ -323,15 +332,16 @@ def _run_validate(file_path: str, displays_dir: str | None, view: PvView = "file
     distinct lower-bound questions each flag answers.
 
     Two inputs are refused BEFORE the walk because each settles the answer alone: a *file_path*
-    that is not a ``.bob`` (the inventory reads nothing else), and one that is not under the
+    whose suffix is not one the inventory collects (see ``display_files.INVENTORY_SUFFIXES``: a
+    ``.bob`` display or a ``.plt`` trend), and one that is not under the
     walked root (it can never match an ``origin_file``). Both used to be discovered AFTER a full
     inventory run, i.e. after the better part of a minute on a large dataset, for an answer that
-    was already fixed. A ``.bob`` that simply declares no real channels is NOT one of these: that
-    is a legitimate empty result, not a refusal.
+    was already fixed. A collected file that simply declares no real channels is NOT one of these:
+    that is a legitimate empty result, not a refusal.
 
     Raises:
-        EpicsError(INVALID_INPUT): file_path / displays_dir missing, wrong kind, not a
-            ``.bob`` display file, or file_path not under displays_dir.
+        EpicsError(INVALID_INPUT): file_path / displays_dir missing, wrong kind, a suffix the
+            inventory does not collect, or file_path not under displays_dir.
         EpicsError(PATH_OUTSIDE_WORKSPACE): a path is outside the opt-in allowed_roots.
     """
     f = resolve_user_path(file_path, kind="file", label="file_path")
@@ -352,15 +362,16 @@ def _run_validate(file_path: str, displays_dir: str | None, view: PvView = "file
     # boundary error the previous release gave (measured: PATH_OUTSIDE_WORKSPACE became
     # INVALID_INPUT). Validate every user path first, then decide, which is also the order
     # services/orchestration.py takes.
-    if f.suffix.lower() != _DISPLAY_SUFFIX:
+    if f.suffix.lower() not in _INVENTORY_SUFFIXES:
         found = f.suffix or "no suffix"
         # Name the RESOLVED path when it differs from what was passed: with a symlink the two
         # disagree, and quoting the raw name beside the target's suffix reads as a contradiction
         # ("got .txt: ...\link.bob").
         shown = str(f) if f != Path(file_path) else file_path
         raise EpicsError(
-            f"file_path must be a {_DISPLAY_SUFFIX} display file (got {found}): {shown}. "
-            f"The display inventory reads only {_DISPLAY_SUFFIX} files, so this call can only "
+            f"file_path must be a {DISPLAY_SUFFIX} display or a {TREND_SUFFIX} Data Browser "
+            f"trend (got {found}): {shown}. "
+            f"The display-PV inventory reads only those two kinds of file, so this call can only "
             f"come back empty. To check a plain list of PVs, pass pv_names instead.",
             error_code="INVALID_INPUT",
         )
@@ -423,7 +434,7 @@ async def _validate_pvs(
     timeout: float | None = None,
     view: PvView = "file",
 ) -> dict[str, object]:
-    """Check PV connectivity. Accepts a PV list or a .bob file path.
+    """Check PV connectivity. Accepts a PV list, or the path of a file the inventory reads.
 
     file_path mode reuses the macro-aware ``opi_navigation`` inventory to extract the concrete,
     resolved ca/pva channels, under one of two views (see :func:`_run_validate`): ``view="file"``
@@ -431,6 +442,13 @@ async def _validate_pvs(
     fragments work too; ``view="display"`` takes what the file resolves to when opened as a
     display, fragments included. The two differ a lot in practice, so every file-mode result
     reports ``shown_by_display`` and, when the file view omits something, says so in ``notes``.
+
+    A ``.plt`` Data Browser trend is a legitimate *file_path* as well, and its two views are
+    reached by different routes rather than by different content: embedded in a screen through a
+    ``databrowser`` widget its traces roll up to that screen while keeping the trend as their
+    ``origin_file`` (so the FILE view finds them), and opened by an ``open_file`` button the trend
+    is a top level of its own (so the DISPLAY view does). A trend is not a screen, and the
+    inventory says so itself through ``node_kind``, never through the suffix.
 
     Pass *displays_dir* = the dataset ROOT for full macro resolution; without it the file's own
     directory is used and fragments under-resolve. A ``notes`` entry flags when the PV list is a
@@ -458,7 +476,7 @@ async def _validate_pvs(
     the resolved path, deliberately differing from the refusal below, which names the resolved one
     (that statement is about the disk, this one is a correlation key for the caller).
 
-    A *file_path* that is not a ``.bob``, or
+    A *file_path* whose suffix the inventory does not collect, or
     that lies outside the walked root, is refused immediately (see :func:`_run_validate`); note
     this only applies when *file_path* is used, an explicit *pvs* list wins and skips the file path
     entirely, along with *view*. NOTE: a full inventory walk is ~60 s for
@@ -522,8 +540,10 @@ async def _validate_pvs(
                 else ""
             )
             notes.append(
+                # "this file", not "this .bob": the inventory reads trend files too since GB-79,
+                # and a note that names the wrong kind is the defect this note exists to prevent.
                 f"This is the file view: the check covers the {len(extracted)} channel(s) this "
-                f".bob declares itself. Opened as a display it resolves{bound} "
+                f"file declares itself. Opened as a display it resolves{bound} "
                 f"{found.shown_only} further channel(s) through the fragments it embeds. "
                 f'Pass view="display" to check those instead.{tail}'
             )

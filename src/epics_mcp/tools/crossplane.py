@@ -1,7 +1,9 @@
 """Tool function for the cross-plane PV provenance check (Display ↔ e3 IOC ↔ Naming).
 
 Read-only join of three planes opi-foundry owns separately: the **macro-expanded, per-instance**
-PVs a ``.bob`` project references (via the SHA-pinned ``opi_navigation`` Wedge-0 inventory), the
+PVs a display project references (via the SHA-pinned ``opi_navigation`` Wedge-0 inventory, whose
+universe is the ``.bob`` screens of the root AND the ``.plt`` Data Browser trends reached from
+them since GB-79), the
 device prefix an e3 IOC ``st.cmd`` declares, and (optionally) the ESS Naming Service registration
 status. Pure file I/O + one optional read-only HTTP ``GET``; no running IOC and no PV writes.
 
