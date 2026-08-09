@@ -812,13 +812,23 @@ messages embed the full request URL, an internal host would leak into this file)
   foreign archiver/olog 404 is corroboration, not a device-identity verdict). With the Olog plane
   *disabled*, `get_log_entry` answers `found:null` (not checked), mirroring the
   `archived`/`configured`/`registered` siblings.
+- **`validate_pvs` reads TWO kinds of file: a `.bob` display and a `.plt` Data Browser trend.**
+  A trend is not a screen and the inventory does not pretend it is, it reports the kind on its own
+  field; but its trace PVs are real channels and the tool checks them like any other. How a trend
+  is REACHED decides which view finds it, and this is the one thing worth knowing before calling:
+  embedded in a screen through a `databrowser` widget its traces are attributed to that SCREEN and
+  only the file view of the trend finds them here, while a trend opened by an `open_file` button is
+  a top level of its own and answers under either view. So on a trend, when in doubt, ask for both.
 - **`validate_pvs` refuses a `file_path` with `INVALID_INPUT`.** Two inputs are refused before any
-  work: a path that is not a `.bob`, and one that is not under `displays_dir`. Both would run the
+  work: a path whose suffix is neither of the two above, and one that is not under `displays_dir`.
+  Both would run the
   full display-inventory walk (tens of seconds on a large dataset) to arrive at a result that was
-  already settled: the inventory reads `.bob` files only, and resolves embed targets against that
-  same collected set, so nothing else can ever contribute a PV. The suffix comparison folds case,
+  already settled: the inventory collects those two suffixes and resolves embed targets against
+  that same collected set, so a file of any other kind cannot contribute a PV. The suffix
+  comparison folds case,
   `UPPER.BOB` is a display. ⚠ Do NOT read this as "an empty answer means a bad path": a genuine
-  `.bob` that declares no real `ca`/`pva` channels of its own still answers `total: 0`, and that is
+  display or trend that declares no real `ca`/`pva` channels of its own still answers `total: 0`,
+  and that is
   a statement about the file rather than a refusal (though not always a complete one, see the two
   caps below). To check a plain list of PVs with no display involved, pass
   `pv_names` instead; supplying a NON-EMPTY one makes the list win and the file path is not looked
