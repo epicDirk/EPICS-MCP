@@ -78,7 +78,11 @@ epics-coverage   --displays <project-root> --scope DEV: # coverage matrix (needs
 `epics-init` prints the MCP client-configuration block for one of four deployment shapes
 (`sandbox`, `ioc-only`, `ioc-archiver`, `full`; `--list` describes them) and then runs the
 `epics-doctor` checks against exactly that block, so generating a configuration and checking it are
-one step. It writes nothing unless asked to.
+one step. It writes nothing unless asked to: `--out PATH` writes the block as UTF-8 with LF, which a
+shell redirect cannot promise (in Windows PowerShell 5.1 both `>` and `Set-Content -Encoding utf8`
+produce bytes a strict JSON parser rejects). `--out` refuses an existing file unless `--force` is
+given, and writes nothing at all while placeholders remain. `--absolute-command` names the installed
+server by its resolved path instead of a bare name, for a client that does not inherit your `PATH`.
 
 `epics-init`, `epics-doctor` and `epics-diagnose` are part of the core install; `epics-crossplane`
 and `epics-coverage` need the `opi_navigation` engine, which a published install cannot obtain

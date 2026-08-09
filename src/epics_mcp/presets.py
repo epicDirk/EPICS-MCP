@@ -260,14 +260,20 @@ def stale_config_vars(environ: Iterable[str]) -> list[str]:
     )
 
 
-def render_client_config(env: Mapping[str, str]) -> str:
+def render_client_config(env: Mapping[str, str], *, command: str = SERVER_COMMAND) -> str:
     """Render *env* as the ``.mcp.json`` block an MCP client expects, without a trailing newline.
 
     Two spaces of indentation and no key sorting, so the output is diffable against
     ``examples/mcp.json`` and keeps the deliberate variable order of the preset. The caller decides
     the trailing newline, because this string is also embedded in prose.
+
+    *command* is keyword-only and defaults to ``SERVER_COMMAND``, so the emitted block is unchanged
+    unless a caller deliberately asks for something else. The one caller that does is
+    ``epics-init --absolute-command``, for a client that cannot resolve a bare name on its own PATH.
+    Resolving it is NOT done here: this module holds no I/O (see the module docstring), and a
+    filesystem lookup is exactly that.
     """
-    document = {"mcpServers": {SERVER_KEY: {"command": SERVER_COMMAND, "env": dict(env)}}}
+    document = {"mcpServers": {SERVER_KEY: {"command": command, "env": dict(env)}}}
     return json.dumps(document, indent=2)
 
 

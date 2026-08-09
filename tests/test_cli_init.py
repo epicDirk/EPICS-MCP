@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import subprocess
 import sys
 
@@ -480,6 +481,216 @@ class TestTheEmptyCheckWarning:
         KEY rather than the value would silence the warning for a preset that probes nothing."""
         assert not configures_a_rest_plane({"EPICS_MCP_ARCHIVER_URL": ""})
         assert configures_a_rest_plane({"EPICS_MCP_ARCHIVER_URL": "http://arch:17665"})
+
+
+class TestWritingTheBlock:
+    """``--out``, ``--force`` and ``--absolute-command``: the one file this command may write.
+
+    The check is stubbed for the same two reasons as ``TestCommandLine``: these tests are not about
+    it, and ``_run_check`` mutates ``os.environ`` in a way that outlives the test.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _stubbed_check(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(cli_init, "_run_check", lambda env, probe_pv: 0)
+
+    def test_out_writes_the_exact_bytes_of_the_block(self, tmp_path: pathlib.Path) -> None:
+        """The whole point of the option, and it has to be asserted on BYTES.
+
+        A text-mode assertion cannot see either half of what this fixes: ``read_text`` decodes a
+        byte-order mark away without saying so, and on Windows an unspecified ``newline`` turns
+        every LF into CRLF. Measured on the sandbox block, those two differ by 15 bytes, and a
+        "does it parse" assertion passes on both. So the file is compared to the exact bytes, and
+        the two properties are then named individually so a failure says which one broke.
+        """
+        target = tmp_path / "mcp.json"
+        expected = (render_client_config(PRESETS["sandbox"].env) + "\n").encode("utf-8")
+
+        exit_code = cli_init.main(["--preset", "sandbox", "--no-check", "--out", str(target)])
+        written = target.read_bytes()
+
+        assert exit_code == 0
+        assert written == expected
+        assert not written.startswith(b"\xef\xbb\xbf")  # no byte-order mark
+        assert b"\r\n" not in written  # LF, whatever platform wrote it
+
+    def test_the_block_stays_ascii_which_is_why_the_encoding_cannot_be_proven(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pins the premise that makes the write's explicit ``encoding`` unprovable, so the premise
+        goes red if it ever changes instead of the reasoning quietly rotting.
+
+        Measured: ``json.dumps`` escapes every non-ASCII character as a ``\\uXXXX`` sequence, so the
+        block is pure ASCII even when a value is not, and removing ``encoding="utf-8"`` from the
+        write changes no byte of it. A mutation sweep therefore cannot kill that parameter, and
+        saying "the test proves the encoding" would be false. It stays for the day someone renders
+        with ``ensure_ascii=False``, when the platform locale would otherwise decide the bytes
+        silently. On that day this test fails and names the write as the place to look.
+
+        The non-ASCII input arrives through a faked resolver, which is also the realistic route: an
+        install path under an account whose name carries an accent.
+        """
+        resolved = str(tmp_path / "rene" / "epics-mcp").replace("rene", "rené")
+        monkeypatch.setattr(cli_init, "_resolve_absolute_command", lambda: resolved)
+        target = tmp_path / "mcp.json"
+
+        exit_code = cli_init.main(
+            ["--preset", "sandbox", "--no-check", "--out", str(target), "--absolute-command"]
+        )
+        written = target.read_bytes()
+
+        assert exit_code == 0
+        assert written.isascii()  # the premise: escaped on the way out
+        assert json.loads(written.decode("ascii"))["mcpServers"][SERVER_KEY]["command"] == resolved
+
+    def test_out_leaves_stdout_pipeable(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Writing a file does not take the block off stdout: the stream contract is unchanged, so
+        an existing pipeline keeps working and the file is an addition rather than a replacement."""
+        target = tmp_path / "mcp.json"
+
+        cli_init.main(["--preset", "sandbox", "--no-check", "--out", str(target)])
+        captured = capsys.readouterr()
+
+        assert json.loads(captured.out)["mcpServers"][SERVER_KEY]["command"] == SERVER_COMMAND
+        assert "wrote" in captured.err  # what it did goes to stderr, as everything else does
+
+    def test_out_refuses_an_existing_file_and_leaves_it_untouched(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A client configuration usually holds OTHER servers, so a default overwrite would destroy
+        work that has nothing to do with this one. The negative control is the point: the refusal
+        is worth nothing if the file was already gone by the time it was reported."""
+        target = tmp_path / "mcp.json"
+        target.write_text("{}\n", encoding="utf-8")
+
+        exit_code = cli_init.main(["--preset", "sandbox", "--no-check", "--out", str(target)])
+
+        assert exit_code == 2
+        assert target.read_text(encoding="utf-8") == "{}\n"  # NOT overwritten
+        assert "--force" in capsys.readouterr().err  # and the way out is named
+
+    def test_force_replaces_an_existing_file(self, tmp_path: pathlib.Path) -> None:
+        """The positive control for the refusal above: with the flag, the write goes through."""
+        target = tmp_path / "mcp.json"
+        target.write_text("{}\n", encoding="utf-8")
+
+        exit_code = cli_init.main(
+            ["--preset", "sandbox", "--no-check", "--out", str(target), "--force"]
+        )
+
+        assert exit_code == 0
+        assert json.loads(target.read_text(encoding="utf-8"))["mcpServers"]
+
+    def test_out_refuses_a_missing_parent_directory(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The common typo. Without this it surfaces as a bare traceback, which reads like a defect
+        in the command rather than a path the caller can correct."""
+        target = tmp_path / "nowhere" / "mcp.json"
+
+        exit_code = cli_init.main(["--preset", "sandbox", "--no-check", "--out", str(target)])
+
+        assert exit_code == 2
+        assert not target.exists()
+        assert "does not exist" in capsys.readouterr().err
+
+    def test_out_writes_nothing_while_placeholders_remain(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """THE trap this option could have introduced, and the reason the write sits after the
+        placeholder branch rather than at the emit.
+
+        Writing an unfinished block would leave a file that the obvious next command, the same run
+        with ``--set``, then refuses to replace. The reader would be told to fill the values in and
+        then blocked from doing it. ``sandbox`` cannot show this (it is the only preset with no
+        placeholder), so the test uses one that can.
+        """
+        target = tmp_path / "mcp.json"
+
+        exit_code = cli_init.main(["--preset", "ioc-archiver", "--out", str(target)])
+        captured = capsys.readouterr()
+
+        assert exit_code == 0
+        assert not target.exists()
+        assert "nothing was written" in captured.err
+        assert "still placeholders" in captured.err  # and the reader is told what to fill in
+        json.loads(captured.out)  # the block itself is still emitted, for reading
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            pytest.param(["--list", "--out", "x.json"], id="list-cannot-be-written"),
+            pytest.param(["--preset", "sandbox", "--force"], id="force-without-out"),
+        ],
+    )
+    def test_meaningless_combinations_are_usage_errors(self, argv: list[str]) -> None:
+        """Refused by the parser, so they exit 2 like every other usage error and produce no output
+        to clean up afterwards."""
+        with pytest.raises(SystemExit) as exit_info:
+            cli_init.main(argv)
+
+        assert exit_info.value.code == 2
+
+    def test_absolute_command_names_the_resolved_path(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The resolver is faked rather than exercised: a real lookup returns a path carrying this
+        machine's user name, and the repo-wide facility guard rejects one of those in a tracked
+        file. What matters here is that whatever it returns reaches the block."""
+        resolved = str(tmp_path / "bin" / "epics-mcp")
+        monkeypatch.setattr(cli_init, "_resolve_absolute_command", lambda: resolved)
+        target = tmp_path / "mcp.json"
+
+        exit_code = cli_init.main(
+            ["--preset", "sandbox", "--no-check", "--out", str(target), "--absolute-command"]
+        )
+        document = json.loads(target.read_text(encoding="utf-8"))
+
+        assert exit_code == 0
+        assert document["mcpServers"][SERVER_KEY]["command"] == resolved
+
+    def test_absolute_command_refuses_rather_than_falling_back(
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A silent fallback to the bare name would emit exactly the block the caller asked not to
+        have, and it would fail later, inside the client, where the cause is invisible. So an
+        unresolvable command is loud, and nothing is written."""
+        monkeypatch.setattr(cli_init, "_resolve_absolute_command", lambda: None)
+        target = tmp_path / "mcp.json"
+
+        exit_code = cli_init.main(
+            ["--preset", "sandbox", "--no-check", "--out", str(target), "--absolute-command"]
+        )
+
+        assert exit_code == 2
+        assert not target.exists()
+        assert "cannot resolve" in capsys.readouterr().err
+
+    def test_an_armed_write_gate_is_named_because_the_check_cannot_see_it(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """``epics-doctor`` probes service planes and never reads the write gates, so the report
+        that follows is silent about the most consequential thing in the block. It is reachable
+        only through ``--set``, since no preset arms a gate."""
+        cli_init.main(
+            ["--preset", "sandbox", "--no-check", "--set", "EPICS_MCP_ALLOW_PV_WRITE=true"]
+        )
+
+        assert "ARMS a write gate" in capsys.readouterr().err
+
+    def test_an_ordinary_block_carries_no_write_gate_warning(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The negative control: a warning that appears on every run is one a reader learns to
+        skip, which would cost exactly the case above."""
+        cli_init.main(["--preset", "sandbox", "--no-check"])
+
+        assert "ARMS a write gate" not in capsys.readouterr().err
 
 
 def test_no_import_builds_the_config_singleton() -> None:

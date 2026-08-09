@@ -424,8 +424,16 @@ needs no editing), `ioc-only`, `ioc-archiver` (the most common partial deploymen
 
 Three things about it are worth knowing before you read its output:
 
-- **The block goes to stdout, everything else to stderr**, so `epics-init --preset X > .mcp.json`
-  produces a usable file even when the command is warning about something.
+- **The block goes to stdout, everything else to stderr**, so a redirect never captures a warning
+  paragraph. ⚠️ Do not tell a user to save it with `>` anyway: a shell redirect writes the encoding
+  its shell prefers, and this block is JSON that a client has to parse. Measured in Windows
+  PowerShell 5.1, `>` writes UTF-16 with a byte-order mark and `Set-Content -Encoding utf8` writes
+  UTF-8 with one, and a strict parser rejects both (POSIX shells and PowerShell 7 are fine). Use
+  `--out PATH`, which writes UTF-8 with LF whatever the shell is. It refuses an existing file unless
+  `--force` is given, because a client configuration usually holds other servers; and it writes
+  nothing while placeholders remain, so the fill-in-and-rerun loop stays open. `--absolute-command`
+  additionally names the installed server by its resolved path, which is what a client that does not
+  inherit an interactive `PATH` needs.
 - **It probes the preset, not your shell.** The doctor reads `os.environ`, so the command clears
   every `EPICS_MCP_*` variable and the six EPICS search-path variables before applying the preset.
   Without that, a variable you exported earlier would be probed as though it were part of the

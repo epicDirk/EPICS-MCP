@@ -12,16 +12,25 @@ an interview WOULD have added, a probe of the result, is here anyway and needs n
 ``epics-doctor``. That closes the loop an interview-only tool leaves open, where a configuration is
 generated and nobody checks it.
 
-Reads nothing from disk and writes nothing to it: the block goes to stdout, so redirecting it is
-the caller's choice and their existing file is never silently overwritten. Anything the command has
-to SAY (the doctor's report, warnings about unfilled placeholders) goes to stderr, which keeps
-``epics-init --preset X > .mcp.json`` correct.
+The block goes to stdout and everything the command has to SAY (the doctor's report, warnings about
+unfilled placeholders) goes to stderr, so the two never mix. It reads nothing from disk, and it
+writes only where ``--out`` tells it to; an existing file is never replaced without ``--force``.
+
+``--out`` exists because a shell redirect cannot promise an encoding, and this block is JSON that a
+client has to parse. Measured in Windows PowerShell 5.1: ``>`` writes UTF-16 with a byte-order mark,
+and ``Set-Content -Encoding utf8`` and ``Out-File -Encoding utf8`` write UTF-8 with one; a strict
+parser rejects all three, Python and Node alike. POSIX shells and PowerShell 7 write UTF-8 without a
+mark and are fine. So ``epics-init --preset X > .mcp.json`` is correct on some shells and silently
+broken on the default Windows one, which is not a difference to leave to the caller.
 
 Exit code:
 
 * ``0``: the block was emitted, and either no check ran or it found nothing wrong;
 * ``1``: the check ran and a configured plane HARD-failed;
-* ``2``: a usage error (unknown preset, malformed ``--set``, bad arguments);
+* ``2``: a usage error (unknown preset, malformed ``--set``, bad arguments), or a request that
+  cannot be carried out (``--out`` onto an existing file without ``--force``, a missing parent
+  directory, ``--absolute-command`` with nothing to resolve). Both are the same answer, "you asked
+  for something impossible", so they share the code;
 * ``3``: the check ran and a plane is reachable but its identity probe FAILED.
 
 Codes 0/1/3 are the doctor's own, passed through unchanged, because "did my setup work?" is the
@@ -35,7 +44,8 @@ Usage::
     epics-init --preset sandbox
     epics-init --preset sandbox --probe-pv TEST:Temperature
     epics-init --preset ioc-archiver --set EPICS_MCP_ARCHIVER_URL=http://arch:17665
-    epics-init --preset full --no-check > .mcp.json
+    epics-init --preset sandbox --out .mcp.json
+    epics-init --preset sandbox --out .mcp.json --absolute-command --force
 """
 
 from __future__ import annotations
@@ -43,6 +53,8 @@ from __future__ import annotations
 import argparse
 import contextlib
 import os
+import pathlib
+import shutil
 import sys
 from collections.abc import Mapping
 
@@ -50,6 +62,7 @@ from epics_mcp import cli_doctor
 from epics_mcp.cli_common import add_version_argument, configure_stdout
 from epics_mcp.presets import (
     PRESETS,
+    SERVER_COMMAND,
     configures_a_rest_plane,
     format_listing,
     open_placeholders,
@@ -120,6 +133,108 @@ def _run_check(env: Mapping[str, str], probe_pv: str | None) -> int:
         return cli_doctor.main(doctor_argv)
 
 
+def _resolve_absolute_command() -> str | None:
+    """The absolute path of the installed server command, or ``None`` when it cannot be found.
+
+    For ``--absolute-command``. A client launched from a desktop icon or a service manager does not
+    inherit an interactive shell's ``PATH``, so a block naming the bare command can be byte-correct
+    and still fail, with the client reporting nothing beyond "did not start".
+
+    ``shutil.which`` rather than a sibling of ``sys.executable``: the two disagree in exactly the
+    case this option exists for. A tool installation puts the console scripts in a directory of its
+    own, and asking the PATH answers "what would a launcher find", which is the question. Returning
+    ``None`` instead of falling back to the bare name is deliberate: a silent fallback would emit
+    the very block the caller asked not to have.
+    """
+    return shutil.which(SERVER_COMMAND)
+
+
+def _write_block(path: str, block: str, *, force: bool) -> str | None:
+    """Write *block* to *path* as UTF-8 with LF endings. Return the path, or ``None`` on refusal.
+
+    Both properties are explicit because the shell's own redirect gets them wrong: measured in
+    Windows PowerShell 5.1, ``>`` writes UTF-16 with a byte-order mark and ``Set-Content -Encoding
+    utf8`` writes UTF-8 with one, and a strict JSON parser rejects all of those. Writing the file
+    here is the only way to promise the caller an encoding.
+
+    ⚠️ Of the two, only ``newline`` is red-provable, and the difference is worth knowing before
+    trusting a mutation sweep here. ``render_client_config`` goes through ``json.dumps``, which
+    escapes non-ASCII as ``\\uXXXX``, so the block is pure ASCII and dropping ``encoding`` changes
+    no byte today; ``tests/test_cli_init.py`` pins that premise rather than claiming a proof it
+    cannot give. Dropping ``newline`` does change bytes, on Windows, and is caught.
+
+    Refusals, each on stderr and each a reason the caller cannot fix by retrying:
+
+    * the parent directory does not exist, which is the common typo and would otherwise surface as
+      a bare ``FileNotFoundError``;
+    * the target exists, unless *force* was given. A client configuration usually holds OTHER
+      servers, so overwriting one by default would destroy work that has nothing to do with us;
+    * the target is a symlink, which ``"x"`` alone does not stop on Windows, where the exclusive
+      create follows a DANGLING link and creates its target instead.
+
+    Deliberately NOT routed through ``epics_mcp.paths``: those helpers consult ``get_config()``,
+    which builds the process-wide config singleton, and this write happens BEFORE ``_run_check``
+    strips the caller's environment. A singleton built here would freeze the pre-strip environment
+    and make the check report on a configuration nobody asked about. The cost is stated rather than
+    hidden: ``--out`` is therefore outside any ``EPICS_MCP_ALLOWED_ROOTS`` boundary, unlike the
+    server's own file-writing tool.
+    """
+    target = pathlib.Path(path)
+    parent = target.parent if str(target.parent) else pathlib.Path()
+    if not parent.is_dir():
+        sys.stderr.write(
+            f"epics-init: cannot write {path}: the directory {parent} does not exist. "
+            "Create it first, or name a path inside an existing one.\n"
+        )
+        return None
+    if target.is_symlink():
+        sys.stderr.write(
+            f"epics-init: cannot write {path}: it is a symbolic link, and following one would "
+            "write somewhere you did not name. Remove the link or choose another path.\n"
+        )
+        return None
+    try:
+        with open(target, "w" if force else "x", encoding="utf-8", newline="\n") as handle:
+            handle.write(block + "\n")
+    except FileExistsError:
+        sys.stderr.write(
+            f"epics-init: {path} already exists, and it may hold other MCP servers. "
+            "Write to a new file and merge the block by hand, or pass --force to replace it.\n"
+        )
+        return None
+    except OSError as exc:
+        sys.stderr.write(f"epics-init: cannot write {path}: {exc.strerror or exc}\n")
+        return None
+    return str(target)
+
+
+def _warn_about_write_gate(env: Mapping[str, str]) -> None:
+    """Say so when the composed configuration arms a write gate. Nothing else will.
+
+    ``epics-doctor`` probes service planes and never reads the write gates, so the check that runs
+    next cannot see this and will report a clean configuration that either mutates a facility or
+    refuses to start. The refusal is the likelier of the two: a write-enabled server needs a durable
+    ``EPICS_MCP_AUDIT_LOG_FILE`` and a loopback-only search reach, and it exits rather than warns
+    when either is missing, which a client shows as nothing more than "server not connected".
+
+    Only reachable through ``--set``, since no preset arms a gate: turning one on is a decision to
+    make deliberately, not one to inherit from a flag.
+    """
+    armed = sorted(
+        name
+        for name in ("EPICS_MCP_ALLOW_PV_WRITE", "EPICS_MCP_ALLOW_OLOG_WRITE")
+        if env.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+    )
+    if not armed:
+        return
+    sys.stderr.write(
+        f"epics-init: this configuration ARMS a write gate ({', '.join(armed)}). The check below "
+        "does not look at write gates, so a clean report says nothing about it. Such a server also "
+        "refuses to start without a durable EPICS_MCP_AUDIT_LOG_FILE and a loopback-only search "
+        "reach. See the write-gate section of docs/safety.md before you use this block.\n"
+    )
+
+
 def _warn_that_nothing_was_verified(preset_name: str) -> None:
     """Say that a clean report confirmed nothing, when that is what happened.
 
@@ -187,14 +302,53 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="only emit the block, do not run epics-doctor against it",
     )
+    parser.add_argument(
+        "--out",
+        default=None,
+        metavar="PATH",
+        help="also write the block to PATH as UTF-8 (a shell redirect cannot promise the encoding)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="with --out, replace an existing file instead of refusing",
+    )
+    parser.add_argument(
+        "--absolute-command",
+        action="store_true",
+        help="name the installed server by its absolute path, for a client without your PATH",
+    )
     args = parser.parse_args(argv)
+
+    # Argument combinations that cannot mean anything, refused before any output exists. Both go
+    # through parser.error so they exit 2 like every other usage error, rather than inventing a
+    # second way to say the same thing.
+    if args.list and args.out:
+        parser.error("--out has nothing to write with --list: a listing is not a configuration")
+    if args.force and not args.out:
+        parser.error("--force only means something together with --out")
 
     if args.list:
         sys.stdout.write(format_listing(PRESETS.values()) + "\n")
         return 0
 
+    command = SERVER_COMMAND
+    if args.absolute_command:
+        # Before the emit, deliberately: a block naming a command that could not be resolved is
+        # worse than no block, because it fails later and somewhere else.
+        resolved = _resolve_absolute_command()
+        if resolved is None:
+            sys.stderr.write(
+                f"epics-init: --absolute-command cannot resolve {SERVER_COMMAND!r} on this PATH. "
+                "Install the package so its console scripts are on PATH, or drop the option and "
+                "put the path in by hand.\n"
+            )
+            return 2
+        command = resolved
+
     env = with_overrides(PRESETS[args.preset].env, dict(args.overrides))
-    sys.stdout.write(render_client_config(env) + "\n")
+    block = render_client_config(env, command=command)
+    sys.stdout.write(block + "\n")
 
     pending = open_placeholders(env)
     if pending:
@@ -203,7 +357,20 @@ def main(argv: list[str] | None = None) -> int:
         # from "you have not filled this in yet". A named refusal is worth more than a report
         # that has to be discounted.
         _warn_about_placeholders(pending)
+        if args.out:
+            # And refuse the WRITE too, which is the difference between a helpful option and a
+            # trap: writing an unfinished block would leave a file on disk that the obvious next
+            # command, the same run with --set, then refuses to replace.
+            sys.stderr.write(
+                f"epics-init: nothing was written to {args.out}, because the block is not usable "
+                "yet. Fill the values above in and run the same command again.\n"
+            )
         return 0
+    if args.out:
+        if _write_block(args.out, block, force=args.force) is None:
+            return 2
+        sys.stderr.write(f"epics-init: wrote {args.out}\n")
+    _warn_about_write_gate(env)
     if args.no_check:
         return 0
 

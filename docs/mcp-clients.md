@@ -8,8 +8,9 @@ Add the server to your `.mcp.json` or `claude_desktop_config.json`.
 
 > `epics-init --preset <shape>` prints the first three of these blocks for you and then runs
 > `epics-doctor` against what it printed, so you can skip the copying. `epics-init --list` names the
-> shapes. The write-enabled block at the bottom is deliberately NOT a preset: turning a write gate
-> on is a decision to make deliberately, not one to inherit from a flag.
+> shapes, and `--out PATH` writes the block to a file with an encoding a client can read, which a
+> shell redirect cannot promise. The write-enabled block at the bottom is deliberately NOT a preset:
+> turning a write gate on is a decision to make deliberately, not one to inherit from a flag.
 
 ⚠️ **`command` is a bare name, and something has to resolve it.** Every block below says
 `"command": "epics-mcp"`, which works only if the process that launches the server can find that name

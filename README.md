@@ -29,8 +29,9 @@ stack. `mypy --strict` covers `src`, `tests` and `scripts`, and the package ship
 five minutes; no facility, no ChannelFinder, no archiver.
 
 **I want to point it at my facility.** Start with `epics-init --list`, pick the shape that matches
-what you run, and let `epics-init --preset <shape>` write the client-configuration block and check
-it for you. When your facility does not match one of the four shapes, the
+what you run, and let `epics-init --preset <shape> --out .mcp.json` write the client-configuration
+block and check it for you (`--out` rather than a shell redirect, which cannot promise an encoding
+the client can read). When your facility does not match one of the four shapes, the
 [deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md) walks through the variables plane by plane, the CA-bundle
 recipe for internal HTTPS, and the documented assumptions. Either way you end at `epics-doctor`,
 which probes every configured plane read-only and tells you what your instance actually reaches.

@@ -67,8 +67,21 @@ defaults, and it is the page to read when a step below points at the template.
 
    The block goes to stdout and everything the command has to SAY goes to stderr. Where the block
    belongs is in [MCP client integration](mcp-clients.md), together with the restart that finishes
-   the job. ⚠️ Saving it with a shell redirect is not safe in every shell: read
-   [Troubleshooting](#6-troubleshooting) before you reach for `>`.
+   the job.
+
+   ⚠️ **Do not save it with a shell redirect.** `>` writes the encoding your shell prefers, and this
+   is JSON a client has to parse; in Windows PowerShell 5.1 that means UTF-16 with a byte-order mark,
+   which no strict parser accepts. Let the command write the file instead:
+
+   ```bash
+   epics-init --preset sandbox --out .mcp.json
+   ```
+
+   It writes UTF-8 with LF whatever the shell is, refuses an existing file unless you add `--force`
+   (a client configuration usually holds other servers), and writes nothing at all while placeholders
+   remain, so the fill-in-and-run-again loop above stays open. Add `--absolute-command` if your client
+   cannot resolve a bare command name, which is the single most common reason a correct-looking block
+   still does not start; see [MCP client integration](mcp-clients.md).
 
 2. **Run the self-check again whenever you change the configuration by hand.** ⚠️ `epics-doctor`
    reads the environment of the process YOU start, not the `env` block of a client-configuration
