@@ -1,5 +1,6 @@
-# Minimal EPICS database for the EPICS MCP quick start.
-# Serve over PVAccess with:  softIocPVA -d test.db
+# Minimal EPICS database, for serving the quick start's PVs from a real IOC instead.
+# Serve over PVAccess with:  softIocPVA -d test.db      (needs EPICS Base)
+# Or, with nothing to install: epics-testpv             (ships with this package)
 # Then:                      epics-diagnose TEST:Temperature
 
 record(ai, "TEST:Temperature") {

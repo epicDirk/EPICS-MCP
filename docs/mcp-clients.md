@@ -4,7 +4,24 @@ Ready-to-paste blocks for `.mcp.json` or `claude_desktop_config.json`, from read
 
 [Back to the README](../README.md)
 
-Add the server to your `.mcp.json` or `claude_desktop_config.json`.
+## Which file, and where it lives
+
+Add the server to the configuration file your client reads. Which file that is, and where it sits,
+belongs to the client rather than to this server, so treat the following as the common cases and
+your client's own documentation as the authority.
+
+A **project-scoped** `.mcp.json` sits in the directory you opened, and is the easy case: it is right
+there. A **desktop application** keeps a file per user instead, `claude_desktop_config.json` under
+`%APPDATA%\Claude\` on Windows, `~/Library/Application Support/Claude/` on macOS, and
+`~/.config/Claude/` on Linux. ⚠️ Two things about that Windows path: `%APPDATA%` is cmd.exe syntax,
+so write `$env:APPDATA` in PowerShell, and nothing expands either form inside a JSON value, where a
+path has to be written out in full with its backslashes doubled.
+
+⚠️ **Check the shape your client expects before pasting.** The blocks below use `mcpServers` with a
+`command` and an `env`, which is what the clients this server was tested against read. A client that
+expects a different key, or an `args` array, will ignore a correct-looking block in exactly the way a
+missing one is ignored: silently. If nothing appears after a restart and the file is where you think
+it is, compare its shape against your client's own example before debugging anything here.
 
 > `epics-init --preset <shape>` prints the first three of these blocks for you and then runs
 > `epics-doctor` against what it printed, so you can skip the copying. `epics-init --list` names the
@@ -50,7 +67,10 @@ merely read-only, disable the auto search explicitly:
 Run `epics-doctor` to see what your instance actually reaches; it reports `localhost-isolated` only
 when every search list is unset **and** the auto search is off.
 
-**With the REST planes enabled:**
+**With the REST planes enabled**, which assumes you RUN those three services, on this machine, on
+these ports. Replace the URLs with your own, or delete the lines for services you do not have: an
+unset URL disables that plane with no network call, whereas a wrong one produces three failing lines
+in the next self-check.
 
 ```json
 {
@@ -90,8 +110,14 @@ The last three are not optional hardening, they are start conditions, and a bloc
 one an MCP client reports only as "server not connected". A write-enabled server refuses to start
 unless `EPICS_MCP_AUDIT_LOG_FILE` names a durable path (an audit trail on stderr vanishes on
 restart) and unless the EPICS client search reach is loopback-only, so that enabling writes cannot
-silently arm a process that reaches a real facility network. Point the audit path somewhere your
-server user can write.
+silently arm a process that reaches a real facility network. The same refusal applies to the LOGBOOK
+write gate, `EPICS_MCP_ALLOW_OLOG_WRITE`, which is a separate decision with its own variables.
+
+Point the audit path somewhere your server user can write, and note two things about it. Its parent
+directory has to exist already, since the server opens the file rather than building a tree, and a
+missing directory is one more way to meet that same silent "not connected". On Windows, choose a
+machine-wide location rather than a user profile and write the path out in full: this is a JSON
+value, so nothing expands a `%VARIABLE%` reference in it and every backslash has to be doubled.
 
 ## Then restart the client (this applies to every block above)
 

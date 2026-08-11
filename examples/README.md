@@ -1,21 +1,27 @@
 # Examples
 
-Minimal, self-contained examples. The core ones need nothing but EPICS + this server:
-no Phoebus, no display layer.
+Minimal, self-contained examples. The core ones need nothing but this server: no EPICS Base, no
+Phoebus, no display layer.
 
 > New here? Point the assistant at the `epics-pv://guide` resource (also
 > [`OPERATING.md`](../OPERATING.md)) for the service landscape, the operational recipes and the
 > error signatures. It ships inside the server, so nothing extra to install.
 
+Every shell command below runs from THIS directory unless it says otherwise. A tool call made
+through an MCP client is different: its paths resolve against the workspace the client opened, so
+those examples name a path from the repository root.
+
 ## 1. A live test PV (core: works for any EPICS user)
 
-Serve a single PVAccess PV with the EPICS base `softIocPVA` tool:
+Serve the PVs with the command that ships with this package:
 
 ```bash
-softIocPVA -d test.db
+epics-testpv
 ```
 
-Then, in another shell, exercise the core server with no MCP client:
+It binds loopback only and runs until Ctrl-C, serving `TEST:Temperature`, an analogue reading, and
+`TEST:Heater`, a writable switch. Then, in another shell, exercise the core server with no MCP
+client at all:
 
 ```bash
 epics-diagnose TEST:Temperature      # connection diagnosis (exit 0 even on disconnect)
@@ -24,11 +30,18 @@ epics-diagnose TEST:Temperature      # connection diagnosis (exit 0 even on disc
 or read it from an MCP client (see `mcp.json` for a ready-to-paste config) and ask the
 assistant to `get_pv_value("TEST:Temperature")`.
 
+**If you would rather use a real IOC**, [`test.db`](test.db) is the same two records as an EPICS
+database, for `softIocPVA -d test.db`. That route needs EPICS Base, which this package does not
+install and which has no route that avoids a build, so it is the alternative rather than the
+starting point.
+
 ## 2. MCP client config
 
 [`mcp.json`](mcp.json) is a ready-to-use, read-only configuration, confined to localhost to match
-the local `softIocPVA` above. Drop its `mcpServers` entry into your `.mcp.json` or
-`claude_desktop_config.json`.
+the local test PV above. Drop its `mcpServers` entry into your `.mcp.json` or
+`claude_desktop_config.json`, then RESTART the client: it reads that file when it starts.
+`epics-init --preset sandbox --out <your config file>` writes the same block for you, with an
+encoding a client can read, which a shell redirect cannot promise.
 
 The confinement is the four `EPICS_*ADDR_LIST` settings, not the absence of configuration: EPICS
 defaults the auto-address search to **ON**, so leaving them out would broadcast PV searches into
@@ -36,7 +49,7 @@ your local subnets. Drop them when you point this at a real IOC.
 
 `epics-doctor` reports this as `search paths: EPICS_PVA_ADDR_LIST (127.0.0.1); ...` rather than
 `localhost-isolated`, and that is correct: it reserves the latter for a server that searches
-**nowhere at all** (no list set, auto search off), which would not find the `softIocPVA` above.
+**nowhere at all** (no list set, auto search off), which would not find the test PV above.
 
 ## 3. A sample display (optional, only if you use Phoebus / CS-Studio)
 
