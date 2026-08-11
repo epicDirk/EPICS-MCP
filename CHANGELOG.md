@@ -7,32 +7,29 @@ carry breaking changes).
 
 ## [Unreleased]
 
-### Changed
-
-- **`validate_pvs` accepts a `.plt` Data Browser trend, where it used to refuse one.** The
-  display-PV engine collects two kinds of file, `.bob` operator screens and `.plt` trends, and this
-  server was pinned to a revision from before that second kind existed. While that pin stood, the
-  refusal "the inventory reads `.bob` files only, so this call can only come back empty" was simply
-  true. The pin has now moved, and with it the refusal would have become a malfunction wearing the
-  clothes of a safety check: a rejection whose stated reason had stopped being the case. Passing a
-  trend now returns its trace channels with their connectivity, exactly like a display.
-  **Nothing that worked before changes**: a `.bob` behaves as it always did, and every other suffix
-  is still refused up front with `INVALID_INPUT`, before the inventory walk, for the same reason as
-  before. The refusal message now names both readable kinds instead of one, so a client that
-  guessed wrong learns what else it could have passed.
-
-  **Which view finds a trend depends on how the trend is REACHED, and that is worth knowing before
-  the call.** A trend embedded in a screen through a `databrowser` widget has its traces attributed
-  to that screen, so only the trend's own `view="file"` finds them here; a trend opened by an
-  `open_file` button is a top level in its own right and answers under either view. A trend is not
-  a screen and is not reported as one: the inventory carries the kind as its own field.
-
-  Two consequences for the other display-aware tools, neither of them a change to those tools:
-  `coverage_audit` and `crossplane_check` now see the trace PVs of trends under their
-  `displays_dir` root, and `find_device` can return a button-opened trend among the screens that
-  show a device.
-
 ### Added
+
+- **`epics-testpv`, a seventh command: a test PV without a control system.** It serves
+  `TEST:Temperature`, an analogue reading with a unit, and `TEST:Heater`, a writable switch, over
+  PVAccess until Ctrl-C. The quick start previously began with `softIocPVA`, which ships with EPICS
+  Base and which no page told you how to obtain, so the promise of a working PV without a facility
+  was not keepable. This one needs nothing beyond the install, since p4p is already a dependency.
+  It binds **loopback** unless `--interface` says otherwise, because a PVA server is a network
+  service and its switch accepts writes, and it prints the port it actually bound, which is not the
+  default one when that is already taken.
+- **`epics-init --out PATH` writes the configuration file itself**, with `--force` to replace an
+  existing one. A shell redirect cannot promise an encoding, and this block is JSON a client has to
+  parse: in Windows PowerShell 5.1, `>` writes UTF-16 with a byte-order mark and
+  `Set-Content -Encoding utf8` writes UTF-8 with one, and a strict parser rejects both. `--out`
+  writes UTF-8 with LF on every platform. It refuses an existing file by default, because a client
+  configuration usually holds other servers, and it writes nothing at all while placeholders remain,
+  so filling them in and running again still works.
+- **`epics-init --absolute-command`** puts the resolved path of the installed server into the block
+  instead of a bare command name. A client launched from a desktop icon does not inherit your
+  shell's `PATH`, which is the commonest reason a correct-looking configuration reports only that
+  the server did not start. An unresolvable command is now an error rather than a silent fallback.
+- **`epics-init` warns when the configuration it emits arms a write gate.** `epics-doctor` probes
+  service planes and never reads the write gates, so nothing else would mention it.
 
 - **Every `validate_pvs` file-mode answer now names the file it is about.** The `file_path` echo used
   to appear on the empty-result answer only, so one mode came back with two different key sets and a
@@ -69,7 +66,90 @@ carry breaking changes).
   wording said; the sentence has been wrong in `coverage_audit` and `crossplane_check` since they
   shipped and is corrected in all three.
 
+### Fixed
+
+- **The documented `epics-doctor --probe-pv` example could only ever fail.** It named
+  `SIM:PS-01:Cur-RB`, a synthetic placeholder that looks exactly like a real PV name, so following
+  the deployment guide produced `disconnected`, exit 1, and a remedy pointing at the IOC of a PV
+  that never existed.
+- **The ChannelFinder privacy example switched the default off while appearing to extend it.** It
+  showed `EPICS_MCP_CHANNELFINDER_SAFE_OWNER_ACCOUNTS=recsync,ioc-svc`; the built-in default is
+  `recceiver`, and a value REPLACES the default rather than adding to it, so copying that line
+  redacted every real owner. The example now repeats the default beside the addition and the
+  replace-not-merge semantics are stated.
+- **The quick start's second step told you to run the server by hand**, which is the one thing its
+  own `--help` says not to do: started that way it waits silently for JSON-RPC, which reads as a
+  hang, and nothing consumed it, because the client starts the server itself.
+
+- **Writing a switch by its LABEL is verified again: landed and not-landed no longer give the same
+  answer.** `set_pv_value` reads every write back, but on an enum PV the value read back is the
+  numeric index while the label rides in a separate block, so a written label such as `On` matched
+  neither comparison: a landed and a not-landed write both came back `verified: null` with a
+  `READBACK_UNVERIFIED` audit line, which is one answer for opposite facts. A written label is now
+  resolved against the record's own choices, case-sensitively and first match wins, and compared by
+  index: `verified: true` when it landed, `verified: false` when it did not. Writing the index
+  instead was already correct and is unchanged, and `readback` still carries the index, exactly as
+  `get_pv_value` reports it. This matters most on a command or reset record, which declares no drive
+  limits: the pre-write bounds check does not cover it either, so the readback was its only value
+  safety net. One consequence to expect there: such a record often clears itself after the pulse,
+  and if it has already cleared when the readback arrives it reads back its idle state, so the write
+  is reported as a mismatch rather than as unverified. That is what the readback saw; judge the
+  effect of such a command from the record's own status.
+
+- **The display tools no longer miss what sits inside a tabbed widget.** All four display-aware
+  tools (`validate_pvs`, `coverage_audit`, `crossplane_check`, `find_device`) read the display tree
+  through the shared navigation engine, and that engine walked a display's widgets flatly. A tabbed
+  widget does not hang its content as a direct child: the display format nests it one level deeper,
+  under the tab container. Everything inside a tab was therefore invisible, so navigation targets
+  reached only from a tab were reported as unreferenced, and PVs that live only on a tab page were
+  absent from the answer. Measured on a 97-display set, restoring the descent raises the edge count
+  from 1493 to 1605 and the `open_display` edges from 92 to 204; across a larger corpus it recovers
+  253 `open_display` actions and 36 navigation widgets spread over 23 files, one of them an operator
+  entry point. Nothing warned about it, and that is the part worth knowing: a target made
+  unreachable this way still counts as having no incoming link, and a display with no incoming link
+  is seeded as an entry point, so the reachability ratio stayed at a clean 1.0 while the edges were
+  missing. Expect a display set to report MORE references and MORE PVs than before, not fewer.
+  Two further engine fixes ride along: a display whose glob-resolved reference matched its own file
+  no longer loses its entry-point status over that guessed self-link, and the inventory walk itself
+  got substantially faster on large sets. Server behaviour and every wire field are unchanged; only
+  the completeness of the underlying analysis improves.
+
 ### Changed
+
+- **Documentation reorganised around getting it running.** The deployment guide gains a
+  troubleshooting section (symptom first: the client says nothing, the tools do not appear, the
+  saved file is rejected, a write-enabled block will not start), a layout of what an install puts on
+  your machine versus what only exists in a checkout, and the fact that `epics-doctor` reads the
+  environment of the process YOU start rather than a client configuration file. The MCP client page
+  now says where that file lives per platform, that the `command` is a bare name something has to
+  resolve, and that the client must be restarted afterwards, which no page previously mentioned.
+- **`docs/safety.md` states what leaves your machine for every plane**, not just for logbook reads,
+  including one outbound call that is not ours: the MCP framework checks `pypi.org` for a newer
+  version of itself when it prints its startup banner. Set `FASTMCP_CHECK_FOR_UPDATES=off` to stop
+  it, which matters in a segmented network where it has nowhere to go.
+
+- **`validate_pvs` accepts a `.plt` Data Browser trend, where it used to refuse one.** The
+  display-PV engine collects two kinds of file, `.bob` operator screens and `.plt` trends, and this
+  server was pinned to a revision from before that second kind existed. While that pin stood, the
+  refusal "the inventory reads `.bob` files only, so this call can only come back empty" was simply
+  true. The pin has now moved, and with it the refusal would have become a malfunction wearing the
+  clothes of a safety check: a rejection whose stated reason had stopped being the case. Passing a
+  trend now returns its trace channels with their connectivity, exactly like a display.
+  **Nothing that worked before changes**: a `.bob` behaves as it always did, and every other suffix
+  is still refused up front with `INVALID_INPUT`, before the inventory walk, for the same reason as
+  before. The refusal message now names both readable kinds instead of one, so a client that
+  guessed wrong learns what else it could have passed.
+
+  **Which view finds a trend depends on how the trend is REACHED, and that is worth knowing before
+  the call.** A trend embedded in a screen through a `databrowser` widget has its traces attributed
+  to that screen, so only the trend's own `view="file"` finds them here; a trend opened by an
+  `open_file` button is a top level in its own right and answers under either view. A trend is not
+  a screen and is not reported as one: the inventory carries the kind as its own field.
+
+  Two consequences for the other display-aware tools, neither of them a change to those tools:
+  `coverage_audit` and `crossplane_check` now see the trace PVs of trends under their
+  `displays_dir` root, and `find_device` can return a button-opened trend among the screens that
+  show a device.
 
 - **The four display tools now call the inventory walk's context cap by ONE name, and two of them
   stop hiding its second limit.** The same cap was named three ways across the four
@@ -116,41 +196,6 @@ carry breaking changes).
   Unchanged, and deliberately so: `shown_by_display_capped`, and the same note under
   `view="display"`, carry the DISPLAY verdict, which gets no such test and stays the more cautious
   of the two. Read a `true` there as "cannot be ruled out" rather than "known to be incomplete".
-
-### Fixed
-
-- **Writing a switch by its LABEL is verified again: landed and not-landed no longer give the same
-  answer.** `set_pv_value` reads every write back, but on an enum PV the value read back is the
-  numeric index while the label rides in a separate block, so a written label such as `On` matched
-  neither comparison: a landed and a not-landed write both came back `verified: null` with a
-  `READBACK_UNVERIFIED` audit line, which is one answer for opposite facts. A written label is now
-  resolved against the record's own choices, case-sensitively and first match wins, and compared by
-  index: `verified: true` when it landed, `verified: false` when it did not. Writing the index
-  instead was already correct and is unchanged, and `readback` still carries the index, exactly as
-  `get_pv_value` reports it. This matters most on a command or reset record, which declares no drive
-  limits: the pre-write bounds check does not cover it either, so the readback was its only value
-  safety net. One consequence to expect there: such a record often clears itself after the pulse,
-  and if it has already cleared when the readback arrives it reads back its idle state, so the write
-  is reported as a mismatch rather than as unverified. That is what the readback saw; judge the
-  effect of such a command from the record's own status.
-
-- **The display tools no longer miss what sits inside a tabbed widget.** All four display-aware
-  tools (`validate_pvs`, `coverage_audit`, `crossplane_check`, `find_device`) read the display tree
-  through the shared navigation engine, and that engine walked a display's widgets flatly. A tabbed
-  widget does not hang its content as a direct child: the display format nests it one level deeper,
-  under the tab container. Everything inside a tab was therefore invisible, so navigation targets
-  reached only from a tab were reported as unreferenced, and PVs that live only on a tab page were
-  absent from the answer. Measured on a 97-display set, restoring the descent raises the edge count
-  from 1493 to 1605 and the `open_display` edges from 92 to 204; across a larger corpus it recovers
-  253 `open_display` actions and 36 navigation widgets spread over 23 files, one of them an operator
-  entry point. Nothing warned about it, and that is the part worth knowing: a target made
-  unreachable this way still counts as having no incoming link, and a display with no incoming link
-  is seeded as an entry point, so the reachability ratio stayed at a clean 1.0 while the edges were
-  missing. Expect a display set to report MORE references and MORE PVs than before, not fewer.
-  Two further engine fixes ride along: a display whose glob-resolved reference matched its own file
-  no longer loses its entry-point status over that guessed self-link, and the inventory walk itself
-  got substantially faster on large sets. Server behaviour and every wire field are unchanged; only
-  the completeness of the underlying analysis improves.
 
 ## [0.5.0] - 2026-08-02
 
