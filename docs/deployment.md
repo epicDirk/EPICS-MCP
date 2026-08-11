@@ -11,7 +11,7 @@ setting those variables for *your* services, with no code change. This guide wal
 answer on your PATH; if `epics-doctor --version` does not print a version, install it first
 (README, "Installation") and come back.
 
-> **Config lives in the environment (the 12-factor equivalent of a CS-Studio `.ini`).** Set the
+> **Config lives in the environment, not in a file this server reads.** Set the
 > variables in whatever LAUNCHES the server: the `env` block of your MCP client's `.mcp.json`, a
 > systemd unit's `Environment=` / `EnvironmentFile=`, a container spec, or your shell.
 > `.env.example` is a commented REFERENCE of every recognised variable, not a file the server
@@ -22,12 +22,40 @@ read**: the server takes its configuration from the process environment, so a va
 reach the process has no effect and says nothing. And **every service URL is optional**: an unset URL
 disables that plane, with no network call and no complaint.
 
-**What an install puts on your disk, and what stays in the repository.** A `pip install` or
-`uv tool install` gives you the package and its commands, and nothing else. `.env.example`,
-`examples/` and this `docs/` tree live in the REPOSITORY, so an instruction to open
-`.env.example` is only performable from a checkout. From an installed copy use
-[the configuration reference](configuration.md) instead: it lists the same variables with their
-defaults, and it is the page to read when a step below points at the template.
+**What an install actually puts on your machine.** Two things, and nothing else. The layout below
+is what a `pip install` into a fresh environment produces, measured rather than sketched:
+
+```text
+    <the environment you installed into>
+         |
+         + bin/  (Scripts\ on Windows)     the seven commands, and the only part on your PATH
+         |    |
+         |    - epics-mcp          the MCP server itself, started BY your client, not by you
+         |    - epics-init         write a client configuration and check it, in one step
+         |    - epics-testpv       serve two synthetic PVs, so a first try needs no IOC
+         |    - epics-doctor       read-only self-check of every configured plane
+         |    - epics-diagnose     why one PV is connected, or is not
+         |    - epics-crossplane   display to IOC to Naming     (needs the display engine)
+         |    - epics-coverage     coverage matrix              (needs the display engine)
+         |
+         + <site-packages>/epics_mcp/      the package itself
+              |
+              + services/           one client per service, and the doctor's probes
+              + tools/              the MCP tools, grouped by plane
+              - operator_guide.md   the operational cookbook. It SHIPS: the same file is served
+              |                     to an assistant as the epics-pv://guide resource, so the
+              |                     knowledge travels with the install rather than with the repo
+              - py.typed            the marker that says the type hints are real
+```
+
+**What is NOT installed**, because it lives in the repository only: `.env.example`, `examples/`
+and this `docs/` tree. So an instruction to open `.env.example` is performable from a checkout and
+nowhere else; from an installed copy read [the configuration reference](configuration.md) instead,
+which lists the same variables with their defaults.
+
+**What you create, and no installer ever touches:** your client's configuration file (section 1
+writes it for you), an audit log if you enable a write gate, and a CA bundle if one of your
+services uses an internal root (section 3).
 
 ## 1. Bring it up
 
@@ -259,10 +287,12 @@ it rather than repeating it.
 **The client reports the server as failed or not connected, and shows no error.** Most causes land
 here, because a client hides the server's stderr, and stderr is where every refusal is written.
 Reproduce it in the open: run `epics-mcp` yourself in a shell with the same variables set. A healthy
-start prints a third-party banner and an upgrade notice to stderr and then waits silently for a
-client to speak to it. That silence is correct and there is nothing further to see. A refusal instead
-ends in a message that names the variable to change. Your client may also keep an MCP log of its own,
-which is worth finding once.
+start prints a third-party banner to stderr and then waits silently for a client to speak to it. That
+silence is correct and there is nothing further to see. A refusal instead ends in a message that names
+the variable to change. Your client may also keep an MCP log of its own, which is worth finding once.
+⚠️ If the start seems to HANG before the banner, suspect the framework's update check, which fetches
+its own latest version from `pypi.org` and has nowhere to go in a segmented network:
+`FASTMCP_CHECK_FOR_UPDATES=off` removes it (see [safety](safety.md)).
 
 **The tools do not appear, and nothing looks wrong.** A client reads its configuration when it starts
 and will not notice an edit, so restart or reconnect it, see

@@ -3,6 +3,36 @@
 Thanks for your interest. This is a pre-1.0, work-in-progress project. Issues and small
 PRs are welcome.
 
+## Organization
+
+What a clone contains, with only the entries whose purpose a directory name does not already give
+away. (What an INSTALL contains is a different question, answered by the layout in
+[docs/deployment.md](docs/deployment.md); the two barely overlap.)
+
+```text
+    EPICS-MCP/
+         |
+         + src/epics_mcp/         the package. Layering is server -> tools -> services -> clients,
+         |    |                   described in ARCHITECTURE.md rather than repeated here
+         |    - operator_guide.md NOT documentation about the code: it is package DATA, shipped in
+         |                        the wheel and served to an assistant as epics-pv://guide, with
+         |                        OPERATING.md as its human mirror. One file, three consumers
+         + tests/                 the suite, including the drift guards that hold prose against
+         |                        code. Most of what surprises a newcomer is enforced from here
+         + scripts/               gate code run by pre-commit, not a user-facing surface
+         + docs/                  the reference pages the README indexes
+         + examples/              a runnable test database, a sample display, an mcp.json
+         + .github/               CI, the release workflow, issue and PR templates
+         - .env.example           the canonical commented list of every EPICS_MCP_* variable
+         - CLAUDE.md              standing policy for an AI assistant working in this repository
+```
+
+⚠️ **`sandbox/` is git-ignored and exists in no clone.** It is a local EPICS stack (an IOC and the
+REST services) that the opt-in live tests are pointed at through environment variables. Several
+places assume you know that, including the live-test checkbox in the pull-request template, so
+treat a reference to "the sandbox" as meaning a stack you supply yourself. It is unrelated to the
+`sandbox` PRESET, which is a deployment shape that needs no infrastructure at all.
+
 ## Development setup
 
 The gate chain is [uv](https://docs.astral.sh/uv/)-based:
@@ -181,6 +211,27 @@ the gates.
 
 Tests that need a running EPICS stack are opt-in and skip by default, so the standard run
 and CI stay green without any infrastructure.
+
+**Without a stack**, which is the normal case and the one CI is in, there is nothing to do: they
+skip, `uv run pytest` is the whole contract, and no contribution is blocked by their absence. The
+one thing to know is that a green run therefore says nothing about the code paths that only a real
+service exercises, which is why the repository asks for a live probe before a behaviour is
+DOCUMENTED as certain (see `CLAUDE.md`, "no promise before a differential live probe").
+
+**With a stack of your own**, point them at it and they run. Selection is `-m live`, and the
+targets come from `EPICS_MCP_LIVE_*` variables, one per thing a test has to be told rather than
+discover: which PV to read (`..._ARCHIVER_PV`, `..._ALARM_PV`, `..._ALARM_CONFIGURED_PV`), which
+name pattern is safe to search (`..._CF_GLOB`, `..._ARCHIVER_GLOB`), which alarm tree and naming
+device to ask for (`..._ALARM_TREE`, `..._NAMING_DEVICE`), whether the archiver is expected to be
+ingesting (`..._DOCTOR_INGEST`), and, for the write gate, the PV to write, the value, an
+out-of-range value and a logbook that must be REFUSED (`..._WRITE_PV`, `..._WRITE_VALUE`,
+`..._OUT_OF_RANGE_VALUE`, `..._OLOG_DENY_LOGBOOK`). They are deliberately absent from
+`.env.example`, which documents the SERVER, not the suite; the test module that reads each one is
+the place its meaning is written down.
+
+⚠️ A live test that writes owns its target and never derives it. The deny logbook above is named
+explicitly for that reason: a test that picked one from the server's own answer once resolved onto
+a colleague's fixture logbook and left entries in a service with no delete.
 
 ## Code style
 
