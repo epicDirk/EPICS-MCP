@@ -130,8 +130,8 @@ Three commands, and nothing to obtain beyond the install above.
    ```
 
 2. **Write the client configuration, and check it in the same step.** `--out` writes the file
-   itself, which a shell redirect cannot do reliably: on Windows it produces bytes no JSON parser
-   accepts.
+   itself, which a shell redirect cannot do reliably: on Windows it produces bytes
+   a strict JSON parser rejects.
 
    ```bash
    epics-init --preset sandbox --out .mcp.json --probe-pv TEST:Temperature

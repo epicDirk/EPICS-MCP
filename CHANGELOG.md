@@ -86,6 +86,12 @@ carry breaking changes).
   itself ends in the alarm severity rather than in the value. Measured against a real PV, the
   connected case prints seven lines. The page now describes the shape of the report rather than
   counting its lines, so the next reader compares the right thing.
+- **Two surfaces overstated what a shell redirect breaks.** The quick start and the setup prompt
+  said it produces "bytes no JSON parser accepts". Measured on the three files in question:
+  Python's `json.loads` reads all of them from raw bytes, because `detect_encoding` recognises the
+  UTF-16 and UTF-8 byte-order marks; Node and Python in text mode reject the two that carry one.
+  Both surfaces now say what the four other places describing this already said, that a STRICT
+  JSON parser rejects them. The remedy is unchanged: let `--out` write the file.
 
 - **Writing a switch by its LABEL is verified again: landed and not-landed no longer give the same
   answer.** `set_pv_value` reads every write back, but on an enum PV the value read back is the
