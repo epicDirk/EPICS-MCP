@@ -132,8 +132,10 @@ def test_all_declared_commands_name_the_same_version() -> None:
     two display-aware commands, and that pair was the more dangerous half of the old shape: after
     QA-42 those two answer on a core-only install too, but the skip would have gone on excluding
     them there while three core commands kept the floor satisfied. The guard would then have
-    checked three of the five that answer, in the one environment reproducing a published install,
-    and looked complete. Deriving the floor makes a silently shrinking population impossible.
+    checked three of the five that answered AT THE TIME, in the one environment reproducing a
+    published install, and looked complete. Seven are declared today, and that is the point:
+    deriving the floor makes a silently shrinking population impossible, and an undated count
+    beside a derived one is how the refusal in ``cli_common`` came to name three of five.
     """
     declared = _declared_entry_points()
     versions = {}

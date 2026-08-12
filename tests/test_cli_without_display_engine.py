@@ -1,9 +1,12 @@
 """The two display-aware CLIs must refuse politely where the engine is absent, not traceback.
 
-Found by installing the built wheel into a clean environment and running all five console scripts:
-three worked, and ``epics-crossplane`` and ``epics-coverage`` died on their module-level import
-chain with a bare ``ModuleNotFoundError``. That is the first thing an outside user sees after
-``pip install``, and it reads as a broken package rather than as a missing optional capability.
+Found by installing the built wheel into a clean environment and running every console script the
+package declared AT THE TIME, which was five: three worked, and ``epics-crossplane`` and
+``epics-coverage`` died on their module-level import chain with a bare ``ModuleNotFoundError``.
+That is the first thing an outside user sees after ``pip install``, and it reads as a broken
+package rather than as a missing optional capability. The counts in this file are dated wherever
+they describe that measurement, because an undated one is how the refusal itself came to name
+three of five for two releases; the guards below derive theirs from ``[project.scripts]``.
 
 ``server.py`` already had the right posture for the MCP surface: register the display tools only
 when the engine imports, keep the core server up. These tests pin the same decision for the CLI
@@ -470,8 +473,9 @@ def test_version_answers_without_the_engine(
 ) -> None:
     """QA-46 met QA-42 here, and the seam between them has MOVED.
 
-    ``--version`` was added to all five console commands, but on these two the availability check
-    used to run before the parser existed, so the flag was unreachable on a core-only install. That
+    ``--version`` was added to every console command (five at the time), but on these two the
+    availability check used to run before the parser existed, so the flag was unreachable on a
+    core-only install. That
     limit is what QA-42 lifted, and this test is the inverted form of the one that pinned it: the
     old version asserted exit 2 and the refusal, and its own docstring predicted that a QA-42 that
     moved argument handling ahead of the check would turn it red on purpose.
