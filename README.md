@@ -130,7 +130,7 @@ Three commands, and nothing to obtain beyond the install above.
    ```
 
 2. **Write the client configuration, and check it in the same step.** `--out` writes the file
-   itself, which a shell redirect cannot do reliably: on Windows it produces bytes
+   itself, which a shell redirect cannot do reliably: in Windows PowerShell 5.1 it produces bytes
    a strict JSON parser rejects.
 
    ```bash
@@ -154,9 +154,10 @@ Three commands, and nothing to obtain beyond the install above.
    epics-diagnose TEST:Temperature
    ```
 
-   which prints a short report: the PV and its state, the likely cause, and the live result on a
-   line of its own (`connected, value=21.5` and the alarm severity), followed by the next steps,
-   any notes, and any plane that was asked for but is unavailable.
+   which prints a short report: the PV, its state and the likely cause, then one line for the live
+   result (`connected, value=21.5`, plus the alarm severity where the PV reports one) and one for
+   each service plane that was consulted, and last the next steps, any notes, and any plane that
+   was asked for but is unavailable.
 
 ⚠️ Note what step 1 is: a PVAccess server, and its second PV accepts writes. It binds loopback
 unless you pass `--interface`, and it says which port it got, which is not the default one when that

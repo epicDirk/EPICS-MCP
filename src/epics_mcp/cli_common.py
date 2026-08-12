@@ -82,8 +82,10 @@ def require_display_engine(command: str) -> int | None:
     ``epics-coverage``) are display-aware and need an engine that is NOT part of the published
     package. Installed from an index, both used to die on the module-level import chain with a bare
     ``ModuleNotFoundError`` traceback, which reads as a broken package rather than as a missing
-    optional capability. Measured by installing the built wheel into a clean environment: three of
-    the five entry points worked, two produced a traceback.
+    optional capability. Measured by installing the built wheel into a clean environment, on a
+    package that declared five console scripts AT THE TIME: three worked, two produced a traceback.
+    The counts are dated on purpose. Seven are declared today, and an undated count in a docstring
+    is how the refusal above came to name three of five for two releases.
 
     ``server.py`` already had the right posture for the MCP surface (register the display tools only
     when the engine imports, keep the core server up, and degrade LOUD when an installed engine

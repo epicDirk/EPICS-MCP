@@ -40,8 +40,12 @@ member, or the `N of the M` shape) over `git ls-files "*.md"`.
 
 ⚠️ The one inventory worth knowing about: `docs/tools.md` lists every tool, and **nothing compares
 that list to the registrations.** Only the operator guide's inventory block is checked
-(`test_guide_matches_code`), and on `docs/tools.md` only the RESOURCE URIs are
-(`test_readme_resources`). It is a second inventory of the same thing with one of them guarded.
+(`test_guide_matches_code`). What is checked on `docs/tools.md` is narrower than its tool table and
+touches none of it: the resource URIs (`test_readme_resources`), that no page advertises an
+`epics-*` command the package does not install (`test_examples_match_entry_points`), and that its
+"part of the core install" sentence names the same commands as the engine gate
+(`test_cli_without_display_engine`). It is a second inventory of the same thing with one of them
+guarded.
 
 ## 9 · The language guard finds German by vocabulary, not by understanding
 

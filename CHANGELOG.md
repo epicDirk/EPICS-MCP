@@ -82,16 +82,19 @@ carry breaking changes).
   hang, and nothing consumed it, because the client starts the server itself.
 - **The quick start described the wrong output for `epics-diagnose`.** It promised "four lines
   beginning `PV:` and ending in `connected, value=21.5`", and neither half holds: a connected PV
-  always gets a next-step line as well, so the report cannot stop at the live line, and that line
-  itself ends in the alarm severity rather than in the value. Measured against a real PV, the
-  connected case prints seven lines. The page now describes the shape of the report rather than
-  counting its lines, so the next reader compares the right thing.
+  always gets a next-step line as well, so the report cannot stop at the live line, and where the
+  PV reports an alarm severity that line carries it after the value. Measured against a real PV,
+  the connected case prints seven lines. The page now describes the shape of the report rather than
+  counting its lines, including the per-plane line every consulted service adds, so the next reader
+  compares the right thing.
 - **Two surfaces overstated what a shell redirect breaks.** The quick start and the setup prompt
   said it produces "bytes no JSON parser accepts". Measured on the three files in question:
   Python's `json.loads` reads all of them from raw bytes, because `detect_encoding` recognises the
   UTF-16 and UTF-8 byte-order marks; Node and Python in text mode reject the two that carry one.
   Both surfaces now say what the four other places describing this already said, that a STRICT
-  JSON parser rejects them. The remedy is unchanged: let `--out` write the file.
+  JSON parser rejects them, and they name the shell it applies to: Windows PowerShell 5.1, not
+  Windows. Measured on the same machine, a redirect in PowerShell 7 and in `cmd.exe` writes
+  BOM-free UTF-8 that every parser reads. The remedy is unchanged: let `--out` write the file.
 - **The refusal on an install without the display engine named three of the five commands that
   still work.** `epics-crossplane` and `epics-coverage` are the only two that need the
   `opi_navigation` engine; asked to run without it they refuse and tell the reader what else is

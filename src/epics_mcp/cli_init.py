@@ -18,10 +18,11 @@ writes only where ``--out`` tells it to; an existing file is never replaced with
 
 ``--out`` exists because a shell redirect cannot promise an encoding, and this block is JSON that a
 client has to parse. Measured in Windows PowerShell 5.1: ``>`` writes UTF-16 with a byte-order mark,
-and ``Set-Content -Encoding utf8`` and ``Out-File -Encoding utf8`` write UTF-8 with one; a strict
-parser rejects all three, Python and Node alike. POSIX shells and PowerShell 7 write UTF-8 without a
-mark and are fine. So ``epics-init --preset X > .mcp.json`` is correct on some shells and silently
-broken on the default Windows one, which is not a difference to leave to the caller.
+and ``Set-Content -Encoding utf8`` and ``Out-File -Encoding utf8`` write UTF-8 with one;
+a strict JSON parser rejects all three, Python and Node alike. POSIX shells and PowerShell 7 write
+UTF-8 without a mark and are fine. So ``epics-init --preset X > .mcp.json`` is correct on some
+shells and silently broken on the default Windows one, which is not a difference to leave to the
+caller.
 
 Exit code:
 
