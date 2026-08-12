@@ -1,9 +1,13 @@
-"""Write gate for Phoebus Olog logbook posts, env gate, test-server URL boundary, logbook
-allowlist, rate-limit, privacy-clean audit.
+"""Write gate for Phoebus Olog logbook posts, non-empty logbooks, env gate, test-server URL
+boundary, logbook allowlist, attachment size cap, rate-limit, privacy-clean audit.
+
+The list above is the whole set of checks that can DENY, and it is spelled out here rather than
+summarised because a shorter version of it stood here naming four of the six and reading as
+complete.
 
 A SEPARATE gate from :class:`~epics_mcp.safety.SafetyLayer` (the PV write gate): Olog write is a
 deliberately-authorized, separate logbook surface, so ``EPICS_MCP_ALLOW_PV_WRITE`` stays false and
-untouched. This is a schwester class rather than a generalisation of ``SafetyLayer`` so the tested
+untouched. This is a sister class rather than a generalisation of ``SafetyLayer`` so the tested
 PV write path is never touched: three things diverge deliberately:
 
 * **Test-server URL boundary** (the one new building block vs. PV). PV write is implicitly test-safe
@@ -56,8 +60,66 @@ def get_olog_safety() -> OlogWriteGate:
     return _olog_safety
 
 
+def split_name_list(value: str) -> frozenset[str]:
+    """A frozenset of the comma-separated, stripped, non-empty tokens of *value*.
+
+    Module level rather than a method, because a SECOND consumer reads the same configuration:
+    ``services/doctor.py`` reports the effective write posture and has to split the allowlists
+    exactly as this gate enforces them. One source, two consumers, the shape the ChannelFinder
+    redaction already uses. No further normalisation happens anywhere: the allowlist comparison is
+    exact and case-sensitive, so the report shows the set the gate really applies.
+    """
+    return frozenset(token.strip() for token in value.split(",") if token.strip())
+
+
+def write_target_allowed(config: EpicsConfig) -> bool:
+    """True iff ``config.olog_url`` is a permitted write target (loopback, or allowlisted remote).
+
+    Module level for the same reason as :func:`split_name_list`, plus one of its own: this question
+    has to be answerable WITHOUT constructing a gate. Constructing one builds a file audit logger
+    and can raise on an unrelated misconfiguration, which is exactly the state ``epics-doctor``
+    exists to REPORT rather than die on. :meth:`OlogWriteGate._url_write_allowed` delegates here,
+    so what the report shows and what the gate enforces cannot drift.
+
+    Three steps, in this order, the ORDER is load-bearing:
+
+    1. **Unparseable -> deny, before anything else** (SEC-2). ``url_host`` returns None for a
+       hostless/garbage URL, for a scheme-less base URL, and for a MALFORMED authority (a bad
+       bracketed IPv6 raises ``LocationParseError``/``ValueError`` in the urllib3 parser it uses,
+       the same parser ``requests`` connects with). This veto runs FIRST, so an unparseable URL is
+       denied even if it is exactly allowlisted; a bad URL is a clean, audited DENY, never an
+       uncaught crash and never a lucky pass.
+    2. **Loopback -> allow** (the local Docker sandbox).
+    3. **Anything else** (INCLUDING RFC1918 private, the production Olog lives on a private
+       network, so "private = allowed" would defeat the prod NO-GO): permit only an EXACTLY
+       allowlisted base URL with remote writes explicitly enabled AND an ``https`` scheme (a
+       plain-http Basic-auth write to a real server would expose the credentials, see
+       :func:`~epics_mcp.services._http.is_https_url`).
+
+    The hardened host extraction lives in :func:`~epics_mcp.services._http.url_host`, the only
+    parser this boundary trusts. What this expresses is the WRITE policy and nothing else: it
+    returns True for an allowlisted REMOTE host too (step 3), so it is never the answer to "is this
+    a local test server", which is :func:`~epics_mcp.services._http.is_loopback_url`. A reader who
+    conflates the two reads "writes reach a sandbox" off a configuration that writes to a real
+    logbook, which is why the doctor reports both and never only this one.
+    """
+    url = config.olog_url
+    if url_host(url) is None:  # SEC-2: unparseable -> fail closed, allowlist cannot override
+        return False
+    if is_loopback_url(url):
+        return True
+    # A REMOTE (non-loopback) target must ALSO be https: a plain-http Basic-auth write to a real
+    # server would expose the service-account credentials on the wire (and to any inherited proxy).
+    # Loopback stayed http-OK above (the sandbox); only the remote lane is tightened.
+    return (
+        config.olog_write_allow_remote
+        and url in split_name_list(config.olog_write_url_allowlist)
+        and is_https_url(url)
+    )
+
+
 class OlogWriteGate:
-    """Guards every Olog logbook write with five checks in fixed, fail-closed order.
+    """Guards every Olog logbook write with six checks in fixed, fail-closed order.
 
     0. Non-empty logbooks: an empty set slips through the ``⊆`` allowlist check, so guard first.
     1. Environment gate: ``allow_olog_write`` must be True.
@@ -76,8 +138,7 @@ class OlogWriteGate:
 
     def __init__(self, config: EpicsConfig) -> None:
         self._config = config
-        self._allowed_logbooks = self._split_csv(config.olog_write_logbooks)
-        self._allowed_urls = self._split_csv(config.olog_write_url_allowlist)
+        self._allowed_logbooks = split_name_list(config.olog_write_logbooks)
         # Fail-closed: a config bypassing validation (EpicsConfig.model_construct) must not let a
         # bare ValueError from deque(maxlen<0) escape the fail-closed contract, mirror SafetyLayer.
         try:
@@ -102,11 +163,6 @@ class OlogWriteGate:
                 "Olog writes are ENABLED but EPICS_MCP_OLOG_WRITE_LOGBOOKS is empty, every write "
                 "is denied (deny-all). Set the allowed logbook names to enable writes."
             )
-
-    @staticmethod
-    def _split_csv(value: str) -> frozenset[str]:
-        """A frozenset of the comma-separated, stripped, non-empty tokens of *value*."""
-        return frozenset(token.strip() for token in value.split(",") if token.strip())
 
     # ------------------------------------------------------------------
     # Public API
@@ -315,38 +371,13 @@ class OlogWriteGate:
     def _url_write_allowed(self) -> bool:
         """True iff ``olog_url`` is a permitted write target (loopback, or allowlisted + remote).
 
-        Three steps, in this order, the ORDER is load-bearing:
-
-        1. **Unparseable → deny, before anything else** (SEC-2). ``url_host`` returns None for a
-           hostless/garbage URL, for a scheme-less base URL, and for a MALFORMED authority (a bad
-           bracketed IPv6 raises ``LocationParseError``/``ValueError`` in the urllib3 parser
-           it uses, the same parser ``requests`` connects with). This veto runs FIRST, so an
-           unparseable URL is denied even if it is exactly allowlisted; a bad URL is a clean,
-           audited DENY, never an uncaught crash and never a lucky pass.
-        2. **Loopback → allow** (the local Docker sandbox).
-        3. **Anything else** (INCLUDING RFC1918 private, the production Olog lives on a private
-           network, so "private = allowed" would defeat the prod NO-GO): permit only an EXACTLY
-           allowlisted base URL with remote writes explicitly enabled AND an ``https`` scheme (a
-           plain-http Basic-auth write to a real server would expose the credentials, see
-           :func:`~epics_mcp.services._http.is_https_url`).
-
-        The hardened host extraction lives in :func:`~epics_mcp.services._http.url_host`, the only
-        parser this boundary trusts. What this method expresses is the WRITE policy and nothing
-        else: it returns True for an allowlisted REMOTE host too (step 3), so it is never the
-        answer to "is this a local test server", which is
-        :func:`~epics_mcp.services._http.is_loopback_url`.
+        The decision itself, with the load-bearing ORDER of its three steps and the reason each one
+        is where it is, lives in :func:`write_target_allowed`. It was lifted out of this method so
+        ``epics-doctor`` can ASK it without constructing a gate; this method is the enforcement
+        side of that one answer, and delegating is what keeps a reported posture from drifting away
+        from the posture actually applied.
         """
-        url = self._config.olog_url
-        if url_host(url) is None:  # SEC-2: unparseable → fail closed, allowlist cannot override
-            return False
-        if is_loopback_url(url):
-            return True
-        # A REMOTE (non-loopback) target must ALSO be https: a plain-http Basic-auth write to a real
-        # server would expose the service-account credentials on the wire (and to any inherited
-        # proxy). Loopback stayed http-OK above (the sandbox); only the remote lane is tightened.
-        return (
-            self._config.olog_write_allow_remote and url in self._allowed_urls and is_https_url(url)
-        )
+        return write_target_allowed(self._config)
 
     def _audit_deny(self, error_code: str, caller: str) -> None:
         """Log a REJECTED write (empty logbooks / gate off / URL / allowlist / rate limit).
@@ -414,7 +445,14 @@ class OlogWriteGate:
                 # (see the _emit docstring): the line disappears without trace. UTF-8 fixes the
                 # encoding across platforms.
                 handler = logging.FileHandler(self._config.audit_log_file, encoding="utf-8")
-            except OSError as exc:
+            # ValueError and TypeError alongside OSError, because the promise above is "a broken
+            # path fails HERE as a SafetyConfigError" and those two escaped it: a NUL byte in the
+            # path raises ValueError out of the builtin open, a non-str raises TypeError out of
+            # os.fspath, and neither is an OSError. Measured on both gates: the process died on a
+            # bare traceback instead of the named refusal this block exists to give. Unreachable
+            # through the environment (an env value cannot carry a NUL), reachable through a
+            # config that bypassed validation, which this file already guards against elsewhere.
+            except (OSError, ValueError, TypeError) as exc:
                 raise SafetyConfigError(
                     f"Invalid EPICS_MCP_AUDIT_LOG_FILE {self._config.audit_log_file!r}: {exc}",
                     details={"audit_log_file": self._config.audit_log_file},

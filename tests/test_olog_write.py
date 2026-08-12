@@ -435,6 +435,27 @@ class TestGateConfigFailClosed:
             audit.handlers.clear()
             audit.handlers.extend(saved)
 
+    def test_an_audit_path_that_is_not_a_path_fails_closed_too(self) -> None:
+        """Symmetric to ``test_safety.py``: two broken paths used to escape the ``except``.
+
+        A NUL byte raises ``ValueError`` out of the builtin ``open`` and a non-str raises
+        ``TypeError`` out of ``os.fspath``, so a clause catching only ``OSError`` let both through
+        and the gate died on a bare traceback where its own comment promises a SafetyConfigError.
+
+        Red-proof: narrow the clause back to ``except OSError``.
+        """
+        audit = logging.getLogger(_AUDIT_LOGGER)
+        saved = audit.handlers[:]
+        audit.handlers.clear()
+        try:
+            with pytest.raises(SafetyConfigError):  # ValueError out of the builtin open
+                OlogWriteGate(EpicsConfig.model_construct(audit_log_file="audit\x00.log"))
+            with pytest.raises(SafetyConfigError):  # TypeError out of os.fspath
+                OlogWriteGate(EpicsConfig.model_construct(audit_log_file=3))  # type: ignore[arg-type]
+        finally:
+            audit.handlers.clear()
+            audit.handlers.extend(saved)
+
 
 class TestOlogAuditSink:
     """K1/K2 (symmetric to test_safety.py::TestAuditSink): the Olog audit FileHandler must encode

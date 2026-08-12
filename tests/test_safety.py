@@ -405,6 +405,32 @@ class TestSafetyConfig:
             audit.handlers.clear()
             audit.handlers.extend(saved)
 
+    def test_an_audit_path_that_is_not_a_path_fails_closed_too(self) -> None:
+        """The promise at the ``except`` is "a broken audit path fails HERE as a
+        SafetyConfigError", and two broken paths used to escape it.
+
+        A NUL byte raises ``ValueError`` out of the builtin ``open`` and a non-str raises
+        ``TypeError`` out of ``os.fspath``; neither is an ``OSError``, so the clause caught neither
+        and the process died on a bare traceback instead of the named refusal. Unreachable through
+        the environment (an env value cannot carry a NUL) and reachable through a config that
+        bypassed validation, which is the same bypass this class already guards against for
+        ``write_rate_limit``.
+
+        Red-proof: narrow the clause back to ``except OSError`` and both cases raise the raw
+        builtin exception instead.
+        """
+        audit = logging.getLogger("epics_mcp.audit")
+        saved = audit.handlers[:]
+        audit.handlers.clear()
+        try:
+            with pytest.raises(SafetyConfigError):  # ValueError out of the builtin open
+                SafetyLayer(EpicsConfig.model_construct(audit_log_file="audit\x00.log"))
+            with pytest.raises(SafetyConfigError):  # TypeError out of os.fspath
+                SafetyLayer(EpicsConfig.model_construct(audit_log_file=3))  # type: ignore[arg-type]
+        finally:
+            audit.handlers.clear()
+            audit.handlers.extend(saved)
+
     def test_audit_path_validated_on_repeated_construction(self, tmp_path: Path) -> None:
         # QA 2026-07-17: the audit-path guard must not be skipped just because an EARLIER
         # SafetyLayer already attached a handler to the process-global audit logger. A later

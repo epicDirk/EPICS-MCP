@@ -364,7 +364,12 @@ class SafetyLayer:
                 # stdlib ``Handler.handleError`` swallows SILENTLY (see the _emit docstring): the
                 # line disappears without trace. UTF-8 fixes the encoding across platforms.
                 handler = logging.FileHandler(self._config.audit_log_file, encoding="utf-8")
-            except OSError as exc:
+            # ValueError and TypeError alongside OSError: the promise above is that a broken path
+            # fails HERE as a SafetyConfigError, and those two escaped it. A NUL byte in the path
+            # raises ValueError out of the builtin open, a non-str raises TypeError out of
+            # os.fspath, and neither is an OSError, so the process died on a bare traceback instead
+            # of the named refusal (measured on both gates). Symmetric with OlogWriteGate.
+            except (OSError, ValueError, TypeError) as exc:
                 raise SafetyConfigError(
                     f"Invalid EPICS_MCP_AUDIT_LOG_FILE {self._config.audit_log_file!r}: {exc}",
                     details={"audit_log_file": self._config.audit_log_file},
