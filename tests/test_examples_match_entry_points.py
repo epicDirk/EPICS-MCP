@@ -114,3 +114,43 @@ def test_no_documentation_advertises_an_undeclared_command() -> None:
         f"documentation advertises commands the package does not install: {invented}; "
         f"declared={sorted(declared)}"
     )
+
+
+def test_the_readme_names_every_installed_command_and_counts_them_right() -> None:
+    """The other direction, which this file was missing: documentation -> code was checked, code ->
+    documentation was not.
+
+    ``README.md`` promises a number of commands and then lists them in brackets. Both halves are
+    hand-maintained prose, and nothing read either: adding an entry point without touching the
+    README left it quietly claiming one command too few, which is what happened when
+    ``epics-testpv`` was added. Asserting the SET rather than the count catches a name that drifts
+    as well as a number that does, and the count comes from the same set so the two cannot disagree.
+    """
+    readme = (_ROOT / "README.md").read_text(encoding="utf-8")
+    declared = _declared_scripts()
+    spelled = {
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+    }
+
+    sentence = next(
+        line for line in readme.splitlines() if "commands (`epics-" in line.replace("\n", "")
+    )
+    # The claim spans two source lines: the number ends the first, the list opens the second.
+    index = readme.splitlines().index(sentence)
+    claim = " ".join(readme.splitlines()[index - 1 : index + 3])
+    listed = set(_COMMAND_IN_PROSE.findall(claim))
+    claimed_number = next(
+        (value for word, value in spelled.items() if f"plus {word}" in claim), None
+    )
+
+    assert listed == declared, (
+        "the README's bracketed command list disagrees with [project.scripts]: "
+        f"only in the README {sorted(listed - declared)}, only declared {sorted(declared - listed)}"
+    )
+    assert claimed_number == len(declared), (
+        f"the README says 'plus <number> commands' for {claimed_number} but "
+        f"{len(declared)} are declared"
+    )

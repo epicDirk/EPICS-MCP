@@ -19,10 +19,12 @@ This is a controls tool, so the trust questions come first.
   plane reaches exactly what the EPICS search environment allows, which `epics-doctor` prints back to
   you. None of it is reported anywhere else, and this server has no telemetry of its own.
   ⚠️ **One connection is not ours and is on by default:** the MCP framework this server is built on
-  (FastMCP) checks `pypi.org` for a newer version of ITSELF when it prints its startup banner. It
-  sends no data of yours, only fetches a version number, and it caches the answer, but it is an
-  outbound call to a third party, which matters in a segmented network where it will simply hang or
-  fail. Set `FASTMCP_CHECK_FOR_UPDATES=off` in the same env block to stop it.
+  (FastMCP) asks `pypi.org` about ITSELF when it prints its startup banner. Stated precisely, since
+  this is the page for it: it sends none of your data and caches the answer for hours, but it fetches
+  that package's whole metadata document rather than a single number, and the request itself tells
+  pypi.org your address and that this host runs it. Where it cannot connect it gives up after roughly
+  two seconds and the server starts regardless, so it delays rather than blocks. Set
+  `FASTMCP_CHECK_FOR_UPDATES=off` in the same env block to remove it.
 - **Read-only by default.** The mutating tools are gated off. `set_pv_value` is **triple-gated**:
   `EPICS_MCP_ALLOW_PV_WRITE=true` **and** a regex allowlist (`EPICS_MCP_PV_WRITE_PATTERN`,
   **required** when writes are on: an empty pattern makes the server **refuse to start** rather

@@ -25,7 +25,10 @@ broken on the default Windows one, which is not a difference to leave to the cal
 
 Exit code:
 
-* ``0``: the block was emitted, and either no check ran or it found nothing wrong;
+* ``0``: the block was emitted, and either no check ran or it found nothing wrong. ⚠️ With ``--out``
+  this does NOT promise a file. While placeholders remain the block is printed and the file is
+  deliberately not written, and the exit stays ``0`` because nothing FAILED: the configuration is
+  simply not finished yet. A script that needs the file has to test for the file, not for the code;
 * ``1``: the check ran and a configured plane HARD-failed;
 * ``2``: a usage error (unknown preset, malformed ``--set``, bad arguments), or a request that
   cannot be carried out (``--out`` onto an existing file without ``--force``, a missing parent
@@ -142,11 +145,19 @@ def _resolve_absolute_command() -> str | None:
 
     ``shutil.which`` rather than a sibling of ``sys.executable``: the two disagree in exactly the
     case this option exists for. A tool installation puts the console scripts in a directory of its
-    own, and asking the PATH answers "what would a launcher find", which is the question. Returning
+    own, and asking the PATH answers "where is the command YOU can run", which is what the client
+    then has to be told, precisely because the client's own PATH will not answer it. Returning
     ``None`` instead of falling back to the bare name is deliberate: a silent fallback would emit
     the very block the caller asked not to have.
+
+    ``abspath`` on the result, because ``shutil.which`` joins each PATH entry as written and a PATH
+    may legitimately hold a relative one (and on Windows the current directory can join the search).
+    A relative answer would satisfy the letter of the lookup and defeat the option, since the client
+    resolves it from a working directory nobody chose. Making the promise structural is cheaper than
+    documenting the exception.
     """
-    return shutil.which(SERVER_COMMAND)
+    found = shutil.which(SERVER_COMMAND)
+    return os.path.abspath(found) if found else None
 
 
 def _write_block(path: str, block: str, *, force: bool) -> str | None:
@@ -172,6 +183,12 @@ def _write_block(path: str, block: str, *, force: bool) -> str | None:
     * the target is a symlink, which ``"x"`` alone does not stop on Windows, where the exclusive
       create follows a DANGLING link and creates its target instead.
 
+    A write that FAILS midway leaves nothing behind either, and the two cases need different care.
+    Creating exclusively and unlinking on error covers the new-file case without a
+    check-then-create window. Replacing an existing file (``--force``) is done through a sibling
+    temporary file and an atomic rename, so a full disk cannot leave the caller with a truncated
+    configuration where a working one used to be.
+
     Deliberately NOT routed through ``epics_mcp.paths``: those helpers consult ``get_config()``,
     which builds the process-wide config singleton, and this write happens BEFORE ``_run_check``
     strips the caller's environment. A singleton built here would freeze the pre-strip environment
@@ -180,7 +197,7 @@ def _write_block(path: str, block: str, *, force: bool) -> str | None:
     server's own file-writing tool.
     """
     target = pathlib.Path(path)
-    parent = target.parent if str(target.parent) else pathlib.Path()
+    parent = target.parent
     if not parent.is_dir():
         sys.stderr.write(
             f"epics-init: cannot write {path}: the directory {parent} does not exist. "
@@ -193,9 +210,15 @@ def _write_block(path: str, block: str, *, force: bool) -> str | None:
             "write somewhere you did not name. Remove the link or choose another path.\n"
         )
         return None
+
+    # Replacing writes through a sibling and renames; creating writes exclusively, which needs no
+    # check-then-create window. Either way, a failure partway leaves the caller's disk as it was.
+    scratch = target.with_name(target.name + ".epics-init-tmp") if force else target
     try:
-        with open(target, "w" if force else "x", encoding="utf-8", newline="\n") as handle:
+        with open(scratch, "w" if force else "x", encoding="utf-8", newline="\n") as handle:
             handle.write(block + "\n")
+        if force:
+            os.replace(scratch, target)
     except FileExistsError:
         sys.stderr.write(
             f"epics-init: {path} already exists, and it may hold other MCP servers. "
@@ -203,6 +226,8 @@ def _write_block(path: str, block: str, *, force: bool) -> str | None:
         )
         return None
     except OSError as exc:
+        with contextlib.suppress(OSError):
+            scratch.unlink()
         sys.stderr.write(f"epics-init: cannot write {path}: {exc.strerror or exc}\n")
         return None
     return str(target)
@@ -350,6 +375,12 @@ def main(argv: list[str] | None = None) -> int:
     block = render_client_config(env, command=command)
     sys.stdout.write(block + "\n")
 
+    # Before any branch returns. An armed write gate is a property of the BLOCK, which has just been
+    # emitted, so a reader can act on it whatever happens next; warning only on the path that also
+    # runs the check would stay silent on exactly the preset most likely to carry a --set, the one
+    # with placeholders still open.
+    _warn_about_write_gate(env)
+
     pending = open_placeholders(env)
     if pending:
         # Refuse the check rather than run it: probing ``<archiver-host>`` yields a DNS failure
@@ -370,7 +401,6 @@ def main(argv: list[str] | None = None) -> int:
         if _write_block(args.out, block, force=args.force) is None:
             return 2
         sys.stderr.write(f"epics-init: wrote {args.out}\n")
-    _warn_about_write_gate(env)
     if args.no_check:
         return 0
 

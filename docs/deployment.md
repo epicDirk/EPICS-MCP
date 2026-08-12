@@ -22,13 +22,21 @@ read**: the server takes its configuration from the process environment, so a va
 reach the process has no effect and says nothing. And **every service URL is optional**: an unset URL
 disables that plane, with no network call and no complaint.
 
-**What an install actually puts on your machine.** Two things, and nothing else. The layout below
-is what a `pip install` into a fresh environment produces, measured rather than sketched:
+**What an install actually puts on your machine.** Two things belong to this package, and the layout
+below is what a `pip install` into a fresh virtual environment produces, measured rather than
+sketched.
+
+⚠️ Two honest qualifications before you read it. An install also pulls the **dependency closure**,
+which is not small: p4p brings the EPICS core libraries and numpy, the MCP framework brings its own
+stack, and a fresh environment measured here held 99 top-level packages. And **where the commands
+end up depends on the installer**: a virtual environment puts them in its own `bin` (`Scripts` on
+Windows), reachable while it is active, whereas `uv tool install` and `pipx` expose them from a
+separate tool directory that has to be on your PATH (`uv tool update-shell` arranges that for uv).
 
 ```text
     <the environment you installed into>
          |
-         + bin/  (Scripts\ on Windows)     the seven commands, and the only part on your PATH
+         + bin/  (Scripts\ on Windows)     the seven commands this package adds
          |    |
          |    - epics-mcp          the MCP server itself, started BY your client, not by you
          |    - epics-init         write a client configuration and check it, in one step
@@ -55,7 +63,8 @@ which lists the same variables with their defaults.
 
 **What you create, and no installer ever touches:** your client's configuration file (section 1
 writes it for you), an audit log if you enable a write gate, and a CA bundle if one of your
-services uses an internal root (section 3).
+services uses an internal root (section 3). The MCP framework also writes a small version-check
+cache of its own under its home directory, which `FASTMCP_CHECK_FOR_UPDATES=off` prevents.
 
 ## 1. Bring it up
 
@@ -130,12 +139,7 @@ services uses an internal root (section 3).
    Reading the report, glyph by glyph: `✓` is a plane that passed, `·` one you have not configured,
    `i` a line that informs rather than judges (the live plane, when you did not ask it to probe),
    and `✗` a failure. Three further glyphs are honest rather than healthy, and they are worth
-   knowing before you call a deployment done; they are two paragraphs below.
-
-**No preset matches your facility?** Then set the variables by hand, which is what the presets are
-made of anyway: section 2 lists them plane by plane. Copy the lines you need from `.env.example` (in a
-checkout) or from [the configuration reference](configuration.md) (from an installed copy) into
-whatever launches the server.
+   knowing before you call a deployment done; they are further down this step.
 
    The exit code is the scriptable contract:
 
@@ -173,6 +177,11 @@ whatever launches the server.
    alone says "nothing failed", not "everything confirmed", so for positive confirmation assert
    `identified_planes` is non-empty: `verification_complete` is vacuously true on an empty config,
    and a degraded plane is listed there too, since its identity IS proven.
+
+**No preset matches your facility?** Then set the variables by hand, which is what the presets are
+made of anyway: section 2 lists them plane by plane. Copy the lines you need from `.env.example` (in a
+checkout) or from [the configuration reference](configuration.md) (from an installed copy) into
+whatever launches the server, then run step 2 above against them.
 
 ## 2. The variables, by plane
 
@@ -290,9 +299,10 @@ Reproduce it in the open: run `epics-mcp` yourself in a shell with the same vari
 start prints a third-party banner to stderr and then waits silently for a client to speak to it. That
 silence is correct and there is nothing further to see. A refusal instead ends in a message that names
 the variable to change. Your client may also keep an MCP log of its own, which is worth finding once.
-⚠️ If the start seems to HANG before the banner, suspect the framework's update check, which fetches
-its own latest version from `pypi.org` and has nowhere to go in a segmented network:
-`FASTMCP_CHECK_FOR_UPDATES=off` removes it (see [safety](safety.md)).
+⚠️ A slow start before the banner is usually the framework's update check, which fetches its own
+latest version from `pypi.org`. Where that is unreachable it costs about two seconds and then
+continues, because it uses a short timeout and swallows the error, so it is not the cause of a
+real hang: `FASTMCP_CHECK_FOR_UPDATES=off` removes the delay (see [safety](safety.md)).
 
 **The tools do not appear, and nothing looks wrong.** A client reads its configuration when it starts
 and will not notice an edit, so restart or reconnect it, see

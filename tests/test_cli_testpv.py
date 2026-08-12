@@ -18,6 +18,7 @@ from p4p.client.thread import Context
 from p4p.server import Server
 
 from epics_mcp import cli_testpv
+from epics_mcp.presets import PRESETS
 
 
 class TestTheInitialValue:
@@ -117,7 +118,36 @@ class TestTheReport:
     def test_the_reach_is_stated_either_way(self, interface: str, expected: str) -> None:
         """This repository states reach everywhere else, and a server it tells people to start is
         no exception."""
-        lines = cli_testpv.describe(interface, {"EPICS_PVAS_SERVER_PORT": "5075"})
+        lines = cli_testpv.describe(
+            interface,
+            {"EPICS_PVAS_SERVER_PORT": "5075", "EPICS_PVAS_INTF_ADDR_LIST": interface},
+        )
+
+        assert any(expected in line for line in lines)
+
+    @pytest.mark.parametrize(
+        ("bound", "expected"),
+        [
+            pytest.param("localhost:5075", "this host only", id="localhost-is-loopback"),
+            pytest.param("[::1]:5075", "this host only", id="ipv6-loopback"),
+            pytest.param("127.0.0.5:5075", "this host only", id="whole-127-range"),
+            pytest.param("10.0.0.7:5075", "WIDE", id="a-real-address-is-wide"),
+        ],
+    )
+    def test_the_reach_line_follows_the_binding_not_the_argument(
+        self, bound: str, expected: str
+    ) -> None:
+        """The reach claim is this module's whole safety statement, so it is derived from what p4p
+        reports rather than from what the caller typed.
+
+        Reading the argument made the line a restatement of the request: ``--interface localhost``
+        binds loopback and was reported as WIDE. The argument passed here is deliberately the
+        OPPOSITE of the reported binding, so a version that reads the argument fails.
+        """
+        opposite = "0.0.0.0" if expected == "this host only" else "127.0.0.1"
+        lines = cli_testpv.describe(
+            opposite, {"EPICS_PVAS_SERVER_PORT": "5075", "EPICS_PVAS_INTF_ADDR_LIST": bound}
+        )
 
         assert any(expected in line for line in lines)
 
@@ -147,3 +177,30 @@ def test_the_served_pvs_answer_a_real_client() -> None:
         ctx.put(cli_testpv.SWITCH_PV, "On", timeout=10)
 
         assert str(ctx.get(cli_testpv.SWITCH_PV, timeout=10)) == "On"
+
+        # The report is built from these two keys. p4p renaming either would make describe() fall
+        # back to "unknown" and to the argument, quietly, and nothing else looks at a real conf().
+        assert cli_testpv._EFFECTIVE_PORT_KEY in server.conf()
+        assert cli_testpv._EFFECTIVE_INTERFACE_KEY in server.conf()
+
+
+def test_the_default_port_matches_the_preset_that_has_to_find_this_server() -> None:
+    """Two copies of one number, and the fallback note is built on ours.
+
+    ``describe()`` says "port 5075 was taken" by comparing against its own constant. If the sandbox
+    preset ever pointed its TCP route elsewhere, that message would print on every ordinary run
+    while the real mismatch went unmentioned. No I/O, so it costs nothing to keep the two tied.
+    """
+    assert cli_testpv._DEFAULT_PVA_PORT in PRESETS["sandbox"].env["EPICS_PVA_NAME_SERVERS"]
+
+
+def test_an_unbindable_interface_is_a_usage_error_not_a_traceback(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The module documents "2 for a usage error", and naming an address this host does not have is
+    how a caller reaches it. p4p raises RuntimeError, which without a handler leaves the reader with
+    a traceback and the documented contract broken."""
+    exit_code = cli_testpv.main(["--interface", "203.0.113.255"])
+
+    assert exit_code == 2
+    assert "cannot bind" in capsys.readouterr().err

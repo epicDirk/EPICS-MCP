@@ -99,15 +99,22 @@ in the next self-check.
         "EPICS_MCP_PV_WRITE_PATTERN": "^TEST:.*",
         "EPICS_MCP_AUDIT_LOG_FILE": "/var/log/epics-mcp/audit.log",
         "EPICS_PVA_AUTO_ADDR_LIST": "NO",
-        "EPICS_CA_AUTO_ADDR_LIST": "NO"
+        "EPICS_CA_AUTO_ADDR_LIST": "NO",
+        "EPICS_PVA_ADDR_LIST": "127.0.0.1",
+        "EPICS_CA_ADDR_LIST": "127.0.0.1"
       }
     }
   }
 }
 ```
 
-The last three are not optional hardening, they are start conditions, and a block without them is
-one an MCP client reports only as "server not connected". A write-enabled server refuses to start
+The two address lists are what makes this block able to REACH anything: with the auto search off and
+no list set, the client searches nowhere at all, so a write-enabled server would start and then fail
+to find the very PV its allowlist permits. `127.0.0.1` keeps it loopback-only, which the write gate
+requires, while still finding a local test PV such as the one `epics-testpv` serves.
+
+The three write variables are not optional hardening, they are start conditions, and a block without
+them is one an MCP client reports only as "server not connected". A write-enabled server refuses to start
 unless `EPICS_MCP_AUDIT_LOG_FILE` names a durable path (an audit trail on stderr vanishes on
 restart) and unless the EPICS client search reach is loopback-only, so that enabling writes cannot
 silently arm a process that reaches a real facility network. The same refusal applies to the LOGBOOK

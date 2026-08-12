@@ -45,6 +45,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import sys
 import time
 from collections.abc import Callable, Mapping
@@ -66,6 +67,9 @@ _SWITCH_CHOICES = ("Off", "On")
 _LOOPBACK = "127.0.0.1"
 #: p4p reports the port it actually bound under this key, which is not the one it was asked for.
 _EFFECTIVE_PORT_KEY = "EPICS_PVAS_SERVER_PORT"
+#: The interface p4p reports back. It keeps the port that was ASKED for, so only the host part
+#: of it is trustworthy; the port comes from the key above.
+_EFFECTIVE_INTERFACE_KEY = "EPICS_PVAS_INTF_ADDR_LIST"
 _DEFAULT_PVA_PORT = "5075"
 
 
@@ -122,15 +126,45 @@ def server_conf(interface: str) -> dict[str, str]:
     return {"EPICS_PVAS_INTF_ADDR_LIST": interface, "EPICS_PVA_AUTO_ADDR_LIST": "0"}
 
 
+def _host_of(entry: str) -> str:
+    """The host part of a p4p interface entry, which may or may not carry a ``:port``.
+
+    Split from the RIGHT and only when the tail is numeric, so a bare IPv6 address (which is full of
+    colons) is not mistaken for a host and a port.
+    """
+    head, separator, tail = entry.strip().rpartition(":")
+    return head if separator and tail.isdigit() else entry.strip()
+
+
+def _is_loopback(host: str) -> bool:
+    """Whether *host* reaches this machine only, so the reach line states a fact.
+
+    A name other than ``localhost`` is not resolved here: an unresolved name is reported as wide,
+    which is the safe direction to be wrong in.
+    """
+    bare = host.strip().strip("[]")
+    if bare in {"localhost", ""}:
+        return True
+    try:
+        return ipaddress.ip_address(bare).is_loopback
+    except ValueError:
+        return False
+
+
 def describe(interface: str, effective: Mapping[str, str]) -> list[str]:
     """The lines printed once the server is up: where it listens, and what it serves.
 
-    The port comes from the effective configuration rather than from what was requested, because p4p
-    falls back to a free port when the default one is taken and keeps the requested one in the
-    interface entry. A caller who trusted that entry would print a port nothing is listening on.
+    Everything here comes from the EFFECTIVE configuration rather than from what was requested,
+    and both halves need it for the same reason. p4p falls back to a free port when the default one
+    is taken while keeping the requested port in the interface entry, so a port read from the wrong
+    key names a port nothing listens on. And a reach line derived from the ARGUMENT would only
+    repeat what the caller typed, which is precisely the claim it exists to replace: it would call
+    ``--interface localhost`` wide while the server sits on loopback, and, worse in principle, it
+    would keep saying "this host only" if a future p4p ever widened a binding we asked to narrow.
     """
     port = effective.get(_EFFECTIVE_PORT_KEY, "unknown")
-    lines = [f"Serving on {interface}:{port} (PVAccess)"]
+    bound = _host_of(effective.get(_EFFECTIVE_INTERFACE_KEY, interface)) or interface
+    lines = [f"Serving on {bound}:{port} (PVAccess)"]
     if port != _DEFAULT_PVA_PORT:
         lines.append(
             f"  NOTE: port {_DEFAULT_PVA_PORT} was taken, so this fell back to {port}. A client "
@@ -139,10 +173,10 @@ def describe(interface: str, effective: Mapping[str, str]) -> list[str]:
         )
     lines.append(f"  {ANALOGUE_PV}   analogue reading, degrees C")
     lines.append(f"  {SWITCH_PV}        writable switch, {'/'.join(_SWITCH_CHOICES)}")
-    if interface == _LOOPBACK:
+    if _is_loopback(bound):
         lines.append("  Reach: this host only. Pass --interface to widen it deliberately.")
     else:
-        lines.append(f"  Reach: WIDE. {interface} is not loopback, and the switch accepts writes.")
+        lines.append(f"  Reach: WIDE. {bound} is not loopback, and the switch accepts writes.")
     lines.append("Press Ctrl-C to stop.")
     return lines
 
@@ -166,17 +200,31 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    with Server(
-        providers=[build_provider()], useenv=False, conf=server_conf(args.interface)
-    ) as server:
-        for line in describe(args.interface, server.conf()):
-            sys.stdout.write(line + "\n")
-        sys.stdout.flush()
-        try:
+    try:
+        server = Server(
+            providers=[build_provider()], useenv=False, conf=server_conf(args.interface)
+        )
+    except RuntimeError as exc:
+        # p4p raises RuntimeError for an interface it cannot bind, which a caller meets by typing a
+        # name or address this host does not have. Without this it arrives as a traceback, and the
+        # documented contract ("2 for a usage error") would be a promise this command does not keep.
+        sys.stderr.write(
+            f"epics-testpv: cannot bind {args.interface!r}: {exc}. Name an address this host has, "
+            f"or omit --interface for {_LOOPBACK}.\n"
+        )
+        return 2
+
+    # The whole lifetime is inside the handler, not just the sleep: Ctrl-C during the report, or
+    # while the server is being torn down, ends the command the same way a reader expects.
+    try:
+        with server:
+            for line in describe(args.interface, server.conf()):
+                sys.stdout.write(line + "\n")
+            sys.stdout.flush()
             while True:
                 time.sleep(3600)
-        except KeyboardInterrupt:
-            sys.stdout.write("Stopped.\n")
+    except KeyboardInterrupt:
+        sys.stdout.write("Stopped.\n")
     return 0
 
 

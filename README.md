@@ -141,6 +141,10 @@ Three commands, and nothing to obtain beyond the install above.
    PV from step 1. Without `--probe-pv` no PV is contacted, so a clean report would say only that
    nothing is misconfigured.
 
+   ⚠️ **Already have a `.mcp.json` with other servers in it?** Then this refuses rather than
+   overwrite it, which is the point. Write to a new file (`--out epics-pv.json`) and paste the one
+   entry into your existing `mcpServers` object, or pass `--force` if the file is yours to replace.
+
 3. **Point your MCP client at that file and restart it**, see
    [MCP client integration](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/mcp-clients.md): a client reads its configuration at startup, so
    until it is restarted the tools are simply absent. Then ask the assistant to read

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 
@@ -682,6 +683,47 @@ class TestWritingTheBlock:
         )
 
         assert "ARMS a write gate" in capsys.readouterr().err
+
+    def test_an_armed_write_gate_is_named_even_when_placeholders_remain(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The warning has to reach the branch it is most likely to be needed on.
+
+        It used to be emitted after the placeholder branch had already returned, so the one preset
+        family that carries `--set` overrides, the ones with placeholders, was exactly the family
+        that never heard it. The block is printed on that path, so the gate is armed in text the
+        reader now holds; the warning belongs with it.
+        """
+        cli_init.main(
+            [
+                "--preset",
+                "ioc-archiver",
+                "--out",
+                str(tmp_path / "mcp.json"),
+                "--set",
+                "EPICS_MCP_ALLOW_OLOG_WRITE=true",
+            ]
+        )
+        captured = capsys.readouterr()
+
+        assert "ARMS a write gate" in captured.err
+        assert "still placeholders" in captured.err  # and the other refusal is still reported
+
+    def test_the_resolved_command_is_absolute(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The option is called --absolute-command, so a relative answer would defeat it.
+
+        ``shutil.which`` joins each PATH entry as written, so a relative entry (or, on Windows, the
+        current directory joining the search) yields a relative path that satisfies the lookup and
+        then fails inside a client resolving it from a directory nobody chose. The resolver is
+        faked, because the real PATH on any given machine may not contain a relative entry at all.
+        """
+        monkeypatch.setattr(shutil, "which", lambda _name: os.path.join(".", "epics-mcp"))
+
+        resolved = cli_init._resolve_absolute_command()
+
+        assert resolved is not None
+        assert os.path.isabs(resolved)
+        assert resolved.endswith("epics-mcp")
 
     def test_an_ordinary_block_carries_no_write_gate_warning(
         self, capsys: pytest.CaptureFixture[str]
