@@ -92,6 +92,13 @@ carry breaking changes).
   UTF-16 and UTF-8 byte-order marks; Node and Python in text mode reject the two that carry one.
   Both surfaces now say what the four other places describing this already said, that a STRICT
   JSON parser rejects them. The remedy is unchanged: let `--out` write the file.
+- **The refusal on an install without the display engine named three of the five commands that
+  still work.** `epics-crossplane` and `epics-coverage` are the only two that need the
+  `opi_navigation` engine; asked to run without it they refuse and tell the reader what else is
+  available. That sentence still said "the other three commands" and omitted `epics-init` and
+  `epics-testpv`, both added after it was written, so a reader on a published install was told
+  that two commands they can actually run are unavailable. `docs/tools.md` carried a different
+  incomplete set, omitting `epics-mcp`. Both now name all five.
 
 - **Writing a switch by its LABEL is verified again: landed and not-landed no longer give the same
   answer.** `set_pv_value` reads every write back, but on an enum PV the value read back is the

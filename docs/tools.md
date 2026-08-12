@@ -93,10 +93,11 @@ network service and that switch accepts writes. `--interface` widens the reach, 
 prints what it is listening on, including the port it actually got, which is not always the one it
 asked for.
 
-`epics-testpv`, `epics-init`, `epics-doctor` and `epics-diagnose` are part of the core install;
-`epics-crossplane` and `epics-coverage` need the `opi_navigation` engine, which a published install
-cannot obtain (see above). None of them writes to a service of yours: the only things written
-anywhere are the file `epics-init --out` names and the PVs `epics-testpv` serves itself.
+`epics-mcp`, `epics-init`, `epics-testpv`, `epics-doctor` and `epics-diagnose` are part of the
+core install; `epics-crossplane` and `epics-coverage` need the `opi_navigation` engine, which a
+published install cannot obtain (see above). None of them writes to a service of yours: the only
+things written anywhere are the file `epics-init --out` names and the PVs `epics-testpv` serves
+itself.
 
 Every console command answers `--help` and `--version` with its own name and the package version, on a
 core-only install as well: they parse their arguments before asking for the display engine, so the

@@ -30,10 +30,13 @@ SUBPROCESS under ``tests.engine_gate.BLOCKER``, which is total in both environme
 
 from __future__ import annotations
 
+import ast
 import importlib
 import os
+import re
 import subprocess
 import sys
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -90,13 +93,68 @@ def _derived_refusal(
     return _normalized(capsys.readouterr().err)
 
 
-#: All four console entry points, for properties every CLI must hold regardless of the engine.
-_ALL_CLI_MODULES = (
-    "epics_mcp.cli_doctor",
-    "epics_mcp.cli_diagnose",
-    "epics_mcp.cli_coverage",
-    "epics_mcp.cli_crossplane",
-)
+#: A console command as this repository writes one in prose: in backticks, prefixed ``epics-``.
+#: Same shape and same reason as ``tests/test_examples_match_entry_points.py``.
+_COMMAND_IN_PROSE = re.compile(r"`(epics-[a-z][a-z0-9-]*)`")
+
+#: The claim the refusal makes about what still works, as one match: the spelled-out number and
+#: the bracketed list. Read from the WHITESPACE-NORMALIZED message, since it is hand-wrapped.
+_STILL_WORKS_CLAIM = re.compile(r"The other (\w+) commands \(([^)]*)\)")
+
+#: Number words spelled out in this repository's prose, so a claim of "five" can be read back.
+_SPELLED = {"three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9}
+
+#: What ``cli_common`` exports to a command that CANNOT work without the display engine. Importing
+#: either name is what makes a command display-aware, which is why the derivation below reads the
+#: imports rather than a list somebody has to remember to extend.
+_ENGINE_GATE_NAMES = frozenset({"require_display_engine", "DisplayEngineAwareParser"})
+
+
+def _declared_commands() -> dict[str, str]:
+    """``{command: module}`` from ``[project.scripts]``, the packaging authority.
+
+    Same source as ``tests/test_cli_version.py`` and ``test_examples_match_entry_points.py``, and
+    for the same reason: it is what an install actually creates, so an eighth command is covered
+    here the day it appears rather than the day somebody remembers this file.
+    """
+    data = tomllib.loads((_REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    return {
+        command: target.rsplit(":", 1)[0] for command, target in data["project"]["scripts"].items()
+    }
+
+
+def _display_aware_commands() -> set[str]:
+    """The declared commands whose entry-point module takes the engine gate from ``cli_common``.
+
+    DERIVED from the imports, not listed. A list is what produced the defect these guards exist
+    for: the refusal named three of five working commands for two releases because both halves
+    were hand-maintained prose. The import is the structural fact behind the behaviour, it sits in
+    the module that owns the command, and it cannot be satisfied halfway.
+    """
+    aware = set()
+    for command, module_name in _declared_commands().items():
+        source = (_REPO / "src").joinpath(*module_name.split(".")).with_suffix(".py")
+        assert source.is_file(), f"{command} points at {module_name}, whose source is missing"
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module == "epics_mcp.cli_common"
+                and {alias.name for alias in node.names} & _ENGINE_GATE_NAMES
+            ):
+                aware.add(command)
+    return aware
+
+
+def _core_commands() -> set[str]:
+    """The commands that work on an install with no display engine at all."""
+    return set(_declared_commands()) - _display_aware_commands()
+
+
+#: Every console entry point, for properties every CLI must hold regardless of the engine.
+#: DERIVED, because the hand-written version of this tuple named four of seven: it was written
+#: when there were four and never grew with ``epics-init``, ``epics-testpv`` or the server, so
+#: three commands sat outside a guard whose whole point is that it holds for all of them.
+_ALL_CLI_MODULES = tuple(sorted(_declared_commands().values()))
 
 
 @pytest.fixture
@@ -140,17 +198,90 @@ def test_a_missing_engine_is_a_usage_error_not_a_crash(
     assert message.startswith("epics-coverage: needs the opi_navigation display engine")
 
 
+def test_the_engine_gate_partitions_the_declared_commands() -> None:
+    """Anchor for the two guards below: an empty or broken derivation must not leave them green.
+
+    Both directions have to be non-empty. An empty ``display_aware`` would mean the import scan
+    stopped seeing the gate, and then "the commands that work without the engine" would silently
+    become "every command", which every message trivially satisfies.
+
+    It also holds the hand-written ``_COMMANDS`` pair in this file against the same derivation, so
+    a third display-aware command cannot leave the older parametrized guards checking two of three.
+    """
+    declared = set(_declared_commands())
+    display_aware = _display_aware_commands()
+
+    assert declared, "no [project.scripts] found, the test anchor broke"
+    assert display_aware, "no command imports the engine gate, the derivation broke"
+    assert display_aware < declared
+    assert display_aware == {command for _, command in _COMMANDS}, (
+        "the hand-written _COMMANDS pair no longer matches the modules that import the engine gate"
+    )
+
+
 def test_the_message_says_what_still_works_and_how_to_get_the_rest(
     engine_absent: None, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A refusal that only says "no" sends the reader to the issue tracker. This one has to name
-    the three commands that DO work and the one command that installs the engine, because the
-    reader's next question is always one of those two."""
-    require_display_engine("epics-crossplane")
-    message = capsys.readouterr().err
+    every command that DOES work and the one command that installs the engine, because the
+    reader's next question is always one of those two.
 
-    for expected in ("epics-doctor", "epics-diagnose", "epics-mcp", "--group displays"):
-        assert expected in message, f"{expected!r} missing from the refusal"
+    ⚠️ THE SET, NOT A HANDFUL OF NAMES, and that half was learned the expensive way. This guard
+    used to assert that three names appear somewhere in the text. It stayed green while the message
+    named three of the five working commands: ``epics-init`` dropped out of the sentence when 0.5.0
+    added it, ``epics-testpv`` when it was added after that, and a reader on a core-only install
+    was told that two commands they can actually run do not work. Measured from a real wheel
+    installed into a clean environment, which is also how the original defect in this module was
+    found. ``test_examples_match_entry_points.py`` had already learned this for the README's
+    command list; the same disease sat one file away, in prose nothing read.
+
+    The expectation is DERIVED (``[project.scripts]`` minus the display-aware commands), so a new
+    command reddens this the day it is declared. The number is asserted from the same set as the
+    names, so the two cannot drift apart from each other either.
+    """
+    require_display_engine("epics-crossplane")
+    message = _normalized(capsys.readouterr().err)
+
+    claim = _STILL_WORKS_CLAIM.search(message)
+    assert claim, f"the refusal no longer states which commands still work: {message!r}"
+    listed = set(re.findall(r"epics-[a-z][a-z0-9-]*", claim.group(2)))
+    core = _core_commands()
+
+    assert listed == core, (
+        "the refusal's command list disagrees with [project.scripts]: "
+        f"only in the message {sorted(listed - core)}, only declared {sorted(core - listed)}"
+    )
+    assert _SPELLED.get(claim.group(1)) == len(core), (
+        f"the refusal says 'the other {claim.group(1)} commands' for {len(core)} of them"
+    )
+    assert "--group displays" in message, "the refusal must still say how to get the engine"
+
+
+def test_the_tools_page_names_the_same_core_commands_as_the_refusal() -> None:
+    """The second surface stating this fact, and it disagreed with the first one DIFFERENTLY.
+
+    ``docs/tools.md`` listed four commands as the core install and left out ``epics-mcp``, while
+    the refusal listed three and left out two others: two pages, two different incomplete sets,
+    neither read by anything. The doc-sync clause in this repository's ``CLAUDE.md`` says to
+    enumerate every surface that describes a behaviour rather than to recall them, and this is that
+    enumeration turned into a guard for the one fact that had two homes.
+
+    Anchored on the phrase rather than on a line number, and matched over the whitespace-normalized
+    page, because the sentence is hand-wrapped and a line number is the weaker anchor.
+    """
+    prose = " ".join((_REPO / "docs" / "tools.md").read_text(encoding="utf-8").split())
+    sentences = re.findall(r"[^.]*are part of the core install", prose)
+
+    assert len(sentences) == 1, (
+        f"expected exactly one 'part of the core install' sentence, found {len(sentences)}"
+    )
+    listed = set(_COMMAND_IN_PROSE.findall(sentences[0]))
+    core = _core_commands()
+
+    assert listed == core, (
+        "docs/tools.md disagrees with [project.scripts] about the core install: "
+        f"only on the page {sorted(listed - core)}, only declared {sorted(core - listed)}"
+    )
 
 
 @pytest.mark.parametrize(("module_name", "command"), _COMMANDS)
