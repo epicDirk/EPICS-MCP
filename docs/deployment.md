@@ -28,10 +28,15 @@ sketched.
 
 ⚠️ Two honest qualifications before you read it. An install also pulls the **dependency closure**,
 which is not small: p4p brings the EPICS core libraries and numpy, the MCP framework brings its own
-stack, and a fresh environment measured here held 99 top-level packages. And **where the commands
-end up depends on the installer**: a virtual environment puts them in its own `bin` (`Scripts` on
-Windows), reachable while it is active, whereas `uv tool install` and `pipx` expose them from a
-separate tool directory that has to be on your PATH (`uv tool update-shell` arranges that for uv).
+stack, and a fresh environment measured here held **82 installed distributions**, this package and
+`pip` itself included. Count the same way before you call a difference drift: that figure is what
+`pip list` reports, it is platform dependent, and `site-packages` holds roughly twice as many
+ENTRIES, because each distribution leaves a `.dist-info` directory beside its package and a few
+leave a `.pth` file, a loose module or a help file that is no package at all. And **where the
+commands end up depends on the installer**: a virtual environment puts them in its own `bin`
+(`Scripts` on Windows), reachable while it is active, whereas `uv tool install` and `pipx` expose
+them from a separate tool directory that has to be on your PATH (`uv tool update-shell` arranges
+that for uv).
 
 ```text
     <the environment you installed into>
