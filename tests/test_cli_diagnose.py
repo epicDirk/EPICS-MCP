@@ -131,6 +131,12 @@ def test_a_healthy_connected_report_never_ends_on_the_live_line() -> None:
     did; what the quick start now promises, and what this pins, is that the output continues past
     the live line.
 
+    ⚠️ HONEST REACH of the severity assertion: it pins that ``_render`` appends the severity when
+    the evidence carries one, and nothing more. Whether a live read FILLS that field is decided in
+    ``services/diagnose.py`` (from the value's alarm structure), which this test does not execute,
+    so the README says "where the PV reports one" rather than promising it. The sibling below pins
+    the other half of that condition.
+
     Red-proof: empty the ``next_steps`` tuple in ``derive_cause``'s ``connected`` branch and the
     render stops at the live line, which is exactly the shape the README used to claim.
     """
@@ -159,6 +165,53 @@ def test_a_healthy_connected_report_never_ends_on_the_live_line() -> None:
         f"the connected output must continue past the live line, got {lines}"
     )
     assert "Next steps:" in lines, lines
+
+
+def test_a_consulted_plane_prints_between_the_live_line_and_the_next_steps() -> None:
+    """The order the quick start states, in the configuration a facility actually runs.
+
+    The first version of that sentence went straight from the live result to the next steps, which
+    is the sandbox shape: with no ChannelFinder URL set, no plane is consulted. Set one, as the
+    deployment guide tells a facility to, and ``_render`` puts a ``channelfinder:`` line in
+    between (cli_diagnose.py, the per-plane block). The sentence was wrong for exactly the reader
+    who has a control system.
+
+    Red-proof: move the per-plane block below the ``Next steps`` block in ``_render`` and the
+    order asserted here inverts.
+    """
+    live = LiveEvidence(connected=True, value=21.5, severity="NO_ALARM")
+    report = _report(
+        live=live,
+        cf=ChannelFinderEvidence(consulted=True, registered=True, pv_status="Active"),
+        next_steps=("PV answers on PVA.",),
+    )
+
+    lines = cli_diagnose._render(report).splitlines()
+    plane = next(i for i, line in enumerate(lines) if line.strip().startswith("channelfinder:"))
+
+    assert lines[3].strip().startswith("live:"), lines
+    assert plane == 4, f"the consulted plane belongs right after the live line, got {lines}"
+    assert lines.index("Next steps:") > plane, (
+        f"the next steps come after every consulted plane, got {lines}"
+    )
+
+
+def test_the_live_line_stops_at_the_value_when_the_pv_reports_no_severity() -> None:
+    """The other half of the README's "where the PV reports one", and the reason it is conditional.
+
+    ``_render`` appends the severity only when the evidence carries one, and a live read leaves it
+    unset whenever the value had no alarm structure. A reader whose PV is such a value sees the
+    line end at the value, so a sentence promising the severity outright would be wrong for them.
+
+    Red-proof: drop the ``if live.severity`` condition in ``_render`` and this line grows a
+    ``severity=None``.
+    """
+    report = _report(live=LiveEvidence(connected=True, value=21.5), next_steps=("Healthy.",))
+
+    lines = cli_diagnose._render(report).splitlines()
+
+    assert lines[3].strip() == "live:         connected, value=21.5", lines
+    assert "severity" not in lines[3], lines
 
 
 # --- main (AsyncMock spy) ---

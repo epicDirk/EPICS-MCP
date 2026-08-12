@@ -104,10 +104,17 @@ _STILL_WORKS_CLAIM = re.compile(r"The other (\w+) commands \(([^)]*)\)")
 #: Number words spelled out in this repository's prose, so a claim of "five" can be read back.
 _SPELLED = {"three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9}
 
-#: What ``cli_common`` exports to a command that CANNOT work without the display engine. Importing
-#: either name is what makes a command display-aware, which is why the derivation below reads the
-#: imports rather than a list somebody has to remember to extend.
+#: What ``cli_common`` offers a command that CANNOT work without the display engine. CALLING
+#: either is what makes a command display-aware, which is why the derivation below reads calls
+#: rather than a list somebody has to remember to extend.
 _ENGINE_GATE_NAMES = frozenset({"require_display_engine", "DisplayEngineAwareParser"})
+
+#: The phrase docs/tools.md uses to claim the core-install set. An anchor, not a line number,
+#: because the sentence is hand-wrapped and a line number is the weaker anchor.
+_CORE_INSTALL_ANCHOR = "are part of the core install"
+
+#: Markdown separates paragraphs on a blank line, whatever the file's line endings are.
+_PARAGRAPH_BREAK = re.compile(r"(?:\r?\n){2,}")
 
 
 def _declared_commands() -> dict[str, str]:
@@ -123,24 +130,43 @@ def _declared_commands() -> dict[str, str]:
     }
 
 
-def _display_aware_commands() -> set[str]:
-    """The declared commands whose entry-point module takes the engine gate from ``cli_common``.
+def _called_name(func: ast.expr) -> str | None:
+    """The bare name a call targets: ``f()``, ``mod.f()`` and ``pkg.mod.f()`` all answer ``f``."""
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
 
-    DERIVED from the imports, not listed. A list is what produced the defect these guards exist
-    for: the refusal named three of five working commands for two releases because both halves
-    were hand-maintained prose. The import is the structural fact behind the behaviour, it sits in
-    the module that owns the command, and it cannot be satisfied halfway.
+
+def _display_aware_commands() -> set[str]:
+    """The declared commands whose entry-point module CALLS the engine gate.
+
+    DERIVED, not listed. A list is what produced the defect these guards exist for: the refusal
+    named three of five working commands for two releases because both halves were hand-maintained
+    prose.
+
+    ⚠️ It reads CALLS, and the first version of this read IMPORTS, which was too narrow in both
+    directions. ``from epics_mcp.cli_common import require_display_engine`` is one of at least six
+    ways to reach that function: a relative import, ``from epics_mcp import cli_common`` with a
+    dotted call, a plain ``import epics_mcp.cli_common``, a star import and a re-export through a
+    third module all reach it while matching no such ImportFrom, so a core command could take the
+    gate with every guard in this file staying green. In the other direction a dead import, left
+    behind by a refactor, classified a working command as display-aware and the guards would then
+    have demanded its removal from the refusal. A call is the fact that decides the behaviour, and
+    it has one shape in the tree however the name arrived. It also ignores prose: ``server.py``
+    names ``cli_common.require_display_engine`` in a docstring and is correctly not counted.
+
+    Honest limit: a command that reaches the engine WITHOUT this gate, by importing
+    ``opi_navigation`` itself, is invisible here. That is a different defect (the traceback QA-14
+    removed) and the guards in this module pin it separately.
     """
     aware = set()
     for command, module_name in _declared_commands().items():
         source = (_REPO / "src").joinpath(*module_name.split(".")).with_suffix(".py")
         assert source.is_file(), f"{command} points at {module_name}, whose source is missing"
         for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
-            if (
-                isinstance(node, ast.ImportFrom)
-                and node.module == "epics_mcp.cli_common"
-                and {alias.name for alias in node.names} & _ENGINE_GATE_NAMES
-            ):
+            if isinstance(node, ast.Call) and _called_name(node.func) in _ENGINE_GATE_NAMES:
                 aware.add(command)
     return aware
 
@@ -150,11 +176,14 @@ def _core_commands() -> set[str]:
     return set(_declared_commands()) - _display_aware_commands()
 
 
-#: Every console entry point, for properties every CLI must hold regardless of the engine.
-#: DERIVED, because the hand-written version of this tuple named four of seven: it was written
-#: when there were four and never grew with ``epics-init``, ``epics-testpv`` or the server, so
-#: three commands sat outside a guard whose whole point is that it holds for all of them.
-_ALL_CLI_MODULES = tuple(sorted(_declared_commands().values()))
+#: Every console entry point as ``(module, command)``, for properties every CLI must hold
+#: regardless of the engine. DERIVED, because the hand-written version of this named four of
+#: seven: it was written when there were four and never grew with ``epics-init``, ``epics-testpv``
+#: or the server, so three commands sat outside a guard whose whole point is that it holds for all
+#: of them. The command travels with the module because the guard asserts the usage line.
+_ALL_ENTRY_POINTS = tuple(
+    sorted((module, command) for command, module in _declared_commands().items())
+)
 
 
 @pytest.fixture
@@ -266,16 +295,23 @@ def test_the_tools_page_names_the_same_core_commands_as_the_refusal() -> None:
     enumerate every surface that describes a behaviour rather than to recall them, and this is that
     enumeration turned into a guard for the one fact that had two homes.
 
-    Anchored on the phrase rather than on a line number, and matched over the whitespace-normalized
-    page, because the sentence is hand-wrapped and a line number is the weaker anchor.
+    Anchored on the phrase rather than on a line number, because the sentence is hand-wrapped and
+    a line number is the weaker anchor. Bounded by its PARAGRAPH: bounding the claim by the
+    preceding full stop instead reaches back over anything that carries none, which in Markdown is
+    most headings, bullets and table cells, so a command named in a heading above would be read as
+    part of the claim and the page could name four while this guard read five.
     """
-    prose = " ".join((_REPO / "docs" / "tools.md").read_text(encoding="utf-8").split())
-    sentences = re.findall(r"[^.]*are part of the core install", prose)
+    page = (_REPO / "docs" / "tools.md").read_text(encoding="utf-8")
+    claiming = [
+        " ".join(block.split())
+        for block in _PARAGRAPH_BREAK.split(page)
+        if _CORE_INSTALL_ANCHOR in " ".join(block.split())
+    ]
 
-    assert len(sentences) == 1, (
-        f"expected exactly one 'part of the core install' sentence, found {len(sentences)}"
+    assert len(claiming) == 1, (
+        f"expected exactly one paragraph claiming {_CORE_INSTALL_ANCHOR!r}, found {len(claiming)}"
     )
-    listed = set(_COMMAND_IN_PROSE.findall(sentences[0]))
+    listed = set(_COMMAND_IN_PROSE.findall(claiming[0].split(_CORE_INSTALL_ANCHOR)[0]))
     core = _core_commands()
 
     assert listed == core, (
@@ -700,22 +736,28 @@ def test_the_absent_and_broken_messages_do_not_share_their_advice(
     assert "which is not installed" not in broken
 
 
-@pytest.mark.parametrize("module_name", _ALL_CLI_MODULES)
-def test_help_survives_a_legacy_encoded_console(module_name: str) -> None:
+@pytest.mark.parametrize(("module_name", "command"), _ALL_ENTRY_POINTS)
+def test_help_survives_a_legacy_encoded_console(module_name: str, command: str) -> None:
     """``--help`` must never die with a bare traceback on a cp1252 console (QA-8).
 
     Measured on Windows before the fix: ``epics-coverage --help`` and ``epics-crossplane --help``
     raised ``UnicodeEncodeError`` on the U+2194 arrow in their parser description whenever stdout
     was not UTF-8 (any redirected or legacy-encoded console), because ``configure_stdout()`` ran
-    AFTER ``parse_args`` and argparse prints the help inside it. The doctor and diagnose help
-    texts are ASCII today, so they pass either way; they are parametrized in anyway so a future
-    non-ASCII character in their help cannot re-open the hole.
+    AFTER ``parse_args`` and argparse prints the help inside it. Most of the other help texts are
+    ASCII today, so they pass either way; every declared entry point is parametrized in anyway so
+    a future non-ASCII character in any of them cannot re-open the hole.
 
     ``PYTHONIOENCODING=cp1252:strict`` forces the legacy stream on every platform, so this runs
     red-provably on Linux CI too, not only on a Windows console.
 
-    ⚠️ The exit code is now pinned to 0 for all four. It used to accept ``(0, 2)``, because 2 was
-    the engine refusal that legitimately preceded parsing on a core-only install. QA-42 abolished
+    ⚠️ The usage line is asserted, not just the exit code, because the three negatives below are
+    all satisfied by a command that prints NOTHING: a module that loses its ``__main__`` block
+    exits 0 with empty output and would pass a guard about the help text without ever printing
+    one. Its sibling above already asserts the same line.
+
+    ⚠️ The exit code is pinned to 0 for every one of them. It used to accept ``(0, 2)``, because
+    2 was the engine refusal that legitimately preceded parsing on a core-only install. QA-42
+    abolished
     that outcome, and leaving the tolerance would have kept a standing permission for the very
     regression the ticket removed, in the ONE environment that reproduces a published install: this
     module is not in ``conftest``'s ``collect_ignore``, so CI runs it with the engine genuinely
@@ -737,3 +779,6 @@ def test_help_survives_a_legacy_encoded_console(module_name: str) -> None:
     assert "UnicodeEncodeError" not in result.stderr, result.stderr[-800:]
     assert "Traceback" not in result.stderr, result.stderr[-800:]
     assert result.returncode == 0, result.stderr[-800:]
+    assert f"usage: {command}" in result.stdout, (
+        f"{command} --help exited 0 without printing a usage line: {result.stdout[:200]!r}"
+    )
