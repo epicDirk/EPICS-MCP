@@ -190,7 +190,9 @@ PRESETS: Mapping[str, Preset] = {
         summary=(
             "Every plane this server speaks: live PVs, ChannelFinder, Archiver (mgmt and "
             "retrieval), Alarm Logger, Naming Service and Olog. Delete the lines you have no "
-            "service for; an unset URL disables that plane with no network call."
+            "service for; an unset URL disables that plane with no network call. The one "
+            "exception is EPICS_MCP_ARCHIVER_RETRIEVAL_URL, which falls back to the mgmt URL "
+            "rather than switching retrieval off."
         ),
         env={
             **_FACILITY_SEARCH,

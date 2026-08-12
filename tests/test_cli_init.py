@@ -2,9 +2,11 @@
 
 Two properties carry most of the weight here and neither is obvious from reading the code:
 
-* the emitted block goes to STDOUT and everything the command says goes to STDERR, which is what
-  makes ``epics-init --preset X > .mcp.json`` produce a usable file rather than one with a warning
-  paragraph in it;
+* the emitted block goes to STDOUT and everything the command says goes to STDERR, so the block
+  stays machine-readable no matter how much the command has to say alongside it. ``--out PATH`` is
+  the supported way to get a file (it promises UTF-8 with LF, which a shell redirect cannot), but
+  the split still carries the redirect case: ``> .mcp.json`` remains something a reader will type,
+  and it has to yield a parseable file rather than one with a warning paragraph in it;
 * every preset disables the EPICS auto-address search EXPLICITLY. Omitting those two lines is
   silent: EPICS defaults that search to ON, so the config would broadcast PV searches into the
   local subnets while looking narrower than it is. A test is the only thing that notices.
@@ -23,6 +25,7 @@ import pytest
 
 from epics_mcp import cli_doctor, cli_init
 from epics_mcp.presets import (
+    _PLACEHOLDER_RE,
     PRESETS,
     SERVER_COMMAND,
     SERVER_KEY,
@@ -33,6 +36,11 @@ from epics_mcp.presets import (
     stale_config_vars,
     with_overrides,
 )
+
+#: The distinct ``<placeholder>`` tokens of one value, read with the detector's OWN pattern so the
+#: count cannot drift away from what ``open_placeholders`` actually sees (a second regex here would
+#: be a second, weaker copy of the rule under test).
+_TOKENS = _PLACEHOLDER_RE.findall
 
 
 def _emitted_env(capsys: pytest.CaptureFixture[str]) -> dict[str, str]:
@@ -70,6 +78,30 @@ class TestPresetData:
 
         assert needs_editing == ["full", "ioc-archiver", "ioc-only"]
         assert open_placeholders(PRESETS["sandbox"].env) == []
+
+    def test_ioc_archiver_carries_the_three_entries_the_deployment_guide_promises(self) -> None:
+        """``docs/deployment.md`` tells a reader ``epics-init`` names "three of them" for this
+        preset, and until now nothing held that number.
+
+        BOTH figures, because the page and the function count DIFFERENT things and only agree here
+        by accident. The page says "placeholder"; the function returns ENTRIES, one per variable.
+        ``ioc-archiver`` carries three entries built from two distinct placeholders, since both
+        address lists take ``<gateway-or-ioc-host>``. Pinning only the first would leave a guard
+        that looks like it protects the sentence on the page and protects a different number, and
+        a later preset that added a variable reusing an existing placeholder would move one figure
+        without the other.
+
+        Red-proof: give either address list a concrete value in ``presets.PRESETS`` and the entry
+        count drops to 2; add a third variable carrying ``<gateway-or-ioc-host>`` and the entry
+        count rises while the distinct count does not.
+        """
+        entries = open_placeholders(PRESETS["ioc-archiver"].env)
+        distinct = {
+            token for value in PRESETS["ioc-archiver"].env.values() for token in _TOKENS(value)
+        }
+
+        assert len(entries) == 3  # what the page counts: the lines the command prints
+        assert len(distinct) == 2  # what the word "placeholder" counts: the blanks to fill in
 
     def test_open_placeholders_names_the_entry_not_just_the_variable(self) -> None:
         """The caller prints these verbatim, so the value has to travel with the name: a reader
@@ -185,8 +217,10 @@ class TestCommandLine:
     def test_placeholders_are_reported_on_stderr_and_leave_stdout_pipeable(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """THE stream contract. Redirecting stdout has to yield a parseable config even while the
-        command is complaining, otherwise ``> .mcp.json`` produces a broken file."""
+        """THE stream contract. Stdout has to stay a parseable config even while the command is
+        complaining on stderr, or every way of capturing the block breaks at once: ``--out``, a
+        pipe, and the ``> .mcp.json`` redirect a reader still reaches for even though ``--out`` is
+        what the pages now teach."""
         exit_code = cli_init.main(["--preset", "full"])
         captured = capsys.readouterr()
 

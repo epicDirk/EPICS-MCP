@@ -30,7 +30,8 @@ Exit code:
   this does NOT promise a file. While placeholders remain the block is printed and the file is
   deliberately not written, and the exit stays ``0`` because nothing FAILED: the configuration is
   simply not finished yet. A script that needs the file has to test for the file, not for the code;
-* ``1``: the check ran and a configured plane HARD-failed;
+* ``1``: the check ran and a configured plane HARD-failed, or the check itself broke internally.
+  The doctor gives those two the same code deliberately and tells them apart on stderr;
 * ``2``: a usage error (unknown preset, malformed ``--set``, bad arguments), or a request that
   cannot be carried out (``--out`` onto an existing file without ``--force``, a missing parent
   directory, ``--absolute-command`` with nothing to resolve). Both are the same answer, "you asked
@@ -235,13 +236,20 @@ def _write_block(path: str, block: str, *, force: bool) -> str | None:
 
 
 def _warn_about_write_gate(env: Mapping[str, str]) -> None:
-    """Say so when the composed configuration arms a write gate. Nothing else will.
+    """Say so when the composed configuration arms a write gate, and say what it costs at START.
 
-    ``epics-doctor`` probes service planes and never reads the write gates, so the check that runs
-    next cannot see this and will report a clean configuration that either mutates a facility or
-    refuses to start. The refusal is the likelier of the two: a write-enabled server needs a durable
-    ``EPICS_MCP_AUDIT_LOG_FILE`` and a loopback-only search reach, and it exits rather than warns
-    when either is missing, which a client shows as nothing more than "server not connected".
+    ``epics-doctor`` PRINTS the effective write posture of both gates (its "Write gates" block), so
+    this is no longer the only mention an armed gate gets. It stays for the two things that block
+    deliberately does not cover: with ``--no-check`` no doctor runs at all, and the doctor reports
+    what the gates are SET to without evaluating whether a server would start on them. The refusal
+    is the likelier outcome of the two, and a client shows it as nothing more than "server not
+    connected".
+
+    ⚠️ The start conditions are NOT the same for the two gates, and stating them as one was wrong:
+    a durable ``EPICS_MCP_AUDIT_LOG_FILE`` is required by BOTH, while the non-empty allowlist
+    pattern and the loopback-only search reach are conditions of the PV gate ALONE. Measured: an
+    Olog-write-enabled server starts with the subnet broadcast search on, because both checks hang
+    off ``allow_pv_write`` (``safety.py``, ``server.main``).
 
     Only reachable through ``--set``, since no preset arms a gate: turning one on is a decision to
     make deliberately, not one to inherit from a flag.
@@ -253,11 +261,17 @@ def _warn_about_write_gate(env: Mapping[str, str]) -> None:
     )
     if not armed:
         return
+    pv_conditions = (
+        " The PV gate additionally refuses an empty EPICS_MCP_PV_WRITE_PATTERN and a search reach "
+        "beyond loopback; the logbook gate has neither of those conditions."
+        if "EPICS_MCP_ALLOW_PV_WRITE" in armed
+        else ""
+    )
     sys.stderr.write(
-        f"epics-init: this configuration ARMS a write gate ({', '.join(armed)}). The check below "
-        "does not look at write gates, so a clean report says nothing about it. Such a server also "
-        "refuses to start without a durable EPICS_MCP_AUDIT_LOG_FILE and a loopback-only search "
-        "reach. See the write-gate section of docs/safety.md before you use this block.\n"
+        f"epics-init: this configuration ARMS a write gate ({', '.join(armed)}). Such a server "
+        "refuses to start without a durable EPICS_MCP_AUDIT_LOG_FILE." + pv_conditions + " The "
+        "check below prints the resulting posture in its 'Write gates' block, but it does not "
+        "evaluate whether the server would start. See docs/safety.md before you use this block.\n"
     )
 
 
