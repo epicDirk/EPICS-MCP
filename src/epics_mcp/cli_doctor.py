@@ -4,9 +4,11 @@ Probes every CONFIGURED plane (a transport probe, refined on success by an ident
 two requests for a healthy plane, THREE on the archiver, whose identified appliance is also asked
 whether it is ingesting; retries on a 5xx add more) and prints whether it is reachable,
 whether the CA bundle works, whether the service **identifies itself as the one that URL is
-supposed to point at**, and what the ChannelFinder privacy redaction is set to, the ``flutter
-doctor`` of this server. Read-only, it probes, never writes, and it touches exactly the planes
-that are CONFIGURED (a disabled plane makes no network call).
+supposed to point at**, what the ChannelFinder privacy redaction is set to, and what the two write
+gates would allow and where, the ``flutter doctor`` of this server. Read-only, it probes, never
+writes, and it touches exactly the planes that are CONFIGURED (a disabled plane makes no network
+call). ⚠️ The write-gate block is INFORMATIVE: it never moves the verdict or the exit code, and it
+describes THIS process's environment rather than a running server's.
 
 Exit code (a DELIBERATE convention, unlike the other CLIs where a finding is exit 0, doctor is
 a scriptable pass/fail):
@@ -15,15 +17,18 @@ a scriptable pass/fail):
   reachable with its identity ``unverified``, a 2xx that just could not be named, or ``no_ingest``,
   identity proven but the service is not doing its job, which is a finding and not a failure);
 * ``1``: a configured plane HARD-failed (unreachable / ca_error / api_error / config_error /
-  backend_down / probe-disconnect);
-* ``2``: a usage error (bad arguments, or an internal EpicsError);
+  backend_down / probe-disconnect), **or an internal EpicsError**. Those two deliberately share a
+  code (QA-15, argued at the ``except`` in :func:`main`) and are told apart on stderr, which only
+  the internal one writes;
+* ``2``: a usage error, bad arguments only (argparse's own convention);
 * ``3``: INCONCLUSIVE: a configured plane is reachable but its identity probe FAILED (a served
   non-2xx like a 401/404, a transport error, or a refused redirect on the identity endpoint). Not a
   hard failure (the plane's TOOL endpoints may work), but not a silent all-clear either.
 
 The exit code relates to ``--json`` as: ``0`` = ``ok`` ∧ no ``inconclusive_identity_planes``; ``3``
-= ``ok`` ∧ some ``inconclusive_identity_planes``; ``1`` = not ``ok``; ``2`` = usage/internal. So
-``ok`` alone is True for BOTH exit 0 and exit 3, do NOT derive the exit code from ``ok`` alone.
+= ``ok`` ∧ some ``inconclusive_identity_planes``; ``1`` = not ``ok``, or an internal error and no
+report at all; ``2`` = usage. So ``ok`` alone is True for BOTH exit 0 and exit 3, do NOT derive the
+exit code from ``ok`` alone.
 
 ⚠️ Exit ``0`` means "nothing failed", NOT "everything was confirmed": a plane can be reachable with
 its identity unverified and still exit 0 (that is honest, not healthy, see ``doctor.py``). A
@@ -49,7 +54,12 @@ from typing import Literal
 
 from epics_mcp.cli_common import add_version_argument, configure_stdout, positive_timeout
 from epics_mcp.errors import EpicsError
-from epics_mcp.services.doctor import DoctorReport, run_doctor
+from epics_mcp.services.doctor import (
+    DoctorReport,
+    OlogWriteGateReport,
+    PvWriteGateReport,
+    run_doctor,
+)
 
 #: One glyph per status for the human-readable render (deterministic). A status gets a mark of
 #: its own rather than borrowing ✓ or ✗ when it is neither "confirmed" nor "broken". Every one of
@@ -103,6 +113,115 @@ def _exit_category(report: DoctorReport) -> Literal["failed", "inconclusive", "c
 _EXIT_CODE: dict[str, int] = {"failed": 1, "inconclusive": 3, "clean": 0}
 
 
+def _pv_write_lines(pv: PvWriteGateReport) -> list[str]:
+    """The PV write gate's lines: whether it is armed, WHAT it allows, and WHERE a write can go.
+
+    The "where" half is the one an approver actually asks for, and it is why the reach appears
+    here rather than being left to the live plane's own posture line. Those two answer different
+    questions and can disagree: the live line reports the ACTIVE provider, the write gate demands
+    both, so a configuration can read ``localhost-isolated`` up there and still be refused a
+    write-enabled start. Measured, not feared. This line is computed with the gate's own function,
+    so it is the gate's answer rather than a second opinion about it.
+    """
+    if not pv.armed:
+        return ["  PV write:   OFF (no PV write can leave this server)"]
+    lines = ["  PV write:   ARMED"]
+    if not pv.name_pattern:
+        lines.append(
+            "              PV names allowed: (none set, so a write-enabled server refuses to start)"
+        )
+    elif pv.pattern_allows_every_name:
+        lines.append(f"              PV names allowed: {pv.name_pattern} (this allows EVERY PV)")
+    else:
+        lines.append(f"              PV names allowed: {pv.name_pattern}")
+        lines.append("              (a regular expression; the WHOLE name has to match)")
+    lines.append(f"              at most {pv.rate_limit_per_minute} writes per minute")
+    if pv.search_reach_violations:
+        lines.append(
+            "              search reach: NOT loopback-only, so a write-enabled server refuses "
+            "to start:"
+        )
+        lines += [f"                {violation}" for violation in pv.search_reach_violations]
+    else:
+        lines.append("              search reach: loopback-only")
+    return lines
+
+
+def _olog_write_lines(olog: OlogWriteGateReport) -> list[str]:
+    """The Olog write gate's lines. Two of its states are read backwards without a word of prose.
+
+    An EMPTY logbook allowlist on an armed gate is deny-all, not unrestricted, and a target that
+    the test-server boundary refuses makes an ARMED gate write nothing at all. Both are stated in
+    words rather than left to the reader, because the naive reading of each is its opposite. And
+    an allowlisted REMOTE target is called what it is: those writes reach a real logbook, which is
+    a different approval from a loopback sandbox even though the gate permits both.
+    """
+    if not olog.armed:
+        return ["  Olog write: OFF (no logbook entry can leave this server)"]
+    lines = ["  Olog write: ARMED"]
+    if olog.logbooks:
+        lines.append(f"              logbooks: {', '.join(olog.logbooks)}")
+    else:
+        lines.append("              logbooks: (none set, so every Olog write is denied)")
+    lines.append(f"              at most {olog.rate_limit_per_minute} writes per minute")
+    if not olog.target_url:
+        lines.append("              target: (no Olog URL set, so there is nothing to write to)")
+    elif not olog.target_allowed:
+        lines.append(
+            f"              target: {olog.target_url} is NOT a permitted write target, "
+            "so every write is denied"
+        )
+    elif olog.target_is_loopback:
+        lines.append(f"              target: {olog.target_url} (loopback, a local test server)")
+    else:
+        lines.append(
+            f"              target: {olog.target_url} (REMOTE and allowlisted: these writes "
+            "reach a real logbook)"
+        )
+    return lines
+
+
+def _write_safety_lines(report: DoctorReport) -> list[str]:
+    """The write-gate block: what may be written, and where. Informative, and glyph-free.
+
+    Glyph-free on purpose. The marks are the per-plane vocabulary, explained by a legend that ships
+    with the server; borrowing one here would either invent a pairing that legend has to carry or
+    reuse a mark for a different question. This block states its verdicts in words instead.
+
+    The heading names WHOSE environment was read, which is the block's sharpest limit rather than a
+    caveat: this command runs in its own process, while a running server was started by an MCP
+    client from a different env block. Without that sentence, "PV write: OFF" reads as a statement
+    about the server that is answering the client, and it is not one.
+    """
+    write = report.write_safety
+    lines = [
+        "Write gates (as THIS command's environment has them; a running server may have been",
+        "started with a different one):",
+    ]
+    lines += _pv_write_lines(write.pv)
+    lines += _olog_write_lines(write.olog)
+    audit = write.audit
+    if not audit.path:
+        lines.append(
+            "  audit log:  not set, so the trail goes to stderr and is lost on restart "
+            "(a write-enabled"
+        )
+        lines.append("              server refuses to start without a durable path)")
+    elif audit.writable is True:
+        lines.append(f"  audit log:  {audit.path}, writable")
+    elif audit.writable is False:
+        lines.append(f"  audit log:  {audit.path}, NOT usable: {audit.note}")
+    else:
+        lines.append(f"  audit log:  {audit.path}, not decidable here: {audit.note}")
+    return lines
+
+
+def _armed_gate_names(report: DoctorReport) -> list[str]:
+    """The write gates that are ARMED, for the verdict tail. Empty is the normal case."""
+    write = report.write_safety
+    return [name for name, armed in (("PV", write.pv.armed), ("Olog", write.olog.armed)) if armed]
+
+
 def _render(report: DoctorReport) -> str:
     """Render a human-readable per-plane report (deterministic)."""
     lines = ["EPICS-MCP doctor, read-only per-plane config check", ""]
@@ -117,6 +236,8 @@ def _render(report: DoctorReport) -> str:
     props = ", ".join(report.privacy.cf_safe_property_names) or "(empty, all properties redacted)"
     lines.append(f"  owner allowlist:    {owners}")
     lines.append(f"  property allowlist: {props}")
+    lines.append("")
+    lines += _write_safety_lines(report)
     lines.append("")
     # One precedence, shared with main() via _exit_category, so the verdict word and the exit code
     # can never drift: failed → PROBLEM (exit 1), inconclusive → INCONCLUSIVE (exit 3), clean → OK.
@@ -175,13 +296,27 @@ def _render(report: DoctorReport) -> str:
             f"OK, no plane failed, but {len(report.unverified_planes)} could not prove its "
             f"identity: {unverified}. Reachable ≠ confirmed; see the '?' lines above."
         )
+    # An ARMED write gate earns a sentence ON the verdict, not only in the block above it. The
+    # verdict is the LAST line, it is labelled "Overall", and by layout convention everything above
+    # it is in its scope, so "Overall: OK" under a line reading "PV write: ARMED" reads as an
+    # all-clear on the write posture. It is not one: nothing in this report checks a write gate,
+    # it only reports what one is set to. Same remedy the degraded and inconclusive branches above
+    # already use, for the same reason, and like them it changes the WORD and not the exit code.
     lines.append(f"Overall: {verdict}")
+    armed = _armed_gate_names(report)
+    if armed:
+        subject = f"the {' and '.join(armed)} write gate" + ("s are" if len(armed) > 1 else " is")
+        lines.append(
+            f"         Nothing here CHECKED a write gate, and {subject} ARMED "
+            "(see the block above)."
+        )
     return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the self-check, print the report. Returns 0 (clean) / 1 (a plane hard-failed) / 2
-    (usage or internal error) / 3 (reachable, but an identity probe failed, inconclusive)."""
+    """Run the self-check, print the report. Returns 0 (clean) / 1 (a plane hard-failed, OR an
+    internal error, see the ``except`` below) / 2 (a usage error) / 3 (reachable, but an identity
+    probe failed, inconclusive)."""
     # Before the parser (QA-8): argparse prints ``--help`` inside ``parse_args``, so a non-ASCII
     # character in any help text would die on a cp1252 console if the reconfigure came later.
     configure_stdout()

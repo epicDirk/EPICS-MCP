@@ -4,16 +4,21 @@
 an identity probe, so a healthy plane answers up to TWO requests (THREE on the archiver, whose
 identified appliance is also asked whether it is actually ingesting), and reports whether it is
 reachable, whether the CA bundle works, whether the service **identifies itself as the service we
-configured**, and what the ChannelFinder privacy redaction is set to. It is the ``flutter doctor``
-of this server: a new user in a fresh facility runs ``epics-doctor`` and gets an immediate "is my
-config right?" without asking us.
+configured**, what the ChannelFinder privacy redaction is set to, and what the two write gates
+would allow and where. It is the ``flutter doctor`` of this server: a new user in a fresh facility
+runs ``epics-doctor`` and gets an immediate "is my config right?" without asking us.
 
 Design (mirrors :mod:`epics_mcp.services.diagnose`):
 
 * One :func:`asyncio.gather` fans out all planes; each gatherer is TOTAL (catches its own errors →
   a :class:`PlaneCheck`, never raises), so one dead plane cannot abort the report.
 * An empty service URL means the plane is DISABLED, no client is built and no network call is
-  made (the empty-URL-disables discipline). A disabled plane is not a failure.
+  made (the empty-URL-disables discipline). A disabled plane is not a failure. ⚠️ ONE variable is
+  outside that rule and the rule used to be stated here as universal: an empty
+  ``EPICS_MCP_ARCHIVER_RETRIEVAL_URL`` does NOT disable the retrieval plane, it falls back to the
+  mgmt URL and is probed, because a single-JVM appliance legitimately leaves it empty (see
+  :func:`_check_retrieval_plane`, which spells out why treating it as "off" would report a live
+  endpoint as disabled).
 * Reachability is proven by the client's ``check_connectivity`` probe. Its failure is classified
   into THREE buckets, not two, so a *reachable but wrong-endpoint* Archiver (a served non-2xx, e.g.
   ``EPICS_MCP_ARCHIVER_URL`` pointing at the retrieval webapp) is reported ``api_error``
@@ -36,18 +41,22 @@ Design (mirrors :mod:`epics_mcp.services.diagnose`):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
+import stat
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
 from epics_mcp.config import EpicsConfig, get_config
-from epics_mcp.epics_address import auto_addr_search_disabled
+from epics_mcp.epics_address import auto_addr_search_disabled, write_reach_violations
 from epics_mcp.errors import EpicsError
+from epics_mcp.olog_safety import split_name_list, write_target_allowed
 from epics_mcp.services._http import (
     build_retrying_session,
     http_status,
+    is_loopback_url,
     is_retry_error,
     is_ssl_error,
     rest_get_json,
@@ -270,11 +279,104 @@ class PrivacyReport(_Model):
     cf_safe_property_names: list[str]
 
 
+class PvWriteGateReport(_Model):
+    """The PV write gate's effective posture, as the launcher's environment has it."""
+
+    #: True iff ``EPICS_MCP_ALLOW_PV_WRITE`` is on. It says the gate is ARMED, never that a write
+    #: would succeed: the name allowlist, the rate limit and the start conditions all still apply.
+    armed: bool
+    #: The regex allowlist verbatim. Empty while armed makes the server REFUSE TO START
+    #: (``safety.py``), which is the opposite of "every PV is writable".
+    name_pattern: str
+    #: True iff the pattern is the sanctioned allow-everything spelling. Compared as a STRING
+    #: against a closed set, never by interpreting the expression: deciding whether an arbitrary
+    #: regex matches every name is not reliably doable, and a wrong guess would be a silent
+    #: all-clear on the widest possible allowlist.
+    pattern_allows_every_name: bool
+    #: Writes admitted per 60 s window.
+    rate_limit_per_minute: int
+    #: Every way the EPICS client search reach extends beyond loopback, from
+    #: :func:`~epics_mcp.epics_address.write_reach_violations`, the SAME function the gate calls at
+    #: construction. Non-empty while ``armed`` means the process refuses to start.
+    #: ⚠️ This can disagree with the live plane's own search-posture line, and the disagreement is
+    #: real rather than a defect: that line reports the ACTIVE provider, this one covers BOTH,
+    #: because the write gate does.
+    search_reach_violations: list[str]
+
+
+class OlogWriteGateReport(_Model):
+    """The Olog logbook write gate's effective posture.
+
+    A SEPARATE gate: nothing here is implied by the PV one, and the two share only the audit sink.
+    """
+
+    armed: bool
+    #: The exact, case-sensitive logbook names a write may target, sorted. EMPTY while armed is
+    #: DENY-ALL rather than unrestricted (``olog_safety``), which is why the render says so in
+    #: words: the naive reading of an empty allowlist is the exact opposite of what it means.
+    logbooks: list[str]
+    rate_limit_per_minute: int
+    #: The configured Olog base URL, credentials redacted. Empty when the plane is off.
+    target_url: str
+    #: True iff a write to that URL would pass the gate's test-server boundary, decided by
+    #: :func:`~epics_mcp.olog_safety.write_target_allowed`, the SAME predicate the gate applies.
+    target_allowed: bool
+    #: True iff the target is a loopback host, i.e. a local test server. Deliberately separate from
+    #: ``target_allowed``, which is ALSO True for an allowlisted REMOTE https target: that one
+    #: reaches a real logbook, and reading the two as one is how a sandbox posture gets claimed for
+    #: a production one.
+    target_is_loopback: bool
+
+
+class AuditSinkReport(_Model):
+    """Where the audit trail of BOTH gates goes, and whether it can be appended to.
+
+    One object rather than a field per gate, because the sink genuinely IS shared: the two gates
+    write to the same file through two loggers of their own (see ``server.main``).
+    """
+
+    #: ``EPICS_MCP_AUDIT_LOG_FILE`` verbatim; empty means stderr, which no restart survives.
+    path: str
+    #: True/False when it could be decided, ``None`` when it could not. See
+    #: :func:`_probe_audit_sink`, which also says what it cannot see and why.
+    writable: bool | None
+    #: Why. Never an empty string: an empty note would satisfy every containment assertion a test
+    #: could make while telling the reader nothing.
+    note: str | None = None
+
+
+class WriteSafetyReport(_Model):
+    """Can this server write anywhere, and if so, exactly where?
+
+    INFORMATIVE: it changes neither ``ok``, nor the verdict category, nor the exit code. It is not
+    a plane and carries no :data:`PlaneStatus`, deliberately, so it stays outside the status,
+    glyph, plane-name and legend guards that exist for the per-plane half of the report.
+
+    ⚠️ It describes the environment of THIS process. ``epics-doctor`` runs in its own process and
+    reads ``os.environ``, while a running server was started by an MCP client from a different env
+    block and built its gates from the config captured at ITS start. The render says so in its
+    heading, because reading this block as a statement about the running server is the one mistake
+    that turns it into a false all-clear.
+
+    Nested rather than flat for three reasons, each measured rather than preferred: the two gates
+    are not the same shape (a regex versus a name set plus a URL boundary), the audit sink is
+    genuinely shared, and the flat configuration names would carry an old defect into a new wire
+    contract (``write_rate_limit`` reads global and is PV-only).
+    """
+
+    pv: PvWriteGateReport
+    olog: OlogWriteGateReport
+    audit: AuditSinkReport
+
+
 class DoctorReport(_Model):
-    """The full self-check: every plane + the privacy posture + an overall pass/fail."""
+    """The full self-check: every plane + the privacy posture + the write posture + a pass/fail."""
 
     planes: list[PlaneCheck]
     privacy: PrivacyReport
+    #: What the two write gates would allow, and where. Informative: it never moves ``ok``, the
+    #: verdict category or the exit code.
+    write_safety: WriteSafetyReport
     #: True iff no configured plane HARD-FAILED (nothing in ``_FAILING_STATUSES``). Note what this
     #: does NOT say: a plane can be reachable with its identity ``unverified`` (still exit 0) OR its
     #: identity probe ``identity_probe_failed`` (exit 3) and still leave ``ok`` True, ``ok`` alone
@@ -539,8 +641,10 @@ def _identity_probe_failed(plane: str, detail: str) -> PlaneCheck:
         ca_ok=True,
         status="identity_probe_failed",
         identified=False,
-        # Appended INSIDE the constructor, not at its five call sites: every identity probe reaches
-        # this status through here, so there is no site left that could forget the remedy.
+        # Appended INSIDE the constructor rather than at the five identity probes that route
+        # through _identity_fetch_failure: every one of them reaches this status through here, so
+        # there is no site left that could forget the remedy. (The five are that neighbour's call
+        # sites, not this function's, which has one; the figure sat on the wrong function.)
         detail=_with_remedy("identity_probe_failed", detail),
     )
 
@@ -1231,10 +1335,159 @@ def _privacy_report(cfg: EpicsConfig) -> PrivacyReport:
     )
 
 
-async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = None) -> DoctorReport:
-    """Probe every configured plane read-only and report reachability + CA + privacy posture.
+#: POSIX only. Absent on Windows (measured: ``hasattr(os, "O_NONBLOCK")`` is False on CPython 3.14
+#: there), so this is 0 and the flag word is unchanged. On POSIX it keeps a readerless FIFO from
+#: blocking the open forever, which matters because :func:`_probe_audit_sink` runs OUTSIDE the
+#: ``asyncio.gather`` and no timeout would rescue a hang. Annotated because a bare ``getattr`` is
+#: ``Any`` and ``--strict`` propagates that into the flag expression.
+_O_NONBLOCK: int = getattr(os, "O_NONBLOCK", 0)
 
-    Read-only, it probes, never writes. It reaches exactly what is CONFIGURED and nothing else: a
+#: The spellings of "allow every PV name" this project sanctions. ``safety.py`` names ``.*`` as the
+#: explicit way to say it; the anchored forms are the same intent written the way an operator who
+#: copied the allowlist style would write it. A CLOSED set on purpose: the alternative is deciding
+#: whether an arbitrary regex is universal, which cannot be done reliably, and whose failure mode
+#: here would be staying silent about the widest allowlist there is.
+_ALLOW_EVERY_PV_NAME = frozenset({".*", "^.*$", ".*?", "^.*"})
+
+
+def _probe_audit_sink(configured_path: str) -> tuple[bool | None, str]:
+    """Would the audit sink accept an append? Probed by opening a handle, never by creating one.
+
+    This answers the question the REAL sink asks, which is not "is this file writable". Both gates
+    build ``logging.FileHandler(path, encoding="utf-8")`` with the stdlib defaults, which resolves
+    ``os.path.abspath`` and opens EAGERLY for append, CREATING the file when it is missing and NOT
+    creating its parent. So the question is "can this be appended to, or created", and answering
+    the neighbouring question is how the obvious probe gets it wrong.
+
+    ``os.access`` is deliberately NOT used. Measured on Windows against the sink itself as ground
+    truth, with both controls: it returns True for a file whose access control list denies writing
+    and that a real append-open rejects with ``PermissionError``, True for a DIRECTORY, and True
+    for a file whose image a running process has mapped. It reads the DOS read-only ATTRIBUTE, not
+    the access control list, and on a directory that attribute means nothing at all.
+
+    Opening a handle is read-only in the sense that matters, and that was measured rather than
+    assumed: size, mtime, atime and ctime are identical before and after a successful probe, the
+    content is unchanged, and the probe succeeds while a SECOND process holds the same file open
+    through a real ``logging.FileHandler``, so a running server does not make its own sink look
+    broken.
+
+    What it cannot see, named rather than implied:
+
+    * **A file that does not exist yet.** Nothing read-only on Windows predicts whether the create
+      would succeed: ``os.access(parent, os.W_OK)`` and ``os.access(parent, os.W_OK | os.X_OK)``
+      are both True for system directories whose access control list denies file creation, and
+      ``os.supports_effective_ids`` is empty there. That branch returns ``None``, which means
+      undecidable, not "no". The one half that IS decidable is the half the sink itself decides: a
+      MISSING PARENT is a hard False, because the handler creates no directories.
+    * **Anything past the open**: free space, a quota, a later permission change, and the encoder
+      (a ``UnicodeEncodeError`` at write time is swallowed by ``logging`` and no open-time probe of
+      any kind can see it). And the verdict describes the instant of the probe, nothing later.
+    * **Which denial it was.** ``os.open`` goes through the C runtime on Windows, so only ``errno``
+      is set and an access denial and a sharing violation arrive as the same one.
+    * **A slow network path.** A sink on an unreachable network share can stall this call, and
+      there is no timeout around it. The tempting repair, running it in a thread under
+      ``asyncio.wait_for``, was probed and REJECTED as cosmetic: the wait would return while the
+      worker thread stayed blocked, and the interpreter joins that thread at exit, so the command
+      would hang anyway, one line later.
+
+    Returns ``(verdict, note)`` and raises nothing, by construction. That last part is not decor:
+    this runs outside the total ``asyncio.gather`` and ``cli_doctor`` catches only ``EpicsError``,
+    so anything escaping here would leave the command as a bare traceback.
+    """
+    if not configured_path:
+        return None, (
+            "no path set, so the trail goes to stderr and does not survive a restart "
+            "(EPICS_MCP_AUDIT_LOG_FILE)"
+        )
+    try:
+        resolved = os.path.abspath(os.fspath(configured_path))
+    except (OSError, ValueError, TypeError) as exc:
+        # False rather than None: a measured hard failure is a finding, not an open question. The
+        # sink does not survive these either, which is why both gates now catch the same three.
+        return False, f"unusable path ({type(exc).__name__}: {exc})"
+
+    # os.stat rather than os.path.exists, and that is not a style choice: the ``os.path``
+    # predicates swallow ValueError and OSError and answer False, so an UNUSABLE path (a NUL byte,
+    # a name the filesystem rejects) would arrive at the branch below wearing the shape of "not
+    # there yet" and be reported as undecided. Measured: os.stat tells the three cases apart, a NUL
+    # raising ValueError, a missing file FileNotFoundError, a rejected name OSError errno 22.
+    try:
+        os.stat(resolved)
+    except FileNotFoundError:
+        parent = os.path.dirname(resolved) or resolved
+        if not os.path.isdir(parent):
+            return False, f"the parent directory {parent} does not exist, and the sink creates none"
+        return None, (
+            f"{resolved} does not exist yet and the sink would create it; whether that create "
+            "succeeds cannot be decided without creating it"
+        )
+    except (OSError, ValueError, TypeError) as exc:
+        return False, f"unusable path ({type(exc).__name__}: {exc})"
+
+    try:
+        handle = os.open(resolved, os.O_WRONLY | os.O_APPEND | _O_NONBLOCK)
+    except (OSError, ValueError, TypeError) as exc:
+        errno_part = f"[Errno {exc.errno}] " if isinstance(exc, OSError) and exc.errno else ""
+        return False, f"cannot be opened for append: {errno_part}{exc}"
+
+    try:
+        try:
+            mode = os.fstat(handle).st_mode
+        except OSError:
+            # The handle opened, which IS the answer; a failing fstat may not downgrade it.
+            mode = stat.S_IFREG
+    finally:
+        with contextlib.suppress(OSError):
+            os.close(handle)
+
+    if not stat.S_ISREG(mode):
+        return False, (
+            f"{resolved} is not a regular file: it accepts an append but keeps no durable trail"
+        )
+    return True, f"{resolved} accepts an append"
+
+
+def _write_safety_report(cfg: EpicsConfig) -> WriteSafetyReport:
+    """The effective posture of both write gates, resolved through the SAME helpers they use.
+
+    ⚠️ It builds NEITHER gate, and that is a requirement rather than an optimisation.
+    Constructing ``SafetyLayer`` raises on configurations this report exists to describe (writes
+    armed with an empty allowlist, or a search reach beyond loopback), and ``OlogWriteGate`` builds
+    a file audit logger on the way. Nor is that theoretical: ``epics-init`` puts the block it has
+    just composed into ``os.environ`` and runs this very command against it, so a doctor that
+    constructed a gate would die on a configuration the onboarding command had just handed the
+    user.
+    """
+    writable, note = _probe_audit_sink(cfg.audit_log_file)
+    return WriteSafetyReport(
+        pv=PvWriteGateReport(
+            armed=cfg.allow_pv_write,
+            name_pattern=cfg.pv_write_pattern,
+            pattern_allows_every_name=cfg.pv_write_pattern in _ALLOW_EVERY_PV_NAME,
+            rate_limit_per_minute=cfg.write_rate_limit,
+            search_reach_violations=write_reach_violations(os.environ),
+        ),
+        olog=OlogWriteGateReport(
+            armed=cfg.allow_olog_write,
+            logbooks=sorted(split_name_list(cfg.olog_write_logbooks)),
+            rate_limit_per_minute=cfg.olog_write_rate_limit,
+            # Through _safe: an Olog base URL is the one string in this block that can carry
+            # ``user:password@``, and doctor output is what an operator pastes into a ticket.
+            target_url=_safe(cfg.olog_url),
+            target_allowed=write_target_allowed(cfg),
+            target_is_loopback=is_loopback_url(cfg.olog_url),
+        ),
+        audit=AuditSinkReport(path=cfg.audit_log_file, writable=writable, note=note),
+    )
+
+
+async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = None) -> DoctorReport:
+    """Probe every plane read-only and report reachability + CA + privacy + the write posture.
+
+    Read-only, it probes, never writes. One clause on that, because one probe touches the
+    filesystem: the audit-sink check OPENS a handle for append and writes zero bytes, creating
+    nothing and leaving size and every timestamp unchanged (measured). It reaches exactly what is
+    CONFIGURED and nothing else: a
     disabled plane makes NO network call, and no plane is touched unless its URL (or the EPICS
     address list, for ``probe_pv``) points there, which, on a configured deployment, may well be a
     real facility. ``ok`` is True iff no configured plane HARD-FAILED, a disabled/info plane never
@@ -1271,6 +1524,7 @@ async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = Non
     return DoctorReport(
         planes=planes,
         privacy=_privacy_report(cfg),
+        write_safety=_write_safety_report(cfg),
         ok=ok,
         verification_complete=not unverified and not inconclusive,
         degraded_planes=degraded,

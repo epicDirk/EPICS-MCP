@@ -11,6 +11,7 @@ identity probe that FAILED, S12).
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import re
 from pathlib import Path
@@ -22,7 +23,14 @@ import requests
 
 from epics_mcp import cli_doctor
 from epics_mcp.config import EpicsConfig
-from epics_mcp.errors import EpicsError
+from epics_mcp.errors import (
+    EpicsError,
+    OlogWriteDeniedError,
+    PVWriteDeniedError,
+    SafetyConfigError,
+)
+from epics_mcp.olog_safety import OlogWriteGate
+from epics_mcp.safety import SafetyLayer
 from epics_mcp.services import doctor
 from epics_mcp.services.doctor import (
     _DEGRADED_STATUSES,
@@ -35,6 +43,7 @@ from epics_mcp.services.doctor import (
     PlaneCheck,
     PlaneStatus,
     PrivacyReport,
+    WriteSafetyReport,
     _check_retrieval_plane,
     _classify_failure,
     _identify,
@@ -43,8 +52,10 @@ from epics_mcp.services.doctor import (
     _identify_naming,
     _identify_retrieval_plane,
     _privacy_report,
+    _probe_audit_sink,
     _safe,
     _with_remedy,
+    _write_safety_report,
     run_doctor,
 )
 from epics_mcp.services.rest_exceptions import RestConnectionError
@@ -82,6 +93,39 @@ class _OkClient:
 
 def _plane(report: DoctorReport, name: str) -> PlaneCheck:
     return next(p for p in report.planes if p.plane == name)
+
+
+#: Every EPICS_MCP_* field the write block reads, so a test that wants a DEFAULT posture gets one
+#: on any machine. ``tests/conftest.py`` strips the six EPICS search vars and deliberately not
+#: these, so without an explicit value a developer who exports EPICS_MCP_ALLOW_PV_WRITE for their
+#: own sandbox would see this file go red for a reason that is not in it.
+_WRITE_GATE_DEFAULTS: dict[str, object] = {
+    "allow_pv_write": False,
+    "pv_write_pattern": "",
+    "write_rate_limit": 10,
+    "allow_olog_write": False,
+    "olog_write_logbooks": "",
+    "olog_write_rate_limit": 5,
+    "olog_write_url_allowlist": "",
+    "olog_write_allow_remote": False,
+    "audit_log_file": "",
+}
+
+
+def _write_config(**overrides: object) -> EpicsConfig:
+    """An EpicsConfig whose write-gate fields are PINNED, never inherited from the environment."""
+    return EpicsConfig(**{**_WRITE_GATE_DEFAULTS, **overrides})  # type: ignore[arg-type]
+
+
+def _disarmed_write_safety() -> WriteSafetyReport:
+    """The write posture of a default configuration: both gates off, sink on stderr."""
+    return _write_safety_report(_write_config())
+
+
+#: A search environment a write-enabled server is allowed to start in. Both providers, because the
+#: write gate demands both (the live plane's own posture line asks only about the active one, which
+#: is why the two can disagree and why the write block computes its own answer).
+_LOOPBACK_ENV = {"EPICS_PVA_AUTO_ADDR_LIST": "NO", "EPICS_CA_AUTO_ADDR_LIST": "NO"}
 
 
 # --- _classify_failure (the 3-bucket core) ---
@@ -1639,6 +1683,10 @@ def test_render_and_exit_agree() -> None:
     would break here.
     """
     privacy = PrivacyReport(cf_safe_owner_accounts=[], cf_safe_property_names=[])
+    # Both gates OFF, so this fixture exercises the verdict WITHOUT the armed-gate tail. The tail
+    # itself is pinned separately (test_an_armed_gate_is_named_on_the_verdict_line), because a
+    # constant here would silently decide which branch every case below takes.
+    write_safety = _disarmed_write_safety()
 
     def _mk(
         *,
@@ -1651,6 +1699,7 @@ def test_render_and_exit_agree() -> None:
         return DoctorReport(
             planes=[],
             privacy=privacy,
+            write_safety=write_safety,
             ok=ok,
             verification_complete=complete,
             degraded_planes=degraded or [],
@@ -1997,3 +2046,363 @@ def test_cli_epicserror_is_distinguishable_from_a_failed_plane(
 
     assert plane.out != "" and plane.err == ""  # a report, nothing on stderr
     assert internal.out == "" and internal.err.startswith("doctor: ")  # the inverse, exactly
+
+
+# --- write-safety posture (BG-DSAFE) ------------------------------------------------------------
+#
+# These deliberately do NOT stop at "the report echoes the config". That assertion cannot fail for
+# any implementation that reads the config, so it measures nothing. What decides whether a write
+# happens is the GATE, so the cross-checks build the real SafetyLayer / OlogWriteGate from the SAME
+# config and show that what the block reports is what those objects do, each with a positive and a
+# negative control.
+
+
+def test_the_reported_pv_pattern_is_the_one_the_real_gate_enforces() -> None:
+    """Cross-check rather than echo: the reported pattern is bound to observed gate behaviour.
+
+    Red-proof: report ``pv_write_pattern`` from any other source (a constant, another field) and
+    the two probes below stop agreeing with the string this asserts on.
+    """
+    pattern = r"^SIM:PS-01:.*-SP$"
+    cfg = _write_config(allow_pv_write=True, pv_write_pattern=pattern)
+    report = _write_safety_report(cfg)
+    gate = SafetyLayer(cfg, environ=_LOOPBACK_ENV)
+
+    assert report.pv.armed is True
+    assert report.pv.name_pattern == pattern
+    gate.check_write_allowed("SIM:PS-01:Cur-SP")  # positive control: the gate admits it
+    with pytest.raises(PVWriteDeniedError):  # negative control: and refuses the neighbour
+        gate.check_write_allowed("SIM:PS-02:Cur-SP")
+
+
+def test_the_reported_pattern_is_flagged_when_it_allows_every_pv() -> None:
+    """``.*`` is the sanctioned way to say "everything", so it has to be LOUD, not merely shown.
+
+    The flag is a string comparison against a closed set, never an attempt to decide regex
+    universality. Both directions, because a flag that is always True is the same as no flag.
+    """
+    wide = _write_safety_report(_write_config(allow_pv_write=True, pv_write_pattern=".*"))
+    narrow = _write_safety_report(
+        _write_config(allow_pv_write=True, pv_write_pattern=r"^SIM:PS-01:.*-SP$")
+    )
+
+    assert wide.pv.pattern_allows_every_name is True
+    assert narrow.pv.pattern_allows_every_name is False
+    # And it is not a stand-in for "the gate is off": on a default config the pattern is EMPTY,
+    # which is a refuse-to-start rather than an allow-all.
+    assert _write_safety_report(_write_config()).pv.pattern_allows_every_name is False
+
+
+def test_the_reported_logbooks_are_the_set_the_real_olog_gate_enforces() -> None:
+    """Cross-check for the Olog half: reported set versus an admitted and a refused write.
+
+    Red-proof: report the raw ``olog_write_logbooks`` string unsplit, or drop the sort, and the
+    equality below fails while both gate probes keep passing, which is exactly the drift it guards.
+    """
+    cfg = _write_config(
+        allow_olog_write=True,
+        olog_write_logbooks=" Commissioning , Operations ",
+        olog_url="http://127.0.0.1:8080/Olog",
+    )
+    report = _write_safety_report(cfg)
+    gate = OlogWriteGate(cfg)
+
+    assert report.olog.logbooks == ["Commissioning", "Operations"]
+    gate.check_write_preconditions(["Commissioning"])  # positive control
+    with pytest.raises(OlogWriteDeniedError):  # negative control
+        gate.check_write_preconditions(["SomewhereElse"])
+
+
+@pytest.mark.parametrize(
+    ("url", "allow_remote", "allowlist", "allowed", "loopback"),
+    [
+        ("http://127.0.0.1:8080/Olog", False, "", True, True),
+        ("https://olog.example.org/Olog", False, "https://olog.example.org/Olog", False, False),
+        ("https://olog.example.org/Olog", True, "https://olog.example.org/Olog", True, False),
+        ("http://olog.example.org/Olog", True, "http://olog.example.org/Olog", False, False),
+        ("garbage", True, "garbage", False, False),
+    ],
+)
+def test_the_reported_target_verdict_matches_what_the_gate_does_to_a_write(
+    url: str, allow_remote: bool, allowlist: str, allowed: bool, loopback: bool
+) -> None:
+    """The WHERE half, cross-checked per case: the report versus a real write attempt.
+
+    ``target_allowed`` and ``target_is_loopback`` are deliberately two fields. The third row is
+    allowed AND remote, i.e. a write that reaches a real logbook, and a reader who took the first
+    field for the second would call that configuration a sandbox.
+    """
+    cfg = _write_config(
+        allow_olog_write=True,
+        olog_write_logbooks="Commissioning",
+        olog_url=url,
+        olog_write_allow_remote=allow_remote,
+        olog_write_url_allowlist=allowlist,
+    )
+    report = _write_safety_report(cfg)
+    assert (report.olog.target_allowed, report.olog.target_is_loopback) == (allowed, loopback)
+
+    gate = OlogWriteGate(cfg)
+    if allowed:
+        gate.check_write_preconditions(["Commissioning"])
+    else:
+        with pytest.raises(OlogWriteDeniedError):
+            gate.check_write_preconditions(["Commissioning"])
+
+
+def test_an_olog_url_with_credentials_is_redacted_in_the_report() -> None:
+    """Doctor output is what an operator pastes into a ticket, and this is the one field of the
+    block whose value can carry ``user:password@``."""
+    cfg = _write_config(olog_url="https://svc:hunter2@olog.example.org/Olog")
+
+    assert "hunter2" not in _write_safety_report(cfg).olog.target_url
+
+
+def test_the_reported_reach_violations_decide_whether_the_real_gate_can_be_built(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cross-check for the reach: no findings exactly when a write-enabled SafetyLayer constructs.
+
+    This is the field with the highest chance of being read off the WRONG source, because the
+    doctor already prints a search posture for the live plane and that one answers a different
+    question (the ACTIVE provider only). Binding it to whether the gate can be BUILT is what keeps
+    the block from inheriting that other answer.
+    """
+    cfg = _write_config(allow_pv_write=True, pv_write_pattern=r"^SIM:PS-01:.*-SP$")
+
+    for name, value in _LOOPBACK_ENV.items():
+        monkeypatch.setenv(name, value)
+    assert _write_safety_report(cfg).pv.search_reach_violations == []
+    SafetyLayer(cfg)  # constructs, i.e. a write-enabled server would start here
+
+    monkeypatch.delenv("EPICS_CA_AUTO_ADDR_LIST")  # one provider's broadcast back ON
+    assert _write_safety_report(cfg).pv.search_reach_violations != []
+    with pytest.raises(SafetyConfigError):
+        SafetyLayer(cfg)
+
+
+def test_the_block_is_built_without_constructing_either_gate() -> None:
+    """The configuration that makes SafetyLayer REFUSE must still produce a report.
+
+    Armed with an empty allowlist is a refuse-to-start, and it is exactly a state an operator needs
+    the doctor to describe. It is also reachable through ``epics-init``, which puts the block it
+    has just composed into ``os.environ`` and runs this command against it.
+
+    Red-proof: construct a SafetyLayer inside ``_write_safety_report`` and this raises
+    SafetyConfigError instead of returning a report.
+    """
+    cfg = _write_config(allow_pv_write=True, pv_write_pattern="")
+
+    report = _write_safety_report(cfg)
+
+    assert (report.pv.armed, report.pv.name_pattern) == (True, "")
+    with pytest.raises(SafetyConfigError):  # the control: the gate really does refuse this config
+        SafetyLayer(cfg, environ=_LOOPBACK_ENV)
+
+
+# --- the audit sink probe -----------------------------------------------------------------------
+
+
+def test_audit_sink_unset_is_undecided_and_says_stderr() -> None:
+    """Not False: stderr IS writable, it merely does not survive a restart. Answering "no" would
+    be a claimed finding about a state that is only un-durable."""
+    writable, note = _probe_audit_sink("")
+
+    assert writable is None
+    assert "stderr" in note
+
+
+def test_audit_sink_accepts_an_append_on_a_real_file(tmp_path: Path) -> None:
+    file = tmp_path / "audit.log"
+    file.write_text("first line\n", encoding="utf-8")
+
+    writable, note = _probe_audit_sink(str(file))
+
+    assert writable is True
+    assert "append" in note
+
+
+def test_probing_an_existing_sink_changes_nothing_about_it(tmp_path: Path) -> None:
+    """The read-only contract at its sharpest. The probe opens a WRITE handle, so prove that it
+    writes nothing and moves no timestamp; ``run_doctor`` documents "it probes, never writes"."""
+    file = tmp_path / "audit.log"
+    file.write_text("first line\n", encoding="utf-8")
+    before = file.stat()
+
+    assert _probe_audit_sink(str(file))[0] is True
+
+    after = file.stat()
+    assert file.read_text(encoding="utf-8") == "first line\n"
+    assert (before.st_size, before.st_mtime_ns) == (after.st_size, after.st_mtime_ns)
+
+
+def test_audit_sink_with_a_missing_parent_is_a_hard_no(tmp_path: Path) -> None:
+    """The one half of the missing-file case that IS decidable: the handler creates no directory,
+    so this configuration cannot work and the report may say so."""
+    writable, note = _probe_audit_sink(str(tmp_path / "nodir" / "audit.log"))
+
+    assert writable is False
+    assert "parent directory" in note
+
+
+def test_audit_sink_that_does_not_exist_yet_is_undecided(tmp_path: Path) -> None:
+    """Undecidable, not "no". Nothing read-only on Windows predicts whether the create succeeds
+    (``os.access`` on a directory is a measured false positive), so the honest answer is None."""
+    writable, note = _probe_audit_sink(str(tmp_path / "audit.log"))
+
+    assert writable is None
+    assert "does not exist yet" in note
+
+
+def test_audit_sink_that_is_a_directory_is_refused(tmp_path: Path) -> None:
+    """``os.access`` answers True here on Windows, measured. The append probe answers correctly,
+    which is the whole reason it is the probe."""
+    assert _probe_audit_sink(str(tmp_path))[0] is False
+
+
+def test_the_audit_probe_raises_nothing_on_an_unusable_path() -> None:
+    """It runs OUTSIDE the total gather and cli_doctor catches only EpicsError, so anything that
+    escaped here would leave the command as a bare traceback. A NUL byte is the reachable case."""
+    writable, note = _probe_audit_sink("audit\x00.log")
+
+    assert writable is False
+    assert note  # never empty: an empty note satisfies every containment assertion and says nothing
+
+
+def test_the_audit_probe_never_creates_the_file(tmp_path: Path) -> None:
+    """Read-only, through the builder that the report uses.
+
+    Red-proof: add ``os.O_CREAT`` to the probe's flags, or switch it to ``open(path, "a")``, and
+    the file exists afterwards.
+    """
+    target = tmp_path / "audit.log"
+
+    _write_safety_report(_write_config(audit_log_file=str(target)))
+
+    assert not target.exists()
+
+
+# --- the block in the report and in the render --------------------------------------------------
+
+
+async def test_run_doctor_carries_the_write_block(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(monkeypatch, **_WRITE_GATE_DEFAULTS)
+    report = await run_doctor()
+
+    assert report.write_safety.pv.armed is False
+    assert report.write_safety.olog.armed is False
+
+
+def test_cli_json_carries_the_write_block(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A field that only exists in the model is invisible to CI, which is where this is read."""
+    _set_config(monkeypatch, **_WRITE_GATE_DEFAULTS)
+
+    assert cli_doctor.main(["--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert set(payload["write_safety"]) == {"pv", "olog", "audit"}
+    assert payload["write_safety"]["pv"]["armed"] is False
+
+
+def test_the_render_shows_both_gates_off(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Red-proof: drop the block from ``_render`` and every assertion here goes."""
+    _set_config(monkeypatch, **_WRITE_GATE_DEFAULTS)
+
+    assert cli_doctor.main([]) == 0
+
+    out = capsys.readouterr().out
+    assert "Write gates" in out
+    assert "PV write:   OFF" in out
+    assert "Olog write: OFF" in out
+    # The heading has to name WHOSE environment was read: this command runs in its own process and
+    # a running server was started from a different env block.
+    assert "THIS command's environment" in out
+
+
+def test_the_render_shows_where_an_armed_gate_can_write(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """The armed state, and the WHERE with it. An approver asks "can this write, and where", and
+    the word ARMED answers only the first half."""
+    audit = tmp_path / "audit.log"
+    audit.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "epics_mcp.services.doctor.get_config",
+        lambda: _write_config(
+            allow_pv_write=True,
+            pv_write_pattern=r"^SIM:PS-01:.*-SP$",
+            allow_olog_write=True,
+            olog_write_logbooks="Commissioning",
+            olog_url="http://127.0.0.1:8080/Olog",
+            audit_log_file=str(audit),
+        ),
+    )
+    for name, value in _LOOPBACK_ENV.items():
+        monkeypatch.setenv(name, value)
+
+    cli_doctor.main([])
+
+    out = capsys.readouterr().out
+    assert "PV write:   ARMED" in out
+    assert r"^SIM:PS-01:.*-SP$" in out
+    assert "search reach: loopback-only" in out
+    assert "logbooks: Commissioning" in out
+    assert "loopback, a local test server" in out
+    assert "writable" in out
+
+
+def test_the_render_says_deny_all_rather_than_leaving_an_empty_list(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An empty Olog allowlist on an armed gate is DENY-ALL, and the naive reading is its opposite.
+
+    Red-proof: print the joined list and nothing else, and the line reads ``logbooks:`` with
+    nothing after it, which no reader takes to mean "every write is denied".
+    """
+    monkeypatch.setattr(
+        "epics_mcp.services.doctor.get_config",
+        lambda: _write_config(allow_olog_write=True, olog_url="http://127.0.0.1:8080/Olog"),
+    )
+
+    cli_doctor.main([])
+
+    assert "every Olog write is denied" in capsys.readouterr().out
+
+
+def test_an_armed_gate_is_named_on_the_verdict_line(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The verdict is the LAST line and is labelled "Overall", so a reader takes everything above
+    it to be in its scope. "Overall: OK" above an ARMED gate therefore reads as an all-clear on the
+    write posture, which nothing here measured. Same remedy the degraded branch already uses.
+
+    Red-proof: delete the tail and ARMED appears in the block while the last line says only OK.
+    """
+    monkeypatch.setattr(
+        "epics_mcp.services.doctor.get_config", lambda: _write_config(allow_pv_write=True)
+    )
+
+    exit_code = cli_doctor.main([])
+
+    out = capsys.readouterr().out
+    assert "Nothing here CHECKED a write gate" in out
+    assert "the PV write gate is ARMED" in out
+    assert exit_code == 0  # informative: the block is not a verdict and moves no exit code
+
+
+def test_an_armed_gate_moves_neither_ok_nor_the_verdict_category(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The informative contract, asserted rather than promised."""
+    for armed in (False, True):
+        monkeypatch.setattr(
+            "epics_mcp.services.doctor.get_config",
+            lambda armed=armed: _write_config(allow_pv_write=armed),
+        )
+        report = asyncio.run(run_doctor())
+        assert report.ok is True
+        assert cli_doctor._exit_category(report) == "clean"
