@@ -23,7 +23,7 @@ expects a different key, or an `args` array, will ignore a correct-looking block
 missing one is ignored: silently. If nothing appears after a restart and the file is where you think
 it is, compare its shape against your client's own example before debugging anything here.
 
-> `epics-init --preset <shape>` prints the first three of these blocks for you and then runs
+> `epics-init --preset <shape>` prints a block of its own for each of four shapes and then runs
 > `epics-doctor` against what it printed, so you can skip the copying. `epics-init --list` names the
 > shapes, and `--out PATH` writes the block to a file with an encoding a client can read, which a
 > shell redirect cannot promise. The write-enabled block at the bottom is deliberately NOT a preset:
@@ -69,8 +69,10 @@ when every search list is unset **and** the auto search is off.
 
 **With the REST planes enabled**, which assumes you RUN those three services, on this machine, on
 these ports. Replace the URLs with your own, or delete the lines for services you do not have: an
-unset URL disables that plane with no network call, whereas a wrong one produces three failing lines
-in the next self-check.
+unset URL disables that plane with no network call, whereas a wrong one produces four failing lines
+in the next self-check (four, not three: the archiver is probed as two planes, mgmt and retrieval).
+The one URL an unset value does NOT switch off is `EPICS_MCP_ARCHIVER_RETRIEVAL_URL`, which falls
+back to the mgmt URL.
 
 ```json
 {
@@ -117,8 +119,15 @@ The three write variables are not optional hardening, they are start conditions,
 them is one an MCP client reports only as "server not connected". A write-enabled server refuses to start
 unless `EPICS_MCP_AUDIT_LOG_FILE` names a durable path (an audit trail on stderr vanishes on
 restart) and unless the EPICS client search reach is loopback-only, so that enabling writes cannot
-silently arm a process that reaches a real facility network. The same refusal applies to the LOGBOOK
-write gate, `EPICS_MCP_ALLOW_OLOG_WRITE`, which is a separate decision with its own variables.
+silently arm a process that reaches a real facility network.
+
+⚠️ Only the FIRST of those carries over to the LOGBOOK write gate,
+`EPICS_MCP_ALLOW_OLOG_WRITE`, which is a separate decision with its own variables. Measured: the
+loopback-reach refusal and the empty-pattern refusal both hang off `EPICS_MCP_ALLOW_PV_WRITE`, so an
+Olog-write-enabled server starts with the subnet broadcast search on. Its own boundary is a
+different one, on the write TARGET rather than the search reach: loopback, or an exactly
+allowlisted https URL with remote writes enabled. `epics-doctor` prints which of the two applies to
+your configuration in its `Write gates` block.
 
 Point the audit path somewhere your server user can write, and note two things about it. Its parent
 directory has to exist already, since the server opens the file rather than building a tree, and a

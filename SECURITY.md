@@ -45,7 +45,10 @@ setting.
   call. PV READ reach follows the standard EPICS search environment, which the launcher controls and
   this server does not. PV WRITE is the exception: enabling it forces a loopback-only reach and the
   process refuses to start otherwise, so that reach is not the launcher's to widen (see above). Run
-  `epics-doctor` to see what an instance actually reaches.
+  `epics-doctor` to see what an instance actually reaches, and to see the effective write posture
+  of both gates: its `Write gates` block names what each one allows and where a write could go,
+  and `--json` carries the same under `write_safety`. It reads the environment of the command you
+  run, which need not be the one a running server was started with.
 - **Output redaction (ChannelFinder only).** ChannelFinder owners and property values pass a
   site-configurable allowlist. Olog entries come back WHOLE (title, text, author, attachments):
   the former Olog read redaction was removed 2026-08-01 as a deliberate prototype decision, see

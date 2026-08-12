@@ -1340,8 +1340,13 @@ async def test_privacy_report_reflects_override(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_privacy_report_carries_no_olog_field() -> None:
-    """The doctor makes no Olog posture claim at all: reads are whole (decision PI, 2026-08-01),
-    so a field that could say "withheld" would only be a place for a future lie."""
+    """The doctor makes no Olog READ-redaction claim: reads are whole (decision PI, 2026-08-01),
+    so a field that could say "withheld" would only be a place for a future lie.
+
+    Scoped to the redaction on purpose. Since BG-DSAFE the report DOES carry an Olog posture, the
+    write gate's, in a model of its own; what must stay absent is a privacy field suggesting a read
+    is filtered when it is not.
+    """
     report = _privacy_report(EpicsConfig(olog_url="http://localhost:8080/Olog"))
     assert "olog" not in {name.split("_")[0] for name in type(report).model_fields}
 

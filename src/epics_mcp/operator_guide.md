@@ -30,7 +30,9 @@ synthetic placeholder name (`SIM:PS-01:Cur-RB`, `sim://ramp`, `http://archiver:1
   `localhost-isolated` only when every search list is unset AND the auto search is explicitly
   disabled.
 - **REST planes are opt-in.** Each REST plane stays disabled until its `*_URL` env var is set; an
-  empty URL means no client and no network call.
+  empty URL means no client and no network call. One exception:
+  `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` falls back to the mgmt URL and is still probed, because a
+  single-JVM appliance legitimately leaves it empty.
 - **Long monitors run in a dedicated pool.** `monitor_pv` holds a worker thread for up to
   `EPICS_MCP_MAX_MONITOR_DURATION` (60 s). Those blocking subscriptions run on a DEDICATED executor
   sized by `EPICS_MCP_MONITOR_MAX_CONCURRENCY` (default 8), NOT the shared pool behind every other
@@ -503,7 +505,8 @@ and imperative, not that it is right
 ([docs/known-limits.md](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/known-limits.md)).
 
 **Reachable is not identified, and identified is not working: read the `?`, `!` and `~` lines.**
-The transport probe is a HEAD and
+The transport probe is a HEAD for ChannelFinder, Alarm, Olog and Naming (the archiver's is a real
+GET, see above), and it
 counts *any* HTTP response as reachable, so a URL pointing at the wrong host can look alive:
 measured, a ChannelFinder URL aimed at a dead container reported `✓ ok` because an unrelated service
 on that port answered `401` (blanket auth answers 401 for every path, so the status said nothing
@@ -564,9 +567,25 @@ and now backs **two** surfaces: epics-doctor's naming plane AND `lookup_device_n
 definitive-negative gate (a 204/404 is trusted only after this beacon confirms the responder, see
 "not found vs not registered" below).
 
+The report also carries a write-gate block, and it answers a different question from every plane
+line above it: not "is this service reachable" but "can this server write anywhere, and where". For
+each of the two write gates it names whether the gate is armed, what it allows (the PV name pattern,
+the Olog logbook allowlist), the rate limit, and the destination a write would actually take, which
+is the EPICS search reach for one gate and the Olog target URL for the other. It also names the
+audit log and says whether it can be appended to. In `--json` the same lives under `write_safety`.
+
+Three of its states read backwards if you skim them, so it spells them out: an empty PV pattern on
+an armed gate makes the server REFUSE TO START rather than permitting everything, an empty logbook
+allowlist DENIES every write rather than permitting any, and an allowlisted remote target reaches a
+real logbook rather than a sandbox. Two limits are worth carrying: the block is informative and
+never moves the verdict or the exit code, and it describes the environment of the process that ran
+the command, which need not be the one a running server was started with. It reports what the gates
+are set to; it does not evaluate whether such a server would start.
+
 Scripting against this? Exit `0` means "nothing failed", **not** "everything confirmed", read
 `verification_complete` / `unverified_planes` / `inconclusive_identity_planes` / `degraded_planes`
-from `--json`, never the exit code alone. A FAILED identity probe lands in
+from `--json`, never the exit code alone (and `write_safety` for the write posture, which never
+moves the verdict, so a pass-or-fail script may ignore it). A FAILED identity probe lands in
 `inconclusive_identity_planes` (exit `3`), NOT
 in `unverified_planes` (exit `0`), a script hunting identity problems must read both. And for
 **positive** confirmation assert `identified_planes` is non-empty: `verification_complete` is

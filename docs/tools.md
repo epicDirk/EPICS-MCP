@@ -70,7 +70,7 @@ MCP client involved:
 ```bash
 epics-testpv                                            # serve two test PVs, loopback, until Ctrl-C
 epics-init       --list                                 # emit a client configuration, then check it
-epics-doctor                                            # read-only config self-check (all planes)
+epics-doctor                                            # read-only self-check: planes + write gates
 epics-diagnose   TEST:Temperature                       # connection diagnosis
 epics-crossplane --displays <project-root> --st-cmd <st.cmd>     # display ↔ IOC ↔ Naming (needs opi_navigation)
 epics-coverage   --displays <project-root> --scope DEV: # coverage matrix (needs opi_navigation)
@@ -131,6 +131,12 @@ is measurably not doing its job reports `no_ingest` (`~`), exit `0`.
 `verification_complete` / `unverified_planes` / `inconclusive_identity_planes` / `degraded_planes`
 from `--json` rather than the exit code alone, and asserts `identified_planes` is non-empty for
 positive confirmation, because `verification_complete` is vacuously true on an empty config.
+
+The same report carries `write_safety`, which answers a different question: what each of the two
+write gates would allow, and where a write could go. It is informative and never moves the verdict
+or the exit code, so a pass-or-fail script can ignore it, while a review of a deployment starts
+there. The human report prints it as a `Write gates` block. Both describe the environment of the
+command you ran, which need not be the one a running server was started with.
 
 ## Resources & Prompts
 

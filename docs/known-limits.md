@@ -190,9 +190,11 @@ What is NOT held, named rather than implied:
   guard added without a row is unfloored and nothing says so.
 
 ⚠️ **"Every status is explained" is not "every LINE is explained", and that is the open gap.** The
-totality guard proves that `PlaneStatus` is a subset of the legend. The report has three other
+totality guard proves that `PlaneStatus` is a subset of the legend. The report has four other
 parts, and measured 2026-08-02 not one of their fixed strings appears in the shipped guide: the
-header line, the privacy block with its two allowlists, and the verdict in all six of its branches.
+header line, the privacy block with its two allowlists, the verdict in all six of its branches, and
+since 2026-08-13 the write-gate block (which the guide describes in prose without quoting a line of
+it, the same trade as the other three).
 The verdict is the last line an operator reads. It was left open deliberately: a mark is a
 CHARACTER and cannot be guessed, which is why it needed a legend, whereas the verdict and the
 privacy block are English sentences that state their own meaning, and the semantics behind them are

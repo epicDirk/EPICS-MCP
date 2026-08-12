@@ -34,7 +34,8 @@ block and check it for you (`--out` rather than a shell redirect, which cannot p
 the client can read). When your facility does not match one of the four shapes, the
 [deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md) walks through the variables plane by plane, the CA-bundle
 recipe for internal HTTPS, and the documented assumptions. Either way you end at `epics-doctor`,
-which probes every configured plane read-only and tells you what your instance actually reaches.
+which probes every configured plane read-only and tells you what your instance actually reaches,
+and whether either write gate is armed and where it could write.
 
 ## What is this (for EPICS people)?
 

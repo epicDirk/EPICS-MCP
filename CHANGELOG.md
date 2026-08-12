@@ -28,8 +28,23 @@ carry breaking changes).
   instead of a bare command name. A client launched from a desktop icon does not inherit your
   shell's `PATH`, which is the commonest reason a correct-looking configuration reports only that
   the server did not start. An unresolvable command is now an error rather than a silent fallback.
-- **`epics-init` warns when the configuration it emits arms a write gate.** `epics-doctor` probes
-  service planes and never reads the write gates, so nothing else would mention it.
+- **`epics-init` warns when the configuration it emits arms a write gate.** The check that follows
+  prints the resulting posture (see the entry below) but does not evaluate whether such a server
+  would START, and with `--no-check` no check runs at all. The warning also no longer claims that
+  the loopback-only search reach is a start condition of both gates: it is one of the PV gate
+  alone, while the durable audit path is required by both.
+- **`epics-doctor` prints what each write gate would allow, and where a write can go.** A new
+  `Write gates` block, in the human report and as a `write_safety` key in `--json`, covering both
+  the PV gate and the Olog logbook gate: whether each is armed, the PV name allowlist and the
+  logbook allowlist, both rate limits, the EPICS search reach a PV write would use, the Olog target
+  and whether the gate would permit writing to it, and the audit log with whether it can be
+  appended to. Informative: it changes neither the verdict nor the exit code. It reports the
+  environment of the command you ran, not necessarily that of a running server, and the heading
+  says so. Three states are spelled out rather than left to the reader, because the obvious reading
+  of each is its opposite: an empty PV pattern on an armed gate makes the server refuse to start,
+  an empty logbook allowlist denies every write, and an allowlisted remote target reaches a real
+  logbook rather than a sandbox. The audit check opens an append handle and writes nothing; where a
+  file does not exist yet it says the answer cannot be determined rather than guessing.
 
 - **Every `validate_pvs` file-mode answer now names the file it is about.** The `file_path` echo used
   to appear on the empty-result answer only, so one mode came back with two different key sets and a

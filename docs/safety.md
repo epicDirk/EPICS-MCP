@@ -71,6 +71,15 @@ This is a controls tool, so the trust questions come first.
   (`EPICS_MCP_OLOG_WRITE_LOGBOOKS`; empty = deny-all) **and** a rate limit. The author is the write
   service account (`EPICS_MCP_OLOG_WRITE_USER`), set server-side and not spoofable; the audit line
   is metadata-only (never the title/description free text). **`ALLOW_PV_WRITE` is untouched by it.**
+- **The effective write posture is inspectable, so you do not have to take this page's word for it.**
+  `epics-doctor` prints a `Write gates` block, and `epics-doctor --json` carries the same under
+  `write_safety`: for each gate whether it is armed, what it allows by name, its rate limit, and
+  **where** a write could physically go, which is the PV search reach for one gate and the Olog
+  target URL for the other. It also names the audit log and says whether it can be appended to.
+  Two limits, stated because they decide how much the block is worth to you. It describes the
+  environment of the command YOU ran, and a server started by an MCP client may have been given a
+  different one; and it reports what the gates are SET to without evaluating whether such a server
+  would start, which for an armed gate is a separate question with the conditions listed above.
 - **Olog reads return the whole entry, a deliberate prototype decision (2026-08-01).** Every read
   (`search_logbook`, `get_log_entry`, the create/reply/update echoes, attachment listing and
   download) returns the full server record: `title`, `description`, `owner` (the author's

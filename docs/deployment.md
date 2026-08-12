@@ -20,7 +20,9 @@ answer on your PATH; if `epics-doctor --version` does not print a version, insta
 Two consequences of that, worth having before you start. **Nothing on disk named `.env` is ever
 read**: the server takes its configuration from the process environment, so a variable that does not
 reach the process has no effect and says nothing. And **every service URL is optional**: an unset URL
-disables that plane, with no network call and no complaint.
+disables that plane, with no network call and no complaint. The one exception is
+`EPICS_MCP_ARCHIVER_RETRIEVAL_URL`, which falls back to the mgmt URL rather than switching
+retrieval off, because a single-JVM appliance legitimately leaves it empty.
 
 **What an install actually puts on your machine.** Two things belong to this package, and the layout
 below is what a `pip install` into a fresh virtual environment produces, measured rather than
@@ -159,11 +161,17 @@ cache of its own under its home directory, which `FASTMCP_CHECK_FOR_UPDATES=off`
    change. So the common cases need no lookup here, and the sections below are for when you want
    the reasoning behind one. Fix what `epics-doctor` flags and your service configuration is done.
 
+   The report also carries a `Write gates` block, which is the fastest answer to "can this server
+   write anywhere, and where": for each of the two write gates, whether it is armed, what it
+   allows by name, its rate limit, and the reach or target a write would use, plus the audit log
+   and whether it can be appended to. `--json` carries it as `write_safety`.
+
    ⚠️ Note what that does NOT cover, because a clean report is easy to read as "everything works":
    the doctor probes the seven service planes, never the LAUNCH. Whether your client can start this
-   server at all, whether `epics-mcp` resolves in the environment the client launches from, and
-   whether a write-enabled block will boot, are separate questions with separate symptoms. They are
-   in [Troubleshooting](#6-troubleshooting).
+   server at all, and whether `epics-mcp` resolves in the environment the client launches from, are
+   separate questions with separate symptoms, in [Troubleshooting](#6-troubleshooting). So is
+   whether a write-enabled block will boot: the write block above reports what the gates are SET
+   to, it does not evaluate the start conditions, and its audit line answers only one of them.
 
    ⚠️ Three states are honest rather than healthy, and none of them fails. Read them before
    calling a deployment done. `?` (`unverified`) answered 2xx but could not prove what it is, exit
@@ -177,7 +185,9 @@ cache of its own under its home directory, which `FASTMCP_CHECK_FOR_UPDATES=off`
 
    Every plane has its own identity beacon (see the operator guide). Scripting this? Read
    `verification_complete` / `unverified_planes` / `inconclusive_identity_planes` /
-   `degraded_planes` from `--json`. A failed probe lands in `inconclusive_identity_planes`, not in
+   `degraded_planes` from `--json`, and `write_safety` for the write posture (that one never moves
+   the verdict, so a script that only wants pass or fail can ignore it). A failed probe lands in
+   `inconclusive_identity_planes`, not in
    `unverified_planes`; a degraded one in `degraded_planes` and in neither of those. The exit code
    alone says "nothing failed", not "everything confirmed", so for positive confirmation assert
    `identified_planes` is non-empty: `verification_complete` is vacuously true on an empty config,
@@ -209,7 +219,11 @@ one healthy line and one failing line rather than as a single ambiguous verdict.
 
 Network posture: PV reach is decided by the launcher's EPICS search-path env: address lists, name
 servers, and the auto-addr search, which defaults to **ON** (subnet broadcast) when unset; a
-genuinely localhost-isolated instance needs every list unset **and** `*_AUTO_ADDR_LIST=NO`. The REST
+genuinely localhost-isolated instance needs every list unset **and** `*_AUTO_ADDR_LIST=NO`.
+⚠️ `epics-doctor` claims `localhost-isolated` on the live plane against the ACTIVE provider's
+auto-addr switch only, so it can print that line while the other provider's switch is still open.
+The write gate is the stricter of the two and demands both, which is why the `Write gates` block
+computes its own reach line rather than pointing at this one. The REST
 planes stay off until their `*_URL` is set. Writes are gated off by default
 (`EPICS_MCP_ALLOW_PV_WRITE=false`) and additionally need a regex allowlist, a rate limit, an audit
 log and a loopback-only EPICS search reach. That last one is why the network posture above and the
@@ -264,7 +278,8 @@ A value REPLACES the default rather than adding to it, which is why the example 
 `recceiver`, the built-in owner account, next to the one being added. Drop it and you have switched
 the default off, silently and successfully.
 
-`epics-doctor` prints the effective allowlists so you can see exactly what will be surfaced.
+`epics-doctor` prints the effective ChannelFinder allowlists so you can see exactly what will be
+surfaced. (Its `Write gates` block prints the write allowlists, which are a different thing.)
 
 ## 5. Documented assumptions (adapt if your site differs)
 
@@ -326,10 +341,15 @@ writes UTF-8 without a mark, as do POSIX shells, and those are fine. So check wh
 wrote: the file has to begin with `{` and carry no invisible bytes in front of it.
 
 **A write-enabled block will not start.** Those variables are start conditions rather than hardening,
-and each one refuses instead of warning: a durable audit path, a loopback-only search reach, and a
-non-empty allowlist pattern. The reasoning is in section 2 and the block itself is in
-[MCP client integration](mcp-clients.md). One thing neither states: the audit path's parent directory
-has to exist already.
+and each one refuses instead of warning: a durable audit path for either gate, plus a loopback-only
+search reach and a non-empty allowlist pattern for the PV gate specifically. The reasoning is in
+section 2 and the block itself is in [MCP client integration](mcp-clients.md). One thing neither
+states: the audit path's parent directory has to exist already.
+
+Run `epics-doctor` with the same environment and read its `Write gates` block, which answers three
+of those four directly: it prints the pattern, the reach findings, and whether the audit log can be
+appended to (a missing parent directory is reported as such rather than guessed at). It does not
+evaluate the start itself, so it narrows the search rather than ending it.
 
 **A PV probe says it did not connect.** The finding names the search path it used, so compare that
 with where the IOC actually is. Two causes are invisible in the PV name: an IOC that answers on a

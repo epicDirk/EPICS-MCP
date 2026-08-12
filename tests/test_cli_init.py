@@ -706,12 +706,18 @@ class TestWritingTheBlock:
         assert not target.exists()
         assert "cannot resolve" in capsys.readouterr().err
 
-    def test_an_armed_write_gate_is_named_because_the_check_cannot_see_it(
+    def test_an_armed_write_gate_is_named_even_when_no_check_follows(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """``epics-doctor`` probes service planes and never reads the write gates, so the report
-        that follows is silent about the most consequential thing in the block. It is reachable
-        only through ``--set``, since no preset arms a gate."""
+        """``--no-check``, so nothing else in this run says a word about the armed gate.
+
+        The name and this docstring used to say the warning existed because the doctor could not
+        see a write gate. That stopped being true with BG-DSAFE, and the assertion below stayed
+        green through it, which is the whole reason a stale test name is worth chasing: it is a
+        claim nothing re-runs. The warning's remaining job is this case and the start conditions
+        the doctor reports the inputs of without evaluating. Reachable only through ``--set``,
+        since no preset arms a gate.
+        """
         cli_init.main(
             ["--preset", "sandbox", "--no-check", "--set", "EPICS_MCP_ALLOW_PV_WRITE=true"]
         )

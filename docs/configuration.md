@@ -52,6 +52,10 @@ combined-bundle recipe is in [the deployment guide](deployment.md#3-tls--ca-bund
 
 ## Optional REST services (empty/unset URL = disabled, no client, no network call)
 
+One variable in the table below is outside that heading, and the row says so: an empty
+`EPICS_MCP_ARCHIVER_RETRIEVAL_URL` falls back to the mgmt URL and is still probed, because a
+single-JVM appliance legitimately leaves it empty.
+
 | Variable | Default | Enables |
 |----------|---------|---------|
 | `EPICS_MCP_CHANNELFINDER_URL` | _(empty)_ | `find_channels` / `list_channel_vocabulary` + the ChannelFinder plane |
@@ -82,6 +86,10 @@ combined-bundle recipe is in [the deployment guide](deployment.md#3-tls--ca-bund
 it, and an unset `*_AUTO_ADDR_LIST` means EPICS broadcasts PV searches into the local subnets.
 A genuinely localhost-isolated instance needs every address list unset **and** both auto-address
 searches explicitly disabled. Run `epics-doctor` to see what your instance actually reaches.
+⚠️ Read the right line for the right question. The live plane's posture line judges the ACTIVE
+provider's auto-address switch only, so it can say `localhost-isolated` while the other provider's
+switch is still open. The `Write gates` block judges BOTH, because the PV write gate does, and its
+reach line is the one that predicts whether a write-enabled server would start.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
