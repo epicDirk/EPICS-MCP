@@ -154,8 +154,9 @@ Three commands, and nothing to obtain beyond the install above.
    epics-diagnose TEST:Temperature
    ```
 
-   which prints the state, the likely cause and the value, four lines beginning `PV:` and ending in
-   `connected, value=21.5`.
+   which prints a short report: the PV and its state, the likely cause, and the live result on a
+   line of its own (`connected, value=21.5` and the alarm severity), followed by the next steps,
+   any notes, and any plane that was asked for but is unavailable.
 
 ⚠️ Note what step 1 is: a PVAccess server, and its second PV accepts writes. It binds loopback
 unless you pass `--interface`, and it says which port it got, which is not the default one when that

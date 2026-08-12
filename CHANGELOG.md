@@ -80,6 +80,12 @@ carry breaking changes).
 - **The quick start's second step told you to run the server by hand**, which is the one thing its
   own `--help` says not to do: started that way it waits silently for JSON-RPC, which reads as a
   hang, and nothing consumed it, because the client starts the server itself.
+- **The quick start described the wrong output for `epics-diagnose`.** It promised "four lines
+  beginning `PV:` and ending in `connected, value=21.5`", and neither half holds: a connected PV
+  always gets a next-step line as well, so the report cannot stop at the live line, and that line
+  itself ends in the alarm severity rather than in the value. Measured against a real PV, the
+  connected case prints seven lines. The page now describes the shape of the report rather than
+  counting its lines, so the next reader compares the right thing.
 
 - **Writing a switch by its LABEL is verified again: landed and not-landed no longer give the same
   answer.** `set_pv_value` reads every write back, but on an enum PV the value read back is the

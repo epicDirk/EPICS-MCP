@@ -24,6 +24,7 @@ from epics_mcp.services.diagnose import (
     LiveEvidence,
     NamingEvidence,
     State,
+    derive_cause,
 )
 
 
@@ -110,6 +111,54 @@ def test_render_consulted_naming_and_alarm_lines() -> None:
     out = cli_diagnose._render(report)
     assert "naming:        registered=True (ACTIVE)" in out
     assert "alarm:         configured=True" in out
+
+
+def test_a_healthy_connected_report_never_ends_on_the_live_line() -> None:
+    """The quick start SHOWS this output, so its shape is a promise, and the promise was wrong.
+
+    ``README.md`` used to say the command prints "four lines beginning ``PV:`` and ending in
+    ``connected, value=21.5``". Neither half holds. The four-line shape is structurally
+    unreachable, because ``derive_cause`` returns exactly one next step for every CONNECTED PV and
+    ``_render`` turns that into a heading plus a bullet; and the live line itself carries the alarm
+    severity after the value, so the output does not end on that string even where it is the last
+    line. Measured against a real PV, the connected case printed seven lines.
+
+    The report is built from the REAL ``derive_cause`` rather than assembled here, which is what
+    makes this a guard on the coupling the README describes rather than on this file's own fixture.
+    It needs no live PV: the decision tree is pure.
+
+    No line COUNT is asserted, deliberately. A number here would drift the same way the README's
+    did; what the quick start now promises, and what this pins, is that the output continues past
+    the live line.
+
+    Red-proof: empty the ``next_steps`` tuple in ``derive_cause``'s ``connected`` branch and the
+    render stops at the live line, which is exactly the shape the README used to claim.
+    """
+    live = LiveEvidence(connected=True, value=21.5, severity="NO_ALARM")
+    # The unconsulted planes are _report's defaults, so the evidence derive_cause reads below is
+    # the evidence the rendered report carries.
+    cause = derive_cause(
+        "connected",
+        DiagnoseEvidence(
+            live=live,
+            channelfinder=ChannelFinderEvidence(consulted=False),
+            naming=NamingEvidence(consulted=False),
+            archiver=ArchiverEvidence(consulted=False),
+            alarm=AlarmEvidence(consulted=False),
+        ),
+    )
+    report = _report(live=live, next_steps=cause.next_steps, notes=cause.notes)
+
+    lines = cli_diagnose._render(report).splitlines()
+
+    assert lines[3].strip().startswith("live:"), lines
+    assert lines[3].endswith("severity=NO_ALARM"), (
+        f"the live line ends in the severity, not in the value: {lines[3]!r}"
+    )
+    assert not lines[-1].strip().startswith("live:"), (
+        f"the connected output must continue past the live line, got {lines}"
+    )
+    assert "Next steps:" in lines, lines
 
 
 # --- main (AsyncMock spy) ---
