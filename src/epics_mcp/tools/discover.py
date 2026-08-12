@@ -133,8 +133,15 @@ async def _discover_by_channelfinder(pattern: str, timeout: float | None) -> Dis
     # wholesale by test doubles (see the ``capped`` note below), so its wire type is not a runtime
     # guarantee. The element check is a comprehension FILTER rather than an ``if not ...: continue``
     # because the latter's body is provably dead under the typed seam and mypy's warn_unreachable
-    # rejects it, the filter form says the same thing and is what diagnose.py:386-387 and
-    # checkers_olog.py:751-753 already use on this kind of payload. Honest scope: neither check is
+    # rejects it (probed with the loop form spliced in: mypy answers "Statement is unreachable"),
+    # the filter form says the same thing and is what ``diagnose._gather_channelfinder`` and
+    # ``checkers_olog.query_olog_add_attachment`` / ``query_olog_update`` already use on this kind
+    # of payload. Named by FUNCTION, and that is the repair rather than the style: this sentence
+    # carried ``diagnose.py:386-387`` and ``checkers_olog.py:751-753``, which were EXACTLY right
+    # when written (429f2ce, 2026-07-25) and have since drifted by +3 and by -35 lines onto a
+    # ``ChannelFinderEvidence`` return and a dict literal. A reader checking them today finds
+    # unrelated code and concludes the comment is confused. Same rot that
+    # ``tests/test_client_edge_guards.py`` records for its own table. Honest scope: neither check is
     # OBSERVED: no double injects a non-list or a non-dict element today, and the pair is mutually
     # masking (tests/test_client_edge_guards.py records that class). They stay because a typing
     # change must not alter runtime behaviour, not because they are guarded.
