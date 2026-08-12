@@ -119,6 +119,13 @@ async def _discover_by_channelfinder(pattern: str, timeout: float | None) -> Dis
     so an empty answer never reads as 'no such PV'. Otherwise each registered channel becomes a
     ``{pv_name, status: "registered", ioc_name, host_name}`` entry, the uniform discover shape,
     with the CF ``capped`` flag carried through (a broad glob can truncate the registry).
+
+    On an off-contract payload this DEGRADES QUIETLY, which the stub sentence above does not cover
+    and which is the asymmetry worth knowing before editing here: a non-list ``channels`` is
+    discarded whole and a non-dict entry is dropped, in both cases producing an empty answer that
+    still carries ``source`` and the registry note, so it reads exactly like an empty registry. No
+    real call path produces such a payload (the client raises first), and the two checks that do
+    this are pinned test by test in the S35 block of ``tests/test_discover.py``.
     """
     result = await query_channels(
         pattern,
@@ -137,14 +144,17 @@ async def _discover_by_channelfinder(pattern: str, timeout: float | None) -> Dis
     # the filter form says the same thing and is what ``diagnose._gather_channelfinder`` and
     # ``checkers_olog.query_olog_add_attachment`` / ``query_olog_update`` already use on this kind
     # of payload. Named by FUNCTION, and that is the repair rather than the style: this sentence
-    # carried ``diagnose.py:386-387`` and ``checkers_olog.py:751-753``, which were EXACTLY right
-    # when written (429f2ce, 2026-07-25) and have since drifted by +3 and by -35 lines onto a
+    # carried ``diagnose.py:386-387`` and ``checkers_olog.py:751-753``, which pointed at the right
+    # blocks when written (429f2ce, 2026-07-25; the second window stopped one line short of the
+    # filter itself) and have since drifted by +3 and by -36 lines onto a
     # ``ChannelFinderEvidence`` return and a dict literal. A reader checking them today finds
     # unrelated code and concludes the comment is confused. Same rot that
     # ``tests/test_client_edge_guards.py`` records for its own table.
     #
-    # Honest scope (S35). Both checks are OBSERVED now, each by a test in
-    # ``tests/test_discover.py`` that names it, and the gap was narrower than this comment used to
+    # Honest scope (S35). Both checks are OBSERVED now by the S35 block in
+    # ``tests/test_discover.py``, as a SECTION rather than test by test: traced, two of its five
+    # never reach the element-check line at all, because their payload is rejected whole by the
+    # list check first. The gap was also narrower than this comment used to
     # say. It said "neither check is OBSERVED", which is true only of the ENABLING polarity:
     # forcing either check to ``False`` empties the answer and reddens
     # ``test_discover_wildcard_delegates_to_channelfinder``, which has covered that half all along.
@@ -152,19 +162,26 @@ async def _discover_by_channelfinder(pattern: str, timeout: float | None) -> Dis
     # measured on this tree before the S35 tests existed. That is the mutual masking, and it is
     # mechanical: with a dict or a str payload the mutant iterates keys or characters and the
     # OTHER check drops every one, so guarded and mutant answer identically.
-    # The tests therefore pin the separating CLASSES rather than two lucky instances: a non-list
-    # iterable OF DICTS (a tuple stands in for generator/deque/UserList/dict_values) and a non-dict
-    # entry that carries ``.get`` (a MappingProxyType stands in for any duck-typed mapping), plus a
-    # subclass case that stops the pair being narrowed to ``type(x) is list`` / ``type(x) is dict``
-    # unnoticed. Residue, said out loud because the rest of this paragraph claims coverage:
-    # ``isinstance(raw_channels, (list, dict))`` survives all five. It is an EQUIVALENT mutant, not
-    # a hole, since iterating a dict yields keys and no bare dict is hashable enough to be one.
-    # ``scripts/guard_audit.py`` can never sweep these two lines: it globs ``services/*_client.py``,
-    # so this module is outside its population by construction and those tests are the only, and
-    # the permanent, watch here.
+    # Each check is therefore pinned by TWO instruments, because one instrument is a point and
+    # never a class. Measured, and the first draft of this comment had it backwards: a tuple
+    # catches ``(list, tuple)``/``Sequence`` and MISSES ``MutableSequence``, while a ``deque``
+    # catches ``MutableSequence`` and misses ``(list, tuple)``; a ``MappingProxyType`` catches
+    # ``Mapping``/``hasattr(.., "get")`` and, being immutable, MISSES ``MutableMapping``, which a
+    # ``UserDict`` catches. Disjoint sets on both sides. A subclass case guards the other
+    # direction, ``type(x) is list`` / ``type(x) is dict``.
+    # Coverage, stated as the sweep that produced it rather than as an adjective: 19 weakenings of
+    # the two checks were spliced in and run against the file. ONE survives,
+    # ``isinstance(raw_channels, (list, dict))``, and it is residue rather than an equivalent
+    # mutant: two payloads do separate it (a dict keyed by a ``__hash__``-defining dict subclass,
+    # and a dict subclass with its own ``__iter__``), neither reachable from a JSON body.
+    # ``scripts/guard_audit.py`` does not sweep these two lines and cannot as it stands: it globs
+    # ``services/*_client.py``, so this module is outside its population by construction, and these
+    # tests are the whole of the watch here.
     # They stay because a typing change must not alter runtime behaviour, and now also because they
-    # are pinned. What they deliberately do NOT do is match the client underneath, which RAISES
-    # ``ChannelFinderResponseError`` on these same payloads; that divergence is named in the tests.
+    # are pinned. What they deliberately do NOT do is match the client underneath, which REFUSES
+    # the same shapes loudly: ``ChannelFinderClient.find_channels`` raises on a non-list body and
+    # on a non-dict record. Here the same shapes answer empty. That divergence is named in the
+    # tests, and it is not a wire-contract question, since no real call path reaches these lines.
     raw_channels = result.get("channels")
     pvs: list[dict[str, object]] = [
         {

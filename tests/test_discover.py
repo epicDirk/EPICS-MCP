@@ -1,6 +1,7 @@
 """Tests for epics_mcp.tools.discover."""
 
-from collections import OrderedDict
+from collections import OrderedDict, UserDict, deque
+from collections.abc import Collection, Mapping
 from types import MappingProxyType
 from unittest.mock import AsyncMock, patch
 
@@ -9,6 +10,12 @@ from epics_mcp.tools.discover import _discover_pvs
 
 
 async def test_discover_wildcard() -> None:
+    # ⚠️ This one drives the REAL ``query_channels`` (no double), so it measures the MACHINE: with
+    # EPICS_MCP_CHANNELFINDER_URL set it leaves the box and fails with EpicsConnectionError.
+    # Reproduced against a dead port. conftest.py strips the six EPICS_* search vars and, by its
+    # own comment, deliberately not the EPICS_MCP_* ones. Recorded here rather than only in a
+    # commit body: the fix is an autouse env strip that touches every test in the suite, which is
+    # its own piece of work, and a note nobody reads is not persistence.
     result = await _discover_pvs("TEST:*")
 
     assert result["total"] == 0
@@ -150,11 +157,14 @@ async def test_discover_wildcard_cf_disabled_keeps_honest_stub() -> None:
 # reddens ``test_discover_wildcard_delegates_to_channelfinder`` above, which has covered that half
 # all along.
 #
-# EVERY test below asserts ``source == "channelfinder"``. That is a BRANCH WITNESS, not
-# decoration: the ChannelFinder-DISABLED branch returns the same ``pvs == [] / total == 0`` and
-# omits ``source`` entirely (the per-path field inventory in CHANGELOG.md states this), so without
-# it a test is satisfiable by the stub path having never executed a guard line at all. Measured
-# before it was added.
+# EVERY test below asserts ``source == "channelfinder"`` as a BRANCH WITNESS: the
+# ChannelFinder-DISABLED branch returns the same ``pvs == [] / total == 0`` and omits ``source``
+# entirely (the per-path field inventory in CHANGELOG.md states this), so without it a test is
+# satisfiable by the stub path having never executed a guard line at all. Measured, and the number
+# matters: THREE of the five would pass that way, the three that expect an EMPTY result. The two
+# that expect ``total == 1`` are self-witnessing, because the stub branch cannot produce a hit, so
+# for those two the assertion is uniformity rather than evidence. Saying "not decoration" of all
+# five would be one claim too wide.
 #
 # The payloads are built as their own literals rather than through ``_cf_result``: that helper
 # takes ``list[dict[str, object]]``, and a tuple, a str and a ``MappingProxyType`` are precisely
@@ -182,6 +192,12 @@ async def test_absent_channels_payload_is_empty_not_a_crash() -> None:
     ``TypeError: 'NoneType' object is not iterable``, a collateral crash rather than the guard's
     own diagnosis, which is exactly the distinction ``scripts/guard_audit.py::classify`` draws.
     The assertion-grade observer of this same check is the test below.
+
+    FILED HONESTLY, because a kill matrix over 34 mutants says so: for the LIST CHECK this test
+    kills nothing the next test does not already kill. Its one exclusive contribution is a line
+    ABOVE the guard, ``result.get("channels")``: turn that into ``result["channels"]`` and only
+    this test notices, with a KeyError. It earns its place there, not as an observer of the check
+    it sits under.
     """
     payload: dict[str, object] = {"enabled": True, "total": 0, "capped": False}
     assert "channels" not in payload  # the premise in code: this really is the absent-key shape
@@ -200,45 +216,57 @@ async def test_absent_channels_payload_is_empty_not_a_crash() -> None:
 async def test_a_non_list_channels_payload_is_dropped_whole() -> None:
     """A non-list ``channels`` is not read, even when every entry inside it is readable.
 
-    THE PAYLOAD IS THE POINT, so its two properties are asserted rather than described: it is not
-    a list (only the list check can fire) and every entry IS a dict (the element check would not
-    have dropped them). Swap in a dict or a str and the second assertion goes red on purpose,
-    because those payloads RESTORE the mask: guarded and mutant both answer empty and this test
-    would silently stop observing anything. The non-emptiness assertion closes the same hole from
-    the other side, ``all(...)`` over an empty payload being vacuously true.
+    THE PAYLOAD IS THE POINT, so its properties are asserted rather than described: exactly one
+    entry (so nothing below is vacuously true), not a list (only the list check can fire), and
+    every entry IS a dict (the element check would not have dropped them). Swap in a dict or a str
+    and the last assertion goes red on purpose, because those payloads RESTORE the mask: guarded
+    and mutant both answer empty and this test would silently stop observing anything.
 
-    A tuple is one representative of the separating class, not the only member: any non-list
-    iterable of dicts does the same (a generator, a ``deque``, a ``UserList``, a ``dict_values``
-    view, measured).
+    TWO instruments, not one, and that correction was measured rather than tidied. Calling a tuple
+    a stand-in for "any non-list iterable of dicts" was wrong in both directions: a tuple alone
+    catches ``(list, tuple)``/``Sequence``/``Iterable`` and MISSES ``MutableSequence``, while a
+    ``deque`` catches ``MutableSequence`` and misses ``(list, tuple)``. The two mutant sets are
+    DISJOINT. An instrument is a point, never a class, so the class is covered by covering it
+    twice.
+
+    ⚠️ A GENERATOR CANNOT BE USED HERE, and the annotation now says so mechanically. It is
+    non-list and it yields dicts, so it reads like a third instrument, but ``all(...)`` above
+    CONSUMES it: the code under test then receives an exhausted iterator, answers empty, and the
+    mutant SURVIVES with the test green. ``bool(empty generator)`` is ``True`` as well, so a
+    truthiness premise would not have caught it either. Hence ``Collection`` (a generator is not
+    one) plus ``len(...) == 1`` (a generator has no ``len``): a generator swap now fails loudly
+    instead of going blind.
 
     NAMED LIMIT, and the reason this test pins rather than endorses: the answer is
     indistinguishable from "the registry knows no such channel". It carries ``source`` and the
-    registry note while having read nothing, and the layer below,
-    ``ChannelFinderClient.find_channels``, RAISES ``ChannelFinderResponseError`` on this very
-    payload. Aligning discover with its own client is a wire-contract change, deliberately not
-    made here (S29's eleventh target reshaped these lines and left them unpromoted). Whoever
-    makes it will find this test red and should be changing it on purpose.
+    registry note while having read nothing, while the layer below refuses the same SHAPE loudly,
+    ``ChannelFinderClient.find_channels`` raising ``ChannelFinderResponseError`` on a non-list body
+    (not on this literal object, which is a decoded-JSON layer below and can never be a tuple).
+    Aligning discover with its client changes behaviour only under a doubled seam, since no real
+    call path reaches these lines, so it is NOT a wire-contract change; it was left undone because
+    S29's eleventh target reshaped these lines and deliberately did not promote them. Whoever
+    promotes them will find this test red and should be changing it on purpose.
     """
-    channels: tuple[object, ...] = (
-        {"name": "SIM:PS-01:Cur-RB", "ioc_name": "sim-ioc", "host_name": "simhost"},
-    )
-    assert channels, "an empty payload satisfies both premises below vacuously"
-    assert all(isinstance(entry, dict) for entry in channels), "the element check would not drop"
-    # Widened to ``object`` on purpose: against the tuple annotation the check below is statically
-    # provable, and mypy's warn_unreachable rejects a premise it can decide without running.
-    shape: object = channels
-    assert not isinstance(shape, list), "only the list check can fire on this payload"
+    entry = {"name": "SIM:PS-01:Cur-RB", "ioc_name": "sim-ioc", "host_name": "simhost"}
+    payloads: tuple[Collection[object], ...] = (tuple([dict(entry)]), deque([dict(entry)]))
+    for channels in payloads:
+        assert len(channels) == 1, "an empty payload satisfies the premise below vacuously"
+        assert all(isinstance(e, dict) for e in channels), "the element check would not drop these"
+        # Widened to ``object`` on purpose: against the annotation the check below is statically
+        # provable, and mypy's warn_unreachable rejects a premise it can decide without running.
+        shape: object = channels
+        assert not isinstance(shape, list), "only the list check can fire on this payload"
 
-    with patch(
-        "epics_mcp.tools.discover.query_channels",
-        new_callable=AsyncMock,
-        return_value=_cf_payload(channels),
-    ):
-        result = await _discover_pvs("SIM:*")
+        with patch(
+            "epics_mcp.tools.discover.query_channels",
+            new_callable=AsyncMock,
+            return_value=_cf_payload(channels),
+        ):
+            result = await _discover_pvs("SIM:*")
 
-    assert result["source"] == "channelfinder"
-    assert result["pvs"] == []
-    assert result["total"] == 0
+        assert result["source"] == "channelfinder"
+        assert result["pvs"] == []
+        assert result["total"] == 0
 
 
 async def test_a_non_dict_channel_entry_is_dropped_and_its_siblings_survive() -> None:
@@ -249,10 +277,17 @@ async def test_a_non_dict_channel_entry_is_dropped_and_its_siblings_survive() ->
     narrower weakening ``isinstance(channel, (dict, list))``, which survives every other test in
     this file and turns a silent drop into a crash.
 
+    Both junk kinds are now asserted rather than only described, and that gap was measured: with
+    no premise at all, deleting EITHER entry left this test green over the whole file, and
+    deleting the ``[]`` handed ``isinstance(channel, (dict, list))`` a clean pass through the
+    suite. A docstring saying "not padding" guarded nothing.
+
     SECOND-GRADE EVIDENCE like the absent-key test: both kills are tracebacks, not assertions.
     """
     good: dict[str, object] = {"name": "SIM:PS-01:Cur-RB", "ioc_name": "sim-ioc", "host_name": "h"}
     channels: list[object] = [good, "not-a-dict", []]
+    assert any(isinstance(e, str) for e in channels), "the str entry catches removal of the check"
+    assert any(isinstance(e, list) for e in channels), "the list entry catches the (dict, list) one"
 
     with patch(
         "epics_mcp.tools.discover.query_channels",
@@ -271,33 +306,40 @@ async def test_a_non_dict_channel_entry_is_dropped_and_its_siblings_survive() ->
 async def test_the_element_check_is_isinstance_not_duck_typing() -> None:
     """An entry that reads like a channel but is not a ``dict`` is dropped, not read.
 
-    The payload is chosen as an instrument: a ``MappingProxyType`` is the one non-dict entry that
-    does NOT crash when the check is removed, so the mutant produces a WRONG ANSWER (one channel
-    where the guarded code returns none) instead of a traceback. That makes this the
-    assertion-grade observer of the element check, and it is also what catches every duck-typed
-    weakening (``hasattr(channel, "get")``, ``isinstance(channel, Mapping)``).
+    The entries are instruments: a mapping that is NOT a dict does not crash when the check is
+    removed, so the mutant produces a WRONG ANSWER (one channel where the guarded code returns
+    none) instead of a traceback. That makes this the assertion-grade observer of the element
+    check.
+
+    TWO instruments again, for the reason the sibling test above spells out, and here the
+    correction was sharper. ``MappingProxyType`` was called "the one non-dict entry that does not
+    crash" and credited with catching "every duck-typed weakening". Both were wrong, measured: a
+    ``UserDict`` and a bare class answering ``.get`` do not crash either, and because a proxy is
+    deliberately IMMUTABLE the weakening ``isinstance(channel, MutableMapping)`` leaves the proxy
+    dropped and this test GREEN. ``UserDict`` is mutable and catches it. Proxy catches ``Mapping``
+    and ``hasattr(.., "get")``; the two sets are disjoint, so both entries stay.
 
     ⚠️ This pins an IMPLEMENTATION CHOICE, deliberately: identity of type, not "it answers
-    ``.get``". A later, considered widening to ``Mapping`` is a legitimate change and will find
-    this test red; that is the point of writing it down rather than leaving the choice unstated.
+    ``.get``". A later, considered widening to ``Mapping`` or ``MutableMapping`` is a legitimate
+    change and will find this test red; that is the point of writing the choice down.
     """
-    entry: object = MappingProxyType(
-        {"name": "SIM:PS-01:Cur-RB", "ioc_name": "sim-ioc", "host_name": "simhost"}
-    )
-    assert not isinstance(entry, dict), "only the element check can drop this entry"
-    assert isinstance(entry, MappingProxyType)
-    assert entry.get("name") == "SIM:PS-01:Cur-RB", "readable, so removing the check reads it"
+    fields = {"name": "SIM:PS-01:Cur-RB", "ioc_name": "sim-ioc", "host_name": "simhost"}
+    entries: tuple[Mapping[str, object], ...] = (MappingProxyType(dict(fields)), UserDict(fields))
+    for entry in entries:
+        shape: object = entry
+        assert not isinstance(shape, dict), "only the element check can drop this entry"
+        assert entry.get("name") == "SIM:PS-01:Cur-RB", "readable, so removing the check reads it"
 
-    with patch(
-        "epics_mcp.tools.discover.query_channels",
-        new_callable=AsyncMock,
-        return_value=_cf_payload([entry]),
-    ):
-        result = await _discover_pvs("SIM:*")
+        with patch(
+            "epics_mcp.tools.discover.query_channels",
+            new_callable=AsyncMock,
+            return_value=_cf_payload([entry]),
+        ):
+            result = await _discover_pvs("SIM:*")
 
-    assert result["source"] == "channelfinder"
-    assert result["pvs"] == []
-    assert result["total"] == 0
+        assert result["source"] == "channelfinder"
+        assert result["pvs"] == []
+        assert result["total"] == 0
 
 
 async def test_subclasses_of_list_and_dict_are_still_read() -> None:
@@ -311,11 +353,14 @@ async def test_subclasses_of_list_and_dict_are_still_read() -> None:
     Not academic on the second half: ``query_channels`` builds its entries with ``dict(channel)``
     today, and any future mapping subclass at that seam would go silently to zero.
 
-    Honest residue, since the rest of this block claims coverage: ``isinstance(raw_channels,
-    (list, dict))`` survives all five tests. It is an EQUIVALENT mutant rather than a gap, because
-    iterating a dict yields its keys and no bare dict can be a key (dicts are unhashable), so the
-    element check drops every one of them. Measured, including the single exception: a dict
-    subclass that defines ``__hash__`` can be a key. No JSON payload produces one.
+    Honest residue, and the first version of this paragraph got it wrong in the direction that
+    flatters: it called ``isinstance(raw_channels, (list, dict))`` an EQUIVALENT mutant, on the
+    argument that iterating a dict yields keys and no bare dict can be a key. The argument is
+    sound and the conclusion is not. Two payloads separate it from the guarded code, measured:
+    a dict whose key is a ``__hash__``-defining dict subclass, and a dict subclass with its own
+    ``__iter__`` that yields dicts, which needs no hashing at all and so falsifies the premise
+    rather than the corollary. It survives the suite, so it IS residue; it is simply not
+    equivalent, and neither payload can come out of a JSON body.
     """
     channels = _ListSubclass([OrderedDict({"name": "SIM:PS-01:Cur-RB", "ioc_name": "sim-ioc"})])
     assert isinstance(channels, list) and type(channels) is not list
