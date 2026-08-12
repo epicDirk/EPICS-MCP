@@ -141,10 +141,30 @@ async def _discover_by_channelfinder(pattern: str, timeout: float | None) -> Dis
     # when written (429f2ce, 2026-07-25) and have since drifted by +3 and by -35 lines onto a
     # ``ChannelFinderEvidence`` return and a dict literal. A reader checking them today finds
     # unrelated code and concludes the comment is confused. Same rot that
-    # ``tests/test_client_edge_guards.py`` records for its own table. Honest scope: neither check is
-    # OBSERVED: no double injects a non-list or a non-dict element today, and the pair is mutually
-    # masking (tests/test_client_edge_guards.py records that class). They stay because a typing
-    # change must not alter runtime behaviour, not because they are guarded.
+    # ``tests/test_client_edge_guards.py`` records for its own table.
+    #
+    # Honest scope (S35). Both checks are OBSERVED now, each by a test in
+    # ``tests/test_discover.py`` that names it, and the gap was narrower than this comment used to
+    # say. It said "neither check is OBSERVED", which is true only of the ENABLING polarity:
+    # forcing either check to ``False`` empties the answer and reddens
+    # ``test_discover_wildcard_delegates_to_channelfinder``, which has covered that half all along.
+    # Forcing either to ``True`` left the FULL suite green, 2023 passed under both mutants,
+    # measured on this tree before the S35 tests existed. That is the mutual masking, and it is
+    # mechanical: with a dict or a str payload the mutant iterates keys or characters and the
+    # OTHER check drops every one, so guarded and mutant answer identically.
+    # The tests therefore pin the separating CLASSES rather than two lucky instances: a non-list
+    # iterable OF DICTS (a tuple stands in for generator/deque/UserList/dict_values) and a non-dict
+    # entry that carries ``.get`` (a MappingProxyType stands in for any duck-typed mapping), plus a
+    # subclass case that stops the pair being narrowed to ``type(x) is list`` / ``type(x) is dict``
+    # unnoticed. Residue, said out loud because the rest of this paragraph claims coverage:
+    # ``isinstance(raw_channels, (list, dict))`` survives all five. It is an EQUIVALENT mutant, not
+    # a hole, since iterating a dict yields keys and no bare dict is hashable enough to be one.
+    # ``scripts/guard_audit.py`` can never sweep these two lines: it globs ``services/*_client.py``,
+    # so this module is outside its population by construction and those tests are the only, and
+    # the permanent, watch here.
+    # They stay because a typing change must not alter runtime behaviour, and now also because they
+    # are pinned. What they deliberately do NOT do is match the client underneath, which RAISES
+    # ``ChannelFinderResponseError`` on these same payloads; that divergence is named in the tests.
     raw_channels = result.get("channels")
     pvs: list[dict[str, object]] = [
         {
