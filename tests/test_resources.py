@@ -1,13 +1,40 @@
 """Tests for epics_mcp.resources."""
 
 import json
+import os
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from epics_mcp import config as config_module
 from epics_mcp.config import EpicsConfig
 from epics_mcp.resources import get_epics_config, get_health
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Strip every ``EPICS_MCP_*`` variable so these assertions measure the code, not the machine.
+
+    ``EpicsConfig`` is a settings model, so a field left unset in a test is read from the PROCESS
+    ENVIRONMENT, and the autouse fixture in conftest strips only the EPICS SEARCH variables. This
+    repository has paid for that twice already: ``_WRITE_GATE_DEFAULTS`` exists because an unpinned
+    ``olog_url`` made the suite dial a real URL, and the guide-drift guard blanks the URL fields for
+    the same reason. Blanking by PREFIX rather than by field list, so a field added to the model
+    later is covered without anyone remembering to add it.
+
+    ⚠️ Stripping alone is not enough for the tests that do NOT call ``_with_config``: they go through
+    the cached ``get_config`` singleton, which a previous test may already have built from the
+    unstripped environment. So the cache is dropped on both sides of the test, the older of the two
+    patterns this suite uses.
+    """
+    for name in list(os.environ):
+        if name.startswith("EPICS_MCP_"):
+            monkeypatch.delenv(name, raising=False)
+    config_module._config = None
+    yield
+    config_module._config = None
 
 
 def _with_config(monkeypatch: pytest.MonkeyPatch, **kwargs: object) -> None:
@@ -35,7 +62,7 @@ _HEALTH_KEYS = frozenset(
         "any_write_gate_armed",
         "write_enabled",
         "write_pattern",
-        "write_pattern_allows_every_name",
+        "write_pattern_is_a_known_allow_all_spelling",
         "write_rate_limit",
         "olog_write",
         "uptime_seconds",
@@ -114,10 +141,101 @@ def test_the_declared_plane_list_still_matches_the_shipped_guide() -> None:
     guide = (
         Path(__file__).resolve().parents[1] / "src" / "epics_mcp" / "operator_guide.md"
     ).read_text(encoding="utf-8")
-    region = re.search(r"BEGIN:plane-inventory(.*?)END:plane-inventory", guide, re.DOTALL)
+    # The SAME region the guard uses, comment delimiters included: without them the capture also
+    # holds the prose of the BEGIN comment, which the guide convention treats as outside the
+    # markers. A backticked word in that comment would then redden this test and leave the guard
+    # it claims to inherit from green, which is a weaker anchor rather than the inherited one.
+    region = re.search(
+        r"<!-- BEGIN:plane-inventory.*?-->(.*?)<!-- END:plane-inventory -->", guide, re.DOTALL
+    )
     assert region is not None, "the guide plane-inventory markers moved, the drift anchor broke"
 
     assert set(re.findall(r"`([a-z_]+)`", region.group(1))) == _DOCTOR_PLANES
+
+
+def test_the_gate_and_plane_booleans_are_wired_to_their_own_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every boolean this ticket added had a key guard and no VALUE guard, which is half a test.
+
+    A key-presence check cannot see a field wired to the wrong source, and several of these are one
+    character apart from a plausible mistake: any_write_gate_armed reading only the Olog half,
+    naming_enabled reading the Olog URL, target_allowed reading the loopback bit. Each pair below is
+    a mutant that survived the suite before this test existed.
+    """
+    _with_config(
+        monkeypatch,
+        allow_pv_write=True,
+        pv_write_pattern="^SIM:.*$",
+        audit_log_file="audit.log",
+        naming_url="https://names.example.org/",
+    )
+    health = get_health()
+
+    # The PV half of any_write_gate_armed, which the Olog test cannot reach.
+    assert health["any_write_gate_armed"] is True
+    assert health["write_enabled"] is True
+    # A narrow pattern is not a known allow-all spelling, and the gate is armed, so this is the
+    # branch where the flag means something.
+    assert health["write_pattern_is_a_known_allow_all_spelling"] is False
+    assert health["naming_enabled"] is True
+    assert health["olog_enabled"] is False, "naming and olog must not be wired to the same URL"
+
+    _with_config(monkeypatch, allow_pv_write=True, pv_write_pattern=".*", audit_log_file="a.log")
+    assert get_health()["write_pattern_is_a_known_allow_all_spelling"] is True
+
+    _with_config(monkeypatch)
+    assert get_health()["any_write_gate_armed"] is False, "neither gate armed is the default"
+
+
+def test_an_allowlisted_remote_logbook_is_not_reported_as_a_local_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """target_allowed and target_is_loopback were only ever measured where BOTH are true.
+
+    That is the one configuration in which the two cannot be told apart, so a payload wiring either
+    to the other survived. The distinction is the whole reason they are separate fields: an
+    allowlisted remote https target is allowed AND not loopback, and reading the pair as one is how
+    a sandbox posture gets claimed for a production one.
+    """
+    _with_config(
+        monkeypatch,
+        olog_url="https://journal.example.org/Olog",
+        allow_olog_write=True,
+        olog_write_allow_remote=True,
+        olog_write_url_allowlist="https://journal.example.org/Olog",
+        olog_write_logbooks="Operations",
+        audit_log_file="audit.log",
+    )
+    olog = get_health()["olog_write"]
+    assert isinstance(olog, dict)
+
+    assert olog["target_allowed"] is True
+    assert olog["target_is_loopback"] is False
+
+
+def test_the_audit_path_never_reaches_the_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Three things are declared withheld; this was the one with no value guard behind the claim.
+
+    An operator's filesystem layout carries a username often enough that the payload states it as a
+    deliberate omission, in docs/safety.md and the changelog. Only the key list stood behind that,
+    and a key list is satisfied by any spelling of the same disclosure.
+    """
+    sentinel = "/var/log/only-here-audit.log"
+    _with_config(
+        monkeypatch,
+        allow_olog_write=True,
+        olog_url="http://localhost:8080/Olog",
+        olog_write_logbooks="Operations",
+        audit_log_file=sentinel,
+    )
+    health = json.dumps(get_health())
+
+    # Positive control first: the configuration really carries the sentinel, so the absence below
+    # is a finding rather than an empty fixture.
+    assert get_health()["any_write_gate_armed"] is True
+    assert sentinel not in health
+    assert "only-here-audit" not in health
 
 
 def test_the_retrieval_plane_follows_the_mgmt_url_in_both_directions(
@@ -352,10 +470,20 @@ _SECRET_WORDS = ("secret", "password", "token", "credential", "auth", "key")
 
 
 def _every_key(payload: object, prefix: str = "") -> list[str]:
-    """Every key in *payload*, nested ones included, as dotted paths."""
+    """Every key in *payload* at ANY depth, as dotted paths, descending through lists as well.
+
+    The list half is not decoration: both nested blocks already hold lists (``olog_write.logbooks``,
+    ``pv_search.search_lists_set``), so a list OF DICTS is one edit away, and a dict-only walk would
+    have skipped it while the caller's docstring promised any depth.
+    """
+    if isinstance(payload, list):
+        found: list[str] = []
+        for index, item in enumerate(payload):
+            found.extend(_every_key(item, f"{prefix}{index}."))
+        return found
     if not isinstance(payload, dict):
         return []
-    found: list[str] = []
+    found = []
     for key, value in payload.items():
         path = f"{prefix}{key}"
         found.append(path)

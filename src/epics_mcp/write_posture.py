@@ -157,15 +157,16 @@ class PvSearchPosture(_Model):
     """
 
     #: Per PROVIDER, because the two parsers disagree about what disables the broadcast: pvxs takes
-    #: only ``NO`` or ``0``, libca takes any value CONTAINING ``no``. One combined flag would have
-    #: to pick a reading and would be wrong for the other client. Unset means ON for both, which is
-    #: the default that is easy to miss.
+    #: only ``NO`` or ``0``, libca any value CONTAINING ``no`` or ``NO``. One combined flag would
+    #: have to pick a reading and would be wrong for the other client. Unset means ON for both,
+    #: which is the default that is easy to miss.
     auto_addr_broadcast: dict[str, bool]
     #: The NAMES of the search-list variables that carry a value, never the values. Their vocabulary
     #: is closed and generated from the provider list, so this cannot leak an address.
     search_lists_set: list[str]
     #: True iff the reach is provably loopback-only, from the SAME function the PV write gate calls
-    #: at construction, so this bit and that gate's start condition cannot disagree.
+    #: at construction, so for the same environment this bit and that gate's start condition cannot
+    #: disagree. The gate always reads ``os.environ``; this one reads what it was handed.
     #: ⚠️ It judges BOTH providers, while ``auto_addr_broadcast`` reports them separately. A process
     #: with the active provider's broadcast disabled and the idle one's still on is loopback_only
     #: False with one True entry above, and that is the truth rather than a contradiction: the write
@@ -186,13 +187,15 @@ def pv_search_posture(environ: Mapping[str, str]) -> PvSearchPosture:
             )
             for provider in CLIENT_REACH_PROVIDERS
         },
-        # Same construction as write_reach_violations walks, so a variable that would produce a
-        # violation is a variable named here; only the VALUE is dropped.
+        # The same four LIST variables write_reach_violations walks; only the value is dropped.
+        # ⚠️ Not every variable that can produce a violation: the two *_AUTO_ADDR_LIST switches
+        # do too, and they are reported by the field above instead, because their unset state is
+        # the interesting one and a list of what is SET cannot express it.
         search_lists_set=[
-            var
+            f"EPICS_{provider.upper()}_{suffix}"
             for provider in CLIENT_REACH_PROVIDERS
             for suffix in ("ADDR_LIST", "NAME_SERVERS")
-            if (var := f"EPICS_{provider.upper()}_{suffix}") and environ.get(var, "").strip()
+            if environ.get(f"EPICS_{provider.upper()}_{suffix}", "").strip()
         ],
         loopback_only=not write_reach_violations(environ),
     )

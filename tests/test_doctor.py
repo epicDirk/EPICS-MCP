@@ -34,7 +34,7 @@ from epics_mcp.errors import (
     PVWriteDeniedError,
     SafetyConfigError,
 )
-from epics_mcp.olog_safety import OlogWriteGate
+from epics_mcp.olog_safety import OlogWriteGate, write_target_allowed
 from epics_mcp.safety import SafetyLayer
 from epics_mcp.services import doctor
 from epics_mcp.services._http import url_without_credentials
@@ -2971,16 +2971,34 @@ def test_the_write_gate_defaults_cover_every_field_the_block_reads() -> None:
     GREEN, which is the sham shape it exists to prevent. Whoever splits one of these functions again
     adds its source here in the same edit, or silently unpins whatever moved out.
     """
-    source = "".join(
-        inspect.getsource(fn)
+    per_source = {
+        fn.__name__: {
+            match.group(1)
+            for match in re.finditer(r"\b(?:cfg|config)\.([a-z_]+)", inspect.getsource(fn))
+        }
         for fn in (
             doctor._write_safety_report,
             pv_write_gate_report,
             olog_write_gate_report,
+            # One level deeper, and invisible twice over without this line: it reads three config
+            # fields into olog.target_allowed, and it spells its parameter ``config``, so listing it
+            # alone would have changed nothing while looking like it did.
+            write_target_allowed,
         )
-    )
-    read = {match.group(1) for match in re.finditer(r"cfg\.([a-z_]+)", source)}
+    }
 
+    # Non-empty floor PER SOURCE, and per source is the whole point. A floor on the union looks
+    # like the same guard and is not: the other three keep it non-empty, so one function renaming
+    # its parameter past this scan drops its fields out of the pin while the assertion below still
+    # passes. Measured on this very test: with a union floor, renaming the parameter of BOTH gate
+    # builders to a third spelling left it green, because the composition still contributed
+    # audit_log_file.
+    silent = sorted(name for name, fields in per_source.items() if not fields)
+    assert not silent, (
+        f"{silent} contributed no config field, so their values are no longer pinned. Either a "
+        "parameter was renamed past this scan, or the function no longer feeds the report."
+    )
+    read = set().union(*per_source.values())
     assert read <= set(_WRITE_GATE_DEFAULTS), (
         f"the block reads {sorted(read - set(_WRITE_GATE_DEFAULTS))} but no default pins it, so "
         "these tests would inherit that value from the machine they run on"

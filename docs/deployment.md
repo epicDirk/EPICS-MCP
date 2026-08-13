@@ -397,7 +397,7 @@ a virtual environment, or `uv tool install`.
 
 ### It is running, and now what
 
-Everything above is bring-up. These four are about an instance that already started, which is a
+Everything above is bring-up. These five are about an instance that already started, which is a
 different set of questions and used to have no answers here at all.
 
 **It runs, and I think it is reading the wrong facility.** Two things decide that and they are not
@@ -409,16 +409,20 @@ ran. A server started by an MCP client was given that client's environment, whic
 its configuration file, so compare the two rather than assuming they match. To see it from the
 running server instead, read its `epics-pv://config` and `epics-pv://health` resources through the
 client; those describe the process that is actually answering. `health` carries one boolean per
-plane, so "which of the seven is even configured" is answerable there, plus `pv_search`, which says
-whether the live plane broadcasts (the default above) without naming an address. Which address it
-broadcasts to is the half that stays here with `epics-doctor`.
+SERVICE plane, six of the seven, so "which of the REST planes is even configured" is answerable
+there. The seventh, `live`, has no such key because it is always configured; `pv_search` reports
+it instead, saying whether it broadcasts (the default above) without naming an address. Which
+address it broadcasts to is the half that stays here with `epics-doctor`.
 
 **And may it write anything?** `epics-pv://health` again, in one field: `any_write_gate_armed`.
 ⚠️ Do not read `write_enabled` for this. That field is the PV gate ALONE, so a server whose logbook
 gate is armed reports it as `false` while it can create entries, which is exactly the misreading
 the one field exists to prevent. `olog_write` beside it carries that gate's allowlist, rate limit
-and target predicates. The audit path is not in the payload, because a client keeps it; a durable
-audit log is a START condition of either gate, so an armed gate means one exists.
+and target predicates. The audit path is not in the payload, because a client keeps it. An armed
+gate does mean one was CONFIGURED, since neither gate starts without `EPICS_MCP_AUDIT_LOG_FILE`
+set, but that check reads the variable and not the disk: whether the file can be written is
+`epics-doctor`'s answer, and for an Olog-only deployment it is not decided until the first
+write.
 
 **How do I stop it?** You do not, directly: an MCP server over stdio is a child of the client that
 launched it, and it lives and dies with that client's connection. Disconnect the server in the

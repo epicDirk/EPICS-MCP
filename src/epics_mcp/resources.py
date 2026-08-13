@@ -80,10 +80,14 @@ def get_health() -> dict[str, object]:
         # nothing distinguished it from a pattern whose text happens to be that word.
         "write_pattern": cfg.pv_write_pattern or None,
         "write_rate_limit": cfg.write_rate_limit,
-        # Meaningful while the PV gate is armed; with the gate off the pattern is not "narrow", it
-        # is irrelevant. Decided against the closed set of allow-everything spellings rather than by
-        # interpreting the expression, see write_posture.
-        "write_pattern_allows_every_name": pv_gate.pattern_allows_every_name,
+        # ⚠️ The NAME says spelling, not semantics, and that is the whole point. It is decided by
+        # comparing the pattern against a closed set of allow-everything spellings, never by
+        # reading the expression, because deciding whether an arbitrary regex matches every name
+        # is not reliably doable. So true means certainly wide, while FALSE DOES NOT MEAN NARROW:
+        # measured, '.*|', '(?s).*', '|.*' and '^$|.*' each admit every PV under the gate's own
+        # fullmatch and none of them is in the set. The CLI prints that caveat beside the flag;
+        # here it has to live in the field name, because a payload carries no prose.
+        "write_pattern_is_a_known_allow_all_spelling": pv_gate.pattern_allows_every_name,
         # The Olog gate, which had NO representation here at all. Its URL is deliberately absent for
         # the reason the olog_enabled comment below gives; the two predicates say what an approver
         # needs from it, and target_allowed is ALSO true for an allowlisted remote https target, so

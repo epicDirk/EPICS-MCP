@@ -1742,9 +1742,10 @@ def health() -> dict[str, object]:
 def epics_config() -> dict[str, object]:
     """Non-secret configuration values this process was started with.
 
-    The service URLs here are the ones whose host may be disclosed; the naming and logbook URLs are
-    withheld and appear as booleans in epics-pv://health instead. An unset PV write pattern is null,
-    never a placeholder string.
+    The service URLs here are the ones whose host may be disclosed. Three are withheld: the naming
+    and logbook ones, which appear as booleans in epics-pv://health instead, and the archiver
+    retrieval one, whose plane is reported there through the mgmt URL it falls back to. An unset PV
+    write pattern is null, never a placeholder string.
     """
     return get_epics_config()
 

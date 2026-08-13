@@ -201,8 +201,10 @@ carry breaking changes).
   account and an allowlist behind it, reported `write_enabled: false` and nothing anywhere
   contradicted it. New fields: `any_write_gate_armed` (the whole write answer in one field, because
   deriving it from `write_enabled` is the mistake this fixes), an `olog_write` block with that
-  gate's allowlist, rate limit and target predicates, `write_pattern_allows_every_name`,
-  `naming_enabled` and `archiver_retrieval_enabled` (the payload named four of the seven planes the
+  gate's allowlist, rate limit and target predicates,
+  `write_pattern_is_a_known_allow_all_spelling` (named for its METHOD, since true means
+  certainly wide while false does NOT mean narrow: it compares the pattern against a closed
+  set of spellings rather than reading the expression), `naming_enabled` and `archiver_retrieval_enabled` (the payload named four of the seven planes the
   doctor probes), and a `pv_search` block saying whether PV searches broadcast into the local
   subnets. Deliberately absent, because a client keeps this payload: the Olog URL, the audit path,
   and the raw address lists. Those stay with `epics-doctor`.
