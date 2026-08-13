@@ -114,6 +114,17 @@ carry breaking changes).
 
 ### Fixed
 
+- **`epics-doctor`'s final verdict named one problem and hid the others.** The line an operator
+  reads last named only the highest-ranking of the three honest-but-not-healthy categories
+  (inconclusive identity probes, degraded planes, unverified planes) and said nothing about the
+  rest, so someone who fixed what it named then discovered the next one: two problems read as
+  almost finished. Measured over every state the tool can report, eleven of sixteen printed a
+  verdict that hid at least one plane NAME. Every category present is now named, with its planes,
+  and the earlier `(N other plane(s) also unverified)` clause is gone: it covered one of the two
+  categories it outranked and gave a count where the rest of the report gives names. The `PROBLEM`
+  verdict, which had named no plane at all, now names the planes that FAILED before it names the
+  others, so the last line does not put the harmless ones first. Exit codes, `--json` fields and
+  the per-plane block are unchanged; this is the verdict line only.
 - **A password in a service URL was handed to the client in the clear.** `epics-pv://config`
   printed `channelfinder_url`, `archiver_url` and `alarm_url` exactly as configured, and those
   fields are unvalidated strings: `https://user:password@host/path` is an ordinary spelling for
@@ -247,6 +258,31 @@ carry breaking changes).
 
 ### Changed
 
+- **BREAKING: `epics-init` refuses `--probe-pv` together with `--no-check`.** That call used to
+  exit `0` and emit the block; it now exits `2` with a usage error, so a script passing both
+  breaks. It was accepted in silence while `--probe-pv` was never read, because the run returns
+  before the check that would have used it. `--probe-pv` is the option that turns "nothing is
+  misconfigured" into "something actually works", and the quick start recommends it for that
+  reason, so a user who passed both believed a PV had been probed when nothing had. Nothing else
+  is lost: the emitted block is byte-identical with and without `--probe-pv` under `--no-check`.
+  Drop one of the two options; without `--no-check` the PV is read as before.
+- **A failing `archiver_retrieval` plane no longer sends you to the variable that just passed.**
+  With `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` empty the plane probes the MGMT URL, which is right for a
+  single-JVM appliance, but a finding then opened with `EPICS_MCP_ARCHIVER_URL` and the remedy
+  promises that the variable to edit is the one named at the start. On a split deployment that is
+  the variable which had just been reported healthy on the line above, so following the advice
+  broke the working half and left the broken half broken, while the setting that actually helps was
+  never named. The finding now opens with the empty retrieval variable and says that the plane fell
+  back; the MGMT variable is still named, because that URL really was the one probed. Only the
+  fallback case changes, and only its `detail` text: a plane with its own retrieval URL reads
+  exactly as before. `--json` consumers matching the old opening words of this one finding will not
+  find them.
+- **The `api_error` remedy no longer names one webapp as the right one for every plane.** It ended
+  "for an Archiver Appliance the mgmt port and not retrieval", and the remedy table is keyed by
+  status and read by every plane, so on `archiver_retrieval` it recommended the endpoint the probe
+  had just failed against, which is the signature of a split deployment. It now states which
+  question to ask (which webapp does this plane read, and from which variable) instead of answering
+  it for one plane. Affects the `detail` text of every `api_error` finding.
 - **`epics-pv://health` now says whether the server may write, and which planes it has.** It
   described the PV write gate only, so a server whose LOGBOOK gate was armed, with a service
   account and an allowlist behind it, reported `write_enabled: false` and nothing anywhere
