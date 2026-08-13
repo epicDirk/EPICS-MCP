@@ -1748,6 +1748,13 @@ def health() -> dict[str, object]:
     with the logbook gate armed reports it as false while it can still create entries. One boolean
     per service plane says which are configured; pv_search says how far a PV search can travel
     without naming an address. Which address, and the audit path, stay with epics-doctor.
+
+    The posture group after the planes answers what an approver asks next: whether the REST planes
+    verify certificates, computed so a CA bundle beats a disabled switch instead of mirroring the
+    switch; whether the REST GET throttle is on, which is never a PV read; whether the file
+    boundary variable holds a root, never which; and how much the ChannelFinder allowlists
+    DISCLOSE, where zero is the most private posture rather than a broken one. Which bundle, which
+    roots and which accounts stay with epics-doctor as well.
     """
     return get_health()
 

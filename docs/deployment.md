@@ -428,6 +428,17 @@ set, but that check reads the variable and not the disk: whether the file can be
 `epics-doctor`'s answer, and for an Olog-only deployment it is not decided until the first
 write.
 
+**Does it verify TLS, throttle its reads, and redact?** The same resource, in a posture group at
+the end. `rest_tls.verification_enabled` is the RESOLVED answer rather than the raw switch:
+`EPICS_MCP_CA_BUNDLE` takes precedence over `EPICS_MCP_TLS_VERIFY`, so a server with the switch off
+and a bundle set does verify, and this field says so instead of calling it unverified.
+`rest_read_rate_limit` is the REST GET throttle ALONE; a p4p PV read runs past it, which is what the
+`rest_` prefix is there to say. `allowed_roots_set` says the boundary variable holds at least one
+root, not that the roots are narrow, since a root of `.` satisfies it too. And
+`channelfinder_redaction` counts what the two allowlists DISCLOSE, so zero is everything redacted,
+the most private posture rather than a broken one. The bundle path, the roots and the account names
+are not in the payload: `epics-doctor` prints those.
+
 **How do I stop it?** You do not, directly: an MCP server over stdio is a child of the client that
 launched it, and it lives and dies with that client's connection. Disconnect the server in the
 client, or quit the client. Removing the block from the configuration file does nothing to a

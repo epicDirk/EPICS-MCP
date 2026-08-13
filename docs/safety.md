@@ -99,11 +99,13 @@ This is a controls tool, so the trust questions come first.
   in the bullets above.
   ⚠️ **The first limit does not apply to the resource route.** `epics-pv://health` carries the same
   posture out of the process that is actually answering: `any_write_gate_armed` for the one-field
-  question, the `olog_write` block for that gate's allowlist, rate limit and target predicates, and
-  `pv_search` for the live plane's reach. Read through the client, it needs no shell and no guess
-  about whose environment you are looking at. It withholds three things the CLI prints, deliberately:
-  the Olog target URL, the audit path and the raw search-reach strings, because a resource payload
-  is kept by the client. So the
+  question, the `olog_write` block for that gate's allowlist, rate limit and target predicates,
+  `pv_search` for the live plane's reach, and a posture group for REST TLS verification, the REST
+  read throttle, the opt-in file boundary and the ChannelFinder redaction. Read through the client,
+  it needs no shell and no guess about whose environment you are looking at. What it withholds is
+  what the CLI prints as a VALUE and this payload can carry only as a boolean or a count, because a
+  resource payload is kept by the client: the Olog target URL, the audit path, the raw search-reach
+  strings, the CA-bundle path, the allowed roots, and the ChannelFinder allowlist entries. So the
   block above remains the fuller answer, and the resource the trustworthy one about **this**
   process.
   The sibling resource `epics-pv://config` does print three service URLs, and the same premise
