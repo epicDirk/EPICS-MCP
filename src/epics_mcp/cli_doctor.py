@@ -49,6 +49,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from typing import Literal
 
@@ -135,10 +136,25 @@ def _one_line(value: str, limit: int = _VALUE_LIMIT) -> str:
     their escapes instead of acted on. ``--json`` is deliberately NOT put through this: a JSON
     encoder escapes them safely on its own, and a machine reader should see the value as configured.
     """
-    escaped = "".join(
+    escaped = _escaped(value)
+    return escaped if len(escaped) <= limit else f"{escaped[:limit]}... (cut after {limit} chars)"
+
+
+def _escaped(value: str) -> str:
+    """*value* with every non-printable shown as its escape. The cap is :func:`_one_line`'s half.
+
+    Split out because the rest of the report needs the ESCAPING and must not have the CAP. The
+    forging hole is not a property of the write block, it is a property of any line built from a
+    string this process did not author, and the report has two more such sources, both measured:
+    the privacy allowlists come from ``EPICS_MCP_CHANNELFINDER_SAFE_*`` verbatim, and a plane's
+    ``detail`` embeds the raw EPICS search-path values (``_live_search_posture`` interpolates
+    ``os.environ`` after a ``strip()``, which trims the ENDS and leaves an interior newline alone).
+    A remedy line can legitimately run past 200 characters, though, and cutting one would trade a
+    forged line for a truncated instruction.
+    """
+    return "".join(
         char if char.isprintable() or char == " " else repr(char)[1:-1] for char in value
     )
-    return escaped if len(escaped) <= limit else f"{escaped[:limit]}... (cut after {limit} chars)"
 
 
 def _pv_write_lines(pv: PvWriteGateReport) -> list[str]:
@@ -177,6 +193,11 @@ def _pv_write_lines(pv: PvWriteGateReport) -> list[str]:
             "              search reach: NOT loopback-only, so a write-enabled server refuses "
             "to start:"
         )
+        # ⚠️ The ONE escaping call in this file that cannot be proven able to go red, and it is
+        # labelled rather than removed: ``write_reach_violations`` builds these strings with
+        # ``!r``, so their control characters are already escaped when they arrive. This is a
+        # second layer that only starts earning its place if that function ever stops using
+        # ``!r``, and a reader who finds it uncovered by the forgery test should know why.
         lines += [f"                {_one_line(v)}" for v in pv.search_reach_violations]
     else:
         lines.append("              search reach: loopback-only")
@@ -252,13 +273,31 @@ def _write_safety_lines(report: DoctorReport) -> list[str]:
         lines.append(f"  audit log:  {path}, NOT usable: {_one_line(audit.note or '')}")
     else:
         lines.append(f"  audit log:  {path}, not decidable here: {_one_line(audit.note or '')}")
-    if audit.resolved_path != audit.path:
+    # Which of the two sentences below applies is decided by ``os.path.isabs``, NOT by whether the
+    # resolved string differs. That difference was the old test and it is a DIFFERENT question:
+    # ``os.path.abspath`` also NORMALISES, so an absolute path can come back respelled while still
+    # naming the same file for both processes. Measured on Windows: an absolute path written with
+    # FORWARD slashes comes back with backslashes, and the line used to call it "relative". That
+    # spelling is the one an MCP client's JSON block invites, because a backslash has to be escaped
+    # there, so it was not an exotic case. Same on POSIX for a ``/./`` segment or a doubled
+    # separator.
+    if not os.path.isabs(audit.path):
         # A RELATIVE path is resolved against the current directory, and the two processes have
         # different ones: this command runs in the operator's shell, the server is started by an
         # MCP client somewhere else. Printing only the configured string would say "writable"
         # about a file the server will never touch, without saying which file was checked. The
         # heading disclaims the environment; the working directory is not part of it.
-        lines.append(f"              (relative, resolved here to {_one_line(audit.resolved_path)})")
+        lines.append(
+            "              (relative, so the server resolves it against ITS working directory; "
+            f"checked here as {_one_line(audit.resolved_path)})"
+        )
+    elif audit.resolved_path != audit.path:
+        # Absolute, merely respelled. Still printed, because the note above quotes the resolved
+        # form and an unexplained second spelling reads like a second file. No warning attached:
+        # there is no working directory in this case for the two processes to disagree about.
+        lines.append(
+            f"              (the same file, normalised to {_one_line(audit.resolved_path)})"
+        )
     return lines
 
 
@@ -269,17 +308,29 @@ def _armed_gate_names(report: DoctorReport) -> list[str]:
 
 
 def _render(report: DoctorReport) -> str:
-    """Render a human-readable per-plane report (deterministic)."""
+    """Render a human-readable per-plane report (deterministic).
+
+    EVERY string this builds from a value the process did not author goes through :func:`_escaped`
+    or :func:`_one_line` first, and that is the whole report rather than the write block alone: a
+    forged line is worth the same wherever it is injected, and the block was only the first place
+    the question got asked. ``test_no_configured_value_can_forge_a_line_anywhere_in_the_report``
+    checks the finished report instead of enumerating these call sites, so a line added later is
+    covered without anyone remembering to add it to a list.
+    """
     lines = ["EPICS-MCP doctor, read-only per-plane config check", ""]
     for plane in report.planes:
         mark = _STATUS_MARK.get(plane.status, "?")
         lines.append(f"  {mark} {plane.plane:<14} {plane.status}")
         if plane.detail:
-            lines.append(f"      {plane.detail}")
+            lines.append(f"      {_escaped(plane.detail)}")
     lines.append("")
     lines.append("Privacy (ChannelFinder redaction):")
-    owners = ", ".join(report.privacy.cf_safe_owner_accounts) or "(empty, all owners redacted)"
-    props = ", ".join(report.privacy.cf_safe_property_names) or "(empty, all properties redacted)"
+    owners = _escaped(", ".join(report.privacy.cf_safe_owner_accounts)) or (
+        "(empty, all owners redacted)"
+    )
+    props = _escaped(", ".join(report.privacy.cf_safe_property_names)) or (
+        "(empty, all properties redacted)"
+    )
     lines.append(f"  owner allowlist:    {owners}")
     lines.append(f"  property allowlist: {props}")
     lines.append("")

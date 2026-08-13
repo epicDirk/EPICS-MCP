@@ -37,6 +37,7 @@ from epics_mcp.errors import (
 from epics_mcp.olog_safety import OlogWriteGate
 from epics_mcp.safety import SafetyLayer
 from epics_mcp.services import doctor
+from epics_mcp.services._http import url_without_credentials
 from epics_mcp.services.doctor import (
     _ALLOW_EVERY_PV_NAME,
     _DEGRADED_STATUSES,
@@ -2481,6 +2482,116 @@ async def _report_for(cfg: EpicsConfig) -> DoctorReport:
         return await run_doctor()
 
 
+def _write_block_of(rendered: str) -> list[str]:
+    """The write-gate block, sliced out of a full report by its heading and the blank line after.
+
+    Sliced rather than obtained from ``_write_safety_lines`` directly, because the block's PLACE in
+    the report is part of what these tests hold: a block rendered correctly into a variable and
+    never appended would satisfy every substring assertion in this file.
+    """
+    lines = rendered.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("Write gates"))
+    end = next(i for i in range(start, len(lines)) if not lines[i].strip())
+    return lines[start:end]
+
+
+# The two states below are pinned LINE BY LINE rather than by substring, and that is a deliberate
+# change of instrument. An exhaustive census of this block counted 30 outcomes, of which 15 were
+# held by an assertion and 11 by none, and each of the 11 was a separate one-line test away from
+# being held. Substring assertions also let a mutant satisfy a sibling branch's phrasing: measured,
+# an ARMED Olog gate printing the disarmed sentence survived the entire suite, because the only
+# test naming that sentence renders the DISARMED state. A full-text pin cannot be satisfied by a
+# neighbouring branch's wording, and it holds the reassuring parentheticals, the two rate limits,
+# the value slots and the heading's disclaimer in one place. The cost is that any deliberate
+# rewording touches this list, which is the intended cost: this block is read by someone deciding
+# whether a server may write.
+_DEFAULT_WRITE_BLOCK = [
+    "Write gates (as THIS command's environment has them; a running server may have been",
+    "started with a different one):",
+    "  PV write:   OFF (no PV write can leave this server)",
+    "  Olog write: OFF (no logbook entry can leave this server)",
+    "  audit log:  not set, so the trail goes to stderr and is lost on restart (a write-enabled",
+    "              server refuses to start without a durable path)",
+]
+
+
+def test_the_write_block_of_a_shipped_default_renders_exactly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The state every fresh install is in, and the one the surrounding prose kept describing as if
+    it were the armed one.
+
+    Red-proof: three separate mutants survived the whole suite before this test: dropping the two
+    audit lines entirely, rewording either OFF parenthetical, and inverting the heading's second
+    line, which is where the block says whose environment it read.
+    """
+    for name, value in _LOOPBACK_ENV.items():
+        monkeypatch.setenv(name, value)
+
+    assert _write_block_of(_render_with()) == _DEFAULT_WRITE_BLOCK
+
+
+def test_the_write_block_of_a_fully_armed_install_renders_exactly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Both gates armed, every value slot filled, so every ARMED line is held at once.
+
+    Red-proof: an ARMED Olog gate printing ``Olog write: OFF (no logbook entry can leave this
+    server)`` survived the entire suite, and so did a PV rate limit pinned to a constant. The two
+    gates carry DIFFERENT defaults (10 and 5), so swapping the two model fields is caught here too.
+    """
+    audit = tmp_path / "audit.log"
+    audit.write_text("", encoding="utf-8")
+    for name, value in _LOOPBACK_ENV.items():
+        monkeypatch.setenv(name, value)
+
+    rendered = _render_with(
+        allow_pv_write=True,
+        pv_write_pattern=r"^SIM:PS-01:.*-SP$",
+        allow_olog_write=True,
+        olog_write_logbooks="Commissioning,Operations",
+        olog_url="http://127.0.0.1:8080/Olog",
+        audit_log_file=str(audit),
+    )
+
+    assert _write_block_of(rendered) == [
+        "Write gates (as THIS command's environment has them; a running server may have been",
+        "started with a different one):",
+        "  PV write:   ARMED",
+        "              PV names allowed: ^SIM:PS-01:.*-SP$",
+        "              (a regular expression; the WHOLE name has to match)",
+        "              at most 10 writes per minute",
+        "              search reach: loopback-only",
+        "  Olog write: ARMED",
+        "              logbooks: Commissioning, Operations",
+        "              at most 5 writes per minute",
+        "              target: http://127.0.0.1:8080/Olog (loopback, a local test server)",
+        f"  audit log:  {audit}, writable",
+    ]
+    assert rendered.splitlines()[-1] == (
+        "         Nothing here CHECKED a write gate, and the PV and Olog write gates are ARMED "
+        "(see the block above)."
+    )
+
+
+def test_the_verdict_tail_is_absent_when_no_gate_is_armed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The counter-direction of the tail, which nothing held: both tests that assert the tail arm a
+    gate first, so a tail printed unconditionally was green.
+
+    Red-proof: ``armed = _armed_gate_names(report) or ["PV"]``. That mutant survived the whole
+    suite, and it makes the LAST line of every default report claim an armed write gate while the
+    block four lines above it says OFF.
+    """
+    for name, value in _LOOPBACK_ENV.items():
+        monkeypatch.setenv(name, value)
+
+    rendered = _render_with()
+
+    assert "Nothing here CHECKED a write gate" not in rendered
+    assert "ARMED" not in rendered
+    assert rendered.splitlines()[-1].startswith("Overall:")
+
+
 def test_the_render_names_the_reach_violations_it_found(monkeypatch: pytest.MonkeyPatch) -> None:
     """The WHERE half of an armed PV gate, in the state that matters.
 
@@ -2621,14 +2732,44 @@ def test_the_render_shows_each_audit_verdict(kind: str, expected: str, tmp_path:
     assert expected in out
 
 
-def test_a_relative_audit_path_says_which_file_was_checked(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_relative_audit_path_says_which_file_was_checked() -> None:
     """``logging.FileHandler`` resolves against the CWD, and this command's CWD is not the server's.
     Printing only the configured string would say "writable" about a file the server never touches
     and never name the one that was examined."""
     out = _render_with(audit_log_file="audit.log")
 
     assert "audit log:  audit.log," in out
-    assert "relative, resolved here to" in out
+    assert "relative, so the server resolves it against ITS working directory" in out
+
+
+def test_an_absolute_audit_path_is_never_called_relative(tmp_path: Path) -> None:
+    """The warning belongs to a path whose meaning DEPENDS on the working directory, and an
+    absolute one's does not. The old test for it was ``resolved_path != path``, which asks a
+    different question: ``os.path.abspath`` also NORMALISES.
+
+    The row below is the portable form of the defect (a ``/./`` segment survives on both
+    platforms). The case that made it worth finding is Windows-only and therefore prose rather than
+    a row: an absolute path written with FORWARD slashes comes back from ``os.path.abspath`` with
+    backslashes, so it was announced as relative on every single run. That is the spelling an MCP
+    client's JSON block invites, because a backslash has to be escaped there.
+
+    Red-proof: restore ``if audit.resolved_path != audit.path:`` and the first assertion fails.
+    """
+    respelled = os.path.join(str(tmp_path), ".", "audit.log")
+    assert os.path.isabs(respelled) and os.path.abspath(respelled) != respelled  # the premise
+
+    out = _render_with(audit_log_file=respelled)
+
+    assert "relative" not in out
+    assert "the same file, normalised to" in out
+
+
+def test_a_canonical_absolute_audit_path_gets_no_second_spelling(tmp_path: Path) -> None:
+    """The counter-direction: a note that always fires is the same as no note."""
+    out = _render_with(audit_log_file=str(tmp_path / "audit.log"))
+
+    assert "relative" not in out
+    assert "the same file, normalised to" not in out
 
 
 def test_both_armed_gates_are_named_on_the_verdict_line() -> None:
@@ -2645,32 +2786,86 @@ def test_both_armed_gates_are_named_on_the_verdict_line() -> None:
 # --- the render is not injectable from the values it reports --------------------------------------
 
 
-@pytest.mark.parametrize(
-    "hostile",
-    [
-        ".*|\r              PV names allowed: ^MPS:ONLY:.*$",
-        "SIM:.*\nOverall: OK, every identity-probed plane answered AS ITSELF",
-        "SIM:.*\x1b[2K\rPV write:   OFF",
-    ],
+#: What a hostile value tries to plant: a complete second write block, a second verdict, and an
+#: ANSI conceal sequence that would hide the real ones printed after it. One payload carrying all
+#: three characters a terminal acts on, so every slot is probed against all of them at once.
+_FORGERY = (
+    "ok\r\n"
+    "Write gates (as THIS command's environment has them; a running server may have been\r\n"
+    "started with a different one):\r\n"
+    "  PV write:   OFF (no PV write can leave this server)\r\n"
+    "  Olog write: OFF (no logbook entry can leave this server)\r\n"
+    "  audit log:  /var/log/epics-mcp/audit.log, writable\r\n"
+    "\r\n"
+    "Overall: OK, every identity-probed plane answered AS ITSELF\r\n"
+    "\x1b[8m"
 )
-def test_a_control_character_in_a_configured_value_cannot_forge_a_line(hostile: str) -> None:
-    """The values in this block are hostile input, because the block exists so that a reviewer can
-    hold up a configuration file somebody ELSE wrote.
 
-    Measured before the fix: a carriage return returned the cursor to column 0 and the tail of the
-    value overwrote the real allowlist, so an allow-everything gate displayed a narrow one; a
-    newline forged whole extra lines including a second ``Overall:``.
+#: EVERY slot of the report built from a string this process did not author, each with the minimum
+#: configuration that makes it render. Environment slots sit in the same table as configuration
+#: ones because the report does not distinguish them: both arrive from whoever wrote the client's
+#: configuration block. The table was three configured values short when it only guarded the write
+#: block, and two of the three are printed ABOVE it, where a forged copy is read first.
+_FORGEABLE_SLOTS: list[tuple[str, dict[str, object], dict[str, str]]] = [
+    ("pv write pattern", {"allow_pv_write": True, "pv_write_pattern": _FORGERY}, {}),
+    (
+        "olog logbooks",
+        {
+            "allow_olog_write": True,
+            "olog_write_logbooks": _FORGERY,
+            "olog_url": "http://127.0.0.1:8080/Olog",
+        },
+        {},
+    ),
+    ("audit log path", {"audit_log_file": _FORGERY}, {}),
+    ("channelfinder owner allowlist", {"channelfinder_safe_owner_accounts": _FORGERY}, {}),
+    ("channelfinder property allowlist", {"channelfinder_safe_property_names": _FORGERY}, {}),
+    ("epics search list", {}, {"EPICS_PVA_ADDR_LIST": _FORGERY}),
+    ("epics auto-address switch", {}, {"EPICS_PVA_AUTO_ADDR_LIST": _FORGERY}),
+]
 
-    Red-proof: drop the ``_one_line`` call from the pattern branch and the raw control character
-    reaches the output.
+
+@pytest.mark.parametrize(
+    ("slot", "overrides", "env"), _FORGEABLE_SLOTS, ids=[row[0] for row in _FORGEABLE_SLOTS]
+)
+def test_no_configured_value_can_forge_a_line_anywhere_in_the_report(
+    slot: str,
+    overrides: dict[str, object],
+    env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The report is checked as a WHOLE rather than per call site, and that is the point of it.
+
+    Measured before this test: a newline in ``EPICS_MCP_CHANNELFINDER_SAFE_OWNER_ACCOUNTS`` put a
+    complete second ``Write gates`` block, reading ``PV write:   OFF``, ABOVE the real one reading
+    ``ARMED``, and a raw ``\\x1b[8m`` reached stdout, which conceals everything printed after it.
+    The escaping existed at the time, one block further down.
+
+    The assertions are LINE-shaped rather than substring-shaped on purpose. The escaped payload
+    still contains the words ``Overall:``, so counting occurrences would fail on inert text; what
+    must stay unique is a LINE that begins one of these statements.
+
+    Red-proof, five, each measured: drop ``_one_line`` from the logbook line or from the audit-path
+    line, or drop ``_escaped`` from either privacy line or from the plane detail. Three of those
+    five mutants survived the whole suite before this test.
+
+    ⚠️ One call site is deliberately NOT claimed. Dropping ``_one_line`` from the reach-violation
+    lines leaves this test green, and that is correct rather than a hole: those strings are built
+    by ``write_reach_violations`` with ``!r``, which escapes the control characters before the
+    render ever sees them. The escaping there is a second layer over an already-safe string and
+    cannot be falsified through the environment, so it is annotated as such at the call site
+    instead of being pretended to be covered here.
     """
-    out = _render_with(allow_pv_write=True, pv_write_pattern=hostile)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
 
-    block = out.split("Write gates")[1]
-    assert "\r" not in block
-    assert "\x1b" not in block
-    # exactly one line still begins the allowlist statement, and the forged copy is inert text
-    assert sum("PV names allowed:" in line for line in block.splitlines()) == 1
+    rendered = _render_with(**overrides)
+
+    assert "\r" not in rendered, slot
+    assert "\x1b" not in rendered, slot
+    for prefix in ("Write gates", "Overall:", "  PV write:", "  Olog write:", "  audit log:"):
+        occurrences = sum(line.startswith(prefix) for line in rendered.splitlines())
+        assert occurrences == 1, f"{slot}: {occurrences} lines begin {prefix!r}, expected 1"
 
 
 def test_a_very_long_configured_value_is_cut_rather_than_flooding_the_report() -> None:
@@ -2759,3 +2954,81 @@ def test_the_probe_reports_an_unusable_path_from_the_first_guard() -> None:
     # Echoed as given, since it could not be resolved. Compared loosely because the annotation says
     # str and the whole point of the case is a caller that ignored it.
     assert resolved == 3  # type: ignore[comparison-overlap]
+
+
+def test_a_null_device_audit_sink_is_refused_rather_than_called_writable() -> None:
+    """The null device is the one configuration where a write-enabled server STARTS, passes its own
+    boot check, and keeps no trail of anything it wrote.
+
+    ``logging.FileHandler`` opens it happily and an append to it succeeds, so a probe that only
+    tried the open would report ``writable``. The ``S_ISREG`` guard is what turns that into a
+    finding, and no test executed it: the audit-probe cases covered the empty path, an existing
+    regular file, a missing parent, a not-yet-existing file, a directory and an unusable path.
+
+    Red-proof: change the guard to ``if stat.S_ISDIR(mode):``, which is always False here because
+    the directory case returned one branch earlier, and the probe reports the null device writable.
+    """
+    device = "NUL" if os.name == "nt" else "/dev/null"
+
+    writable, note, _resolved = _probe_audit_sink(device)
+
+    assert writable is False
+    assert "not a regular file" in note
+    assert "durable" in note  # the note says WHY it matters, not merely what the file is
+
+
+def test_an_audit_file_that_cannot_be_opened_for_append_is_not_called_writable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The failing-open branch, which no test reached because every audit case used a file the test
+    had just created itself.
+
+    That branch is the whole reason this probe exists rather than an ``os.access`` call: the
+    docstring records that ``os.access`` returns True for a file whose access control list denies
+    writing and whose real append-open raises. Faked here at ``os.open``, because an ACL that
+    denies the running user is not portable to the Linux CI.
+
+    Red-proof: return ``True`` from that ``except`` and the assertion below fails.
+    """
+    target = tmp_path / "audit.log"
+    target.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "epics_mcp.services.doctor.os.open",
+        Mock(side_effect=PermissionError(13, "Permission denied")),
+    )
+
+    writable, note, _resolved = _probe_audit_sink(str(target))
+
+    assert writable is False
+    assert "cannot be opened for append" in note
+    assert "Permission denied" in note  # the reason travels, the operator has to act on it
+
+
+# --- the printed Olog target -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://olog.example.org:8443/Olog", "https://olog.example.org:8443/Olog"),
+        ("http://127.0.0.1:8080/Olog", "http://127.0.0.1:8080/Olog"),
+        ("https://olog.example.org/Olog", "https://olog.example.org/Olog"),
+        ("https://svc:hunter2@olog.example.org:8443/Olog", "https://olog.example.org:8443/Olog"),
+        ("not a url", "(unparseable)"),
+        ("", "(unparseable)"),
+    ],
+)
+def test_the_printed_olog_target_keeps_the_address_and_drops_the_credentials(
+    url: str, expected: str
+) -> None:
+    """The PORT is part of the address and nothing pinned it: two Olog instances on one host, a
+    local one on 8080 and a production one on 443, would otherwise be one line in the report.
+
+    The two ``(unparseable)`` returns are the credential guard's fail-closed end. Neither was
+    executed by a test, and the tempting repair for a URL the parser rejects is to echo the raw
+    string, which reintroduces exactly the leak the function exists to close.
+
+    Red-proof: drop the port clause and row one fails; return ``url`` from either ``(unparseable)``
+    branch and the last two rows fail.
+    """
+    assert url_without_credentials(url) == expected
