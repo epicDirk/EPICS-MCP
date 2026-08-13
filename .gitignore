@@ -48,3 +48,12 @@ scripts/.pii_patterns.local
 # "could not open directory ... Permission denied" warning. Ignoring them silences that too.
 qa_tmp*/
 .qa_full*/
+
+# Stray log files. This one is not hygiene for its own sake: an untracked `x.log` in the ROOT was
+# packed into the published 0.4.0 sdist, because hatchling packs the working tree minus what VCS
+# ignores, and nothing ignored it (the reasoning is in pyproject.toml beside the sdist
+# declaration). The stray guard in tests/test_packaging.py cannot catch this one either: it reads
+# the artifact, and only-include already keeps a ROOT file out, so the file reappears on disk
+# release after release with every check green. Its own failure message says the remedy is this
+# line (GB-33 d).
+*.log
