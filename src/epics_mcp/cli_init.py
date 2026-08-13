@@ -308,11 +308,50 @@ def _warn_that_nothing_was_verified(preset_name: str) -> None:
     )
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Emit the client-configuration block for one preset, then optionally probe it."""
-    # Before the parser (QA-8): argparse prints ``--help`` inside ``parse_args``, so a non-ASCII
-    # character in any help text would die on a cp1252 console if the reconfigure came later.
-    configure_stdout()
+#: The argparse dests whose option string is NOT ``--`` plus the dest with underscores turned into
+#: hyphens. Exactly one is, and the ``--list`` rule below has to name the option a user typed
+#: rather than the attribute it lands in, so a derived name alone would lie about this one.
+#: argparse offers no public way back from a dest to its option string. Pinned against the parser
+#: by ``TestCommandLine::test_every_option_the_parser_has_is_refused_next_to_list``.
+_FLAG_BY_DEST = {"overrides": "--set"}
+
+
+def _options_that_cannot_reach_list(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> list[str]:
+    """The option strings of every value ``--list`` would swallow, sorted, empty if there are none.
+
+    ONE rule instead of one per option, and that is the whole point rather than a shortcut. The
+    defect this was written for is that four options (``--probe-pv``, ``--no-check``, ``--set``,
+    ``--absolute-command``) had accumulated next to ``--list`` unrefused, each accepted with exit 0
+    while ``--list`` returns before any of them is read. Four more rules would have closed those
+    four and left the fifth open the day it is added. Holding the parsed namespace against the
+    parser's OWN defaults closes the class: a value that is not its default was typed, and under
+    ``--list`` nothing reads it.
+
+    ``--list`` itself is excluded, and ``--preset`` needs no excluding: argparse refuses the two
+    together before this runs, so it can only be at its default here.
+
+    ⚠️ Rests on ``append`` not mutating its own default list, which would make ``--set`` compare
+    equal to it and drop silently out of this rule. Measured on the interpreter this ships for:
+    ``_AppendAction`` copies the list first, so the default stays empty.
+    """
+    return sorted(
+        _FLAG_BY_DEST.get(dest, f"--{dest.replace('_', '-')}")
+        for dest, value in vars(args).items()
+        if dest != "list" and value != parser.get_default(dest)
+    )
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """The command line, built apart from :func:`main` so a guard can enumerate its options.
+
+    The split is what turns the ``--list`` rule in :func:`main` from an argument into a proof. That
+    rule refuses EVERY option ``--list`` would swallow by holding the parsed namespace against the
+    defaults declared here, which is meant to cover an option added later as well; a test can only
+    check that by walking the options this function really declares. Reading the rule cannot
+    promise it, and four options had already accumulated unrefused before anyone read it.
+    """
     parser = argparse.ArgumentParser(
         # prog pinned: argparse's default is interpreter dependent and prints an absolute console
         # script path on 3.14 (QA-41). Same reason at every entry point of this package.
@@ -374,6 +413,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="name the installed server by its absolute path, for a client without your PATH",
     )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Emit the client-configuration block for one preset, then optionally probe it."""
+    # Before the parser (QA-8): argparse prints ``--help`` inside ``parse_args``, so a non-ASCII
+    # character in any help text would die on a cp1252 console if the reconfigure came later.
+    configure_stdout()
+    parser = _build_parser()
     args = parser.parse_args(argv)
 
     # Argument combinations that cannot mean anything, refused before any output exists. All of
@@ -381,6 +429,16 @@ def main(argv: list[str] | None = None) -> int:
     # inventing a second way to say the same thing.
     if args.list and args.out:
         parser.error("--out has nothing to write with --list: a listing is not a configuration")
+    # Before the two --preset rules below, deliberately: under --list the reason is ALWAYS --list,
+    # and the --force rule would otherwise answer "--list --force" with "add --out", a repair that
+    # --list refuses on the line above. The exit code of every such call is unchanged, only the
+    # sentence is. The --out rule stays ahead of this one because it says something this cannot:
+    # a listing is not a configuration.
+    if args.list and (dead := _options_that_cannot_reach_list(parser, args)):
+        parser.error(
+            f"{', '.join(dead)} cannot do anything with --list: the preset listing is printed "
+            "and the run ends there, before any of these is read"
+        )
     if args.force and not args.out:
         parser.error("--force only means something together with --out")
     # The third one is the one this rule was written for and did not cover. --probe-pv is the option

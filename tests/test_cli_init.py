@@ -20,6 +20,7 @@ import pathlib
 import shutil
 import subprocess
 import sys
+from typing import ClassVar
 
 import pytest
 
@@ -47,6 +48,17 @@ def _emitted_env(capsys: pytest.CaptureFixture[str]) -> dict[str, str]:
     """Parse the captured stdout as the client config and return its env block."""
     document = json.loads(capsys.readouterr().out)
     return dict(document["mcpServers"][SERVER_KEY]["env"])
+
+
+def _argparse_error_line(stderr: str) -> str:
+    """The ``epics-init: error:`` line of *stderr*, or ``""``.
+
+    The error LINE only, never the whole stream, and that is the discriminator rather than a
+    convenience: argparse prints its usage line first and that already names every option, so a
+    check over the whole of stderr passes on any wording at all. Measured, a refusal reading
+    "that combination cannot mean anything" satisfied the earlier whole-stream form.
+    """
+    return next((line for line in stderr.splitlines() if line.startswith("epics-init: error:")), "")
 
 
 class TestPresetData:
@@ -189,6 +201,60 @@ class TestCommandLine:
         assert exit_code == 0
         for name in PRESETS:
             assert name in out
+
+    #: One usable value per option that takes one, so the guard below can build a REAL call for
+    #: every option the parser declares. An option added without a row here reddens that guard
+    #: instead of dropping out of it in silence, which is exactly how BG-DLIST happened: four
+    #: options accumulated next to ``--list`` and nothing noticed.
+    _SAMPLE_VALUE: ClassVar[dict[str, str]] = {
+        "--set": "EPICS_MCP_OLOG_URL=http://olog:8080/Olog",
+        "--probe-pv": "SIM:PS-01:Cur-RB",
+        "--out": "x.json",
+    }
+
+    def test_every_option_the_parser_has_is_refused_next_to_list(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The design claim of the ``--list`` rule, made mechanical: it is ONE rule holding the
+        parsed namespace against the parser's defaults, so an option added TOMORROW is refused
+        without anyone remembering to add a rule for it. Four cases in the family above prove the
+        options that exist today; this proves the property, over the parser itself.
+
+        The enumeration comes from ``parser._actions`` because argparse offers no public way to
+        walk its options, and a hand-written list here would be the second copy whose drift the
+        rule exists to prevent. ``--preset`` is excluded as the mutually exclusive partner (argparse
+        refuses it next to ``--list`` before any rule of ours runs), ``-h``/``--version`` because
+        they exit inside ``parse_args``.
+
+        Both halves are asserted: the refusal names the dead option, AND it names ``--list``, since
+        the option to drop is ``--list`` far more often than it is the other one.
+
+        Red-proof on the pre-fix code: ``--probe-pv``, ``--no-check``, ``--set`` and
+        ``--absolute-command`` raise no SystemExit at all.
+        """
+        parser = cli_init._build_parser()
+        options = {
+            action.option_strings[0]: action
+            for action in parser._actions
+            if action.option_strings and action.dest not in {"help", "version", "list", "preset"}
+        }
+        needs_a_value = {flag for flag, action in options.items() if action.nargs != 0}
+        assert needs_a_value == set(self._SAMPLE_VALUE), (
+            "an option that takes a value has no sample here, so the guard below would skip it"
+        )
+
+        for flag in sorted(options):
+            argv = ["--list", flag]
+            if flag in needs_a_value:
+                argv.append(self._SAMPLE_VALUE[flag])
+
+            with pytest.raises(SystemExit) as exit_info:
+                cli_init.main(argv)
+
+            assert exit_info.value.code == 2, f"{flag} is accepted next to --list"
+            error_line = _argparse_error_line(capsys.readouterr().err)
+            assert flag in error_line, f"the refusal does not name {flag}: {error_line!r}"
+            assert "--list" in error_line, f"the refusal does not name --list: {error_line!r}"
 
     def test_the_block_is_valid_json_naming_the_server_and_its_command(
         self, capsys: pytest.CaptureFixture[str]
@@ -663,6 +729,27 @@ class TestWritingTheBlock:
                 ("--probe-pv", "--no-check"),
                 id="probe-pv-with-no-check",
             ),
+            # BG-DLIST, the four calls --list used to accept in silence. Each names --list too,
+            # because the option to drop is the OTHER one and a refusal naming only the dead
+            # option would read as a defect in that option.
+            pytest.param(
+                ["--list", "--probe-pv", "SIM:PS-01:Cur-RB"],
+                ("--probe-pv", "--list"),
+                id="list-cannot-probe",
+            ),
+            pytest.param(
+                ["--list", "--no-check"], ("--no-check", "--list"), id="list-runs-no-check"
+            ),
+            pytest.param(
+                ["--list", "--set", "EPICS_MCP_OLOG_URL=http://olog:8080/Olog"],
+                ("--set", "--list"),
+                id="list-takes-no-overrides",
+            ),
+            pytest.param(
+                ["--list", "--absolute-command"],
+                ("--absolute-command", "--list"),
+                id="list-has-no-command",
+            ),
         ],
     )
     def test_meaningless_combinations_are_usage_errors(
@@ -676,24 +763,24 @@ class TestWritingTheBlock:
         nothing had. Measured before the refusal existed: the emitted block is byte-identical with
         and without --probe-pv, so the option cannot carry any remaining meaning under --no-check.
 
-        ``mentions`` is empty for the two older rows on purpose: their wording is not this guard's
-        subject. For the new one it is, because a refusal that does not name both options leaves the
-        reader to guess which of the two to drop.
+        The last four are BG-DLIST and they are BREAKING for the same reason: every one of them
+        used to exit 0 with the preset listing on stdout while the option it carried was never
+        read, because ``--list`` returns before any of those values is used. Measured at the
+        installed command before the fix, all four exited 0 with an EMPTY stderr.
 
-        Red-proof for the new row on the pre-fix code: no SystemExit is raised at all, main returns
-        0 and writes the block to stdout.
+        ``mentions`` is empty for the two older rows on purpose: their wording is not this guard's
+        subject. For the newer ones it is, because a refusal that does not name both options leaves
+        the reader to guess which of the two to drop.
+
+        Red-proof on the pre-fix code: for the BG-DFIX row and the four BG-DLIST rows no SystemExit
+        is raised at all, main returns 0 and writes to stdout.
         """
         with pytest.raises(SystemExit) as exit_info:
             cli_init.main(argv)
 
         assert exit_info.value.code == 2
-        # The ERROR line only. argparse prints its usage line first and that already lists every
-        # option, so a check over the whole of stderr passes on any wording at all: measured, a
-        # refusal reading "that combination cannot mean anything" satisfied it.
         stderr = capsys.readouterr().err
-        error_line = next(
-            (line for line in stderr.splitlines() if line.startswith("epics-init: error:")), ""
-        )
+        error_line = _argparse_error_line(stderr)
         assert error_line, f"no argparse error line in stderr: {stderr!r}"
         for option in mentions:
             assert option in error_line, f"the refusal does not name {option}: {error_line!r}"
