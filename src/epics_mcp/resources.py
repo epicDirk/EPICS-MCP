@@ -74,7 +74,11 @@ def get_health() -> dict[str, object]:
         # never that a write would succeed.
         "any_write_gate_armed": pv_gate.armed or olog_gate.armed,
         "write_enabled": cfg.allow_pv_write,
-        "write_pattern": cfg.pv_write_pattern or "(none)",
+        # null, not a placeholder string. The placeholder claimed a state the server refuses
+        # to start in: an armed gate with an empty pattern raises SafetyConfigError, so
+        # write_enabled true beside no pattern cannot exist. It was also ambiguous, since
+        # nothing distinguished it from a pattern whose text happens to be that word.
+        "write_pattern": cfg.pv_write_pattern or None,
         "write_rate_limit": cfg.write_rate_limit,
         # Meaningful while the PV gate is armed; with the gate off the pattern is not "narrow", it
         # is irrelevant. Decided against the closed set of allow-everything spellings rather than by
@@ -134,7 +138,8 @@ def get_epics_config() -> dict[str, object]:
         "max_monitor_duration": cfg.max_monitor_duration,
         "max_monitor_events": cfg.max_monitor_events,
         "allow_pv_write": cfg.allow_pv_write,
-        "pv_write_pattern": cfg.pv_write_pattern or "(none)",
+        # null rather than a placeholder, see the same field in get_health.
+        "pv_write_pattern": cfg.pv_write_pattern or None,
         "write_rate_limit": cfg.write_rate_limit,
         "channelfinder_url": cfg.channelfinder_url or "(disabled)",
         "archiver_url": cfg.archiver_url or "(disabled)",

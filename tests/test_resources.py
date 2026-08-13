@@ -144,6 +144,27 @@ def test_the_retrieval_plane_follows_the_mgmt_url_in_both_directions(
     )
 
 
+def test_the_pattern_field_never_claims_a_state_the_server_refuses_to_start_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ "(none)" described a configuration that cannot exist, and could not be told from a pattern.
+
+    An armed PV gate with an empty allowlist raises SafetyConfigError at construction, so a RUNNING
+    server is never write_enabled with no pattern. The placeholder therefore stood only where the
+    gate is off, where the pattern is not "none" but irrelevant, and nothing distinguished it from
+    an allowlist whose text happens to be that word. null says absent once, unambiguously.
+
+    Red-proof: restore ``or "(none)"`` in either payload and the matching assertion fails.
+    """
+    _with_config(monkeypatch)
+    assert get_health()["write_pattern"] is None
+    assert get_epics_config()["pv_write_pattern"] is None
+
+    _with_config(monkeypatch, pv_write_pattern="^SIM:.*$")
+    assert get_health()["write_pattern"] == "^SIM:.*$"
+    assert get_epics_config()["pv_write_pattern"] == "^SIM:.*$"
+
+
 def test_the_search_posture_names_variables_and_never_their_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
