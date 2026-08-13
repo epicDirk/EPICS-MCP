@@ -3143,8 +3143,18 @@ def test_the_render_names_the_olog_target_in_every_shape(
     assert expected in out
 
 
+#: The two lines the report adds under a target verdict that can rest on the allowlist, spelled out
+#: here rather than imported from ``cli_doctor``: importing the constant under test would make
+#: every assertion below true by construction, and the rewording this text has already had once is
+#: exactly what a reader of the block should be made to look at.
+_ADDRESS_NOTE = [
+    "              (shown for reading. The string the gate works from is EPICS_MCP_OLOG_URL",
+    "              exactly as configured, and this line need not match it character for character)",
+]
+
+
 def test_a_denied_target_does_not_read_as_the_string_the_gate_compared() -> None:
-    """The address on this line is REBUILT from the parse, the gate compares the configured value
+    """The address on this line is REBUILT from the parse, the gate reads the configured value
     exactly, and the two used to stand next to each other with nothing saying so (BG-DCMP).
 
     The configuration here is the sharp case rather than a generic one. The report prints exactly
@@ -3156,10 +3166,18 @@ def test_a_denied_target_does_not_read_as_the_string_the_gate_compared() -> None
     leave the rest of this test green for a reason that has nothing to do with what it is named
     after.
 
-    The addition names the configured value and stops there, deliberately. This branch is also
-    reached by an unparseable URL, denied by the SEC-2 veto that no allowlist entry can lift, and
-    by a remote target missing EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE or https, so a line telling the
-    reader to edit the allowlist would be false in several of the states that print it.
+    ⚠️ The note claims NOTHING about a comparison having run, and the first draft did, which an
+    adversarial pass showed to be false in seven states of this same branch. Six reach the refusal
+    without any allowlist being read (five SEC-2 vetoes, plus an exactly-allowlisted target with
+    EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE unset, where the and-chain short-circuits), and in the
+    seventh, a plain-http allowlisted target, the comparison ran and SUCCEEDED while the https rule
+    denied. Whoever rewords these two lines owes that enumeration again.
+
+    ⚠️ This one test contacts the network, and it is the only reason it takes seconds: setting
+    olog_url configures the Olog REST plane, so ``run_doctor`` probes it and the synthetic host
+    fails to resolve three times. It renders through the full report rather than calling
+    ``_olog_write_lines`` because the block's PLACE in the report is part of what is held here; the
+    branch-by-branch checks below need no report and take none.
 
     Red-proof: remove the two added lines and the block comparison fails.
     """
@@ -3187,11 +3205,52 @@ def test_a_denied_target_does_not_read_as_the_string_the_gate_compared() -> None
         "              at most 5 writes per minute",
         f"              target: {allowlisted} is NOT a permitted write target, "
         "so every write is denied",
-        "              (that is the ADDRESS a write would reach. The gate compared "
-        "EPICS_MCP_OLOG_URL",
-        "              exactly as configured, which this line need not repeat character for "
-        "character)",
+        *_ADDRESS_NOTE,
     ]
+
+
+@pytest.mark.parametrize(
+    ("url", "allow_remote", "allowlist", "note_expected"),
+    [
+        ("", False, "", False),
+        ("http://127.0.0.1:8080/Olog", False, "", False),
+        ("https://olog.example.org/Olog", False, "", True),
+        ("https://Olog.Example.org/Olog", True, "https://Olog.Example.org/Olog", True),
+    ],
+    ids=["no-url", "loopback", "refused", "allowlisted-remote"],
+)
+def test_only_the_allowlist_verdicts_warn_that_the_address_is_not_the_configured_string(
+    url: str, allow_remote: bool, allowlist: str, note_expected: bool
+) -> None:
+    """Presence AND absence, over all four target shapes, because presence alone is half a guard.
+
+    The ALLOWLISTED-REMOTE row is the one this test exists for. Its verdict says "allowlisted",
+    which IS the result of the membership test, and it prints the same rebuilt address: measured,
+    a target configured and allowlisted as ``https://Olog.Example.org/Olog`` prints
+    ``https://olog.example.org/Olog``, so an operator tidying the allowlist to match what the
+    report shows turns a working gate into a deny-all. That branch had no note, and a mutant
+    copying the note onto it survived the entire suite, so nothing held the question either way.
+
+    The two absent rows are not decoration. Loopback is a property of the ADDRESS rather than of a
+    configured string, and the no-URL branch has nothing to compare at all; a note there would
+    train the reader to discount it everywhere.
+
+    Red-proof, both directions: drop the note from either allowlist branch and that row fails;
+    append it to the loopback branch and the loopback row fails.
+    """
+    olog = _write_safety_report(
+        _write_config(
+            allow_olog_write=True,
+            olog_write_logbooks="Commissioning",
+            olog_url=url,
+            olog_write_allow_remote=allow_remote,
+            olog_write_url_allowlist=allowlist,
+        )
+    ).olog
+
+    lines = cli_doctor._olog_write_lines(olog)
+
+    assert (lines[-2:] == _ADDRESS_NOTE) is note_expected, lines
 
 
 @pytest.mark.parametrize(

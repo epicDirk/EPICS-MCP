@@ -222,6 +222,26 @@ def _pv_write_lines(pv: PvWriteGateReport) -> list[str]:
     return lines
 
 
+#: Printed under the two Olog target verdicts that can rest on the allowlist (BG-DCMP). The address
+#: above them is REBUILT by ``url_without_credentials``, which lower-cases the host and drops a
+#: query and a fragment, while the gate reads the RAW ``olog_url``; measured, a target configured
+#: in mixed case prints exactly the string already in the allowlist and is refused anyway, so a
+#: reader repairing the allowlist from that line compares two values that read identically.
+#:
+#: ⚠️ It deliberately claims NOTHING about a comparison having taken place, and the first draft did.
+#: The refusal is reached by six states in which no allowlist is ever read: five SEC-2 vetoes, plus
+#: an exactly-allowlisted target with ``EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE`` unset, where the ``and``
+#: chain short-circuits first. In a seventh, a plain-http allowlisted target, the comparison ran and
+#: SUCCEEDED and the https rule is what denies. A sentence naming the comparison sent the reader of
+#: all seven hunting for a character difference that is not the cause, which is the class of defect
+#: this whole line of tickets exists to remove. It also no longer calls the value an ADDRESS: on an
+#: unparseable URL the slot holds the literal ``(unparseable)``, and nothing would reach it.
+_TARGET_IS_NOT_THE_CONFIGURED_STRING = (
+    "              (shown for reading. The string the gate works from is EPICS_MCP_OLOG_URL",
+    "              exactly as configured, and this line need not match it character for character)",
+)
+
+
 def _olog_write_lines(olog: OlogWriteGateReport) -> list[str]:
     """The Olog write gate's lines. Two of its states are read backwards without a word of prose.
 
@@ -232,10 +252,14 @@ def _olog_write_lines(olog: OlogWriteGateReport) -> list[str]:
     a different approval from a loopback sandbox even though the gate permits both.
 
     ⚠️ The printed address is the NORMALISING redaction, which is the right one here because the
-    question this block asks is which address a write would reach. Only the REFUSED branch says so
-    out loud, and that is a judgement rather than an oversight: it is the one branch whose verdict
-    comes from a comparison, so it is the one that invites a reader to hold the printed string
-    against a configured one. The other two report a state, not a comparison.
+    question this block asks is which address a write would reach. The two branches whose verdict
+    can rest on the ALLOWLIST, refused and allowlisted-remote, say so out loud; the loopback branch
+    does not, because being loopback is a property of the address itself and no configured string
+    is being matched. That the allowed branch needs it too was a QA finding, not the first draft:
+    the word "allowlisted" IS the result of a comparison, and measured, a target configured as
+    ``https://Olog.Example.org/Olog`` and allowlisted under that same spelling prints
+    ``https://olog.example.org/Olog``, so an operator tidying the allowlist from that line turns a
+    working gate into a deny-all.
     """
     if not olog.armed:
         return ["  Olog write: OFF (no logbook entry can leave this server)"]
@@ -253,26 +277,7 @@ def _olog_write_lines(olog: OlogWriteGateReport) -> list[str]:
             f"              target: {target} is NOT a permitted write target, "
             "so every write is denied"
         )
-        # BG-DCMP. This is the one branch where the two halves of the line invite being held
-        # against each other: the address is REBUILT by url_without_credentials, which lower-cases
-        # the host and drops a query and a fragment, while the verdict beside it comes from
-        # write_target_allowed, which compares the RAW olog_url exactly and case-sensitively.
-        # Measured: with the host configured in mixed case, the report prints exactly the string
-        # in the allowlist and the gate still denies, so a reader repairing the allowlist from
-        # this line ends up comparing two values that read identically.
-        #
-        # It says WHICH string was compared and stops there, on purpose. This branch is also
-        # reached by an unparseable URL, where the SEC-2 veto denies before any allowlist is
-        # consulted, and by a remote target missing EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE or https, so
-        # a repair named here would be wrong in several of the states that print it.
-        lines.append(
-            "              (that is the ADDRESS a write would reach. The gate compared "
-            "EPICS_MCP_OLOG_URL"
-        )
-        lines.append(
-            "              exactly as configured, which this line need not repeat character for "
-            "character)"
-        )
+        lines += _TARGET_IS_NOT_THE_CONFIGURED_STRING
     elif olog.target_is_loopback:
         lines.append(f"              target: {target} (loopback, a local test server)")
     else:
@@ -280,6 +285,7 @@ def _olog_write_lines(olog: OlogWriteGateReport) -> list[str]:
             f"              target: {target} (REMOTE and allowlisted: these writes "
             "reach a real logbook)"
         )
+        lines += _TARGET_IS_NOT_THE_CONFIGURED_STRING
     return lines
 
 

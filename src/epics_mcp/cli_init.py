@@ -427,17 +427,21 @@ def main(argv: list[str] | None = None) -> int:
     # Argument combinations that cannot mean anything, refused before any output exists. All of
     # them go through parser.error so they exit 2 like every other usage error, rather than
     # inventing a second way to say the same thing.
-    if args.list and args.out:
-        parser.error("--out has nothing to write with --list: a listing is not a configuration")
     # Before the two --preset rules below, deliberately: under --list the reason is ALWAYS --list,
-    # and the --force rule would otherwise answer "--list --force" with "add --out", a repair that
-    # --list refuses on the line above. The exit code of every such call is unchanged, only the
-    # sentence is. The --out rule stays ahead of this one because it says something this cannot:
-    # a listing is not a configuration.
+    # and the --force rule would otherwise answer "--list --force" with "add --out", a repair
+    # --list refuses too. The exit code of such a call is unchanged, only the sentence.
     if args.list and (dead := _options_that_cannot_reach_list(parser, args)):
+        if dead == ["--out"]:
+            # --out ALONE keeps its own sentence, which says something the general one cannot.
+            # Inside this block rather than ahead of it, and that was a QA finding: as a separate
+            # rule it fired first and hid every other dead option, so a caller passing --out with
+            # three more of them was refused once per round trip. It also made the guard that
+            # walks the parser blind to --out, because the older rule answered that walk's call
+            # and a mutant dropping --out from the enumeration survived the whole suite.
+            parser.error("--out has nothing to write with --list: a listing is not a configuration")
         parser.error(
-            f"{', '.join(dead)} cannot do anything with --list: the preset listing is printed "
-            "and the run ends there, before any of these is read"
+            f"{', '.join(dead)} cannot do anything with --list, which prints the preset listing "
+            "and returns before any of these is used"
         )
     if args.force and not args.out:
         parser.error("--force only means something together with --out")

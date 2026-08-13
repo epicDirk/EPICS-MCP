@@ -229,8 +229,16 @@ class TestCommandLine:
         Both halves are asserted: the refusal names the dead option, AND it names ``--list``, since
         the option to drop is ``--list`` far more often than it is the other one.
 
+        The namespace is held against the option strings as well, because the rule's fallback name
+        is ``--`` plus the dest and a POSITIONAL has a dest with no option string at all. Measured
+        on a wrapped parser: adding ``parser.add_argument("target", nargs="?")`` makes the refusal
+        name ``--target``, an option that does not exist and that the caller cannot remove. That
+        assertion turns the next positional into a red test instead of a fabricated flag.
+
         Red-proof on the pre-fix code: ``--probe-pv``, ``--no-check``, ``--set`` and
-        ``--absolute-command`` raise no SystemExit at all.
+        ``--absolute-command`` raise no SystemExit at all. Red-proof of the ordering claim, which
+        nothing else in the suite holds: move the rule below the ``--force`` rule and ``--force``
+        is answered without ``--list`` being named.
         """
         parser = cli_init._build_parser()
         options = {
@@ -241,6 +249,9 @@ class TestCommandLine:
         needs_a_value = {flag for flag, action in options.items() if action.nargs != 0}
         assert needs_a_value == set(self._SAMPLE_VALUE), (
             "an option that takes a value has no sample here, so the guard below would skip it"
+        )
+        assert {action.dest for action in parser._actions if not action.option_strings} == set(), (
+            "a positional would get a fabricated --flag name from the rule's fallback"
         )
 
         for flag in sorted(options):
