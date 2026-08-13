@@ -196,6 +196,20 @@ carry breaking changes).
 
 ### Changed
 
+- **`epics-pv://health` now says whether the server may write, and which planes it has.** It
+  described the PV write gate only, so a server whose LOGBOOK gate was armed, with a service
+  account and an allowlist behind it, reported `write_enabled: false` and nothing anywhere
+  contradicted it. New fields: `any_write_gate_armed` (the whole write answer in one field, because
+  deriving it from `write_enabled` is the mistake this fixes), an `olog_write` block with that
+  gate's allowlist, rate limit and target predicates, `write_pattern_allows_every_name`,
+  `naming_enabled` and `archiver_retrieval_enabled` (the payload named four of the seven planes the
+  doctor probes), and a `pv_search` block saying whether PV searches broadcast into the local
+  subnets. Deliberately absent, because a client keeps this payload: the Olog URL, the audit path,
+  and the raw address lists. Those stay with `epics-doctor`.
+  ⚠️ **Breaking, in one field each:** `write_pattern` (health) and `pv_write_pattern` (config) are
+  now `null` when no pattern is set, where they used to be the string `"(none)"`. That string
+  claimed a state the server refuses to start in, since an armed gate with an empty allowlist
+  raises at construction, and nothing distinguished it from a pattern whose text is that word.
 - **The deployment guide answers the questions that come AFTER it starts.** Its troubleshooting
   section was entirely bring-up; it now also covers an instance that runs and may be pointed at the
   wrong facility, how to stop one (you do not, directly: an stdio server belongs to the client that
