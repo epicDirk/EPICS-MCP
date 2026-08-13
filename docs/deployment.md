@@ -408,7 +408,17 @@ so an environment that names nothing still broadcasts into the local subnets). R
 ran. A server started by an MCP client was given that client's environment, which is the block in
 its configuration file, so compare the two rather than assuming they match. To see it from the
 running server instead, read its `epics-pv://config` and `epics-pv://health` resources through the
-client; those describe the process that is actually answering.
+client; those describe the process that is actually answering. `health` carries one boolean per
+plane, so "which of the seven is even configured" is answerable there, plus `pv_search`, which says
+whether the live plane broadcasts (the default above) without naming an address. Which address it
+broadcasts to is the half that stays here with `epics-doctor`.
+
+**And may it write anything?** `epics-pv://health` again, in one field: `any_write_gate_armed`.
+⚠️ Do not read `write_enabled` for this. That field is the PV gate ALONE, so a server whose logbook
+gate is armed reports it as `false` while it can create entries, which is exactly the misreading
+the one field exists to prevent. `olog_write` beside it carries that gate's allowlist, rate limit
+and target predicates. The audit path is not in the payload, because a client keeps it; a durable
+audit log is a START condition of either gate, so an armed gate means one exists.
 
 **How do I stop it?** You do not, directly: an MCP server over stdio is a child of the client that
 launched it, and it lives and dies with that client's connection. Disconnect the server in the

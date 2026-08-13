@@ -142,8 +142,8 @@ command you ran, which need not be the one a running server was started with.
 
 | Resource URI | Description |
 |--------------|-------------|
-| `epics-pv://health` | Server health: version, uptime, provider, p4p version |
-| `epics-pv://config` | Non-secret configuration values |
+| `epics-pv://health` | What this process IS and what it may WRITE: version, uptime, provider, p4p version, one boolean per service plane, both write gates, and the PV search posture |
+| `epics-pv://config` | Non-secret configuration values it was started with |
 | `epics-pv://guide` | Operational cookbook: service planes, recipes, error signatures |
 
 The guide's source is `src/epics_mcp/operator_guide.md`: one file, shipped in the wheel and served

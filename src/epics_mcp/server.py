@@ -1728,13 +1728,24 @@ if _display_registrar is not None:
 
 @mcp.resource("epics-pv://health")
 def health() -> dict[str, object]:
-    """Server status, p4p version, write configuration."""
+    """What this process is and what it may write: status, p4p version, planes, both write gates.
+
+    any_write_gate_armed is the whole write answer. write_enabled is the PV gate ALONE, so a server
+    with the logbook gate armed reports it as false while it can still create entries. One boolean
+    per service plane says which are configured; pv_search says how far a PV search can travel
+    without naming an address. Which address, and the audit path, stay with epics-doctor.
+    """
     return get_health()
 
 
 @mcp.resource("epics-pv://config")
 def epics_config() -> dict[str, object]:
-    """Non-secret configuration values."""
+    """Non-secret configuration values this process was started with.
+
+    The service URLs here are the ones whose host may be disclosed; the naming and logbook URLs are
+    withheld and appear as booleans in epics-pv://health instead. An unset PV write pattern is null,
+    never a placeholder string.
+    """
     return get_epics_config()
 
 

@@ -97,6 +97,14 @@ This is a controls tool, so the trust questions come first.
   different one; and it reports what the gates are SET to without evaluating whether such a server
   would start, which for an armed gate is a separate question with the conditions given per gate
   in the bullets above.
+  ⚠️ **The first limit does not apply to the resource route.** `epics-pv://health` carries the same
+  posture out of the process that is actually answering: `any_write_gate_armed` for the one-field
+  question, the `olog_write` block for that gate's allowlist, rate limit and target predicates, and
+  `pv_search` for the live plane's reach. Read through the client, it needs no shell and no guess
+  about whose environment you are looking at. It withholds two things the CLI prints, deliberately:
+  the Olog target URL and the audit path, because a resource payload is kept by the client. So the
+  block above remains the fuller answer, and the resource the trustworthy one about **this**
+  process.
 - **Olog reads return the whole entry, a deliberate prototype decision (2026-08-01).** Every read
   (`search_logbook`, `get_log_entry`, the create/reply/update echoes, attachment listing and
   download) returns the full server record: `title`, `description`, `owner` (the author's
