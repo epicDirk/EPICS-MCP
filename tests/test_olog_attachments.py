@@ -15,6 +15,7 @@ All host/URL/person/file tokens are SYNTHETIC (facility-agnostic guard).
 from __future__ import annotations
 
 import base64
+import inspect
 import json
 import logging
 import uuid
@@ -371,6 +372,30 @@ class TestAttachmentPrep:
         # UUID-shaped in its canonical spelling, not merely "some token that differs"
         assert str(uuid.UUID(first)) == first
         assert str(uuid.UUID(second)) == second
+
+    def test_the_service_entry_points_bind_that_factory_by_default(self) -> None:
+        """OQ12 follow-up: freshness reaches production only through the DEFAULT BINDING.
+
+        The test above pins the factory's BODY, and that is not where production reads it. Both
+        write entry points take ``id_factory`` as a keyword with a default, and every offline test
+        overrides it, so a constant bound at the INJECTION POINT (rather than inside the factory)
+        survived the entire offline suite: measured after the OQ12 build, on 2228 green tests. Only
+        the opt-in live tests exercise the real binding, and they skip without a server.
+
+        The consequence is not silent, which is why this is hardening and not a hole: with a
+        constant id the OQ12 union check refuses the second attach loudly. What this pins is that
+        the refusal never has to fire on the sanctioned path.
+
+        Read through ``inspect.signature`` rather than ``__kwdefaults__``: the latter is
+        ``dict[str, Any] | None`` and indexing it fails ``mypy --strict``, which this repository
+        runs over ``tests/`` as well.
+        """
+        for entry in (
+            checkers_module.query_olog_create,
+            checkers_module.query_olog_add_attachment,
+        ):
+            default = inspect.signature(entry).parameters["id_factory"].default
+            assert default is checkers_module._default_olog_id_factory, entry.__name__
 
     def test_read_uploads_refuses_a_file_grown_past_the_cap(self, tmp_path: Path) -> None:
         """QA (TOCTOU): plan_attachments sizes by ``stat``, the gate checks that sum:
