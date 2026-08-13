@@ -39,7 +39,6 @@ from epics_mcp.safety import SafetyLayer
 from epics_mcp.services import doctor
 from epics_mcp.services._http import url_without_credentials
 from epics_mcp.services.doctor import (
-    _ALLOW_EVERY_PV_NAME,
     _DEGRADED_STATUSES,
     _FAILING_STATUSES,
     _INCONCLUSIVE_STATUSES,
@@ -66,6 +65,11 @@ from epics_mcp.services.doctor import (
     run_doctor,
 )
 from epics_mcp.services.rest_exceptions import RestConnectionError
+from epics_mcp.write_posture import (
+    _ALLOW_EVERY_PV_NAME,
+    olog_write_gate_report,
+    pv_write_gate_report,
+)
 
 
 def _set_config(monkeypatch: pytest.MonkeyPatch, **kwargs: object) -> EpicsConfig:
@@ -2960,8 +2964,21 @@ def test_the_write_gate_defaults_cover_every_field_the_block_reads() -> None:
 
     Derived rather than declared: the fields are read off the source of ``_write_safety_report``, so
     a field added there without a default here is red the same day.
+
+    ⚠️ ALL THREE sources, and that is the whole guard rather than a detail. When the two gate halves
+    moved to ``write_posture`` (BG-DRES), the composition left behind read exactly one ``cfg.``
+    field, so a single-source scan would have shrunk this pin from eight fields to one AND STAYED
+    GREEN, which is the sham shape it exists to prevent. Whoever splits one of these functions again
+    adds its source here in the same edit, or silently unpins whatever moved out.
     """
-    source = inspect.getsource(doctor._write_safety_report)
+    source = "".join(
+        inspect.getsource(fn)
+        for fn in (
+            doctor._write_safety_report,
+            pv_write_gate_report,
+            olog_write_gate_report,
+        )
+    )
     read = {match.group(1) for match in re.finditer(r"cfg\.([a-z_]+)", source)}
 
     assert read <= set(_WRITE_GATE_DEFAULTS), (

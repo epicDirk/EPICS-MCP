@@ -55,12 +55,8 @@ from typing import Literal
 
 from epics_mcp.cli_common import add_version_argument, configure_stdout, positive_timeout
 from epics_mcp.errors import EpicsError
-from epics_mcp.services.doctor import (
-    DoctorReport,
-    OlogWriteGateReport,
-    PvWriteGateReport,
-    run_doctor,
-)
+from epics_mcp.services.doctor import DoctorReport, run_doctor
+from epics_mcp.write_posture import OlogWriteGateReport, PvWriteGateReport
 
 #: One glyph per status for the human-readable render (deterministic). A status gets a mark of
 #: its own rather than borrowing ✓ or ✗ when it is neither "confirmed" nor "broken". Every one of
