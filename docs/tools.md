@@ -69,7 +69,8 @@ MCP client involved:
 
 ```bash
 epics-testpv                                            # serve two test PVs, loopback, until Ctrl-C
-epics-init       --list                                 # emit a client configuration, then check it
+epics-init       --list                                 # name the deployment shapes and stop
+epics-init       --preset sandbox                       # emit a client configuration, then check it
 epics-doctor                                            # read-only self-check: planes + write gates
 epics-diagnose   TEST:Temperature                       # connection diagnosis
 epics-crossplane --displays <project-root> --st-cmd <st.cmd>     # display ↔ IOC ↔ Naming (needs opi_navigation)
@@ -84,6 +85,9 @@ shell redirect cannot promise (in Windows PowerShell 5.1 both `>` and `Set-Conte
 produce bytes a strict JSON parser rejects). `--out` refuses an existing file unless `--force` is
 given, and writes nothing at all while placeholders remain. `--absolute-command` names the installed
 server by its resolved path instead of a bare name, for a client that does not inherit your `PATH`.
+⚠️ **`--list` is exclusive and says so**: it prints the shapes and returns before any other option
+is read, so combining it with one is a usage error (exit `2`) rather than a silently ignored flag.
+That holds for every option the command has, including ones added after this page was written.
 
 `epics-testpv` serves two synthetic PVs so the quick start needs no control system at all:
 `TEST:Temperature`, an analogue reading with a unit, and `TEST:Heater`, a writable switch, which is

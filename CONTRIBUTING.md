@@ -132,7 +132,8 @@ instead since 2026-08-04: `docs/known-limits.md`, entry 16.
   coverage-dependent half of the sham audit. It is not in the gate because it costs a full
   `COVERAGE_CORE=ctrace` suite run, so it only happens if someone does it deliberately:
   `uv run python scripts/guard_audit.py sham --check --coverage-db <db>`, recipe in
-  `scripts/guard_audit.py`. Without it, two of that audit's four figures are recorded and unverified.
+  `scripts/guard_audit.py`. Without it, two of that audit's six figures are recorded and unverified
+  (run it without a database and it says so itself: four pins checked, two named as needing one).
   ⚠️ Point `COVERAGE_FILE` at a path **outside the repository** while recording, or the run
   overwrites the working `.coverage`. And record with `COVERAGE_CORE=ctrace`: on Python 3.12+ the
   default core disables a location after its first observation, so a map recorded without it makes

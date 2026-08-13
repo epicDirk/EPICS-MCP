@@ -24,7 +24,8 @@ What you expected instead.
 - `epics-mcp` version (or commit):
 - Python version:
 - OS:
-- Which REST planes are enabled (ChannelFinder / Archiver / Alarm / Naming, via their `*_URL`)?
+- Which REST planes are enabled (ChannelFinder / Archiver / Alarm / Naming / Olog, via their
+  `*_URL`)?
 - Relevant EPICS network config (`EPICS_PVA_ADDR_LIST` / name server), if a live read is involved:
 
 ## Logs / output

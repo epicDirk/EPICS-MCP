@@ -15,8 +15,11 @@ requires-python = ">=3.12"
 # renders as an unfinished stub and the index cannot categorise the package at all.
 #
 # Each one is a claim, so each is one this repository can back:
-#   * "4 - Beta" means feature-complete and under test, which is what this is: all five planes and
-#     both write gates are built and covered. It does NOT mean stable, and the instability is
+#   * "4 - Beta" means feature-complete and under test, which is what this is: every plane the
+#     README table names, and both write gates, are built and covered. The count that used to
+#     stand here said "five", which matched no counting the repository does: the README names
+#     eight, epics-doctor probes seven, and five is the number of optional REST services. A claim
+#     is kept, the unbacked figure is not. It does NOT mean stable, and the instability is
 #     stated where a user looks for it, in CHANGELOG.md ("pre-1.0: minor versions may carry
 #     breaking changes"). Moving this row up or down is a judgement about the project, not a
 #     formality, so it is made here deliberately rather than copied from a template.
