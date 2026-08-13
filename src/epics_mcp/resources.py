@@ -90,7 +90,20 @@ def get_health() -> dict[str, object]:
         "p4p_version": p4p_version,
         "channelfinder_enabled": bool(cfg.channelfinder_url),
         "archiver_enabled": bool(cfg.archiver_url),
+        # ⚠️ NOT bool(archiver_retrieval_url), and the naive spelling would be wrong in BOTH
+        # directions. An empty retrieval URL falls back to the mgmt one, because a single-JVM
+        # appliance serves both webapps on one port, so the naive field would report false for a
+        # deployment whose history retrieval works. And a retrieval URL WITHOUT a mgmt URL is a
+        # config_error the doctor reports, because every archiver tool gates on the mgmt one, so
+        # the naive field would report true for a plane that is never used. Both cases reduce to
+        # the mgmt URL, which is why this reads the same as archiver_enabled: the two planes are
+        # one service, and only their probes differ.
+        "archiver_retrieval_enabled": bool(cfg.archiver_url),
         "alarm_enabled": bool(cfg.alarm_url),
+        # The naming plane, absent until now. A boolean and never the URL: unlike the other REST
+        # planes it has no built-in default host, so its URL is the most identifying single value
+        # in the configuration.
+        "naming_enabled": bool(cfg.naming_url),
         # olog as an enabled-boolean only (never the URL, an ESS host, name-capable plane).
         "olog_enabled": bool(cfg.olog_url),
     }

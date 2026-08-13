@@ -1,5 +1,8 @@
 """Tests for epics_mcp.resources."""
 
+import re
+from pathlib import Path
+
 import pytest
 
 from epics_mcp.config import EpicsConfig
@@ -39,9 +42,20 @@ _HEALTH_KEYS = frozenset(
         "p4p_version",
         "channelfinder_enabled",
         "archiver_enabled",
+        "archiver_retrieval_enabled",
         "alarm_enabled",
+        "naming_enabled",
         "olog_enabled",
     }
+)
+
+#: The planes ``run_doctor`` probes, in the spelling its report uses. Declared here rather than
+#: imported from the doctor on purpose: the point is that the two agree, and deriving the
+#: expectation from the thing under test proves nothing. ``live`` is the one plane with no
+#: ``*_enabled`` key and that is not an omission: it is always configured, so a field for it would
+#: have exactly one reachable value. ``provider`` is its report instead.
+_DOCTOR_PLANES = frozenset(
+    {"live", "channelfinder", "archiver", "archiver_retrieval", "alarm", "naming", "olog"}
 )
 
 _CONFIG_KEYS = frozenset(
@@ -70,6 +84,62 @@ def test_health_key_set_is_exact() -> None:
     deciding to. This one is the second half, and it is meant to go red on every future edit.
     """
     assert set(get_health()) == set(_HEALTH_KEYS)
+
+
+def test_health_names_every_plane_the_doctor_probes() -> None:
+    """The payload described four of the seven planes, and nothing said which three were missing.
+
+    naming had no key at all, archiver_retrieval had no key at all, and live is reported through
+    ``provider``. An approver reading this resource to see what the running server reaches got a
+    silent partial answer, which is worse than a short one: nothing distinguished "this plane is
+    off" from "this payload does not know about that plane".
+    """
+    keys = set(get_health())
+    named = {plane for plane in _DOCTOR_PLANES if f"{plane}_enabled" in keys}
+
+    assert named == _DOCTOR_PLANES - {"live"}
+    assert "provider" in keys, "the live plane is reported as provider, so it must be present"
+
+
+def test_the_declared_plane_list_still_matches_the_shipped_guide() -> None:
+    """The list above is declared, so something has to tie it to the planes that really exist.
+
+    The guide's plane-inventory region is already drift-guarded against a real ``run_doctor`` run by
+    tests/test_guide_matches_code.py, so tying this list to the REGION inherits that check and
+    closes the chain without a second run. Without this test the list above would be a third
+    statement of the plane names, free to rot on its own.
+    """
+    guide = (
+        Path(__file__).resolve().parents[1] / "src" / "epics_mcp" / "operator_guide.md"
+    ).read_text(encoding="utf-8")
+    region = re.search(r"BEGIN:plane-inventory(.*?)END:plane-inventory", guide, re.DOTALL)
+    assert region is not None, "the guide plane-inventory markers moved, the drift anchor broke"
+
+    assert set(re.findall(r"`([a-z_]+)`", region.group(1))) == _DOCTOR_PLANES
+
+
+def test_the_retrieval_plane_follows_the_mgmt_url_in_both_directions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """bool(archiver_retrieval_url) would have been a new lie of the exact kind this ticket removes.
+
+    Two configurations, and the naive spelling gets both wrong. A single-JVM appliance serves both
+    webapps on one port and is configured with the mgmt URL alone, so the naive field reports false
+    while history retrieval works. And a retrieval URL without a mgmt URL is a config_error the
+    doctor reports, because every archiver tool gates on the mgmt one, so the naive field reports
+    true for a plane that is never used.
+
+    Red-proof: spell the field bool(cfg.archiver_retrieval_url) and BOTH assertions below fail.
+    """
+    _with_config(monkeypatch, archiver_url="http://archiver:17665")
+    assert get_health()["archiver_retrieval_enabled"] is True, (
+        "an empty retrieval URL falls back to the mgmt one, the plane works"
+    )
+
+    _with_config(monkeypatch, archiver_retrieval_url="http://archiver:17668")
+    assert get_health()["archiver_retrieval_enabled"] is False, (
+        "a retrieval URL without a mgmt URL is never used, the doctor calls it a config_error"
+    )
 
 
 def test_an_armed_olog_gate_is_visible_in_health(monkeypatch: pytest.MonkeyPatch) -> None:
