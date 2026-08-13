@@ -59,9 +59,18 @@ single-JVM appliance legitimately leaves it empty.
 ⚠️ **Put credentials in the `*_AUTH` header variables, not into a `*_URL`.** A URL accepts
 `https://user:password@host/path` and nothing here rejects it, but that string is also what
 `epics-pv://config` reports to a client, which keeps it. That resource removes a userinfo before
-printing, and withholds the address entirely when it cannot do so provably, so the password does
-not travel; a token in a QUERY string is not removed, however, and neither redaction changes the
-fact that the value then sits in the process environment of every tool that reads it.
+printing and withholds the address entirely when it cannot do so provably, and a token in a QUERY
+string is not removed at all.
+
+⚠️ **That redaction covers the resource, not every route out of the process.** Measured
+2026-08-13: a REST failure is reported with the request URL in its text, and
+`diagnose_connection` puts that text into a `note` of a SUCCESSFUL payload, so a credential in a
+service URL still reaches the client that way. The redaction of those paths is a separate open
+item; until it lands, treat a credential in a `*_URL` as disclosed.
+
+Four planes have a header variable to use instead (`CHANNELFINDER`, `ARCHIVER`, `ALARM`, `OLOG`).
+The Naming plane has none, so there is nothing to move a credential into there; its URL is never
+part of the `epics-pv://config` payload either.
 
 | Variable | Default | Enables |
 |----------|---------|---------|

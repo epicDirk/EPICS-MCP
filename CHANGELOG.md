@@ -106,11 +106,15 @@ carry breaking changes).
   lower-cases the host, drops a query and a fragment and percent-encodes a space. The boundary is
   urllib3's, the parser `requests` connects through, so a password containing `@` loses its whole
   tail rather than only the part before the first one. An address whose userinfo cannot be removed
-  provably is `null` instead of printed, which covers a URL the parser refuses, a spelling in
-  which the `@` is not a userinfo at all, and one where an `@` survives the removal. `"(disabled)"`
-  still means the plane is not configured. ⚠️ A token in a QUERY STRING is not removed; that is the
-  price of the character-for-character promise. Credentials belong in the `EPICS_MCP_*_AUTH`
-  header variables, never in a URL.
+  provably is `null` instead of printed: a URL the parser refuses, one with no scheme or no host,
+  a spelling in which the `@` is not a userinfo at all, one where an `@` survives the removal, and
+  a cut whose result no longer names the same address. `"(disabled)"` still means the plane is not
+  configured, and the two are different answers. ⚠️ A token in a QUERY STRING is not removed; that
+  is the price of the character-for-character promise. ⚠️ And this covers the resource, not every
+  route out of the process: a REST error message still carries the whole request URL, and
+  `diagnose_connection` puts such a message into a successful payload. Credentials belong in the
+  `EPICS_MCP_*_AUTH` header variables of the four planes that have one (ChannelFinder, Archiver,
+  Alarm, Olog), never in a URL.
 - **Editing a logbook entry you had just read destroyed it, and nothing said so.** A read gives a
   body back in two shapes, the raw `source` its author wrote and the `description` the server
   rendered from it, and nothing marked which of the two `update_log_entry` wants. Since that

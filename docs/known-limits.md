@@ -21,6 +21,7 @@ retired, and where it went, is listed at the end.
 [14 the status legend](#14--the-shipped-status-legend-is-guarded-by-name-glyph-and-set-not-by-what-it-says) ·
 [15 the https write path](#15--the-remote-https-write-path-has-no-live-probe-any-more-only-in-memory-coverage) ·
 [16 CI and the display tests](#16--ci-cannot-run-the-display-coupled-tests-and-no-switch-inside-this-repository-changes-that) ·
+[17 the service-URL redaction](#17--the-service-url-redaction-removes-a-userinfo-not-every-secret-a-url-can-carry) ·
 [retired](#retired-entries-and-where-they-went)
 
 ---
@@ -310,11 +311,25 @@ reason, and it can, because there the question is which ADDRESS a write would re
 what an operator typed. The two functions therefore answer the same question differently on
 purpose, and each says so in its docstring.
 
-Two things follow for an adopter. Put credentials in `EPICS_MCP_*_AUTH`, which is the documented
-place and which no payload prints. And read `null` in one of those fields as "configured, but its
-spelling could not be shown to be a removable userinfo", never as "not configured", which is
-`"(disabled)"`; the withheld case covers a URL the parser refuses, an `@` urllib3 does not read as
-a userinfo, and an `@` that survives the removal.
+**It also does not recognise a credential written without a literal `@`.**
+`https://svc:pw%40host/path` percent-encodes the separator; measured, urllib3 refuses that URL
+outright, and since the parser refuses it the address is withheld rather than printed. A Unicode
+lookalike (`＠`) is a different character again and is not a userinfo to any parser. None of these
+spellings can connect, so the plane is dead either way.
+
+**And it covers the RESOURCE, not every route out of the process.** Measured 2026-08-13: a REST
+failure carries the request URL in its message text, and `diagnose_connection` puts that text into
+a `note` of a SUCCESSFUL payload, so a credential in a service URL reaches the client along that
+path even though `epics-pv://config` no longer prints it. That is a separate open item; until it
+lands, a credential in a `*_URL` should be treated as disclosed regardless of this entry.
+
+Three things follow for an adopter. Put credentials in `EPICS_MCP_*_AUTH`, which four of the
+planes have (ChannelFinder, Archiver, Alarm, Olog; the Naming plane has none, and its URL is not
+part of this payload at all). Read `null` in one of those fields as "configured, but its spelling
+could not be shown to be a removable userinfo", never as "not configured", which is `"(disabled)"`.
+And do not read the withheld case as a short list: it covers a URL the parser refuses, a URL with
+no scheme or no host, an `@` urllib3 does not read as a userinfo, an `@` that survives the removal,
+and a cut whose result no longer names the same address.
 
 ## Retired entries, and where they went
 
