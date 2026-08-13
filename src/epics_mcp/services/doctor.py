@@ -196,10 +196,17 @@ _REMEDY: dict[str, str] = {
         "Set EPICS_MCP_CA_BUNDLE to a PEM that trusts this host, combining your internal CA roots "
         "with the public ones when planes present different trust roots. See docs/deployment.md."
     ),
+    # This entry used to end "for an Archiver Appliance the mgmt port and not retrieval", and a
+    # status-keyed remedy is read by EVERY plane: on the retrieval plane, whose whole reason to
+    # exist is the OTHER webapp, that named the webapp it had just probed as the right one. It now
+    # states the QUESTION rather than answering it for one plane, which is what a shared remedy can
+    # honestly do; which variable a plane reads is in its own observation.
     "api_error": (
-        "Check the URL names the right service AND the right webapp, for an Archiver Appliance the "
-        "mgmt port and not retrieval. A service that answers every attempt with a 5xx is up and "
-        "erroring instead, and then the URL is right and the service is what needs looking at."
+        "Check the URL names the right service AND the right webapp for THIS plane: one product "
+        "can serve several webapps on different ports, an Archiver Appliance serves mgmt and "
+        "retrieval, and each of them is read from a variable of its own. A service that answers "
+        "every attempt with a 5xx is up and erroring instead, and then the URL is right and the "
+        "service is what needs looking at."
     ),
     "unreachable": (
         "Check that the host and port in the URL this plane reads are right, and that the service "

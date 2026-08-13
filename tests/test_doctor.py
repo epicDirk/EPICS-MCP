@@ -20,6 +20,7 @@ import os
 import re
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import get_args
 from unittest.mock import Mock
 
@@ -64,7 +65,7 @@ from epics_mcp.services.doctor import (
     _write_safety_report,
     run_doctor,
 )
-from epics_mcp.services.rest_exceptions import RestConnectionError
+from epics_mcp.services.rest_exceptions import RestConnectionError, RestResponseError
 from epics_mcp.write_posture import (
     _ALLOW_EVERY_PV_NAME,
     olog_write_gate_report,
@@ -205,9 +206,13 @@ def test_classify_served_non2xx_is_api_error_reachable() -> None:
     assert (reachable, ca_ok, status) == (True, True, "api_error")
     assert "404" in detail
     assert _PROBE_VAR in detail  # WHICH variable served the 404, not just that something did
-    # the actionable payload: the mgmt/retrieval hint distinguishes api_error from unreachable.
+    # The actionable payload: the webapp hint is what distinguishes api_error from unreachable, and
+    # BOTH webapps are named. This used to assert "not retrieval", pinning a remedy that told every
+    # plane the mgmt one was correct; on the retrieval plane that named the webapp it had just
+    # probed (BG-DFIX). The pair is asserted rather than the direction, so the hint has to stay
+    # present without the guard deciding which of the two a given plane should point at.
     assert "mgmt" in detail
-    assert "not retrieval" in detail
+    assert "retrieval" in detail
     assert _REMEDY["api_error"] in detail  # C1
 
 
@@ -1259,6 +1264,58 @@ async def test_the_fallback_finding_names_the_variable_that_would_help(
     )
     assert "EPICS_MCP_ARCHIVER_URL" in named, (
         f"the URL that was actually probed must still be named: {detail!r}"
+    )
+
+
+#: The measured wrong sentence: the api_error remedy told EVERY plane that the right webapp of an
+#: Archiver Appliance is the mgmt one. Pinned as the exact string it used to be, because that is a
+#: claim about ONE sentence that was wrong rather than about how the remedy should be worded, which
+#: section 13 of docs/known-limits.md deliberately leaves free.
+_WEBAPP_DIRECTIVE = "mgmt port and not retrieval"
+
+
+async def test_the_api_error_remedy_does_not_send_the_retrieval_plane_to_mgmt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BG-DFIX, found while measuring (b): ``_REMEDY`` is keyed by STATUS and shared by every plane,
+    and its ``api_error`` entry named one webapp as the correct one.
+
+    On the plane whose whole reason to exist is the OTHER webapp, that is the wrong instruction: a
+    404 from the retrieval endpoint is the signature of a split deployment, and the operator was
+    told to point at mgmt, which is where the probe already was. Measured with a chained HTTP 404,
+    both with the retrieval URL set and on the fallback, where the finding since (b) opens by saying
+    it fell back to mgmt and then closed by advising mgmt.
+
+    The remedy stays status-keyed and static, as its own docstring requires; what changes is that it
+    describes the QUESTION (which webapp does this plane read, and from which variable) instead of
+    answering it for one plane.
+
+    Red-proof on the pre-fix code: the phrase is present in the rendered finding.
+    """
+    cfg = _set_config(
+        monkeypatch,
+        archiver_url="http://arch.example:17665",
+        archiver_retrieval_url="http://arch.example:17668",
+    )
+
+    class _NotFound(Exception):
+        response = SimpleNamespace(status_code=404)
+
+    def _served_404(*_args: object, **_kwargs: object) -> object:
+        try:
+            raise _NotFound("404")
+        except _NotFound as cause:
+            raise RestResponseError("wrong webapp") from cause
+
+    monkeypatch.setattr("epics_mcp.services.doctor.rest_get_json", _served_404)
+
+    check = await _check_retrieval_plane(cfg, 5.0)
+    detail = check.detail or ""
+
+    assert check.status == "api_error", f"expected a served non-2xx: {detail!r}"
+    assert _WEBAPP_DIRECTIVE not in detail, (
+        "the shared api_error remedy tells the RETRIEVAL plane to use the mgmt webapp, which is "
+        f"the one it just probed: {detail!r}"
     )
 
 
