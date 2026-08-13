@@ -347,10 +347,42 @@ def test_low_level_server_version_attribute_exists() -> None:
     assert low_level.version == __version__
 
 
-def test_config_no_secrets() -> None:
-    result = get_epics_config()
-    assert "provider" in result
+#: Words that make a key name look like a credential. Matched as SUBSTRINGS, see the test.
+_SECRET_WORDS = ("secret", "password", "token", "credential", "auth", "key")
 
-    secret_keywords = {"secret", "password", "key", "token"}
-    for k in result:
-        assert k.lower() not in secret_keywords, f"Config exposes secret-like key: {k}"
+
+def _every_key(payload: object, prefix: str = "") -> list[str]:
+    """Every key in *payload*, nested ones included, as dotted paths."""
+    if not isinstance(payload, dict):
+        return []
+    found: list[str] = []
+    for key, value in payload.items():
+        path = f"{prefix}{key}"
+        found.append(path)
+        found.extend(_every_key(value, f"{path}."))
+    return found
+
+
+def test_neither_resource_exposes_a_secret_like_key() -> None:
+    """The scan compared WHOLE key names and ran on one of the two payloads. Both were too narrow.
+
+    Measured: ``olog_write_password`` is a real field name in ``EpicsConfig`` today, and an exact
+    comparison against {"secret", "password", "key", "token"} does not match it, so the one guard
+    standing between a credential and the wire would have passed it. Substring matching does.
+
+    It now walks NESTED keys, because the write-gate blocks this ticket added are nested and a
+    top-level loop would not see ``olog_write.password``, and it runs on health as well as config,
+    because health is where the gate blocks landed and a credential-shaped field is likelier there.
+
+    Red-proof: add a key containing any of the words to either payload, at any depth.
+    """
+    for resource, payload in (("health", get_health()), ("config", get_epics_config())):
+        for key in _every_key(payload):
+            lowered = key.lower()
+            assert not any(word in lowered for word in _SECRET_WORDS), (
+                f"{resource} exposes a secret-like key: {key}"
+            )
+
+    # Positive control: the walk really descends, so the assertions above are not vacuous on the
+    # nested blocks. Without this a broken _every_key would make the whole test pass silently.
+    assert "olog_write.armed" in _every_key(get_health())
