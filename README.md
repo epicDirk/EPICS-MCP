@@ -18,9 +18,10 @@ allowlist, and a rate limit. Logbook writes sit behind their own separate gate.
 > **Project status: pre-1.0 and under active development.** Tools and APIs may still change
 > between minor versions, so pin one if you depend on it.
 
-**Maturity.** CI runs the full suite on every push against Python 3.12 and 3.13, on a standalone
-install with no EPICS infrastructure at all; the live-stack tests are opt-in and skip without a
-stack. `mypy --strict` covers `src`, `tests` and `scripts`, and the package ships `py.typed`.
+**Maturity.** CI runs the full suite on every push against Python 3.12, 3.13 and 3.14, which is
+every version `requires-python` permits, on a standalone install with no EPICS infrastructure at
+all; the live-stack tests are opt-in and skip without a stack. `mypy --strict` covers `src`,
+`tests` and `scripts`, and the package ships `py.typed`.
 
 ## Where to start
 

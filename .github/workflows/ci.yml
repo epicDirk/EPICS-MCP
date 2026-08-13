@@ -9,14 +9,27 @@ jobs:
   # Coverage is report-only (no --cov-fail-under gate), matching phoebus-display-mcp.
   #
   # The matrix exists to test the claim rather than decorate it: pyproject declares
-  # requires-python = ">=3.12", and a single unpinned runner never exercised the upper end.
-  # fail-fast is off so one version failing still reports the other.
+  # requires-python = ">=3.12", so every version from 3.12 up is a version this package PERMITS,
+  # and one it does not run is a combination a user is allowed to install and nobody has tried.
+  # 3.14 is here for exactly that reason: it was released, the floor still admits it, and the
+  # maintainer's own machine runs it. fail-fast is off so one version failing still reports the
+  # others.
+  #
+  # Two limits of this matrix, written down because both invite the opposite reading:
+  #
+  #   * It is a CI signal, NOT a release gate. publish.yml builds and tests on 3.12 alone, so a
+  #     green tag run says nothing about 3.14. That split is deliberate: a release is ONE
+  #     deterministic artifact, and a pure-Python wheel does not differ per interpreter.
+  #   * The static tools stay at the FLOOR (ruff target-version = py312, mypy python_version =
+  #     3.12), which is correct for a floor and is why they cannot cover the top: mypy resolving
+  #     against 3.12 cannot see an API that 3.14 REMOVED. Only a run on 3.14 can, which is what
+  #     this leg buys and what the trove classifier promises.
   test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
     name: test (Python ${{ matrix.python-version }})
     steps:
       - uses: actions/checkout@v5
@@ -25,8 +38,13 @@ jobs:
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
+      # --locked, not --frozen, and the difference is the whole point of the step name. Both
+      # install from the lockfile without re-resolving; only --locked also VERIFIES that the
+      # lockfile still matches pyproject.toml. Under --frozen a dependency edit committed without
+      # the matching `uv lock` installs the OLD set in silence, and CI reports green over a
+      # dependency tree that no longer exists in the file it claims to follow (GB-33 c).
       - name: Install dependencies (exactly as uv.lock pins them)
-        run: uv sync --extra dev --frozen
+        run: uv sync --extra dev --locked
       - name: Run tests with coverage (report only)
         run: uv run pytest tests/ --tb=short --cov=src --cov-branch --cov-report=term
 
@@ -42,6 +60,6 @@ jobs:
         with:
           enable-cache: true
       - name: Install dependencies (exactly as uv.lock pins them)
-        run: uv sync --extra dev --frozen
+        run: uv sync --extra dev --locked
       - name: pre-commit (ruff check + format + mypy)
         run: uv run pre-commit run --all-files --show-diff-on-failure

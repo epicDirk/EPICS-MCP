@@ -27,7 +27,12 @@ requires-python = ">=3.12"
 #     assertion was added when this comment was found citing a check that only covered the
 #     operator guide (QA-37): no code here reads the marker, so nothing else can notice it going
 #     missing.
-#   * 3.12 and 3.13 are exactly the versions the CI matrix runs. No 3.14 row until one does.
+#   * 3.12, 3.13 and 3.14 are exactly the versions the CI matrix runs. The rule is the same one
+#     that admitted 3.14: a row here is a promise, so it appears when a leg exercises it and not
+#     before. requires-python permits every version from the floor up, which is why the matrix
+#     has to reach the top rather than stop where it is comfortable. ⚠️ The promise is backed by
+#     the CI matrix, not by the release build: publish.yml builds on 3.12 alone (see its comment),
+#     so a green tag run is no evidence for any row below it.
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -37,6 +42,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering",
     "Topic :: System :: Monitoring",
     "Typing :: Typed",
