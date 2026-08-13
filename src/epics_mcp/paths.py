@@ -33,6 +33,27 @@ from epics_mcp.config import get_config
 from epics_mcp.errors import EpicsError
 
 
+def path_boundary_configured(raw: str) -> bool:
+    """True iff an ``EPICS_MCP_ALLOWED_ROOTS`` string holds at least one non-blank root.
+
+    The one rule that decides whether the opt-in boundary exists at all, written once because two
+    spellings that look equivalent are not: ``bool(raw)`` is true for ``";"`` and for ``"   "``,
+    both of which :func:`_resolve_roots` drops to nothing. A caller built on the naive spelling
+    would report a boundary that no file argument is actually held to, which is the direction that
+    matters. :func:`_allowed_roots` asks it below, and so does ``epics-pv://health``.
+
+    It answers WITHOUT touching the filesystem, unlike ``_allowed_roots``: ``Path.resolve()`` is a
+    stat, and the health resource is a synchronous handler where a stat on a dead network root
+    would block. And it takes the STRING rather than reading the config itself, so a caller pointed
+    at one configuration cannot be answered from another (the resource tests rebind ``get_config``
+    in their own module, which a ``get_config()`` in here would bypass).
+
+    ⚠️ True does not mean NARROW. A root of ``"."``, or a volume root, satisfies it and constrains
+    almost nothing; how WIDE a configured boundary is, is a different question this does not ask.
+    """
+    return any(part.strip() for part in raw.split(os.pathsep))
+
+
 @functools.lru_cache(maxsize=8)
 def _resolve_roots(raw: str) -> tuple[Path, ...]:
     """Resolve an ``EPICS_MCP_ALLOWED_ROOTS`` string into roots, cached on the raw string (S2-7).
@@ -50,10 +71,12 @@ def _allowed_roots() -> list[Path]:
 
     Guards the empty-string trap: ``"".split(os.pathsep)`` yields ``[""]`` whose
     ``Path("")`` would resolve to the *current working directory* and silently
-    become an allowed root. An unset/blank value must mean "no boundary".
+    become an allowed root. An unset/blank value must mean "no boundary", and
+    that decision is :func:`path_boundary_configured`, shared with the health
+    resource so the two can never disagree about what "configured" means.
     """
     raw = get_config().allowed_roots
-    if not raw.strip():
+    if not path_boundary_configured(raw):
         return []
     return list(_resolve_roots(raw))
 

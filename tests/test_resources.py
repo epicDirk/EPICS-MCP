@@ -75,8 +75,35 @@ _HEALTH_KEYS = frozenset(
         "naming_enabled",
         "pv_search",
         "olog_enabled",
+        "rest_tls",
+        "rest_read_rate_limit",
+        "allowed_roots_set",
+        "channelfinder_redaction",
     }
 )
+
+#: The keys INSIDE each block, and which top-level keys are blocks at all. The set above pins one
+#: level, which was the whole contract while every block belonged to one ticket; three of the four
+#: posture fields added later are blocks, so a wire contract pinned at the top level only would let
+#: a nested key appear, vanish or be renamed with the suite green. Declared for the same reason the
+#: set above is declared rather than derived: an expectation read off the payload is satisfied by
+#: whatever the payload happens to say.
+_HEALTH_NESTED_KEYS: dict[str, frozenset[str]] = {
+    "olog_write": frozenset(
+        {"armed", "logbooks", "rate_limit_per_minute", "target_allowed", "target_is_loopback"}
+    ),
+    "pv_search": frozenset({"auto_addr_broadcast", "search_lists_set", "loopback_only"}),
+    "rest_tls": frozenset({"verification_enabled", "ca_bundle_configured"}),
+    "rest_read_rate_limit": frozenset({"enabled", "per_minute"}),
+    "channelfinder_redaction": frozenset(
+        {
+            "disclosed_owner_account_count",
+            "disclosed_property_name_count",
+            "owner_allowlist_site_configured",
+            "property_allowlist_site_configured",
+        }
+    ),
+}
 
 #: The planes ``run_doctor`` probes, in the spelling its report uses. Declared here rather than
 #: imported from the doctor on purpose: the point is that the two agree, and deriving the
@@ -111,8 +138,18 @@ def test_health_key_set_is_exact() -> None:
     are mandatory" and the wrong one for "this is the wire contract": it cannot see an addition at
     all, and that is how the payload came to describe four of the seven planes without anyone
     deciding to. This one is the second half, and it is meant to go red on every future edit.
+
+    It pins BOTH levels. Pinning the top one alone left every block's contents unwatched, which
+    stayed invisible while the blocks were one ticket's and stopped being invisible when three more
+    arrived: comparing WHICH values are dicts against the declaration also catches a block that
+    quietly becomes a scalar, or a scalar that grows into a block.
     """
-    assert set(get_health()) == set(_HEALTH_KEYS)
+    health = get_health()
+
+    assert set(health) == set(_HEALTH_KEYS)
+    assert {key: set(value) for key, value in health.items() if isinstance(value, dict)} == {
+        key: set(value) for key, value in _HEALTH_NESTED_KEYS.items()
+    }
 
 
 def test_health_names_every_plane_the_doctor_probes() -> None:
@@ -316,7 +353,164 @@ def test_the_search_posture_names_variables_and_never_their_values(
     assert search["loopback_only"] is False, "a non-loopback entry is a reach beyond loopback"
 
 
-def test_no_payload_field_carries_a_host_outside_the_three_declared_url_keys(
+def test_a_ca_bundle_deployment_is_not_reported_as_an_unverified_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A field mirroring cfg.tls_verify would call a verifying server unverified.
+
+    ``ca_bundle`` wins over ``tls_verify`` at the session chokepoint (``verify = cfg.ca_bundle or
+    cfg.tls_verify``), so the two settings are not two independent switches: the third case below
+    is a deployment that verifies against an internal root while its switch reads false. Reporting
+    that as "unverified" is the kind of claim Decision WP forbids, and it is the false alarm this
+    payload would have carried into an approver's transcript.
+
+    Red-proof: spell verification_enabled as ``cfg.tls_verify`` and the third case fails; spell it
+    as ``bool(cfg.ca_bundle)`` and the first fails.
+    """
+    _with_config(monkeypatch)
+    assert get_health()["rest_tls"] == {"verification_enabled": True, "ca_bundle_configured": False}
+
+    _with_config(monkeypatch, tls_verify=False)
+    assert get_health()["rest_tls"] == {
+        "verification_enabled": False,
+        "ca_bundle_configured": False,
+    }
+
+    _with_config(monkeypatch, tls_verify=False, ca_bundle="/etc/pki/internal-root.pem")
+    assert get_health()["rest_tls"] == {"verification_enabled": True, "ca_bundle_configured": True}
+
+
+def test_the_tls_field_agrees_with_the_session_this_process_really_builds() -> None:
+    """The precedence is measured against the sessions, not against a second copy of the rule.
+
+    The assertions above compare the payload with a rule spelled out in the test, which cannot see
+    the two drifting apart: the field would keep passing if ``build_retrying_session`` stopped
+    honouring ``ca_bundle``. This one asks the REST session factory itself, with the same
+    configuration, and pins that "verification_enabled" means what requests will actually do.
+
+    The real config singleton is set here rather than the module rebind ``_with_config`` uses,
+    because ``_http`` reads ``epics_mcp.config.get_config`` and a rebind in ``resources`` would
+    leave the two halves looking at different configurations, which is exactly the drift this test
+    exists to catch. The autouse fixture drops the singleton on both sides.
+    """
+    from epics_mcp.services._http import build_retrying_session
+
+    bundle = "/etc/pki/internal-root.pem"
+    config_module._config = EpicsConfig(tls_verify=False, ca_bundle=bundle)
+    session = build_retrying_session()
+    assert session.verify == bundle, "the bundle path is what requests will verify against"
+    with_bundle = get_health()["rest_tls"]
+    assert isinstance(with_bundle, dict)
+    assert with_bundle["verification_enabled"] is True
+
+    config_module._config = EpicsConfig(tls_verify=False)
+    session = build_retrying_session()
+    assert session.verify is False, "positive control: without a bundle the switch really is off"
+    without_bundle = get_health()["rest_tls"]
+    assert isinstance(without_bundle, dict)
+    assert without_bundle["verification_enabled"] is False
+
+
+def test_the_file_boundary_field_is_not_satisfied_by_a_value_holding_no_root(
+    tmp_path: Path,
+) -> None:
+    """``bool(cfg.allowed_roots)`` reports a boundary that no file argument is held to.
+
+    A separator-only or blank value is dropped to nothing by the resolver, so the naive spelling
+    would answer "the path boundary is configured" for a server on which every file argument is
+    unbounded. That direction is the dangerous one, and it is the same false all-clear the two
+    preceding tickets each built into their own new field.
+
+    Measured against ``paths._allowed_roots`` rather than against a second copy of the rule, for
+    the reason the TLS pair states: a payload agreeing with a rule the test spells out cannot see
+    the two drifting apart. The real config singleton is set for that reason too.
+
+    Red-proof: spell the field ``bool(cfg.allowed_roots)`` and the separator cases fail.
+    """
+    from epics_mcp import paths
+
+    for raw in ("", "   ", os.pathsep, f" {os.pathsep} ", os.pathsep * 2):
+        config_module._config = EpicsConfig(allowed_roots=raw)
+        assert get_health()["allowed_roots_set"] is False, raw
+        assert paths._allowed_roots() == [], f"the resolver disagrees about {raw!r}"
+
+    # Positive control, so the loop above cannot be passing on an unset variable: a real root is
+    # reported, and the resolver agrees that it bounds something.
+    config_module._config = EpicsConfig(allowed_roots=str(tmp_path))
+    assert get_health()["allowed_roots_set"] is True
+    assert paths._allowed_roots() != []
+
+
+def test_the_read_throttle_and_the_redaction_counters_are_wired_to_their_own_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counts are the half a key-presence check cannot see, and each has a plausible wrong source.
+
+    The sentinel allowlists deliberately have a cardinality the built-in defaults do NOT have
+    (three owners, two properties against one and five): with matching sizes an implementation that
+    ignores the configuration and counts the module constants would pass every assertion here.
+
+    The three-way of the allowlists is the point of the site_configured pair: unset means the
+    built-in default, an explicitly EMPTY value means redact everything, and a count of zero is
+    therefore the most private posture rather than a broken one. Nothing else in the payload can
+    tell those two apart.
+
+    Red-proof: count the module constants instead of the resolved allowlists, or wire either
+    site_configured flag to the other field, and one of the blocks below fails.
+    """
+    _with_config(
+        monkeypatch,
+        read_rate_limit=60,
+        channelfinder_safe_owner_accounts="svc-alpha, svc-beta, svc-gamma",
+        channelfinder_safe_property_names="propOne,propTwo",
+    )
+    health = get_health()
+    assert health["rest_read_rate_limit"] == {"enabled": True, "per_minute": 60}
+    assert health["channelfinder_redaction"] == {
+        "disclosed_owner_account_count": 3,
+        "disclosed_property_name_count": 2,
+        "owner_allowlist_site_configured": True,
+        "property_allowlist_site_configured": True,
+    }
+
+    # The default posture. The two figures are the built-in ESS allowlists, and a change to either
+    # is a change to what a ChannelFinder answer discloses, so it is meant to surface here.
+    _with_config(monkeypatch)
+    health = get_health()
+    assert health["rest_read_rate_limit"] == {"enabled": False, "per_minute": 0}
+    assert health["channelfinder_redaction"] == {
+        "disclosed_owner_account_count": 1,
+        "disclosed_property_name_count": 5,
+        "owner_allowlist_site_configured": False,
+        "property_allowlist_site_configured": False,
+    }
+
+    # Explicitly empty: configured AND disclosing nothing, which is not the same as unset.
+    _with_config(
+        monkeypatch,
+        channelfinder_safe_owner_accounts="",
+        channelfinder_safe_property_names="",
+    )
+    assert get_health()["channelfinder_redaction"] == {
+        "disclosed_owner_account_count": 0,
+        "disclosed_property_name_count": 0,
+        "owner_allowlist_site_configured": True,
+        "property_allowlist_site_configured": True,
+    }
+
+    # Exactly one of the two overridden. Every case above sets both or neither, which is the one
+    # shape in which a field wired to its sibling cannot be told from a correct one: the flags
+    # agree, and the counts differ only where the sentinel cardinalities differ.
+    _with_config(monkeypatch, channelfinder_safe_owner_accounts="svc-alpha, svc-beta, svc-gamma")
+    assert get_health()["channelfinder_redaction"] == {
+        "disclosed_owner_account_count": 3,
+        "disclosed_property_name_count": 5,
+        "owner_allowlist_site_configured": True,
+        "property_allowlist_site_configured": False,
+    }
+
+
+def test_no_payload_field_carries_a_host_a_path_or_an_account_outside_the_url_keys(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Which fields may name a host is a decision, so it is written down rather than left to habit.
@@ -331,6 +525,18 @@ def test_no_payload_field_carries_a_host_outside_the_three_declared_url_keys(
     from one that redacts three; without credentials, a redaction applied to one field only would
     still satisfy every assertion. Now the expected values below are the REDACTED spellings, so
     that mutant fails on two rows.
+
+    A host is no longer the only shape that must not travel, which is why the name grew: the
+    posture fields are derived from a CA-bundle path, a root list and two allowlists of service
+    accounts, and each of those is a filesystem path or a raw environment value. They are set here
+    with sentinels of their own, and each is checked in BOTH spellings, because ``json.dumps``
+    escapes a backslash: a Windows path sentinel is absent from the rendered payload as written
+    and present as escaped, so the obvious assertion passes while the value is right there.
+
+    ⚠️ The bundle sentinel carries a backslash but NO drive letter, deliberately: the repo-wide
+    facility-agnostic scan in test_guide.py reads ``X:\\dir`` as a local drive path and rejects it
+    in any tracked file, this one included. A relative Windows path exercises the escaping just as
+    well and stays inside that rule.
     """
     # Host names that share no substring with a plane name, so an assertion about a HOST cannot be
     # satisfied or broken by a KEY: "channelfinder" as a host would collide with
@@ -342,6 +548,10 @@ def test_no_payload_field_carries_a_host_outside_the_three_declared_url_keys(
         channelfinder_url="http://cf-svc:cf-pw@directory.example.org:8080/ChannelFinder",
         archiver_url="http://ar-svc:ar-pw@storage.example.org:17665",
         alarm_url="http://al-svc:al-pw@bells.example.org:8081",
+        ca_bundle=r"certs\internal-root-ca.pem",
+        allowed_roots=os.pathsep.join(("/srv/displays", "/srv/trends")),
+        channelfinder_safe_owner_accounts="svc-recceiver,ops-user-one,ops-user-two",
+        channelfinder_safe_property_names="siteEngineer,locationHall",
     )
 
     health = json.dumps(get_health())
@@ -361,6 +571,31 @@ def test_no_payload_field_carries_a_host_outside_the_three_declared_url_keys(
         assert disclosed not in health, (
             "health names planes as booleans, so no plane host belongs in it"
         )
+
+    # The path and account sentinels, each in both spellings: as configured, and as json.dumps
+    # would render it. The escaped form is the one a Windows path actually takes in the payload.
+    for value in (
+        r"certs\internal-root-ca.pem",
+        "/srv/displays",
+        "/srv/trends",
+        "svc-recceiver",
+        "ops-user-one",
+        "siteEngineer",
+        "locationHall",
+    ):
+        for spelling in (value, json.dumps(value)[1:-1]):
+            assert spelling not in health, f"health disclosed {value}"
+            assert spelling not in json.dumps(config), f"config disclosed {value}"
+
+    # Positive control for those four settings, so the loop above cannot be green on a payload
+    # that simply forgot them: each one really did reach the process, counted rather than named.
+    posture = get_health()
+    rest_tls, redaction = posture["rest_tls"], posture["channelfinder_redaction"]
+    assert isinstance(rest_tls, dict) and isinstance(redaction, dict)
+    assert rest_tls["ca_bundle_configured"] is True
+    assert posture["allowed_roots_set"] is True
+    assert redaction["disclosed_owner_account_count"] == 3
+    assert redaction["disclosed_property_name_count"] == 2
 
 
 def test_a_credential_in_a_service_url_never_reaches_the_client(

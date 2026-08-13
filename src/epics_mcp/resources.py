@@ -8,7 +8,12 @@ from functools import lru_cache
 
 from epics_mcp import __version__
 from epics_mcp.config import get_config
+from epics_mcp.paths import path_boundary_configured
 from epics_mcp.services._http import url_without_userinfo
+from epics_mcp.services.channelfinder_client import (
+    resolve_safe_owner_accounts,
+    resolve_safe_property_names,
+)
 from epics_mcp.write_posture import (
     olog_write_gate_report,
     pv_search_posture,
@@ -49,6 +54,14 @@ def get_health() -> dict[str, object]:
     which name hosts and raw environment values verbatim; those belong in an operator's own terminal
     through ``epics-doctor``, not in a payload a client keeps. Projecting by hand is what makes a
     later field added to that report a deliberate disclosure rather than an automatic one.
+
+    The posture blocks at the end answer what an approver asks after the gates: does this process
+    verify TLS on its REST planes, does it throttle its REST reads, is the opt-in file boundary
+    set, and how much does the ChannelFinder redaction let through. Each is a boolean or a count,
+    and each is named for what it MEASURES rather than for the question that brings a reader to
+    it: the same rule that gave ``write_pattern_is_a_known_allow_all_spelling`` its length. Two of
+    them compute something rather than mirroring a setting, and the comment beside each says which
+    precedence it resolves, because a payload carries no prose to qualify itself with.
     """
     cfg = get_config()
     p4p_version = "unknown"
@@ -130,6 +143,54 @@ def get_health() -> dict[str, object]:
         },
         # olog as an enabled-boolean only (never the URL, an ESS host, name-capable plane).
         "olog_enabled": bool(cfg.olog_url),
+        # ⚠️ The REST planes' TLS posture, with the precedence COMPUTED rather than mirrored.
+        # ca_bundle wins over tls_verify at the single session chokepoint (services/_http.py,
+        # verify = cfg.ca_bundle or cfg.tls_verify), so a server configured with tls_verify false
+        # AND a bundle path does verify. A field mirroring cfg.tls_verify alone would report that
+        # deployment as unverified: more than it checks, which is what this pair avoids.
+        # Two things it deliberately does NOT say, because this payload cannot prove them:
+        # whether any plane speaks https at all (an http URL has no certificate to verify), and,
+        # when ca_bundle_configured is false, WHICH trust store is in force. On the plain default
+        # trust_env stays on, so a REQUESTS_CA_BUNDLE in the environment can still replace it, and
+        # that variable is not ours to report.
+        "rest_tls": {
+            "verification_enabled": bool(cfg.ca_bundle) or cfg.tls_verify,
+            "ca_bundle_configured": bool(cfg.ca_bundle),
+        },
+        # ⚠️ rest_, because the throttle sits at the shared REST GET chokepoint ALONE: a p4p PV
+        # read, a monitor and the live discovery run past it. Without that prefix the field would
+        # read as an all-clear for exactly the reads that load an IOC.
+        # A block rather than a bare number, because 0 is the DISABLED default and a lone
+        # "read_rate_limit: 0" reads as "no reads permitted", which is its opposite. Its sibling
+        # write_rate_limit stays a bare number: that one has no off state (ge=1).
+        "rest_read_rate_limit": {
+            "enabled": cfg.read_rate_limit > 0,
+            "per_minute": cfg.read_rate_limit,
+        },
+        # The opt-in file boundary as a boolean, NEVER the root list: those are filesystem paths,
+        # the class this payload withholds. Decided by the same predicate the boundary itself asks
+        # (paths.path_boundary_configured), because bool(cfg.allowed_roots) is true for ";" and
+        # for "   ", neither of which holds a single file argument to anything.
+        # ⚠️ The NAME says the variable is SET, in the spelling-not-semantics sense the write
+        # pattern field above uses: a root of "." satisfies it, and how WIDE a configured boundary
+        # is cannot be answered without naming the roots.
+        "allowed_roots_set": path_boundary_configured(cfg.allowed_roots),
+        # The ChannelFinder redaction, counted through the SAME resolvers the client redacts with
+        # (services/channelfinder_client), so this can never drift from what a query really
+        # returns. ⚠️ An allowlist is the set of what is DISCLOSED, so these counters run OPPOSITE
+        # to privacy: zero is the most private posture (every owner and property redacted), not a
+        # broken one. They are named for that, because a "safe_*_count" under a "privacy" heading
+        # invites the reading that more is safer. The entries themselves stay out: an owner is a
+        # service account name and both lists come from the site's own environment verbatim, so
+        # which entries they are stays with epics-doctor.
+        "channelfinder_redaction": {
+            "disclosed_owner_account_count": len(resolve_safe_owner_accounts(cfg)),
+            "disclosed_property_name_count": len(resolve_safe_property_names(cfg)),
+            # Whether the built-in default posture still holds, which a count alone cannot say:
+            # unset means the default, and an explicitly empty value means redact everything.
+            "owner_allowlist_site_configured": cfg.channelfinder_safe_owner_accounts is not None,
+            "property_allowlist_site_configured": cfg.channelfinder_safe_property_names is not None,
+        },
     }
 
 
