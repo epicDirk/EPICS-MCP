@@ -235,7 +235,7 @@ def _write_block(path: str, block: str, *, force: bool) -> str | None:
     return str(target)
 
 
-def _warn_about_write_gate(env: Mapping[str, str]) -> None:
+def _warn_about_write_gate(env: Mapping[str, str], *, check_follows: bool) -> None:
     """Say so when the composed configuration arms a write gate, and say what it costs at START.
 
     ``epics-doctor`` PRINTS the effective write posture of both gates (its "Write gates" block), so
@@ -244,6 +244,13 @@ def _warn_about_write_gate(env: Mapping[str, str]) -> None:
     what the gates are SET to without evaluating whether a server would start on them. The refusal
     is the likelier outcome of the two, and a client shows it as nothing more than "server not
     connected".
+
+    ⚠️ ``check_follows`` is why this takes an argument at all, and it is the same defect the
+    surrounding prose kept making: the sentence pointed at "the check below" unconditionally, while
+    this warning is deliberately emitted BEFORE the two branches that return without running one
+    (``--no-check``, and a block that still has placeholders). Both of those are exactly the
+    situations the paragraph above names as the reason this warning exists, so in the two cases
+    where it matters most it was promising output that never came.
 
     ⚠️ The start conditions are NOT the same for the two gates, and stating them as one was wrong:
     a durable ``EPICS_MCP_AUDIT_LOG_FILE`` is required by BOTH, while the non-empty allowlist
@@ -267,11 +274,20 @@ def _warn_about_write_gate(env: Mapping[str, str]) -> None:
         if "EPICS_MCP_ALLOW_PV_WRITE" in armed
         else ""
     )
+    posture = (
+        " The check below prints the resulting posture in its 'Write gates' block, but it does not "
+        "evaluate whether the server would start."
+        if check_follows
+        else " No check runs in this invocation, so nothing else here looks at the gate: run "
+        "epics-doctor with the same environment for the resulting posture, bearing in mind that it "
+        "reports what the gates are SET to without evaluating whether the server would start."
+    )
     sys.stderr.write(
         f"epics-init: this configuration ARMS a write gate ({', '.join(armed)}). Such a server "
-        "refuses to start without a durable EPICS_MCP_AUDIT_LOG_FILE." + pv_conditions + " The "
-        "check below prints the resulting posture in its 'Write gates' block, but it does not "
-        "evaluate whether the server would start. See docs/safety.md before you use this block.\n"
+        "refuses to start without a durable EPICS_MCP_AUDIT_LOG_FILE."
+        + pv_conditions
+        + posture
+        + " See docs/safety.md before you use this block.\n"
     )
 
 
@@ -393,10 +409,12 @@ def main(argv: list[str] | None = None) -> int:
     # Before any branch returns. An armed write gate is a property of the BLOCK, which has just been
     # emitted, so a reader can act on it whatever happens next; warning only on the path that also
     # runs the check would stay silent on exactly the preset most likely to carry a --set, the one
-    # with placeholders still open.
-    _warn_about_write_gate(env)
-
+    # with placeholders still open. Which is why the warning has to be TOLD whether a check follows:
+    # it is emitted on two paths that return before running one, and it used to point at "the check
+    # below" on both of them.
     pending = open_placeholders(env)
+    _warn_about_write_gate(env, check_follows=not pending and not args.no_check)
+
     if pending:
         # Refuse the check rather than run it: probing ``<archiver-host>`` yields a DNS failure
         # shaped exactly like a real finding, and the reader cannot tell "your archiver is down"

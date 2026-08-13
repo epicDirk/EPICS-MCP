@@ -722,7 +722,12 @@ class TestWritingTheBlock:
             ["--preset", "sandbox", "--no-check", "--set", "EPICS_MCP_ALLOW_PV_WRITE=true"]
         )
 
-        assert "ARMS a write gate" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "ARMS a write gate" in err
+        # And it must not point at a check that this very flag suppressed. Measured before the fix:
+        # it said "The check below prints the resulting posture", with no check below.
+        assert "check below" not in err
+        assert "No check runs in this invocation" in err
 
     def test_an_armed_write_gate_is_named_even_when_placeholders_remain(
         self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
@@ -748,6 +753,28 @@ class TestWritingTheBlock:
 
         assert "ARMS a write gate" in captured.err
         assert "still placeholders" in captured.err  # and the other refusal is still reported
+        # The placeholder branch returns before the check too, so the same promise would be empty.
+        assert "check below" not in captured.err
+        assert "No check runs in this invocation" in captured.err
+
+    def test_the_write_gate_warning_points_at_the_check_only_when_one_follows(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Both branches of the sentence, at the unit the caller decides for.
+
+        The end-to-end tests above hold the two paths where no check runs; this holds that the
+        other wording still exists and is not simply gone. A warning that never mentions the block
+        would be the opposite defect: the block IS the answer, on the path that reaches it.
+
+        Red-proof: pin ``check_follows`` to either value and one of the two halves fails.
+        """
+        armed = {"EPICS_MCP_ALLOW_OLOG_WRITE": "true"}
+
+        cli_init._warn_about_write_gate(armed, check_follows=True)
+        assert "The check below prints the resulting posture" in capsys.readouterr().err
+
+        cli_init._warn_about_write_gate(armed, check_follows=False)
+        assert "No check runs in this invocation" in capsys.readouterr().err
 
     def test_the_resolved_command_is_absolute(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The option is called --absolute-command, so a relative answer would defeat it.

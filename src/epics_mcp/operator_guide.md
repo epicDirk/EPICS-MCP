@@ -271,11 +271,14 @@ The two pre-dispatch refusals (`DENY`, `BOUNDS_DENY`) are outside that correlati
 
 Posting to the logbook is the server's first mutating operation against a REST service, so it has its
 own gate, distinct from `set_pv_value`, and it never touches `ALLOW_PV_WRITE`. SIX **gate** checks
-must line up before a write proceeds, each fail-closed and audited as `DENY` before the raise. The
-first and the fifth are easy to miss and are listed here because a four-item version of this list
-stood here and read as complete: a write with an EMPTY target-logbook list is refused before the
-allowlist is consulted, and an attachment upload is capped by total size.
+must line up before a write proceeds, each fail-closed and audited as `DENY` before the raise, and
+all six are below, in the order the gate applies them. The first and the fifth are the ones that go
+missing: an earlier version of this list said "four" and named four, then said "six" and still
+named four, so the sentence announcing the correction was itself the incomplete list.
 
+- **Non-empty target logbooks.** A write that names NO logbook is refused before the allowlist is
+  consulted, because `set() <= frozenset()` is true and an empty request would otherwise pass the
+  allowlist check unexamined (SEC-3).
 - **Env gate.** `EPICS_MCP_ALLOW_OLOG_WRITE=true` (default false = every write denied).
 - **Test-server URL boundary.** PV write bounds its reach IN-SERVER: enabling it forces a
   loopback-only EPICS search reach, checked at boot, and the process refuses to start otherwise
@@ -290,6 +293,10 @@ allowlist is consulted, and an attachment upload is capped by total size.
 - **Logbook allowlist.** Every target logbook must be in `EPICS_MCP_OLOG_WRITE_LOGBOOKS`; an EMPTY
   allowlist with the gate on is **deny-all** (fail-closed). (The PV write pattern is fail-closed too,
   but differently: an empty pattern with writes on is refused at startup, not treated as allow-all.)
+- **Attachment size cap.** `EPICS_MCP_OLOG_ATTACH_MAX_BYTES` (default 50 MiB) bounds the TOTAL size
+  of an upload, checked from the files' `stat` before any bytes are read and re-checked while
+  reading, so a file that grows between the two is still refused. It runs BEFORE the rate limit, so
+  an over-limit upload consumes no token.
 - **Rate limit + audit.** `EPICS_MCP_OLOG_WRITE_RATE_LIMIT` (low; a logbook is human-paced). The limit
   is enforced ATOMICALLY (the purge/check/record step holds a per-gate lock), so concurrent writes,
   the Olog gate runs under `asyncio.to_thread`, i.e. real worker threads, can never both slip past it
@@ -572,12 +579,14 @@ definitive-negative gate (a 204/404 is trusted only after this beacon confirms t
 "not found vs not registered" below).
 
 The report also carries a write-gate block, and it answers a different question from every plane
-line above it: not "is this service reachable" but "can this server write anywhere, and where". For
-each of the two write gates it names whether the gate is armed, what it allows (the PV name pattern,
-the Olog logbook allowlist), the rate limit, and the destination a write would actually take, which
-is the EPICS search reach for one gate and the Olog target URL for the other. It also names the
-audit log, and says whether it can be appended to, cannot, or could not be decided without
-creating the file. In `--json` the same lives under `write_safety`.
+line above it: not "is this service reachable" but "can this server write anywhere, and where". A
+gate that is OFF, which is what a default install has for both, gets ONE line saying so and nothing
+else, because that is the whole answer for it. For an ARMED gate the block adds what it allows (the
+PV name pattern, the Olog logbook allowlist), the rate limit, and the destination a write would
+actually take, which is the EPICS search reach for one gate and the Olog target URL for the other.
+It names the audit log either way, and says whether it can be appended to, cannot, or could not be
+decided without creating the file. In `--json` every field is present whether a gate is armed or
+not, and the whole lives under `write_safety`.
 
 Three of its states read backwards if you skim them, so it spells them out: an empty PV pattern on
 an armed gate makes the server REFUSE TO START rather than permitting everything, an empty logbook

@@ -162,9 +162,10 @@ cache of its own under its home directory, which `FASTMCP_CHECK_FOR_UPDATES=off`
    the reasoning behind one. Fix what `epics-doctor` flags and your service configuration is done.
 
    The report also carries a `Write gates` block, which is the fastest answer to "can this server
-   write anywhere, and where": for each of the two write gates, whether it is armed, what it
-   allows by name, its rate limit, and the reach or target a write would use, plus the audit log
-   and whether it can be appended to. `--json` carries it as `write_safety`.
+   write anywhere, and where". A gate that is OFF, which is what you have here unless you went out
+   of your way, gets one line saying so and that is its whole answer; an ARMED one adds what it
+   allows by name, its rate limit, and the reach or target a write would use. The audit log and
+   whether it can be appended to are named either way. `--json` carries it as `write_safety`.
 
    ⚠️ Note what that does NOT cover, because a clean report is easy to read as "everything works":
    the doctor probes the seven service planes, never the LAUNCH. Whether your client can start this

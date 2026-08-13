@@ -32,7 +32,10 @@ carry breaking changes).
   prints the resulting posture (see the entry below) but does not evaluate whether such a server
   would START, and with `--no-check` no check runs at all. The warning also no longer claims that
   the loopback-only search reach is a start condition of both gates: it is one of the PV gate
-  alone, while the durable audit path is required by both.
+  alone, while the durable audit path is required by both. It only points at "the check below"
+  when one actually follows: the warning is deliberately emitted before the two branches that
+  return without running a check (`--no-check`, and a block with placeholders left in it), which
+  are the two cases it exists for, and on both of them it used to promise output that never came.
 - **`epics-doctor` prints what each write gate would allow, and where a write can go.** A new
   `Write gates` block, in the human report and as a `write_safety` key in `--json`, covering both
   the PV gate and the Olog logbook gate. A gate that is OFF gets one line saying so; an ARMED one
@@ -99,6 +102,12 @@ carry breaking changes).
   conceal sequence hides everything printed after it. Every line the report builds from a
   configured value is escaped now. Long values keep their full text where they are instructions: a
   remedy is no longer at risk of being cut in the name of this.
+
+- **The shipped operator guide listed four of the Olog gate's six checks.** The list had already
+  been corrected once, from "four" to "SIX", with a sentence saying the two easily-missed ones
+  "are listed here"; the two were not added, so the sentence announcing the correction sat above
+  the incomplete list it was correcting. The non-empty-target-logbooks check and the attachment
+  size cap are bullets of their own now, in the order the gate applies them.
 
 - **An ABSOLUTE audit path was reported as relative.** The `Write gates` block warned that the
   server would resolve the path against a different working directory, for paths whose meaning does

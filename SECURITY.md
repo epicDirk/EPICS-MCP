@@ -51,8 +51,9 @@ setting.
   this server does not. PV WRITE is the exception: enabling it forces a loopback-only reach and the
   process refuses to start otherwise, so that reach is not the launcher's to widen (see above). Run
   `epics-doctor` to see what an instance actually reaches, and to see the effective write posture
-  of both gates: its `Write gates` block names what each one allows and where a write could go,
-  and `--json` carries the same under `write_safety`. It reads the environment of the command you
+  of both gates: its `Write gates` block gives a gate that is OFF, the default for both, one line
+  saying so, and an ARMED one what it allows and where a write could go. `--json` carries the same
+  under `write_safety`, every field present either way. It reads the environment of the command you
   run, which need not be the one a running server was started with.
 - **Output redaction (ChannelFinder only).** ChannelFinder owners and property values pass a
   site-configurable allowlist. Olog entries come back WHOLE (title, text, author, attachments):
