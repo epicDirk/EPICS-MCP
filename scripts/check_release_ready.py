@@ -13,9 +13,16 @@ Four checks, in the order a failure costs:
    it is the one thing PyPI refuses categorically. This repository had exactly that until the
    display engine became a dependency group, and the failure would otherwise arrive as an opaque
    HTTP 400 at the end of a release, rather than here.
-2. **No pre-release version**, unless ``--allow-prerelease`` says so. ``0.3.0.dev0`` is the working
-   version between releases, and publishing it by accident cannot be undone: an index never lets a
-   version be reused, even after a delete.
+2. **No pre-release version**, unless ``--allow-prerelease`` says so. Publishing a ``.dev`` version
+   by accident cannot be undone: an index never lets a version be reused, even after a delete.
+   ⚠️ This check does NOT rest on a house convention of carrying a ``.dev`` version between
+   releases, and an earlier wording claimed one. Measured with a pickaxe search for ``.dev0`` over
+   every commit that touched ``pyproject.toml``: exactly two ever carried such a version, the one
+   that introduced it and the one that removed it at 0.3.0; since then the declared version simply
+   stays at the last release until the next bump. It earns its place regardless: it refuses the
+   accident, and
+   ``--allow-prerelease`` is the rehearsal's safety valve, there so a dry run stays green whatever
+   the working version happens to be rather than because it is known to be a pre-release.
 3. **A description that renders.** The long description is the project page. If its content type is
    missing or its body is empty, the page renders as raw text or as nothing, and there is no second
    chance for a published file.

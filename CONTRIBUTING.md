@@ -168,9 +168,16 @@ the gates.
    through it (run 30402266430).
 3. The rehearsal path works too. `workflow_dispatch` with `dry_run` at its default `true` installs,
    tests, clears `dist/`, builds and gates, and stops before uploading; it is the only way to
-   exercise a release workflow without releasing. ⚠️ **One step has still never executed**: the
-   rehearsal skips the publish job, so `download-artifact` has never run. The upload path is
-   therefore proven by the real 0.3.0 release, not by a rehearsal.
+   exercise a release workflow without releasing. ⚠️ **What a rehearsal cannot cover, stated
+   precisely because this paragraph used to overstate it.** It stops before the publish job, so
+   `download-artifact` and the upload never run under it, and it takes the LENIENT gate branch
+   (`--allow-prerelease`); the strict `--expect-version` branch runs on a tag alone. So a green
+   rehearsal says nothing about either. What covers them is the real releases, and that coverage is
+   measured rather than assumed: run `30767777703` (the `v0.5.0` tag, 2026-08-02) is the most recent
+   one whose `publish` job ran `download-artifact` and uploaded, and whose `github-release` job then
+   sliced the changelog successfully. Older tags did the same; the earlier claim that
+   `download-artifact` "has still never executed" was already false when it was written, and had
+   been since `v0.3.0`.
 
 **Every release:**
 

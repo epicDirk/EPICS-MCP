@@ -46,8 +46,12 @@ jobs:
       # CI already runs on the tag push, but nothing makes THIS workflow wait for it, and a release
       # built from a red tree is exactly the artifact that must not exist. Two minutes here buys
       # that guarantee inside the workflow that does the uploading.
+      # --locked rather than --frozen: both install from the lockfile, only --locked verifies that
+      # it still matches pyproject.toml. This is the job that UPLOADS, so a dependency edit whose
+      # `uv lock` was forgotten must stop here rather than ship an artifact built against a
+      # dependency set the project file no longer declares (GB-33 c; same change in ci.yml).
       - name: Install dependencies (exactly as uv.lock pins them)
-        run: uv sync --extra dev --frozen
+        run: uv sync --extra dev --locked
       - name: Run tests
         run: uv run pytest tests/ --tb=short
 
@@ -65,13 +69,17 @@ jobs:
       # description that would not render on the project page. Two shapes of the same gate
       # (QA-2 + QA-16):
       #
-      #   * A REHEARSAL runs between releases, where the working version is always a .dev one, so
-      #     it tolerates exactly that; without the flag the rehearsal could never go green and the
-      #     steps behind the gate (including the artifact upload) would stay unrehearsed forever.
+      #   * A REHEARSAL runs between releases and must not care what the working version happens
+      #     to be, so it tolerates a pre-release one. ⚠️ It does NOT follow that the working
+      #     version IS a .dev one, and this comment used to say so: measured, the declared version
+      #     simply stays at the last release until the next bump, and only two commits in this
+      #     repository's history ever carried a .dev version at all. The flag is the safety valve
+      #     that keeps the rehearsal green either way, not a description of the tree.
       #   * A TAG run stays strict AND pins the tag to the built version: the build uses whatever
       #     pyproject.toml says, so a tag pushed against an unbumped tree would otherwise publish
       #     the wrong version under that tag, and an index never lets either number be reused.
-      - name: Release gate (rehearsal, tolerates the working .dev version)
+      #     This branch runs on a tag ALONE, so no rehearsal has ever exercised it.
+      - name: Release gate (rehearsal, tolerates a pre-release working version)
         if: "!startsWith(github.ref, 'refs/tags/v')"
         run: uv run python scripts/check_release_ready.py --allow-prerelease dist/*
       - name: Release gate (tag, strict, and the tag must match the built version)
@@ -101,10 +109,10 @@ jobs:
       id-token: write # Trusted Publishing; nothing else is needed and nothing else is granted
     steps:
       # NOT covered by a rehearsal: this job is gated on a tag AND on dry_run being false, so a
-      # manual dry run never reaches this step. Its Node-20 deprecation therefore never appeared
-      # in either dry-run log, and this bump is the one change here that a rehearsal cannot prove.
-      # It is made anyway, because the alternative is leaving a runner-cut landmine in the single
-      # job that publishes, which runs once, at release time, and cannot be re-run.
+      # manual dry run never reaches this step, and the v8 bump made here could not be proven by
+      # one. It IS covered by the real releases, and that is measured rather than assumed: this
+      # step ran green in run 30767777703 (the v0.5.0 tag) and in 30531166469 (v0.4.0) before it,
+      # both on @v8. A rehearsal remains no evidence for this job; a shipped tag is.
       - uses: actions/download-artifact@v8
         with:
           name: distributions
