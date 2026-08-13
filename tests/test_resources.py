@@ -1,6 +1,21 @@
 """Tests for epics_mcp.resources."""
 
+import pytest
+
+from epics_mcp.config import EpicsConfig
 from epics_mcp.resources import get_epics_config, get_health
+
+
+def _with_config(monkeypatch: pytest.MonkeyPatch, **kwargs: object) -> None:
+    """Point both resources at one explicit configuration.
+
+    A module-local rebind, the pattern the rest of the suite uses, rather than surgery on the
+    ``get_config`` singleton: ``resources`` imports the name, so replacing it there is complete and
+    leaves no state for the next test to inherit.
+    """
+    cfg = EpicsConfig(**kwargs)  # type: ignore[arg-type]
+    monkeypatch.setattr("epics_mcp.resources.get_config", lambda: cfg)
+
 
 #: Every top-level key the two resources put on the wire, declared rather than derived: an
 #: expectation read off the payload is satisfied by whatever the payload happens to say, which is
@@ -13,9 +28,12 @@ _HEALTH_KEYS = frozenset(
         "version",
         "status",
         "provider",
+        "any_write_gate_armed",
         "write_enabled",
         "write_pattern",
+        "write_pattern_allows_every_name",
         "write_rate_limit",
+        "olog_write",
         "uptime_seconds",
         "python_version",
         "p4p_version",
@@ -52,6 +70,58 @@ def test_health_key_set_is_exact() -> None:
     deciding to. This one is the second half, and it is meant to go red on every future edit.
     """
     assert set(get_health()) == set(_HEALTH_KEYS)
+
+
+def test_an_armed_olog_gate_is_visible_in_health(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A server that may create logbook entries reported that it does not write, and nothing else.
+
+    That is the whole ticket. The PV gate was the only writing this payload could describe, so the
+    field an approver reads first said "false" about a server whose Olog gate is armed, with a
+    service account, an allowlist and a durable audit trail behind it. The CONTRAST is asserted
+    rather than only the new field, so the test states the misreading it exists to prevent: a reader
+    who stops at write_enabled is still wrong, and now something else in the payload says so.
+    """
+    _with_config(
+        monkeypatch,
+        olog_url="http://localhost:8080/Olog",
+        allow_olog_write=True,
+        olog_write_logbooks="Commissioning, Operations",
+        audit_log_file="audit.log",
+    )
+    health = get_health()
+
+    assert health["write_enabled"] is False, "the PV gate is off, and that much was always right"
+    assert health["any_write_gate_armed"] is True, "but this server writes, which was invisible"
+    assert health["olog_write"] == {
+        "armed": True,
+        "logbooks": ["Commissioning", "Operations"],
+        "rate_limit_per_minute": 5,
+        "target_allowed": True,
+        "target_is_loopback": True,
+    }
+
+
+def test_an_armed_olog_gate_with_no_logbooks_is_not_read_as_unrestricted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An EMPTY allowlist on an armed gate is deny-all, and the naive reading is its exact opposite.
+
+    Worth its own test because the two gates are fail-closed in DIFFERENT shapes: an empty PV
+    pattern refuses the start, an empty logbook list starts and denies every write. A payload that
+    showed ``armed: true`` beside an empty list without anything else distinguishing the two would
+    invite the reading that nothing constrains this gate.
+    """
+    _with_config(
+        monkeypatch,
+        olog_url="http://localhost:8080/Olog",
+        allow_olog_write=True,
+        audit_log_file="audit.log",
+    )
+    olog = get_health()["olog_write"]
+    assert isinstance(olog, dict)
+
+    assert olog["armed"] is True
+    assert olog["logbooks"] == []
 
 
 def test_config_key_set_is_exact() -> None:
