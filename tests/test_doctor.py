@@ -1787,6 +1787,93 @@ def test_render_and_exit_agree() -> None:
     assert "NOT doing their job" in rendered and "archiver" in rendered
 
 
+#: The honest-but-not-healthy report lists, paired with the status set each is built from in
+#: ``run_doctor``. DERIVED rather than declared: the guard below asserts that this mapping covers
+#: every such list on ``DoctorReport``, so a FOURTH category added to the report reddens it instead
+#: of slipping past three hardcoded field names. That is the whole difference between this guard and
+#: a set of literal assertions, and it is why the status sets are named here at all.
+_HONEST_BUT_NOT_HEALTHY: dict[str, frozenset[str]] = {
+    "inconclusive_identity_planes": _INCONCLUSIVE_STATUSES,
+    "degraded_planes": _DEGRADED_STATUSES,
+    "unverified_planes": frozenset({"unverified"}),
+}
+
+
+@pytest.mark.parametrize(
+    ("ok", "degraded", "unverified", "inconclusive"),
+    [
+        # The three states the ticket measured, plus the pair that is hidden ONLY as a name.
+        pytest.param(True, ["archiver"], ["olog", "naming"], [], id="degraded-hides-unverified"),
+        pytest.param(True, ["archiver"], [], ["channelfinder"], id="inconclusive-hides-degraded"),
+        pytest.param(True, [], ["olog"], ["channelfinder"], id="inconclusive-counts-unverified"),
+        pytest.param(True, ["archiver"], ["olog"], ["channelfinder"], id="inconclusive-hides-both"),
+        # Controls: one category alone is named by its own branch, and a clean report gets no tail.
+        pytest.param(True, ["archiver"], [], [], id="control-degraded-alone"),
+        pytest.param(True, [], ["olog"], [], id="control-unverified-alone"),
+        pytest.param(True, [], [], ["channelfinder"], id="control-inconclusive-alone"),
+        pytest.param(True, [], [], [], id="control-nothing-to-say"),
+    ],
+)
+def test_the_verdict_names_every_honest_but_not_healthy_state(
+    ok: bool, degraded: list[str], unverified: list[str], inconclusive: list[str]
+) -> None:
+    """BG-DFIX(a): the verdict named only the HIGHEST-ranking of the three honest-but-not-healthy
+    categories and stayed silent about the rest, while ``verification_complete`` said False.
+
+    Measured on the pre-fix code over all 16 states ``run_doctor`` can build: ELEVEN of them hid at
+    least one plane NAME. The ticket described one of them (degraded hiding unverified); the
+    inconclusive branch hid degraded entirely and disclosed unverified as a COUNT only, never as a
+    name, which is why ``inconclusive-counts-unverified`` is a row here rather than a control.
+
+    The claim is deliberately about NAMES, not about a mention: an operator who reads "1 other
+    plane(s) also unverified" learns that something is wrong and not WHERE, and the two branches
+    that do disclose (degraded, unverified) print names, so a count is the weaker standard of the
+    same report.
+
+    What this does NOT cover: the ``failed`` branch, which hides all three in seven states and needs
+    the failing planes named FIRST to stay honest. That is its own guard
+    (``test_the_problem_verdict_names_what_failed_before_what_did_not``), because a tail appended to
+    a headline that names no plane at all would make the harmless planes the only named ones.
+
+    Red-proof (per row, on the pre-fix code): ``degraded-hides-unverified`` and
+    ``inconclusive-hides-degraded`` fail on the missing name, ``inconclusive-counts-unverified``
+    fails because the count clause never names the plane.
+    """
+    report = DoctorReport(
+        planes=[],
+        privacy=PrivacyReport(cf_safe_owner_accounts=[], cf_safe_property_names=[]),
+        write_safety=_disarmed_write_safety(),
+        ok=ok,
+        # The invariant run_doctor holds (services/doctor.py): a state built any other way is not
+        # one the tool can produce, and pinning it here keeps the rows honest.
+        verification_complete=not unverified and not inconclusive,
+        degraded_planes=degraded,
+        unverified_planes=unverified,
+        inconclusive_identity_planes=inconclusive,
+        identified_planes=degraded,
+    )
+    assert set(_HONEST_BUT_NOT_HEALTHY) <= set(DoctorReport.model_fields), (
+        "a list in _HONEST_BUT_NOT_HEALTHY is not a field of DoctorReport any more"
+    )
+    # The categories come from the STATUS SETS, so a fourth honest-but-not-healthy status added to
+    # the doctor reddens this instead of being quietly outside the three names below.
+    covered = set().union(*_HONEST_BUT_NOT_HEALTHY.values())
+    assert covered == _NON_FAILING_STATUSES - {"ok", "disabled", "info"} | _INCONCLUSIVE_STATUSES, (
+        "the honest-but-not-healthy statuses drifted from the sets this guard reads: "
+        f"{sorted(covered)}"
+    )
+
+    verdict = next(
+        line for line in cli_doctor._render(report).splitlines() if line.startswith("Overall:")
+    )
+
+    for field in _HONEST_BUT_NOT_HEALTHY:
+        for plane in getattr(report, field):
+            assert plane in verdict, (
+                f"{plane} is in {field} and the verdict does not name it: {verdict!r}"
+            )
+
+
 def test_cli_verdict_with_nothing_configured_claims_no_identity(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

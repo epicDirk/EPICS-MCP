@@ -325,6 +325,48 @@ def _armed_gate_names(report: DoctorReport) -> list[str]:
     return [name for name, armed in (("PV", write.pv.armed), ("Olog", write.olog.armed)) if armed]
 
 
+#: The report's honest-but-not-healthy lists, in verdict-precedence order, each with the word the
+#: tail clause uses for it. The words are the JSON field names minus their suffix ON PURPOSE, so the
+#: sentence a human reads and the key a script reads are one vocabulary rather than two.
+#:
+#: Read as FIELDS of the report rather than re-derived from ``report.planes``: ``run_doctor`` has
+#: already classified every plane into exactly these lists, and a second classification here would
+#: be free to drift from the one ``--json`` publishes.
+_OTHER_STATES: tuple[tuple[str, str], ...] = (
+    ("inconclusive_identity_planes", "inconclusive"),
+    ("degraded_planes", "degraded"),
+    ("unverified_planes", "unverified"),
+)
+
+
+def _other_states_clause(report: DoctorReport, *, named: frozenset[str]) -> str:
+    """The honest-but-not-healthy states this verdict has NOT already named, as one tail clause.
+
+    ONE seam for every branch, so a category can be added to the report without being carried into
+    each verdict by hand: a branch declares what IT names and gets the rest. Measured on the code
+    this replaces, over every state ``run_doctor`` can build: eleven of them printed a verdict that
+    hid at least one plane NAME, and the operator who fixed what the sentence named then found the
+    next thing.
+
+    Planes are NAMED, never counted alone. The clause this generalises counted them ("N other
+    plane(s) also unverified") while the two branches that disclosed at all printed names, so the
+    weaker standard was the one being copied. A count says something is wrong; the reader still has
+    to find WHERE, and the report is the only thing that knows.
+
+    No positional wording ("above", "below"), for the reason recorded at ``_REMEDY`` in
+    ``services/doctor.py``: this clause is appended to sentences of very different lengths, so a
+    direction is a promise about layout that the layout does not keep.
+    """
+    parts: list[str] = []
+    for field, word in _OTHER_STATES:
+        if field in named:
+            continue
+        planes: list[str] = getattr(report, field)
+        if planes:
+            parts.append(f"{len(planes)} {word} ({', '.join(planes)})")
+    return f" Also NOT healthy: {'; '.join(parts)}." if parts else ""
+
+
 def _render(report: DoctorReport) -> str:
     """Render a human-readable per-plane report (deterministic).
 
@@ -366,15 +408,15 @@ def _render(report: DoctorReport) -> str:
         # work), so it earns its own INCONCLUSIVE verdict and exit 3, never "OK".
         planes = ", ".join(report.inconclusive_identity_planes)
         n = len(report.inconclusive_identity_planes)
-        also = (
-            f" ({len(report.unverified_planes)} other plane(s) also unverified)"
-            if report.unverified_planes
-            else ""
-        )
+        # This branch used to carry its own tail, "(N other plane(s) also unverified)", which named
+        # ONE of the two categories it outranks and named it as a COUNT. _other_states_clause covers
+        # both and names the planes; the count-only form is gone rather than kept beside it, because
+        # one sentence disclosing the same kind of fact two ways is how a reader learns to skip it.
         verdict = (
             f"INCONCLUSIVE, {n} identity probe(s) FAILED (reachable, but the identity endpoint "
-            f"did not return a usable response): {planes}{also}. Not a confirmed failure, but not "
+            f"did not return a usable response): {planes}. Not a confirmed failure, but not "
             "confirmed healthy, see the '!' lines above."
+            + _other_states_clause(report, named=frozenset({"inconclusive_identity_planes"}))
         )
     elif report.degraded_planes:
         # A degraded plane is exit 0 and leaves verification_complete True, so without this branch
@@ -388,6 +430,7 @@ def _render(report: DoctorReport) -> str:
         verdict = (
             f"OK, nothing failed, but {n} plane(s) proved their identity and are NOT doing their "
             f"job: {planes}. Reachable and confirmed is not working; see the '~' lines above."
+            + _other_states_clause(report, named=frozenset({"degraded_planes"}))
         )
     elif report.verification_complete:
         # verification_complete is "no plane unverified or inconclusive", vacuously true when
