@@ -109,6 +109,17 @@ This is a controls tool, so the trust questions come first.
   at a real facility, so do **not** assume isolation from this document; run `epics-doctor` to
   see what your instance actually reaches (it claims `localhost-isolated` only when every search
   list is unset and the auto search is explicitly disabled). The write gates above hold either way.
+- **One command in this package LISTENS, and it is the only one that both listens and accepts
+  writes.** Everything else on this page is about outbound reach; `epics-testpv` is the exception,
+  and it is worth knowing about before someone runs it on a facility machine. It is a real
+  PVAccess server: it serves `TEST:Temperature` and `TEST:Heater`, and the second one takes writes
+  from anybody who can reach it, with no gate of any kind, because it exists so a quick start needs
+  no control system. It binds **loopback** unless `--interface` says otherwise, so its default
+  reach is this host. Measured for precision, since the claim is an exclusive one: it is the only
+  entry point in the package that opens a listening service (`epics-mcp` speaks stdio and has no
+  host or port option, and the PV client planes bind UDP ports for search replies without serving
+  anything). Do not leave it running, and do not give it `--interface 0.0.0.0` on a machine that
+  others can reach.
 - **Optional service planes are off until configured.** ChannelFinder, Archiver, Alarm and
   Naming stay disabled until their `*_URL` env vars are set; an empty/unset URL means *no
   client and no network call*. The ESS Naming plane has **no built-in host**, so no egress

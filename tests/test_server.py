@@ -546,6 +546,36 @@ def test_compare_machine_state_prompt_hides_capability_arg() -> None:
     assert "display_tools_available" not in params
 
 
+def test_setup_prompt_wrapper_offers_the_command_that_needs_no_control_system() -> None:
+    """Guard B2 for ``setup_epics_mcp``: the RENDERED prompt must name ``epics-testpv``.
+
+    BG-DOC asked whether ``prompts.py`` should name it, because the file does not spell it
+    anywhere. Measured on the running server before deciding: it does not have to. The prompt takes
+    no arguments and renders its catalogue from the whole ``PRESETS`` mapping, so every rendering
+    carries all four shapes, and the ``sandbox`` summary spells the command. Naming it a second
+    time in the prompt body would have duplicated a sentence that is already delivered.
+
+    That is exactly why this guard exists rather than a paragraph explaining the decision. The name
+    reaches the surface through ONE thread, the ``sandbox`` preset summary in ``presets.py``, and
+    nothing held that thread: ``tests/test_prompts.py`` checks that every preset NAME appears and
+    checks one summary belonging to a preset the test invents. A rewrite of the real summary would
+    take the command out of the delivered prompt silently, and so would a wrapper that filtered the
+    table (``{k: v for k, v in PRESETS.items() if k != "sandbox"}`` is a plausible edit: "the
+    onboarding prompt should not offer a test configuration").
+
+    Asserted against the REGISTERED wrapper for that second reason, the B1/B2 split this file
+    already runs for ``compare_machine_state``: a pure-function test would stay green through the
+    filtering wrapper, which is the failure that actually reaches a user.
+
+    Provably red: drop ``epics-testpv`` from the ``sandbox`` summary in ``presets.py``, or make the
+    wrapper pass a subset of ``PRESETS``.
+    """
+    import epics_mcp.server as server
+
+    rendered = server.setup_epics_mcp()
+    assert "epics-testpv" in rendered
+
+
 def test_build_instructions_omits_display_claims_core_only() -> None:
     """Guard C (S26): the instructions advertise the display-gated capabilities only when
     the extra is available, a core-only install must not over-claim them. Both branches by direct

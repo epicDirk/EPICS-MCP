@@ -21,7 +21,7 @@ away. (What an INSTALL contains is a different question, answered by the layout 
          |                        code. Most of what surprises a newcomer is enforced from here
          + scripts/               gate code run by pre-commit, not a user-facing surface
          + docs/                  the reference pages the README indexes
-         + examples/              a runnable test database, a sample display, an mcp.json
+         + examples/              a sample display, an mcp.json, a test.db needing EPICS Base
          + .github/               CI, the release workflow, issue and PR templates
          - .env.example           the canonical commented list of every EPICS_MCP_* variable
          - CLAUDE.md              standing policy for an AI assistant working in this repository

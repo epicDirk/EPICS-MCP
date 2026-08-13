@@ -160,6 +160,11 @@ Three commands, and nothing to obtain beyond the install above.
    each service plane that was consulted, and last the next steps, any notes, and any plane that
    was asked for but is unavailable.
 
+   ⚠️ **If the client reports only that the server did not start**, the likeliest cause is that
+   `"command": "epics-mcp"` is a bare name and a client launched from a desktop icon does not
+   inherit your shell's `PATH`. Rerun step 2 with `--absolute-command`, which writes the resolved
+   path into the block instead and refuses rather than guessing when it cannot find one.
+
 ⚠️ Note what step 1 is: a PVAccess server, and its second PV accepts writes. It binds loopback
 unless you pass `--interface`, and it says which port it got, which is not the default one when that
 is already taken.

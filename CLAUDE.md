@@ -29,8 +29,9 @@ EPICS service landscape behaves. This file is the standing policy that keeps tha
   the work itself is narrated in the commit body. It drifted into a 763-line work journal once,
   because no rule claimed it.
 - `.env.example`: the canonical, commented configuration template (every `EPICS_MCP_*` var).
-- `examples/` holds a runnable `test.db`, a sample `.bob` and an `mcp.json`: the path for someone with
-  no facility at all.
+- `examples/` holds a sample `.bob` and an `mcp.json`: the path for someone with no facility at all.
+  The `test.db` beside them is the ALTERNATIVE rather than the starting point, since running it needs
+  EPICS Base, which this package does not install; `epics-testpv` is what needs nothing.
 - **`src/epics_mcp/operator_guide.md`**: the operational cookbook (service planes, recipes, error
   signatures). Shipped as package data, served as the `epics-pv://guide` MCP resource, mirrored for
   humans by `OPERATING.md`. **One source file, three consumers: never copy it, link it.**

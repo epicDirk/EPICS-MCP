@@ -454,8 +454,8 @@ yields a complete-looking list of the wrong population.
 
 `epics-init` (core install) is the step before the doctor: it prints the MCP client-configuration
 block for one of four named deployment shapes, then runs the doctor against exactly that block.
-`--list` describes the shapes: `sandbox` (loopback only, the workshop setup and the only one that
-needs no editing), `ioc-only`, `ioc-archiver` (the most common partial deployment) and `full`.
+`--list` describes the shapes: `sandbox` (loopback only, the shape to start with and the only one
+that needs no editing), `ioc-only`, `ioc-archiver` (the most common partial deployment) and `full`.
 
 Three things about it are worth knowing before you read its output:
 

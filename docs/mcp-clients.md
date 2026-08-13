@@ -34,8 +34,10 @@ it is, compare its shape against your client's own example before debugging anyt
 on its own PATH. A client started from a desktop icon, a menu or a service manager usually does NOT
 inherit the PATH of your interactive shell, so a byte-correct block can still fail, and the client
 will report no more than that the server did not start. When that happens, put the absolute path into
-`command` instead. `which epics-mcp` prints it on Linux and macOS, `where.exe epics-mcp` on Windows.
-In JSON on Windows, remember that every backslash in that path has to be doubled.
+`command` instead. `epics-init --preset <shape> --absolute-command` writes that path for you and
+errors out if it cannot resolve one, which is the shorter route and the one to prefer. By hand:
+`which epics-mcp` prints it on Linux and macOS, `where.exe epics-mcp` on Windows. In JSON on
+Windows, remember that every backslash in that path has to be doubled.
 
 ## Read-only (the default posture)
 
