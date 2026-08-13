@@ -11,6 +11,25 @@ carry breaking changes).
 
 ### Added
 
+- **`epics-pv://health` answers the posture questions an approver asks after the write gates.**
+  Four additions, every one a boolean or a count and none of them an address: `rest_tls` (whether
+  the REST planes verify certificates, and whether a CA bundle is configured),
+  `rest_read_rate_limit` (the opt-in REST GET throttle), `allowed_roots_set` (whether the opt-in
+  file boundary holds a root) and `channelfinder_redaction` (how many ChannelFinder owner accounts
+  and property names the redaction discloses, and whether each allowlist came from the site or from
+  the built-in default). Each is named for what it MEASURES rather than for the question that
+  brings a reader to it, and three of them needed that. `rest_tls.verification_enabled` resolves
+  the precedence instead of mirroring `EPICS_MCP_TLS_VERIFY`, because `EPICS_MCP_CA_BUNDLE` wins
+  over that switch: a server with the switch off and a bundle set does verify, and a field
+  mirroring the switch would have reported it as unverified. The throttle carries its `rest_`
+  prefix because a p4p PV read runs past it, so "reads are limited" without the prefix would be an
+  all-clear for the reads that load an IOC. And the redaction counters say DISCLOSED, because an
+  allowlist is the set of what passes through: zero is the most private posture, not a broken one.
+  `allowed_roots_set` is decided by the same predicate the boundary itself asks, so a value of `;`
+  or of blanks, which resolves to no root at all, reports false rather than claiming a boundary
+  that no file argument is held to. Deliberately absent, because a client keeps this payload: the
+  CA-bundle path, the roots, and the allowlist entries. Those stay with `epics-doctor`.
+
 - **`epics-testpv`, a seventh command: a test PV without a control system.** It serves
   `TEST:Temperature`, an analogue reading with a unit, and `TEST:Heater`, a writable switch, over
   PVAccess until Ctrl-C. The quick start previously began with `softIocPVA`, which ships with EPICS
