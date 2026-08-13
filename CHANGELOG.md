@@ -149,6 +149,20 @@ carry breaking changes).
   `diagnose_connection` puts such a message into a successful payload. Credentials belong in the
   `EPICS_MCP_*_AUTH` header variables of the four planes that have one (ChannelFinder, Archiver,
   Alarm, Olog), never in a URL.
+- **`epics-doctor` printed a rebuilt Olog address next to a verdict about the configured one.** The
+  `Write gates` block prints the write target with its userinfo, query and fragment removed, which
+  also lower-cases the host and percent-encodes a space, while the verdict beside it comes from the
+  gate's own comparison, and that one reads `EPICS_MCP_OLOG_URL` exactly and case-sensitively.
+  Measured: with the host configured in mixed case the report prints, character for character, the
+  string already in `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` and still says the target is not
+  permitted, so an operator repairing the allowlist from that line ends up comparing two values
+  that read identically and stays denied. The refused branch now says that the address is the one a
+  write would REACH and names the variable the gate compared. It deliberately advises no repair:
+  the same branch is also reached by an unparseable URL, denied before any allowlist is consulted,
+  and by a remote target with `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE` unset or a plain-http scheme, so
+  a named repair would be wrong in several of the states that print it. The address itself is
+  unchanged, and so are the exit code, `--json` and `epics-pv://health`: this is two lines of the
+  human report.
 - **Editing a logbook entry you had just read destroyed it, and nothing said so.** A read gives a
   body back in two shapes, the raw `source` its author wrote and the `description` the server
   rendered from it, and nothing marked which of the two `update_log_entry` wants. Since that
