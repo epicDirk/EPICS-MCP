@@ -22,22 +22,29 @@ _HEADING = re.compile(r"^## \[(?P<version>[^\]]+)\]")
 
 
 def extract(text: str, version: str) -> str:
-    """Return the body of *version*'s section, without its own heading. Raises if absent.
+    """Return the body of *version*'s section, without its own heading. Raises if it has no text.
 
-    Absent is an ERROR, never an empty string: this feeds a release body, and a silent empty result
-    would publish a release that says nothing about a version somebody is about to install. The
-    version is matched with or without a leading ``v`` so a caller can pass a tag name straight
+    An empty result is an ERROR, never a return value: this feeds a release body, and a silent
+    empty string would publish a release that says nothing about a version somebody is about to
+    install. TWO ways to reach nothing, and the docstring used to promise both while the code
+    covered one. The heading may be MISSING, or it may be present with an empty body, which is
+    exactly the state a changelog is in between releases and therefore not exotic. Each raises with
+    its own sentence, because the repair differs: add the section, or fill it.
+
+    The version is matched with or without a leading ``v`` so a caller can pass a tag name straight
     through.
     """
     wanted = version.removeprefix("v")
     lines = text.splitlines()
     start: int | None = None
+    body: str | None = None
     for index, line in enumerate(lines):
         match = _HEADING.match(line)
         if match is None:
             continue
         if start is not None:  # the next version heading ends the section
-            return "\n".join(lines[start:index]).strip()
+            body = "\n".join(lines[start:index]).strip()
+            break
         if match.group("version").removeprefix("v") == wanted:
             start = index + 1
     if start is None:
@@ -45,7 +52,17 @@ def extract(text: str, version: str) -> str:
         raise SystemExit(
             f"changelog_section: no section for {version!r}. Present: {', '.join(available)}"
         )
-    return "\n".join(lines[start:]).strip()  # the last section runs to the end of the file
+    if body is None:  # no following heading: the last section runs to the end of the file
+        body = "\n".join(lines[start:]).strip()
+    # ONE check behind BOTH ways of arriving at a body. Written after the branches rather than
+    # inside each, because an empty LAST section is the same defect as an empty middle one and a
+    # per-branch check is how one of the two ends up unguarded.
+    if not body:
+        raise SystemExit(
+            f"changelog_section: the section for {version!r} exists but is empty. A release body "
+            f"cannot be built from it; write the entries under that heading first."
+        )
+    return body
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -46,6 +46,17 @@ Preamble that belongs to no version.
 - the second thing
 """
 
+#: Deliberately a SECOND fixture rather than an empty heading spliced into the one above: every
+#: test on ``_SAMPLE`` asserts a slice by position, so adding a heading there would move them all
+#: and couple two unrelated failures. ``0.9.0`` is empty with a heading after it (the middle
+#: branch), ``0.8.0`` is empty at the end of the file (the last-section branch).
+_SAMPLE_WITH_EMPTY_SECTIONS = """# Changelog
+
+## [0.9.0] - 2026-08-14
+
+## [0.8.0] - 2026-08-01
+"""
+
 
 def test_a_middle_section_stops_at_the_next_version() -> None:
     """The slice must end at the next heading, not run to the end of the file. A release body that
@@ -83,6 +94,39 @@ def test_a_missing_version_is_an_error_not_an_empty_body() -> None:
     message = str(excinfo.value)
     assert "9.9.9" in message
     assert "0.4.0" in message, "the error must list what IS available, or it cannot be acted on"
+
+
+def test_an_empty_middle_section_is_an_error_not_an_empty_body() -> None:
+    """The other way to reach nothing, and the one a real changelog is in between releases.
+
+    ``## [Unreleased]`` sits empty in this repository's own file for most of its life, so an empty
+    section is the normal state rather than an exotic one, and the release body must not be built
+    from it. The failure it prevents is worse than a crash: the workflow step stays green and the
+    published release page carries no text at all.
+
+    Red-proof (mutation): drop the ``if not body`` raise and this test fails, while every test
+    above keeps passing.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        extract(_SAMPLE_WITH_EMPTY_SECTIONS, "0.9.0")
+    message = str(excinfo.value)
+    assert "0.9.0" in message
+    assert "empty" in message, "the message must distinguish this from a MISSING section"
+
+
+def test_an_empty_LAST_section_is_an_error_too() -> None:
+    """The second branch, which a single check placed inside the loop would have missed.
+
+    A section with no heading after it takes the other return path (the slice runs to the end of
+    the file), so the two ways of arriving at a body have to meet the same check. This test exists
+    because the check was nearly written per branch.
+
+    Red-proof (mutation): move the ``if not body`` raise inside the loop's break branch and this
+    test fails while ``test_an_empty_middle_section_is_an_error_not_an_empty_body`` still passes.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        extract(_SAMPLE_WITH_EMPTY_SECTIONS, "0.8.0")
+    assert "empty" in str(excinfo.value)
 
 
 def test_the_real_changelog_yields_a_body_for_the_current_version() -> None:
