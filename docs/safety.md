@@ -18,6 +18,13 @@ This is a controls tool, so the trust questions come first.
   configuration, not this list: a plane whose URL is unset is never contacted at all, and the live
   plane reaches exactly what the EPICS search environment allows, which `epics-doctor` prints back to
   you. None of it is reported anywhere else, and this server has no telemetry of its own.
+  ⚠️ **What was READ is not recoverable afterwards, and that cuts both ways.** The audit log records
+  write attempts and gate verdicts only; no read leaves a line, and on a read-only deployment, the
+  default, there is no audit log at all. So "what did the assistant take out of my facility in the
+  last hour" has no answer on this side, and the record that does exist is the MCP client's own
+  conversation log. Decide with that in mind rather than discovering it later. The operational
+  half of these questions, what a running instance reaches, how to stop it and how to remove it,
+  is in the [deployment guide](deployment.md).
   ⚠️ **One connection is not ours and is on by default:** the MCP framework this server is built on
   (FastMCP) asks `pypi.org` about ITSELF when it prints its startup banner. Stated precisely, since
   this is the page for it: it sends none of your data and caches the answer for hours, but it fetches

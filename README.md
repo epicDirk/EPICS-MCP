@@ -171,7 +171,16 @@ is already taken.
 
 To reach a real control system instead, pick the matching preset and follow the
 [deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md), which walks the variables plane by plane and ends at the
-same self-check.
+same self-check. The one variable every facility shape needs is the PV search path, so that a
+`--set` looks like this in practice:
+
+```bash
+epics-init --preset ioc-only --set EPICS_PVA_ADDR_LIST=<gateway-or-ioc-host> --out <my config>
+```
+
+A containerised IOC usually needs `EPICS_PVA_NAME_SERVERS=<ioc-host>:5075` **alongside** that
+rather than instead of it, since it publishes a TCP port and answers no broadcast. The deployment
+guide explains why, and what to do when neither finds anything.
 
 ## Documentation
 
@@ -182,7 +191,8 @@ same self-check.
 | [Safety and network posture](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/safety.md) | What is gated, what is audited, what decides network reach |
 | [MCP client integration](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/mcp-clients.md) | Ready-to-paste `.mcp.json` blocks, where they go, and the restart that finishes the job |
 | [Deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md) | Bringing it up in **your** facility, plane by plane, with `epics-doctor` |
-| [Troubleshooting](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md#6-troubleshooting) | It did not work: symptom first, from "the client says nothing" to a rejected config file |
+| [Troubleshooting](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md#6-troubleshooting) | It did not work: symptom first, from "the client says nothing" to a rejected config file, and the running-server questions after it |
+| [Removing it again](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md#7-removing-it-again-and-going-back-a-version) | Uninstall and downgrade, and the four things an uninstall leaves behind |
 | [Write-gate contract](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/write-gate-contract.md) | What every in-server write gate must satisfy, and what a gate is deliberately not |
 | [Operating guide](https://github.com/epicDirk/EPICS-MCP/blob/main/OPERATING.md) | The operational cookbook: service landscape, recipes, error signatures. Also served to an assistant as `epics-pv://guide` |
 | [Architecture](https://github.com/epicDirk/EPICS-MCP/blob/main/ARCHITECTURE.md) | The `server → tools → services → clients` layering and the plane model |

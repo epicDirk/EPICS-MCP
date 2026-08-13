@@ -309,6 +309,38 @@ surfaced. (Its `Write gates` block prints the write allowlists, which are a diff
   because loopback fixes the port; the three facility shapes deliberately set the address list alone,
   since none of them can know your port and a guessed one is worse than none.
 
+### Will it work against MY version of these services?
+
+There is deliberately no table of tested versions here, and the reason is worth a paragraph because
+the absence looks like an omission.
+
+A list such as "tested against Archiver 2.1.1" would be worth very little to you: you do not have
+the stack it was measured on, exactly one constellation was ever measured, and several parts of it
+are locally built with no upstream version to name. Worse, such a list gets read as a compatibility
+promise, and this project cannot keep one for software it does not ship.
+
+**So what is written down is what the server EXPECTS, and what it MEASURES.** The expectations are
+above: section 2 names the endpoint each plane talks to and section 5 lists the assumptions about
+their shape, which is the part that actually breaks when an implementation differs (the Naming
+request form and the Olog parameter names follow the Phoebus conventions, and a different
+implementation of either may need adjustment).
+
+The measuring is `epics-doctor`, and it answers this question about YOUR installation:
+
+- For a REST plane that answers, it runs an identity probe and reports `✓ ok` when the service
+  named itself, `? unverified` when it answered but could not prove what it is, and
+  `! identity probe failed` when the probe itself got a 401, a 404 or a redirect. The verdict line
+  at the bottom repeats which planes came back unproven.
+- `get_appliance_info` asks the Archiver directly for its own topology, which is the way to confirm
+  you are pointed at the intended cluster before trusting anything enumerated from it.
+
+Two limits, so you read the report for what it is. **A plane that hard-fails is never identity
+probed at all**: the probe runs on a service that answered, so an `unreachable` or `api_error`
+plane shows up in the overall verdict rather than in the unverified list. And an identity probe
+proves WHAT a service is, not which release it runs: only the Archiver retrieval webapp reports a
+version string, through its own `getVersion` endpoint, and the check there is anchored on the
+product name precisely so that upgrading it does not turn into a false alarm.
+
 ## 6. Troubleshooting
 
 Symptom first, because the symptom is what you have. Each entry points at the material that explains
@@ -363,7 +395,77 @@ wheel for your platform and fell back to building from source, see Compatibility
 mentions an externally managed environment, your Python is refusing a system-wide `pip install`: use
 a virtual environment, or `uv tool install`.
 
-## 7. Where to look next
+### It is running, and now what
+
+Everything above is bring-up. These four are about an instance that already started, which is a
+different set of questions and used to have no answers here at all.
+
+**It runs, and I think it is reading the wrong facility.** Two things decide that and they are not
+in the same place. The REST planes follow their `*_URL` variables; the live plane follows the EPICS
+search environment, which has a default that is easy to miss (`*_AUTO_ADDR_LIST` is ON when unset,
+so an environment that names nothing still broadcasts into the local subnets). Read them back with
+`epics-doctor`, and mind what it is telling you: it reports the environment of the command YOU just
+ran. A server started by an MCP client was given that client's environment, which is the block in
+its configuration file, so compare the two rather than assuming they match. To see it from the
+running server instead, read its `epics-pv://config` and `epics-pv://health` resources through the
+client; those describe the process that is actually answering.
+
+**How do I stop it?** You do not, directly: an MCP server over stdio is a child of the client that
+launched it, and it lives and dies with that client's connection. Disconnect the server in the
+client, or quit the client. Removing the block from the configuration file does nothing to a
+process that is already running, because the file is read at startup. If you need it gone right
+now and the client will not let go, kill the `epics-mcp` process; nothing is lost, since it holds
+no state of its own between calls.
+
+**What has it read out of my facility?** There is no answer on this side, and it is better to know
+that before you need it. The audit log covers write attempts and gate verdicts; no read leaves a
+line, and a read-only deployment has no audit log at all. What does exist is the MCP client's own
+conversation record. See [safety](safety.md), which states the same thing from the approval side.
+
+**A write was refused while a session was running.** The refusal arrives as the tool's error text,
+not in a log you have to go looking for, and it names which of the conditions stopped it: the
+`EPICS_MCP_ALLOW_PV_WRITE` gate being off, or the PV not matching the allowlist pattern, or the
+rate limit. Both `PVWriteDeniedError` messages also tell the caller not to route around the
+refusal by writing a different PV or through another route, and to report it to the operator on
+duty; if an assistant relays that to you, that instruction is ours and it is deliberate. The gate
+conditions themselves are start conditions and are covered above. A refusal at the IOC rather than
+at our gate is a different case, described in the `epics-pv://guide` resource.
+
+## 7. Removing it again, and going back a version
+
+Worth reading before you install rather than after, because one of the four leftovers is a file you
+may be required to keep.
+
+**Uninstalling.** Remove the package the way you installed it (`uv tool uninstall epics-mcp`,
+`pip uninstall epics-mcp`, or delete the virtual environment). That takes the seven commands and the
+server with it. Four things it does **not** touch:
+
+- **The block in your MCP client's configuration file.** Nothing outside that client ever wrote it
+  and nothing removes it; left behind, the client keeps trying to launch a command that is gone and
+  reports only that the server did not start. Delete this server's own entry from that file
+  yourself, the one whose `command` names the package.
+- **The audit log** at `EPICS_MCP_AUDIT_LOG_FILE`, if a write gate was ever armed. It is deliberately
+  outside the package, on a path you chose, and it is the record of every write this server
+  attempted. ⚠️ Check whether your site's retention rules apply to it before deleting it.
+- **The framework's update-check cache.** The MCP framework caches its `pypi.org` answer under the
+  user cache directory (`$XDG_CACHE_HOME` or the platform equivalent, `%LOCALAPPDATA%` on Windows).
+  Harmless, and it expires on its own.
+- **Anything at the services.** Reads leave nothing. Logbook entries written through a sanctioned
+  Olog gate stay where they are; Olog has no delete, so those are permanent by design.
+
+**Going back a version.** There is nothing to migrate: this server keeps no database, no schema and
+no state between calls, so a downgrade is an install of the older version over the newer one
+(`uv tool install "epics-mcp==0.5.0"`, or the equivalent pin for pip). Your configuration block is
+compatible in both directions unless the [changelog](../CHANGELOG.md) says a variable was renamed or
+removed, which is the one thing worth checking first. Run `epics-doctor` afterwards: it reads the
+environment and tells you whether the older build still understands it.
+
+⚠️ **A caveat about the `git+` install route**, which the README also offers. That one tracks the
+branch rather than a release, so it has no version to go back to and changes whenever the branch
+does. Pin a tag (`git+https://github.com/epicDirk/EPICS-MCP@v0.5.0`) if you install that way and
+want a fixed point.
+
+## 8. Where to look next
 
 - [MCP client integration](mcp-clients.md): where the block has to end up, the paste-ready variants
   including the write-enabled one, and the restart step that finishes the job.

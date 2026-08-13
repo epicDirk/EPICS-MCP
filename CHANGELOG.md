@@ -194,6 +194,17 @@ carry breaking changes).
 
 ### Changed
 
+- **The deployment guide answers the questions that come AFTER it starts.** Its troubleshooting
+  section was entirely bring-up; it now also covers an instance that runs and may be pointed at the
+  wrong facility, how to stop one (you do not, directly: an stdio server belongs to the client that
+  launched it), what a runtime write refusal says, and the honest answer to "what has it read out
+  of my facility", which is that no read is logged anywhere on this side. A new section covers
+  uninstall and downgrade, including the four things an uninstall leaves behind: the block in your
+  client configuration, the audit log on the path you chose, the framework's update-check cache,
+  and any logbook entry a sanctioned Olog write created. And there is a plain statement about
+  service versions, with the reasoning for not publishing a tested-versions table: what the server
+  expects is documented, and `epics-doctor` plus `get_appliance_info` measure what YOUR services
+  actually are.
 - **`set_pv_value` no longer reads as the authority over whether a write lands.** Its description
   said "the load-bearing, client-independent guard" and closed by calling the safety layer "what
   actually gates the write". Both are now scoped to what this server decides, which is whether it
