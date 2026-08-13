@@ -277,10 +277,12 @@ carry breaking changes).
   the variable which had just been reported healthy on the line above, so following the advice
   broke the working half and left the broken half broken, while the setting that actually helps was
   never named. The finding now opens with the empty retrieval variable and says that the plane fell
-  back; the MGMT variable is still named, because that URL really was the one probed. Only the
-  fallback case changes, and only its `detail` text: a plane with its own retrieval URL reads
-  exactly as before. `--json` consumers matching the old opening words of this one finding will not
-  find them.
+  back; the MGMT variable is still named, because that URL really was the one probed. It says so
+  only where the host ANSWERED and just the webapp is in doubt: when nothing answered at all, the
+  MGMT plane has failed on the line above too and its address is what needs repairing, so that
+  finding reads as before. Only the fallback case changes, and only its `detail` text: a plane with
+  its own retrieval URL is untouched. `--json` consumers matching the old opening words of this one
+  finding will not find them.
 - **The `api_error` remedy no longer names one webapp as the right one for every plane.** It ended
   "for an Archiver Appliance the mgmt port and not retrieval", and the remedy table is keyed by
   status and read by every plane, so on `archiver_retrieval` it recommended the endpoint the probe
