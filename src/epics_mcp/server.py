@@ -387,11 +387,15 @@ async def get_pv_info(
     waveforms come back as int lists.
 
     The two alarm levels do not mix, and reading the wrong one gives the wrong cause.
-    alarm.status_text is the coarse pvData NT category of the alarm SOURCE (DEVICE, RECORD, DB and
-    the like), never the fine CA STAT condition. HIHI, LOLO, UDF, SIMM and their siblings arrive as
-    plain text in alarm.message, already extracted for you. A PV over its HIHI threshold therefore
-    reads status_text=RECORD with message=HIHI_ALARM: the status says WHERE the alarm came from, the
-    message says WHY. Do not expect a threshold name in status_text and do not map one into it.
+    alarm.status_text is the coarse pvData NT category of the alarm SOURCE, one of eight values
+    (NONE, DEVICE, DRIVER, RECORD, DB, CONF, UNDEFINED, CLIENT), and it is NEVER the fine CA STAT
+    condition. A threshold or state name (HIHI, LOLO, UDF, SIMM and their siblings) reaches you as
+    plain text in alarm.message instead: the status says WHERE the alarm came from, the message says
+    WHY. So do not expect a threshold name in status_text, and do not map one into it.
+    ⚠ alarm.message is whatever the server sent and is often empty even on a real alarm. When it is,
+    the WHY is not in this reply at all: severity_text still says how bad it is, and the thresholds
+    themselves can be read as record fields (get_pv_info("PV.HIHI") and its siblings). Say the cause
+    is unreported rather than reaching for status_text, which answers a different question.
 
     Record fields read directly: pass a channel with a field suffix (e.g. get_pv_info("PV.RTYP"),
     "PV.SCAN", "PV.HIHI") to read individual record metadata / alarm thresholds, useful when a PVA

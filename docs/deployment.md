@@ -414,8 +414,10 @@ client; those describe the process that is actually answering.
 launched it, and it lives and dies with that client's connection. Disconnect the server in the
 client, or quit the client. Removing the block from the configuration file does nothing to a
 process that is already running, because the file is read at startup. If you need it gone right
-now and the client will not let go, kill the `epics-mcp` process; nothing is lost, since it holds
-no state of its own between calls.
+now and the client will not let go, kill the `epics-mcp` process. Nothing you own is lost: it
+persists nothing anywhere. ⚠️ It does hold in-memory state that a restart discards, and one piece
+of that is a guardrail: the write rate limit counts within a running process, so a kill and restart
+hands the new one a fresh budget.
 
 **What has it read out of my facility?** There is no answer on this side, and it is better to know
 that before you need it. The audit log covers write attempts and gate verdicts; no read leaves a
@@ -440,21 +442,22 @@ may be required to keep.
 `pip uninstall epics-mcp`, or delete the virtual environment). That takes the seven commands and the
 server with it. Four things it does **not** touch:
 
-- **The block in your MCP client's configuration file.** Nothing outside that client ever wrote it
-  and nothing removes it; left behind, the client keeps trying to launch a command that is gone and
-  reports only that the server did not start. Delete this server's own entry from that file
-  yourself, the one whose `command` names the package.
+- **The block in your MCP client's configuration file.** `epics-init --out` may well have written
+  it for you, but no uninstall removes it; left behind, the client keeps trying to launch a command
+  that is gone and reports only that the server did not start. Delete this server's own entry from
+  that file yourself, the one whose `command` names the package.
 - **The audit log** at `EPICS_MCP_AUDIT_LOG_FILE`, if a write gate was ever armed. It is deliberately
   outside the package, on a path you chose, and it is the record of every write this server
   attempted. ⚠️ Check whether your site's retention rules apply to it before deleting it.
-- **The framework's update-check cache.** The MCP framework caches its `pypi.org` answer under the
-  user cache directory (`$XDG_CACHE_HOME` or the platform equivalent, `%LOCALAPPDATA%` on Windows).
-  Harmless, and it expires on its own.
+- **The framework's update-check cache.** The MCP framework caches its `pypi.org` answer in its own
+  directory under the platform's user DATA path, not the cache path: `~/.local/share/fastmcp` on
+  Linux, `~/Library/Application Support/fastmcp` on macOS, `%LOCALAPPDATA%\fastmcp` on Windows.
+  Harmless, and one small file. Its content expires on a timer, but nothing deletes the file.
 - **Anything at the services.** Reads leave nothing. Logbook entries written through a sanctioned
   Olog gate stay where they are; Olog has no delete, so those are permanent by design.
 
 **Going back a version.** There is nothing to migrate: this server keeps no database, no schema and
-no state between calls, so a downgrade is an install of the older version over the newer one
+nothing persisted anywhere, so a downgrade is an install of the older version over the newer one
 (`uv tool install "epics-mcp==0.5.0"`, or the equivalent pin for pip). Your configuration block is
 compatible in both directions unless the [changelog](../CHANGELOG.md) says a variable was renamed or
 removed, which is the one thing worth checking first. Run `epics-doctor` afterwards: it reads the

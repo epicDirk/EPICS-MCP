@@ -228,17 +228,26 @@ allowlisted PV name is a statement about our policy, never a promise about the r
 report a sanctioned write as done because the gate let it through, and do not read a refusal at the
 IOC as a fault in this server.
 
-The practical consequence is the same either way, and it does not depend on knowing WHY a value did
-not land: every sanctioned put is read back and compared (see the readback verdicts below), so a
-write the IOC declined surfaces as `verified=false` with the readback that was actually seen. Judge
-the outcome from that field, not from the absence of an error.
+**A refused write can reach you in two shapes, and only one of them carries a verdict.** If the put
+RETURNS, the value is read back and compared (see the readback verdicts below), so a value the IOC
+accepted and then did not apply reads as `verified=false` with the readback that was actually seen.
+If the put RAISES, there is no readback and no `verified` at all: the tool call fails, the audit
+line is `FAILED`, and the caller gets an error rather than a result. Do not go looking for
+`verified` in that case, and do not read its absence as success.
 
-⚠️ **What form a refusal at the IOC takes here is NOT measured.** There is no live test in this
-project that has an IOC decline a write, and the access-security tests that exist are static ones
-over the database file. A refusal would arrive through the ordinary put-failure path, which
-classifies by message text and has no category of its own for "the IOC said no", so it can be
-expected to read as a connection-class error rather than an authorisation one. Treat that as the
-shape to expect, not as a documented promise, and prefer the readback verdict, which is measured.
+⚠️ **Which of those two shapes an IOC refusal takes is NOT measured here.** No live test in this
+project has an IOC decline a write; the access-security material that exists is static, over the
+database file. What is known is where such a refusal would arrive if it raises: the ordinary
+put-failure path classifies by message text and has no category of its own for "the IOC said no",
+so it would read as a connection-class error rather than an authorisation one. Treat that as the
+shape to expect, not as a documented promise.
+
+**So when a write fails and you cannot tell why:** read the PV back yourself with `get_pv_value`
+and say what you found. Report both possible causes, a transport problem or a refusal at the IOC,
+because this project cannot yet distinguish them, and name the operator rather than choosing one.
+**Do not retry.** A `FAILED` audit line does not prove nothing was written, and a retry can
+double-apply to hardware; that reasoning is spelled out for `UNKNOWN_PENDING` below and it applies
+here for the same reason.
 
 ### The audit trail
 

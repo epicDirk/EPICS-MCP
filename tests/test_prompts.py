@@ -143,6 +143,26 @@ class TestSetupEpicsMcp:
 
         assert "not that anything works" in result.lower()
 
+    def test_the_taught_command_line_carries_probe_pv(self) -> None:
+        """BG-DOC: the EXAMPLE, not just the warning about it.
+
+        The prompt explained what a run without ``--probe-pv`` does and does not prove, and then
+        taught a command line without the flag. An assistant copies the line, not the paragraph
+        underneath it, so the honest warning arrived attached to the very call that earns it.
+
+        This pins the line rather than the flag's presence anywhere in the text, which is the
+        distinction that failed before: the warning already mentioned ``--probe-pv``, so a test for
+        the bare string was green while the example was wrong. Provably red: take the flag off the
+        ``epics-init`` line in ``prompts.py`` and leave the surrounding prose alone.
+        """
+        result = setup_epics_mcp(presets=PRESETS)
+
+        taught = [ln for ln in result.splitlines() if "epics-init --preset" in ln]
+        assert taught, "the prompt no longer teaches an epics-init command line"
+        assert all("--probe-pv" in ln for ln in taught), (
+            f"a taught epics-init line omits --probe-pv: {taught}"
+        )
+
     def test_it_names_the_three_states_that_look_healthy_and_are_not(self) -> None:
         """``?``, ``!`` and ``~`` are exit-code 0 or 3 states that a reader skims past as fine.
         They are the whole reason the doctor has more than two outcomes."""

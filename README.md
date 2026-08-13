@@ -163,7 +163,9 @@ Three commands, and nothing to obtain beyond the install above.
    ⚠️ **If the client reports only that the server did not start**, the likeliest cause is that
    `"command": "epics-mcp"` is a bare name and a client launched from a desktop icon does not
    inherit your shell's `PATH`. Rerun step 2 with `--absolute-command`, which writes the resolved
-   path into the block instead and refuses rather than guessing when it cannot find one.
+   path into the block instead and refuses rather than guessing when it cannot find one. Since
+   step 2 already wrote that file, add `--force` to replace it, or write a new one and copy the
+   entry across.
 
 ⚠️ Note what step 1 is: a PVAccess server, and its second PV accepts writes. It binds loopback
 unless you pass `--interface`, and it says which port it got, which is not the default one when that
@@ -231,6 +233,10 @@ Archiver Appliance** (single- or multi-instance), **ChannelFinder**, and the **P
 server and logger. Archiver topology note: in a single-JVM appliance the MGMT and retrieval webapps
 share a port, so leave `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` empty; in a split deployment MGMT
 (`:17665`) and retrieval (`:17668`) are separate ports.
+
+No version of any of those is listed here, and that is deliberate rather than an omission: the
+deployment guide explains [why, and what to run to answer the question for your own
+installation](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md#will-it-work-against-my-version-of-these-services).
 
 ## Development
 

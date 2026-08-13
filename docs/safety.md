@@ -22,9 +22,12 @@ This is a controls tool, so the trust questions come first.
   write attempts and gate verdicts only; no read leaves a line, and on a read-only deployment, the
   default, there is no audit log at all. So "what did the assistant take out of my facility in the
   last hour" has no answer on this side, and the record that does exist is the MCP client's own
-  conversation log. Decide with that in mind rather than discovering it later. The operational
-  half of these questions, what a running instance reaches, how to stop it and how to remove it,
-  is in the [deployment guide](deployment.md).
+  conversation log. Decide with that in mind rather than discovering it later. The operational half
+  of these questions is in the deployment guide: whether a running instance is pointed at the
+  facility you think ([troubleshooting](deployment.md#6-troubleshooting)), whether it works against
+  YOUR service versions and how to check rather than take our word
+  ([versions](deployment.md#will-it-work-against-my-version-of-these-services)), and how to remove
+  it again ([uninstall](deployment.md#7-removing-it-again-and-going-back-a-version)).
   ⚠️ **One connection is not ours and is on by default:** the MCP framework this server is built on
   (FastMCP) asks `pypi.org` about ITSELF when it prints its startup banner. Stated precisely, since
   this is the page for it: it sends none of your data and caches the answer for hours, but it fetches
@@ -122,11 +125,16 @@ This is a controls tool, so the trust questions come first.
   PVAccess server: it serves `TEST:Temperature` and `TEST:Heater`, and the second one takes writes
   from anybody who can reach it, with no gate of any kind, because it exists so a quick start needs
   no control system. It binds **loopback** unless `--interface` says otherwise, so its default
-  reach is this host. Measured for precision, since the claim is an exclusive one: it is the only
-  entry point in the package that opens a listening service (`epics-mcp` speaks stdio and has no
-  host or port option, and the PV client planes bind UDP ports for search replies without serving
-  anything). Do not leave it running, and do not give it `--interface 0.0.0.0` on a machine that
-  others can reach.
+  reach is this host. It is the only command here that opens a listening service **of its own**:
+  the other six are one-shot CLIs or, in the server's case, speak stdio, and none of them has a
+  host or port option. Do not leave it running, and do not give it `--interface 0.0.0.0` on a
+  machine that others can reach.
+  ⚠️ **One caveat on that, because it is not ours to close.** The MCP framework reads its own
+  `FASTMCP_*` environment, and `FASTMCP_TRANSPORT` set to an HTTP transport makes `epics-mcp`
+  listen on `FASTMCP_HOST`/`FASTMCP_PORT` instead of speaking stdio. No option of ours does that
+  and nothing here sets it, but a deployment that sets it has a second listening service, gated
+  only by whatever the framework provides. If you are approving this, confirm that variable is
+  unset.
 - **Optional service planes are off until configured.** ChannelFinder, Archiver, Alarm and
   Naming stay disabled until their `*_URL` env vars are set; an empty/unset URL means *no
   client and no network call*. The ESS Naming plane has **no built-in host**, so no egress

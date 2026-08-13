@@ -70,7 +70,7 @@ class TestPresetData:
 
     def test_sandbox_is_the_only_preset_that_needs_no_editing(self) -> None:
         """``sandbox`` is the one shape that is complete as emitted, which is what makes it the
-        workshop preset; the other three describe a facility nobody here can know the hosts of.
+        shape to start with; the other three describe a facility nobody here can know the hosts of.
         Pinned in both directions so neither half can drift alone."""
         needs_editing = sorted(
             name for name, preset in PRESETS.items() if open_placeholders(preset.env)

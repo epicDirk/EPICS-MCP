@@ -73,17 +73,29 @@ class TestDenyMessageEscalation:
 
     The message is the only surface a denied caller sees, and until now it named a remedy and
     stopped there. An assistant told "not this PV" and nothing else has an obvious next move, and
-    it is the wrong one: try a neighbouring name, or a route that is not gated. So BOTH
-    ``PVWriteDeniedError`` paths carry the escalation, not only the disabled gate the ticket named.
-    The allowlist miss is in fact the more dangerous of the two, because it names a PV.
+    it is the wrong one: try a neighbouring name, or a route that is not gated. So EVERY refusal
+    raised out of :meth:`SafetyLayer.check_write_allowed` carries the escalation, not only the
+    disabled gate the ticket named. The allowlist miss is the more dangerous of the two, because it
+    names a PV, and naming one PV is what invites trying its neighbour.
 
-    Asserted on stable MARKERS rather than the whole sentence, the posture
-    ``test_consent_meta_tools_document_the_client_scope`` takes for the same class of claim: the
-    wording may be improved, the instruction may not go missing. Asserting ``_ESCALATION in msg``
-    would be the tautology of comparing the constant to itself.
+    ⚠️ Deliberately NOT covered, so nobody reads the class name as wider than it is:
+    ``PVWriteBoundsError`` (a SUBCLASS of ``PVWriteDeniedError``, raised in ``tools/write.py``) and
+    the rate-limit denial, which raises ``RateLimitError``. Both refuse a write and neither carries
+    this sentence. The bounds case has the same shape of temptation ("then a value just inside the
+    limit"), so it is a gap rather than a decision; it is named here because the first version of
+    this docstring said "BOTH paths" and a reader counting raise sites would have found three.
 
-    Provably red: drop ``+ _ESCALATION`` from either raise in ``safety.check_write_allowed``, or
-    let the escalation REPLACE the gate remedy rather than stand beside it.
+    Each marker is asserted WITH its polarity, which the first version of this test got wrong. It
+    checked the neutral phrases "work around" and "operator on duty" alone, and the sentence
+    "If you need to work around this, ask the operator on duty." would have satisfied both while
+    inverting the instruction. Asserting ``_ESCALATION in msg`` is not the alternative, that is the
+    tautology of comparing the constant to itself; the alternative is to pin the parts that carry
+    the meaning, which is the posture
+    ``test_consent_meta_tools_document_the_client_scope`` takes for the same class of claim.
+
+    Provably red: drop ``+ _ESCALATION`` from either raise in ``safety.check_write_allowed``, let
+    the escalation REPLACE the gate remedy rather than stand beside it, or soften the prohibition
+    into a permission the way the sentence above does.
     """
 
     def _denial(self, act: Callable[[], None]) -> str:
@@ -91,20 +103,23 @@ class TestDenyMessageEscalation:
             act()
         return str(excinfo.value)
 
+    def _assert_escalates(self, message: str) -> None:
+        """The instruction must FORBID the workaround, name both of its routes, and escalate."""
+        assert "Do NOT work around this" in message, "the prohibition is not stated as one"
+        assert "a different PV" in message, "the neighbouring-PV route is not named"
+        assert "another route" in message, "the other-route case is not named"
+        assert "Report the refusal to the operator on duty" in message
+
     def test_the_disabled_gate_tells_the_caller_not_to_route_around_it(
         self, safety_locked: SafetyLayer
     ) -> None:
-        message = self._denial(lambda: safety_locked.check_write_allowed("any:pv"))
-        assert "work around" in message
-        assert "operator on duty" in message
+        self._assert_escalates(self._denial(lambda: safety_locked.check_write_allowed("any:pv")))
 
     def test_the_allowlist_miss_tells_the_caller_not_to_try_a_neighbour(self) -> None:
         sl = SafetyLayer(
             EpicsConfig(allow_pv_write=True, pv_write_pattern=r"^TEST:.*$", write_rate_limit=10)
         )
-        message = self._denial(lambda: sl.check_write_allowed("OTHER:pv"))
-        assert "work around" in message
-        assert "operator on duty" in message
+        self._assert_escalates(self._denial(lambda: sl.check_write_allowed("OTHER:pv")))
 
     def test_the_escalation_stands_beside_the_remedy_and_not_instead_of_it(
         self, safety_locked: SafetyLayer
@@ -117,7 +132,7 @@ class TestDenyMessageEscalation:
         """
         message = self._denial(lambda: safety_locked.check_write_allowed("any:pv"))
         assert "EPICS_MCP_ALLOW_PV_WRITE=true" in message
-        assert message.index("EPICS_MCP_ALLOW_PV_WRITE") < message.index("work around")
+        assert message.index("EPICS_MCP_ALLOW_PV_WRITE") < message.index("Do NOT work around")
 
 
 class TestWriteReachAssert:

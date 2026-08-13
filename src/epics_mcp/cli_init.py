@@ -325,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
     add_version_argument(parser)
     # Exactly one of the two is required, so the no-argument case prints usage instead of guessing
     # a default preset. There is no obviously right default here: 'sandbox' would silently hand a
-    # facility operator a loopback config, and 'full' would hand a workshop attendee six services
+    # facility operator a loopback config, and 'full' would hand someone starting out six services
     # they do not have.
     what = parser.add_mutually_exclusive_group(required=True)
     what.add_argument(
