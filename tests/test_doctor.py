@@ -1874,6 +1874,54 @@ def test_the_verdict_names_every_honest_but_not_healthy_state(
             )
 
 
+def test_the_problem_verdict_names_what_failed_before_what_did_not() -> None:
+    """BG-DFIX(a), the failed branch: it is the state that hides the most, and the only one where
+    disclosing the OTHER categories without also naming the failures would make things worse.
+
+    The headline was "PROBLEM, a configured plane failed (see above)": it names no plane at all,
+    because ``DoctorReport`` carries a list for every honest-but-not-healthy category and none for
+    the failures. Appending the tail alone would therefore have made the harmless planes the ONLY
+    ones named in the last line an operator reads, which inverts the urgency of the sentence. So the
+    failures are named first, derived from ``report.planes`` through ``_FAILING_STATUSES`` rather
+    than from a new report field: ``ok`` is computed from those same statuses, so the two cannot
+    disagree, and no wire contract changes.
+
+    ORDER is asserted, not just presence. "alarm is somewhere in the sentence" would also hold for
+    the sentence that reads worst, the one that opens with the two planes nobody has to fix today.
+
+    Red-proof on the pre-fix code: no plane name appears at all, so both the naming and the ordering
+    assertion fail.
+    """
+    planes = [
+        PlaneCheck(plane="channelfinder", configured=True, status="unreachable", detail="refused"),
+        PlaneCheck(plane="archiver", configured=True, status="no_ingest", identified=True),
+        PlaneCheck(plane="olog", configured=True, status="unverified"),
+    ]
+    report = DoctorReport(
+        planes=planes,
+        privacy=PrivacyReport(cf_safe_owner_accounts=[], cf_safe_property_names=[]),
+        write_safety=_disarmed_write_safety(),
+        ok=False,
+        verification_complete=False,
+        degraded_planes=["archiver"],
+        unverified_planes=["olog"],
+        inconclusive_identity_planes=[],
+        identified_planes=["archiver"],
+    )
+
+    verdict = next(
+        line for line in cli_doctor._render(report).splitlines() if line.startswith("Overall:")
+    )
+
+    assert "channelfinder" in verdict, f"the failed plane is not named: {verdict!r}"
+    assert "archiver" in verdict and "olog" in verdict, (
+        f"a degraded and an unverified plane are in the report and not in the verdict: {verdict!r}"
+    )
+    assert verdict.index("channelfinder") < min(verdict.index("archiver"), verdict.index("olog")), (
+        f"the verdict names a plane nobody has to fix before the one that failed: {verdict!r}"
+    )
+
+
 def test_cli_verdict_with_nothing_configured_claims_no_identity(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

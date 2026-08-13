@@ -55,7 +55,7 @@ from typing import Literal
 
 from epics_mcp.cli_common import add_version_argument, configure_stdout, positive_timeout
 from epics_mcp.errors import EpicsError
-from epics_mcp.services.doctor import DoctorReport, run_doctor
+from epics_mcp.services.doctor import _FAILING_STATUSES, DoctorReport, run_doctor
 from epics_mcp.write_posture import OlogWriteGateReport, PvWriteGateReport
 
 #: One glyph per status for the human-readable render (deterministic). A status gets a mark of
@@ -400,7 +400,23 @@ def _render(report: DoctorReport) -> str:
     # can never drift: failed → PROBLEM (exit 1), inconclusive → INCONCLUSIVE (exit 3), clean → OK.
     category = _exit_category(report)
     if category == "failed":
-        verdict = "PROBLEM, a configured plane failed (see above)"
+        # The failures are NAMED here, and they lead. This branch outranks every other state, so it
+        # is the one that hides the most, and the tail below would otherwise make the planes nobody
+        # has to fix today the only ones the last line names. There is no failed_planes field to
+        # read: the report carries a list per honest-but-not-healthy category and none for the
+        # failures, so they are derived from the plane statuses. That is the SAME derivation
+        # run_doctor uses for `ok` (services/doctor.py), so the headline and the exit code cannot
+        # disagree, and nothing on the wire changes.
+        failed = [plane.plane for plane in report.planes if plane.status in _FAILING_STATUSES]
+        # The empty case is not a state run_doctor can build (it sets `ok` False only BECAUSE one of
+        # these statuses is present) but a hand-built report can, and a "0 plane(s) failed" headline
+        # under a PROBLEM verdict would be worse than the sentence this one replaces.
+        what = (
+            f"{len(failed)} configured plane(s) FAILED: {', '.join(failed)}"
+            if failed
+            else "a configured plane failed"
+        )
+        verdict = f"PROBLEM, {what} (see above)" + _other_states_clause(report, named=frozenset())
     elif category == "inconclusive":
         # The S4 lie in its exact form: "all configured planes healthy" was printed for a
         # ChannelFinder URL at a week-dead container because a neighbour answered 401. That probe
