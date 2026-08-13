@@ -42,11 +42,16 @@ carry breaking changes).
   or could not be decided without creating the file. `--json` always carries every field.
   Informative: it changes neither the verdict nor the exit code. It reports the
   environment of the command you ran, not necessarily that of a running server, and the heading
-  says so. Three states are spelled out rather than left to the reader, because the obvious reading
+  says so. Four states are spelled out rather than left to the reader, because the obvious reading
   of each is its opposite: an empty PV pattern on an armed gate makes the server refuse to start,
-  an empty logbook allowlist denies every write, and an allowlisted remote target reaches a real
-  logbook rather than a sandbox. The audit check opens an append handle and writes nothing; where a
-  file does not exist yet it says the answer cannot be determined rather than guessing.
+  an empty logbook allowlist denies every write, an allowlisted remote target reaches a real
+  logbook rather than a sandbox, and an audit verdict that could not be decided is not a "no". The
+  audit check opens an append handle and writes nothing; where a file does not exist yet it says
+  the answer cannot be determined rather than guessing. A PV pattern that does not COMPILE is named
+  as such instead of being shown like a working allowlist, since that too refuses the start; and
+  the line about a pattern's width says what was CHECKED, a comparison against a fixed list of
+  allow-everything spellings, rather than calling the pattern narrow, because a pattern can admit
+  every name and still be written outside that list.
 
 - **Every `validate_pvs` file-mode answer now names the file it is about.** The `file_path` echo used
   to appear on the empty-result answer only, so one mode came back with two different key sets and a
@@ -84,6 +89,23 @@ carry breaking changes).
   shipped and is corrected in all three.
 
 ### Fixed
+
+- **A configured value could still forge a line of the `epics-doctor` report, outside the write
+  block.** Control characters were escaped in the write block and nowhere else, while the report
+  builds four more lines from values it did not author: the two ChannelFinder redaction allowlists
+  and a plane's detail, which carries the raw EPICS search-path values. A newline in one of them
+  put a complete second `Write gates` block, reading `PV write:   OFF`, above the real one reading
+  `ARMED`, together with a second `Overall:` line; a raw escape byte reached the terminal, where a
+  conceal sequence hides everything printed after it. Every line the report builds from a
+  configured value is escaped now. Long values keep their full text where they are instructions: a
+  remedy is no longer at risk of being cut in the name of this.
+
+- **An ABSOLUTE audit path was reported as relative.** The `Write gates` block warned that the
+  server would resolve the path against a different working directory, for paths whose meaning does
+  not depend on one. The test was whether the resolved string differs, and `os.path.abspath` also
+  normalises, so an absolute path written with forward slashes, or a POSIX one containing a `/./`
+  segment, took the warning. It now asks whether the path is absolute; a merely respelled one is
+  named as the same file.
 
 - **A broken `EPICS_MCP_AUDIT_LOG_FILE` could kill a write-enabled server with a bare
   traceback.** Both write gates promise that an unusable audit path fails as a named

@@ -2559,7 +2559,8 @@ def test_the_write_block_of_a_fully_armed_install_renders_exactly(
         "started with a different one):",
         "  PV write:   ARMED",
         "              PV names allowed: ^SIM:PS-01:.*-SP$",
-        "              (a regular expression; the WHOLE name has to match)",
+        "              (a regular expression; the WHOLE name has to match. Whether it is wide was",
+        "              checked against a fixed list of spellings, not by reading the expression)",
         "              at most 10 writes per minute",
         "              search reach: loopback-only",
         "  Olog write: ARMED",
@@ -2641,16 +2642,47 @@ _EXPECTED_ALLOW_ALL_SPELLINGS = frozenset(
         "^.*?",
         "^.*?$",
         "(.*)",
+        "(.*)$",
+        "^(.*)",
         "^(.*)$",
         "(?:.*)",
+        "(?:.*)$",
+        "^(?:.*)",
         "^(?:.*)$",
         ".{0,}",
+        ".{0,}$",
+        "^.{0,}",
         "^.{0,}$",
         "[\\s\\S]*",
+        "[\\s\\S]*$",
+        "^[\\s\\S]*",
         "^[\\s\\S]*$",
+        "\\A.*",
+        ".*\\Z",
         "\\A.*\\Z",
     }
 )
+
+
+def test_every_family_of_the_declared_spellings_carries_all_of_its_anchors() -> None:
+    """The anchor asymmetry, guarded rather than narrated. The set's own docstring tells the story
+    of ``^.*`` being known while ``.*$`` was not; the SECOND version of it repeated that mistake in
+    four more families, which is what this asserts against.
+
+    Derived from the declared list, so it also fails if a family is added with a gap.
+
+    Red-proof: drop ``(.*)$`` from the declared list and the ``(.*)`` family reports 3 of 4.
+    """
+    incomplete = {
+        core: sorted(
+            anchored
+            for anchored in (core, f"{core}$", f"^{core}", f"^{core}$")
+            if anchored not in _EXPECTED_ALLOW_ALL_SPELLINGS
+        )
+        for core in (".*", ".*?", "(.*)", "(?:.*)", ".{0,}", "[\\s\\S]*")
+    }
+
+    assert not {core: missing for core, missing in incomplete.items() if missing}
 
 
 def test_the_recognised_allow_all_spellings_are_the_declared_ones() -> None:
@@ -2679,6 +2711,53 @@ def test_a_narrow_pattern_is_not_called_out() -> None:
 
     assert "allows EVERY PV" not in out
     assert "the WHOLE name has to match" in out
+    # And silence about the width is not a claim of narrowness: the line says what was checked.
+    assert "checked against a fixed list of spellings, not by reading the expression" in out
+
+
+@pytest.mark.parametrize("wide", [".*|", "|.*", "^$|.*", "(?s).*"])
+def test_a_pattern_outside_the_declared_spellings_is_not_called_narrow(wide: str) -> None:
+    """The honest half of a hint that cannot be complete.
+
+    Each pattern here admits EVERY PV name and none is in the declared list, which is a deliberate
+    limit rather than an oversight: the flag compares strings and refuses to interpret or execute
+    the expression. What the render must therefore not do is read as reassurance. It used to end
+    at "the WHOLE name has to match", which is true of an allow-everything pattern too.
+
+    ``.*|`` is not a hypothetical spelling: the anti-forgery docstring in ``cli_doctor`` uses it as
+    its own worked example of a pattern ``SafetyLayer`` accepts for every name.
+
+    Red-proof: delete the second half of the else-branch and every row fails.
+    """
+    assert all(re.fullmatch(wide, name) for name in ("A", "SIM:PS-01:Cur-SP", "x y"))  # the premise
+
+    out = _render_with(allow_pv_write=True, pv_write_pattern=wide)
+
+    assert "allows EVERY PV" not in out  # it is outside the list, so no positive claim either way
+    assert "checked against a fixed list of spellings, not by reading the expression" in out
+
+
+def test_a_pattern_that_does_not_compile_is_named_rather_than_shown_as_an_allowlist() -> None:
+    """A FOURTH start condition of the PV gate, and the one the block used to hide.
+
+    Measured: with a broken pattern the block printed it exactly like a working narrow one, under a
+    line saying the whole name has to match it, while ``SafetyLayer`` refuses to construct at all.
+    An operator reading the report would take a server that cannot start for one with a tight
+    allowlist.
+
+    Red-proof: report ``pattern_is_valid_regex=True`` unconditionally and the first two assertions
+    fail while the control below keeps passing.
+    """
+    broken = "^SIM:[.*$"
+
+    out = _render_with(allow_pv_write=True, pv_write_pattern=broken)
+
+    assert "NOT a valid regular expression, so a write-enabled server refuses to start" in out
+    assert "the WHOLE name has to match" not in out
+    with pytest.raises(SafetyConfigError):  # the control: the gate really does refuse this config
+        SafetyLayer(
+            _write_config(allow_pv_write=True, pv_write_pattern=broken), environ=_LOOPBACK_ENV
+        )
 
 
 @pytest.mark.parametrize(

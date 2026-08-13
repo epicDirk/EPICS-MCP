@@ -93,9 +93,14 @@ def url_without_credentials(url: str) -> str:
     value is already a hard veto at every boundary that reads it, and echoing the raw string would
     reintroduce exactly the leak this function exists to close.
 
-    The result is comparable to an allowlist entry, which the credential-masking form is not: an
-    operator told a target is refused can hold this against ``EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST``
-    and see whether the two are the same string.
+    ⚠️ The result is NOT a string an operator can hold against
+    ``EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST``, and an earlier version of this docstring said it was.
+    The gate compares the RAW configured value, exactly and case-sensitively
+    (``olog_safety.write_target_allowed``), while this rebuild normalises: measured, the host comes
+    back lower-cased, a query or fragment is dropped, and a space in the path is percent-encoded,
+    so four out of five realistic spellings print differently from the string the boundary
+    compared. What it IS good for is naming the ADDRESS a write would reach, host and port
+    included, which is the question the report asks around it.
     """
     try:
         parsed = urllib3.util.parse_url(url)

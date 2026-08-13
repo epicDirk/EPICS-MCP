@@ -168,9 +168,11 @@ def _pv_write_lines(pv: PvWriteGateReport) -> list[str]:
     feared. This line is computed with the gate's own function, so it is the gate's answer rather
     than a second opinion about it.
 
-    ⚠️ It predicts ONE of the PV gate's three start conditions. The pattern line above it covers a
-    second and the audit line below covers the third, and none of the three is evaluated together,
-    which is why nothing here says the server would start.
+    ⚠️ It predicts ONE of the PV gate's FOUR start conditions. The pattern lines above it cover two
+    (a pattern must be set, and it must compile) and the audit line below covers the fourth, and
+    none of the four is evaluated together, which is why nothing here says the server would start.
+    The figure said three until an independent round measured the fourth: a pattern that does not
+    compile makes ``SafetyLayer`` raise, and the block used to print it exactly like a working one.
     """
     if not pv.armed:
         return ["  PV write:   OFF (no PV write can leave this server)"]
@@ -179,6 +181,15 @@ def _pv_write_lines(pv: PvWriteGateReport) -> list[str]:
         lines.append(
             "              PV names allowed: (none set, so a write-enabled server refuses to start)"
         )
+    elif not pv.pattern_is_valid_regex:
+        # Before the branch below, deliberately: a broken pattern is not a narrow one, and the
+        # reassurance under the else-branch ("the WHOLE name has to match") would be describing an
+        # allowlist that never comes into existence.
+        lines.append(f"              PV names allowed: {_one_line(pv.name_pattern)}")
+        lines.append(
+            "              (NOT a valid regular expression, so a write-enabled server refuses "
+            "to start)"
+        )
     elif pv.pattern_allows_every_name:
         lines.append(
             f"              PV names allowed: {_one_line(pv.name_pattern)} "
@@ -186,7 +197,18 @@ def _pv_write_lines(pv: PvWriteGateReport) -> list[str]:
         )
     else:
         lines.append(f"              PV names allowed: {_one_line(pv.name_pattern)}")
-        lines.append("              (a regular expression; the WHOLE name has to match)")
+        # The second line says WHAT was checked rather than calling the pattern narrow. The wide
+        # check is a comparison against a fixed list of spellings, so a pattern that admits every
+        # name but is written outside that list (an alternation with an empty branch, an inline
+        # flag) lands here, and a reader who took silence for narrowness would be wrong.
+        lines.append(
+            "              (a regular expression; the WHOLE name has to match. Whether it is "
+            "wide was"
+        )
+        lines.append(
+            "              checked against a fixed list of spellings, not by reading the "
+            "expression)"
+        )
     lines.append(f"              at most {pv.rate_limit_per_minute} writes per minute")
     if pv.search_reach_violations:
         lines.append(

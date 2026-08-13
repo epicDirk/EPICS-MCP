@@ -294,6 +294,16 @@ class PvWriteGateReport(_Model):
     #: regex matches every name is not reliably doable, and a wrong guess would be a silent
     #: all-clear on the widest possible allowlist.
     pattern_allows_every_name: bool
+    #: True iff the pattern COMPILES. False is a FOURTH start condition of this gate, and the one
+    #: the report used to hide: ``SafetyLayer`` compiles the pattern at construction and raises
+    #: ``SafetyConfigError`` when it cannot, so a typo in the allowlist is a refuse-to-start. Until
+    #: this field existed the block printed the broken pattern exactly like a working narrow one,
+    #: under a line saying the whole name has to match it. Compiling is safe here where EXECUTING
+    #: is not: ``re.compile`` does not run the expression against any input, so a catastrophically
+    #: backtracking pattern costs nothing (measured: the compile of a nested-quantifier pattern is
+    #: immediate; only a match against a long subject is not). Vacuously True for the empty
+    #: pattern, which has its own line and its own start condition.
+    pattern_is_valid_regex: bool
     #: Writes admitted per 60 s window.
     rate_limit_per_minute: int
     #: Every way the EPICS client search reach extends beyond loopback, from
@@ -1359,12 +1369,20 @@ _O_NONBLOCK: int = getattr(os, "O_NONBLOCK", 0)
 #: an operator runs to review such a file, so a catastrophically backtracking pattern would hang
 #: the review tool.
 #:
-#: The cost is stated rather than hidden, because the first version of this set understated it. It
-#: knew ``^.*`` and not ``.*$``, which ``re.fullmatch`` (``safety.py``) treats identically, so the
-#: loud hint stayed silent on an allow-everything gate written in the very style ``safety.py``'s own
-#: error message teaches (``'^MPS:.*$'``). The set below covers the anchored, lazy and grouped
-#: spellings; forms like ``(?s).*`` or ``[\s\S]*`` are still not recognised, and the render says
-#: what it checked rather than claiming the pattern is narrow.
+#: The cost is stated rather than hidden, because two earlier versions of this set understated it.
+#: The first knew ``^.*`` and not ``.*$``, which ``re.fullmatch`` (``safety.py``) treats
+#: identically, so the loud hint stayed silent on an allow-everything gate written in the very
+#: style ``safety.py``'s own error message teaches (``'^MPS:.*$'``). The second fixed that ANCHOR
+#: ASYMMETRY for two families and left it standing in four more: measured, ``(.*)``, ``(?:.*)``,
+#: ``.{0,}`` and ``[\s\S]*`` carried two of their four anchored spellings each and ``\A.*\Z`` one
+#: of three, so the same defect the paragraph above narrates as repaired was still present four
+#: times. Every family is complete below, and the completeness is a declared list in the tests
+#: rather than a derivation from this set, which would be a tautology.
+#:
+#: What remains unrecognised is named rather than implied, because a hint that misses is worse than
+#: no hint: an alternation containing an empty branch (``.*|``, ``|.*``, ``^$|.*``), an inline flag
+#: (``(?s).*``), and anything else spelled outside these families. Two of those are cheap to write
+#: by accident. The render therefore says WHAT it checked instead of calling the pattern narrow.
 _ALLOW_EVERY_PV_NAME = frozenset(
     {
         ".*",
@@ -1376,13 +1394,23 @@ _ALLOW_EVERY_PV_NAME = frozenset(
         "^.*?",
         "^.*?$",
         "(.*)",
+        "(.*)$",
+        "^(.*)",
         "^(.*)$",
         "(?:.*)",
+        "(?:.*)$",
+        "^(?:.*)",
         "^(?:.*)$",
         ".{0,}",
+        ".{0,}$",
+        "^.{0,}",
         "^.{0,}$",
         "[\\s\\S]*",
+        "[\\s\\S]*$",
+        "^[\\s\\S]*",
         "^[\\s\\S]*$",
+        "\\A.*",
+        ".*\\Z",
         "\\A.*\\Z",
     }
 )
@@ -1500,6 +1528,24 @@ def _probe_audit_sink(configured_path: str) -> tuple[bool | None, str, str]:
     return True, f"{resolved} accepts an append", resolved
 
 
+def _compiles_as_regex(pattern: str) -> bool:
+    """Does *pattern* compile? The question ``SafetyLayer`` asks at construction, asked here safely.
+
+    ``re.compile`` only PARSES, so this is not the pattern-execution the neighbouring flag refuses
+    to do: nothing is matched against any subject and a catastrophically backtracking expression
+    costs no more than its parse. ``re.error`` is the documented failure; ``TypeError`` and
+    ``ValueError`` are caught alongside it for the same reason ``safety.py`` widened its own audit
+    clause, a config that bypassed validation can hold a non-string.
+    """
+    if not pattern:
+        return True  # the empty case is a start condition of its own, with its own line
+    try:
+        re.compile(pattern)
+    except (re.error, TypeError, ValueError):
+        return False
+    return True
+
+
 def _write_safety_report(cfg: EpicsConfig) -> WriteSafetyReport:
     """The effective posture of both write gates, resolved through the SAME helpers they use.
 
@@ -1517,6 +1563,7 @@ def _write_safety_report(cfg: EpicsConfig) -> WriteSafetyReport:
             armed=cfg.allow_pv_write,
             name_pattern=cfg.pv_write_pattern,
             pattern_allows_every_name=cfg.pv_write_pattern in _ALLOW_EVERY_PV_NAME,
+            pattern_is_valid_regex=_compiles_as_regex(cfg.pv_write_pattern),
             rate_limit_per_minute=cfg.write_rate_limit,
             search_reach_violations=write_reach_violations(os.environ),
         ),
