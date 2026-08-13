@@ -56,6 +56,13 @@ One variable in the table below is outside that heading, and the row says so: an
 `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` falls back to the mgmt URL and is still probed, because a
 single-JVM appliance legitimately leaves it empty.
 
+⚠️ **Put credentials in the `*_AUTH` header variables, not into a `*_URL`.** A URL accepts
+`https://user:password@host/path` and nothing here rejects it, but that string is also what
+`epics-pv://config` reports to a client, which keeps it. That resource removes a userinfo before
+printing, and withholds the address entirely when it cannot do so provably, so the password does
+not travel; a token in a QUERY string is not removed, however, and neither redaction changes the
+fact that the value then sits in the process environment of every tool that reads it.
+
 | Variable | Default | Enables |
 |----------|---------|---------|
 | `EPICS_MCP_CHANNELFINDER_URL` | _(empty)_ | `find_channels` / `list_channel_vocabulary` + the ChannelFinder plane |

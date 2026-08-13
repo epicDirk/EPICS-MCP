@@ -292,6 +292,30 @@ uv sync --extra dev --group displays
 EPICS_MCP_REQUIRE_DISPLAYS=1 uv run pytest tests/
 ```
 
+## 17 · The service-URL redaction removes a userinfo, not every secret a URL can carry
+
+Measured 2026-08-13, when the redaction was built (BG-DURL).
+
+`epics-pv://config` reports `channelfinder_url`, `archiver_url` and `alarm_url`, and those fields
+are unvalidated strings, so `https://user:password@host/path` is a spelling an operator can and
+does use. `url_without_userinfo` removes the userinfo from them and leaves every other character
+alone, because the documented use of that resource is to compare the running server's configuration
+with the block in a client's configuration file, and a rebuilt address would make that comparison
+false-negative.
+
+**What it does not remove is a token in a QUERY string.** `http://archiver:17665/mgmt?apikey=SECRET`
+is printed as configured. That is not an oversight, it is the price of the character-for-character
+promise: the sibling redaction on the `epics-doctor` write block drops the query for exactly this
+reason, and it can, because there the question is which ADDRESS a write would reach rather than
+what an operator typed. The two functions therefore answer the same question differently on
+purpose, and each says so in its docstring.
+
+Two things follow for an adopter. Put credentials in `EPICS_MCP_*_AUTH`, which is the documented
+place and which no payload prints. And read `null` in one of those fields as "configured, but its
+spelling could not be shown to be a removable userinfo", never as "not configured", which is
+`"(disabled)"`; the withheld case covers a URL the parser refuses, an `@` urllib3 does not read as
+a userinfo, and an `@` that survives the removal.
+
 ## Retired entries, and where they went
 
 An entry is retired when the limit it records belongs beside the guard it describes, where the next

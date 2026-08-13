@@ -106,6 +106,13 @@ This is a controls tool, so the trust questions come first.
   is kept by the client. So the
   block above remains the fuller answer, and the resource the trustworthy one about **this**
   process.
+  The sibling resource `epics-pv://config` does print three service URLs, and for the same reason
+  it prints them without a userinfo: `https://user:password@host/path` is a spelling those
+  unvalidated fields accept, and a payload the client keeps is the one place a password must not
+  appear. Everything else in such a URL survives character for character, because comparing that
+  value against a client's own configuration is what the resource is for, and a query string is
+  therefore NOT redacted (`docs/known-limits.md`, entry 17). Credentials belong in
+  `EPICS_MCP_*_AUTH`.
 - **Olog reads return the whole entry, a deliberate prototype decision (2026-08-01).** Every read
   (`search_logbook`, `get_log_entry`, the create/reply/update echoes, attachment listing and
   download) returns the full server record: `title`, `description`, `owner` (the author's
