@@ -3262,9 +3262,10 @@ async def test_stripped_tool_still_returns_structured_content(
 # machine-readable (the core value of S29) and cost only ~1% more context per agent turn, so the
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
-# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-13 after BG-DOC: the
-# core lane is 66_062 and the full lane 78_867 (the docstring below carries the deltas, and the
-# pairs 65_692 / 78_497 and 65_402 / 78_207 from earlier the same day, 64_719 / 77_524 measured on
+# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-13 after OQ11: the
+# core lane is 67_100 and the full lane 79_905 (the docstring below carries the deltas, and the
+# pair 66_062 / 78_867 measured after BG-DOC earlier the same day, the pairs 65_692 / 78_497 and
+# 65_402 / 78_207 from earlier still, 64_719 / 77_524 measured on
 # the tree before BG-DOC began, 64_719 / 75_853 from 2026-08-08, 64_719 / 74_899 from 2026-08-06
 # and 63_017 / 72_508 from 2026-08-02 are superseded).
 # ⚠ This sentence and the docstring's are TWO copies of the same measurement and they have
@@ -3286,8 +3287,19 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 66_062 and the full lane
-    78_867, re-measured 2026-08-13 on both lanes, three times, for the three BG-DOC edits that
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 67_100 and the full lane
+    79_905, re-measured 2026-08-13 on both lanes with the engine hidden for the core one, since a
+    lane estimated rather than measured is the error the constant's comment records.
+
+    OQ11 moved both by +1038: description and source are the same body in two shapes, one raw and
+    one rendered by the server, and nothing on the wire said which one a caller may write back, so
+    a read-modify-write destroyed what it had just read. The signpost went on the write field and
+    on both read descriptions, 66_062 / 78_867 -> 67_100 / 79_905. Both lanes move alike because
+    every tool it touches is CORE. Measured TWICE, and the second time was not ceremony: the
+    post-build review sent a sentence back for claiming an image behaviour nobody here had probed,
+    and rewording it moved both lanes another 25, which the first figure would have hidden.
+
+    Before that, the same day, three BG-DOC edits that
     reach the wire. The alarm-level invariant went where an assistant reads it, the full text on
     ``get_pv_info`` and a pointing half-sentence on each tool whose description already delegates
     the alarm block to it, 64_719 / 77_524 -> 65_402 / 78_207 (+683 on both); then

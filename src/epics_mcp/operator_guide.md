@@ -142,6 +142,19 @@ Entries come back **whole**: `title`, `description`, `owner` (the author), `sour
 and the raw `attachments` array, plus two derived conveniences, the synthesised
 `attachment_count` and name-only `logbooks`/`tags` lists.
 
+⚠️ **A body arrives in two shapes that are not interchangeable, and nothing in the payload marks
+which is which.** `source` is the raw body its author wrote; `description` is the plain text Olog
+RENDERED from it. So when you edit an entry you just read, **read `source`, not `description`**:
+writing the rendering back replaces the whole body with it, whatever the rendering dropped is gone,
+and the archived version is not reachable from here (see the edit recipe below). The two do diverge
+in practice, measured read-only on a local sandbox Olog (`services/olog_client._expand_log_entry`
+carries the figures and their scope); how much a given rendering drops is not decidable from here,
+it may be markup, an inline image, or only a blank line.
+
+An entry written by an old client can carry **no `source` at all**. ⚠️ Editing THAT entry's body is
+the one shape nothing warns about: the legacy warning fires only when you leave the body alone, and
+the read-modify-write warning needs a `source` to compare against.
+
 The former DS-PRIVACY read redaction (author dropped, free text withheld outside a declared local
 sandbox) was removed 2026-08-01: it was written against an *assumed* privacy policy that was never
 specified for this server, and it cost the logbook its point (a search returned ids whose content
@@ -396,7 +409,7 @@ one difference that matters: the logbook allowlist is keyed on
 the **UNION** of the entry's current and resulting logbooks, because moving an entry INTO a logbook and
 pulling it OUT of one are both writes to that logbook; gating on either side alone leaves a hole. An
 omitted argument means "unchanged", the tool round-trips the whole entry and overlays only what was
-passed, so attachments and properties survive. Three server behaviours it has to compensate for:
+passed, so attachments and properties survive. Server behaviours it has to compensate for:
 a body edit must carry the new text in **`source`**, which is the field of truth (under
 `markup=commonmark` the server regenerates `description` FROM `source`, so a new description beside
 a stale source is silently overwritten and the edit vanishes); the client sets **both** fields to
@@ -407,6 +420,15 @@ empty title is **not** rejected server-side. Note also that the server re-sets `
 service account on EVERY update, the original author survives only in the archived version, and that
 editing a legacy entry with no raw `source` makes the server re-render its visible body (reported back
 as a warning).
+
+⚠️ **The body you hand it comes from the entry's `source`, never from its `description`** (the read
+side of this is under "Olog output shape" above). A read-modify-write that takes the rendering
+replaces the whole body with it, and whatever the rendering dropped is gone. Where that is
+detectable the tool says so in a `warnings` entry, and the wording names what it CHECKED rather
+than what it suspects: the new body starts with the entry's own rendering and NOT with its raw
+`source`. That covers the read-it-straight-back and the append shapes. A body rewritten in the
+MIDDLE, or prepended to, is the same mistake and passes unseen, and how much a rendering dropped is
+not decidable here either, so the warning is a safety net, not a gate and not a damage report.
 
 ⚠️ **The archived version is not reachable from this server.** It is cited here and in the code as
 the reason a re-stamped owner or an overwritten field is recoverable, but no MCP tool can read or

@@ -1140,6 +1140,10 @@ async def search_logbook(
     Read-only. Disabled by default, returns enabled=false unless EPICS_MCP_OLOG_URL is set.
     Entries come back WHOLE: id, dates, level, state, title, description, owner (the author),
     source and properties, plus the derived name-only logbook/tag lists and attachment_count.
+    A body arrives in two shapes that are NOT interchangeable: source is what an author wrote,
+    while description is the server's rendered plain text of it. Rendering is one-way, so whatever
+    it dropped cannot be recovered from the result. To feed a body back into update_log_entry, read
+    source, not description. An entry written by an old client can carry no source at all.
 
     Time window: start/end take an absolute time (ISO-8601, normalized to UTC before sending;
     a naive value is read as UTC) or a single relative amount ('7 days', '90 min', 'now'). Months
@@ -1211,7 +1215,10 @@ async def get_log_entry(
 
     Read-only. Disabled by default, returns enabled=false with found=null (the plane was NOT
     checked) unless EPICS_MCP_OLOG_URL is set. Same whole-entry shape as search_logbook (title,
-    description, owner, source, properties, raw attachments list + attachment_count).
+    description, owner, source, properties, raw attachments list + attachment_count), carrying the
+    same distinction between the body shapes: description is the server's rendered plain text,
+    source is the raw body, so to edit this entry through update_log_entry, read source, not
+    description. An entry written by an old client can carry no source at all.
 
     found is false ONLY on the service's definitive HTTP 404; an unreadable 2xx raises a loud
     error (it is neither a "not found" nor projected as a fabricated entry). NOTE: a real Olog
@@ -1503,7 +1510,11 @@ async def update_log_entry(
         str | None,
         Field(
             description="New body text (CommonMark). Omit to leave unchanged; REPLACES the whole "
-            "body"
+            "body. Editing an entry you just read: read source, not description. An entry's "
+            "description is the server's RENDERED plain text of its body, so writing that value "
+            "back drops the markup and the inline images the raw source carries, and the previous "
+            "version is not reachable from this server. A body that starts with the entry's own "
+            "rendering is reported back as a warning, but only that shape is detectable"
         ),
     ] = None,
     level: Annotated[
@@ -1545,7 +1556,7 @@ async def update_log_entry(
     UNION of the entry's current and resulting logbooks (moving an entry in or out is a write to
     both).
 
-    Three server behaviours worth knowing: the entry's OWNER is re-set to the write service account
+    Server behaviours worth knowing: the entry's OWNER is re-set to the write service account
     on every edit (the original author survives only in the server's archived version, which
     is NOT reachable from this server, so recovery is manual, by someone with direct Olog
     access); editing a

@@ -214,6 +214,10 @@ async def _update_log_entry(
     at ``None`` leaves that field UNCHANGED. *logbooks* and *tags* are comma-separated names and
     REPLACE the entry's current list (they are not merged), passing an empty *tags* clears the
     tags, while an empty *logbooks* is refused (an entry must stay in at least one logbook).
+
+    *description* is the whole new BODY, and it is the trap of this tool: the same-named field a
+    read gives back is the server's rendering, so an edit built on THAT loses what the rendering
+    dropped. The service reports the detectable shape of that mistake in ``warnings``.
     """
     return await query_olog_update(
         log_id=log_id,

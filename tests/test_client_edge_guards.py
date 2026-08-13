@@ -154,7 +154,14 @@ _UNOBSERVED: dict[str, str] = {
     "epics_client.py:792": "NaN alarm field",
     "olog_client.py:181": "lenient name filter inside an already-anchored entry",
     "olog_client.py:389": "attachment filename check",
-    "olog_client.py:977": "source default before concatenation",
+    # Moved +14 by the OQ11 docstring on ``_expand_log_entry`` and RE-LOCATED, not re-judged: the
+    # line still carries the same guard (``source if isinstance(source, str) else ""`` feeding the
+    # inline-markup concatenation), verified against the surrounding code AND against
+    # ``git show HEAD:...`` at the old number. Same offset rot as the epics_client rows above, and
+    # the same reason it is a relocation rather than a finding. ⚠ The test below only checks that
+    # the key names SOME guard line, so it cannot tell a correct relocation from a coincidence:
+    # that comparison is this comment, and it has to be redone by hand whenever the number moves.
+    "olog_client.py:991": "source default before concatenation",
 }
 
 # Neither polarity is noticed, and lines no test executes at all. Both are TEST GAPS at the

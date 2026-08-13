@@ -439,6 +439,20 @@ def _expand_log_entry(entry: dict[str, object]) -> dict[str, object]:
     former ``_project_log_entry`` allowlist was built on an ASSUMED privacy rule that was never
     specified for this server. If a real facility privacy specification ever arrives, rebuild
     against that spec (the removed mechanism is in the git history up to 2026-08-01).
+
+    ⚠ Whole means the caller now sees BOTH bodies with nothing marking which is which: ``source``
+    is what an author wrote, ``description`` is Olog's rendering of it. Anything that hands a body
+    back to a write reads source, not description, or what the rendering dropped is lost.
+
+    THE ONE PLACE THIS IS MEASURED, so the figure is not repeated on the surfaces that quote it.
+    A read-only page of a LOCAL SANDBOX Olog, 2026-08-13, 94 entries: every one carried a
+    ``source``, 22 differed from their ``description``, and of those 22 the difference was pure
+    whitespace on 12 (the renderer collapses a blank line) and a genuine loss of markup on 10.
+    Scope, because it bounds what any of this may claim: a sandbox is not a facility, and those 10
+    are artifacts this repository's own live probes left behind, all carrying the same fixture
+    string. What the page establishes is that the two fields DIVERGE in practice and that a
+    divergence is not by itself proof of lost markup. It establishes nothing about how often a
+    real logbook carries an inline image.
     """
     return _derive_shape(entry, dict(entry))
 

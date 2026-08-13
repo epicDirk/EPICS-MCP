@@ -95,6 +95,18 @@ carry breaking changes).
 
 ### Fixed
 
+- **Editing a logbook entry you had just read destroyed it, and nothing said so.** A read gives a
+  body back in two shapes, the raw `source` its author wrote and the `description` the server
+  rendered from it, and nothing marked which of the two `update_log_entry` wants. Since that
+  tool's `description` REPLACES the whole body, the obvious sequence, read the entry, add a line,
+  write it back, replaced the raw body with its own rendering, and whatever the rendering had
+  dropped was gone for good: this server cannot reach the archived version. All three tool
+  descriptions now name `source` as the field a round trip reads. `update_log_entry` additionally
+  returns a `warnings` entry when the new body starts with the entry's own rendering and NOT with
+  its `source`, which covers writing the read value straight back and appending to it. A body
+  rewritten in the middle, or prepended to, is the same mistake and is not detectable that way, so
+  the warning is a safety net rather than a gate; and it says nothing about how MUCH was lost,
+  since the renderer rewrites plain text too.
 - **A configured value could still forge a line of the `epics-doctor` report, outside the write
   block.** Control characters were escaped in the write block and nowhere else, while the report
   builds four more lines from values it did not author: the two ChannelFinder redaction allowlists

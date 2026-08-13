@@ -284,7 +284,10 @@ async def query_olog_search(
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns a structured ``enabled: false``
     result and makes NO network call (no ESS egress). Every returned entry comes back WHOLE
     (title, description, owner, source, properties, plus the derived name-only logbook/tag lists
-    and attachment_count; see services.olog_client._expand_log_entry). *offset*
+    and attachment_count; see services.olog_client._expand_log_entry). A body arrives in two shapes
+    that are NOT interchangeable: ``source`` is the raw body, ``description`` the server's rendering
+    of it, so a caller feeding a body back into ``update_log_entry`` reads source, not description.
+    *offset*
     (Olog wire ``from``) pages past the first *size* results; *sort* orders by create time (``down``
     newest-first default, ``up`` oldest-first). ``total`` is the number of entries returned;
     ``total_matches`` is the true total across all pages (Olog ``hitCount``, ``None`` if the Olog
@@ -359,7 +362,9 @@ async def query_olog_entry(log_id: str, timeout: float = 5.0) -> OlogEntryResult
     ``found: None``, the plane was NOT checked, mirroring the ``archived: None`` /
     ``configured: None`` / ``registered: None`` / get_archive_info ``found: None`` siblings
     (S11: this was the lone ``found: False`` among them, a definitive "does not exist" from a
-    plane that was never asked). ``found`` is False ONLY for the definitive 404.
+    plane that was never asked). ``found`` is False ONLY for the definitive 404. Whole means both
+    body fields, and they are not interchangeable: a caller editing what it just read reads source,
+    not description (see :func:`_looks_like_a_rendered_body_written_back`).
     Backs ``get_log_entry``.
     """
     cfg = get_config()
@@ -541,6 +546,51 @@ def _reject_unknown_level(client: OlogClient, level: str | None, caller: str) ->
             f"{', '.join(known)}",
             error_code="INVALID_INPUT",
         )
+
+
+def _looks_like_a_rendered_body_written_back(
+    raw_entry: dict[str, object], description: str | None
+) -> bool:
+    """Whether *description* is this entry's own RENDERED body going back over its raw one.
+
+    Named after its METHOD, a prefix comparison, rather than after the question a reader actually
+    has ("did the caller just destroy this entry?"), because the method is the part it can decide
+    (decision WP: a field may not claim more than it checks).
+
+    An entry read back through ``get_log_entry``/``search_logbook`` carries BOTH bodies, the raw
+    ``source`` its author wrote and the ``description`` Olog rendered from it, and nothing in the
+    payload marks which is which. A caller who reads, appends and writes back therefore hands the
+    RENDERING to a field that replaces the whole body, and the markup and inline images that lived
+    in ``source`` are gone for good, the archived version being unreachable from here.
+
+    Each condition removes a false alarm rather than adding reach:
+
+    * the rendering has to be NON-EMPTY, since ``"anything".startswith("")`` is true, so a blank
+      description would make this fire on every body edit there is;
+    * the new body has to START WITH it, which is the read-it-straight-back shape and the append
+      shape. A body rewritten in the MIDDLE, or one PREPENDED to (newest line on top, the second
+      habit of logbook writers), is the same mistake and is not detectable this way;
+    * the new body must NOT start with ``source``, which is what a caller who did it RIGHT hands
+      over. Measured, and not a hypothetical: this server's own ``add_log_attachment`` appends
+      ``![](attachment/...)`` to the END of ``source``, so the rendering of such an entry IS a
+      prefix of its source, and read-source-then-append would have been reported as the mistake it
+      is not;
+    * ``source`` has to DIFFER from the rendering, because a body identical to its rendering loses
+      nothing at all when written back.
+
+    What this does NOT establish is how MUCH was lost. The Olog renderer also rewrites plain text,
+    measured on a local sandbox it collapses a blank line, so a difference between them is not by
+    itself evidence of lost markup. The warning wording is bounded accordingly.
+    """
+    if description is None:
+        return False
+    rendered = raw_entry.get("description")
+    source = raw_entry.get("source")
+    if not isinstance(rendered, str) or not rendered or not isinstance(source, str):
+        return False
+    if description.startswith(source):
+        return False
+    return source != rendered and description.startswith(rendered)
 
 
 async def query_olog_create(
@@ -778,6 +828,12 @@ async def query_olog_update(
     update is DESTRUCTIVE (it prunes any attachment not resubmitted and NULLS any field not sent),
     so a safe edit round-trips the target entry's FULL content (read first).
 
+    Two ``warnings`` can come back, and they are mutually exclusive by construction: the legacy one
+    fires only when the body is LEFT ALONE on an entry that has no raw ``source``, the
+    read-modify-write one (:func:`_looks_like_a_rendered_body_written_back`) only when the body IS
+    edited on an entry that has one. ⚠ The gap that leaves is a body edit on a source-less entry,
+    where neither can say anything.
+
     ``None`` means "leave unchanged"; only the fields passed are overlaid. The write goes
     through the SAME :class:`~epics_mcp.olog_safety.OlogWriteGate` as create: the env gate and the
     test-server URL boundary are checked BEFORE the round-trip read (a write target the gate
@@ -890,6 +946,18 @@ async def query_olog_update(
                 "This entry carries no raw 'source' (a legacy/old-client entry). Olog will "
                 "regenerate its body from the description through the CommonMark renderer, so "
                 "markup-significant characters in the visible text may be rewritten."
+            )
+        if _looks_like_a_rendered_body_written_back(raw, description):
+            warnings.append(
+                "The new body STARTS WITH this entry's own 'description', which is the server's "
+                "RENDERED plain text, and not with its raw 'source', which differs from that "
+                "rendering. Whatever 'source' carried beyond the rendering is therefore gone from "
+                "the entry now, and the previous version is not reachable from this server, so "
+                "recovery is manual, by someone with direct Olog access. What is stated is what "
+                "was CHECKED, those prefixes, and not the caller's intent nor the SIZE of the "
+                "loss: the renderer rewrites plain text too, so the difference may be markup, or "
+                "an inline image, or only a blank line. A body rewritten in the MIDDLE, or "
+                "prepended to, is the same mistake and passes this check unseen."
             )
         try:
             entry = client.update_log_entry(

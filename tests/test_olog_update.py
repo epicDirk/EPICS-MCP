@@ -62,6 +62,14 @@ _RAW_ENTRY: dict[str, object] = {
     "attachments": [{"id": "old1", "filename": "old1_a.png", "fileMetadataDescription": "image"}],
 }
 
+#: The ordered phrase the read-modify-write signpost carries on every surface that teaches the
+#: round trip. THE ORDER IS THE WHOLE GUARD: the bare word "source" already stands in both read
+#: descriptions today, in the flat field list "title, description, owner, source and properties",
+#: so an assertion on that word alone is green before anyone writes a thing.
+_SIGNPOST = "read source, not description"
+#: The refuted wording. It carries every token of the correct one, so it needs its own assertion.
+_SIGNPOST_REFUTED = "read description, not source"
+
 
 @pytest.fixture(autouse=True)
 def _reset_singletons() -> Iterator[None]:
@@ -292,6 +300,64 @@ class TestClientUpdate:
         assert log_json["level"] == "Problem"  # the caller's level wins over the raw entry's
         assert log_json["title"] == "existing title"  # ...and nothing else moved
         assert log_json["source"] == "raw **body**"
+
+
+# ======================================================================================
+# OQ11: the signpost that keeps a read-modify-write from destroying the entry it edits
+# ======================================================================================
+
+
+class TestReadModifyWriteSignpost:
+    """A caller who reads an entry, appends to it and writes it back destroys it, and nothing on
+    the wire used to say which of the two same-named body fields is the safe one to read.
+
+    The behaviour the signpost points at is proven next door, by
+    ``TestClientUpdate.test_body_edit_is_written_to_source``, and ``_RAW_ENTRY`` carries the very
+    difference the signpost is about (``description="raw body"`` beside ``source="raw **body**"``).
+    That the two fields diverge on a real server, and what that divergence does and does not
+    prove, is measured in ONE place, the docstring of
+    ``services.olog_client._expand_log_entry``; it is not restated here, because a figure copied
+    is a figure that drifts.
+
+    READ OFF THE WIRE, never off the source text. The field description is assembled from two
+    adjacent string literals, so grepping the source for the joined phrase does not match the
+    ``.py`` file at all: it matches stale ``__pycache__`` instead, which reads like a hit.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_signpost_reaches_the_wire_on_every_surface(self) -> None:
+        from epics_mcp.server import mcp
+
+        tools = {tool.name: tool.to_mcp_tool() for tool in await mcp.list_tools()}
+        # The premise first. A tool that fell off the wire has to SAY so; without this the test
+        # dies of a KeyError whose cause nobody can read. All three are registered
+        # unconditionally, so this holds in the core-only lane as well as the full one.
+        carriers = ("update_log_entry", "search_logbook", "get_log_entry")
+        missing = [name for name in carriers if name not in tools]
+        assert not missing, f"not on the wire: {missing}, so this test cannot make its claim"
+
+        # The exact FIELD node on the write side, never the serialised tool: the same sentence
+        # moved into a neighbouring field description would otherwise pass unnoticed.
+        write_field = tools["update_log_entry"].inputSchema["properties"]["description"]
+        surfaces = {
+            "update_log_entry.description (field)": write_field.get("description", ""),
+            "search_logbook (tool description)": tools["search_logbook"].description or "",
+            "get_log_entry (tool description)": tools["get_log_entry"].description or "",
+        }
+        for where, wire_text in surfaces.items():
+            # Whitespace-normalised: the two read descriptions are wrapped docstrings, so asserting
+            # on the raw text would pin the line breaks rather than the claim. Named per surface,
+            # because a signpost on two of the three is the failure this loop exists to find.
+            text = " ".join(wire_text.split()).lower()
+            assert _SIGNPOST in text, (
+                f"{where}: the read-modify-write signpost is gone. A caller who reads an entry and "
+                f"writes its description back destroys the markup. Wire text was: {text!r}"
+            )
+            assert _SIGNPOST_REFUTED not in text, (
+                f"{where}: the refuted wording is back. description is the server's RENDERED plain "
+                "text, regenerated from source, so writing it back drops markup and inline images. "
+                "See TestClientUpdate.test_body_edit_is_written_to_source."
+            )
 
 
 # ======================================================================================
@@ -652,6 +718,151 @@ class TestServiceUpdate:
         del entry["source"]
         _install_fake(monkeypatch, raw=entry)
         result = await query_olog_update("17", description="new body")
+        assert "warnings" not in result
+
+    @pytest.mark.asyncio
+    async def test_a_rendered_body_written_back_is_reported(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # RED-PROOF (OQ11): _RAW_ENTRY's description is the rendered plain text of its source, so a
+        # new body that STARTS with it is a rendered body going back over the raw one. This is the
+        # commonest shape by far: read the entry, append a line, write it back.
+        config_module._config = _write_config(olog_write_logbooks="Ops")
+        _install_fake(monkeypatch)
+        result = await query_olog_update("17", description="raw body\n\nand one more line")
+        warnings = result["warnings"]
+        assert isinstance(warnings, list)
+        # Case-folded: the emphasis capitals are formatting, the claim is the phrase.
+        assert any("rendered plain text" in warning.lower() for warning in warnings), warnings
+
+    @pytest.mark.asyncio
+    async def test_an_unchanged_rendering_is_reported_too(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The degenerate shape of the same mistake: the read value handed straight back.
+        config_module._config = _write_config(olog_write_logbooks="Ops")
+        _install_fake(monkeypatch)
+        result = await query_olog_update("17", description="raw body")
+        warnings = result["warnings"]
+        assert isinstance(warnings, list)
+        # Case-folded: the emphasis capitals are formatting, the claim is the phrase.
+        assert any("rendered plain text" in warning.lower() for warning in warnings), warnings
+
+    @pytest.mark.asyncio
+    async def test_an_entry_whose_rendering_lost_nothing_does_not_warn(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A body with no markup renders to itself, so writing the read value back loses NOTHING.
+        # Warning there would be the field claiming more than it checks (decision WP).
+        config_module._config = _write_config(olog_write_logbooks="Ops")
+        entry = dict(_RAW_ENTRY)
+        entry["source"] = entry["description"]
+        _install_fake(monkeypatch, raw=entry)
+        result = await query_olog_update("17", description="raw body and one more line")
+        assert "warnings" not in result
+
+    @pytest.mark.asyncio
+    async def test_a_body_that_is_not_the_rendering_does_not_warn(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A genuinely new body neither equals nor extends the rendering. What the guard checks is
+        # that PREFIX and nothing else, so anything past it must stay silent.
+        config_module._config = _write_config(olog_write_logbooks="Ops")
+        _install_fake(monkeypatch)
+        result = await query_olog_update("17", description="a completely different **body**")
+        assert "warnings" not in result
+
+    @pytest.mark.asyncio
+    async def test_a_body_merely_CONTAINING_the_rendering_does_not_warn(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The discriminator between a PREFIX test and a containment test, and it is the difference
+        # between the guard's own wording and a lie: the warning says "STARTS WITH" and declares a
+        # mid-body rewrite undetectable. Relaxing ``startswith`` to ``in`` made this shape warn
+        # while the whole suite stayed green (adversarial review), so the guard claimed a reach it
+        # had disowned in writing. The neighbouring case, a body that does not contain the
+        # rendering at all, cannot tell those two apart.
+        config_module._config = _write_config(olog_write_logbooks="Ops")
+        _install_fake(monkeypatch)
+        result = await query_olog_update("17", description="Update: raw body is now obsolete")
+        assert "warnings" not in result
+
+    @pytest.mark.asyncio
+    async def test_the_prefix_is_LITERAL_in_every_direction_it_could_be_softened(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The warning SAYS "STARTS WITH" and declares a mid-body rewrite undetectable, so the
+        # comparison has to be exactly that, or the wording claims a reach the code disowned.
+        # A mutation sweep found the removal of any conjunct caught and every SOFTENING of this one
+        # free: case-folded, whitespace-folded, and first-line-only each survived the whole suite.
+        # Each row below is a body that a softened comparison would report and a literal one must
+        # not, and the third row is the one that matters most: a completely rewritten multi-line
+        # body that happens to open on the same line.
+        config_module._config = _write_config(olog_write_logbooks="Ops")
+        entry = dict(_RAW_ENTRY)
+        entry["description"] = "Beam lost at 12:00\nsector 3"
+        entry["source"] = "Beam lost at 12:00\n**sector 3**"
+        _install_fake(monkeypatch, raw=entry)
+        softenings = {
+            "case-folded": "beam lost at 12:00\nsector 3 and more",
+            "whitespace-folded": "  Beam lost at 12:00\nsector 3 and more",
+            "first-line-only": "Beam lost at 12:00\nsomething entirely different",
+        }
+        for softening, body in softenings.items():
+            result = await query_olog_update("17", description=body)
+            assert "warnings" not in result, (
+                f"a {softening} comparison would have reported this body, but the warning claims a "
+                f"literal prefix: {body!r}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_a_caller_who_read_source_is_not_accused(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # THE FALSE POSITIVE THIS GUARD ALMOST SHIPPED WITH, and it sat on the CORRECT path. This
+        # server's own add_log_attachment appends the image markup to the END of ``source``, so
+        # such an entry's rendering is a PREFIX of its source. A caller who then does exactly what
+        # every surface here tells it to, read source and append, hands over a body starting with
+        # the rendering as well, and was reported as the mistake it had just avoided.
+        config_module._config = _write_config(olog_write_logbooks="Ops")
+        entry = dict(_RAW_ENTRY)
+        entry["description"] = "Beam lost at 12:00"
+        entry["source"] = "Beam lost at 12:00\n\n![shot](attachment/uid)"
+        _install_fake(monkeypatch, raw=entry)
+        correct = "Beam lost at 12:00\n\n![shot](attachment/uid)\n\nUpdate: recovered"
+        result = await query_olog_update("17", description=correct)
+        assert "warnings" not in result
+
+    @pytest.mark.asyncio
+    async def test_the_same_entry_still_catches_the_rendered_body(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The positive control for the case above, on the SAME entry: without it, the fix that
+        # silenced the false positive could have silenced the finding as well and both would read
+        # as one green test.
+        config_module._config = _write_config(olog_write_logbooks="Ops")
+        entry = dict(_RAW_ENTRY)
+        entry["description"] = "Beam lost at 12:00"
+        entry["source"] = "Beam lost at 12:00\n\n![shot](attachment/uid)"
+        _install_fake(monkeypatch, raw=entry)
+        result = await query_olog_update(
+            "17", description="Beam lost at 12:00\n\nUpdate: recovered"
+        )
+        warnings = result["warnings"]
+        assert isinstance(warnings, list)
+        assert any("rendered plain text" in warning.lower() for warning in warnings), warnings
+
+    @pytest.mark.asyncio
+    async def test_an_empty_rendering_is_not_a_prefix_of_everything(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # str.startswith("") is True for every string, so an entry with a blank description would
+        # make the guard fire on every body edit there is.
+        config_module._config = _write_config(olog_write_logbooks="Ops")
+        entry = dict(_RAW_ENTRY)
+        entry["description"] = ""
+        _install_fake(monkeypatch, raw=entry)
+        result = await query_olog_update("17", description="a new body")
         assert "warnings" not in result
 
     @pytest.mark.asyncio
