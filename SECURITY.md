@@ -72,6 +72,12 @@ plainly because the word "gate" invites a category error:
 - The real boundary, where one is wanted, lives outside this process: network reach, account
   privileges, an external reconciliation watchdog. This server does not claim to be one, and no
   reader should mistake it for one.
+- **One of those boundaries is not hypothetical, and it applies to the sanctioned path too.** Even
+  a write this server permits still has to satisfy the IOC's own access security, which decides
+  whether the value lands. The gate here is policy and audit over whether the server ATTEMPTS the
+  write; nothing in it reads or models what an IOC allows, so an allowlisted PV name is a statement
+  about our configuration, never a claim about the record. The `epics-pv://guide` resource states
+  what is and is not measured about how such a refusal arrives.
 - The audit's promise is therefore *every gate verdict, and every write through this server that
   reaches the I/O*. It is not *every write*.
 

@@ -125,6 +125,13 @@ State this plainly where the gate is described, because the word "gate" invites 
 - Therefore the audit's promise is **"every gate verdict, and every write through the server that reaches the
   I/O,"** not "every write". Scope every completeness claim that way; a claim of total coverage would be the
   very silent gap the audit exists to close.
+- **The downstream service authorises too, and a gate must not describe itself as though it did not.** Passing
+  the gate means this server ATTEMPTS the write; whether it takes effect is decided by the target (an IOC's
+  access security, a logbook service's account permissions), which no gate here reads or models. So an
+  allowlisted target is a statement about our configuration, never a claim about the target's own rules. Write
+  every gate's description in those terms: measured on the PV gate, its tool description had drifted into
+  claiming to be "what actually gates the write" in two separate sentences, which is the same category error
+  as the one this point opens with, one layer further in.
 - **Every deny-path must be verifiable, and a guard that cannot be driven red is the defect.** Each denial the
   gate can raise (env off, allowlist miss, boundary reject, rate limit) must be exercised by a test that can
   be shown to **fail on the un-gated code or on a mutant**: the evidence-discipline rule applied to the
