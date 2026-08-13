@@ -3013,7 +3013,20 @@ def test_a_credential_in_the_olog_url_never_reaches_the_report() -> None:
     that decides the boundary, splits the authority at the LAST ``@`` while the regex stops at the
     first, so the tail of a real password stayed in the clear.
 
-    Red-proof: swap ``url_without_credentials`` back for ``_safe`` and the first row fails.
+    ⚠️ The assertion is on the EXACT printed string, and the earlier "the secret does not occur in
+    it" could not see the property this test is named after. Measured against the regex redactor,
+    row one comes back as ``https://***@ter2@olog.example.org/Olog``: the password's tail is in the
+    clear, and yet ``"hun@ter2" not in ...`` holds, because after the substitution the secret no
+    longer occurs as one string. The tail is therefore asserted on its own as well.
+
+    Red-proof: swap ``url_without_credentials`` back for ``_safe``. Measured, rows three and four
+    fail (pytest stops at three), and after this sharpening row one fails as well, which is the
+    row the property is about.
+
+    ⚠️ This surface keeps the NORMALISING function on purpose. Here the question is which ADDRESS a
+    write would reach, so a rebuilt spelling is the right answer; where a reader compares a printed
+    value against a configured one, ``epics-pv://config`` uses ``url_without_userinfo`` instead,
+    which deletes and never rewrites. The two are not interchangeable.
     """
     for secret, url in (
         ("hun@ter2", "https://svc:hun@ter2@olog.example.org/Olog"),
@@ -3022,8 +3035,9 @@ def test_a_credential_in_the_olog_url_never_reaches_the_report() -> None:
         ("tok", "https://olog.example.org/Olog?token=tok"),
     ):
         report = _write_safety_report(_write_config(olog_url=url))
+        assert report.olog.target_url == "https://olog.example.org/Olog", url
         assert secret not in report.olog.target_url, url
-        assert "olog.example.org" in report.olog.target_url  # and the host is still legible
+        assert "ter2" not in report.olog.target_url, "a first-@ split would leave this behind"
 
 
 def test_the_probe_refuses_a_non_regular_file_without_opening_it(
