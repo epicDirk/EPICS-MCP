@@ -130,10 +130,11 @@ def build_instructions(display_tools_available: bool) -> str:
         # byte budget below leaves no room to spell that out; the tool description does.
         #
         # GB-79 named the second file kind here for ZERO net bytes, and the wording was measured
-        # rather than chosen: ".bob display" -> ".bob or .plt" is the only candidate that keeps
-        # all 19 bytes of head-room the budget had (spelling it out as ".bob display or .plt
-        # trend" costs 14 of them, and this guard exists to keep room for new tool lines). Which
-        # kind is which, and that a trend answers the two views by different routes, is the tool
+        # rather than chosen: ".bob display" -> ".bob or .plt" is the only candidate that spends
+        # none of the head-room the budget has left. Spelling it out as ".bob display or .plt
+        # trend" is 14 characters longer, and measured against the cap today that does not fit at
+        # all, which is what the guard below is for: it keeps room for new tool lines. Which kind
+        # is which, and that a trend answers the two views by different routes, is the tool
         # description's job under the division of labour the paragraph above states.
         "validate the PVs of a .bob or .plt (file or display view), cross-plane provenance, "
         "device lookup (screens + live + source IOC), "
@@ -167,8 +168,10 @@ def build_instructions(display_tools_available: bool) -> str:
         # READ, not "network": the PV-WRITE reach is not the launcher's, it is forced loopback-only
         # at start (safety.py:77-89, stated above). Says PV because the OLOG write reach IS the
         # launcher's, bounded by an env allowlist rather than by an assert. This header is capped at
-        # 2048 bytes with under 20 to spare, so the qualifier is one word and the detail lives in
-        # epics-pv://guide.
+        # 2048 bytes, and what is left of that budget is measured by the guard named
+        # test_build_instructions_under_2048_bytes rather than named here, because a head-room
+        # figure written into prose drifts with every edit to this string and nothing compares it.
+        # So the qualifier is one word and the detail lives in epics-pv://guide.
         "READ reach is decided by the LAUNCHER, not this server: a deployment may well point "
         "the EPICS env at a real facility, so do NOT assume isolation, run epics-doctor to see "
         "what this instance actually reaches. The write gates hold regardless of reach. "

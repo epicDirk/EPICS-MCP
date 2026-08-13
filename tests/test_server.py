@@ -584,7 +584,7 @@ def test_build_instructions_omits_display_claims_core_only() -> None:
     The quoted phrase tracks the clause verbatim, which is the point: it is a SURFACE that
     describes the tool, and this assertion is what made GB-79 enumerate it rather than recall it.
     The clause now reads ".bob or .plt" because the inventory collects Data Browser trends too,
-    and the wording was picked to cost zero of the 19 bytes the size budget had left."""
+    and the wording was picked to spend none of the head-room the size budget had left."""
     from epics_mcp.server import build_instructions
 
     full = build_instructions(True)
