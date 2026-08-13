@@ -111,7 +111,8 @@ class EpicsConfig(BaseSettings):
     # path to a CA-bundle PEM, set it when the REST hosts use a certificate signed by an internal
     # root CA that is NOT in certifi (the default trust store), which otherwise fails with
     # "self-signed certificate in chain". It is applied to EVERY REST session at the single
-    # ``build_retrying_session`` chokepoint. When planes present DIFFERENT trust roots (one
+    # session factory in ``services/_http.py`` (three of them, all resolving the same expression;
+    # the VALUE is one, the place is not). When planes present DIFFERENT trust roots (one
     # internal CA, another public), a single-root bundle fails one: combine the internal CA
     # PEM WITH the public roots (certifi's cacert.pem) into ONE PEM, see epics-pv://guide.
     # ``tls_verify=False`` disables verification entirely:

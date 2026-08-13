@@ -53,7 +53,10 @@ synthetic placeholder name (`SIM:PS-01:Cur-RB`, `sim://ramp`, `http://archiver:1
   `RATE_LIMIT_EXCEEDED`, because this refusal writes no audit line and is not a gate verdict), never
   blocked, a blocking wait there would hold a worker thread and reintroduce the monitor starvation
   above. Turn it on to protect a production facility from an unthrottled read burst. It bounds only
-  the REST planes (ChannelFinder/Archiver/Alarm/Naming/Olog), not live p4p PV reads. Two caveats:
+  the REST planes (ChannelFinder/Archiver/Alarm/Naming/Olog), not live p4p PV reads. Whether it
+is on in the process you are talking to is `rest_read_rate_limit` in `epics-pv://health`, whose
+name carries that REST-only reach, so the field cannot be read as an all-clear for PV reads.
+Two caveats:
   the ChannelFinder/Alarm/Olog/Naming reachability self-checks are HTTP HEADs and bypass the
   throttle entirely, but the ARCHIVER's is not, it is a real GET of `/mgmt/bpl/getApplianceInfo`
   (it needs a 2xx to tell "reachable" from "wrong endpoint"), so it spends a token like any other
@@ -444,7 +447,9 @@ API or its datastore). Treat every edit as effectively irreversible from here, a
 the raw bytes back; `list_log_attachments` lists each attachment's id, filename and
 fileMetadataDescription. Worth knowing: the by-id endpoint has NO server-side per-log authorization
 (any valid GridFS id grants content). Bytes cross the MCP
-boundary as a workspace file `output_path` (a NEW file, `EPICS_MCP_ALLOWED_ROOTS`-checked, it refuses
+boundary as a workspace file `output_path` (a NEW file, `EPICS_MCP_ALLOWED_ROOTS`-checked, and
+whether that boundary exists at all is `allowed_roots_set` in `epics-pv://health`, true only for a
+value holding a non-blank root and never a claim that the roots are NARROW; it refuses
 to overwrite an existing file or follow a symlink, so a download never loses data or escapes the
 boundary) or, for a small inline image, base64 in the result. The download body is size-capped by
 `EPICS_MCP_OLOG_ATTACH_MAX_BYTES` (a base64 result is capped smaller still, it rides back as response
@@ -687,6 +692,14 @@ concatenate the internal CA PEM **with** the public roots (certifi's `cacert.pem
 PEM and point `EPICS_MCP_CA_BUNDLE` at it. The session pins `trust_env=False` whenever a CA path is set,
 so a stray `REQUESTS_CA_BUNDLE` cannot silently override it. (`EPICS_MCP_TLS_VERIFY=false` disables
 verification entirely, internal-network escape hatch only, never the default.)
+What is in force in a RUNNING server is `rest_tls` in `epics-pv://health`:
+`verification_enabled` resolves the precedence, so a bundle beats a disabled switch and such a
+server is not reported as unverified; `ca_bundle_configured` says whether a bundle is set at all
+(false does NOT mean certifi, since at the plain default `trust_env` stays on for the read
+sessions and an environment `REQUESTS_CA_BUNDLE` can still replace the trust store); and
+`https_plane_configured` says whether any plane speaks TLS at all, because verification being on
+means nothing where there is no certificate. The bundle PATH is in none of them, and no surface
+prints it: that answer is the environment the server was started with.
 
 ### Read record fields directly (`.FIELD`)
 Any channel name works, so append a field suffix to read record metadata without a dedicated tool:
@@ -870,7 +883,10 @@ messages embed the full request URL, an internal host would leak into this file)
   `INVALID_INPUT`). `EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES` **REPLACES** that list, it does
   not extend it: a comma-list becomes the whole allowlist, so naming one extra property silently
   drops the built-in ones, and the same allowlist also decides which properties the RESULTS carry.
-  To keep the defaults, list them alongside the new name. Two honesty rules:
+  To keep the defaults, list them alongside the new name. How many names the effective allowlists
+disclose is `channelfinder_redaction` in `epics-pv://health`, counted through these same
+resolvers; the counters say DISCLOSED, so zero is every owner and property redacted rather than
+a broken configuration, and the entries themselves stay with `epics-doctor`. Two honesty rules:
   the TAG filter semantics (`has_tags`/`lacks_tags`) are **UNVERIFIED** until a differential live
   probe (the property filters were live-verified 2026-07-22); and a silent 0 is not the same thing
   as a refusal. A property name that is NOT on the allowlist, which every misspelling is, is
