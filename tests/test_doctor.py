@@ -1199,17 +1199,60 @@ async def test_unreachable_retrieval_names_the_variable_the_url_came_from(
     check = await _check_retrieval_plane(cfg, 5.0)
 
     assert check.status == "unreachable"
-    assert expected_var in (check.detail or ""), (
-        f"the remedy must name {expected_var}, the variable that carried the failing URL: "
+    # The OBSERVATION half, not mere presence of the name anywhere in the detail. Presence is what
+    # a later change can satisfy accidentally: a post-build audit measured that pinning ``url_var``
+    # to the wrong variable kept this green once another clause in the same detail happened to
+    # mention the right one. What this test is about is which variable carried the failing URL, and
+    # the sentence that says so is the one asserted.
+    assert f"could not reach the service at {expected_var}" in (check.detail or ""), (
+        f"the observation must name {expected_var}, the variable that carried the failing URL: "
         f"{check.detail!r}"
     )
+
+
+def _served_404(*_args: object, **_kwargs: object) -> object:
+    """A rest_get_json that fails the way a host WITH a webapp but WITHOUT this one fails."""
+
+    class _NotFound(Exception):
+        response = SimpleNamespace(status_code=404)
+
+    try:
+        raise _NotFound("404")
+    except _NotFound as cause:
+        raise RestResponseError("wrong webapp") from cause
+
+
+async def _probe_retrieval(
+    monkeypatch: pytest.MonkeyPatch, *, retrieval_url: str, payload: object
+) -> PlaneCheck:
+    """Run the retrieval plane against a faked TRANSPORT, with the real identity probe restored.
+
+    The restore matters: the module's autouse ``_identity_never_touches_the_network`` replaces
+    ``_identify_retrieval_plane`` for every test here, and under it an identity row measures a plain
+    ``ok`` while READING as though it exercised the identity path. The real function comes from the
+    module-level import, which holds the object captured before any stubbing.
+    """
+    cfg = _set_config(
+        monkeypatch, archiver_url="http://arch.example:17665", archiver_retrieval_url=retrieval_url
+    )
+    if callable(payload):
+        probe: object = payload
+    elif isinstance(payload, Exception):
+        probe = Mock(side_effect=payload)
+    else:
+        probe = Mock(return_value=payload)
+    monkeypatch.setattr("epics_mcp.services.doctor.rest_get_json", probe)
+    monkeypatch.setattr(
+        "epics_mcp.services.doctor._identify_retrieval_plane", _identify_retrieval_plane
+    )
+    return await _check_retrieval_plane(cfg, 5.0)
 
 
 @pytest.mark.parametrize(
     ("payload", "expected_status"),
     [
-        pytest.param(RestConnectionError("refused"), "unreachable", id="transport"),
-        pytest.param({"version": "Some Other Service 1.0"}, "unverified", id="identity"),
+        pytest.param(_served_404, "api_error", id="wrong-webapp"),
+        pytest.param({"version": "Some Other Service 1.0"}, "unverified", id="not-retrieval"),
     ],
 )
 async def test_the_fallback_finding_names_the_variable_that_would_help(
@@ -1222,12 +1265,14 @@ async def test_the_fallback_finding_names_the_variable_that_would_help(
     Following that advice breaks the half that works and leaves the broken half broken. The one
     setting that helps, a retrieval URL of its own, was not named at all. The state is real rather
     than constructed for a test: it was reproduced against a local HTTP server that serves the MGMT
-    routes and resets the connection on /retrieval/, which is a split deployment with the retrieval
-    variable left unset.
+    routes and 404s every /retrieval/ route, which is a split deployment with the retrieval variable
+    left unset.
 
-    Both rows matter and they fail differently: a transport failure carries a remedy that promises
-    "the variable to edit is named at the start of this finding", while ``unverified`` carries NO
-    remedy by design, so there the observation is the only thing that can name a variable at all.
+    Both rows are states in which the HOST ANSWERED, which is the condition for the note at all: a
+    served 404 and a 2xx from something that is not the retrieval webapp. They also fail
+    differently, and both ways matter: ``api_error`` carries a remedy promising "the variable to
+    edit is named at the start of this finding", while ``unverified`` carries NO remedy by design,
+    so there the observation is the only thing that can name a variable at all.
 
     The ORDER is the assertion, not the presence. EPICS_MCP_ARCHIVER_URL keeps being named, because
     it is the URL that was really probed and dropping it would trade one dishonest sentence for
@@ -1235,25 +1280,8 @@ async def test_the_fallback_finding_names_the_variable_that_would_help(
 
     Red-proof on the pre-fix code: the first variable named is EPICS_MCP_ARCHIVER_URL in both rows,
     and EPICS_MCP_ARCHIVER_RETRIEVAL_URL appears nowhere.
-
-    ⚠️ The identity row has to UNDO the autouse stub above: ``_identity_never_touches_the_network``
-    replaces ``_identify_retrieval_plane`` with a benign "identified" for every test in this module,
-    and under it this row measured a plain ``ok`` while looking like it exercised the identity path.
-    The real function is restored from the module-level import, which holds the object captured
-    before any stubbing, and the transport seam stays faked so nothing reaches the network.
     """
-    cfg = _set_config(
-        monkeypatch, archiver_url="http://arch.example:17665", archiver_retrieval_url=""
-    )
-    probe = (
-        Mock(side_effect=payload) if isinstance(payload, Exception) else Mock(return_value=payload)
-    )
-    monkeypatch.setattr("epics_mcp.services.doctor.rest_get_json", probe)
-    monkeypatch.setattr(
-        "epics_mcp.services.doctor._identify_retrieval_plane", _identify_retrieval_plane
-    )
-
-    check = await _check_retrieval_plane(cfg, 5.0)
+    check = await _probe_retrieval(monkeypatch, retrieval_url="", payload=payload)
     detail = check.detail or ""
     named = re.findall(r"EPICS_MCP_[A-Z_]+", detail)
 
@@ -1265,6 +1293,58 @@ async def test_the_fallback_finding_names_the_variable_that_would_help(
     assert "EPICS_MCP_ARCHIVER_URL" in named, (
         f"the URL that was actually probed must still be named: {detail!r}"
     )
+
+
+@pytest.mark.parametrize(
+    ("retrieval_url", "expected_first", "reason"),
+    [
+        pytest.param(
+            "",
+            "EPICS_MCP_ARCHIVER_URL",
+            "the host never answered, so a retrieval URL of its own cannot help",
+            id="host-never-answered",
+        ),
+        pytest.param(
+            "http://arch.example:17668",
+            "EPICS_MCP_ARCHIVER_RETRIEVAL_URL",
+            "there was no fallback: this URL came from the retrieval variable",
+            id="split-port-untouched",
+        ),
+    ],
+)
+async def test_the_fallback_note_stays_out_where_it_would_mislead(
+    monkeypatch: pytest.MonkeyPatch, retrieval_url: str, expected_first: str, reason: str
+) -> None:
+    """The other half of BG-DFIX(b), and it is the half the first version got WRONG.
+
+    The note is only true, and only useful, when the HOST ANSWERED: then "which webapp does this
+    URL serve" is a live question and giving retrieval a URL of its own is the fix. When the host
+    did not answer at all, the same note leads with an EMPTY variable while the thing to repair is
+    the address, or the service, behind EPICS_MCP_ARCHIVER_URL. Measured on the first version of
+    this change, against a closed port: BOTH archiver planes failed, nothing had earned a ✓, and
+    the retrieval finding still opened with EPICS_MCP_ARCHIVER_RETRIEVAL_URL. That is the same
+    misdirection the ticket is about, moved into a different configuration rather than removed.
+
+    ``reachable`` is the discriminator rather than a list of statuses, because it is the question
+    itself: measured, it is False for exactly the transport and TLS failures (``unreachable``,
+    ``ca_error``) and True for every state in which the host produced a response.
+
+    The second row guards the other exit: with a retrieval URL of its own there was no fallback, so
+    a note claiming one would be false. Deleting the ``cfg.archiver_retrieval_url or`` half of the
+    condition leaves this row red and the rest of the suite green.
+
+    Red-proof: dropping the reachable test reddens the first row; dropping the retrieval-URL test
+    reddens the second.
+    """
+    check = await _probe_retrieval(
+        monkeypatch, retrieval_url=retrieval_url, payload=RestConnectionError("refused")
+    )
+    detail = check.detail or ""
+    named = re.findall(r"EPICS_MCP_[A-Z_]+", detail)
+
+    assert check.status == "unreachable", f"expected a transport failure: {detail!r}"
+    assert named[:1] == [expected_first], f"{reason}, so the finding must lead with it: {detail!r}"
+    assert "fell back" not in detail, f"a fallback is claimed where {reason}: {detail!r}"
 
 
 #: The measured wrong sentence: the api_error remedy told EVERY plane that the right webapp of an
@@ -2008,6 +2088,11 @@ def test_the_problem_verdict_names_what_failed_before_what_did_not() -> None:
     ORDER is asserted, not just presence. "alarm is somewhere in the sentence" would also hold for
     the sentence that reads worst, the one that opens with the two planes nobody has to fix today.
 
+    The COUNTS are asserted too, as the exact rendered fragments. They are the one part of this
+    sentence nothing else pins: a post-build audit measured that adding a constant to both of them
+    left the whole suite green, in a repository that has an open ticket about a prose number nobody
+    compared (BG-DBYTE).
+
     Red-proof on the pre-fix code: no plane name appears at all, so both the naming and the ordering
     assertion fail.
     """
@@ -2038,6 +2123,15 @@ def test_the_problem_verdict_names_what_failed_before_what_did_not() -> None:
     )
     assert verdict.index("channelfinder") < min(verdict.index("archiver"), verdict.index("olog")), (
         f"the verdict names a plane nobody has to fix before the one that failed: {verdict!r}"
+    )
+    assert "1 configured plane(s) FAILED: channelfinder" in verdict, (
+        f"the failure count is not the number of failing planes: {verdict!r}"
+    )
+    assert "1 degraded (archiver); 1 unverified (olog)" in verdict, (
+        f"a tail count does not match the list it summarises: {verdict!r}"
+    )
+    assert "(see above). Also" in verdict, (
+        f"the headline and the tail run together as one sentence: {verdict!r}"
     )
 
 

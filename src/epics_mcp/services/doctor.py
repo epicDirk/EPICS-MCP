@@ -1080,7 +1080,7 @@ async def _check_retrieval_plane(cfg: EpicsConfig, timeout: float) -> PlaneCheck
         return _identify_retrieval_plane(url, cfg.archiver_auth or None, timeout)
 
     probed = await _run_probe("archiver_retrieval", _run, _id, url_var=url_var)
-    if cfg.archiver_retrieval_url or probed.status == "ok":
+    if cfg.archiver_retrieval_url or probed.status == "ok" or not probed.reachable:
         return probed
     # The fallback finding used to open with EPICS_MCP_ARCHIVER_URL, and both remedies that promise
     # "the variable to edit is named at the start of this finding" therefore pointed at the variable
@@ -1098,6 +1098,15 @@ async def _check_retrieval_plane(cfg: EpicsConfig, timeout: float) -> PlaneCheck
     # fallback to report) and `config_error` (the retrieval variable is SET there) both return above
     # this line. An `is not ok` test placed on the function's return would have covered `disabled`
     # too and claimed a fallback for a plane that never had a URL.
+    #
+    # `reachable` is the third condition, and the first version of this change did NOT have it,
+    # which made the fix move the defect instead of removing it. When the host does not answer at
+    # all, the mgmt plane fails on the line above, nothing has earned a ✓, and the address or the
+    # service behind EPICS_MCP_ARCHIVER_URL is what has to be repaired: leading with an EMPTY
+    # variable there is the same misdirection in a different configuration. Measured against a
+    # closed port. It is `reachable` rather than a list of statuses because it IS the question,
+    # "did this host produce a response": measured False for exactly the transport and TLS
+    # failures, True for every state in which something answered and only the WEBAPP is in doubt.
     prefix = (
         "EPICS_MCP_ARCHIVER_RETRIEVAL_URL is empty, so this plane fell back to the MGMT URL in "
         "EPICS_MCP_ARCHIVER_URL and probed retrieval there:"

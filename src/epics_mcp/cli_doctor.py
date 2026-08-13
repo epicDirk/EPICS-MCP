@@ -326,8 +326,11 @@ def _armed_gate_names(report: DoctorReport) -> list[str]:
 
 
 #: The report's honest-but-not-healthy lists, in verdict-precedence order, each with the word the
-#: tail clause uses for it. The words are the JSON field names minus their suffix ON PURPOSE, so the
-#: sentence a human reads and the key a script reads are one vocabulary rather than two.
+#: tail clause uses for it. The word is the one a ``--json`` reader meets in the field name, so the
+#: human sentence and the machine key stay one vocabulary; it is NOT mechanically the field name
+#: minus a suffix, and the entry that shows why is ``inconclusive_identity_planes``, whose
+#: field-minus-suffix would be ``inconclusive_identity`` while both the guide and the verdict branch
+#: above call that state "inconclusive".
 #:
 #: Read as FIELDS of the report rather than re-derived from ``report.planes``: ``run_doctor`` has
 #: already classified every plane into exactly these lists, and a second classification here would
@@ -338,15 +341,26 @@ _OTHER_STATES: tuple[tuple[str, str], ...] = (
     ("unverified_planes", "unverified"),
 )
 
+#: The fields a branch may declare as already named. Pinned so a typo in a ``named=`` argument is
+#: loud: without it the branch keeps its own category in the tail as well, and the verdict names the
+#: same planes twice while every test stays green (measured).
+_NAMEABLE_STATES: frozenset[str] = frozenset(field for field, _ in _OTHER_STATES)
+
 
 def _other_states_clause(report: DoctorReport, *, named: frozenset[str]) -> str:
     """The honest-but-not-healthy states this verdict has NOT already named, as one tail clause.
 
-    ONE seam for every branch, so a category can be added to the report without being carried into
-    each verdict by hand: a branch declares what IT names and gets the rest. Measured on the code
-    this replaces, over every state ``run_doctor`` can build: eleven of them printed a verdict that
-    hid at least one plane NAME, and the operator who fixed what the sentence named then found the
-    next thing.
+    ONE seam for the three branches that can hide something, so a category can be added to the
+    report without being carried into each of them by hand: a branch declares what IT names and
+    gets the rest. ⚠️ It is three of the five verdict branches, NOT all five: the
+    ``verification_complete`` and bare-``unverified`` branches are reachable only when the other
+    lists are empty, so they have nothing to add and do not call this.
+
+    Measured on the code this replaces, over every state ``run_doctor`` can build: eleven of
+    sixteen printed a verdict that hid the NAME of a plane in one of these three categories, and
+    the operator who fixed what the sentence named then found the next thing. (Twelve hid a plane
+    name of any kind; the twelfth is the failed branch naming no failure at all, which is its own
+    change.)
 
     Planes are NAMED, never counted alone. The clause this generalises counted them ("N other
     plane(s) also unverified") while the two branches that disclosed at all printed names, so the
@@ -357,6 +371,9 @@ def _other_states_clause(report: DoctorReport, *, named: frozenset[str]) -> str:
     ``services/doctor.py``: this clause is appended to sentences of very different lengths, so a
     direction is a promise about layout that the layout does not keep.
     """
+    unknown = named - _NAMEABLE_STATES
+    if unknown:  # pragma: no cover - a caller typo, loud rather than a silently doubled clause
+        raise ValueError(f"not honest-but-not-healthy report fields: {sorted(unknown)}")
     parts: list[str] = []
     for field, word in _OTHER_STATES:
         if field in named:
@@ -416,7 +433,9 @@ def _render(report: DoctorReport) -> str:
             if failed
             else "a configured plane failed"
         )
-        verdict = f"PROBLEM, {what} (see above)" + _other_states_clause(report, named=frozenset())
+        # The full stop is the tail's, not the headline's: without it this branch, and only this
+        # branch, ran two sentences together, since the other two end their own text in one.
+        verdict = f"PROBLEM, {what} (see above)." + _other_states_clause(report, named=frozenset())
     elif category == "inconclusive":
         # The S4 lie in its exact form: "all configured planes healthy" was printed for a
         # ChannelFinder URL at a week-dead container because a neighbour answered 401. That probe

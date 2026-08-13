@@ -687,9 +687,16 @@ class TestWritingTheBlock:
             cli_init.main(argv)
 
         assert exit_info.value.code == 2
-        message = capsys.readouterr().err
+        # The ERROR line only. argparse prints its usage line first and that already lists every
+        # option, so a check over the whole of stderr passes on any wording at all: measured, a
+        # refusal reading "that combination cannot mean anything" satisfied it.
+        stderr = capsys.readouterr().err
+        error_line = next(
+            (line for line in stderr.splitlines() if line.startswith("epics-init: error:")), ""
+        )
+        assert error_line, f"no argparse error line in stderr: {stderr!r}"
         for option in mentions:
-            assert option in message, f"the refusal does not name {option}: {message!r}"
+            assert option in error_line, f"the refusal does not name {option}: {error_line!r}"
 
     def test_absolute_command_names_the_resolved_path(
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
