@@ -1200,6 +1200,68 @@ async def test_unreachable_retrieval_names_the_variable_the_url_came_from(
     )
 
 
+@pytest.mark.parametrize(
+    ("payload", "expected_status"),
+    [
+        pytest.param(RestConnectionError("refused"), "unreachable", id="transport"),
+        pytest.param({"version": "Some Other Service 1.0"}, "unverified", id="identity"),
+    ],
+)
+async def test_the_fallback_finding_names_the_variable_that_would_help(
+    monkeypatch: pytest.MonkeyPatch, payload: object, expected_status: str
+) -> None:
+    """BG-DFIX(b): with EPICS_MCP_ARCHIVER_RETRIEVAL_URL empty this plane probes the MGMT URL, and
+    a finding then sent the operator to edit EPICS_MCP_ARCHIVER_URL, the variable that got a ✓ on
+    the line above (the archiver plane answered; only its retrieval webapp did not).
+
+    Following that advice breaks the half that works and leaves the broken half broken. The one
+    setting that helps, a retrieval URL of its own, was not named at all. The state is real rather
+    than constructed for a test: it was reproduced against a local HTTP server that serves the MGMT
+    routes and resets the connection on /retrieval/, which is a split deployment with the retrieval
+    variable left unset.
+
+    Both rows matter and they fail differently: a transport failure carries a remedy that promises
+    "the variable to edit is named at the start of this finding", while ``unverified`` carries NO
+    remedy by design, so there the observation is the only thing that can name a variable at all.
+
+    The ORDER is the assertion, not the presence. EPICS_MCP_ARCHIVER_URL keeps being named, because
+    it is the URL that was really probed and dropping it would trade one dishonest sentence for
+    another; what changes is which variable the reader meets first.
+
+    Red-proof on the pre-fix code: the first variable named is EPICS_MCP_ARCHIVER_URL in both rows,
+    and EPICS_MCP_ARCHIVER_RETRIEVAL_URL appears nowhere.
+
+    ⚠️ The identity row has to UNDO the autouse stub above: ``_identity_never_touches_the_network``
+    replaces ``_identify_retrieval_plane`` with a benign "identified" for every test in this module,
+    and under it this row measured a plain ``ok`` while looking like it exercised the identity path.
+    The real function is restored from the module-level import, which holds the object captured
+    before any stubbing, and the transport seam stays faked so nothing reaches the network.
+    """
+    cfg = _set_config(
+        monkeypatch, archiver_url="http://arch.example:17665", archiver_retrieval_url=""
+    )
+    probe = (
+        Mock(side_effect=payload) if isinstance(payload, Exception) else Mock(return_value=payload)
+    )
+    monkeypatch.setattr("epics_mcp.services.doctor.rest_get_json", probe)
+    monkeypatch.setattr(
+        "epics_mcp.services.doctor._identify_retrieval_plane", _identify_retrieval_plane
+    )
+
+    check = await _check_retrieval_plane(cfg, 5.0)
+    detail = check.detail or ""
+    named = re.findall(r"EPICS_MCP_[A-Z_]+", detail)
+
+    assert check.status == expected_status, f"expected {expected_status}: {detail!r}"
+    assert named[:1] == ["EPICS_MCP_ARCHIVER_RETRIEVAL_URL"], (
+        "the fallback finding must lead with the variable that would fix it, not with the one that "
+        f"just passed its own probe: {detail!r}"
+    )
+    assert "EPICS_MCP_ARCHIVER_URL" in named, (
+        f"the URL that was actually probed must still be named: {detail!r}"
+    )
+
+
 async def test_retrieval_url_without_archiver_url_is_a_config_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

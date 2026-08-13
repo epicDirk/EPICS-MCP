@@ -1072,7 +1072,30 @@ async def _check_retrieval_plane(cfg: EpicsConfig, timeout: float) -> PlaneCheck
     def _id() -> PlaneCheck:
         return _identify_retrieval_plane(url, cfg.archiver_auth or None, timeout)
 
-    return await _run_probe("archiver_retrieval", _run, _id, url_var=url_var)
+    probed = await _run_probe("archiver_retrieval", _run, _id, url_var=url_var)
+    if cfg.archiver_retrieval_url or probed.status == "ok":
+        return probed
+    # The fallback finding used to open with EPICS_MCP_ARCHIVER_URL, and both remedies that promise
+    # "the variable to edit is named at the start of this finding" therefore pointed at the variable
+    # that had just earned a ✓ one line above: the MGMT webapp answered, only retrieval did not.
+    # Following that advice breaks the working half and leaves the broken half broken, while the one
+    # setting that helps was not named at all.
+    #
+    # So the empty variable LEADS and the observation keeps its own text behind it. Every clause is
+    # something this function measured: the retrieval variable IS empty, the fallback DID happen,
+    # and the URL that failed DID come from the mgmt variable, which stays named because dropping it
+    # would trade one dishonest sentence for another.
+    #
+    # Wrapped around the _run_probe result rather than around the function's own return, which is
+    # what keeps the two earlier exits out of it: `disabled` (both variables empty, so there was no
+    # fallback to report) and `config_error` (the retrieval variable is SET there) both return above
+    # this line. An `is not ok` test placed on the function's return would have covered `disabled`
+    # too and claimed a fallback for a plane that never had a URL.
+    prefix = (
+        "EPICS_MCP_ARCHIVER_RETRIEVAL_URL is empty, so this plane fell back to the MGMT URL in "
+        "EPICS_MCP_ARCHIVER_URL and probed retrieval there:"
+    )
+    return probed.model_copy(update={"detail": f"{prefix} {probed.detail or ''}".rstrip()})
 
 
 #: The exact ``elastic.status`` the Alarm Logger reports when its Elasticsearch is healthy (measured
