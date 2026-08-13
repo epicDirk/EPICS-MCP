@@ -95,6 +95,22 @@ carry breaking changes).
 
 ### Fixed
 
+- **A password in a service URL was handed to the client in the clear.** `epics-pv://config`
+  printed `channelfinder_url`, `archiver_url` and `alarm_url` exactly as configured, and those
+  fields are unvalidated strings: `https://user:password@host/path` is an ordinary spelling for
+  them, so a deployment that used it published its password into whatever transcript the client
+  keeps. A userinfo is now removed from each of them. Everything else is kept CHARACTER FOR
+  CHARACTER, because the documented use of this resource is to compare the running server's
+  configuration with the block in a client's configuration file, and the redaction that already
+  existed for the logbook URL cannot serve that: it rebuilds the address from the parse, which
+  lower-cases the host, drops a query and a fragment and percent-encodes a space. The boundary is
+  urllib3's, the parser `requests` connects through, so a password containing `@` loses its whole
+  tail rather than only the part before the first one. An address whose userinfo cannot be removed
+  provably is `null` instead of printed, which covers a URL the parser refuses, a spelling in
+  which the `@` is not a userinfo at all, and one where an `@` survives the removal. `"(disabled)"`
+  still means the plane is not configured. ⚠️ A token in a QUERY STRING is not removed; that is the
+  price of the character-for-character promise. Credentials belong in the `EPICS_MCP_*_AUTH`
+  header variables, never in a URL.
 - **Editing a logbook entry you had just read destroyed it, and nothing said so.** A read gives a
   body back in two shapes, the raw `source` its author wrote and the `description` the server
   rendered from it, and nothing marked which of the two `update_log_entry` wants. Since that
