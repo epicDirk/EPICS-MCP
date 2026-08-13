@@ -3233,9 +3233,10 @@ async def test_stripped_tool_still_returns_structured_content(
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
 # RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-13 after BG-DOC: the
-# core lane is 65_402 and the full lane 78_207 (the docstring below carries the deltas, and the
-# pairs 64_719 / 77_524 measured on the tree just before that edit, 64_719 / 75_853 from
-# 2026-08-08, 64_719 / 74_899 from 2026-08-06 and 63_017 / 72_508 from 2026-08-02 are superseded).
+# core lane is 65_692 and the full lane 78_497 (the docstring below carries the deltas, and the
+# pairs 65_402 / 78_207 from earlier the same day, 64_719 / 77_524 measured on the tree before
+# BG-DOC began, 64_719 / 75_853 from 2026-08-08, 64_719 / 74_899 from 2026-08-06 and
+# 63_017 / 72_508 from 2026-08-02 are superseded).
 # ⚠ This sentence and the docstring's are TWO copies of the same measurement and they have
 # drifted apart once already, in the very commit that added the third figure: keep them in one
 # edit. Re-MEASURE these two after
@@ -3255,12 +3256,15 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 65_402 and the full lane
-    78_207, re-measured 2026-08-13 on both lanes after BG-DOC put the alarm-level invariant where an
-    assistant reads it: the full text on ``get_pv_info`` and a pointing half-sentence on each tool
-    whose description already delegates the alarm block to it, +683 on BOTH lanes, every char of it
-    description text. Both lanes move by the same amount here because all of those are CORE tools,
-    the mirror image of the five display-gated edits below.
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 65_692 and the full lane
+    78_497, re-measured 2026-08-13 on both lanes, twice, for the two BG-DOC edits that reach the
+    wire. The alarm-level invariant went where an assistant reads it, the full text on
+    ``get_pv_info`` and a pointing half-sentence on each tool whose description already delegates
+    the alarm block to it, 64_719 / 77_524 -> 65_402 / 78_207 (+683 on both); then
+    ``set_pv_value`` stopped claiming to be the authority over whether a write lands and pointed at
+    the guide for the layer that is, 65_402 / 78_207 -> 65_692 / 78_497 (+290 on both). Every char
+    of both is description text. Both lanes move by the same amount because every tool touched is
+    CORE, the mirror image of the five display-gated edits below.
 
     ⚠ The full-lane figure had drifted AGAIN before this edit, and the two copies had also drifted
     apart from each other, which is the pair of failures the constant's comment above predicts. It

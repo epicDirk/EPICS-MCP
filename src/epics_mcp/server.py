@@ -324,7 +324,9 @@ async def set_pv_value(
     Protected by safety layer: environment gate, regex allowlist, rate-limit (10/min default),
     audit logging to a durable path (EPICS_MCP_AUDIT_LOG_FILE) and a loopback-only EPICS client
     search reach; a write-enabled server refuses to start without either of the last two. The
-    load-bearing, client-independent guard.
+    load-bearing, client-independent guard on whether this SERVER attempts the write. Whether it
+    LANDS is the IOC's own access security, which this server does not model: an allowlisted name
+    is our policy, not a promise about the record. See the epics-pv://guide resource.
 
     Value bounds (always-on, pre-put): the written value is checked against the record's OWN drive
     limits (control DRVL/DRVH, read on the pre-read). An out-of-range value is denied with
@@ -354,7 +356,8 @@ async def set_pv_value(
     before every write - even under bypassPermissions - and, on a recognising client, fails closed:
     a non-interactive run denies the call rather than writing silently, so a headless write needs a
     reachable human (or the client's programmatic approval callback). An older or non-recognising
-    client ignores the hint; the server-side safety layer above is what actually gates the write.
+    client ignores the hint; the server-side safety layer above is what actually gates the CALL,
+    with the IOC deciding the write itself as described there.
     """
     return await _set_pv_value(pv_name, value, timeout)
 

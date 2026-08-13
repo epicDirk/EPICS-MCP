@@ -194,6 +194,16 @@ carry breaking changes).
 
 ### Changed
 
+- **`set_pv_value` no longer reads as the authority over whether a write lands.** Its description
+  said "the load-bearing, client-independent guard" and closed by calling the safety layer "what
+  actually gates the write". Both are now scoped to what this server decides, which is whether it
+  ATTEMPTS the put; the IOC's own access security decides whether the value lands, and this server
+  neither reads nor models it. The description points at `epics-pv://guide` for the detail rather
+  than growing, which is this repository's own convention for that. Nothing about the gates or the
+  wire changed. ⚠️ What a refusal at the IOC looks like from here is stated in the guide as **not
+  measured**: no live test in this project has an IOC decline a write. What is measured, and what
+  the guide sends you to instead, is the always-on readback: a value that did not land comes back
+  `verified=false` whatever the reason.
 - **The alarm reply says which of its two levels answers "why".** `get_pv_info` now states in its
   own description that `alarm.status_text` is the coarse pvData NT category of the alarm SOURCE
   (DEVICE, RECORD, DB and the like) while the fine CA STAT condition (HIHI, LOLO, UDF, SIMM) is

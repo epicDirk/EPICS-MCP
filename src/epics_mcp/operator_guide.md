@@ -218,7 +218,29 @@ An unbalanced double quote in `title` makes the server throw, which an anonymous
 (Olog's error dispatch requires auth and so masks its own 400). On this read path a 401 almost always
 means the QUERY was rejected, not that credentials are wrong.
 
-### PV write posture (`set_pv_value`): the audit trail
+### PV write posture (`set_pv_value`): who actually decides
+
+**Two layers decide a write, and this server is only the first of them.** The gate here (the env
+switch, the regex allowlist, the rate limit, the audit trail below) decides whether this server
+ATTEMPTS the put. Whether the value LANDS is the IOC's decision, through its own access security,
+which this server neither reads nor models: nothing in it knows what an IOC permits, and an
+allowlisted PV name is a statement about our policy, never a promise about the record. So do not
+report a sanctioned write as done because the gate let it through, and do not read a refusal at the
+IOC as a fault in this server.
+
+The practical consequence is the same either way, and it does not depend on knowing WHY a value did
+not land: every sanctioned put is read back and compared (see the readback verdicts below), so a
+write the IOC declined surfaces as `verified=false` with the readback that was actually seen. Judge
+the outcome from that field, not from the absence of an error.
+
+⚠️ **What form a refusal at the IOC takes here is NOT measured.** There is no live test in this
+project that has an IOC decline a write, and the access-security tests that exist are static ones
+over the database file. A refusal would arrive through the ordinary put-failure path, which
+classifies by message text and has no category of its own for "the IOC said no", so it can be
+expected to read as a connection-class error rather than an authorisation one. Treat that as the
+shape to expect, not as a documented promise, and prefer the readback verdict, which is measured.
+
+### The audit trail
 
 A `set_pv_value` write leaves a `PV_WRITE` audit line at each stage. A write-enabled server
 **refuses to start** unless `EPICS_MCP_AUDIT_LOG_FILE` names a durable path, an ephemeral stderr
