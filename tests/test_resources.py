@@ -2,6 +2,66 @@
 
 from epics_mcp.resources import get_epics_config, get_health
 
+#: Every top-level key the two resources put on the wire, declared rather than derived: an
+#: expectation read off the payload is satisfied by whatever the payload happens to say, which is
+#: the one thing these two cannot check. Both URIs are documented in ``docs/tools.md`` and are what
+#: ``docs/deployment.md`` sends an approver to, so a key appearing or vanishing is a contract change
+#: and has to show up in a diff rather than in a support question.
+_HEALTH_KEYS = frozenset(
+    {
+        "server",
+        "version",
+        "status",
+        "provider",
+        "write_enabled",
+        "write_pattern",
+        "write_rate_limit",
+        "uptime_seconds",
+        "python_version",
+        "p4p_version",
+        "channelfinder_enabled",
+        "archiver_enabled",
+        "alarm_enabled",
+        "olog_enabled",
+    }
+)
+
+_CONFIG_KEYS = frozenset(
+    {
+        "provider",
+        "default_timeout",
+        "max_batch_size",
+        "max_monitor_duration",
+        "max_monitor_events",
+        "allow_pv_write",
+        "pv_write_pattern",
+        "write_rate_limit",
+        "channelfinder_url",
+        "archiver_url",
+        "alarm_url",
+    }
+)
+
+
+def test_health_key_set_is_exact() -> None:
+    """The key set was unpinned, so a key could be added or dropped with the whole suite green.
+
+    ``test_health_shape`` below asserts a SUBSET deliberately, which is the right shape for "these
+    are mandatory" and the wrong one for "this is the wire contract": it cannot see an addition at
+    all, and that is how the payload came to describe four of the seven planes without anyone
+    deciding to. This one is the second half, and it is meant to go red on every future edit.
+    """
+    assert set(get_health()) == set(_HEALTH_KEYS)
+
+
+def test_config_key_set_is_exact() -> None:
+    """The same pin for the configuration payload, and it is the more exposed of the two.
+
+    Its keys carry service URLs, so an addition here is not only a contract change but a disclosure
+    decision, and ``test_config_no_secrets`` cannot make it: that one reads key NAMES, never values.
+    """
+    assert set(get_epics_config()) == set(_CONFIG_KEYS)
+
 
 def test_health_shape() -> None:
     result = get_health()
