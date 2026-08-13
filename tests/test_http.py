@@ -37,6 +37,7 @@ from epics_mcp.services._http import (
     rest_get_json,
     rest_put_json,
     url_host,
+    url_without_userinfo,
 )
 from epics_mcp.services.archiver_exceptions import (
     ArchiverConnectionError,
@@ -702,3 +703,164 @@ def test_read_throttle_window_slides() -> None:
     throttle.check()  # stale token purged → admitted
     with pytest.raises(RateLimitError):
         throttle.check()  # window is full again
+
+
+# ----------------------------------------------------------------------------------------------
+# url_without_userinfo, the redaction epics-pv://config prints its three service URLs through
+#
+# The sibling url_without_credentials is tested next to its one caller, in test_doctor.py under
+# "the printed Olog target". The two are deliberately different functions and the difference is
+# the point: that one rebuilds (and normalises), this one deletes (and withholds what it cannot
+# prove), because a payload a client compares against its own configuration must not be reworded.
+# ----------------------------------------------------------------------------------------------
+
+
+#: Every spelling this redaction has been measured against, with the exact answer it must give.
+#: A table rather than a handful of asserts because the failures that matter here are all in the
+#: SPELLINGS, not in the branches: a mutation sweep over the implementation showed seven of nine
+#: mutants dying on one row each, and no two of them on the same row.
+_REDACTION_TABLE: tuple[tuple[str, str | None], ...] = (
+    # No "@" at all. Passed through character for character, whatever the string looks like,
+    # because there is nothing in it that could be a userinfo.
+    ("http://cf.example.org:8080/ChannelFinder", "http://cf.example.org:8080/ChannelFinder"),
+    (
+        "http://CF.Example.ORG:8080/Channel Finder?x=1#f",
+        "http://CF.Example.ORG:8080/Channel Finder?x=1#f",
+    ),
+    ("(disabled)", "(disabled)"),
+    ("", ""),
+    ("not a url", "not a url"),
+    # A userinfo urllib3 recognises. Removed, and nothing else moves: the host keeps its case, the
+    # path keeps its space, the query and the fragment stay. A rebuild from the parse would return
+    # a lower-cased host and a percent-encoded space here, which is what row four is for.
+    ("https://svc:hunter2@cf.example.org:8080/CF", "https://cf.example.org:8080/CF"),
+    ("https://svc:hun@ter2@cf.example.org:8080/CF", "https://cf.example.org:8080/CF"),
+    ("https://svc@cf.example.org/CF", "https://cf.example.org/CF"),
+    (
+        "https://SVC:PW@CF.Example.ORG/Channel Finder?q=1#f",
+        "https://CF.Example.ORG/Channel Finder?q=1#f",
+    ),
+    ("https://svc:p%40w@cf.example.org/CF", "https://cf.example.org/CF"),
+    ("https://svc:pw@cf.example.org", "https://cf.example.org"),
+    ("http://svc:pw@cf.example.org?token=ab", "http://cf.example.org?token=ab"),
+    ("https://svc:pw@cf.example.org#note", "https://cf.example.org#note"),
+    ("https://svc:pw@[::1]:8080/Olog", "https://[::1]:8080/Olog"),
+    # Withheld: a delimiter inside the password makes urllib3 refuse the whole URL, so there is no
+    # boundary to trust. Echoing the string back is what an earlier draft of this function did,
+    # and it printed the password.
+    ("https://svc:s3cr3t/x@cf.example.org/CF", None),
+    ("https://svc:s3cr3t?x@cf.example.org/CF", None),
+    ("https://svc:s3cr3t#x@cf.example.org/CF", None),
+    # Withheld: no address a socket could follow. urllib3 reads no host at all here (one slash too
+    # few, a leading space, a scheme-shaped prefix), so its "no userinfo" verdict says nothing.
+    ("https:/svc:s3cr3t@al.example.org/alarm", None),
+    (" https://svc:s3cr3t@cf.example.org/CF", None),
+    ("svc:s3cr3t@cf.example.org/CF", None),
+    ("http:svc:s3cr3t@cf.example.org/CF", None),
+    ("svc@//user:s3cr3t@cf.example.org/CF", None),
+    ("@@", None),
+    # Withheld: urllib3 reads the "@" differently than a person writing a credential does. A
+    # backslash or a slash inside the USER NAME ends the authority for the parser, so the password
+    # lands in the path and the host is a fragment of the user name (measured: "domain", "user").
+    ("https://DOMAIN\\svc:s3cr3t@cf.example.org/CF", None),
+    ("https://user/name:s3cr3t@cf.example.org/CF", None),
+    ("https://svc:p@ss/w0rd@cf.example.org/CF", None),
+    # Withheld: a backslash in the AUTHORITY. urllib3 connects to the host in front of it, a
+    # delimiter scan would cut past it and name the host behind it, so the two readings disagree
+    # and the address is not shown. Both spellings, with and without a userinfo.
+    ("http://svc:s3cr3t@evil.example.org:8080\\@127.0.0.1/Olog", None),
+    ("http://evil.example.org:8080\\@127.0.0.1/Olog", None),
+    ("https://svc:s3cr3t@cf.example.org\\@evil.example.org/CF", None),
+    # Withheld: the parser refuses a malformed IPv6 literal.
+    ("https://svc:pw@[::1/Olog", None),
+    # Withheld: a second "@" survives the cut. Nothing distinguishes "a path that contains an @"
+    # from "a password written in a spelling that put its tail into the path", so both go.
+    ("https://svc:pw@cf.example.org/x@y/CF", None),
+    ("https://svc:pw@cf.example.org/x@cf.example.org/CF", None),
+    # Withheld although harmless, and this is the deliberate price: an "@" outside the userinfo is
+    # withheld too. A service ROOT carrying one is not an address this server has had to print.
+    ("http://cf.example.org:8080/CF?mail=a@b", None),
+    ("http://cf.example.org:8080/p@th/CF", None),
+)
+
+#: The secrets planted in :data:`_REDACTION_TABLE`, for the leak scan below. Declared rather than
+#: derived: a scan that reads its own needles off the inputs cannot fail.
+_PLANTED_SECRETS: tuple[str, ...] = ("s3cr3t", "hunter2", "hun@ter2", "ter2", "w0rd", "p%40w")
+
+
+@pytest.mark.parametrize(("url", "expected"), _REDACTION_TABLE)
+def test_the_service_url_redaction_is_pinned_row_by_row(url: str, expected: str | None) -> None:
+    """The exact answer per spelling, because every failure this function has had was a spelling.
+
+    Red-proof, by mutant, since this function did not exist before: the IDENTITY (what the payload
+    did, ``cfg.<x>_url or "(disabled)"``) fails every cut and every withheld row. The narrower
+    mutants each die on their own rows, measured: cutting at the FIRST ``@``, rebuilding from the
+    parse instead of deleting, dropping the "an @ survives" check, dropping the component
+    comparison. Node ids and counts are in the commit that introduced this table.
+    """
+    assert url_without_userinfo(url) == expected
+
+
+def test_no_row_of_the_table_leaks_its_planted_secret() -> None:
+    """The table pins answers; this asks the question the answers exist for, over the whole table.
+
+    The positive control is the load-bearing half: it proves each needle really is in an input, so
+    a typo in a fixture cannot make the absence below vacuously true.
+    """
+    inputs = "\n".join(url for url, _ in _REDACTION_TABLE)
+    for secret in _PLANTED_SECRETS:
+        assert secret in inputs, f"{secret} is not planted anywhere, so its absence proves nothing"
+
+    for url, expected in _REDACTION_TABLE:
+        shown = url_without_userinfo(url) or ""
+        for secret in _PLANTED_SECRETS:
+            assert secret not in shown, f"{url} leaked {secret}"
+        assert shown == (expected or "")  # and the leak scan ran on the value the table pins
+
+
+def test_a_shown_address_is_the_original_minus_one_contiguous_span() -> None:
+    """The structural half of "it does not normalise", and it holds independently of the table.
+
+    An assertion per row can only refuse the normalisations someone thought of. This one refuses
+    all of them at once: whatever comes back has to be the input with ONE contiguous piece cut out,
+    so a lower-cased host, a percent-encoded space or a dropped query cannot be produced at all,
+    since those introduce characters the input never had in that order.
+
+    Red-proof: rebuild the result from ``urllib3.util.parse_url`` and the fourth cut row fails.
+    """
+
+    def is_one_deletion(original: str, shown: str) -> bool:
+        return any(
+            shown == original[:head] + original[tail:]
+            for head in range(len(original) + 1)
+            for tail in range(head, len(original) + 1)
+        )
+
+    cut_rows = 0
+    for url, _expected in _REDACTION_TABLE:
+        shown = url_without_userinfo(url)
+        if shown is None:
+            continue
+        assert is_one_deletion(url, shown), f"{url} came back as more than a deletion: {shown}"
+        cut_rows += shown != url
+
+    # Positive control: the identity function would satisfy the assertion above on every row, so
+    # the table has to contain rows where something really was removed.
+    assert cut_rows >= 9, "the table lost its cut rows, so the property above is vacuous"
+
+
+def test_a_password_that_contains_an_at_sign_loses_its_whole_tail() -> None:
+    """The one property a "the secret is not in the output" assertion cannot see.
+
+    urllib3, the parser ``requests`` connects through, splits the authority at the LAST ``@``; a
+    regex stops at the first. Under the first-``@`` reading ``svc:hun@ter2@host`` keeps ``ter2`` in
+    the clear, and an assertion that only looks for the WHOLE secret passes anyway, because
+    ``hun@ter2`` no longer occurs as one string. So the assertion is on the exact answer, and on
+    the tail on its own.
+
+    Red-proof: swap ``rfind`` for ``find`` in ``url_without_userinfo`` and this fails.
+    """
+    shown = url_without_userinfo("https://svc:hun@ter2@cf.example.org:8080/CF")
+
+    assert shown == "https://cf.example.org:8080/CF"
+    assert shown is not None and "ter2" not in shown  # the half a first-@ split would leave behind

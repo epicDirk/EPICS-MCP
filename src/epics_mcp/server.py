@@ -1757,6 +1757,11 @@ def epics_config() -> dict[str, object]:
     and logbook ones, which appear as booleans in epics-pv://health instead, and the archiver
     retrieval one, whose plane is reported there through the mgmt URL it falls back to. An unset PV
     write pattern is null, never a placeholder string.
+
+    A userinfo (user:password@) is removed from a service URL; every other character is kept, so
+    the value stays comparable with the block in a client configuration file. "(disabled)" means
+    the plane is not configured, and null means it is configured but could not be shown without
+    risking a credential.
     """
     return get_epics_config()
 

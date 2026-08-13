@@ -324,6 +324,13 @@ def test_no_payload_field_carries_a_host_outside_the_three_declared_url_keys(
     channelfinder_url, archiver_url and alarm_url disclosed one before this ticket and still do;
     naming and olog deliberately do not, and neither does the search posture. Without this list the
     next field derived from a URL joins them silently, which is how the payload would drift back.
+
+    ⚠️ ALL THREE permitted fields are configured here, and each of them carries a credential. Both
+    halves of that were missing and both were load-bearing: with only channelfinder_url set, the
+    other two keys read "(disabled)" and the test could not tell a payload that redacts one field
+    from one that redacts three; without credentials, a redaction applied to one field only would
+    still satisfy every assertion. Now the expected values below are the REDACTED spellings, so
+    that mutant fails on two rows.
     """
     # Host names that share no substring with a plane name, so an assertion about a HOST cannot be
     # satisfied or broken by a KEY: "channelfinder" as a host would collide with
@@ -332,7 +339,9 @@ def test_no_payload_field_carries_a_host_outside_the_three_declared_url_keys(
         monkeypatch,
         naming_url="https://names.example.org/",
         olog_url="http://journal.example.org:8080/Olog",
-        channelfinder_url="http://directory.example.org:8080/ChannelFinder",
+        channelfinder_url="http://cf-svc:cf-pw@directory.example.org:8080/ChannelFinder",
+        archiver_url="http://ar-svc:ar-pw@storage.example.org:17665",
+        alarm_url="http://al-svc:al-pw@bells.example.org:8081",
     )
 
     health = json.dumps(get_health())
@@ -342,12 +351,76 @@ def test_no_payload_field_carries_a_host_outside_the_three_declared_url_keys(
         assert withheld not in health, f"health disclosed {withheld}"
         assert withheld not in json.dumps(config), f"config disclosed {withheld}"
 
-    # Positive control, so the assertions above cannot pass on an empty configuration: the one host
-    # that IS disclosed is disclosed, through its declared key and nowhere else.
+    # Positive control, so the assertions above cannot pass on an empty configuration: the three
+    # hosts that ARE disclosed are disclosed, each through its declared key and nowhere else, and
+    # each without the userinfo it was configured with.
     assert config["channelfinder_url"] == "http://directory.example.org:8080/ChannelFinder"
-    assert "directory.example.org" not in health, (
-        "health names planes as booleans, so no plane host belongs in it"
+    assert config["archiver_url"] == "http://storage.example.org:17665"
+    assert config["alarm_url"] == "http://bells.example.org:8081"
+    for disclosed in ("directory.example.org", "storage.example.org", "bells.example.org"):
+        assert disclosed not in health, (
+            "health names planes as booleans, so no plane host belongs in it"
+        )
+
+
+def test_a_credential_in_a_service_url_never_reaches_the_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A password written into one of the three service URLs would land in a chat transcript.
+
+    The three fields are nothing but the configured strings, the config model does not validate
+    them, and ``https://user:password@host/path`` is an ordinary spelling. A resource payload is
+    kept by the client, so this is the one class of disclosure a later fix cannot repair.
+
+    The password CONTAINS an ``@`` on purpose. urllib3, the parser requests connects through,
+    splits the authority at the last one while a regex stops at the first, and under the first-``@``
+    reading the tail ``ter2`` stays in the clear. An assertion that only searched for the whole
+    secret would pass on that, which is why the expected strings are exact and the tail is asserted
+    on its own.
+
+    Red-proof: the pre-fix payload was ``cfg.<x>_url or "(disabled)"``, so all three rows fail.
+    """
+    _with_config(
+        monkeypatch,
+        channelfinder_url="https://svc:hun@ter2@directory.example.org:8080/ChannelFinder",
+        archiver_url="https://svc:hun@ter2@storage.example.org:17665",
+        alarm_url="https://svc:hun@ter2@bells.example.org:8081",
     )
+    config = get_epics_config()
+
+    assert config["channelfinder_url"] == "https://directory.example.org:8080/ChannelFinder"
+    assert config["archiver_url"] == "https://storage.example.org:17665"
+    assert config["alarm_url"] == "https://bells.example.org:8081"
+    assert "ter2" not in json.dumps(config), "a first-@ split would leave the password's tail here"
+    assert "svc" not in json.dumps(config)
+
+
+def test_a_service_url_without_a_credential_is_byte_identical(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The redaction must not normalise, because the documented use of this payload is comparison.
+
+    ``docs/deployment.md`` sends an operator here to hold the running server's configuration
+    against the block in their client's configuration file. The obvious function to reuse
+    (``url_without_credentials``) rebuilds the address from the parse: measured, it lower-cases the
+    host, drops a query and a fragment and percent-encodes a space, so four of five realistic
+    spellings print differently from what the operator typed and the comparison goes
+    false-negative. Every character therefore has to survive.
+
+    Red-proof: point the three fields at ``url_without_credentials`` and rows one and two fail.
+    """
+    spellings = (
+        "http://CF.Example.ORG:8080/Channel Finder",  # case and space
+        "http://cf.example.org:8080/ChannelFinder?x=1#f",  # query and fragment
+        "http://cf.example.org:8080/ChannelFinder/",  # trailing slash
+    )
+    for spelling in spellings:
+        _with_config(monkeypatch, channelfinder_url=spelling)
+        assert get_epics_config()["channelfinder_url"] == spelling
+
+    # And the one non-URL value this field has always been able to carry is untouched by all of it.
+    _with_config(monkeypatch)
+    assert get_epics_config()["channelfinder_url"] == "(disabled)"
 
 
 def test_an_armed_olog_gate_is_visible_in_health(monkeypatch: pytest.MonkeyPatch) -> None:

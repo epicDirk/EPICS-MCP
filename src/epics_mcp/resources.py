@@ -8,6 +8,7 @@ from functools import lru_cache
 
 from epics_mcp import __version__
 from epics_mcp.config import get_config
+from epics_mcp.services._http import url_without_userinfo
 from epics_mcp.write_posture import (
     olog_write_gate_report,
     pv_search_posture,
@@ -132,8 +133,32 @@ def get_health() -> dict[str, object]:
     }
 
 
+def _service_url(configured: str) -> str | None:
+    """One service URL as this payload may show it: no userinfo, otherwise unchanged.
+
+    Three states, and they are three different answers rather than shades of one. The string
+    ``"(disabled)"`` means the plane is not configured at all. A URL means it is configured and is
+    printed CHARACTER FOR CHARACTER apart from a userinfo that was removed, which is what makes it
+    comparable with the block in a client's configuration file, the use ``docs/deployment.md``
+    sends a reader here for. ``None`` means it is configured and could not be shown without
+    risking a credential, see :func:`~epics_mcp.services._http.url_without_userinfo`; the value
+    then stays with the operator's own environment.
+
+    Why a redaction at all: these fields may carry ``https://user:password@host/path``, the config
+    model does not validate them, and a resource payload is kept by the client, so a password
+    written into one of them would land in a conversation transcript.
+    """
+    return url_without_userinfo(configured) if configured else "(disabled)"
+
+
 def get_epics_config() -> dict[str, object]:
-    """Non-secret configuration values."""
+    """Non-secret configuration values, with any userinfo removed from the three service URLs.
+
+    "Non-secret" is a property of the KEYS chosen here, and it used to be an incomplete claim: the
+    three URL fields are the only ones that disclose a host, and a host is exactly where a
+    credential is written when someone spells a service as ``https://user:password@host/path``.
+    They go through :func:`_service_url`, which removes a userinfo and otherwise changes nothing.
+    """
     cfg = get_config()
     return {
         "provider": cfg.provider,
@@ -145,7 +170,7 @@ def get_epics_config() -> dict[str, object]:
         # null rather than a placeholder, see the same field in get_health.
         "pv_write_pattern": cfg.pv_write_pattern or None,
         "write_rate_limit": cfg.write_rate_limit,
-        "channelfinder_url": cfg.channelfinder_url or "(disabled)",
-        "archiver_url": cfg.archiver_url or "(disabled)",
-        "alarm_url": cfg.alarm_url or "(disabled)",
+        "channelfinder_url": _service_url(cfg.channelfinder_url),
+        "archiver_url": _service_url(cfg.archiver_url),
+        "alarm_url": _service_url(cfg.alarm_url),
     }

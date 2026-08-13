@@ -101,6 +101,10 @@ def url_without_credentials(url: str) -> str:
     so four out of five realistic spellings print differently from the string the boundary
     compared. What it IS good for is naming the ADDRESS a write would reach, host and port
     included, which is the question the report asks around it.
+
+    Where a reader has to COMPARE the answer against a configured value instead of reading an
+    address off it, :func:`url_without_userinfo` is the one to reach for: it deletes the userinfo
+    and leaves every other character alone, at the price of withholding what it cannot prove.
     """
     try:
         parsed = urllib3.util.parse_url(url)
@@ -110,6 +114,115 @@ def url_without_credentials(url: str) -> str:
         return "(unparseable)"
     port = f":{parsed.port}" if parsed.port else ""
     return f"{parsed.scheme}://{parsed.host}{port}{parsed.path or ''}"
+
+
+def _authority_span(url: str) -> tuple[int, int]:
+    """The half-open ``[start, end)`` of *url*'s authority, as offsets into the RAW string.
+
+    Offsets rather than the parsed pieces, because urllib3 re-encodes what it hands back
+    (``svc:hun@ter2`` comes out as ``svc:hun%40ter2``), and a caller that wants to delete the
+    userinfo without rewriting anything else has to find it in the original characters. The
+    authority starts after the ``//`` and ends at the first ``/``, ``?`` or ``#``. The span is
+    deliberately never NARROWER than urllib3's own, which also ends at a backslash, so the last
+    ``@`` that parser saw is always inside it; it may be wider, and refusing a cut that used the
+    extra width is the verification's job, not this function's.
+    """
+    separator = url.find("//")
+    start = separator + 2 if separator != -1 else 0
+    ends = (url.find(delimiter, start) for delimiter in "/?#")
+    return start, min((end for end in ends if end != -1), default=len(url))
+
+
+def _keeps_the_same_address(candidate: str, original: urllib3.util.Url) -> bool:
+    """True iff *candidate* is *original*'s address with the userinfo gone and nothing else moved.
+
+    Four conditions, each closing a case the textual cut gets wrong on its own, all measured:
+    no ``@`` survives ANYWHERE (``https://svc:p@ss/w0rd@host/x`` parses with host ``ss``, so
+    cutting its authority would leave half the password behind in the path), the result parses,
+    it carries no userinfo, and it agrees with the original on all six components (a backslash in
+    the authority ends it for urllib3 but not for a delimiter scan, and a cut using the wider span
+    turned ``evil.example.org`` into ``127.0.0.1``, naming a host nothing would connect to).
+
+    The comparison runs on PARSED components on both sides, so urllib3's normalisation cancels out
+    and a result that preserved the original's case, its spaces and its query still compares equal.
+    """
+    if "@" in candidate:
+        return False
+    try:
+        after = urllib3.util.parse_url(candidate)
+    except (urllib3.exceptions.LocationParseError, ValueError):
+        return False
+    if after.auth is not None:
+        return False
+    return (
+        after.scheme,
+        after.host,
+        after.port,
+        after.path,
+        after.query,
+        after.fragment,
+    ) == (
+        original.scheme,
+        original.host,
+        original.port,
+        original.path,
+        original.query,
+        original.fragment,
+    )
+
+
+def url_without_userinfo(url: str) -> str | None:
+    """*url* with its userinfo removed and EVERY OTHER CHARACTER unchanged, or ``None``.
+
+    The sibling of :func:`url_without_credentials`, and the two are not interchangeable. That one
+    REBUILDS the address from the parse, which normalises (lower-cased host, dropped query and
+    fragment, percent-encoded path), and is right where the question is "which ADDRESS would a
+    write reach". This one DELETES a span out of the string, and is right where a reader has to
+    COMPARE the answer against a configured value character for character, which is what
+    ``epics-pv://config`` exists for (``docs/deployment.md``): a normalised address makes that
+    comparison false-negative, showing a difference where there is none.
+
+    The rule in one sentence: an address without an ``@`` is passed through unchanged; an address
+    with one is either PROVABLY the same address minus its userinfo, or it is withheld as ``None``.
+
+    urllib3 decides WHETHER there is a userinfo, because it is the parser ``requests`` connects
+    with and its reading is the one a socket follows. The cut is a pure deletion at the LAST ``@``
+    of the authority (a regex stopping at the first one leaves the tail of a password containing
+    ``@`` in the clear). The result is then handed BACK to urllib3, see
+    :func:`_keeps_the_same_address`; that verification is what refuses the spellings a textual rule
+    alone gets wrong, and ``None`` is the answer whenever it cannot be satisfied.
+
+    The ``auth is None`` clause below STATES the rule rather than adding reach: measured, dropping
+    it changes no row of the pinned table, because the verification refuses those inputs anyway.
+    It is kept because a reader should not have to derive the rule from a backstop.
+
+    ``None`` costs one harmless case on purpose: an ``@`` inside a path or query (``/CF?mail=a@b``)
+    is withheld as well, because nothing distinguishes it from a credential written in a spelling
+    urllib3 reads differently than a person does (``https://DOMAIN\\user:pw@host/x`` parses with
+    host ``domain``). A service ROOT carrying an ``@`` outside its userinfo is not an address this
+    server has ever had to print.
+
+    ⚠️ A token in a QUERY STRING is NOT removed, which is the price of the character-for-character
+    promise; the sibling drops the query for exactly that reason, pinned in
+    ``tests/test_doctor.py::test_a_credential_in_the_olog_url_never_reaches_the_report``. The
+    documented place for credentials is the ``EPICS_MCP_*_AUTH`` header, never the URL, see
+    ``docs/configuration.md`` and ``docs/known-limits.md``.
+    """
+    if "@" not in url:
+        return url  # nothing that could be a userinfo, so nothing to prove
+    try:
+        parsed = urllib3.util.parse_url(url)
+    except (urllib3.exceptions.LocationParseError, ValueError):
+        return None  # the parser refuses the whole URL, so there is nothing to reason about
+    if not parsed.scheme or not parsed.host or parsed.auth is None:
+        return None  # no address a socket could follow, or an "@" urllib3 does not read as one
+    start, end = _authority_span(url)
+    # rfind cannot miss here: urllib3 found a userinfo, and its authority is never wider than the
+    # span above. If it ever did, the candidate would keep its "@" and be refused below rather
+    # than trusted, so this needs no branch of its own.
+    at = url.rfind("@", start, end)
+    candidate = url[:start] + url[at + 1 :]
+    return candidate if _keeps_the_same_address(candidate, parsed) else None
 
 
 def is_loopback_url(url: str) -> bool:

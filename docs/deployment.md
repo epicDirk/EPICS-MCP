@@ -408,7 +408,11 @@ so an environment that names nothing still broadcasts into the local subnets). R
 ran. A server started by an MCP client was given that client's environment, which is the block in
 its configuration file, so compare the two rather than assuming they match. To see it from the
 running server instead, read its `epics-pv://config` and `epics-pv://health` resources through the
-client; those describe the process that is actually answering. `health` carries one boolean per
+client; those describe the process that is actually answering. `config` prints each service URL
+character for character, so the comparison is a comparison, with one exception: a userinfo
+(`user:password@`) is removed from it, and an address whose userinfo could not be removed provably
+is `null` rather than printed. Credentials belong in the `EPICS_MCP_*_AUTH` header variables, not
+in a URL, see [Configuration](configuration.md). `health` carries one boolean per
 SERVICE plane, six of the seven, so "which of the REST planes is even configured" is answerable
 there. The seventh, `live`, has no such key because it is always configured; `pv_search` reports
 it instead, saying whether it broadcasts (the default above) without naming an address. Which
