@@ -431,13 +431,22 @@ write.
 **Does it verify TLS, throttle its reads, and redact?** The same resource, in a posture group at
 the end. `rest_tls.verification_enabled` is the RESOLVED answer rather than the raw switch:
 `EPICS_MCP_CA_BUNDLE` takes precedence over `EPICS_MCP_TLS_VERIFY`, so a server with the switch off
-and a bundle set does verify, and this field says so instead of calling it unverified.
-`rest_read_rate_limit` is the REST GET throttle ALONE; a p4p PV read runs past it, which is what the
-`rest_` prefix is there to say. `allowed_roots_set` says the boundary variable holds at least one
-root, not that the roots are narrow, since a root of `.` satisfies it too. And
-`channelfinder_redaction` counts what the two allowlists DISCLOSE, so zero is everything redacted,
-the most private posture rather than a broken one. The bundle path, the roots and the account names
-are not in the payload: `epics-doctor` prints those.
+and a bundle set does verify, and this field says so instead of calling it unverified. ⚠️ It is
+**true by default**, and on a deployment whose planes are all plain `http://` there is no
+certificate to verify at all, which is why `https_plane_configured` sits beside it: read the two
+together or the first one reads like an all-clear for traffic that is in the clear.
+`rest_read_rate_limit` is the REST GET throttle only (the shared GET path, plus the Naming lookup,
+which consults it itself); a p4p PV read, a monitor and the per-plane liveness probes run past it,
+which is what the `rest_` prefix is there to say. `allowed_roots_set` says the boundary variable
+holds at least one root, not that the roots are narrow, since a root of `.` satisfies it too. And
+`channelfinder_redaction` counts what the two allowlists DISCLOSE, so zero means every owner and
+every property redacted, the most private posture rather than a broken one; a channel's name and
+its tags are not gated by either list and travel regardless.
+
+None of the four carries a value: no bundle path, no root list, no account name. Where the value
+lives differs, and it is worth knowing which: `epics-doctor` prints the ChannelFinder allowlist
+entries, but neither it nor any other surface prints the CA-bundle path or the allowed roots. For
+those two, the answer is the environment the server was started with.
 
 **How do I stop it?** You do not, directly: an MCP server over stdio is a child of the client that
 launched it, and it lives and dies with that client's connection. Disconnect the server in the

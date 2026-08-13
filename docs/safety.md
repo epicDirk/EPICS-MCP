@@ -102,12 +102,15 @@ This is a controls tool, so the trust questions come first.
   question, the `olog_write` block for that gate's allowlist, rate limit and target predicates,
   `pv_search` for the live plane's reach, and a posture group for REST TLS verification, the REST
   read throttle, the opt-in file boundary and the ChannelFinder redaction. Read through the client,
-  it needs no shell and no guess about whose environment you are looking at. What it withholds is
-  what the CLI prints as a VALUE and this payload can carry only as a boolean or a count, because a
-  resource payload is kept by the client: the Olog target URL, the audit path, the raw search-reach
-  strings, the CA-bundle path, the allowed roots, and the ChannelFinder allowlist entries. So the
-  block above remains the fuller answer, and the resource the trustworthy one about **this**
-  process.
+  it needs no shell and no guess about whose environment you are looking at. Four things it
+  withholds are things the CLI does print as a VALUE and this payload carries only as a boolean or
+  a count, because a resource payload is kept by the client: the Olog target URL, the audit path,
+  the raw search-reach strings and the ChannelFinder allowlist entries. Two more, the CA-bundle
+  path and the allowed roots, are withheld here and printed by no surface at all; for those the
+  answer is the server's environment. So for the write gates the
+  block above remains the fuller answer; for TLS verification, the read throttle and the file
+  boundary the resource is the ONLY answer, and in both cases it is the trustworthy one about
+  **this** process.
   The sibling resource `epics-pv://config` does print three service URLs, and the same premise
   lands differently there rather than identically: those three hosts were a deliberate disclosure
   from the start, so the decision was not whether to print an address but what may travel with it.

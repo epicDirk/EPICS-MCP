@@ -142,7 +142,7 @@ command you ran, which need not be the one a running server was started with.
 
 | Resource URI | Description |
 |--------------|-------------|
-| `epics-pv://health` | What this process IS and what it may WRITE: version, uptime, provider, p4p version, one boolean per service plane, both write gates, the PV search posture, and a posture group: REST TLS verification (`ca_bundle` beats a disabled `tls_verify`, and the field says the resolved answer), the REST GET read throttle, whether `EPICS_MCP_ALLOWED_ROOTS` holds a root, and how many ChannelFinder owner accounts and property names the redaction DISCLOSES. Counts and booleans only: no path, no root list and no account name |
+| `epics-pv://health` | What this process IS and what it may WRITE: version, uptime, provider, p4p version, one boolean per service plane, both write gates, the PV search posture, and a posture group: REST TLS verification (`ca_bundle` beats a disabled `tls_verify`, and the field says the resolved answer, with a second field for whether any plane speaks https at all), the REST GET read throttle, whether `EPICS_MCP_ALLOWED_ROOTS` holds a root, and how many ChannelFinder owner accounts and property names the redaction DISCLOSES. That group carries counts and booleans only: no path, no root list and no account name |
 | `epics-pv://config` | Non-secret configuration values it was started with. A userinfo (`user:password@`) is removed from each service URL and every other character is kept, so the value stays comparable with a client's configuration; an address whose userinfo could not be removed provably is `null` |
 | `epics-pv://guide` | Operational cookbook: service planes, recipes, error signatures |
 

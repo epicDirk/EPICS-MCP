@@ -62,6 +62,11 @@ def get_health() -> dict[str, object]:
     it: the same rule that gave ``write_pattern_is_a_known_allow_all_spelling`` its length. Two of
     them compute something rather than mirroring a setting, and the comment beside each says which
     precedence it resolves, because a payload carries no prose to qualify itself with.
+
+    ⚠️ Where the withheld half lives differs per field, and saying "epics-doctor" for all of them
+    would be wrong: that report prints the ChannelFinder allowlist ENTRIES, but it does not print
+    the CA-bundle path or the allowed roots at all. Those two are in the server's environment and
+    on no surface, which is a thing to say plainly rather than to point at the wrong command for.
     """
     cfg = get_config()
     p4p_version = "unknown"
@@ -144,22 +149,40 @@ def get_health() -> dict[str, object]:
         # olog as an enabled-boolean only (never the URL, an ESS host, name-capable plane).
         "olog_enabled": bool(cfg.olog_url),
         # ⚠️ The REST planes' TLS posture, with the precedence COMPUTED rather than mirrored.
-        # ca_bundle wins over tls_verify at the single session chokepoint (services/_http.py,
-        # verify = cfg.ca_bundle or cfg.tls_verify), so a server configured with tls_verify false
-        # AND a bundle path does verify. A field mirroring cfg.tls_verify alone would report that
-        # deployment as unverified: more than it checks, which is what this pair avoids.
-        # Two things it deliberately does NOT say, because this payload cannot prove them:
-        # whether any plane speaks https at all (an http URL has no certificate to verify), and,
-        # when ca_bundle_configured is false, WHICH trust store is in force. On the plain default
-        # trust_env stays on, so a REQUESTS_CA_BUNDLE in the environment can still replace it, and
-        # that variable is not ours to report.
+        # ca_bundle wins over tls_verify wherever a session is built (services/_http.py, three
+        # factories, each spelling verify = cfg.ca_bundle or cfg.tls_verify), so a server
+        # configured with tls_verify false AND a bundle path does verify. A field mirroring
+        # cfg.tls_verify alone would report that deployment as unverified: a false alarm, the
+        # mirror image of an over-claim and just as wrong.
+        # verification_enabled is TRUE BY DEFAULT and says nothing about whether there is a
+        # certificate to verify, which on a plain-http deployment makes it read like an all-clear
+        # it does not mean. That is answerable from the configured URLs without naming one, so it
+        # is answered beside it rather than folded in: two settings, two fields, each true to
+        # itself. What stays unanswered, because the payload cannot prove it: when
+        # ca_bundle_configured is false, WHICH trust store is in force. The READ sessions keep
+        # trust_env on at the plain default, so a REQUESTS_CA_BUNDLE in the environment can still
+        # replace it there, and that variable is not ours to report (the Olog write session never
+        # honours it, a difference this field does not carry either).
         "rest_tls": {
             "verification_enabled": bool(cfg.ca_bundle) or cfg.tls_verify,
             "ca_bundle_configured": bool(cfg.ca_bundle),
+            "https_plane_configured": any(
+                url.startswith("https://")
+                for url in (
+                    cfg.channelfinder_url,
+                    cfg.archiver_url,
+                    cfg.archiver_retrieval_url,
+                    cfg.alarm_url,
+                    cfg.naming_url,
+                    cfg.olog_url,
+                )
+            ),
         },
-        # ⚠️ rest_, because the throttle sits at the shared REST GET chokepoint ALONE: a p4p PV
-        # read, a monitor and the live discovery run past it. Without that prefix the field would
-        # read as an all-clear for exactly the reads that load an IOC.
+        # ⚠️ rest_, because the throttle is consulted on the REST GET paths only: the shared
+        # rest_get_json / rest_get_bytes chokepoint, plus the Naming lookup, which asks it itself
+        # before its own GET. A p4p PV read and a monitor run past it, and so do the per-plane
+        # HEAD liveness probes. Without that prefix the field would read as an all-clear for
+        # exactly the reads that load an IOC.
         # A block rather than a bare number, because 0 is the DISABLED default and a lone
         # "read_rate_limit: 0" reads as "no reads permitted", which is its opposite. Its sibling
         # write_rate_limit stays a bare number: that one has no off state (ge=1).
@@ -176,8 +199,10 @@ def get_health() -> dict[str, object]:
         # is cannot be answered without naming the roots.
         "allowed_roots_set": path_boundary_configured(cfg.allowed_roots),
         # The ChannelFinder redaction, counted through the SAME resolvers the client redacts with
-        # (services/channelfinder_client), so this can never drift from what a query really
-        # returns. ⚠️ An allowlist is the set of what is DISCLOSED, so these counters run OPPOSITE
+        # (services/channelfinder_client), so the two cannot disagree about the ALLOWLIST. What a
+        # query returns is the intersection of that list with the channel, and a channel's NAME and
+        # TAGS are outside both counters because they are not gated at all.
+        # ⚠️ An allowlist is the set of what is DISCLOSED, so these counters run OPPOSITE
         # to privacy: zero is the most private posture (every owner and property redacted), not a
         # broken one. They are named for that, because a "safe_*_count" under a "privacy" heading
         # invites the reading that more is safer. The entries themselves stay out: an owner is a

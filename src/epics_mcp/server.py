@@ -1751,10 +1751,12 @@ def health() -> dict[str, object]:
 
     The posture group after the planes answers what an approver asks next: whether the REST planes
     verify certificates, computed so a CA bundle beats a disabled switch instead of mirroring the
-    switch; whether the REST GET throttle is on, which is never a PV read; whether the file
-    boundary variable holds a root, never which; and how much the ChannelFinder allowlists
-    DISCLOSE, where zero is the most private posture rather than a broken one. Which bundle, which
-    roots and which accounts stay with epics-doctor as well.
+    switch, and beside it whether any plane speaks https at all, because verification being on says
+    nothing where there is no certificate; whether the REST GET throttle is on, which is never a PV
+    read; whether the file boundary variable holds a root, never which; and how much the
+    ChannelFinder allowlists DISCLOSE, where zero is the most private posture rather than a broken
+    one. Which accounts those are stays with epics-doctor; the bundle path and the roots are on no
+    surface at all, they are in the environment the server was started with.
     """
     return get_health()
 

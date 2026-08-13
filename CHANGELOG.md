@@ -13,7 +13,9 @@ carry breaking changes).
 
 - **`epics-pv://health` answers the posture questions an approver asks after the write gates.**
   Four additions, every one a boolean or a count and none of them an address: `rest_tls` (whether
-  the REST planes verify certificates, and whether a CA bundle is configured),
+  the REST planes verify certificates, whether a CA bundle is configured, and whether any plane
+  speaks `https` at all, since verification is on by default and says nothing where there is no
+  certificate to verify),
   `rest_read_rate_limit` (the opt-in REST GET throttle), `allowed_roots_set` (whether the opt-in
   file boundary holds a root) and `channelfinder_redaction` (how many ChannelFinder owner accounts
   and property names the redaction discloses, and whether each allowlist came from the site or from
@@ -28,7 +30,9 @@ carry breaking changes).
   `allowed_roots_set` is decided by the same predicate the boundary itself asks, so a value of `;`
   or of blanks, which resolves to no root at all, reports false rather than claiming a boundary
   that no file argument is held to. Deliberately absent, because a client keeps this payload: the
-  CA-bundle path, the roots, and the allowlist entries. Those stay with `epics-doctor`.
+  CA-bundle path, the roots, and the allowlist entries. `epics-doctor` prints the allowlist
+  entries; the bundle path and the roots are printed by no surface at all and stay in the
+  environment the server was started with.
 
 - **`epics-testpv`, a seventh command: a test PV without a control system.** It serves
   `TEST:Temperature`, an analogue reading with a unit, and `TEST:Heater`, a writable switch, over

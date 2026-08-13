@@ -82,18 +82,23 @@ _HEALTH_KEYS = frozenset(
     }
 )
 
-#: The keys INSIDE each block, and which top-level keys are blocks at all. The set above pins one
-#: level, which was the whole contract while every block belonged to one ticket; three of the four
-#: posture fields added later are blocks, so a wire contract pinned at the top level only would let
-#: a nested key appear, vanish or be renamed with the suite green. Declared for the same reason the
-#: set above is declared rather than derived: an expectation read off the payload is satisfied by
-#: whatever the payload happens to say.
+#: Every dict BELOW the top level, by dotted path, with its key set. The set above pins one level,
+#: which was the whole contract while every block belonged to one ticket; three of the four posture
+#: fields added later are blocks, so a wire contract pinned at the top level only would let a nested
+#: key appear, vanish or be renamed with the suite green. Declared for the same reason the set above
+#: is declared rather than derived: an expectation read off the payload is satisfied by whatever the
+#: payload happens to say. It goes as deep as the payload does, because two levels was not a
+#: principle, it was the depth this payload happened to have: ``pv_search.auto_addr_broadcast`` is a
+#: third level, and a key added there would otherwise be invisible.
 _HEALTH_NESTED_KEYS: dict[str, frozenset[str]] = {
     "olog_write": frozenset(
         {"armed", "logbooks", "rate_limit_per_minute", "target_allowed", "target_is_loopback"}
     ),
     "pv_search": frozenset({"auto_addr_broadcast", "search_lists_set", "loopback_only"}),
-    "rest_tls": frozenset({"verification_enabled", "ca_bundle_configured"}),
+    "pv_search.auto_addr_broadcast": frozenset({"pva", "ca"}),
+    "rest_tls": frozenset(
+        {"verification_enabled", "ca_bundle_configured", "https_plane_configured"}
+    ),
     "rest_read_rate_limit": frozenset({"enabled", "per_minute"}),
     "channelfinder_redaction": frozenset(
         {
@@ -104,6 +109,49 @@ _HEALTH_NESTED_KEYS: dict[str, frozenset[str]] = {
         }
     ),
 }
+
+#: The paths whose value may be TEXT. Every other leaf must be a boolean, a number or null, and
+#: that is the shape of the disclosure rule rather than a style: a host, a path, an account name or
+#: a raw environment value can only travel as text, so declaring where text is allowed at all bounds
+#: the whole payload instead of one field at a time. Measured, a substring scan does not: a field
+#: echoing a configured path as its BASENAME, with the separators normalised, or lower-cased, passes
+#: every "the sentinel is absent" assertion while carrying the value.
+_HEALTH_TEXT_PATHS = frozenset(
+    {
+        "server",
+        "version",
+        "status",
+        "provider",
+        "write_pattern",
+        "python_version",
+        "p4p_version",
+        "olog_write.logbooks",
+        "pv_search.search_lists_set",
+    }
+)
+
+
+def _dicts_by_path(payload: object, prefix: str = "") -> dict[str, frozenset[str]]:
+    """Every dict inside *payload* below the top level, keyed by its dotted path."""
+    found: dict[str, frozenset[str]] = {}
+    if isinstance(payload, dict):
+        if prefix:
+            found[prefix] = frozenset(payload)
+        for key, value in payload.items():
+            found.update(_dicts_by_path(value, f"{prefix}.{key}" if prefix else str(key)))
+    return found
+
+
+def _leaves_by_path(payload: object, prefix: str = "") -> list[tuple[str, object]]:
+    """Every non-dict value inside *payload*, keyed by its dotted path."""
+    if not isinstance(payload, dict):
+        return [(prefix, payload)]
+    return [
+        leaf
+        for key, value in payload.items()
+        for leaf in _leaves_by_path(value, f"{prefix}.{key}" if prefix else str(key))
+    ]
+
 
 #: The planes ``run_doctor`` probes, in the spelling its report uses. Declared here rather than
 #: imported from the doctor on purpose: the point is that the two agree, and deriving the
@@ -139,16 +187,21 @@ def test_health_key_set_is_exact() -> None:
     all, and that is how the payload came to describe four of the seven planes without anyone
     deciding to. This one is the second half, and it is meant to go red on every future edit.
 
-    It pins BOTH levels. Pinning the top one alone left every block's contents unwatched, which
-    stayed invisible while the blocks were one ticket's and stopped being invisible when three more
-    arrived: comparing WHICH values are dicts against the declaration also catches a block that
-    quietly becomes a scalar, or a scalar that grows into a block.
+    It pins EVERY level, not only the top one. Pinning the top alone left every block's contents
+    unwatched, which stayed invisible while the blocks were one ticket's and stopped being invisible
+    when three more arrived; and pinning two levels would have stopped one level short of this
+    payload's own depth. Comparing which paths hold dicts against the declaration also catches a
+    block that quietly becomes a scalar, or a scalar that grows into a block.
+
+    ⚠️ What it still does not see is the CONTENT of a list. ``pv_search.search_lists_set`` could
+    lose half its entries with this green, because the key is there and its type is unchanged; that
+    belongs to the test which knows what those entries mean.
     """
     health = get_health()
 
     assert set(health) == set(_HEALTH_KEYS)
-    assert {key: set(value) for key, value in health.items() if isinstance(value, dict)} == {
-        key: set(value) for key, value in _HEALTH_NESTED_KEYS.items()
+    assert {path: set(keys) for path, keys in _dicts_by_path(health).items()} == {
+        path: set(keys) for path, keys in _HEALTH_NESTED_KEYS.items()
     }
 
 
@@ -367,17 +420,39 @@ def test_a_ca_bundle_deployment_is_not_reported_as_an_unverified_one(
     Red-proof: spell verification_enabled as ``cfg.tls_verify`` and the third case fails; spell it
     as ``bool(cfg.ca_bundle)`` and the first fails.
     """
+    bundle = "/etc/pki/internal-root.pem"
+    off = {"https_plane_configured": False}
+
     _with_config(monkeypatch)
-    assert get_health()["rest_tls"] == {"verification_enabled": True, "ca_bundle_configured": False}
+    assert get_health()["rest_tls"] == {
+        "verification_enabled": True,
+        "ca_bundle_configured": False,
+        **off,
+    }
 
     _with_config(monkeypatch, tls_verify=False)
     assert get_health()["rest_tls"] == {
         "verification_enabled": False,
         "ca_bundle_configured": False,
+        **off,
     }
 
-    _with_config(monkeypatch, tls_verify=False, ca_bundle="/etc/pki/internal-root.pem")
-    assert get_health()["rest_tls"] == {"verification_enabled": True, "ca_bundle_configured": True}
+    _with_config(monkeypatch, tls_verify=False, ca_bundle=bundle)
+    assert get_health()["rest_tls"] == {
+        "verification_enabled": True,
+        "ca_bundle_configured": True,
+        **off,
+    }
+
+    # The fourth cell, and the one a three-case test cannot do without: verification ON with an
+    # internal root, which is the ordinary secure production setting. Without it an expression
+    # reading the two settings as EITHER-OR rather than either passes every case above.
+    _with_config(monkeypatch, ca_bundle=bundle)
+    assert get_health()["rest_tls"] == {
+        "verification_enabled": True,
+        "ca_bundle_configured": True,
+        **off,
+    }
 
 
 def test_the_tls_field_agrees_with_the_session_this_process_really_builds() -> None:
@@ -411,6 +486,43 @@ def test_the_tls_field_agrees_with_the_session_this_process_really_builds() -> N
     assert without_bundle["verification_enabled"] is False
 
 
+def test_verification_on_says_nothing_about_a_plane_that_speaks_no_tls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """verification_enabled is TRUE by default, including where there is no certificate at all.
+
+    Read alone on a plain-http deployment it is an all-clear for traffic that is in the clear, and
+    the payload carries no prose to qualify it with. The configured URLs answer that question
+    without naming one, so the answer sits beside it: two settings, two fields, each true to
+    itself, rather than one field folding a second question in and being wrong about both.
+
+    Red-proof: drop https_plane_configured and the first case cannot be told from the second.
+    """
+    _with_config(monkeypatch, channelfinder_url="http://cf:8080/ChannelFinder")
+    plain = get_health()["rest_tls"]
+    assert isinstance(plain, dict)
+    assert plain == {
+        "verification_enabled": True,
+        "ca_bundle_configured": False,
+        "https_plane_configured": False,
+    }, "nothing here speaks TLS, so verification being on is not an all-clear"
+
+    # Every plane that can carry one, so the field is not wired to a single URL. archiver_retrieval
+    # is included because it is a URL of its own even though its ENABLED bit follows the mgmt one.
+    for plane in (
+        "channelfinder_url",
+        "archiver_url",
+        "archiver_retrieval_url",
+        "alarm_url",
+        "naming_url",
+        "olog_url",
+    ):
+        _with_config(monkeypatch, **{plane: "https://secure.example.org/svc"})
+        secure = get_health()["rest_tls"]
+        assert isinstance(secure, dict)
+        assert secure["https_plane_configured"] is True, plane
+
+
 def test_the_file_boundary_field_is_not_satisfied_by_a_value_holding_no_root(
     tmp_path: Path,
 ) -> None:
@@ -429,16 +541,25 @@ def test_the_file_boundary_field_is_not_satisfied_by_a_value_holding_no_root(
     """
     from epics_mcp import paths
 
-    for raw in ("", "   ", os.pathsep, f" {os.pathsep} ", os.pathsep * 2):
-        config_module._config = EpicsConfig(allowed_roots=raw)
-        assert get_health()["allowed_roots_set"] is False, raw
-        assert paths._allowed_roots() == [], f"the resolver disagrees about {raw!r}"
+    empty = ("", "   ", os.pathsep, f" {os.pathsep} ", os.pathsep * 2)
+    # Positive controls, and the shapes matter as much as their presence. A LEADING separator is
+    # the case that tells a predicate reading every entry from one reading only the first, and that
+    # mutant would switch the boundary off for a value which really does hold a root. Several roots
+    # is the second: with one root, "any" and "exactly one" are the same expression.
+    holding = (
+        str(tmp_path),
+        f"{os.pathsep}{tmp_path}",
+        f"{tmp_path}{os.pathsep}",
+        f"{tmp_path}{os.pathsep}{tmp_path / 'second'}",
+    )
 
-    # Positive control, so the loop above cannot be passing on an unset variable: a real root is
-    # reported, and the resolver agrees that it bounds something.
-    config_module._config = EpicsConfig(allowed_roots=str(tmp_path))
-    assert get_health()["allowed_roots_set"] is True
-    assert paths._allowed_roots() != []
+    for raw in empty + holding:
+        config_module._config = EpicsConfig(allowed_roots=raw)
+        reported = get_health()["allowed_roots_set"]
+        assert reported is (raw in holding), raw
+        # Computed rather than spelled out a second time: the payload and the boundary must agree
+        # about THIS value, which is what sharing one predicate is for.
+        assert reported == (paths._allowed_roots() != []), f"the resolver disagrees about {raw!r}"
 
 
 def test_the_read_throttle_and_the_redaction_counters_are_wired_to_their_own_source(
@@ -448,7 +569,9 @@ def test_the_read_throttle_and_the_redaction_counters_are_wired_to_their_own_sou
 
     The sentinel allowlists deliberately have a cardinality the built-in defaults do NOT have
     (three owners, two properties against one and five): with matching sizes an implementation that
-    ignores the configuration and counts the module constants would pass every assertion here.
+    ignores the configuration and counts the module constants would pass every assertion here. The
+    owner sentinel also carries a duplicate and a blank entry, so a count taken from the raw
+    environment string rather than from the resolved allowlist is a different number.
 
     The three-way of the allowlists is the point of the site_configured pair: unset means the
     built-in default, an explicitly EMPTY value means redact everything, and a count of zero is
@@ -461,17 +584,25 @@ def test_the_read_throttle_and_the_redaction_counters_are_wired_to_their_own_sou
     _with_config(
         monkeypatch,
         read_rate_limit=60,
-        channelfinder_safe_owner_accounts="svc-alpha, svc-beta, svc-gamma",
+        # A duplicate and a blank entry, because a count taken from the raw string instead of the
+        # resolved allowlist agrees with this one on any list that has neither.
+        channelfinder_safe_owner_accounts="svc-alpha, svc-beta, svc-alpha, ,svc-gamma",
         channelfinder_safe_property_names="propOne,propTwo",
     )
     health = get_health()
     assert health["rest_read_rate_limit"] == {"enabled": True, "per_minute": 60}
+
     assert health["channelfinder_redaction"] == {
         "disclosed_owner_account_count": 3,
         "disclosed_property_name_count": 2,
         "owner_allowlist_site_configured": True,
         "property_allowlist_site_configured": True,
     }
+
+    # A third rate, off the two the rest of this test uses: 0 and 60 are fixed points of several
+    # plausible corruptions (a cap at 60, a modulo), and a two-point test cannot see any of them.
+    _with_config(monkeypatch, read_rate_limit=600)
+    assert get_health()["rest_read_rate_limit"] == {"enabled": True, "per_minute": 600}
 
     # The default posture. The two figures are the built-in ESS allowlists, and a change to either
     # is a change to what a ChannelFinder answer discloses, so it is meant to surface here.
@@ -529,9 +660,15 @@ def test_no_payload_field_carries_a_host_a_path_or_an_account_outside_the_url_ke
     A host is no longer the only shape that must not travel, which is why the name grew: the
     posture fields are derived from a CA-bundle path, a root list and two allowlists of service
     accounts, and each of those is a filesystem path or a raw environment value. They are set here
-    with sentinels of their own, and each is checked in BOTH spellings, because ``json.dumps``
-    escapes a backslash: a Windows path sentinel is absent from the rendered payload as written
-    and present as escaped, so the obvious assertion passes while the value is right there.
+    with sentinels of their own, and each is checked in both spellings, because ``json.dumps``
+    escapes a backslash: for the one sentinel that carries one, the raw form is absent from the
+    rendered payload and the escaped form is what would be present, so checking only the obvious
+    spelling would pass with the value right there. For the other sentinels the two spellings are
+    the same string, and the second check costs nothing rather than adding cover.
+
+    ⚠️ This scan compares bytes it was told to look for, so it sees an ECHO and not a leak in
+    general. ``test_only_the_declared_paths_of_the_health_payload_may_carry_text`` is the half that
+    covers a transformed value.
 
     ⚠️ The bundle sentinel carries a backslash but NO drive letter, deliberately: the repo-wide
     facility-agnostic scan in test_guide.py reads ``X:\\dir`` as a local drive path and rejects it
@@ -596,6 +733,48 @@ def test_no_payload_field_carries_a_host_a_path_or_an_account_outside_the_url_ke
     assert posture["allowed_roots_set"] is True
     assert redaction["disclosed_owner_account_count"] == 3
     assert redaction["disclosed_property_name_count"] == 2
+
+
+def test_only_the_declared_paths_of_the_health_payload_may_carry_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A substring scan sees an echo, not a leak, and the difference is one transformation wide.
+
+    Measured on this payload: a field that returns a configured path's BASENAME, or the same path
+    with its separators normalised, or an allowlist entry lower-cased, satisfies every "the
+    sentinel is absent" assertion in the test above while carrying the value to the client. The
+    scan can only ever compare bytes it was told to look for.
+
+    So the rule is stated as a SHAPE instead: a host, a path, an account name and a raw environment
+    value are all TEXT, and text is allowed only where this file says it is. Everything else must
+    be a boolean, a number or null, which no transformation of a configured string can become.
+
+    Red-proof: return any configured string, transformed however you like, under a path outside the
+    declaration, and this fails on the path rather than on the spelling.
+    """
+    _with_config(
+        monkeypatch,
+        ca_bundle=r"certs\internal-root-ca.pem",
+        allowed_roots=os.pathsep.join(("/srv/displays", "/srv/trends")),
+        channelfinder_safe_owner_accounts="svc-recceiver,ops-user-one",
+        channelfinder_safe_property_names="siteEngineer,locationHall",
+        olog_url="http://journal.example.org:8080/Olog",
+        pv_write_pattern="^SIM:.*$",
+    )
+
+    for path, value in _leaves_by_path(get_health()):
+        if path in _HEALTH_TEXT_PATHS:
+            assert isinstance(value, str) or (
+                isinstance(value, list) and all(isinstance(item, str) for item in value)
+            ), f"{path} is declared as text and is not"
+            continue
+        assert isinstance(value, bool | int | float) or value is None, (
+            f"{path} carries {type(value).__name__}, and only the declared paths may carry text"
+        )
+
+    # Positive control: the declaration is not empty, so the loop cannot be vacuously satisfied by
+    # a payload that stopped producing text at all.
+    assert {path for path, _ in _leaves_by_path(get_health())} & _HEALTH_TEXT_PATHS
 
 
 def test_a_credential_in_a_service_url_never_reaches_the_client(
