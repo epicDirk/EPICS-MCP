@@ -305,8 +305,11 @@ class TestAttachmentPrep:
         Olog decides attachment retention on the SUBMITTED list, matched by
         ``filename.compareToIgnoreCase`` inside a ``TreeSet``, so two names that differ only in
         case collapse into ONE element. The property this pins is therefore not "a prefix is
-        present" (:281 already asserts that exact value) but the one the collapse actually turns
-        on: two uploads of the SAME basename stay distinguishable under Olog's own comparison.
+        present" (``test_plan_sizes_and_prefixes_a_file`` already asserts that exact value) but the
+        one the collapse actually turns on: two uploads of the SAME basename stay distinguishable
+        under Olog's own comparison. Named, not numbered, deliberately: OQ12 exists because a line
+        citation rotted, and the first draft of THIS docstring cited a line that its own commit had
+        already moved by one.
         """
         _set_config()
         first, second = tmp_path / "a", tmp_path / "b"
