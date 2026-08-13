@@ -1,13 +1,18 @@
 """MCP Resources for the EPICS MCP server."""
 
 import importlib.resources
+import os
 import sys
 import time
 from functools import lru_cache
 
 from epics_mcp import __version__
 from epics_mcp.config import get_config
-from epics_mcp.write_posture import olog_write_gate_report, pv_write_gate_report
+from epics_mcp.write_posture import (
+    olog_write_gate_report,
+    pv_search_posture,
+    pv_write_gate_report,
+)
 
 _start_time = time.monotonic()
 
@@ -57,6 +62,7 @@ def get_health() -> dict[str, object]:
     # resource handler; the doctor's composition of them is not, see write_posture's docstring.
     pv_gate = pv_write_gate_report(cfg)
     olog_gate = olog_write_gate_report(cfg)
+    search = pv_search_posture(os.environ)
 
     return {
         "server": "epics-mcp",
@@ -104,6 +110,15 @@ def get_health() -> dict[str, object]:
         # planes it has no built-in default host, so its URL is the most identifying single value
         # in the configuration.
         "naming_enabled": bool(cfg.naming_url),
+        # How far a PV search from this process can travel, said without naming an address. The
+        # REST planes follow their URL variables above; the live plane follows this, and its
+        # default is the one that is easy to miss, because an unset AUTO_ADDR_LIST means the
+        # broadcast is ON. Which subnet stays with epics-doctor and the operator's own terminal.
+        "pv_search": {
+            "auto_addr_broadcast": search.auto_addr_broadcast,
+            "search_lists_set": search.search_lists_set,
+            "loopback_only": search.loopback_only,
+        },
         # olog as an enabled-boolean only (never the URL, an ESS host, name-capable plane).
         "olog_enabled": bool(cfg.olog_url),
     }

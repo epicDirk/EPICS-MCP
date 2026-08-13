@@ -1,5 +1,6 @@
 """Tests for epics_mcp.resources."""
 
+import json
 import re
 from pathlib import Path
 
@@ -45,6 +46,7 @@ _HEALTH_KEYS = frozenset(
         "archiver_retrieval_enabled",
         "alarm_enabled",
         "naming_enabled",
+        "pv_search",
         "olog_enabled",
     }
 )
@@ -139,6 +141,73 @@ def test_the_retrieval_plane_follows_the_mgmt_url_in_both_directions(
     _with_config(monkeypatch, archiver_retrieval_url="http://archiver:17668")
     assert get_health()["archiver_retrieval_enabled"] is False, (
         "a retrieval URL without a mgmt URL is never used, the doctor calls it a config_error"
+    )
+
+
+def test_the_search_posture_names_variables_and_never_their_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Whether this process broadcasts must be answerable without naming a single address.
+
+    ``docs/deployment.md`` sends an approver here to find out whether the server reads the wrong
+    facility, and the trap it names is the DEFAULT: an unset ``*_AUTO_ADDR_LIST`` means the
+    broadcast is on, so an environment that names nothing still reaches into the local subnets. That
+    is answerable from booleans. Which subnet is not, and it stays with ``epics-doctor``.
+
+    The positive control matters here: the assertion that a host is absent proves nothing unless the
+    host really was configured, which is how a fixture typo makes a leak test vacuously green.
+    """
+    sentinel = "10.0.0.7"
+    monkeypatch.setenv("EPICS_PVA_ADDR_LIST", sentinel)
+    monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", "NO")
+    monkeypatch.delenv("EPICS_CA_AUTO_ADDR_LIST", raising=False)
+
+    search = get_health()["pv_search"]
+    assert isinstance(search, dict)
+
+    # Positive control: the sentinel really is in the environment this payload was built from.
+    assert "EPICS_PVA_ADDR_LIST" in search["search_lists_set"]
+    assert sentinel not in json.dumps(search), (
+        "the payload quoted an address, not just its variable"
+    )
+
+    # Per provider, because the two parsers disagree about what disables the broadcast. Here pva is
+    # explicitly off and ca is unset, and unset means ON.
+    assert search["auto_addr_broadcast"] == {"pva": False, "ca": True}
+    assert search["loopback_only"] is False, "a non-loopback entry is a reach beyond loopback"
+
+
+def test_no_payload_field_carries_a_host_outside_the_three_declared_url_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Which fields may name a host is a decision, so it is written down rather than left to habit.
+
+    channelfinder_url, archiver_url and alarm_url disclosed one before this ticket and still do;
+    naming and olog deliberately do not, and neither does the search posture. Without this list the
+    next field derived from a URL joins them silently, which is how the payload would drift back.
+    """
+    # Host names that share no substring with a plane name, so an assertion about a HOST cannot be
+    # satisfied or broken by a KEY: "channelfinder" as a host would collide with
+    # channelfinder_enabled and make the test say something it does not mean.
+    _with_config(
+        monkeypatch,
+        naming_url="https://names.example.org/",
+        olog_url="http://journal.example.org:8080/Olog",
+        channelfinder_url="http://directory.example.org:8080/ChannelFinder",
+    )
+
+    health = json.dumps(get_health())
+    config = get_epics_config()
+
+    for withheld in ("names.example.org", "journal.example.org"):
+        assert withheld not in health, f"health disclosed {withheld}"
+        assert withheld not in json.dumps(config), f"config disclosed {withheld}"
+
+    # Positive control, so the assertions above cannot pass on an empty configuration: the one host
+    # that IS disclosed is disclosed, through its declared key and nowhere else.
+    assert config["channelfinder_url"] == "http://directory.example.org:8080/ChannelFinder"
+    assert "directory.example.org" not in health, (
+        "health names planes as booleans, so no plane host belongs in it"
     )
 
 

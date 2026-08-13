@@ -23,11 +23,16 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict
 
 from epics_mcp.config import EpicsConfig
-from epics_mcp.epics_address import write_reach_violations
+from epics_mcp.epics_address import (
+    CLIENT_REACH_PROVIDERS,
+    auto_addr_search_disabled,
+    write_reach_violations,
+)
 from epics_mcp.olog_safety import split_name_list, write_target_allowed
 from epics_mcp.services._http import is_loopback_url, url_without_credentials
 
@@ -140,6 +145,57 @@ class OlogWriteGateReport(_Model):
     #: reaches a real logbook, and reading the two as one is how a sandbox posture gets claimed for
     #: a production one.
     target_is_loopback: bool
+
+
+class PvSearchPosture(_Model):
+    """How far a PV search from THIS process can travel, said without naming a single address.
+
+    The addresses themselves are what ``epics-doctor`` prints into an operator's own terminal. This
+    is the shape a client may keep: it answers the question ``docs/deployment.md`` actually poses,
+    which is not "which subnet" but "does this broadcast without anyone asking it to", and it
+    answers it without putting a facility host into a transcript.
+    """
+
+    #: Per PROVIDER, because the two parsers disagree about what disables the broadcast: pvxs takes
+    #: only ``NO`` or ``0``, libca takes any value CONTAINING ``no``. One combined flag would have
+    #: to pick a reading and would be wrong for the other client. Unset means ON for both, which is
+    #: the default that is easy to miss.
+    auto_addr_broadcast: dict[str, bool]
+    #: The NAMES of the search-list variables that carry a value, never the values. Their vocabulary
+    #: is closed and generated from the provider list, so this cannot leak an address.
+    search_lists_set: list[str]
+    #: True iff the reach is provably loopback-only, from the SAME function the PV write gate calls
+    #: at construction, so this bit and that gate's start condition cannot disagree.
+    #: ⚠️ It judges BOTH providers, while ``auto_addr_broadcast`` reports them separately. A process
+    #: with the active provider's broadcast disabled and the idle one's still on is loopback_only
+    #: False with one True entry above, and that is the truth rather than a contradiction: the write
+    #: gate refuses to start on the idle provider too, because the variables are process-global.
+    loopback_only: bool
+
+
+def pv_search_posture(environ: Mapping[str, str]) -> PvSearchPosture:
+    """The search posture of *environ*, address-free.
+
+    Takes the environment rather than reading ``os.environ`` itself, so the answer is a function of
+    its argument and a test does not have to mutate process state to ask a question.
+    """
+    return PvSearchPosture(
+        auto_addr_broadcast={
+            provider: not auto_addr_search_disabled(
+                provider, environ.get(f"EPICS_{provider.upper()}_AUTO_ADDR_LIST", "")
+            )
+            for provider in CLIENT_REACH_PROVIDERS
+        },
+        # Same construction as write_reach_violations walks, so a variable that would produce a
+        # violation is a variable named here; only the VALUE is dropped.
+        search_lists_set=[
+            var
+            for provider in CLIENT_REACH_PROVIDERS
+            for suffix in ("ADDR_LIST", "NAME_SERVERS")
+            if (var := f"EPICS_{provider.upper()}_{suffix}") and environ.get(var, "").strip()
+        ],
+        loopback_only=not write_reach_violations(environ),
+    )
 
 
 def compiles_as_regex(pattern: str) -> bool:
