@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import uuid
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, ClassVar
@@ -39,7 +40,7 @@ from epics_mcp.services.checkers import (
     query_olog_list_attachments,
 )
 from epics_mcp.services.olog_attachments import plan_attachments, read_uploads, write_download
-from epics_mcp.services.olog_client import AttachmentUpload, OlogClient
+from epics_mcp.services.olog_client import AttachmentUpload, OlogClient, attachment_round_trip
 from epics_mcp.services.olog_exceptions import (
     OlogConnectionError,
     OlogResponseError,
@@ -297,6 +298,76 @@ class TestAttachmentPrep:
         assert spec.inline_bytes == data
         assert spec.filename == "uidX.png"
         assert read_uploads(plan.specs, max_total_bytes=1024)[0]["content"] == data
+
+    def test_two_uploads_of_the_same_basename_stay_distinguishable(self, tmp_path: Path) -> None:
+        """OQ12: the id prefix is not cosmetic, it is what keeps a submission collision-free.
+
+        Olog decides attachment retention on the SUBMITTED list, matched by
+        ``filename.compareToIgnoreCase`` inside a ``TreeSet``, so two names that differ only in
+        case collapse into ONE element. The property this pins is therefore not "a prefix is
+        present" (:281 already asserts that exact value) but the one the collapse actually turns
+        on: two uploads of the SAME basename stay distinguishable under Olog's own comparison.
+        """
+        _set_config()
+        first, second = tmp_path / "a", tmp_path / "b"
+        first.mkdir()
+        second.mkdir()
+        (first / "report.pdf").write_bytes(b"ONE")
+        (second / "report.pdf").write_bytes(b"TWO")
+        ids = iter(["uid1", "uid2"])
+        plan = plan_attachments(
+            [str(first / "report.pdf"), str(second / "report.pdf")], None, lambda: next(ids)
+        )
+        names = [spec.filename for spec in plan.specs]
+        assert names == ["uid1_report.pdf", "uid2_report.pdf"]  # the exact target value
+        keys = [name.lower() for name in names]  # lower(), the server's compareToIgnoreCase
+        assert len(set(keys)) == len(keys)
+
+    def test_the_union_a_submission_builds_survives_the_guard(self, tmp_path: Path) -> None:
+        """OQ12: the same property, tied to the guard whose blind spot it covers.
+
+        ``add_attachment`` submits the UNION of the entry's existing attachment metadata and the
+        new uploads, and until OQ12 the guard inspected only the existing half. Here the union is
+        built exactly as the client builds it and pushed through the guard, with a NEGATIVE TWIN
+        in the same test: assert-nothing-happened is not evidence on its own, since
+        ``attachment_round_trip`` also answers ``([], [])`` for a payload it never saw (measured:
+        a misspelled ``attachments`` key gives the identical result).
+        """
+        _set_config()
+        upload = tmp_path / "report.pdf"
+        upload.write_bytes(b"%PDF")
+        plan = plan_attachments([str(upload)], None, lambda: "uid9")
+        raw: dict[str, object] = {"attachments": [{"id": "old1", "filename": "Report.PDF"}]}
+        existing, _clean = attachment_round_trip(raw)
+        new, _parts = olog_client_module._attachment_parts(
+            read_uploads(plan.specs, max_total_bytes=1024)
+        )
+        union: dict[str, object] = {"attachments": existing + new}
+        submitted, offenders = attachment_round_trip(union)
+        # POSITIVE control: the guard really saw both halves (an empty verdict would look the same)
+        assert [item["filename"] for item in submitted] == ["Report.PDF", "uid9_report.pdf"]
+        assert offenders == []
+        # NEGATIVE twin: the same union WITHOUT the prefix, the state the prefix hides today
+        unprefixed: dict[str, object] = {
+            "attachments": [*existing, {**new[0], "filename": "report.pdf"}]
+        }
+        collapsed, colliding = attachment_round_trip(unprefixed)
+        assert colliding == ["report.pdf"]
+        assert len(collapsed) == 1  # the silent prune: two submitted, one survives
+
+    def test_the_production_id_factory_mints_a_fresh_id(self) -> None:
+        """OQ12: the invariant rests on the id being FRESH per call, and nothing pinned that.
+
+        Every attachment test injects its own ``id_factory``, so the production one had zero test
+        coverage (measured: no occurrence in tests/). A weakening that returns a constant keeps
+        every prefix assertion green while destroying the distinguishability the prefix exists for.
+        """
+        first = checkers_module._default_olog_id_factory()
+        second = checkers_module._default_olog_id_factory()
+        assert first != second
+        # UUID-shaped in its canonical spelling, not merely "some token that differs"
+        assert str(uuid.UUID(first)) == first
+        assert str(uuid.UUID(second)) == second
 
     def test_read_uploads_refuses_a_file_grown_past_the_cap(self, tmp_path: Path) -> None:
         """QA (TOCTOU): plan_attachments sizes by ``stat``, the gate checks that sum:
@@ -910,6 +981,57 @@ class TestClientAddAttachment:
         with pytest.raises(OlogRoundTripUnsafe, match="filename"):
             client.add_attachment("17", entry, [new])
         assert captured == {}  # nothing was written
+
+    def test_refuses_an_upload_colliding_with_an_existing_attachment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # RED-PROOF (OQ12): the check above sees the EXISTING half only, but the server decides
+        # retention on the SUBMITTED list, which is existing + new. A new upload colliding
+        # case-insensitively with an existing attachment therefore passed unnoticed while the
+        # payload silently lost an element. The upload is built DIRECTLY here, not through
+        # plan_attachments, so the proof runs WITHOUT the uuid prefix, against the state the
+        # prefix hides in production.
+        captured: dict[str, Any] = {}
+
+        def fake_post(
+            session: object, url: str, files: _http.MultipartFiles, *a: object, **k: object
+        ) -> object:
+            captured["files"] = files
+            return {"id": 17, "logbooks": ["Ops"]}
+
+        monkeypatch.setattr(olog_client_module, "rest_post_multipart", fake_post)
+        client = OlogClient(_LOOPBACK)
+        entry = dict(_RAW_ENTRY)
+        entry["attachments"] = [{"id": "old1", "filename": "Report.PDF"}]
+        new = AttachmentUpload(id="n1", filename="report.pdf", content=b"%PDF", content_type=None)
+        with pytest.raises(OlogRoundTripUnsafe, match=r"report\.pdf"):
+            client.add_attachment("17", entry, [new])
+        assert captured == {}  # refused BEFORE anything reached the wire
+
+    def test_refuses_an_inline_image_colliding_with_an_existing_attachment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # RED-PROOF (OQ12): the inline image carries the same invariant through a different name
+        # shape (<uuid>.png instead of <uuid>_<basename>), and with an injected factory the
+        # collision is OBSERVABLE rather than merely constructible.
+        _set_config()
+        captured: dict[str, Any] = {}
+
+        def fake_post(
+            session: object, url: str, files: _http.MultipartFiles, *a: object, **k: object
+        ) -> object:
+            captured["files"] = files
+            return {"id": 17, "logbooks": ["Ops"]}
+
+        monkeypatch.setattr(olog_client_module, "rest_post_multipart", fake_post)
+        client = OlogClient(_LOOPBACK)
+        plan = plan_attachments(None, base64.b64encode(b"IMG").decode(), lambda: "uidX")
+        uploads = read_uploads(plan.specs, max_total_bytes=1024)
+        entry = dict(_RAW_ENTRY)
+        entry["attachments"] = [{"id": "old1", "filename": "UIDX.PNG"}]
+        with pytest.raises(OlogRoundTripUnsafe, match=r"uidX\.png"):
+            client.add_attachment("17", entry, uploads, inline_markup=plan.inline_markup)
+        assert captured == {}
 
     def test_get_raw_entry_quotes_log_id_in_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # S1: the round-trip read must percent-encode the log_id in the URL path too

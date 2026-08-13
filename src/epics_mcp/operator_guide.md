@@ -374,7 +374,9 @@ with at most one byte over budget ever read). Any file type is accepted (only HE
 server-side, by content-sniff); an over-limit request is the server's HTTP 413. The audit line carries
 attachment COUNT + total BYTES, never a filename (a filename is author free text). Each attachment gets
 a client-minted UUID and an id-prefixed unique filename (`<uuid>_<name>`), so a by-name download can
-never hit the server's duplicate-filename 404.
+never hit the server's duplicate-filename 404. That prefix carries a second, heavier job: because
+retention below is filename-keyed and case-insensitive, a FRESH uuid per upload is what keeps a new
+file from taking the place of an existing attachment with the same name.
 
 **Attach to an existing entry** (`add_log_attachment` → `POST /logs/multipart`) is a third write tool,
 gated identically, with the logbook allowlist keyed on the TARGET entry's OWN logbooks (read first).
@@ -397,7 +399,9 @@ and two attachments whose filenames collide case-insensitively collapse into one
 fixable client-side. That is why every round-trip re-lists a non-null filename per attachment, and why
 **both** round-tripping tools (`update_log_entry` and `add_log_attachment`) REFUSE an entry whose
 attachments cannot survive the match, duplicate, missing, or otherwise unreadable, instead of
-writing to it. The re-submitted list and that refusal are derived in the SAME pass, on purpose: when
+writing to it. `add_log_attachment` checks the list it will really SUBMIT, which is the entry's
+attachments plus the new upload(s): a new file whose name collides case-insensitively with one
+already there is refused too, locally, before the destructive round-trip starts. The re-submitted list and that refusal are derived in the SAME pass, on purpose: when
 they were computed separately they disagreed, and an attachment the payload quietly omitted passed the
 guard as safe (found by adversarial review, probe-measured, the guard existed and the file was lost
 anyway).

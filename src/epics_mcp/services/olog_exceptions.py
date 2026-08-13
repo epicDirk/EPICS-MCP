@@ -67,7 +67,17 @@ class OlogResponseError(OlogError, RestResponseError):
 
 
 class OlogRoundTripUnsafe(OlogError):
-    """An entry cannot be updated (OA3) because its attachments would not survive the round-trip.
+    """An attachment list cannot be submitted safely, because the match would drop one of them.
+
+    TWO occasions, and they differ in who owns the offending name and in what protects it:
+
+    * the ENTRY's own attachments cannot survive the round-trip (OA3 update, and the OA1b attach,
+      which round-trips the same list). The service pre-checks this up front via
+      :func:`~epics_mcp.services.olog_client.unroundtrippable_attachment_filenames`, and only on
+      the UPDATE path (``checkers_olog``); the client re-checks as a backstop.
+    * the CALLER's new uploads collide with that submitted list (OA1b attach, OQ12). There is no
+      service pre-check for this one at all, so the client's check is the only one, and it runs on
+      the union that is actually sent rather than on the existing half.
 
     Olog keeps attachments across an update by ``retainAll`` against the SUBMITTED list, and that
     match is **filename-keyed**, ``Attachment.compareTo`` compares ``filename.compareToIgnoreCase``
@@ -76,10 +86,9 @@ class OlogRoundTripUnsafe(OlogError):
     attachment without a usable filename cannot be matched at all, either way the server would
     silently DROP an attachment from an edit the caller only meant to change a field in.
 
-    Refusing is deliberate (safe-refuse): a loud error is better than a silently lost file. The
-    service checks this up front via
-    :func:`~epics_mcp.services.olog_client.unroundtrippable_attachment_filenames`; the client
-    re-checks as a defense-in-depth backstop.
+    Refusing is deliberate (safe-refuse): a loud error is better than a silently lost file. Where
+    the checks sit, and where one of them does NOT, is listed above rather than summarised here,
+    because the two occasions are not covered alike.
 
     MEASURED 2026-07-20 against Olog 6.0.4-SNAPSHOT, and the measurement refines WHERE the danger
     sits without removing it. A controlled probe (identical multipart submission, second filename

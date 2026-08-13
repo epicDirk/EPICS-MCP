@@ -972,8 +972,13 @@ class OlogClient:
         ⚠️ That retention is **filename-keyed, not id-keyed** (``Attachment.compareTo`` inside a
         ``TreeSet``; see :func:`attachment_round_trip`), an earlier version of this docstring said
         "equality is by id", wrong about the mechanism, and what let a matching bug hide.
-        An entry whose attachments cannot survive that match is REFUSED here rather than attached
-        to, because the attach would silently drop one of the existing files.
+        The list that has to survive it is the one this method SUBMITS, so it is checked twice and
+        both times by the same one-pass function: once on the entry's existing attachments (a
+        broken entry is refused before its content is touched) and once on the union of those and
+        the new uploads (OQ12). Either verdict REFUSES rather than attaching, because the write
+        would otherwise silently drop a file. The union case is unreachable through the sanctioned
+        path, where every upload filename carries a uuid4 minted for this call, and it is checked
+        anyway rather than left resting on that invariant.
 
         *inline_markup* (from an ``embed_image_base64``) is appended to the round-tripped ``source``
         so the new inline image renders; ``markup=commonmark`` regenerates ``description`` from
@@ -986,6 +991,25 @@ class OlogClient:
                 "filename (case-insensitively), so one of them would be silently dropped."
             )
         new_meta, file_parts = _attachment_parts(uploads)
+        # OQ12: the refusal above inspected the EXISTING half only, while the server decides
+        # retention on the SUBMITTED list, which is this union. Running the SAME one-pass check
+        # over the actual payload closes that gap WITHOUT giving the check a second input, which
+        # is the drift its docstring warns about: the list sent below IS what this second pass
+        # returned, so verdict and payload still cannot disagree. No sanctioned upload can collide
+        # today, every upload filename is <a uuid4 minted for this call>_<basename>
+        # (plan_attachments); this refuses rather than resting on that invariant staying true.
+        payload: dict[str, object] = {"attachments": existing_meta + new_meta}
+        submitted, colliding = attachment_round_trip(payload)
+        if colliding:
+            raise OlogRoundTripUnsafe(
+                "Refusing to attach to this Olog entry: the list this attach would SUBMIT (its "
+                "existing attachments plus the new upload(s)) cannot survive Olog's filename "
+                f"match ({', '.join(colliding)}). The entry's own attachments passed that check, "
+                "so the problem is on the NEW side: a new filename colliding case-insensitively "
+                "with an existing attachment or with another upload in the same request, or an "
+                "upload without a usable filename. Olog matches attachments by filename "
+                "(case-insensitively), so the pair would collapse into ONE element."
+            )
         source = raw_entry.get("source")
         if inline_markup:
             source = (source if isinstance(source, str) else "") + inline_markup
@@ -1002,7 +1026,9 @@ class OlogClient:
             "logbooks": raw_entry.get("logbooks"),
             "tags": raw_entry.get("tags"),
             "properties": raw_entry.get("properties"),
-            "attachments": existing_meta + new_meta,
+            # The union AS THE SECOND PASS RETURNED IT, not rebuilt here: payload and verdict from
+            # one source, the same rule the first pass follows.
+            "attachments": submitted,
         }
         files: MultipartFiles = [("logEntry", (None, json.dumps(log_json), "application/json"))]
         files += file_parts
