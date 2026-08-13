@@ -7,6 +7,8 @@ carry breaking changes).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-13
+
 ### Added
 
 - **`epics-testpv`, a seventh command: a test PV without a control system.** It serves

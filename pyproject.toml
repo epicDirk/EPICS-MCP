@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "epics-mcp"
-version = "0.5.0"
+version = "0.6.0"
 description = "MCP server for EPICS: live PV values, connection diagnosis, and cross-plane provenance"
 readme = "README.md"
 license = { text = "MIT" }
