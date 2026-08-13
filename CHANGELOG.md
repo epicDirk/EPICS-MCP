@@ -270,6 +270,19 @@ carry breaking changes).
   reason, so a user who passed both believed a PV had been probed when nothing had. Nothing else
   is lost: the emitted block is byte-identical with and without `--probe-pv` under `--no-check`.
   Drop one of the two options; without `--no-check` the PV is read as before.
+- **BREAKING: `epics-init --list` refuses every option it used to swallow.** `--list --probe-pv
+  NAME`, `--list --no-check`, `--list --set NAME=VALUE` and `--list --absolute-command` used to
+  exit `0` and print the preset listing while the option they carried was never read, because
+  `--list` returns before any of those values is used. All four now exit `2` with a usage error,
+  so a script passing one breaks. Nothing is taken away: the listing is built from the presets
+  alone, so none of the four could have changed it. `--list --out` was already refused and keeps
+  its own sentence. The refusal is ONE rule that holds the parsed options against their defaults
+  rather than four named ones, so an option added later is covered the day it is added, which is
+  the gap this closes: the four had accumulated one at a time. Two calls that already exited `2`
+  now say why differently. `--list --force` used to be answered with "add `--out`", a repair
+  `--list` refuses on its own line, and `--list --no-check --probe-pv` used to be answered as if
+  the two of them were the problem; both are now answered by the `--list` rule, which names
+  `--list`.
 - **A failing `archiver_retrieval` plane no longer sends you to the variable that just passed.**
   With `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` empty the plane probes the MGMT URL, which is right for a
   single-JVM appliance, but a finding then opened with `EPICS_MCP_ARCHIVER_URL` and the remedy
