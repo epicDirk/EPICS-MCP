@@ -61,6 +61,18 @@ def plan_attachments(
     filename is id-prefixed ``<uuid>_<basename>`` (exactly CS-Studio's convention) so it is unique
     per submission and a by-name download can never hit the server's duplicate-filename 404.
 
+    ⚠️ **That prefix is load-bearing, and what carries it is the id being FRESH per call, not the
+    underscore** (OQ12). :meth:`~epics_mcp.services.olog_client.OlogClient.add_attachment` submits
+    the UNION of the target entry's existing attachment metadata and these uploads, and Olog
+    decides retention on that submitted list through ``filename.compareToIgnoreCase`` inside a
+    ``TreeSet``: two names differing only in case collapse into ONE element, so an unprefixed
+    upload named like an existing attachment would take its place instead of joining it. A fresh
+    uuid4 per upload (``checkers_olog._default_olog_id_factory``) is what makes that collision
+    unreachable; a constant or reused id would remove the protection silently, while every
+    exact-value assertion on the filename stayed green.
+    :func:`~epics_mcp.services.olog_client.attachment_round_trip` re-checks the union rather than
+    trusting this, but the two are meant to hold together, and a change here needs a look there.
+
     *embed_image_base64* is a small inline image already in memory, so it IS decoded here; it is
     added
     as an ``image/png`` attachment and its ``![](attachment/<uuid>)`` markup (the CS-Studio inline
