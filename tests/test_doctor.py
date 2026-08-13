@@ -3143,6 +3143,57 @@ def test_the_render_names_the_olog_target_in_every_shape(
     assert expected in out
 
 
+def test_a_denied_target_does_not_read_as_the_string_the_gate_compared() -> None:
+    """The address on this line is REBUILT from the parse, the gate compares the configured value
+    exactly, and the two used to stand next to each other with nothing saying so (BG-DCMP).
+
+    The configuration here is the sharp case rather than a generic one. The report prints exactly
+    the string that is in the allowlist, character for character, and the gate denies anyway,
+    because the host was configured in a different case and the comparison is case-sensitive. An
+    operator who copies the address off this line into EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST is then
+    looking at two values that read identically and a deny that will not go away. The collision is
+    asserted as a PRECONDITION rather than assumed: a fixture that stopped producing it would
+    leave the rest of this test green for a reason that has nothing to do with what it is named
+    after.
+
+    The addition names the configured value and stops there, deliberately. This branch is also
+    reached by an unparseable URL, denied by the SEC-2 veto that no allowlist entry can lift, and
+    by a remote target missing EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE or https, so a line telling the
+    reader to edit the allowlist would be false in several of the states that print it.
+
+    Red-proof: remove the two added lines and the block comparison fails.
+    """
+    configured = "https://Olog.Example.org/Olog"
+    allowlisted = "https://olog.example.org/Olog"
+    overrides: dict[str, object] = {
+        "allow_olog_write": True,
+        "olog_write_logbooks": "Commissioning",
+        "olog_url": configured,
+        "olog_write_allow_remote": True,
+        "olog_write_url_allowlist": allowlisted,
+    }
+
+    olog = _write_safety_report(_write_config(**overrides)).olog
+    block = _write_block_of(_render_with(**overrides))
+    start = block.index("  Olog write: ARMED")
+    end = next(i for i in range(start, len(block)) if block[i].startswith("  audit log:"))
+
+    # The precondition: what is printed IS the allowlist entry, and the gate refuses all the same.
+    assert olog.target_url == allowlisted
+    assert olog.target_allowed is False
+    assert block[start:end] == [
+        "  Olog write: ARMED",
+        "              logbooks: Commissioning",
+        "              at most 5 writes per minute",
+        f"              target: {allowlisted} is NOT a permitted write target, "
+        "so every write is denied",
+        "              (that is the ADDRESS a write would reach. The gate compared "
+        "EPICS_MCP_OLOG_URL",
+        "              exactly as configured, which this line need not repeat character for "
+        "character)",
+    ]
+
+
 @pytest.mark.parametrize(
     ("kind", "expected"),
     [("missing_parent", "NOT usable"), ("not_yet", "not decidable here"), ("ok", "writable")],

@@ -230,6 +230,12 @@ def _olog_write_lines(olog: OlogWriteGateReport) -> list[str]:
     words rather than left to the reader, because the naive reading of each is its opposite. And
     an allowlisted REMOTE target is called what it is: those writes reach a real logbook, which is
     a different approval from a loopback sandbox even though the gate permits both.
+
+    ⚠️ The printed address is the NORMALISING redaction, which is the right one here because the
+    question this block asks is which address a write would reach. Only the REFUSED branch says so
+    out loud, and that is a judgement rather than an oversight: it is the one branch whose verdict
+    comes from a comparison, so it is the one that invites a reader to hold the printed string
+    against a configured one. The other two report a state, not a comparison.
     """
     if not olog.armed:
         return ["  Olog write: OFF (no logbook entry can leave this server)"]
@@ -246,6 +252,26 @@ def _olog_write_lines(olog: OlogWriteGateReport) -> list[str]:
         lines.append(
             f"              target: {target} is NOT a permitted write target, "
             "so every write is denied"
+        )
+        # BG-DCMP. This is the one branch where the two halves of the line invite being held
+        # against each other: the address is REBUILT by url_without_credentials, which lower-cases
+        # the host and drops a query and a fragment, while the verdict beside it comes from
+        # write_target_allowed, which compares the RAW olog_url exactly and case-sensitively.
+        # Measured: with the host configured in mixed case, the report prints exactly the string
+        # in the allowlist and the gate still denies, so a reader repairing the allowlist from
+        # this line ends up comparing two values that read identically.
+        #
+        # It says WHICH string was compared and stops there, on purpose. This branch is also
+        # reached by an unparseable URL, where the SEC-2 veto denies before any allowlist is
+        # consulted, and by a remote target missing EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE or https, so
+        # a repair named here would be wrong in several of the states that print it.
+        lines.append(
+            "              (that is the ADDRESS a write would reach. The gate compared "
+            "EPICS_MCP_OLOG_URL"
+        )
+        lines.append(
+            "              exactly as configured, which this line need not repeat character for "
+            "character)"
         )
     elif olog.target_is_loopback:
         lines.append(f"              target: {target} (loopback, a local test server)")
