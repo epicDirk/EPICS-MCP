@@ -194,6 +194,14 @@ carry breaking changes).
 
 ### Changed
 
+- **The alarm reply says which of its two levels answers "why".** `get_pv_info` now states in its
+  own description that `alarm.status_text` is the coarse pvData NT category of the alarm SOURCE
+  (DEVICE, RECORD, DB and the like) while the fine CA STAT condition (HIHI, LOLO, UDF, SIMM) is
+  plain text in `alarm.message`. Nothing about the payload changed; what changed is that an
+  assistant reading a PV over its HIHI threshold no longer has to guess why it says
+  `status_text=RECORD`, and no longer reports a threshold breach as a record fault. `get_pv_value`,
+  `get_pvs` and `monitor_pv` point at the same paragraph, since their descriptions already delegate
+  the alarm block to `get_pv_info`.
 - **A refused PV write now says what NOT to do next.** Both `PVWriteDeniedError` messages, the
   disabled gate and the allowlist miss, carry an instruction not to route around the refusal by
   writing a different PV or taking another route, and to report it to the operator on duty. The

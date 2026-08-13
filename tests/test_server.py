@@ -3232,10 +3232,10 @@ async def test_stripped_tool_still_returns_structured_content(
 # machine-readable (the core value of S29) and cost only ~1% more context per agent turn, so the
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
-# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-08 after GB-65: the
-# core lane is 64_719 and the full lane 75_853 (the docstring below carries the deltas, and the
-# pairs 64_719 / 75_699 from earlier the same day, 64_719 / 74_899 from 2026-08-06 and
-# 63_017 / 72_508 from 2026-08-02 are superseded).
+# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-13 after BG-DOC: the
+# core lane is 65_402 and the full lane 78_207 (the docstring below carries the deltas, and the
+# pairs 64_719 / 77_524 measured on the tree just before that edit, 64_719 / 75_853 from
+# 2026-08-08, 64_719 / 74_899 from 2026-08-06 and 63_017 / 72_508 from 2026-08-02 are superseded).
 # ⚠ This sentence and the docstring's are TWO copies of the same measurement and they have
 # drifted apart once already, in the very commit that added the third figure: keep them in one
 # edit. Re-MEASURE these two after
@@ -3255,7 +3255,20 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 64_719 and the full lane
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 65_402 and the full lane
+    78_207, re-measured 2026-08-13 on both lanes after BG-DOC put the alarm-level invariant where an
+    assistant reads it: the full text on ``get_pv_info`` and a pointing half-sentence on each tool
+    whose description already delegates the alarm block to it, +683 on BOTH lanes, every char of it
+    description text. Both lanes move by the same amount here because all of those are CORE tools,
+    the mirror image of the five display-gated edits below.
+
+    ⚠ The full-lane figure had drifted AGAIN before this edit, and the two copies had also drifted
+    apart from each other, which is the pair of failures the constant's comment above predicts. It
+    claimed 75_853, this sentence claimed 76_937, and the tree measured 77_524. Neither figure was
+    wrong when written; nothing re-measured them afterwards, which is the whole point of the
+    instruction to re-measure rather than to trust. A ``<=`` ceiling cannot notice either drift.
+
+    The previous figures were core 64_719 and the full lane
     76_937 (re-measured 2026-08-09 on both lanes, five times, for five edits to display-gated
     tools: GB-28 made the ``file_path`` echo a file-mode field of ``validate_pvs`` and said so in
     three of its argument descriptions, 74_899 -> 75_176 (+277 full, +0 core); GB-29 gave the

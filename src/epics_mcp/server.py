@@ -259,7 +259,7 @@ async def get_pv_value(
     """Get the current value of an EPICS Process Variable.
 
     The result carries the same best-effort metadata as get_pv_info
-    (alarm/timestamp/display/control/value_alarm/enum)."""
+    (alarm/timestamp/display/control/value_alarm/enum), including which alarm level says what."""
     return await _get_pv_value(pv_name, timeout)
 
 
@@ -289,7 +289,8 @@ async def get_pvs(
     """Batch-read multiple EPICS PVs in a single call.
 
     Each result carries the same best-effort metadata as get_pv_info
-    (alarm/timestamp/display/control/value_alarm/enum). A per-PV read failure lands in the errors
+    (alarm/timestamp/display/control/value_alarm/enum), including which alarm level says what.
+    A per-PV read failure lands in the errors
     list; a structural provider fault, the native batch returning a different number of values than
     requested, surfaces loudly as [UPSTREAM_CONTRACT_ERROR] rather than silently dropping PVs."""
     return await _get_pvs(pv_names, timeout)
@@ -382,6 +383,13 @@ async def get_pv_info(
     choices for enum PVs. Unset (zero-width) display/control limit pairs are omitted; DBR_CHAR
     waveforms come back as int lists.
 
+    The two alarm levels do not mix, and reading the wrong one gives the wrong cause.
+    alarm.status_text is the coarse pvData NT category of the alarm SOURCE (DEVICE, RECORD, DB and
+    the like), never the fine CA STAT condition. HIHI, LOLO, UDF, SIMM and their siblings arrive as
+    plain text in alarm.message, already extracted for you. A PV over its HIHI threshold therefore
+    reads status_text=RECORD with message=HIHI_ALARM: the status says WHERE the alarm came from, the
+    message says WHY. Do not expect a threshold name in status_text and do not map one into it.
+
     Record fields read directly: pass a channel with a field suffix (e.g. get_pv_info("PV.RTYP"),
     "PV.SCAN", "PV.HIHI") to read individual record metadata / alarm thresholds, useful when a PVA
     gateway serves the NT value_alarm limits as NaN. A cold (first) connection can need a longer
@@ -429,7 +437,7 @@ async def monitor_pv(
     """Subscribe to PV changes for a given duration and return collected events.
 
     Each event carries the same best-effort metadata as get_pv_info
-    (alarm/timestamp/display/control/value_alarm/enum).
+    (alarm/timestamp/display/control/value_alarm/enum), including which alarm level says what.
 
     Also returns ``connection`` (connected/disconnected/unknown), so an empty ``events`` list
     says which it is: a quiet PV, or one that was never reachable. When there is something to
