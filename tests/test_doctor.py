@@ -12,8 +12,13 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import contextlib
+import inspect
 import json
+import logging
+import os
 import re
+from collections.abc import Iterator
 from pathlib import Path
 from typing import get_args
 from unittest.mock import Mock
@@ -33,6 +38,7 @@ from epics_mcp.olog_safety import OlogWriteGate
 from epics_mcp.safety import SafetyLayer
 from epics_mcp.services import doctor
 from epics_mcp.services.doctor import (
+    _ALLOW_EVERY_PV_NAME,
     _DEGRADED_STATUSES,
     _FAILING_STATUSES,
     _INCONCLUSIVE_STATUSES,
@@ -95,10 +101,17 @@ def _plane(report: DoctorReport, name: str) -> PlaneCheck:
     return next(p for p in report.planes if p.plane == name)
 
 
-#: Every EPICS_MCP_* field the write block reads, so a test that wants a DEFAULT posture gets one
+#: EVERY EPICS_MCP_* field the write block reads, so a test that wants a DEFAULT posture gets one
 #: on any machine. ``tests/conftest.py`` strips the six EPICS search vars and deliberately not
-#: these, so without an explicit value a developer who exports EPICS_MCP_ALLOW_PV_WRITE for their
-#: own sandbox would see this file go red for a reason that is not in it.
+#: these, so without an explicit value a developer who exports one for their own sandbox sees this
+#: file go red for a reason that is not in it.
+#:
+#: ⚠️ The list has to be COMPLETE, and the first version was not: it omitted ``olog_url``, which the
+#: block reads three times. Measured with ``EPICS_MCP_OLOG_URL`` exported: three of these tests went
+#: red, the block under test reported ``target_is_loopback: true`` from a leaked environment, and
+#: the suite additionally made real network calls to that URL. Anything the block reads belongs
+#: here, and ``test_the_write_gate_defaults_cover_every_field_the_block_reads`` says so mechanically
+#: rather than leaving it to the next author to remember.
 _WRITE_GATE_DEFAULTS: dict[str, object] = {
     "allow_pv_write": False,
     "pv_write_pattern": "",
@@ -108,8 +121,36 @@ _WRITE_GATE_DEFAULTS: dict[str, object] = {
     "olog_write_rate_limit": 5,
     "olog_write_url_allowlist": "",
     "olog_write_allow_remote": False,
+    "olog_url": "",
     "audit_log_file": "",
 }
+
+
+@contextlib.contextmanager
+def _isolated_audit_loggers() -> Iterator[None]:
+    """Build a real write gate without leaving a handler on a process-global logger.
+
+    Both gates attach to ``epics_mcp.audit`` / ``epics_mcp.olog_audit`` and dedup with
+    ``if not audit.handlers``, so a handler left behind makes a LATER test's own FileHandler never
+    be attached, and it is bound to this test's captured stderr, which is gone by then. Every gate
+    test in ``test_safety.py`` and ``test_olog_write.py`` does this dance (twelve sites); the first
+    version of the tests below did not, and measured, it left a StreamHandler and ``level=INFO`` on
+    both loggers where a pristine run has none.
+    """
+    saved = {
+        name: (logging.getLogger(name).handlers[:], logging.getLogger(name).level)
+        for name in ("epics_mcp.audit", "epics_mcp.olog_audit")
+    }
+    for name in saved:
+        logging.getLogger(name).handlers.clear()
+    try:
+        yield
+    finally:
+        for name, (handlers, level) in saved.items():
+            logger = logging.getLogger(name)
+            logger.handlers.clear()
+            logger.handlers.extend(handlers)
+            logger.setLevel(level)
 
 
 def _write_config(**overrides: object) -> EpicsConfig:
@@ -2071,7 +2112,8 @@ def test_the_reported_pv_pattern_is_the_one_the_real_gate_enforces() -> None:
     pattern = r"^SIM:PS-01:.*-SP$"
     cfg = _write_config(allow_pv_write=True, pv_write_pattern=pattern)
     report = _write_safety_report(cfg)
-    gate = SafetyLayer(cfg, environ=_LOOPBACK_ENV)
+    with _isolated_audit_loggers():
+        gate = SafetyLayer(cfg, environ=_LOOPBACK_ENV)
 
     assert report.pv.armed is True
     assert report.pv.name_pattern == pattern
@@ -2110,7 +2152,8 @@ def test_the_reported_logbooks_are_the_set_the_real_olog_gate_enforces() -> None
         olog_url="http://127.0.0.1:8080/Olog",
     )
     report = _write_safety_report(cfg)
-    gate = OlogWriteGate(cfg)
+    with _isolated_audit_loggers():
+        gate = OlogWriteGate(cfg)
 
     assert report.olog.logbooks == ["Commissioning", "Operations"]
     gate.check_write_preconditions(["Commissioning"])  # positive control
@@ -2147,7 +2190,8 @@ def test_the_reported_target_verdict_matches_what_the_gate_does_to_a_write(
     report = _write_safety_report(cfg)
     assert (report.olog.target_allowed, report.olog.target_is_loopback) == (allowed, loopback)
 
-    gate = OlogWriteGate(cfg)
+    with _isolated_audit_loggers():
+        gate = OlogWriteGate(cfg)
     if allowed:
         gate.check_write_preconditions(["Commissioning"])
     else:
@@ -2178,7 +2222,8 @@ def test_the_reported_reach_violations_decide_whether_the_real_gate_can_be_built
     for name, value in _LOOPBACK_ENV.items():
         monkeypatch.setenv(name, value)
     assert _write_safety_report(cfg).pv.search_reach_violations == []
-    SafetyLayer(cfg)  # constructs, i.e. a write-enabled server would start here
+    with _isolated_audit_loggers():
+        SafetyLayer(cfg)  # constructs: a write-enabled server would start here
 
     monkeypatch.delenv("EPICS_CA_AUTO_ADDR_LIST")  # one provider's broadcast back ON
     assert _write_safety_report(cfg).pv.search_reach_violations != []
@@ -2211,7 +2256,7 @@ def test_the_block_is_built_without_constructing_either_gate() -> None:
 def test_audit_sink_unset_is_undecided_and_says_stderr() -> None:
     """Not False: stderr IS writable, it merely does not survive a restart. Answering "no" would
     be a claimed finding about a state that is only un-durable."""
-    writable, note = _probe_audit_sink("")
+    writable, note, _resolved = _probe_audit_sink("")
 
     assert writable is None
     assert "stderr" in note
@@ -2221,7 +2266,7 @@ def test_audit_sink_accepts_an_append_on_a_real_file(tmp_path: Path) -> None:
     file = tmp_path / "audit.log"
     file.write_text("first line\n", encoding="utf-8")
 
-    writable, note = _probe_audit_sink(str(file))
+    writable, note, _resolved = _probe_audit_sink(str(file))
 
     assert writable is True
     assert "append" in note
@@ -2244,7 +2289,7 @@ def test_probing_an_existing_sink_changes_nothing_about_it(tmp_path: Path) -> No
 def test_audit_sink_with_a_missing_parent_is_a_hard_no(tmp_path: Path) -> None:
     """The one half of the missing-file case that IS decidable: the handler creates no directory,
     so this configuration cannot work and the report may say so."""
-    writable, note = _probe_audit_sink(str(tmp_path / "nodir" / "audit.log"))
+    writable, note, _resolved = _probe_audit_sink(str(tmp_path / "nodir" / "audit.log"))
 
     assert writable is False
     assert "parent directory" in note
@@ -2253,7 +2298,7 @@ def test_audit_sink_with_a_missing_parent_is_a_hard_no(tmp_path: Path) -> None:
 def test_audit_sink_that_does_not_exist_yet_is_undecided(tmp_path: Path) -> None:
     """Undecidable, not "no". Nothing read-only on Windows predicts whether the create succeeds
     (``os.access`` on a directory is a measured false positive), so the honest answer is None."""
-    writable, note = _probe_audit_sink(str(tmp_path / "audit.log"))
+    writable, note, _resolved = _probe_audit_sink(str(tmp_path / "audit.log"))
 
     assert writable is None
     assert "does not exist yet" in note
@@ -2268,7 +2313,7 @@ def test_audit_sink_that_is_a_directory_is_refused(tmp_path: Path) -> None:
 def test_the_audit_probe_raises_nothing_on_an_unusable_path() -> None:
     """It runs OUTSIDE the total gather and cli_doctor catches only EpicsError, so anything that
     escaped here would leave the command as a bare traceback. A NUL byte is the reachable case."""
-    writable, note = _probe_audit_sink("audit\x00.log")
+    writable, note, _resolved = _probe_audit_sink("audit\x00.log")
 
     assert writable is False
     assert note  # never empty: an empty note satisfies every containment assertion and says nothing
@@ -2411,3 +2456,306 @@ def test_an_armed_gate_moves_neither_ok_nor_the_verdict_category(
         report = asyncio.run(run_doctor())
         assert report.ok is True
         assert cli_doctor._exit_category(report) == "clean"
+
+
+# --- the RENDER, state by state ------------------------------------------------------------------
+#
+# The first version of this section cross-checked the MODEL thoroughly and then asserted the render
+# only along the all-clear path. Measured with mutants: a render that always printed
+# "search reach: loopback-only", and one that turned the empty-pattern line into "so every PV is
+# writable", both survived the entire file. Those are the two sentences an approver acts on, and the
+# second is the exact misreading the line exists to prevent. Every output shape gets a case here.
+
+
+def _render_with(**overrides: object) -> str:
+    """Render a full report for a config, with every write-gate field pinned. No network: the
+    default config configures no REST plane, so ``run_doctor`` probes nothing."""
+    cfg = _write_config(**overrides)
+    report = asyncio.run(_report_for(cfg))
+    return cli_doctor._render(report)
+
+
+async def _report_for(cfg: EpicsConfig) -> DoctorReport:
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr("epics_mcp.services.doctor.get_config", lambda: cfg)
+        return await run_doctor()
+
+
+def test_the_render_names_the_reach_violations_it_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The WHERE half of an armed PV gate, in the state that matters.
+
+    Red-proof: make the reach branch unconditional (``if False:``) so the line always reads
+    ``loopback-only``. That mutant survived the whole file before this test existed, which means the
+    report could claim a loopback-only reach for a configuration that is not one.
+    """
+    monkeypatch.delenv("EPICS_CA_AUTO_ADDR_LIST", raising=False)
+    monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", "NO")
+
+    out = _render_with(allow_pv_write=True, pv_write_pattern=r"^SIM:PS-01:.*-SP$")
+
+    assert "search reach: NOT loopback-only" in out
+    assert "refuses to start" in out
+    assert "EPICS_CA_AUTO_ADDR_LIST" in out  # the finding names the variable, not just the verdict
+    assert "search reach: loopback-only" not in out  # and never both
+
+
+def test_the_render_says_an_empty_pattern_refuses_the_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty allowlist on an armed gate is a refuse-to-start, and the naive reading is its
+    opposite ("nothing listed, so everything goes").
+
+    Red-proof: replace the line with "(none set, so every PV is writable)". That mutant survived
+    the whole file, and it states the inversion the code exists to prevent.
+    """
+    out = _render_with(allow_pv_write=True, pv_write_pattern="")
+
+    assert "PV names allowed: (none set, so a write-enabled server refuses to start)" in out
+    assert "writable" not in out.split("Olog write")[0]
+
+
+#: The spellings this project promises to recognise as "allow every PV name", DECLARED here rather
+#: than read from the code. Deriving them from ``_ALLOW_EVERY_PV_NAME`` is what the first version
+#: did, and it was a tautology of the exact kind this file warns about two hundred lines up:
+#: deleting a member deleted its own test case, so the guard could not fail. Measured, that mutant
+#: survived the whole file. A declared list fails on both a removal and a silent addition.
+_EXPECTED_ALLOW_ALL_SPELLINGS = frozenset(
+    {
+        ".*",
+        ".*$",
+        "^.*",
+        "^.*$",
+        ".*?",
+        ".*?$",
+        "^.*?",
+        "^.*?$",
+        "(.*)",
+        "^(.*)$",
+        "(?:.*)",
+        "^(?:.*)$",
+        ".{0,}",
+        "^.{0,}$",
+        "[\\s\\S]*",
+        "^[\\s\\S]*$",
+        "\\A.*\\Z",
+    }
+)
+
+
+def test_the_recognised_allow_all_spellings_are_the_declared_ones() -> None:
+    """Set equality, both directions. A removal loses a warning an operator relies on; an addition
+    that nobody declared is a claim about a spelling nothing checked."""
+    assert _ALLOW_EVERY_PV_NAME == _EXPECTED_ALLOW_ALL_SPELLINGS
+
+
+@pytest.mark.parametrize("pattern", sorted(_EXPECTED_ALLOW_ALL_SPELLINGS))
+def test_every_declared_allow_all_spelling_is_called_out(pattern: str) -> None:
+    """All of them, not one. An operator writes the anchored form because ``safety.py``'s own error
+    message teaches it, and the first version of the set knew ``^.*`` and not ``.*$``, which
+    ``re.fullmatch`` treats identically.
+
+    Red-proof: drop any member from ``_ALLOW_EVERY_PV_NAME`` and its row here fails, because the
+    rows come from the declared list rather than from the set under test.
+    """
+    out = _render_with(allow_pv_write=True, pv_write_pattern=pattern)
+
+    assert "allows EVERY PV" in out
+
+
+def test_a_narrow_pattern_is_not_called_out() -> None:
+    """The counter-direction: a hint that always fires is the same as no hint."""
+    out = _render_with(allow_pv_write=True, pv_write_pattern=r"^SIM:PS-01:.*-SP$")
+
+    assert "allows EVERY PV" not in out
+    assert "the WHOLE name has to match" in out
+
+
+@pytest.mark.parametrize(
+    ("url", "allow_remote", "allowlist", "expected"),
+    [
+        ("", False, "", "no Olog URL set"),
+        ("http://127.0.0.1:8080/Olog", False, "", "loopback, a local test server"),
+        (
+            "https://olog.example.org/Olog",
+            True,
+            "https://olog.example.org/Olog",
+            "REMOTE and allowlisted",
+        ),
+        ("https://olog.example.org/Olog", False, "", "NOT a permitted write target"),
+    ],
+)
+def test_the_render_names_the_olog_target_in_every_shape(
+    url: str, allow_remote: bool, allowlist: str, expected: str
+) -> None:
+    """Four target shapes, four sentences. Three of them were never executed by any test, including
+    the allowlisted-remote one, which is the shape the docstring calls "a different approval from a
+    loopback sandbox"."""
+    out = _render_with(
+        allow_olog_write=True,
+        olog_write_logbooks="Commissioning",
+        olog_url=url,
+        olog_write_allow_remote=allow_remote,
+        olog_write_url_allowlist=allowlist,
+    )
+
+    assert expected in out
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected"),
+    [("missing_parent", "NOT usable"), ("not_yet", "not decidable here"), ("ok", "writable")],
+)
+def test_the_render_shows_each_audit_verdict(kind: str, expected: str, tmp_path: Path) -> None:
+    """Three verdicts, three lines. Two of the three were never rendered by any test, and the
+    tri-state is the whole design: "not decidable" must not read as "no"."""
+    target = {
+        "missing_parent": tmp_path / "nodir" / "audit.log",
+        "not_yet": tmp_path / "audit.log",
+        "ok": tmp_path / "there.log",
+    }[kind]
+    if kind == "ok":
+        target.write_text("", encoding="utf-8")
+
+    out = _render_with(audit_log_file=str(target))
+
+    assert expected in out
+
+
+def test_a_relative_audit_path_says_which_file_was_checked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``logging.FileHandler`` resolves against the CWD, and this command's CWD is not the server's.
+    Printing only the configured string would say "writable" about a file the server never touches
+    and never name the one that was examined."""
+    out = _render_with(audit_log_file="audit.log")
+
+    assert "audit log:  audit.log," in out
+    assert "relative, resolved here to" in out
+
+
+def test_both_armed_gates_are_named_on_the_verdict_line() -> None:
+    """The plural branch. A report that silently dropped the Olog gate from the tail was green
+    before this test: the two-gate case was executed and asserted by nothing.
+
+    Red-proof: name only ``armed[0]`` in ``_armed_gate_names``' consumer.
+    """
+    out = _render_with(allow_pv_write=True, allow_olog_write=True)
+
+    assert "the PV and Olog write gates are ARMED" in out
+
+
+# --- the render is not injectable from the values it reports --------------------------------------
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        ".*|\r              PV names allowed: ^MPS:ONLY:.*$",
+        "SIM:.*\nOverall: OK, every identity-probed plane answered AS ITSELF",
+        "SIM:.*\x1b[2K\rPV write:   OFF",
+    ],
+)
+def test_a_control_character_in_a_configured_value_cannot_forge_a_line(hostile: str) -> None:
+    """The values in this block are hostile input, because the block exists so that a reviewer can
+    hold up a configuration file somebody ELSE wrote.
+
+    Measured before the fix: a carriage return returned the cursor to column 0 and the tail of the
+    value overwrote the real allowlist, so an allow-everything gate displayed a narrow one; a
+    newline forged whole extra lines including a second ``Overall:``.
+
+    Red-proof: drop the ``_one_line`` call from the pattern branch and the raw control character
+    reaches the output.
+    """
+    out = _render_with(allow_pv_write=True, pv_write_pattern=hostile)
+
+    block = out.split("Write gates")[1]
+    assert "\r" not in block
+    assert "\x1b" not in block
+    # exactly one line still begins the allowlist statement, and the forged copy is inert text
+    assert sum("PV names allowed:" in line for line in block.splitlines()) == 1
+
+
+def test_a_very_long_configured_value_is_cut_rather_than_flooding_the_report() -> None:
+    out = _render_with(allow_pv_write=True, pv_write_pattern="A" * 5000)
+
+    assert "cut after 200 chars" in out
+    assert max(len(line) for line in out.splitlines()) < 400
+
+
+def test_the_write_gate_defaults_cover_every_field_the_block_reads() -> None:
+    """The pin list has to be COMPLETE, and it was not: ``olog_url`` was missing, so three tests in
+    this file read it from the developer's environment and the suite dialled that URL for real.
+
+    Derived rather than declared: the fields are read off the source of ``_write_safety_report``, so
+    a field added there without a default here is red the same day.
+    """
+    source = inspect.getsource(doctor._write_safety_report)
+    read = {match.group(1) for match in re.finditer(r"cfg\.([a-z_]+)", source)}
+
+    assert read <= set(_WRITE_GATE_DEFAULTS), (
+        f"the block reads {sorted(read - set(_WRITE_GATE_DEFAULTS))} but no default pins it, so "
+        "these tests would inherit that value from the machine they run on"
+    )
+
+
+def test_a_credential_in_the_olog_url_never_reaches_the_report() -> None:
+    """The block prints the Olog URL on EVERY run, where the old error path printed it only on a
+    failure, so a partial redaction here is a new and routine exposure.
+
+    ``@`` inside the password is the case that broke the pattern-based redactor: urllib3, the parser
+    that decides the boundary, splits the authority at the LAST ``@`` while the regex stops at the
+    first, so the tail of a real password stayed in the clear.
+
+    Red-proof: swap ``url_without_credentials`` back for ``_safe`` and the first row fails.
+    """
+    for secret, url in (
+        ("hun@ter2", "https://svc:hun@ter2@olog.example.org/Olog"),
+        ("hunter2", "https://svc:hunter2@olog.example.org/Olog"),
+        ("svc", "https://svc@olog.example.org/Olog"),
+        ("tok", "https://olog.example.org/Olog?token=tok"),
+    ):
+        report = _write_safety_report(_write_config(olog_url=url))
+        assert secret not in report.olog.target_url, url
+        assert "olog.example.org" in report.olog.target_url  # and the host is still legible
+
+
+def test_the_probe_refuses_a_non_regular_file_without_opening_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A directory is refused from the stat result, not from a failed open.
+
+    Two reasons, both in the docstring: the open would report "Permission denied" and send the
+    reader after an access-control list, and opening is not free on every node type the code can
+    reach (a character device, a serial port, a named pipe can react to being opened). Before this,
+    the ``S_ISREG`` guard was unreachable in the suite and the directory case passed through the
+    open.
+
+    Red-proof: delete the ``S_ISDIR`` branch and the note reverts to the errno wording.
+    """
+    opened: list[str] = []
+    real_open = os.open
+
+    def _spy(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        opened.append(str(path))
+        return real_open(path, flags, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("epics_mcp.services.doctor.os.open", _spy)
+
+    writable, note, _resolved = _probe_audit_sink(str(tmp_path))
+
+    assert writable is False
+    assert "is a directory" in note
+    assert opened == []  # the decisive point: nothing was opened to find that out
+
+
+def test_the_probe_reports_an_unusable_path_from_the_first_guard() -> None:
+    """``os.fspath`` rejects a non-str before any filesystem call, and that clause was never
+    executed by a test even though it is what keeps a TypeError from escaping.
+
+    Red-proof: narrow the first ``except`` to ``OSError`` and this raises instead of answering.
+    """
+    writable, note, resolved = _probe_audit_sink(3)  # type: ignore[arg-type]
+
+    assert writable is False
+    assert "TypeError" in note
+    # Echoed as given, since it could not be resolved. Compared loosely because the annotation says
+    # str and the whole point of the case is a caller that ignored it.
+    assert resolved == 3  # type: ignore[comparison-overlap]

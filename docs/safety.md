@@ -54,7 +54,11 @@ This is a controls tool, so the trust questions come first.
   consequence is worth knowing before you meet it: a command record that clears itself after the
   pulse may already have cleared when the readback arrives, so it reads back its idle state and the
   verdict is `verified=false`. That is what the readback saw, not a claim that the command failed.
-- **Writes enabled require a loopback-only search reach.** Enabling writes with the EPICS client
+- **PV writes enabled require a loopback-only search reach.** ⚠️ The PV gate only: this condition
+  and the non-empty-pattern one hang off `EPICS_MCP_ALLOW_PV_WRITE`, while the durable audit path is
+  required by both gates. Measured: an Olog-write-enabled server starts with the subnet broadcast
+  search on, and its own boundary is on the write target instead (see the Olog bullet below).
+  Enabling PV writes with the EPICS client
   search env able to reach beyond loopback makes the server **refuse to start** (`SafetyConfigError`):
   the name-pattern above scopes *what* may be written, this gate scopes *where* a write can
   physically go, and both must hold. To write, the address lists (`EPICS_PVA/CA_ADDR_LIST`) and
@@ -73,13 +77,16 @@ This is a controls tool, so the trust questions come first.
   is metadata-only (never the title/description free text). **`ALLOW_PV_WRITE` is untouched by it.**
 - **The effective write posture is inspectable, so you do not have to take this page's word for it.**
   `epics-doctor` prints a `Write gates` block, and `epics-doctor --json` carries the same under
-  `write_safety`: for each gate whether it is armed, what it allows by name, its rate limit, and
-  **where** a write could physically go, which is the PV search reach for one gate and the Olog
-  target URL for the other. It also names the audit log and says whether it can be appended to.
+  `write_safety`. A gate that is OFF gets one line saying so, which is the whole answer for it. For
+  an ARMED gate the block adds what it allows by name, its rate limit, and **where** a write could
+  physically go, which is the PV search reach for one gate and the Olog target URL for the other.
+  It also names the audit log, and says whether it can be appended to, cannot, or could not be
+  decided without creating it. `--json` always carries every field, armed or not.
   Two limits, stated because they decide how much the block is worth to you. It describes the
   environment of the command YOU ran, and a server started by an MCP client may have been given a
   different one; and it reports what the gates are SET to without evaluating whether such a server
-  would start, which for an armed gate is a separate question with the conditions listed above.
+  would start, which for an armed gate is a separate question with the conditions given per gate
+  in the bullets above.
 - **Olog reads return the whole entry, a deliberate prototype decision (2026-08-01).** Every read
   (`search_logbook`, `get_log_entry`, the create/reply/update echoes, attachment listing and
   download) returns the full server record: `title`, `description`, `owner` (the author's

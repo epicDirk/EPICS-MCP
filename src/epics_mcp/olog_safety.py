@@ -1,9 +1,9 @@
 """Write gate for Phoebus Olog logbook posts, non-empty logbooks, env gate, test-server URL
 boundary, logbook allowlist, attachment size cap, rate-limit, privacy-clean audit.
 
-The list above is the whole set of checks that can DENY, and it is spelled out here rather than
-summarised because a shorter version of it stood here naming four of the six and reading as
-complete.
+Six of those seven can DENY a write (the audit is a record, not a check), and they are spelled out
+here rather than summarised because a shorter version stood here naming four of the six and reading
+as complete.
 
 A SEPARATE gate from :class:`~epics_mcp.safety.SafetyLayer` (the PV write gate): Olog write is a
 deliberately-authorized, separate logbook surface, so ``EPICS_MCP_ALLOW_PV_WRITE`` stays false and

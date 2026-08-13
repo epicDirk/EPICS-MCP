@@ -60,6 +60,7 @@ from epics_mcp.services._http import (
     is_retry_error,
     is_ssl_error,
     rest_get_json,
+    url_without_credentials,
 )
 from epics_mcp.services.alarm_client import AlarmClient
 from epics_mcp.services.archiver_client import ArchiverClient
@@ -299,8 +300,9 @@ class PvWriteGateReport(_Model):
     #: :func:`~epics_mcp.epics_address.write_reach_violations`, the SAME function the gate calls at
     #: construction. Non-empty while ``armed`` means the process refuses to start.
     #: ⚠️ This can disagree with the live plane's own search-posture line, and the disagreement is
-    #: real rather than a defect: that line reports the ACTIVE provider, this one covers BOTH,
-    #: because the write gate does.
+    #: real rather than a defect: that line judges the ACTIVE provider's auto-address switch only,
+    #: this one covers both providers, because the write gate does. (The address lists themselves
+    #: are read for both providers on either side; it is the auto-address switch that differs.)
     search_reach_violations: list[str]
 
 
@@ -337,8 +339,16 @@ class AuditSinkReport(_Model):
 
     #: ``EPICS_MCP_AUDIT_LOG_FILE`` verbatim; empty means stderr, which no restart survives.
     path: str
+    #: The path the probe actually examined, which is ``path`` resolved against the CURRENT
+    #: DIRECTORY exactly as ``logging.FileHandler`` resolves it. Equal to ``path`` for an absolute
+    #: one. Reported separately because the two processes have different working directories: this
+    #: command runs in an operator's shell, the server is started by an MCP client elsewhere, so a
+    #: relative path names two different files and a verdict that did not say which one it checked
+    #: would be unusable. Empty when no path is configured.
+    resolved_path: str
     #: True/False when it could be decided, ``None`` when it could not. See
-    #: :func:`_probe_audit_sink`, which also says what it cannot see and why.
+    #: :func:`_probe_audit_sink`, which also says what it cannot see and why. ⚠️ THREE states: a
+    #: reader who treats this as a boolean turns "I could not tell" into "no".
     writable: bool | None
     #: Why. Never an empty string: an empty note would satisfy every containment assertion a test
     #: could make while telling the reader nothing.
@@ -1342,15 +1352,43 @@ def _privacy_report(cfg: EpicsConfig) -> PrivacyReport:
 #: ``Any`` and ``--strict`` propagates that into the flag expression.
 _O_NONBLOCK: int = getattr(os, "O_NONBLOCK", 0)
 
-#: The spellings of "allow every PV name" this project sanctions. ``safety.py`` names ``.*`` as the
-#: explicit way to say it; the anchored forms are the same intent written the way an operator who
-#: copied the allowlist style would write it. A CLOSED set on purpose: the alternative is deciding
-#: whether an arbitrary regex is universal, which cannot be done reliably, and whose failure mode
-#: here would be staying silent about the widest allowlist there is.
-_ALLOW_EVERY_PV_NAME = frozenset({".*", "^.*$", ".*?", "^.*"})
+#: The spellings of "allow every PV name" this flag RECOGNISES, and the word is exact: this is a
+#: comparison of strings, never a decision about a regex. Deciding universality in general cannot
+#: be done reliably, and EXECUTING the pattern to find out is refused for its own reason: the
+#: pattern can come from a configuration file somebody else authored, and this command is the one
+#: an operator runs to review such a file, so a catastrophically backtracking pattern would hang
+#: the review tool.
+#:
+#: The cost is stated rather than hidden, because the first version of this set understated it. It
+#: knew ``^.*`` and not ``.*$``, which ``re.fullmatch`` (``safety.py``) treats identically, so the
+#: loud hint stayed silent on an allow-everything gate written in the very style ``safety.py``'s own
+#: error message teaches (``'^MPS:.*$'``). The set below covers the anchored, lazy and grouped
+#: spellings; forms like ``(?s).*`` or ``[\s\S]*`` are still not recognised, and the render says
+#: what it checked rather than claiming the pattern is narrow.
+_ALLOW_EVERY_PV_NAME = frozenset(
+    {
+        ".*",
+        ".*$",
+        "^.*",
+        "^.*$",
+        ".*?",
+        ".*?$",
+        "^.*?",
+        "^.*?$",
+        "(.*)",
+        "^(.*)$",
+        "(?:.*)",
+        "^(?:.*)$",
+        ".{0,}",
+        "^.{0,}$",
+        "[\\s\\S]*",
+        "^[\\s\\S]*$",
+        "\\A.*\\Z",
+    }
+)
 
 
-def _probe_audit_sink(configured_path: str) -> tuple[bool | None, str]:
+def _probe_audit_sink(configured_path: str) -> tuple[bool | None, str, str]:
     """Would the audit sink accept an append? Probed by opening a handle, never by creating one.
 
     This answers the question the REAL sink asks, which is not "is this file writable". Both gates
@@ -1390,21 +1428,23 @@ def _probe_audit_sink(configured_path: str) -> tuple[bool | None, str]:
       worker thread stayed blocked, and the interpreter joins that thread at exit, so the command
       would hang anyway, one line later.
 
-    Returns ``(verdict, note)`` and raises nothing, by construction. That last part is not decor:
-    this runs outside the total ``asyncio.gather`` and ``cli_doctor`` catches only ``EpicsError``,
-    so anything escaping here would leave the command as a bare traceback.
+    Returns ``(verdict, note, resolved_path)`` and raises nothing, by construction. That last part
+    is not decor: this runs outside the total ``asyncio.gather`` and ``cli_doctor`` catches only
+    ``EpicsError``, so anything escaping here would leave the command as a bare traceback.
     """
     if not configured_path:
-        return None, (
+        return (
+            None,
             "no path set, so the trail goes to stderr and does not survive a restart "
-            "(EPICS_MCP_AUDIT_LOG_FILE)"
+            "(EPICS_MCP_AUDIT_LOG_FILE)",
+            "",
         )
     try:
         resolved = os.path.abspath(os.fspath(configured_path))
     except (OSError, ValueError, TypeError) as exc:
         # False rather than None: a measured hard failure is a finding, not an open question. The
         # sink does not survive these either, which is why both gates now catch the same three.
-        return False, f"unusable path ({type(exc).__name__}: {exc})"
+        return False, f"unusable path ({type(exc).__name__}: {exc})", configured_path
 
     # os.stat rather than os.path.exists, and that is not a style choice: the ``os.path``
     # predicates swallow ValueError and OSError and answer False, so an UNUSABLE path (a NUL byte,
@@ -1412,39 +1452,52 @@ def _probe_audit_sink(configured_path: str) -> tuple[bool | None, str]:
     # there yet" and be reported as undecided. Measured: os.stat tells the three cases apart, a NUL
     # raising ValueError, a missing file FileNotFoundError, a rejected name OSError errno 22.
     try:
-        os.stat(resolved)
+        mode = os.stat(resolved).st_mode
     except FileNotFoundError:
-        parent = os.path.dirname(resolved) or resolved
+        parent = os.path.dirname(resolved)
+        if not parent or parent == resolved:
+            # A drive root, a UNC root or a device name: ``dirname`` is a fixed point there, and
+            # the old wording read "the parent directory X does not exist" naming X itself.
+            return False, f"{resolved} has no parent directory to be created in", resolved
         if not os.path.isdir(parent):
-            return False, f"the parent directory {parent} does not exist, and the sink creates none"
-        return None, (
+            return (
+                False,
+                f"the parent directory {parent} does not exist, and the sink creates none",
+                resolved,
+            )
+        return (
+            None,
             f"{resolved} does not exist yet and the sink would create it; whether that create "
-            "succeeds cannot be decided without creating it"
+            "succeeds cannot be decided without creating it",
+            resolved,
         )
     except (OSError, ValueError, TypeError) as exc:
-        return False, f"unusable path ({type(exc).__name__}: {exc})"
+        return False, f"unusable path ({type(exc).__name__}: {exc})", resolved
+
+    if stat.S_ISDIR(mode):
+        # Answered from the stat result rather than from a failed open, for two reasons. The open
+        # would say "Permission denied", sending the reader after an access-control list instead of
+        # after the fact that the path is a directory; and refusing here keeps the probe from
+        # OPENING node types where opening is not free. That is the read-only contract's real edge:
+        # a character device, a serial port or a named pipe can react to being opened (asserting
+        # DTR, rewinding a tape, waking a pipe server), and the type is already in hand.
+        return False, f"{resolved} is a directory, and the sink needs a file", resolved
+    if not stat.S_ISREG(mode):
+        return (
+            False,
+            f"{resolved} is not a regular file, so it would keep no durable trail "
+            f"(st_mode {stat.filemode(mode)})",
+            resolved,
+        )
 
     try:
         handle = os.open(resolved, os.O_WRONLY | os.O_APPEND | _O_NONBLOCK)
     except (OSError, ValueError, TypeError) as exc:
-        errno_part = f"[Errno {exc.errno}] " if isinstance(exc, OSError) and exc.errno else ""
-        return False, f"cannot be opened for append: {errno_part}{exc}"
-
-    try:
-        try:
-            mode = os.fstat(handle).st_mode
-        except OSError:
-            # The handle opened, which IS the answer; a failing fstat may not downgrade it.
-            mode = stat.S_IFREG
-    finally:
-        with contextlib.suppress(OSError):
-            os.close(handle)
-
-    if not stat.S_ISREG(mode):
-        return False, (
-            f"{resolved} is not a regular file: it accepts an append but keeps no durable trail"
-        )
-    return True, f"{resolved} accepts an append"
+        # str(OSError) already begins with "[Errno N] ", so prepending it again doubled it.
+        return False, f"cannot be opened for append: {exc}", resolved
+    with contextlib.suppress(OSError):
+        os.close(handle)
+    return True, f"{resolved} accepts an append", resolved
 
 
 def _write_safety_report(cfg: EpicsConfig) -> WriteSafetyReport:
@@ -1458,7 +1511,7 @@ def _write_safety_report(cfg: EpicsConfig) -> WriteSafetyReport:
     constructed a gate would die on a configuration the onboarding command had just handed the
     user.
     """
-    writable, note = _probe_audit_sink(cfg.audit_log_file)
+    writable, note, resolved = _probe_audit_sink(cfg.audit_log_file)
     return WriteSafetyReport(
         pv=PvWriteGateReport(
             armed=cfg.allow_pv_write,
@@ -1471,13 +1524,20 @@ def _write_safety_report(cfg: EpicsConfig) -> WriteSafetyReport:
             armed=cfg.allow_olog_write,
             logbooks=sorted(split_name_list(cfg.olog_write_logbooks)),
             rate_limit_per_minute=cfg.olog_write_rate_limit,
-            # Through _safe: an Olog base URL is the one string in this block that can carry
-            # ``user:password@``, and doctor output is what an operator pastes into a ticket.
-            target_url=_safe(cfg.olog_url),
+            # REBUILT without its userinfo, not pattern-redacted. ``_safe`` matches up to the
+            # FIRST ``@`` while urllib3, the parser that decides the boundary two lines down,
+            # splits the authority at the LAST one, so a password containing ``@`` keeps its tail
+            # in the clear under it (measured: ``https://svc:hun@ter2@host/Olog`` came out as
+            # ``https://***@ter2@host/Olog``, and a bare ``svc@host`` username was untouched).
+            # This block prints the URL on EVERY run, where the old error path printed it only on
+            # a failure, so a partial redaction here is a new and routine exposure.
+            target_url=url_without_credentials(cfg.olog_url) if cfg.olog_url else "",
             target_allowed=write_target_allowed(cfg),
             target_is_loopback=is_loopback_url(cfg.olog_url),
         ),
-        audit=AuditSinkReport(path=cfg.audit_log_file, writable=writable, note=note),
+        audit=AuditSinkReport(
+            path=cfg.audit_log_file, resolved_path=resolved, writable=writable, note=note
+        ),
     )
 
 

@@ -28,10 +28,15 @@ setting.
 - **Two independent write gates.** The Olog logbook gate (`EPICS_MCP_ALLOW_OLOG_WRITE`) is separate
   from the PV gate, with its own allowlist, its own rate limit and its own URL boundary. Enabling
   one never enables the other.
-- **Writes require a loopback-only search reach.** A write-enabled server whose EPICS client search
-  environment can reach beyond loopback refuses to start. "Read the facility and write the facility"
-  is a start-time impossibility here, not a matter of discipline. The check reads the reach with the
-  same parser the real client uses and never trusts a hostname as loopback.
+- **PV writes require a loopback-only search reach.** A server with `EPICS_MCP_ALLOW_PV_WRITE=true`
+  whose EPICS client search environment can reach beyond loopback refuses to start. "Read the
+  facility and write the facility" is a start-time impossibility here, not a matter of discipline.
+  The check reads the reach with the same parser the real client uses and never trusts a hostname as
+  loopback. ⚠️ **PV, not both gates**, and the distinction is measured rather than assumed: this
+  refusal and the empty-allowlist one are conditions of the PV gate alone, while the durable audit
+  path is required by both. An Olog-write-enabled server starts with the subnet broadcast search on;
+  its own boundary is on the write TARGET (loopback, or an exactly allowlisted https URL), not on
+  the search reach.
 - **Every sanctioned write is bounds-checked and read back.** The value is checked against the
   record's own drive limits before the put; an out-of-range value is refused before it reaches the
   IOC. After the put, the server reads the value back and reports whether it landed, so a silent

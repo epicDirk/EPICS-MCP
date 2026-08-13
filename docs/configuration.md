@@ -88,8 +88,10 @@ A genuinely localhost-isolated instance needs every address list unset **and** b
 searches explicitly disabled. Run `epics-doctor` to see what your instance actually reaches.
 ⚠️ Read the right line for the right question. The live plane's posture line judges the ACTIVE
 provider's auto-address switch only, so it can say `localhost-isolated` while the other provider's
-switch is still open. The `Write gates` block judges BOTH, because the PV write gate does, and its
-reach line is the one that predicts whether a write-enabled server would start.
+switch is still open. The `Write gates` block judges BOTH, because the PV write gate does, so its
+reach line is the one to read when you are asking about a write. It answers ONE of the PV gate's
+three start conditions, not the question of whether the server would start: nothing in that block
+evaluates the three together.
 
 | Variable | Default | Description |
 |----------|---------|-------------|

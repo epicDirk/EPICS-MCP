@@ -35,10 +35,12 @@ carry breaking changes).
   alone, while the durable audit path is required by both.
 - **`epics-doctor` prints what each write gate would allow, and where a write can go.** A new
   `Write gates` block, in the human report and as a `write_safety` key in `--json`, covering both
-  the PV gate and the Olog logbook gate: whether each is armed, the PV name allowlist and the
-  logbook allowlist, both rate limits, the EPICS search reach a PV write would use, the Olog target
-  and whether the gate would permit writing to it, and the audit log with whether it can be
-  appended to. Informative: it changes neither the verdict nor the exit code. It reports the
+  the PV gate and the Olog logbook gate. A gate that is OFF gets one line saying so; an ARMED one
+  adds its allowlist (a PV name pattern, or a set of logbook names), its rate limit, and where a
+  write would actually go, which is the EPICS search reach for the PV gate and the target URL for
+  the logbook gate. The audit log is named either way, with whether it can be appended to, cannot,
+  or could not be decided without creating the file. `--json` always carries every field.
+  Informative: it changes neither the verdict nor the exit code. It reports the
   environment of the command you ran, not necessarily that of a running server, and the heading
   says so. Three states are spelled out rather than left to the reader, because the obvious reading
   of each is its opposite: an empty PV pattern on an armed gate makes the server refuse to start,
@@ -82,6 +84,14 @@ carry breaking changes).
   shipped and is corrected in all three.
 
 ### Fixed
+
+- **A broken `EPICS_MCP_AUDIT_LOG_FILE` could kill a write-enabled server with a bare
+  traceback.** Both write gates promise that an unusable audit path fails as a named
+  configuration error, and two inputs escaped that promise because the clause caught only
+  `OSError`: a NUL byte in the path raises `ValueError`, and a non-string raises `TypeError`.
+  Both now produce the named refusal. Not reachable through the environment, since an
+  environment value cannot carry a NUL, and reachable through a configuration built in
+  process.
 
 - **The documented `epics-doctor --probe-pv` example could only ever fail.** It named
   `SIM:PS-01:Cur-RB`, a synthetic placeholder that looks exactly like a real PV name, so following

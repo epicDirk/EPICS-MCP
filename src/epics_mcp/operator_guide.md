@@ -270,8 +270,11 @@ The two pre-dispatch refusals (`DENY`, `BOUNDS_DENY`) are outside that correlati
 ### Olog write posture (all four write tools)
 
 Posting to the logbook is the server's first mutating operation against a REST service, so it has its
-own gate, distinct from `set_pv_value`, and it never touches `ALLOW_PV_WRITE`. Four **gate** checks
-must line up before a write proceeds, each fail-closed and audited as `DENY` before the raise:
+own gate, distinct from `set_pv_value`, and it never touches `ALLOW_PV_WRITE`. SIX **gate** checks
+must line up before a write proceeds, each fail-closed and audited as `DENY` before the raise. The
+first and the fifth are easy to miss and are listed here because a four-item version of this list
+stood here and read as complete: a write with an EMPTY target-logbook list is refused before the
+allowlist is consulted, and an attachment upload is capped by total size.
 
 - **Env gate.** `EPICS_MCP_ALLOW_OLOG_WRITE=true` (default false = every write denied).
 - **Test-server URL boundary.** PV write bounds its reach IN-SERVER: enabling it forces a
@@ -312,7 +315,8 @@ Attachments are the one Olog surface where raw bytes cross the boundary, so the 
 **Upload** (`create_log_entry` / `reply_to_log` with `attachments` = workspace file paths, or
 `embed_image_base64`): the entry is sent as `multipart/form-data` to `PUT /logs/multipart` (mirroring
 CS-Studio's own client) instead of the plain JSON `PUT /logs`, the no-attachment path is unchanged. It
-rides the SAME write gate as a plain post (env + URL boundary + logbook allowlist + rate limit), plus a
+rides the SAME write gate as a plain post (non-empty logbooks + env + URL boundary + logbook
+allowlist + rate limit), plus a
 **total-size cap** (`EPICS_MCP_OLOG_ATTACH_MAX_BYTES`, checked from file `stat` BEFORE any bytes are
 read and RE-CHECKED while reading, a file that grew past the cap between stat and read is refused,
 with at most one byte over budget ever read). Any file type is accepted (only HEIC is refused
@@ -572,7 +576,8 @@ line above it: not "is this service reachable" but "can this server write anywhe
 each of the two write gates it names whether the gate is armed, what it allows (the PV name pattern,
 the Olog logbook allowlist), the rate limit, and the destination a write would actually take, which
 is the EPICS search reach for one gate and the Olog target URL for the other. It also names the
-audit log and says whether it can be appended to. In `--json` the same lives under `write_safety`.
+audit log, and says whether it can be appended to, cannot, or could not be decided without
+creating the file. In `--json` the same lives under `write_safety`.
 
 Three of its states read backwards if you skim them, so it spells them out: an empty PV pattern on
 an armed gate makes the server REFUSE TO START rather than permitting everything, an empty logbook

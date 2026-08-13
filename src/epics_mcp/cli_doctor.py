@@ -113,15 +113,48 @@ def _exit_category(report: DoctorReport) -> Literal["failed", "inconclusive", "c
 _EXIT_CODE: dict[str, int] = {"failed": 1, "inconclusive": 3, "clean": 0}
 
 
+#: Longest configured value this block prints verbatim. Past it the value is cut and the cut is
+#: named, because a single env var can be arbitrarily long (measured: a 70 000-character address
+#: list was echoed in full into one line) and a report nobody can read is a report nobody checks.
+_VALUE_LIMIT = 200
+
+
+def _one_line(value: str, limit: int = _VALUE_LIMIT) -> str:
+    """*value* made safe to interpolate into a fixed-layout line, and capped.
+
+    Every string this block prints comes from the environment, and the block exists so that a
+    reviewer can hold a configuration file somebody ELSE wrote up against what it would do. That
+    makes the values hostile input, and it was exploitable rather than theoretical. Measured: with
+    ``EPICS_MCP_PV_WRITE_PATTERN`` set to ``.*|`` followed by a carriage return and a forged
+    ``PV names allowed: ^MPS:ONLY:.*$``, the pattern is a valid regex, ``SafetyLayer`` accepts any
+    PV under it, and a terminal shows the forged narrow allowlist because the CR returns the cursor
+    to column 0. A newline instead forges whole extra lines, including a second ``Overall:`` and a
+    second ``PV write: OFF``, above the real ones.
+
+    So control characters, which no legitimate value in this configuration carries, are shown as
+    their escapes instead of acted on. ``--json`` is deliberately NOT put through this: a JSON
+    encoder escapes them safely on its own, and a machine reader should see the value as configured.
+    """
+    escaped = "".join(
+        char if char.isprintable() or char == " " else repr(char)[1:-1] for char in value
+    )
+    return escaped if len(escaped) <= limit else f"{escaped[:limit]}... (cut after {limit} chars)"
+
+
 def _pv_write_lines(pv: PvWriteGateReport) -> list[str]:
     """The PV write gate's lines: whether it is armed, WHAT it allows, and WHERE a write can go.
 
     The "where" half is the one an approver actually asks for, and it is why the reach appears
     here rather than being left to the live plane's own posture line. Those two answer different
-    questions and can disagree: the live line reports the ACTIVE provider, the write gate demands
-    both, so a configuration can read ``localhost-isolated`` up there and still be refused a
-    write-enabled start. Measured, not feared. This line is computed with the gate's own function,
-    so it is the gate's answer rather than a second opinion about it.
+    questions and can disagree: the live line judges the ACTIVE provider's auto-address switch
+    only, while the write gate demands both providers, so a configuration can read
+    ``localhost-isolated`` up there and still be refused a write-enabled start. Measured, not
+    feared. This line is computed with the gate's own function, so it is the gate's answer rather
+    than a second opinion about it.
+
+    ⚠️ It predicts ONE of the PV gate's three start conditions. The pattern line above it covers a
+    second and the audit line below covers the third, and none of the three is evaluated together,
+    which is why nothing here says the server would start.
     """
     if not pv.armed:
         return ["  PV write:   OFF (no PV write can leave this server)"]
@@ -131,9 +164,12 @@ def _pv_write_lines(pv: PvWriteGateReport) -> list[str]:
             "              PV names allowed: (none set, so a write-enabled server refuses to start)"
         )
     elif pv.pattern_allows_every_name:
-        lines.append(f"              PV names allowed: {pv.name_pattern} (this allows EVERY PV)")
+        lines.append(
+            f"              PV names allowed: {_one_line(pv.name_pattern)} "
+            "(this spelling allows EVERY PV)"
+        )
     else:
-        lines.append(f"              PV names allowed: {pv.name_pattern}")
+        lines.append(f"              PV names allowed: {_one_line(pv.name_pattern)}")
         lines.append("              (a regular expression; the WHOLE name has to match)")
     lines.append(f"              at most {pv.rate_limit_per_minute} writes per minute")
     if pv.search_reach_violations:
@@ -141,7 +177,7 @@ def _pv_write_lines(pv: PvWriteGateReport) -> list[str]:
             "              search reach: NOT loopback-only, so a write-enabled server refuses "
             "to start:"
         )
-        lines += [f"                {violation}" for violation in pv.search_reach_violations]
+        lines += [f"                {_one_line(v)}" for v in pv.search_reach_violations]
     else:
         lines.append("              search reach: loopback-only")
     return lines
@@ -160,22 +196,23 @@ def _olog_write_lines(olog: OlogWriteGateReport) -> list[str]:
         return ["  Olog write: OFF (no logbook entry can leave this server)"]
     lines = ["  Olog write: ARMED"]
     if olog.logbooks:
-        lines.append(f"              logbooks: {', '.join(olog.logbooks)}")
+        lines.append(f"              logbooks: {_one_line(', '.join(olog.logbooks))}")
     else:
         lines.append("              logbooks: (none set, so every Olog write is denied)")
     lines.append(f"              at most {olog.rate_limit_per_minute} writes per minute")
+    target = _one_line(olog.target_url)
     if not olog.target_url:
         lines.append("              target: (no Olog URL set, so there is nothing to write to)")
     elif not olog.target_allowed:
         lines.append(
-            f"              target: {olog.target_url} is NOT a permitted write target, "
+            f"              target: {target} is NOT a permitted write target, "
             "so every write is denied"
         )
     elif olog.target_is_loopback:
-        lines.append(f"              target: {olog.target_url} (loopback, a local test server)")
+        lines.append(f"              target: {target} (loopback, a local test server)")
     else:
         lines.append(
-            f"              target: {olog.target_url} (REMOTE and allowlisted: these writes "
+            f"              target: {target} (REMOTE and allowlisted: these writes "
             "reach a real logbook)"
         )
     return lines
@@ -207,12 +244,21 @@ def _write_safety_lines(report: DoctorReport) -> list[str]:
             "(a write-enabled"
         )
         lines.append("              server refuses to start without a durable path)")
-    elif audit.writable is True:
-        lines.append(f"  audit log:  {audit.path}, writable")
+        return lines
+    path = _one_line(audit.path)
+    if audit.writable is True:
+        lines.append(f"  audit log:  {path}, writable")
     elif audit.writable is False:
-        lines.append(f"  audit log:  {audit.path}, NOT usable: {audit.note}")
+        lines.append(f"  audit log:  {path}, NOT usable: {_one_line(audit.note or '')}")
     else:
-        lines.append(f"  audit log:  {audit.path}, not decidable here: {audit.note}")
+        lines.append(f"  audit log:  {path}, not decidable here: {_one_line(audit.note or '')}")
+    if audit.resolved_path != audit.path:
+        # A RELATIVE path is resolved against the current directory, and the two processes have
+        # different ones: this command runs in the operator's shell, the server is started by an
+        # MCP client somewhere else. Printing only the configured string would say "writable"
+        # about a file the server will never touch, without saying which file was checked. The
+        # heading disclaims the environment; the working directory is not part of it.
+        lines.append(f"              (relative, resolved here to {_one_line(audit.resolved_path)})")
     return lines
 
 
@@ -300,8 +346,10 @@ def _render(report: DoctorReport) -> str:
     # verdict is the LAST line, it is labelled "Overall", and by layout convention everything above
     # it is in its scope, so "Overall: OK" under a line reading "PV write: ARMED" reads as an
     # all-clear on the write posture. It is not one: nothing in this report checks a write gate,
-    # it only reports what one is set to. Same remedy the degraded and inconclusive branches above
-    # already use, for the same reason, and like them it changes the WORD and not the exit code.
+    # it only reports what one is set to. Same reason the degraded and inconclusive branches above
+    # exist. UNLIKE them it appends a second line instead of choosing a different verdict word: the
+    # verdict is about the planes and stays true as it is, what was missing is a fact beside it.
+    # The exit code is untouched either way.
     lines.append(f"Overall: {verdict}")
     armed = _armed_gate_names(report)
     if armed:

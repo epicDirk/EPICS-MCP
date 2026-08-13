@@ -77,6 +77,36 @@ def url_host(url: str) -> str | None:
     return host.strip("[]").rstrip(".").lower() or None
 
 
+def url_without_credentials(url: str) -> str:
+    """*url* rebuilt without its userinfo, query and fragment, for printing.
+
+    Not a regex redaction, and that distinction was measured rather than argued. The pattern-based
+    redactor in ``services/doctor.py`` matches ``scheme://user:pass@`` up to the FIRST ``@``, while
+    urllib3 (the parser ``requests`` connects with, and the one this function uses) splits the
+    authority at the LAST one. So a password that legitimately contains ``@``, say
+    ``https://svc:hun@ter2@host/Olog``, keeps its tail in the clear under the regex, and a bare
+    ``https://svc@host/Olog`` username is not touched by it at all. Rebuilding drops the whole
+    userinfo whatever it contains.
+
+    Query and fragment go too, because a base URL does not need them and a token is a normal thing
+    to find in a query string. Returns ``"(unparseable)"`` when the parser refuses the URL: such a
+    value is already a hard veto at every boundary that reads it, and echoing the raw string would
+    reintroduce exactly the leak this function exists to close.
+
+    The result is comparable to an allowlist entry, which the credential-masking form is not: an
+    operator told a target is refused can hold this against ``EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST``
+    and see whether the two are the same string.
+    """
+    try:
+        parsed = urllib3.util.parse_url(url)
+    except (urllib3.exceptions.LocationParseError, ValueError):
+        return "(unparseable)"
+    if not parsed.scheme or not parsed.host:
+        return "(unparseable)"
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"{parsed.scheme}://{parsed.host}{port}{parsed.path or ''}"
+
+
 def is_loopback_url(url: str) -> bool:
     """True iff *url*'s host is a loopback address, i.e. a LOCAL test server, not a real facility.
 

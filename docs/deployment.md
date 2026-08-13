@@ -153,8 +153,8 @@ cache of its own under its home directory, which `FASTMCP_CHECK_FOR_UPDATES=off`
    | Exit | Meaning |
    |------|---------|
    | `0` | nothing failed, and no identity probe failed |
-   | `1` | a configured plane HARD-failed: `unreachable`, `ca_error`, `api_error`, `config_error` (the variables contradict each other, e.g. a retrieval URL with no archiver URL), `backend_down` (identified, but a backend it needs is down), or `disconnected` (only with `--probe-pv`) |
-   | `2` | usage error |
+   | `1` | a configured plane HARD-failed: `unreachable`, `ca_error`, `api_error`, `config_error` (the variables contradict each other, e.g. a retrieval URL with no archiver URL), `backend_down` (identified, but a backend it needs is down), or `disconnected` (only with `--probe-pv`). ALSO an internal error in the check itself, which shares this code deliberately and is the only case that writes a `doctor:` line to stderr and produces no report |
+   | `2` | usage error (bad arguments) |
    | `3` | INCONCLUSIVE: a plane is reachable but its identity probe FAILED, a served non-2xx like a 401/404, a transport error, or a refused redirect |
 
    Every line that reports a problem also carries its remedy: what was observed, then what to
