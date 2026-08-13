@@ -376,13 +376,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # Argument combinations that cannot mean anything, refused before any output exists. Both go
-    # through parser.error so they exit 2 like every other usage error, rather than inventing a
-    # second way to say the same thing.
+    # Argument combinations that cannot mean anything, refused before any output exists. All of
+    # them go through parser.error so they exit 2 like every other usage error, rather than
+    # inventing a second way to say the same thing.
     if args.list and args.out:
         parser.error("--out has nothing to write with --list: a listing is not a configuration")
     if args.force and not args.out:
         parser.error("--force only means something together with --out")
+    # The third one is the one this rule was written for and did not cover. --probe-pv is the option
+    # that turns "nothing is misconfigured" into "something actually works", the quick start
+    # recommends it for exactly that, and with --no-check it was accepted in silence while never
+    # being read: the run returns before the check (below), so the user believed a PV had been
+    # probed when nothing had. Measured: the emitted block is byte-identical with and without it, so
+    # nothing is being taken away here that the option could still have meant.
+    if args.no_check and args.probe_pv:
+        parser.error("--probe-pv has nothing to probe with --no-check: no check runs")
 
     if args.list:
         sys.stdout.write(format_listing(PRESETS.values()) + "\n")

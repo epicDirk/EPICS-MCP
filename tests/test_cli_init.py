@@ -654,19 +654,42 @@ class TestWritingTheBlock:
         json.loads(captured.out)  # the block itself is still emitted, for reading
 
     @pytest.mark.parametrize(
-        "argv",
+        ("argv", "mentions"),
         [
-            pytest.param(["--list", "--out", "x.json"], id="list-cannot-be-written"),
-            pytest.param(["--preset", "sandbox", "--force"], id="force-without-out"),
+            pytest.param(["--list", "--out", "x.json"], (), id="list-cannot-be-written"),
+            pytest.param(["--preset", "sandbox", "--force"], (), id="force-without-out"),
+            pytest.param(
+                ["--preset", "sandbox", "--no-check", "--probe-pv", "SIM:PS-01:Cur-RB"],
+                ("--probe-pv", "--no-check"),
+                id="probe-pv-with-no-check",
+            ),
         ],
     )
-    def test_meaningless_combinations_are_usage_errors(self, argv: list[str]) -> None:
+    def test_meaningless_combinations_are_usage_errors(
+        self, argv: list[str], mentions: tuple[str, ...], capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """Refused by the parser, so they exit 2 like every other usage error and produce no output
-        to clean up afterwards."""
+        to clean up afterwards.
+
+        The third row is BG-DFIX(c) and it is a BREAKING change: that call used to exit 0 and emit
+        the block, with --probe-pv never touched, so the user believed a PV had been read when
+        nothing had. Measured before the refusal existed: the emitted block is byte-identical with
+        and without --probe-pv, so the option cannot carry any remaining meaning under --no-check.
+
+        ``mentions`` is empty for the two older rows on purpose: their wording is not this guard's
+        subject. For the new one it is, because a refusal that does not name both options leaves the
+        reader to guess which of the two to drop.
+
+        Red-proof for the new row on the pre-fix code: no SystemExit is raised at all, main returns
+        0 and writes the block to stdout.
+        """
         with pytest.raises(SystemExit) as exit_info:
             cli_init.main(argv)
 
         assert exit_info.value.code == 2
+        message = capsys.readouterr().err
+        for option in mentions:
+            assert option in message, f"the refusal does not name {option}: {message!r}"
 
     def test_absolute_command_names_the_resolved_path(
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
