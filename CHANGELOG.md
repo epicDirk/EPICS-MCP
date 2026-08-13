@@ -156,11 +156,16 @@ carry breaking changes).
   Measured: with the host configured in mixed case the report prints, character for character, the
   string already in `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` and still says the target is not
   permitted, so an operator repairing the allowlist from that line ends up comparing two values
-  that read identically and stays denied. The refused branch now says that the address is the one a
-  write would REACH and names the variable the gate compared. It deliberately advises no repair:
-  the same branch is also reached by an unparseable URL, denied before any allowlist is consulted,
-  and by a remote target with `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE` unset or a plain-http scheme, so
-  a named repair would be wrong in several of the states that print it. The address itself is
+  that read identically and stays denied. Both target verdicts that can rest on the allowlist, the
+  refusal and `REMOTE and allowlisted`, now say that the line is shown for reading and that the
+  gate works from `EPICS_MCP_OLOG_URL` exactly as configured. The allowlisted one is not
+  decoration: an operator tidying a working allowlist to match the printed address turns the gate
+  into a deny-all, since the gate keeps comparing the mixed-case original. The note deliberately
+  claims neither a repair nor that a comparison took place, and the second half of that had to be
+  learned: seven states reach the refusal without the allowlist deciding anything, five of them
+  vetoed as unparseable, one short-circuited by an unset `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE` and
+  one denied by the `https` rule after the comparison had SUCCEEDED. The loopback verdict gets no
+  note, because being loopback is a property of the address itself. The printed address is
   unchanged, and so are the exit code, `--json` and `epics-pv://health`: this is two lines of the
   human report.
 - **Editing a logbook entry you had just read destroyed it, and nothing said so.** A read gives a
@@ -285,18 +290,21 @@ carry breaking changes).
   is lost: the emitted block is byte-identical with and without `--probe-pv` under `--no-check`.
   Drop one of the two options; without `--no-check` the PV is read as before.
 - **BREAKING: `epics-init --list` refuses every option it used to swallow.** `--list --probe-pv
-  NAME`, `--list --no-check`, `--list --set NAME=VALUE` and `--list --absolute-command` used to
-  exit `0` and print the preset listing while the option they carried was never read, because
-  `--list` returns before any of those values is used. All four now exit `2` with a usage error,
-  so a script passing one breaks. Nothing is taken away: the listing is built from the presets
-  alone, so none of the four could have changed it. `--list --out` was already refused and keeps
-  its own sentence. The refusal is ONE rule that holds the parsed options against their defaults
-  rather than four named ones, so an option added later is covered the day it is added, which is
-  the gap this closes: the four had accumulated one at a time. Two calls that already exited `2`
-  now say why differently. `--list --force` used to be answered with "add `--out`", a repair
-  `--list` refuses on its own line, and `--list --no-check --probe-pv` used to be answered as if
-  the two of them were the problem; both are now answered by the `--list` rule, which names
-  `--list`.
+  NAME`, `--list --no-check`, `--list --set NAME=VALUE`, `--list --absolute-command` and
+  `--list --out ""` used to exit `0` and print the preset listing while the option they carried was
+  never read, because `--list` returns before any of those values is used. All five now exit `2`
+  with a usage error, so a script passing one breaks. Nothing is taken away: the listing is built
+  from the presets alone, so none of them could have changed it. The fifth is the one an earlier
+  draft of this entry got wrong: `--list --out PATH` was already refused, but the older rule tested
+  `--out` for TRUTH, so an empty value slipped past it and printed the listing. It keeps its own
+  sentence, which says something the general one cannot, whenever `--out` is the only dead option
+  in the call. The refusal is ONE rule that holds the parsed options against their defaults rather
+  than a named rule per option, so an option added later is covered the day it is added, which is
+  the gap this closes: these had accumulated one at a time. Calls that already exited `2` may say
+  why differently. `--list --force` used to be answered with "add `--out`", a repair `--list`
+  refuses as well; `--list --no-check --probe-pv` used to be answered as if those two were the
+  problem; and `--list --out PATH` alongside another dead option now names all of them at once
+  instead of sending you back for one more round per rule.
 - **A failing `archiver_retrieval` plane no longer sends you to the variable that just passed.**
   With `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` empty the plane probes the MGMT URL, which is right for a
   single-JVM appliance, but a finding then opened with `EPICS_MCP_ARCHIVER_URL` and the remedy
