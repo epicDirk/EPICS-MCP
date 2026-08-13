@@ -68,6 +68,58 @@ class TestPatternAllowlist:
         SafetyLayer(EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10))
 
 
+class TestDenyMessageEscalation:
+    """BG-DOC(c): what a refused write TELLS the assistant that read it.
+
+    The message is the only surface a denied caller sees, and until now it named a remedy and
+    stopped there. An assistant told "not this PV" and nothing else has an obvious next move, and
+    it is the wrong one: try a neighbouring name, or a route that is not gated. So BOTH
+    ``PVWriteDeniedError`` paths carry the escalation, not only the disabled gate the ticket named.
+    The allowlist miss is in fact the more dangerous of the two, because it names a PV.
+
+    Asserted on stable MARKERS rather than the whole sentence, the posture
+    ``test_consent_meta_tools_document_the_client_scope`` takes for the same class of claim: the
+    wording may be improved, the instruction may not go missing. Asserting ``_ESCALATION in msg``
+    would be the tautology of comparing the constant to itself.
+
+    Provably red: drop ``+ _ESCALATION`` from either raise in ``safety.check_write_allowed``, or
+    let the escalation REPLACE the gate remedy rather than stand beside it.
+    """
+
+    def _denial(self, act: Callable[[], None]) -> str:
+        with pytest.raises(PVWriteDeniedError) as excinfo:
+            act()
+        return str(excinfo.value)
+
+    def test_the_disabled_gate_tells_the_caller_not_to_route_around_it(
+        self, safety_locked: SafetyLayer
+    ) -> None:
+        message = self._denial(lambda: safety_locked.check_write_allowed("any:pv"))
+        assert "work around" in message
+        assert "operator on duty" in message
+
+    def test_the_allowlist_miss_tells_the_caller_not_to_try_a_neighbour(self) -> None:
+        sl = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r"^TEST:.*$", write_rate_limit=10)
+        )
+        message = self._denial(lambda: sl.check_write_allowed("OTHER:pv"))
+        assert "work around" in message
+        assert "operator on duty" in message
+
+    def test_the_escalation_stands_beside_the_remedy_and_not_instead_of_it(
+        self, safety_locked: SafetyLayer
+    ) -> None:
+        """The gate message must keep naming the variable that arms it.
+
+        Separate from the two above because it is the failure mode a well-meaning edit produces:
+        hardening a message reads like a reason to stop advertising the switch, and then a reader
+        with every right to enable writes cannot find out how.
+        """
+        message = self._denial(lambda: safety_locked.check_write_allowed("any:pv"))
+        assert "EPICS_MCP_ALLOW_PV_WRITE=true" in message
+        assert message.index("EPICS_MCP_ALLOW_PV_WRITE") < message.index("work around")
+
+
 class TestWriteReachAssert:
     """E8: writes ENABLED requires a loopback-only EPICS client search reach, else it fails closed.
 

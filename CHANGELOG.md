@@ -194,6 +194,12 @@ carry breaking changes).
 
 ### Changed
 
+- **A refused PV write now says what NOT to do next.** Both `PVWriteDeniedError` messages, the
+  disabled gate and the allowlist miss, carry an instruction not to route around the refusal by
+  writing a different PV or taking another route, and to report it to the operator on duty. The
+  allowlist miss got it too, although only the gate was asked for: that message names a PV, and
+  naming one PV is what invites trying its neighbour. The gate message still says which variable
+  arms it, the escalation stands beside that remedy rather than replacing it.
 - **Documentation reorganised around getting it running.** The deployment guide gains a
   troubleshooting section (symptom first: the client says nothing, the tools do not appear, the
   saved file is rejected, a write-enabled block will not start), a layout of what an install puts on

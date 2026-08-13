@@ -15,6 +15,16 @@ from epics_mcp.errors import PVWriteDeniedError, RateLimitError, SafetyConfigErr
 
 logger = logging.getLogger(__name__)
 
+#: Appended to BOTH ``PVWriteDeniedError`` messages, because the refusal an assistant is most
+#: tempted to route around is the allowlist miss, not the disabled gate: that one names a PV, and
+#: naming a PV invites trying a neighbouring one. It sits BESIDE the remedy rather than replacing
+#: it, the gate message still says which variable arms it, and one constant rather than two spelled
+#: copies so the two paths cannot drift into saying different things about the same rule.
+_ESCALATION = (
+    "Do NOT work around this by writing a different PV or through another route. "
+    "Report the refusal to the operator on duty."
+)
+
 _safety: "SafetyLayer | None" = None
 _safety_lock = threading.Lock()
 
@@ -123,7 +133,8 @@ class SafetyLayer:
         if not self._config.allow_pv_write:
             self._audit_deny(pv_name, "PV_WRITE_DENIED")
             raise PVWriteDeniedError(
-                "PV writes are disabled. Set EPICS_MCP_ALLOW_PV_WRITE=true to enable.",
+                "PV writes are disabled. Set EPICS_MCP_ALLOW_PV_WRITE=true to enable. "
+                + _ESCALATION,
                 details={"pv_name": pv_name},
             )
 
@@ -132,7 +143,7 @@ class SafetyLayer:
             self._audit_deny(pv_name, "PV_WRITE_DENIED")
             raise PVWriteDeniedError(
                 f"PV '{pv_name}' does not match the write allowlist pattern "
-                f"'{self._config.pv_write_pattern}'.",
+                f"'{self._config.pv_write_pattern}'. " + _ESCALATION,
                 details={"pv_name": pv_name, "pattern": self._config.pv_write_pattern},
             )
 
