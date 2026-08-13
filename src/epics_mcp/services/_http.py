@@ -136,12 +136,18 @@ def _authority_span(url: str) -> tuple[int, int]:
 def _keeps_the_same_address(candidate: str, original: urllib3.util.Url) -> bool:
     """True iff *candidate* is *original*'s address with the userinfo gone and nothing else moved.
 
-    Four conditions, each closing a case the textual cut gets wrong on its own, all measured:
+    Three conditions, each closing a case the textual cut gets wrong on its own, all measured:
     no ``@`` survives ANYWHERE (``https://svc:p@ss/w0rd@host/x`` parses with host ``ss``, so
     cutting its authority would leave half the password behind in the path), the result parses,
-    it carries no userinfo, and it agrees with the original on all six components (a backslash in
-    the authority ends it for urllib3 but not for a delimiter scan, and a cut using the wider span
-    turned ``evil.example.org`` into ``127.0.0.1``, naming a host nothing would connect to).
+    and it agrees with the original on all six components (a backslash in the authority ends it
+    for urllib3 but not for a delimiter scan, and a cut using the wider span turned
+    ``evil.example.org`` into ``127.0.0.1``, naming a host nothing would connect to).
+
+    A fourth condition, "and it carries no userinfo", was written here and then removed as
+    UNREACHABLE rather than left standing: urllib3 reads a userinfo only from the text before an
+    ``@``, so the first condition already refuses every candidate that could have one. Measured on
+    200000 ``@``-free strings, not one is given an ``auth``. A guard no input can reach is not a
+    second line of defence, it is a claim nothing tests.
 
     The comparison runs on PARSED components on both sides, so urllib3's normalisation cancels out
     and a result that preserved the original's case, its spaces and its query still compares equal.
@@ -151,8 +157,6 @@ def _keeps_the_same_address(candidate: str, original: urllib3.util.Url) -> bool:
     try:
         after = urllib3.util.parse_url(candidate)
     except (urllib3.exceptions.LocationParseError, ValueError):
-        return False
-    if after.auth is not None:
         return False
     return (
         after.scheme,
@@ -182,19 +186,26 @@ def url_without_userinfo(url: str) -> str | None:
     ``epics-pv://config`` exists for (``docs/deployment.md``): a normalised address makes that
     comparison false-negative, showing a difference where there is none.
 
-    The rule in one sentence: an address without an ``@`` is passed through unchanged; an address
-    with one is either PROVABLY the same address minus its userinfo, or it is withheld as ``None``.
+    The rule in one sentence: an address the parser accepts and that carries no ``@`` is passed
+    through unchanged; an address with one is either PROVABLY the same address minus its userinfo,
+    or it is withheld as ``None``.
 
-    urllib3 decides WHETHER there is a userinfo, because it is the parser ``requests`` connects
-    with and its reading is the one a socket follows. The cut is a pure deletion at the LAST ``@``
-    of the authority (a regex stopping at the first one leaves the tail of a password containing
-    ``@`` in the clear). The result is then handed BACK to urllib3, see
-    :func:`_keeps_the_same_address`; that verification is what refuses the spellings a textual rule
-    alone gets wrong, and ``None`` is the answer whenever it cannot be satisfied.
+    A LITERAL ``@`` is the precondition, and urllib3 decides everything after it, because it is
+    the parser ``requests`` connects with and its reading is the one a socket follows. The cut is a
+    pure deletion at the LAST ``@`` of the authority (a regex stopping at the first one leaves the
+    tail of a password containing ``@`` in the clear). The result is then handed BACK to urllib3,
+    see :func:`_keeps_the_same_address`; that verification is what refuses the spellings a textual
+    rule alone gets wrong, and ``None`` is the answer whenever it cannot be satisfied.
 
-    The ``auth is None`` clause below STATES the rule rather than adding reach: measured, dropping
-    it changes no row of the pinned table, because the verification refuses those inputs anyway.
-    It is kept because a reader should not have to derive the rule from a backstop.
+    An address the PARSER REFUSES is withheld whether or not it carries an ``@``. Without that, a
+    credential whose separator is percent-encoded (``https://svc:pw%40host/x``, measured: urllib3
+    refuses it, and it has no literal ``@``) would be printed in full. Nothing can connect to such
+    a string either way, so withholding it costs an operator only the sight of their own typo.
+
+    The ``auth is None`` clause below is not redundant, and the earlier claim that it was is
+    withdrawn: measured, ``https://@host/x`` has NO userinfo for urllib3 while a delimiter scan
+    finds an ``@`` in the authority, so without the clause the address would be silently rewritten.
+    It has its own row in the pinned table.
 
     ``None`` costs one harmless case on purpose: an ``@`` inside a path or query (``/CF?mail=a@b``)
     is withheld as well, because nothing distinguishes it from a credential written in a spelling
@@ -208,12 +219,12 @@ def url_without_userinfo(url: str) -> str | None:
     documented place for credentials is the ``EPICS_MCP_*_AUTH`` header, never the URL, see
     ``docs/configuration.md`` and ``docs/known-limits.md``.
     """
-    if "@" not in url:
-        return url  # nothing that could be a userinfo, so nothing to prove
     try:
         parsed = urllib3.util.parse_url(url)
     except (urllib3.exceptions.LocationParseError, ValueError):
-        return None  # the parser refuses the whole URL, so there is nothing to reason about
+        return None  # the parser refuses it, so a credential can hide in a spelling with no "@"
+    if "@" not in url:
+        return url  # nothing that could be a userinfo, so nothing to prove
     if not parsed.scheme or not parsed.host or parsed.auth is None:
         return None  # no address a socket could follow, or an "@" urllib3 does not read as one
     start, end = _authority_span(url)

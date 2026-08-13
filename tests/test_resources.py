@@ -423,6 +423,34 @@ def test_a_service_url_without_a_credential_is_byte_identical(
     assert get_epics_config()["channelfinder_url"] == "(disabled)"
 
 
+def test_a_service_url_that_cannot_be_redacted_provably_is_withheld(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The third state of these fields, and nothing exercised it until the review asked.
+
+    A password containing a delimiter makes the parser refuse the whole URL, so there is no
+    boundary to cut at and the address is withheld as null. That state is documented for adopters
+    (``docs/known-limits.md``), and it is the state a support question arrives about, which makes
+    the tempting repair ``url_without_userinfo(configured) or configured`` and that repair prints
+    the password. Measured: with it, the whole module stayed green.
+
+    null and "(disabled)" are DIFFERENT answers, so the distinction is asserted rather than
+    assumed: health still reports the plane as configured while config declines to name it.
+
+    Red-proof: the pre-fix payload, or that ``or configured`` fallback, and the first assertion
+    fails.
+    """
+    _with_config(monkeypatch, channelfinder_url="https://svc:s3cr3t/x@directory.example.org/CF")
+    config = get_epics_config()
+
+    assert config["channelfinder_url"] is None
+    assert config["channelfinder_url"] != "(disabled)", "withheld is not the same as unconfigured"
+    assert "s3cr3t" not in json.dumps(config)
+    assert get_health()["channelfinder_enabled"] is True, (
+        "the plane IS configured, which is exactly what null says and (disabled) would deny"
+    )
+
+
 def test_an_armed_olog_gate_is_visible_in_health(monkeypatch: pytest.MonkeyPatch) -> None:
     """A server that may create logbook entries reported that it does not write, and nothing else.
 

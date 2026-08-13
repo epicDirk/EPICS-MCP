@@ -7,6 +7,7 @@ exception hierarchy, and the single debug line that wakes the previously-dead RE
 from __future__ import annotations
 
 import logging
+import random
 import time
 from http.cookiejar import DefaultCookiePolicy
 from unittest.mock import Mock
@@ -15,6 +16,7 @@ from urllib.parse import urlparse
 import pytest
 import requests
 from requests.adapters import HTTPAdapter
+from urllib3.exceptions import LocationParseError
 from urllib3.util import parse_url
 from urllib3.util.retry import Retry
 
@@ -22,6 +24,7 @@ from epics_mcp.config import EpicsConfig
 from epics_mcp.errors import RateLimitError, ReadRateLimitError
 from epics_mcp.services._http import (
     ReadThrottle,
+    _authority_span,
     build_retrying_session,
     build_write_session,
     get_read_throttle,
@@ -717,8 +720,12 @@ def test_read_throttle_window_slides() -> None:
 
 #: Every spelling this redaction has been measured against, with the exact answer it must give.
 #: A table rather than a handful of asserts because the failures that matter here are all in the
-#: SPELLINGS, not in the branches: a mutation sweep over the implementation showed seven of nine
-#: mutants dying on one row each, and no two of them on the same row.
+#: SPELLINGS, not in the branches. Measured over a mutation sweep, and stated by row because an
+#: earlier version of this comment said "seven of nine mutants, one row each, no two on the same
+#: row" and all three halves of that were wrong: the four NARROW mutants (cut at the first ``@``,
+#: rebuild from the parse, drop the "an @ survives" check, drop the component comparison) die on
+#: 1, 1, 3 and 2 rows and those sets are disjoint, while the identity mutant dies on 29 and
+#: therefore overlaps every one of them.
 _REDACTION_TABLE: tuple[tuple[str, str | None], ...] = (
     # No "@" at all. Passed through character for character, whatever the string looks like,
     # because there is nothing in it that could be a userinfo.
@@ -745,6 +752,12 @@ _REDACTION_TABLE: tuple[tuple[str, str | None], ...] = (
     ("http://svc:pw@cf.example.org?token=ab", "http://cf.example.org?token=ab"),
     ("https://svc:pw@cf.example.org#note", "https://cf.example.org#note"),
     ("https://svc:pw@[::1]:8080/Olog", "https://[::1]:8080/Olog"),
+    # An EMPTY userinfo, both spellings, and they differ. urllib3 reads no userinfo at all in the
+    # first (auth is None) while a delimiter scan sees an @ in the authority, so it is withheld
+    # rather than silently rewritten; the second IS a userinfo to the parser and is cut. This pair
+    # is the reach of the auth-is-None clause, which a docstring once called reachless.
+    ("https://@cf.example.org/CF", None),
+    ("https://:@cf.example.org/CF", "https://cf.example.org/CF"),
     # Withheld: a delimiter inside the password makes urllib3 refuse the whole URL, so there is no
     # boundary to trust. Echoing the string back is what an earlier draft of this function did,
     # and it printed the password.
@@ -781,11 +794,33 @@ _REDACTION_TABLE: tuple[tuple[str, str | None], ...] = (
     # withheld too. A service ROOT carrying one is not an address this server has had to print.
     ("http://cf.example.org:8080/CF?mail=a@b", None),
     ("http://cf.example.org:8080/p@th/CF", None),
+    # Withheld with NO "@" in it at all: the parser refuses this one, and the credential is there
+    # with a percent-encoded separator. The "@"-free fast path used to print it in full.
+    ("https://svc:s3cr3t%40cf.example.org/ChannelFinder", None),
 )
 
 #: The secrets planted in :data:`_REDACTION_TABLE`, for the leak scan below. Declared rather than
-#: derived: a scan that reads its own needles off the inputs cannot fail.
-_PLANTED_SECRETS: tuple[str, ...] = ("s3cr3t", "hunter2", "hun@ter2", "ter2", "w0rd", "p%40w")
+#: derived: a scan that reads its own needles off the inputs cannot fail. ⚠️ The first version of
+#: this tuple named the exotic secrets only, so 13 of the 29 rows carrying an "@" held a password
+#: (``pw``, ``PW``) or a user name (``svc``) that no needle covered, and the per-needle positive
+#: control below could not see it, because it asks whether a NEEDLE occurs anywhere rather than
+#: whether a ROW is covered. Both axes are checked now.
+_PLANTED_SECRETS: tuple[str, ...] = (
+    "s3cr3t",
+    "hunter2",
+    "hun@ter2",
+    "ter2",
+    "w0rd",
+    "p%40w",
+    "pw",
+    "PW",
+    "svc",
+)
+
+#: Userinfo spellings that carry no secret to look for, so the row-axis control below skips them.
+#: Declared rather than pattern-matched: "it has no letters" would also excuse a real leak written
+#: in digits.
+_USERINFO_WITHOUT_A_SECRET: frozenset[str] = frozenset({":", "%40"})
 
 
 @pytest.mark.parametrize(("url", "expected"), _REDACTION_TABLE)
@@ -804,12 +839,24 @@ def test_the_service_url_redaction_is_pinned_row_by_row(url: str, expected: str 
 def test_no_row_of_the_table_leaks_its_planted_secret() -> None:
     """The table pins answers; this asks the question the answers exist for, over the whole table.
 
-    The positive control is the load-bearing half: it proves each needle really is in an input, so
-    a typo in a fixture cannot make the absence below vacuously true.
+    TWO positive controls, on two axes, because one of them was measured to be blind. The needle
+    axis proves each needle really is in an input, so a typo in a fixture cannot make the absence
+    below vacuously true. The ROW axis proves each row that carries a userinfo carries a needle
+    too, which the needle axis cannot see: with the first needle tuple, 13 of the 29 rows with an
+    "@" had a secret no needle named, and every one of them was scanned for nothing.
     """
     inputs = "\n".join(url for url, _ in _REDACTION_TABLE)
     for secret in _PLANTED_SECRETS:
         assert secret in inputs, f"{secret} is not planted anywhere, so its absence proves nothing"
+
+    for url, _expected in _REDACTION_TABLE:
+        userinfo = _userinfo_of(url)
+        if userinfo is None or userinfo in _USERINFO_WITHOUT_A_SECRET:
+            continue
+        assert any(secret in userinfo for secret in _PLANTED_SECRETS), (
+            f"{url} carries the userinfo {userinfo!r}, which no needle names, so scanning its "
+            "answer proves nothing about it"
+        )
 
     for url, expected in _REDACTION_TABLE:
         shown = url_without_userinfo(url) or ""
@@ -818,35 +865,103 @@ def test_no_row_of_the_table_leaks_its_planted_secret() -> None:
         assert shown == (expected or "")  # and the leak scan ran on the value the table pins
 
 
-def test_a_shown_address_is_the_original_minus_one_contiguous_span() -> None:
-    """The structural half of "it does not normalise", and it holds independently of the table.
+def _userinfo_of(url: str) -> str | None:
+    """The userinfo urllib3 reads out of *url*, or None if it reads none / refuses the URL."""
+    try:
+        return parse_url(url).auth
+    except (LocationParseError, ValueError):
+        return None
+
+
+def _deleted_spans(original: str, shown: str) -> list[str]:
+    """Every contiguous piece of *original* whose removal yields *shown* (empty list: not one)."""
+    return [
+        original[head:tail]
+        for head in range(len(original) + 1)
+        for tail in range(head, len(original) + 1)
+        if shown == original[:head] + original[tail:]
+    ]
+
+
+def test_a_shown_address_is_the_original_minus_one_userinfo_span() -> None:
+    """The structural half of "it does not normalise", and it does not read the expected column.
 
     An assertion per row can only refuse the normalisations someone thought of. This one refuses
     all of them at once: whatever comes back has to be the input with ONE contiguous piece cut out,
     so a lower-cased host, a percent-encoded space or a dropped query cannot be produced at all,
     since those introduce characters the input never had in that order.
 
-    Red-proof: rebuild the result from ``urllib3.util.parse_url`` and the fourth cut row fails.
+    ⚠️ "One deletion" alone is too weak, measured: a function returning the EMPTY STRING satisfies
+    it on every row (head 0, tail the whole length) and passed an earlier version of this test. So
+    the removed piece also has to END WITH the delimiter it is named after, which is what makes the
+    assertion say "a userinfo was removed" rather than "something was".
+
+    Red-proof: rebuild the result from ``urllib3.util.parse_url``, KEEPING query and fragment so
+    the verification still accepts it, and the case-and-space row fails. A rebuild that drops them
+    is refused upstream and reddens this test only through the positive control below, which is
+    what the first version of this docstring mistook for the property firing.
     """
-
-    def is_one_deletion(original: str, shown: str) -> bool:
-        return any(
-            shown == original[:head] + original[tail:]
-            for head in range(len(original) + 1)
-            for tail in range(head, len(original) + 1)
-        )
-
     cut_rows = 0
     for url, _expected in _REDACTION_TABLE:
         shown = url_without_userinfo(url)
         if shown is None:
             continue
-        assert is_one_deletion(url, shown), f"{url} came back as more than a deletion: {shown}"
+        spans = _deleted_spans(url, shown)
+        assert spans, f"{url} came back as more than a deletion: {shown}"
+        assert any(span == "" or span.endswith("@") for span in spans), (
+            f"{url} lost {spans!r}, which is not a userinfo"
+        )
         cut_rows += shown != url
 
-    # Positive control: the identity function would satisfy the assertion above on every row, so
+    # Positive control: the identity function would satisfy the assertions above on every row, so
     # the table has to contain rows where something really was removed.
-    assert cut_rows >= 9, "the table lost its cut rows, so the property above is vacuous"
+    assert cut_rows >= 10, "the table lost its cut rows, so the property above is vacuous"
+
+
+def test_the_property_holds_on_inputs_the_table_never_saw() -> None:
+    """The table is a pin; this is the sweep, and the difference matters.
+
+    Every other test here reads :data:`_REDACTION_TABLE`, so all of them go green together and none
+    of them can find a spelling nobody thought of. This one generates its own, from a seed, over an
+    alphabet of exactly the characters that decide the boundary. It asserts the CONTRACT rather
+    than an expected value, which is the only thing one can assert about an input one did not
+    choose: no planted secret survives, the answer is the input minus one userinfo span, and
+    running it twice changes nothing.
+
+    Seeded, so it is a deterministic test and not a lottery: the same 2000 inputs every run. The
+    original sweep behind the implementation was far larger (a per-character sweep over the
+    printable ASCII in both positions, plus 800000 random lines, all with zero leaks) and lived in
+    a scratchpad, which is to say it is gone. This is the part of it that stays.
+
+    Red-proof: any mutant that leaks also fails here, and unlike the table this test finds the
+    spelling itself. Measured on the first-``@`` mutant, it goes red without a table row.
+    """
+    rng = random.Random(20260813)
+    alphabet = ":/?#@.%[]" + chr(92) + " abAB01"
+    prefixes = ("https://", "http://", "//", "https:/", "", "HTTPS://")
+    secret = "SEKRET"
+
+    for _ in range(2000):
+        noise = "".join(rng.choice(alphabet) for _ in range(rng.randrange(1, 12)))
+        url = rng.choice(prefixes) + f"user{noise}:{secret}{noise}@cf.example.org/CF"
+        shown = url_without_userinfo(url)
+        if shown is None:
+            continue
+        assert secret not in shown, f"{url!r} leaked its secret as {shown!r}"
+        spans = _deleted_spans(url, shown)
+        assert any(span == "" or span.endswith("@") for span in spans), f"{url!r} lost {spans!r}"
+        assert url_without_userinfo(shown) == shown, f"{url!r} is not idempotent"
+
+
+def test_the_authority_span_starts_at_zero_when_there_is_no_scheme_separator() -> None:
+    """``_authority_span`` is used by one caller that can never hand it such a string, and its
+    fallback would still be wrong if it read ``find("//") + 2`` on a miss (that is 1, not 0).
+
+    The public function refuses a URL without a scheme or host before the span is computed, so this
+    branch is unreachable from outside and is asserted here instead of being left as a claim.
+    """
+    assert _authority_span("cf.example.org/CF") == (0, len("cf.example.org"))
+    assert _authority_span("//cf.example.org/CF") == (2, len("//cf.example.org"))
 
 
 def test_a_password_that_contains_an_at_sign_loses_its_whole_tail() -> None:
@@ -855,8 +970,14 @@ def test_a_password_that_contains_an_at_sign_loses_its_whole_tail() -> None:
     urllib3, the parser ``requests`` connects through, splits the authority at the LAST ``@``; a
     regex stops at the first. Under the first-``@`` reading ``svc:hun@ter2@host`` keeps ``ter2`` in
     the clear, and an assertion that only looks for the WHOLE secret passes anyway, because
-    ``hun@ter2`` no longer occurs as one string. So the assertion is on the exact answer, and on
-    the tail on its own.
+    ``hun@ter2`` no longer occurs as one string. Hence the assertion on the exact answer.
+
+    ⚠️ The follow-up assertion on the tail is belt and braces, not the discriminator: after the
+    equality above it cannot fire on its own. What it documents is the string a reviewer should
+    look for when this test ever does go red. And the first-``@`` mutant does not actually leak
+    here, measured: it produces a candidate that still carries an ``@``, which the verification
+    refuses, so it answers None. The leak it would cause without that verification is what the
+    table row for ``svc:p@ss/w0rd@host`` pins.
 
     Red-proof: swap ``rfind`` for ``find`` in ``url_without_userinfo`` and this fails.
     """

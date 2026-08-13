@@ -3017,7 +3017,9 @@ def test_a_credential_in_the_olog_url_never_reaches_the_report() -> None:
     it" could not see the property this test is named after. Measured against the regex redactor,
     row one comes back as ``https://***@ter2@olog.example.org/Olog``: the password's tail is in the
     clear, and yet ``"hun@ter2" not in ...`` holds, because after the substitution the secret no
-    longer occurs as one string. The tail is therefore asserted on its own as well.
+    longer occurs as one string. The two assertions after the equality are belt and braces, not
+    the discriminator: once the exact string is pinned they cannot fire on their own. They stay
+    because they name what a reviewer should look for on the day this test does go red.
 
     Red-proof: swap ``url_without_credentials`` back for ``_safe``. Measured, rows three and four
     fail (pytest stops at three), and after this sharpening row one fails as well, which is the
