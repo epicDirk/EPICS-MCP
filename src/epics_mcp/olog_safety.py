@@ -41,6 +41,7 @@ import threading
 import time
 from collections import deque
 
+from epics_mcp.audit_record import as_one_record
 from epics_mcp.config import EpicsConfig, get_config
 from epics_mcp.errors import OlogWriteDeniedError, RateLimitError, SafetyConfigError
 from epics_mcp.services._http import is_https_url, is_loopback_url, url_host
@@ -454,8 +455,13 @@ class OlogWriteGate:
         """Single audit sink. The message is pre-formatted from discrete metadata only (no free
         text), and passed with NO logging args so a literal ``%`` in a logbook name is never treated
         as a format directive. The stdlib logging layer absorbs handler errors via
-        ``Handler.handleError``, so an audit emission never turns a denial/failure into a crash."""
-        self._audit_logger.info(message)
+        ``Handler.handleError``, so an audit emission never turns a denial/failure into a crash.
+
+        "Discrete metadata" bounds what a field MEANS, not what it CONTAINS: a logbook and a level
+        name reach this gate as caller-chosen strings, so the record separator gets the same
+        treatment as the ``%`` above, one line further out. See :mod:`epics_mcp.audit_record` for
+        the measurement that made both necessary."""
+        self._audit_logger.info(as_one_record(message))
 
     def _purge_old(self, now: float) -> None:
         """Remove timestamps older than the sliding window."""

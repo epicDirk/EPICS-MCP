@@ -9,6 +9,7 @@ import time
 from collections import deque
 from collections.abc import Mapping
 
+from epics_mcp.audit_record import as_one_record
 from epics_mcp.config import EpicsConfig, get_config
 from epics_mcp.epics_address import write_reach_violations
 from epics_mcp.errors import PVWriteDeniedError, RateLimitError, SafetyConfigError
@@ -343,8 +344,14 @@ class SafetyLayer:
         handler I/O/formatting errors via ``Handler.handleError``, so an audit
         emission never turns a denial/failure into a crash nor hides the original
         raise, hence no ``try/except`` guard is needed here.
+
+        The record is rendered HERE and passed with no logging args, so the sanitising below sees
+        the finished line and a literal ``%`` in a caller's PV name is never read as a directive
+        (the Olog gate's sink reached the same shape from the other direction). Why the sanitising
+        is on the rendered record rather than on the one field that was the hole:
+        :mod:`epics_mcp.audit_record`.
         """
-        self._audit_logger.info(message, *args)
+        self._audit_logger.info(as_one_record(message % args))
 
     def _purge_old(self, now: float) -> None:
         """Remove timestamps older than the sliding window."""
