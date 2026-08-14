@@ -25,6 +25,7 @@ from epics_mcp.errors import RateLimitError, ReadRateLimitError
 from epics_mcp.services._http import (
     ReadThrottle,
     _authority_span,
+    _shown_cause,
     build_retrying_session,
     build_write_session,
     get_read_throttle,
@@ -39,6 +40,8 @@ from epics_mcp.services._http import (
     rest_get_bytes,
     rest_get_json,
     rest_put_json,
+    shown_failure,
+    shown_url,
     url_host,
     url_without_userinfo,
 )
@@ -985,3 +988,246 @@ def test_a_password_that_contains_an_at_sign_loses_its_whole_tail() -> None:
 
     assert shown == "https://cf.example.org:8080/CF"
     assert shown is not None and "ter2" not in shown  # the half a first-@ split would leave behind
+
+
+# --- The address and the cause as a client-facing MESSAGE may carry them (BG-DERR-A) ------------
+
+#: Every spelling :func:`shown_url` has been measured against, with the exact answer it must give.
+#: A table for the same reason the redaction table above is one: the failures that matter here are
+#: in the SPELLINGS, not in the branches. Two things are pinned that its delegate does not promise,
+#: and both have their own rows: a query and a fragment are cut, and an unprovable answer becomes a
+#: MARKER rather than ``None``, because an f-string has no null to print.
+_SHOWN_URL_TABLE: tuple[tuple[str, str], ...] = (
+    # Nothing to redact: passed through character for character, so an operator comparing the line
+    # against their own EPICS_MCP_*_URL reads their own string back.
+    ("http://cf.example.org:8080/ChannelFinder", "http://cf.example.org:8080/ChannelFinder"),
+    ("http://CF.Example.ORG:8080/Channel Finder", "http://CF.Example.ORG:8080/Channel Finder"),
+    # A userinfo urllib3 recognises, including the spelling a first-@ rule gets wrong.
+    ("https://svc:hunter2@cf.example.org:8080/CF", "https://cf.example.org:8080/CF"),
+    ("https://svc:hun@ter2@cf.example.org:8080/CF", "https://cf.example.org:8080/CF"),
+    ("https://svc@cf.example.org/CF", "https://cf.example.org/CF"),
+    ("https://svc:pw@[::1]:8080/Olog", "https://[::1]:8080/Olog"),
+    # The query and the fragment go, with and without a userinfo. A token in a query string is a
+    # normal thing to configure and a message has no use for one: every caller in this module
+    # passes its query as ``params``, so a query in the printed string came from the base URL.
+    ("http://archiver:17665/mgmt?apikey=s3cr3t", "http://archiver:17665/mgmt"),
+    ("http://archiver:17665/mgmt#note", "http://archiver:17665/mgmt"),
+    ("https://svc:pw@cf.example.org/CF?token=s3cr3t", "https://cf.example.org/CF"),
+    ("https://svc:pw@cf.example.org/CF#f", "https://cf.example.org/CF"),
+    # Withheld. Each is a row the delegate refuses, and the marker is what a message prints
+    # instead. The third kills "just rebuild from the parse": that answer would be
+    # "https://ss/w0rd@cf.example.org/CF", a fragment of the password, in the path, with no "@"
+    # left for any structural check to catch.
+    ("https://@cf.example.org/CF", "(unparseable)"),
+    ("svc:s3cr3t@cf.example.org/CF", "(unparseable)"),
+    ("https://svc:p@ss/w0rd@cf.example.org/CF", "(unparseable)"),
+    ("https://svc:s3cr3t%40cf.example.org/ChannelFinder", "(unparseable)"),
+    ("http://svc:s3cr3t@evil.example.org:8080\\@127.0.0.1/Olog", "(unparseable)"),
+    # A cut that leaves nothing is not an address either.
+    ("?token=s3cr3t", "(unparseable)"),
+)
+
+
+#: Rows carrying an ``@`` that plant no secret at all, so the row axis below skips them instead of
+#: demanding a needle they cannot have. Declared by their whole spelling rather than pattern-
+#: matched, for the reason the sibling exemption above states: "it has no letters" would excuse a
+#: real leak written in digits. One row so far: an EMPTY userinfo is a userinfo to a delimiter scan
+#: and to nobody else.
+_ROWS_WITHOUT_A_SECRET: frozenset[str] = frozenset({"https://@cf.example.org/CF"})
+
+
+@pytest.mark.parametrize(("url", "expected"), _SHOWN_URL_TABLE)
+def test_the_shown_address_is_pinned_row_by_row(url: str, expected: str) -> None:
+    """The exact answer per spelling.
+
+    Red-proof, by mutant: returning ``url`` fails every redacted row; delegating to
+    ``url_without_credentials`` instead of ``url_without_userinfo`` fails the ``svc:p@ss/w0rd`` row
+    with a password fragment in the path; dropping the query cut fails the four query/fragment
+    rows; returning the delegate's answer unguarded puts ``None`` where a marker belongs.
+    """
+    assert shown_url(url) == expected
+
+
+def test_no_row_of_the_shown_address_table_leaks_its_planted_secret() -> None:
+    """The table pins answers; this asks the question the answers exist for.
+
+    Two axes, the pair the redaction table above already needs and for the same measured reason:
+    the needle axis proves each needle is really planted, so a typo in a fixture cannot make the
+    absence vacuously true, and the row axis proves every row carrying a userinfo or a query
+    carries a needle at all.
+    """
+    # ``svc`` and ``pw`` are needles in their own right, not filler: a BARE user name is the whole
+    # credential material of the ``https://svc@host/CF`` row, and the row axis found that row
+    # scanned for nothing the first time this list was written without them.
+    needles = ("s3cr3t", "hunter2", "hun@ter2", "ter2", "w0rd", "svc", "pw")
+    inputs = "\n".join(url for url, _ in _SHOWN_URL_TABLE)
+    for needle in needles:
+        assert needle in inputs, f"the needle {needle!r} is planted in no row"
+    for url, _ in _SHOWN_URL_TABLE:
+        if url in _ROWS_WITHOUT_A_SECRET:
+            continue
+        if "@" in url or "?" in url:
+            assert any(needle in url for needle in needles), f"{url!r} is scanned for nothing"
+
+    outputs = "\n".join(shown_url(url) for url, _ in _SHOWN_URL_TABLE)
+    for needle in needles:
+        assert needle not in outputs, f"{needle!r} survived into a shown address"
+
+
+def test_a_served_status_is_named_from_the_client_side_table_not_the_servers_reason() -> None:
+    """The cause of a served failure says what the STATUS was, in this process's own words.
+
+    Requests' own text is ``f"{code} Client Error: {reason} for url: {self.url}"``, where
+    ``self.url`` is the PREPARED url and keeps its userinfo, and ``reason`` is the responding
+    server's status line. Printing either lets a foreign host write part of a message this module
+    promises is credential-free.
+
+    Red-proof: returning ``str(exc)`` for an ``HTTPError`` fails this assertion.
+    """
+    response = requests.Response()
+    response.status_code = 401
+    response.reason = "c3ZjOnB3"  # what a hostile server can put in its own status line
+    response.url = "http://svc:pw@cf.example.org/CF"
+    exc = requests.exceptions.HTTPError(
+        "401 Client Error: c3ZjOnB3 for url: http://svc:pw@cf.example.org/CF", response=response
+    )
+
+    assert _shown_cause(exc) == "HTTP 401 Unauthorized"
+
+
+def test_a_status_no_table_names_still_reports_its_number() -> None:
+    """``HTTPStatus(599)`` RAISES, and a proxy really does answer 520 and 599.
+
+    Red-proof: an unguarded ``HTTPStatus(status).phrase`` raises ValueError on this row.
+    """
+    response = requests.Response()
+    response.status_code = 599
+    assert _shown_cause(requests.exceptions.HTTPError("599", response=response)) == "HTTP 599"
+
+
+def test_an_http_error_without_a_response_falls_through_rather_than_inventing_a_code() -> None:
+    """A hand-built ``HTTPError`` has no ``.response``, and dozens of tests in this tree build one.
+
+    Such a text carries no url either, so the pass-through is safe, and an ``AttributeError`` here
+    would be a red with nothing to do with the leak.
+
+    Red-proof: reading ``exc.response.status_code`` unguarded raises AttributeError on this row.
+    """
+    assert _shown_cause(requests.exceptions.HTTPError("500")) == "500"
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        requests.exceptions.MissingSchema("Invalid URL 'svc:pw@h/x': No scheme supplied."),
+        requests.exceptions.InvalidSchema("No connection adapters were found for 'x://svc:pw@h'"),
+        requests.exceptions.InvalidURL("Failed to parse: https://svc:s3cr3t%40host/x"),
+    ],
+)
+def test_a_url_shape_failure_names_the_defect_and_echoes_nothing(exc: Exception) -> None:
+    """These three are raised inside ``prepare_url``, before a request exists, and they quote the
+    configured value: ``MissingSchema`` twice, the second time as a helpful suggestion that
+    reconstructs it WITH its credential. There is nothing to redact either, because the parser
+    that would prove a redaction is the one that just refused the string.
+
+    Red-proof: falling through to ``str(exc)`` puts ``pw``/``s3cr3t`` into the answer.
+    """
+    shown = _shown_cause(exc)
+
+    assert "not a usable HTTP address" in shown
+    assert "pw" not in shown
+    assert "s3cr3t" not in shown
+
+
+@pytest.mark.parametrize(
+    ("cause", "marker"),
+    [
+        ("HTTPConnectionPool(host='h', port=9): Max retries (ConnectionRefusedError)", "Refused"),
+        ("HTTPConnectionPool(host='h', port=9): Max retries (NameResolutionError)", "NameResolut"),
+        ("HTTPConnectionPool(host='h', port=9): Read timed out. (read timeout=1)", "timed out"),
+        ("HTTPSConnectionPool(host='h', port=443): CERTIFICATE_VERIFY_FAILED", "CERTIFICATE"),
+    ],
+)
+def test_a_transport_cause_travels_verbatim_and_stays_distinguishable(
+    cause: str, marker: str
+) -> None:
+    """The four transport failures read differently, and this text is the ONLY place they do.
+
+    Measured: requests hands urllib3 only ``path_url``, so none of these carries a userinfo, and
+    withholding them would delete diagnosis without closing a leak. ``doctor._REMEDY`` is static
+    per status and cannot supply the distinction afterwards.
+
+    Red-proof: withholding the cause wholesale (the class name for every family) fails all four
+    rows, and so does a per-family fixed phrase.
+    """
+    shown = _shown_cause(requests.exceptions.ConnectionError(cause))
+
+    assert shown == cause
+    assert marker in shown
+
+
+def test_an_unexpected_text_carrying_an_at_is_withheld_and_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The output-side check, and the input that proves the branch can fire.
+
+    The criterion needs no knowledge of the secret, which is the point: requests rewrites a
+    userinfo in flight, so a search for the CONFIGURED value finds nothing and reports a clean
+    message that carries the password. What survives every rewrite is the SEPARATOR.
+
+    It logs at WARNING because a net that silently repairs makes the defect it repaired invisible.
+
+    Red-proof: dropping the ``"@" not in text`` check returns the raw text and fails both the
+    absence assertion and the log assertion.
+    """
+    with caplog.at_level(logging.WARNING, logger="epics_mcp.services._http"):
+        shown = _shown_cause(ValueError("boom at http://svc:s3cr3t@cf.example.org/CF"))
+
+    assert shown == "ValueError (message withheld: it would echo a credential)"
+    assert "s3cr3t" not in shown
+    assert any("withheld the cause text" in record.message for record in caplog.records)
+
+
+def test_shown_failure_pairs_the_two_redacted_halves() -> None:
+    """The composite every failing site prints, both halves redacted, in the punctuation the sites
+    used before, so a reader's eye finds the same shape.
+
+    Red-proof: composing with ``url`` or with ``str(exc)`` puts the credential back.
+    """
+    response = requests.Response()
+    response.status_code = 404
+    exc = requests.exceptions.HTTPError("404 ... for url: http://svc:pw@h/x", response=response)
+
+    assert (
+        shown_failure("http://svc:pw@olog:8080/Olog", exc)
+        == "http://olog:8080/Olog: HTTP 404 Not Found"
+    )
+
+
+def test_requests_still_puts_the_prepared_url_in_the_httperror_message() -> None:
+    """The PREMISE the whole redaction rests on, pinned ONCE instead of inside every absence test.
+
+    Two measured facts about a library this repository does not own: a prepared request keeps the
+    userinfo in its url, and ``raise_for_status`` quotes that url. If a future requests stops doing
+    either, THIS test goes red and says so, rather than N absence tests going red together and
+    reading as "our redaction broke".
+
+    The last two lines pin the transcoding that killed the obvious design: requests requotes the
+    userinfo, so ``s%65cret`` arrives as ``secret``. A check that searches a message for the
+    CONFIGURED secret is therefore blind, and ``_shown_cause`` looks for the separator instead,
+    which requote's safe set never touches.
+    """
+    prepared = requests.Request("GET", "http://svc:s3cr3t@cf.example.org/CF").prepare()
+    assert prepared.url is not None
+    assert "svc:s3cr3t@" in prepared.url
+
+    response = requests.Response()
+    response.status_code = 401
+    response.url = prepared.url
+    with pytest.raises(requests.exceptions.HTTPError) as excinfo:
+        response.raise_for_status()
+    assert "svc:s3cr3t@" in str(excinfo.value)
+
+    transcoded = requests.Request("GET", "http://svc:s%65cret@cf.example.org/CF").prepare()
+    assert transcoded.url is not None
+    assert "svc:secret@" in transcoded.url

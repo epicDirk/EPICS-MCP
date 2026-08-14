@@ -24,6 +24,7 @@ import threading
 import time
 from collections import deque
 from email.message import Message
+from http import HTTPStatus
 from http.cookiejar import DefaultCookiePolicy
 from typing import Any
 
@@ -953,3 +954,131 @@ def is_retry_error(exc: BaseException) -> bool:
     should report it as reachable-but-erroring, NOT "unreachable". Null-safe.
     """
     return isinstance(getattr(exc, "__cause__", None), requests.exceptions.RetryError)
+
+
+#: What :func:`shown_url` prints when the address cannot be shown without its credentials. The same
+#: token :func:`url_without_credentials` already returns, deliberately, rather than a fifth dialect:
+#: a reader who meets it in a doctor line and in an error message meets one word, not two.
+_ADDRESS_UNPARSEABLE = "(unparseable)"
+
+#: What :func:`_shown_cause` prints for a configured value that is not a usable HTTP address. It
+#: names the defect and echoes NOTHING, because the value is exactly what cannot be shown: urllib3
+#: refuses these spellings, so :func:`url_without_userinfo` cannot prove any redaction of them, and
+#: requests' own text for this family quotes the URL twice (once as a helpful suggestion).
+_URL_SHAPE_CAUSE = (
+    "the configured URL is not a usable HTTP address (no scheme, a scheme this client cannot use, "
+    "or a malformed host). The value is not echoed here, because a credential can hide in a "
+    "spelling the parser refuses; read it back from this process's environment"
+)
+
+
+def shown_url(url: str) -> str:
+    """*url* as a client-facing MESSAGE may carry it: no userinfo, no query, no fragment.
+
+    The message spelling of :func:`url_without_userinfo`'s answer, and it delegates to that one
+    rather than to :func:`url_without_credentials` for a measured reason. The rebuilding sibling
+    normalises, and on one real spelling it does worse than normalise: for
+    ``https://svc:p@ss/w0rd@host/x`` urllib3 parses host ``ss`` and path ``/w0rd@host/x``, so the
+    rebuild prints ``https://ss/w0rd@host/x``, a fragment of the password, in the path, carrying no
+    ``@`` for any structural check to catch. A fallback that can leak is not a fallback, so there is
+    none: what the deleting sibling cannot PROVE is printed as :data:`_ADDRESS_UNPARSEABLE`.
+
+    The query and fragment go beyond what that sibling promises, and the cut is safe BECAUSE of what
+    it already proved: the result parses and agrees with the original on all six components, so the
+    first literal ``?`` or ``#`` is the real delimiter. A token in a query string is a normal thing
+    to configure, and a message has no use for one: every caller in this module passes its query as
+    ``params`` to requests, so a query in the printed string can only have come from the configured
+    base URL. ``epics-pv://config`` deliberately KEEPS the query, because that surface exists to be
+    compared character for character; this one exists to name an address.
+
+    A cut that leaves nothing is not an address either, so it also yields the marker.
+    """
+    shown = url_without_userinfo(url)
+    if shown is None:
+        return _ADDRESS_UNPARSEABLE
+    cut = min((at for at in (shown.find("?"), shown.find("#")) if at != -1), default=len(shown))
+    return shown[:cut] or _ADDRESS_UNPARSEABLE
+
+
+def _status_phrase(status: int) -> str:
+    """`` Not Found`` for 404, and an empty string for a status no IANA table names.
+
+    The phrase comes from :class:`http.HTTPStatus`, a CLIENT-side table, never from
+    ``response.reason``. Two reasons, and the first is the one that always holds: ``reason`` is the
+    responding server's own status line, so printing it lets a foreign host choose the text of a
+    message this module promises is credential-free. The second is determinism: a proxy answering
+    520 or 599 has no entry here at all, and ``HTTPStatus(599)`` raises rather than returning one.
+    """
+    try:
+        return f" {HTTPStatus(status).phrase}"
+    except ValueError:
+        return ""
+
+
+def _shown_cause(exc: BaseException) -> str:
+    """Why a request failed, in a text that provably carries no userinfo.
+
+    Measured, and the whole design follows from it: requests hands urllib3 only ``path_url``, so a
+    TRANSPORT failure (refused, DNS, either timeout, TLS, a body that is not JSON) reads
+    ``HTTPConnectionPool(host=..., port=P): ... url: /path`` and carries no credential at all. That
+    text is also the ONLY place "refused" is distinguishable from "not resolved" from "timed out"
+    from a TLS failure, and ``doctor._REMEDY`` is static per status, so nothing supplies it later.
+    It is therefore passed through VERBATIM, and withholding it wholesale would delete diagnosis
+    without closing any leak.
+
+    Two families do carry it, and each gets its own branch above the pass-through:
+    ``raise_for_status`` builds ``f"{code} ... for url: {self.url}"`` from the PREPARED url, which
+    keeps its userinfo; and the URL-shape errors are raised inside ``prepare_url`` before a request
+    exists, quoting the configured value twice.
+
+    ⚠️ The branches are ordered by specificity because ``RequestException`` subclasses ``IOError``,
+    which IS ``OSError``: an ``OSError`` arm anywhere above these two would swallow both leaking
+    families and print them raw. An earlier draft of this function had exactly that arm, and the
+    surrounding comments in ``olog_client``/``naming_client`` had already recorded the inheritance.
+
+    The final ``@`` check is the output-side verification, and it is what makes this function safe
+    against a family nobody enumerated. It needs no knowledge of the secret, which is the point:
+    requests rewrites the userinfo in flight (``requote_uri(unquote_unreserved(...))``, measured:
+    ``s%65cret`` prints as ``secret`` and ``hun@ter2`` as ``hun%40ter2``), so a search for the
+    CONFIGURED value finds nothing and reports a clean message that carries the password. What
+    cannot be rewritten is the SEPARATOR: ``prepare_url`` builds ``netloc = auth + "@" + host`` and
+    only then requotes, and ``@`` is in requote's safe set. A surviving userinfo therefore always
+    brings a literal ``@``, whatever its parts now look like.
+
+    The withheld branch logs at WARNING on purpose. A net that silently repairs makes the defect it
+    repaired invisible, and the site that produced an unexpected ``@`` is worth finding.
+    """
+    if isinstance(
+        exc,
+        (
+            requests.exceptions.MissingSchema,
+            requests.exceptions.InvalidSchema,
+            requests.exceptions.InvalidURL,
+        ),
+    ):
+        return _URL_SHAPE_CAUSE
+    if isinstance(exc, requests.exceptions.HTTPError):
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if isinstance(status, int):
+            return f"HTTP {status}{_status_phrase(status)}"
+        # No response object (a hand-built HTTPError, and dozens of tests build one): fall through
+        # to the check below rather than inventing a code, since such a text has no url to leak.
+    text = str(exc)
+    if "@" in text:
+        logger.warning(
+            "withheld the cause text of a %s: it carried an '@', which a redacted address cannot",
+            type(exc).__name__,
+        )
+        return f"{type(exc).__name__} (message withheld: it would echo a credential)"
+    return text
+
+
+def shown_failure(url: str, exc: BaseException) -> str:
+    """``"<address>: <cause>"``, the pair every failing REST site prints, both halves redacted.
+
+    A composer rather than a fourth idea: the showability of the address and the showability of the
+    cause are one decision at every call site, and the ten ``raise conn_exc/resp_exc`` sites, the
+    four ``check_connectivity`` bodies and the naming client's own HTTPError catch all want exactly
+    this shape. Same role as :func:`is_http_404` over :func:`http_status`.
+    """
+    return f"{shown_url(url)}: {_shown_cause(exc)}"
