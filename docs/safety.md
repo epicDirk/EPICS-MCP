@@ -89,22 +89,34 @@ This is a controls tool, so the trust questions come first.
   `EPICS_MCP_OLOG_URL` is an unvalidated string that accepts `https://user:password@host/Olog`, this
   refusal fires on the gate's ordinary state ("remote and not allowlisted", nothing has to be
   broken), and its text reaches the caller verbatim. Measured 2026-08-14, before it was closed, all
-  four write tools answered with the configured password in clear text. The address itself is in
-  `epics-doctor`'s `Write gates` block, with any userinfo removed. The logbook-allowlist refusal
-  does still name the logbooks it refused: a logbook name cannot carry a credential, and which
-  denials may name their target is decided per surface, never copied from a sibling gate.
+  four write tools answered with the configured password in clear text. What a caller gets instead
+  is the gate's own verdict, `olog_write.target_allowed` in `epics-pv://health`, out of the process
+  that answered. The address stays operator-side: `epics-doctor`'s `Write gates` block rebuilds it
+  without userinfo, query or fragment, but it prints that line only when the environment of THAT
+  command arms the gate, and a URL its parser refuses prints as `(unparseable)`. The
+  logbook-allowlist refusal does still name the logbooks it refused: a logbook name cannot carry a
+  credential, and which denials may name their target is decided per surface, never copied from a
+  sibling gate. ⚠️ This is the REFUSAL, not the whole tool: a credential in the URL still travels
+  with an ordinary HTTP failure of a PERMITTED target, including a loopback sandbox spelled with a
+  userinfo, which is the open item the entry below already names.
 - **The server's own log is NOT a redacted surface, and it is a different channel from the answer.**
   Everything above is about what travels toward the MCP client. An UNEXPECTED internal error is
   handled the other way round on purpose: the caller gets only the exception's class name
   (`[INTERNAL] <ClassName>`), while the full message and its traceback go to the server log, which
   is what makes such a bug debuggable at all. That detail can include a service URL exactly as
-  configured, credentials included, and the shared REST layer additionally logs the request URL at
-  `DEBUG`. **Treat the log as carrying whatever the process environment carries.** Two consequences
-  worth acting on before you meet them: this server speaks stdio, so its stderr is captured by
-  whatever launched it rather than by a path you chose, and with no `EPICS_MCP_AUDIT_LOG_FILE` set
-  the Olog audit goes to that same stderr. If that is not acceptable in your deployment, configure a
-  durable audit path and keep the log level above `DEBUG`; put credentials in `EPICS_MCP_*_AUTH`
-  rather than in a `*_URL`, which is the only thing that removes them from this channel entirely.
+  configured, credentials included. **Treat the log as carrying whatever the process environment
+  carries**, and put credentials in `EPICS_MCP_*_AUTH` rather than in a `*_URL`, which is the only
+  thing that removes them from this channel entirely.
+  Three qualifications, because each one decides how much this actually costs you, and stating the
+  exposure without them would overstate it. The shared REST layer also names a request URL, but only
+  for a request that FAILED and only at `DEBUG`, which Python's default root level already
+  suppresses; this server sets no log level of its own, so how much of that a deployment sees is the
+  embedder's decision, not a switch here. Where the stream goes is likewise not this server's to
+  say: it speaks stdio unless `FASTMCP_TRANSPORT` says otherwise (see the caveat further down), so
+  the stderr belongs to whatever launched the process. And the audit logger's stderr fallback is
+  **not** a state an armed gate can be in: a write-enabled server refuses to start without a durable
+  `EPICS_MCP_AUDIT_LOG_FILE` (above), so that fallback only ever carries the DENY lines of a server
+  whose gates are off.
 - **The effective write posture is inspectable, so you do not have to take this page's word for it.**
   `epics-doctor` prints a `Write gates` block, and `epics-doctor --json` carries the same under
   `write_safety`. A gate that is OFF gets one line saying so, which is the whole answer for it. For

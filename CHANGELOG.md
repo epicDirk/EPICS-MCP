@@ -15,22 +15,16 @@ carry breaking changes).
   ordinary path: "remote and not allowlisted" is the boundary's normal state, and no service has to
   be unreachable for the message to be produced. Measured before the fix, all four write tools
   (`create_log_entry`, `reply_to_log`, `add_log_attachment`, `update_log_entry`) answered with the
-  password in clear text. **Wire change:** the message now names the variable instead of its value
-  and ends with `Run epics-doctor to see the effective target.`; a client matching on the old text
-  must be updated. The effective address is unchanged and still printed by `epics-doctor`'s
-  `Write gates` block, with any userinfo removed. The logbook-allowlist refusal still names the
-  logbooks it refused, which cannot carry a credential.
+  password in clear text. **Wire change:** the message now names the variable instead of its value,
+  points at `olog_write.target_allowed` in `epics-pv://health` for the gate's own verdict, and ends
+  with an instruction not to route around the refusal; a client matching on the old text must be
+  updated. The configured address is disclosed to a caller on no surface, which is the posture
+  `epics-pv://health` and `epics-pv://config` already held for this field; an operator reads it from
+  `epics-doctor`'s `Write gates` block, which needs that command's own environment to arm the gate.
+  The logbook-allowlist refusal still names the logbooks it refused, which cannot carry a credential.
   ⚠️ **This closes the refusal, not every route.** A credential in `EPICS_MCP_OLOG_URL` still
   travels with an ordinary HTTP failure of a PERMITTED target, including a loopback sandbox URL
   spelled with a userinfo; that is a separate open item in the shared REST layer.
-
-### Changed
-
-- **`docs/safety.md` and `SECURITY.md` now state what the server's own log carries.** It is not a
-  redacted surface: an unexpected internal error gives the caller only the exception class name and
-  puts the full message and traceback in the log, which can include a service URL as configured.
-  The page says what to do about it (a durable audit path, a level above `DEBUG`, credentials in
-  `EPICS_MCP_*_AUTH`). No behaviour changed; the posture was previously unwritten.
 
 ## [0.6.0] - 2026-08-13
 
