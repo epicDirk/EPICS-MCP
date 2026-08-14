@@ -34,7 +34,7 @@ from epics_mcp.epics_address import (
     write_reach_violations,
 )
 from epics_mcp.olog_safety import split_name_list, write_target_allowed
-from epics_mcp.services._http import is_loopback_url, url_without_credentials
+from epics_mcp.services._http import is_loopback_url, shown_url
 
 
 class _Model(BaseModel):
@@ -248,14 +248,29 @@ def olog_write_gate_report(cfg: EpicsConfig) -> OlogWriteGateReport:
         armed=cfg.allow_olog_write,
         logbooks=sorted(split_name_list(cfg.olog_write_logbooks)),
         rate_limit_per_minute=cfg.olog_write_rate_limit,
-        # REBUILT without its userinfo, not pattern-redacted. The regex redactor matches up to the
-        # FIRST ``@`` while urllib3, the parser that decides the boundary two lines down, splits the
-        # authority at the LAST one, so a password containing ``@`` keeps its tail in the clear
-        # under it (measured: ``https://svc:hun@ter2@host/Olog`` came out as
-        # ``https://***@ter2@host/Olog``, and a bare ``svc@host`` username was untouched). This is
-        # printed on EVERY run, where the old error path printed it only on a failure, so a partial
-        # redaction here would be a new and routine exposure.
-        target_url=url_without_credentials(cfg.olog_url) if cfg.olog_url else "",
+        # WITHHELD unless the cut is provable, which is a stronger promise than either of the two
+        # this line carried before. The premise is unchanged and still the reason any redaction
+        # happens here at all: this prints on EVERY run with an armed gate, where the old error
+        # path printed only on a failure, so a partial redaction here is a routine exposure.
+        #
+        # What changed is which redaction counts as partial. The pattern redactor was ruled out
+        # because it cuts at the FIRST ``@`` while urllib3, the parser that decides the boundary
+        # two lines down, splits the authority at the LAST one (measured:
+        # ``https://svc:hun@ter2@host/Olog`` came out as ``https://***@ter2@host/Olog``, and a
+        # bare ``svc@host`` username was untouched). The REBUILDING sibling that replaced it
+        # fails the same way on a spelling nobody enumerated: for
+        # ``https://svc:p@ss/w0rd@host/Olog`` urllib3 reads host ``ss`` and path
+        # ``/w0rd@host/Olog``, so the rebuild printed ``https://ss/w0rd@host/Olog``, a fragment of
+        # the password, in the path, carrying no ``@`` for a structural check to catch. Measured
+        # through the rendered block, not argued.
+        #
+        # :func:`shown_url` is the answer that has no such spelling: it DELETES the userinfo and
+        # hands the result back to urllib3, and where that cannot prove the same address it
+        # returns ``(unparseable)`` rather than a best effort. A fallback that can leak is not a
+        # fallback. The block's own text already tells a reader this value is shown for reading
+        # and need not match the configured string character for character, which is what makes
+        # withholding admissible here and not on ``epics-pv://config``.
+        target_url=shown_url(cfg.olog_url) if cfg.olog_url else "",
         target_allowed=write_target_allowed(cfg),
         target_is_loopback=is_loopback_url(cfg.olog_url),
     )

@@ -209,17 +209,25 @@ class OlogWriteGate:
         # Measured before the fix: all four write tools answered with the configured password in
         # clear text on the everyday path.
         #
-        # Why NOT a redaction, and this is not the reason a first draft gave. Measured over nine
-        # spellings, :func:`~epics_mcp.services._http.url_without_credentials` IS safe here: the
-        # userinfo, the query and the fragment all go, and an address the parser refuses comes back
-        # as ``(unparseable)``. So "no redaction would be safe" would simply be false. The reason is
+        # Why NOT a redaction, and this is not the reason a first draft gave. A redaction that is
+        # safe here does exist, :func:`~epics_mcp.services._http.shown_url`: it deletes the
+        # userinfo, drops the query and the fragment, and withholds as ``(unparseable)`` whatever
+        # it cannot prove to be the same address. So "no redaction would be safe" would simply be
+        # false. The reason is
         # the VALUE: this server does not disclose the Olog target address to a CALLER on any
         # surface, deliberately and in writing. ``resources.py`` carries "olog as an
         # enabled-boolean only (never the URL...)" in the health payload, and ``epics-pv://config``
         # prints the three other planes' URLs and not this one. A refusal is the same kind of
-        # surface kept by the same client, so it follows the same posture. (The sibling
-        # :func:`~epics_mcp.services._http.url_without_userinfo` would not even be safe here:
-        # measured, it keeps a query-string token, ``docs/known-limits.md`` 17.)
+        # surface kept by the same client, so it follows the same posture.
+        #
+        # ⚠️ Neither of the other two would do, and an earlier version of this comment named the
+        # wrong one as safe. :func:`~epics_mcp.services._http.url_without_credentials` REBUILDS
+        # from the parse, and on ``https://svc:p@ss/w0rd@host/Olog`` urllib3 reads host ``ss``, so
+        # the rebuild prints a fragment of the password in the path (measured; it cost the
+        # ``epics-doctor`` write block a real leak before that caller moved to ``shown_url``).
+        # :func:`~epics_mcp.services._http.url_without_userinfo` keeps a query-string token
+        # (``docs/known-limits.md`` 17). ``shown_url`` is the one that closes both, which is why
+        # it is the one named above.
         #
         # What the caller gets instead is the gate's OWN verdict, in band and out of the process
         # that is actually answering: ``olog_write.target_allowed`` in ``epics-pv://health``. The

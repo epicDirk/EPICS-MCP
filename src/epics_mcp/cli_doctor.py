@@ -223,10 +223,18 @@ def _pv_write_lines(pv: PvWriteGateReport) -> list[str]:
 
 
 #: Printed under the two Olog target verdicts that can rest on the allowlist (BG-DCMP). The address
-#: above them is REBUILT by ``url_without_credentials``, which lower-cases the host and drops a
-#: query and a fragment, while the gate reads the RAW ``olog_url``; measured, a target configured
-#: in mixed case prints exactly the string already in the allowlist and is refused anyway, so a
-#: reader repairing the allowlist from that line compares two values that read identically.
+#: above them is REDACTED by ``shown_url``, which deletes the userinfo and drops a query and a
+#: fragment, while the gate reads the RAW ``olog_url``; measured, a target configured with a
+#: userinfo prints exactly the string already in the allowlist and is refused anyway, so a reader
+#: repairing the allowlist from that line compares two values that read identically.
+#:
+#: ⚠️ The collision class shrank when that line moved off the REBUILDING redaction, and the note
+#: survived the move on the remaining half. The rebuild also lower-cased the host, so a target
+#: configured in mixed case used to collide too; ``shown_url`` deletes rather than rebuilds and
+#: preserves case, so that spelling no longer does (measured). What still collides is whatever the
+#: printed line legitimately drops, which is the userinfo above and a query string. Narrower is
+#: not empty, and the reason for the move was a leak rather than this note: the rebuild put a
+#: fragment of a password into the PATH on one spelling.
 #:
 #: ⚠️ It deliberately claims NOTHING about a comparison having taken place, and the first draft did.
 #: The refusal is reached by six states in which no allowlist is ever read: five SEC-2 vetoes, plus

@@ -7,6 +7,19 @@ carry breaking changes).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`epics-doctor` printed a fragment of the Olog password for one spelling of
+  `EPICS_MCP_OLOG_URL`, on every run rather than on a failure.** The write-gate block redacted its
+  target address by rebuilding it from the parse. For `https://svc:p@ss/w0rd@host/Olog` urllib3
+  reads the host as `ss` and the rest as a path, so the rebuild printed
+  `https://ss/w0rd@host/Olog`: part of the password, in the path, with no `@` left anywhere for a
+  structural check to catch. The block now redacts by deleting the userinfo and handing the result
+  back to the parser, and prints `(unparseable)` where it cannot prove the result names the same
+  address. Two visible consequences beyond the leak: the host keeps the case it was configured in
+  (the rebuild lower-cased it), and a URL whose spelling the parser refuses is withheld instead of
+  approximated. Put credentials in `EPICS_MCP_OLOG_AUTH` rather than in the URL either way.
+
 ### Changed
 
 - **Releasing now takes an approval, and the tag is no longer the point of no return.** Two

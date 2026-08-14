@@ -93,9 +93,13 @@ This is a controls tool, so the trust questions come first.
   broken), and its text reaches the caller verbatim. Measured 2026-08-14, before it was closed, all
   four write tools answered with the configured password in clear text. What a caller gets instead
   is the gate's own verdict, `olog_write.target_allowed` in `epics-pv://health`, out of the process
-  that answered. The address stays operator-side: `epics-doctor`'s `Write gates` block rebuilds it
-  without userinfo, query or fragment, but it prints that line only when the environment of THAT
-  command arms the gate, and a URL its parser refuses prints as `(unparseable)`. The
+  that answered. The address stays operator-side: `epics-doctor`'s `Write gates` block deletes the
+  userinfo and drops the query and fragment, but it prints that line only when the environment of
+  THAT command arms the gate, and a URL it cannot prove it has redacted prints as `(unparseable)`.
+  ⚠️ That block REBUILT the address from the parse until 2026-08-14, and rebuilding was measured
+  to leak: for `https://svc:p@ss/w0rd@host/Olog` the parser reads the host as `ss`, so the rebuild
+  printed part of the password inside the path, with no `@` left for a structural check to see.
+  Deleting and then asking the parser to confirm the result is the same address is what closed it. The
   logbook-allowlist refusal does still name the logbooks it refused: a logbook name cannot carry a
   credential, and which denials may name their target is decided per surface, never copied from a
   sibling gate. ⚠️ This covers the REFUSAL, and the ordinary HTTP failure of a PERMITTED target

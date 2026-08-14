@@ -715,10 +715,13 @@ def test_read_throttle_window_slides() -> None:
 # ----------------------------------------------------------------------------------------------
 # url_without_userinfo, the redaction epics-pv://config prints its three service URLs through
 #
-# The sibling url_without_credentials is tested next to its one caller, in test_doctor.py under
-# "the printed Olog target". The two are deliberately different functions and the difference is
-# the point: that one rebuilds (and normalises), this one deletes (and withholds what it cannot
-# prove), because a payload a client compares against its own configuration must not be reworded.
+# The sibling url_without_credentials is tested in test_doctor.py, under "the printed Olog target".
+# It has NO caller any more, and the difference between the two is why: that one rebuilds (and
+# normalises), this one deletes (and withholds what it cannot prove), because a payload a client
+# compares against its own configuration must not be reworded. The rebuild turned out to carry a
+# password fragment into the PATH on the spelling ``https://svc:p@ss/w0rd@host/x`` (host parses as
+# ``ss``), so its last caller, the Olog write-gate block, moved to ``shown_url``. Its test keeps
+# that row pinned; do not give it a new caller without reading it.
 # ----------------------------------------------------------------------------------------------
 
 

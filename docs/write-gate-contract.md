@@ -123,9 +123,13 @@ can be an arbitrary host must confine *where* a write can physically go, in addi
   allowlist miss names its PV beside an escalation sentence; the logbook allowlist names the refused
   logbooks). Which of its refusals may name their target is a per-surface decision each gate makes and
   writes down, exactly as point 2 requires for empty-allowlist semantics. Do not redact the value instead
-  of omitting it unless the redaction is proven for the shape being printed: measured here, one existing
-  redaction leaves a query-string token in place, and the other is safe but rebuilds the address, which
-  prints a string differing from the one an exact allowlist compares. Deciding to omit rather than to
+  of omitting it unless the redaction is proven for the shape being printed, and "proven" means measured
+  over spellings rather than argued: of this server's three redactions, one leaves a query-string token
+  in place, one REBUILDS the address and was measured to print a fragment of a password in the path for
+  `https://svc:p@ss/w0rd@host/x` (the parser reads the host as `ss`), and only the third both deletes and
+  asks the parser to confirm the result names the same address, withholding where it cannot. The first
+  two each read as safe until the spelling that breaks them was tried, which is the point of this
+  sentence. Deciding to omit rather than to
   redact was, in this server's case, settled by a posture it already held, that the logbook target
   address is disclosed to a caller on no surface at all.
   ⚠️ **Scope, because the sentence above is about what the GATE produces and a caller can be handed the

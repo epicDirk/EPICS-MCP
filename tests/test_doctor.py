@@ -3154,17 +3154,25 @@ _ADDRESS_NOTE = [
 
 
 def test_a_denied_target_does_not_read_as_the_string_the_gate_compared() -> None:
-    """The address on this line is REBUILT from the parse, the gate reads the configured value
-    exactly, and the two used to stand next to each other with nothing saying so (BG-DCMP).
+    """The address on this line is REDACTED, the gate reads the configured value exactly, and the
+    two used to stand next to each other with nothing saying so (BG-DCMP).
 
     The configuration here is the sharp case rather than a generic one. The report prints exactly
     the string that is in the allowlist, character for character, and the gate denies anyway,
-    because the host was configured in a different case and the comparison is case-sensitive. An
-    operator who copies the address off this line into EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST is then
-    looking at two values that read identically and a deny that will not go away. The collision is
-    asserted as a PRECONDITION rather than assumed: a fixture that stopped producing it would
-    leave the rest of this test green for a reason that has nothing to do with what it is named
-    after.
+    because the configured value carries a userinfo that the printed line drops and the comparison
+    reads the configured value. An operator who copies the address off this line into
+    EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST is then looking at two values that read identically and a
+    deny that will not go away. The collision is asserted as a PRECONDITION rather than assumed: a
+    fixture that stopped producing it would leave the rest of this test green for a reason that
+    has nothing to do with what it is named after.
+
+    ⚠️ The MECHANISM here changed once, which is why the precondition is asserted at all. Until
+    the line moved off the rebuilding redaction it was a case difference: the rebuild lower-cased
+    the host, so ``https://Olog.Example.org/Olog`` printed as its allowlisted lower-case twin.
+    ``shown_url`` deletes rather than rebuilds and therefore preserves case, so that spelling no
+    longer collides (measured). What still does is anything the printed line legitimately DROPS,
+    the userinfo below and a query string. The class is narrower than it was, and not empty, which
+    is exactly why the note this test guards is still owed.
 
     ⚠️ The note claims NOTHING about a comparison having run, and the first draft did, which an
     adversarial pass showed to be false in seven states of this same branch. Six reach the refusal
@@ -3181,7 +3189,7 @@ def test_a_denied_target_does_not_read_as_the_string_the_gate_compared() -> None
 
     Red-proof: remove the two added lines and the block comparison fails.
     """
-    configured = "https://Olog.Example.org/Olog"
+    configured = "https://svc:pw@olog.example.org/Olog"
     allowlisted = "https://olog.example.org/Olog"
     overrides: dict[str, object] = {
         "allow_olog_write": True,
@@ -3479,23 +3487,37 @@ def test_a_credential_in_the_olog_url_never_reaches_the_report() -> None:
     the discriminator: once the exact string is pinned they cannot fire on their own. They stay
     because they name what a reviewer should look for on the day this test does go red.
 
-    Red-proof: swap ``url_without_credentials`` back for ``_safe``. Measured, rows three and four
-    fail (pytest stops at three), and after this sharpening row one fails as well, which is the
-    row the property is about.
+    Red-proof: swap ``shown_url`` back for either of the two redactions this block has already
+    outgrown. Against ``_safe`` (the pattern redactor, deleted with the guard it was) rows three
+    and four fail; against ``url_without_credentials`` (the rebuilding sibling) row FIVE fails,
+    measured as ``https://ss/w0rd@olog.example.org/Olog == '(unparseable)'``.
 
-    ⚠️ This surface keeps the NORMALISING function on purpose. Here the question is which ADDRESS a
-    write would reach, so a rebuilt spelling is the right answer; where a reader compares a printed
-    value against a configured one, ``epics-pv://config`` uses ``url_without_userinfo`` instead,
-    which deletes and never rewrites. The two are not interchangeable.
+    ⚠️ Row five is why this surface no longer keeps the NORMALISING function, and the reasoning it
+    replaces was not wrong so much as under-measured. "Which ADDRESS would a write reach" really is
+    the question here, and a rebuilt spelling really is an answer to it, but only where the rebuild
+    is faithful: on this spelling urllib3 puts a fragment of the password into the PATH, so the
+    printed value is neither the address nor redacted. ``shown_url`` deletes instead, hands the
+    result back to the parser, and withholds where it cannot prove the same address. It is the
+    same family as ``epics-pv://config``'s ``url_without_userinfo``, and still not interchangeable
+    with it: that surface exists to be compared character for character and therefore keeps the
+    query, this one names an address and drops it.
     """
-    for secret, url in (
-        ("hun@ter2", "https://svc:hun@ter2@olog.example.org/Olog"),
-        ("hunter2", "https://svc:hunter2@olog.example.org/Olog"),
-        ("svc", "https://svc@olog.example.org/Olog"),
-        ("tok", "https://olog.example.org/Olog?token=tok"),
+    clean = "https://olog.example.org/Olog"
+    for secret, url, expected in (
+        ("hun@ter2", "https://svc:hun@ter2@olog.example.org/Olog", clean),
+        ("hunter2", "https://svc:hunter2@olog.example.org/Olog", clean),
+        ("svc", "https://svc@olog.example.org/Olog", clean),
+        ("tok", "https://olog.example.org/Olog?token=tok", clean),
+        # The row the REBUILDING sibling gets wrong, and the reason this block no longer uses it.
+        # urllib3 reads host ``ss`` and path ``/w0rd@olog.example.org/Olog`` out of this spelling,
+        # so a rebuild prints a fragment of the password IN THE PATH, carrying no ``@`` for any
+        # structural check to catch. Measured before the fix, on the success path of every run
+        # with an armed gate: ``https://ss/w0rd@olog.example.org/Olog``. The deleting sibling
+        # cannot PROVE the cut here, so it withholds, which is the only answer that does not leak.
+        ("w0rd", "https://svc:p@ss/w0rd@olog.example.org/Olog", "(unparseable)"),
     ):
         report = _write_safety_report(_write_config(olog_url=url))
-        assert report.olog.target_url == "https://olog.example.org/Olog", url
+        assert report.olog.target_url == expected, url
         assert secret not in report.olog.target_url, url
         assert "ter2" not in report.olog.target_url, "a first-@ split would leave this behind"
 
@@ -3604,9 +3626,18 @@ def test_an_audit_file_that_cannot_be_opened_for_append_is_not_called_writable(
         ("https://svc:hunter2@olog.example.org:8443/Olog", "https://olog.example.org:8443/Olog"),
         ("not a url", "(unparseable)"),
         ("", "(unparseable)"),
+        # The hole, pinned rather than described. This function REBUILDS from the parse, and on
+        # this spelling urllib3 reads host "ss" with path "/w0rd@olog.example.org/Olog", so the
+        # rebuild carries a fragment of the password into the path and no "@" is left in the
+        # userinfo position for a structural check to notice. It is why the Olog write block moved
+        # off this function and onto ``shown_url``, which withholds here instead.
+        (
+            "https://svc:p@ss/w0rd@olog.example.org/Olog",
+            "https://ss/w0rd@olog.example.org/Olog",
+        ),
     ],
 )
-def test_the_printed_olog_target_keeps_the_address_and_drops_the_credentials(
+def test_the_olog_target_rebuild_keeps_the_address_and_drops_a_plain_credential(
     url: str, expected: str
 ) -> None:
     """The PORT is part of the address and nothing pinned it: two Olog instances on one host, a
@@ -3616,7 +3647,15 @@ def test_the_printed_olog_target_keeps_the_address_and_drops_the_credentials(
     executed by a test, and the tempting repair for a URL the parser rejects is to echo the raw
     string, which reintroduces exactly the leak the function exists to close.
 
+    ⚠️ This function no longer has a caller, and the last row says why. It was renamed off "the
+    printed Olog target" because it no longer prints anything: the write-gate block it served
+    moved to ``shown_url`` after the final row was measured to leak on the success path of every
+    run with an armed gate. The row stays here, asserting the WRONG-looking value on purpose, so
+    the limit is a pinned fact rather than a sentence somebody has to believe. Whoever deletes
+    this function deletes this test with it; whoever finds a new caller for it reads this row
+    first.
+
     Red-proof: drop the port clause and row one fails; return ``url`` from either ``(unparseable)``
-    branch and the last two rows fail.
+    branch and rows five and six fail.
     """
     assert url_without_credentials(url) == expected
