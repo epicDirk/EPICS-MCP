@@ -1489,9 +1489,14 @@ def test_no_plane_verdict_echoes_a_credential_its_exception_still_carries(
     LAST layer that can still get it wrong, and its exceptions are built by hand because that is
     the shape an unbarriered caller does deliver.
 
-    It covers ALL FOUR sites in ``services/doctor.py`` that interpolate a cause into a verdict, and
-    the completeness is the point rather than a detail: a fifth site added later is exactly how
-    this property would be lost, and three-of-four is what that looks like on the way there.
+    It covers four of the FIVE sites in ``services/doctor.py`` that interpolate a cause into a
+    verdict, and the completeness is the point rather than a detail: measured per node, every one
+    of its four rows executes all four. ⚠️ The fifth is the ``ca_error`` arm, which only a
+    CA-bundle failure can enter, so it is held by
+    ``test_an_unreadable_ca_bundle_is_a_ca_error_on_both_arrival_shapes`` instead. It was added in
+    the same working session as this test, and this docstring said "ALL FOUR" for a while
+    afterwards, which is exactly the drift the sentence warns about: a new site is how this
+    property gets lost, and nothing counts the sites.
 
     Red-proof: all four rows against the deleted ``_safe`` guard, and WHICH assertion catches each
     is the finding. Rows two, three and four fail on the secret itself (``ter2``, ``loneuser``,

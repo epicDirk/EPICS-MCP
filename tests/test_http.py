@@ -428,6 +428,57 @@ def test_rest_get_json_refuses_redirect_with_neutral_message(
         )
 
 
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://svc:p@ss/w0rd@service.example.org/CF",
+        "https://svc:hun@ter2@service.example.org/CF",
+        "https://loneuser@service.example.org/CF",
+        "https://service.example.org/CF?token=t0ken",
+    ],
+    ids=["at-and-slash-in-password", "at-in-password", "bare-username", "query-token"],
+)
+def test_the_shared_barrier_leaks_no_secret_on_any_failing_route(
+    monkeypatch: pytest.MonkeyPatch, base_url: str
+) -> None:
+    """The barrier every plane crosses, driven with a base URL that CARRIES a secret.
+
+    ⚠️ This condition was not created by any test until 2026-08-14, and the omission mattered
+    beyond coverage: four shipped documents cite this barrier as the reason ``epics-doctor`` no
+    longer needs a redaction of its own. The property they lean on was argued from the call graph.
+    Here it is exercised, on both failure shapes ``rest_get_json`` distinguishes, since they build
+    their messages through different helpers (``shown_failure`` versus ``shown_url`` plus
+    ``shown_cause``).
+
+    The first row is the spelling that broke the REBUILDING redaction, kept here because this
+    barrier delegates to the DELETING one and must not acquire the same hole by a later edit.
+
+    Red-proof: point ``shown_url`` at ``url_without_credentials`` and row one fails on ``w0rd``;
+    interpolate ``url`` instead of ``shown_url(url)`` at either raise site and every row fails.
+    """
+    secrets = ("p@ss", "w0rd", "hun@ter2", "ter2", "loneuser", "t0ken")
+    session = build_retrying_session()
+
+    for outcome in (
+        Mock(side_effect=requests.exceptions.ConnectionError("refused")),
+        Mock(return_value=_resp(None, ok=False)),
+    ):
+        monkeypatch.setattr(session, "get", outcome)
+        with pytest.raises((ArchiverConnectionError, ArchiverResponseError)) as raised:
+            rest_get_json(
+                session,
+                f"{base_url}/resources/channels",
+                None,
+                1.0,
+                conn_exc=ArchiverConnectionError,
+                resp_exc=ArchiverResponseError,
+            )
+        message = str(raised.value)
+        for secret in secrets:
+            assert secret not in message, f"{base_url} -> {message}"
+        assert "@" not in message, f"an address-shaped '@' survived: {message}"
+
+
 def test_rest_put_json_refuses_redirect_with_neutral_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -511,24 +562,32 @@ def test_a_ca_bundle_failure_is_recognised_through_a_wrapper_and_names_no_path()
     this repository forbids in output, an account name in a filesystem path, and the original
     ``OSError`` puts it in the message.
 
-    Red-proof: drop the ``cause`` half of the predicate and the wrapper row fails; return
-    ``str(exc)`` from the branch in ``shown_cause`` and both path assertions fail.
+    ⚠️ TWO path shapes, and the second one is the whole reason this test is not satisfied by the
+    guard that preceded it. A bundle path containing an ``@`` is withheld by the generic ``@``
+    branch even with this branch deleted, so it proves the OLD net rather than the new one; only a
+    path WITHOUT an ``@`` reaches the new branch as the only thing standing between the message and
+    the output. Measured: with the branch removed, ``/etc/ssl/certs/ca-bundle.crt`` is echoed in
+    full. The common shape of a real bundle path has no ``@`` at all, so testing only the ``@``
+    shape would have been a guard that cannot go red for the case it exists for.
+
+    Red-proof: drop the ``cause`` half of the predicate and the wrapper rows fail; delete the
+    branch in ``shown_cause`` and the ``EPICS_MCP_CA_BUNDLE`` assertion fails on every row while
+    the no-``@`` row additionally fails on its path assertion.
     """
-    raw = OSError(
-        "Could not find a suitable TLS CA certificate bundle, invalid path: "
-        "/home/svc@site.example/certs/ca.pem"
-    )
-    wrapped = ArchiverConnectionError("Failed to connect to Archiver at http://arch:17665")
-    wrapped.__cause__ = raw
+    for path in ("/home/svc@site.example/certs/ca.pem", "/etc/ssl/certs/ca-bundle.crt"):
+        raw = OSError(f"Could not find a suitable TLS CA certificate bundle, invalid path: {path}")
+        wrapped = ArchiverConnectionError("Failed to connect to Archiver at http://arch:17665")
+        wrapped.__cause__ = raw
 
-    assert is_ca_bundle_error(raw) is True
-    assert is_ca_bundle_error(wrapped) is True
+        assert is_ca_bundle_error(raw) is True, path
+        assert is_ca_bundle_error(wrapped) is True, path
+
+        for exc in (raw, wrapped):
+            shown = shown_cause(exc)
+            assert path not in shown, shown
+            assert "EPICS_MCP_CA_BUNDLE" in shown, shown
+
     assert is_ca_bundle_error(ArchiverConnectionError("timed out")) is False
-
-    for exc in (raw, wrapped):
-        shown = shown_cause(exc)
-        assert "svc@site.example" not in shown, shown
-        assert "EPICS_MCP_CA_BUNDLE" in shown, shown
 
 
 def test_http_status_reads_chained_response_code() -> None:
