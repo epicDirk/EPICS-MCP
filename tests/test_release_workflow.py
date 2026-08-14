@@ -139,10 +139,63 @@ def test_the_build_clears_dist_before_building() -> None:
 def test_the_tests_run_in_the_same_workflow_that_publishes() -> None:
     """CI runs on the tag push too, but nothing makes this workflow wait for it. A release built
     from a red tree is exactly the artifact that must not exist, so the check lives here as well.
+
+    Bound to the BUILD job by position rather than found anywhere in the file, the same idiom the
+    token test above uses and for the same reason: a ``uv run pytest`` line that drifted into
+    another job, or into a comment, satisfies a whole-file scan while the artifact is built
+    ungated.
     """
-    assert any("uv run pytest" in line for line in _lines()), (
+    lines = _lines()
+    build_at = next(i for i, line in enumerate(lines) if line.rstrip() == "  build:")
+    publish_at = next(i for i, line in enumerate(lines) if line.rstrip() == "  publish:")
+    running = [
+        i
+        for i, line in enumerate(lines)
+        if "uv run pytest" in line and not line.strip().startswith("#")
+    ]
+
+    assert running, (
         "the publish workflow must run the suite itself; a green CI run on the same commit is a "
         "separate workflow this one does not depend on"
+    )
+    assert all(build_at < at < publish_at for at in running), (
+        f"the suite must run in the build job (lines {build_at}..{publish_at}), found at {running}"
+    )
+
+
+def test_the_lint_chain_runs_in_the_same_workflow_that_publishes() -> None:
+    """The other half of the argument above, and it was missing until this guard existed.
+
+    ``ci.yml`` has two jobs, ``test`` and ``lint``; this workflow replicated the first and left the
+    second behind, so a release was built and uploaded without ruff, without ruff-format, without
+    mypy --strict and without the two prose guards. The consequence is not symmetric with a failing
+    test, which is why this is not merely tidiness: ``pre-commit`` is the only place
+    ``scripts/check_no_ess_internal.py`` runs, that script is the only thing in this repository
+    that looks for a credential, a facility-internal host name or a personal name in the tree,
+    ``src/`` ships in the wheel and ``docs/`` in the sdist, and a version on a package index can be
+    superseded but never withdrawn. Nothing upstream compensates: ``main`` carries no branch
+    protection and no ruleset, so no required status check stands between a red commit and a tag.
+
+    Red proof: delete the ``pre-commit`` step from the build job and this fails on the first
+    assertion; move it into another job and it fails on the second.
+    """
+    lines = _lines()
+    build_at = next(i for i, line in enumerate(lines) if line.rstrip() == "  build:")
+    publish_at = next(i for i, line in enumerate(lines) if line.rstrip() == "  publish:")
+    linting = [
+        i
+        for i, line in enumerate(lines)
+        if "pre-commit run" in line and not line.strip().startswith("#")
+    ]
+
+    assert linting, (
+        "the publish workflow must run the pre-commit chain itself, the same one ci.yml's lint "
+        "job runs; a green CI run on the same commit is a separate workflow this one does not "
+        "depend on and cannot be blocked by"
+    )
+    assert all(build_at < at < publish_at for at in linting), (
+        f"the lint chain must run in the build job (lines {build_at}..{publish_at}), found at "
+        f"{linting}"
     )
 
 
@@ -154,6 +207,15 @@ def test_every_action_reference_is_pinned_in_order() -> None:
     workflow's own comment records that ``astral-sh/setup-uv`` publishes v8.x and v9.x but no
     floating major tag for either, so a routine bump to ``@v9`` would not resolve and would break
     the release outright.
+
+    ⚠️ "Pinned" here means "pinned in THIS list", which is a weaker property than the name suggests
+    and is worth saying plainly: five of the six references are major TAGS, which the owner can
+    move without anyone editing this file, so this test notices a bump and not a hijack. Exactly
+    one reference is a COMMIT, and that asymmetry is deliberate rather than half-finished work: the
+    publishing action is the only one that runs in a job holding ``id-token: write``, and it used
+    to resolve through ``release/v1``, a mutable BRANCH. Its version comment is inside the pinned
+    string on purpose, so a SHA and a comment that no longer agree are a red test rather than a
+    convincing-looking lie.
     """
     refs = [
         line.strip().split("uses:", 1)[1].strip()
@@ -166,7 +228,7 @@ def test_every_action_reference_is_pinned_in_order() -> None:
         "astral-sh/setup-uv@v7",
         "actions/upload-artifact@v7",
         "actions/download-artifact@v8",
-        "pypa/gh-action-pypi-publish@release/v1",
+        "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2",
         # The github-release job's own checkout, added consciously: it needs CHANGELOG.md and the
         # slicer script. Everything else that job does is `gh`, which is preinstalled on the runner,
         # so no THIRD-PARTY action joined the release's supply chain here.
