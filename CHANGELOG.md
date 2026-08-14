@@ -7,6 +7,19 @@ carry breaking changes).
 
 ## [Unreleased]
 
+### Changed
+
+- **Releasing now takes an approval, and the tag is no longer the point of no return.** Two
+  repository settings arrived in front of the upload: only an administrator can create a `v*` tag,
+  and the `publish` job waits for an approval on the `pypi` environment, whose deployment policy
+  admits tag refs matching `v*` only. Nothing about the published artifact changes; what changes is
+  the procedure in `CONTRIBUTING.md`, so anyone cutting a release from a checkout of this repository
+  needs to know that a pushed tag now stops and waits. `SECURITY.md` states the posture, including
+  the two things it is not: self-approval is permitted, and administrators may bypass it.
+- The CI and release workflows check out with `actions/checkout@v7` (was `@v5`), which blocks
+  checking out fork pull request code under `pull_request_target` and `workflow_run`. Neither
+  trigger is used here, so this is hardening with no behaviour change.
+
 ## [0.6.0] - 2026-08-14
 
 ### Added

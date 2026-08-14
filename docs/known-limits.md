@@ -23,6 +23,7 @@ retired, and where it went, is listed at the end.
 [16 CI and the display tests](#16--ci-cannot-run-the-display-coupled-tests-and-no-switch-inside-this-repository-changes-that) ·
 [17 the service-URL redaction](#17--the-service-url-redaction-removes-a-userinfo-not-every-secret-a-url-can-carry) ·
 [18 one line is not one field set](#18--the-audit-record-is-one-line-which-is-not-the-same-as-one-set-of-fields) ·
+[19 the repository posture is unguarded](#19--the-repository-side-release-protections-are-unguarded-and-a-guard-over-them-was-rejected) ·
 [retired](#retired-entries-and-where-they-went)
 
 ---
@@ -374,6 +375,42 @@ release.
 **What to do with it as an operator:** read an audit line's fields left to right and take the first
 occurrence of each key, which is what the gate wrote. And note that neither gate promises anything
 about a field a caller chose beyond recording it faithfully.
+
+
+## 19 · The repository-side release protections are unguarded, and a guard over them was rejected
+
+**Measured 2026-08-14**, when the protections were created.
+
+Three of the four things that now stand in front of a release live on GitHub, not in this tree: the
+`release-tags` ruleset, the required reviewer and tag-only deployment policy on the `pypi`
+environment, and the allowlist of third-party actions. `SECURITY.md` describes them and
+`CONTRIBUTING.md` tells a releaser to expect the approval. **Nothing in this repository notices if
+any of them is deleted.** A single API call removes any one of them, and every test stays green.
+
+**What IS guarded, and it is only the tree-side half:**
+`test_the_upload_runs_inside_the_pypi_environment` pins the `environment: name: pypi` block into the
+`publish` job, so the reference the approval hangs on cannot be removed or moved without a red test.
+The rules behind that reference are not covered.
+
+**The tempting repair, probed and rejected.** A test calling `gh api .../rulesets` would need a
+token and network access. CI has neither: the workflow token is read-only by repository policy
+(`default_workflow_permissions: read`, measured), and a fork checkout has less than that. Such a
+test would therefore skip on every run that matters, which is the silent non-check this repository
+rejects elsewhere (`tests/test_release_workflow.py` states the same argument for a guard that only
+runs when an optional dependency happens to be installed). A guard that cannot go red in CI is not
+a guard.
+
+**What to do with it instead:** re-measure by hand when a release is prepared. One command each:
+
+```bash
+gh api repos/<owner>/<repo>/rulesets --jq '.[].id' | while read id; do \
+  gh api "repos/<owner>/<repo>/rulesets/$id" --jq '{name,rules:[.rules[].type],me:.current_user_can_bypass}'; done
+gh api repos/<owner>/<repo>/environments/pypi --jq '.protection_rules'
+gh api repos/<owner>/<repo>/actions/permissions/selected-actions
+```
+
+A cheaper signal costs nothing: if a `v*` tag push starts the upload **without** stopping for an
+approval, one of the two protections is gone.
 
 
 ## Retired entries, and where they went

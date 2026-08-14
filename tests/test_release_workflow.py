@@ -51,6 +51,48 @@ def test_only_the_publish_job_may_request_the_publishing_token() -> None:
     )
 
 
+def test_the_upload_runs_inside_the_pypi_environment() -> None:
+    """The ``environment:`` reference is what makes the repository-side approval reach this job.
+
+    Two separate things hang off this one block, which is why losing it is worse than it looks.
+    It is half of the Trusted Publisher claim the index verifies (repository + workflow +
+    environment name), so removing it fails the upload loudly, after the build. And since
+    2026-08-14 the ``pypi`` environment carries a required reviewer and a tag-only deployment
+    policy; a job that references an environment does not start until those pass, so this block is
+    also the only thing that stops the runner before an OIDC token exists. Delete it and the
+    approval disappears in silence, because the loud half only speaks at upload time.
+
+    Bound by position rather than by presence, the same argument as the id-token guard above: an
+    ``environment:`` block moved into the build job would satisfy a mere substring check while
+    granting the approval to the wrong job.
+
+    Red proof: delete the block and the count assertion fails; move it into the build job and the
+    position assertion fails; rename the environment and the name assertion fails.
+    """
+    lines = _lines()
+    build_at = next(i for i, line in enumerate(lines) if line.rstrip() == "  build:")
+    publish_at = next(i for i, line in enumerate(lines) if line.rstrip() == "  publish:")
+    release_at = next(i for i, line in enumerate(lines) if line.rstrip() == "  github-release:")
+    referencing = [
+        i
+        for i, line in enumerate(lines)
+        if line.rstrip() == "    environment:" and not line.strip().startswith("#")
+    ]
+
+    assert len(referencing) == 1, (
+        f"expected exactly one environment reference, found lines: {referencing}"
+    )
+    at = referencing[0]
+    assert build_at < publish_at < at < release_at, (
+        "the environment reference must sit inside the publish job, found it at line "
+        f"{at + 1} (build: {build_at + 1}, publish: {publish_at + 1}, release: {release_at + 1})"
+    )
+    assert lines[at + 1].strip() == "name: pypi", (
+        "the environment name is half of the Trusted Publisher claim and carries the approval "
+        f"rules, found: {lines[at + 1].strip()!r}"
+    )
+
+
 def test_the_upload_is_gated_on_a_tag_and_on_not_being_a_dry_run() -> None:
     """The manual trigger exists so the workflow can be rehearsed end to end without an account.
     That rehearsal is only safe while BOTH halves of the condition survive: a tag ref, and an
@@ -174,8 +216,11 @@ def test_the_lint_chain_runs_in_the_same_workflow_that_publishes() -> None:
     tree for a credential at all (its built-in formats; the site-specific patterns live in a
     git-ignored file that no runner checkout materialises, which ``CLAUDE.md`` records as well),
     ``src/`` ships in the wheel and ``docs/`` in the sdist, and a version on a package index can be
-    superseded but never withdrawn. Nothing upstream compensates: ``main`` carries no branch
-    protection and no ruleset, so no required status check stands between a red commit and a tag.
+    superseded but never withdrawn. Nothing upstream compensates, and that survived main getting a
+    ruleset on 2026-08-14: the ruleset holds ``non_fast_forward`` and ``deletion`` only, and
+    deliberately so, because a required status check would force every change through a pull
+    request. No required status check therefore stands between a red commit and a tag, and this
+    guard is still the whole net.
 
     Red proof: delete the ``pre-commit`` step from the build job and this fails on the first
     assertion; move it into another job and it fails on the second.

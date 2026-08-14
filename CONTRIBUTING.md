@@ -181,11 +181,14 @@ the gates.
    `download-artifact` and the upload never run under it, and it takes the LENIENT gate branch
    (`--allow-prerelease`); the strict `--expect-version` branch runs on a tag alone. So a green
    rehearsal says nothing about either. What covers them is the real releases, and that coverage is
-   measured rather than assumed: run `30767777703` (the `v0.5.0` tag, 2026-08-02) is the most recent
+   measured rather than assumed: run `31765446620` (the `v0.6.0` tag, 2026-08-14) is the most recent
    one whose `publish` job ran `download-artifact` and uploaded, and whose `github-release` job then
    sliced the changelog successfully. Older tags did the same; the earlier claim that
    `download-artifact` "has still never executed" was already false when it was written, and had
-   been since `v0.3.0`.
+   been since `v0.3.0`. ⚠️ A superlative like "the most recent" goes stale on its own, without
+   anyone editing it: this line named `v0.5.0` for twelve hours after `v0.6.0` had shipped. Re-read
+   it whenever a release goes out, or measure it with
+   `gh run list --workflow Publish --json databaseId,headBranch,event`.
 
 **Every release:**
 
@@ -206,14 +209,25 @@ the gates.
    scripts/check_release_ready.py dist/*`. The gate reads the BUILT metadata, never
    `pyproject.toml`, because the two can differ; it refuses a direct reference, a pre-release
    version, and a description that would not render.
-4. Tag `vX.Y.Z` and push the tag. That is what triggers the upload, and it is the irreversible
-   step: from here the version number is spent whatever happens next.
+4. Tag `vX.Y.Z` and push the tag. That starts the build. ⚠️ **Since 2026-08-14 the tag is no longer
+   the irreversible step, and this line used to say it was.** Two repository settings sit in front
+   of the upload now, both outside this tree, so neither shows up in a diff:
+   - Only a repository **administrator** can create a `v*` tag at all (ruleset `release-tags`).
+   - The `publish` job then **waits for an approval** on the `pypi` environment. Approve it under
+     the run's own page, "Review deployments". The version is spent from that click onwards, not
+     from the tag push.
+
+   If the approval is never given, the run expires after GitHub's pending-deployment limit and the
+   `github-release` job is skipped: the tag exists, the index has nothing, and the Releases page
+   disagrees with the tag. The way back is to re-run the whole workflow from the same tag and
+   approve it, not to push a second tag.
 5. Afterwards: check that the index page renders and that a clean install of the new version
    imports and runs its commands. The README install command and the index badge are already
    pointing at the published package since 0.3.0, so there is nothing to swap. The **GitHub
-   release** needs no hand step: the workflow's third job creates it after a successful upload,
-   with the body sliced out of `CHANGELOG.md` by `scripts/changelog_section.py`. Check it appeared;
-   if the section was missing the job fails loudly rather than publishing an empty release.
+   release** needs no hand step *after the approval in step 4*: the workflow's third job creates it
+   once the upload succeeded, with the body sliced out of `CHANGELOG.md` by
+   `scripts/changelog_section.py`. Check it appeared; if the section was missing the job fails
+   loudly rather than publishing an empty release.
 
 **Three traps, all measured here rather than imagined:**
 

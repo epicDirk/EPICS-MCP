@@ -62,9 +62,12 @@ jobs:
       # assuming: its site-specific patterns are loaded from a git-ignored file that no checkout
       # materialises, so a fresh runner runs the built-in credential formats only. Those are the
       # ones that matter here. CI would go red on the same tag
-      # push, but this workflow neither waits for it nor can be blocked by it (main carries no
-      # branch protection and no ruleset), and a package index never lets a version be reused: a
-      # secret published this way can only be superseded, never withdrawn.
+      # push, but this workflow neither waits for it nor can be blocked by it. Main carries a
+      # ruleset since 2026-08-14, and that changes nothing about this argument, which is why the
+      # premise is restated rather than removed: the ruleset holds `non_fast_forward` and
+      # `deletion` only, so there is still no required status check between a red commit and a
+      # tag. And a package index never lets a version be reused: a secret published this way can
+      # only be superseded, never withdrawn.
       - name: Lint, format and types (the same pre-commit chain ci.yml runs)
         run: uv run pre-commit run --all-files --show-diff-on-failure
       - name: Run tests
@@ -112,13 +115,21 @@ jobs:
 
   # Upload. Split into its own job so the OIDC permission exists ONLY here. What actually stands
   # between a run and the index, measured rather than assumed (`gh api repos/<owner>/<repo>/
-  # environments`): ONE blocker, the tag condition below, and one binding. The `pypi` environment
-  # is the binding: it is part of the Trusted Publisher claim the index verifies (repository +
-  # workflow + environment name), so a run outside it cannot mint a usable token. It is NOT a
-  # second blocker today, and an earlier version of this comment said it was: the environment
-  # carries `protection_rules: []` and `deployment_branch_policy: null`, so no required reviewer,
-  # no wait timer, no ref restriction. The environment is where such a rule WOULD live, on the
-  # GitHub side rather than the index side; adding one is a repository setting, not an edit here.
+  # environments`): TWO blockers and one binding, where an earlier version of this comment could
+  # honestly record only one. The tag condition below is the first blocker. The second arrived on
+  # 2026-08-14: the `pypi` environment now carries a required reviewer and a deployment policy
+  # restricted to tag refs matching `v*`. A job that references an environment does not START
+  # until its protection rules pass, so the runner never comes up and no OIDC token is minted
+  # before the approval. The environment is ALSO the binding, unchanged: it is part of the Trusted
+  # Publisher claim the index verifies (repository + workflow + environment name), so a run
+  # outside it cannot mint a usable token.
+  #
+  # Two limits of that second blocker, stated because the obvious reading overstates it.
+  # `prevent_self_review` is false, so the account that pushes the tag approves its own
+  # deployment; this is a deliberate stop against the ACCIDENT (a tag pushed against an unbumped
+  # tree), not a second independent factor against a compromised account. And `can_admins_bypass`
+  # is true and is not settable through the REST API, only in the repository UI, so an
+  # administrator can start a waiting job without approving it.
   # A manual rehearsal never reaches this job.
   publish:
     needs: build
@@ -133,8 +144,9 @@ jobs:
       # NOT covered by a rehearsal: this job is gated on a tag AND on dry_run being false, so a
       # manual dry run never reaches this step, and the v8 bump made here could not be proven by
       # one. It IS covered by the real releases, and that is measured rather than assumed: this
-      # step ran green in run 30767777703 (the v0.5.0 tag) and in 30531166469 (v0.4.0) before it,
-      # both on @v8. A rehearsal remains no evidence for this job; a shipped tag is.
+      # step ran green in run 31765446620 (the v0.6.0 tag), in 30767777703 (v0.5.0) and in
+      # 30531166469 (v0.4.0) before those, all on @v8. A rehearsal remains no evidence for this
+      # job; a shipped tag is.
       - uses: actions/download-artifact@v8
         with:
           name: distributions

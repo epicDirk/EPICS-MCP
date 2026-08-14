@@ -116,3 +116,28 @@ The EPICS client is [p4p](https://mdavidsaver.github.io/p4p/), distributed as pr
 bundle the EPICS Base libraries, so no separate EPICS Base build takes part. REST access uses
 `requests`. Secret scanning and push protection are enabled on this repository; dependency updates
 are watched by Dependabot.
+
+## Release path
+
+A release is the one action here that cannot be undone: a package index never lets a version number
+be reused. Four repository settings stand in front of it, measured on 2026-08-14 rather than
+intended:
+
+- **No API token exists.** The upload uses Trusted Publishing (OIDC), bound to this repository, the
+  `publish.yml` workflow and the `pypi` environment, so there is no credential to steal from here.
+- **Only an administrator can create a `v*` tag** (ruleset `release-tags`, rules `creation`,
+  `update`, `deletion`, `non_fast_forward`).
+- **The upload waits for an approval** on the `pypi` environment, whose deployment policy admits tag
+  refs matching `v*` only. A job referencing an environment does not start until its rules pass, so
+  no OIDC token is minted before that approval.
+- **Third-party actions are allowlisted.** Only GitHub-owned actions plus `astral-sh/setup-uv` and
+  `pypa/gh-action-pypi-publish` may run.
+
+Two limits, because the list above reads stronger than it is. `prevent_self_review` is false, so the
+account that pushes the tag approves its own deployment: this is a stop against the accident, not a
+second independent factor. And repository administrators may bypass the approval entirely, which is
+GitHub's default and is not settable through its REST API.
+
+`main` carries a ruleset that blocks force pushes and deletion. It deliberately does **not** require
+pull requests or status checks, so a red commit can still reach `main`; the release workflow
+therefore runs the full lint and test chain itself rather than trusting a separate CI run.
