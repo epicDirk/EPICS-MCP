@@ -1,6 +1,6 @@
 # MCP client integration
 
-Ready-to-paste blocks for `.mcp.json` or `claude_desktop_config.json`, from read-only localhost to a write-enabled test setup.
+Ready-to-paste blocks for `.mcp.json` or `claude_desktop_config.json`, from the read-only default posture to a write-enabled test setup. Read-only is not the same as localhost, and the first block says which of the two it is.
 
 [Back to the README](../README.md)
 
@@ -24,9 +24,14 @@ missing one is ignored: silently. If nothing appears after a restart and the fil
 it is, compare its shape against your client's own example before debugging anything here.
 
 > `epics-init --preset <shape>` prints a block of its own for each of four shapes and then runs
-> `epics-doctor` against what it printed, so you can skip the copying. `epics-init --list` names the
+> `epics-doctor` against what it printed, so you can skip the copying. That check runs once no
+> `<placeholder>` is left: `sandbox` is checked immediately, the other three only once you supply
+> their hosts with `--set NAME=VALUE`, because probing `<archiver-host>` would produce a DNS failure
+> shaped exactly like a real finding. `epics-init --list` names the
 > shapes, and `--out PATH` writes the block to a file with an encoding a client can read, which a
-> shell redirect cannot promise. The write-enabled block at the bottom is deliberately NOT a preset:
+> shell redirect cannot promise; while a placeholder is still open it writes NOTHING, names the
+> value it is waiting for, and still exits `0`, so test for the file rather than for the code.
+> The write-enabled block at the bottom is deliberately NOT a preset:
 > turning a write gate on is a decision to make deliberately, not one to inherit from a flag.
 
 ⚠️ **`command` is a bare name, and something has to resolve it.** Every block below says
@@ -66,13 +71,17 @@ merely read-only, disable the auto search explicitly:
 }
 ```
 
-Run `epics-doctor` to see what your instance actually reaches; it reports `localhost-isolated` only
-when every search list is unset **and** the auto search is off.
+Run `epics-doctor` to see what your instance actually reaches, and export the same variables into
+its own shell first: it reads the environment of the command YOU run, not this file, which is why
+`epics-init --preset <shape> --set ...` checks the block by injecting it into its own process. It
+reports `localhost-isolated` only when every search list is unset **and** the ACTIVE provider's auto
+search is off, so the other protocol's switch can still be open.
 
 **With the REST planes enabled**, which assumes you RUN those three services, on this machine, on
 these ports. Replace the URLs with your own, or delete the lines for services you do not have: an
-unset URL disables that plane with no network call, whereas a wrong one produces four failing lines
-in the next self-check (four, not three: the archiver is probed as two planes, mgmt and retrieval).
+unset URL disables that plane with no network call, whereas keeping all three while you run none of
+the services produces four failing lines in the next self-check (four, not three: the archiver is
+probed as two planes, mgmt and retrieval, so one wrong archiver URL alone already fails two).
 The one URL an unset value does NOT switch off is `EPICS_MCP_ARCHIVER_RETRIEVAL_URL`, which falls
 back to the mgmt URL.
 

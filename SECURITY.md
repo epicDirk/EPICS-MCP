@@ -64,6 +64,22 @@ setting.
   decision either: it speaks stdio unless `FASTMCP_TRANSPORT` says otherwise (see below), so its
   stderr belongs to whatever launched it. `docs/safety.md` states the exposure with the three
   qualifications that bound it.
+  ⚠️ **That measure is unavailable on one plane.** Four planes have an `EPICS_MCP_*_AUTH` variable
+  (ChannelFinder, Archiver, Alarm, Olog). The **Naming** plane has none, so a credential it needs
+  can only live in its `*_URL`, and for that plane the sentence above has no remedy to offer.
+- **The ANSWER is a second channel, and it is closed.** Everything above is about the log. The
+  other route out of this process is what a tool RETURNS, and it used to carry the same value: a
+  REST failure message named the whole request URL, and two tools put such a message into a `note`
+  of a payload they returned SUCCESSFULLY, which a client keeps (`diagnose_connection` and
+  `lookup_device_name`). Measured 2026-08-13 across every REST-backed tool: all of them carried a
+  configured credential, in one of the two ways. Measured 2026-08-14 after the fix, over the same
+  set and both failure kinds: none does. An address is now printed without its userinfo and without
+  its query, or as `(unparseable)` where that cannot be proven, and a served status is reported in
+  this client's own words rather than the responding server's. **The two channels therefore differ
+  on purpose**: the answer is redacted, the log is not, and an operator who treats them alike will
+  be wrong about one of them. One caller-facing surface is not covered by that fix and is tracked
+  separately: `epics-doctor` still prints a value through a pattern-based redaction that cuts at
+  the first `@` and does not recognise a bare user name.
 - **Output redaction (ChannelFinder only).** ChannelFinder owners and property values pass a
   site-configurable allowlist. Olog entries come back WHOLE (title, text, author, attachments):
   the former Olog read redaction was removed 2026-08-01 as a deliberate prototype decision, see

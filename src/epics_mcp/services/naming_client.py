@@ -19,7 +19,13 @@ from urllib.parse import quote as url_quote
 
 import requests
 
-from epics_mcp.services._http import get_read_throttle, get_shared_session
+from epics_mcp.services._http import (
+    get_read_throttle,
+    get_shared_session,
+    shown_cause,
+    shown_failure,
+    shown_url,
+)
 from epics_mcp.services.naming_exceptions import (
     NamingServiceConnectionError,
     NamingServiceNotFound,
@@ -57,7 +63,7 @@ class NamingServiceClient:
         # ``base_url`` is REQUIRED and caller-provided (from ``EPICS_MCP_NAMING_URL`` via config):
         # there is deliberately NO built-in default host, so this client never reaches a hard-coded
         # ESS endpoint. Callers gate on an unset URL (see checkers.build_naming_client + diagnose).
-        # Normalise like the other three REST clients (channelfinder/archiver/alarm): strip a
+        # Normalise like the other four REST clients (channelfinder/archiver/alarm/olog): strip a
         # trailing slash so a URL configured with OR without it yields the same endpoints (M10;
         # without this, ``http://naming:8080/enotify-web`` gave ``...enotify-webrest/...`` → 404).
         self.base_url = base_url.rstrip("/")
@@ -101,7 +107,7 @@ class NamingServiceClient:
             OSError,
         ) as exc:
             raise NamingServiceConnectionError(
-                f"Failed to connect to Naming Service at {self.base_url}: {exc}"
+                f"Failed to connect to Naming Service at {shown_failure(self.base_url, exc)}"
             ) from exc
 
     # ------------------------------------------------------------------
@@ -163,11 +169,11 @@ class NamingServiceClient:
                     f'The name "{name}" is not registered in the Naming Service'
                 ) from exc
             raise NamingServiceResponseError(
-                f"Failed to query device name '{name}': {exc}"
+                f"Failed to query device name '{name}': {shown_cause(exc)}"
             ) from exc
         except requests.exceptions.RequestException as exc:
             raise NamingServiceResponseError(
-                f"Failed to query device name '{name}': {exc}"
+                f"Failed to query device name '{name}': {shown_cause(exc)}"
             ) from exc
         if not isinstance(data, dict):
             # S11: a non-dict 2xx used to escape as an uncaught AttributeError in validate_name
@@ -198,12 +204,13 @@ class NamingServiceClient:
         if self._identity != "verified":
             logger.debug(
                 "Naming not-registered WITHHELD: identity probe to %s%s = %s (not verified)",
-                self.base_url,
+                shown_url(self.base_url),
                 NAMING_SWAGGER_PATH,
                 self._identity,
             )
             raise NamingServiceResponseError(
-                f"Naming Service identity at {self.base_url} could not be confirmed via its "
+                f"Naming Service identity at {shown_url(self.base_url)} could not be "
+                "confirmed via its "
                 f"swagger beacon (probe: {self._identity}); a 'not registered' answer is withheld "
                 "rather than trusted as definitive (S13)."
             )

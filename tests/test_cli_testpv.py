@@ -13,6 +13,8 @@ find at a known one. That asymmetry is the point of ``cli_testpv.server_conf``.
 
 from __future__ import annotations
 
+import gc
+
 import pytest
 from p4p.client.thread import Context
 from p4p.server import Server
@@ -161,9 +163,21 @@ def test_the_served_pvs_answer_a_real_client() -> None:
 
     ``isolate=True`` is used HERE and nowhere else, for a random loopback port that cannot collide
     with a developer's own IOC or with a parallel test run. Production does the opposite.
+
+    The provider is BOUND to a name, exactly as ``main`` binds it, and that is the property this
+    test now pins rather than a detail of its own setup: p4p's ``Server`` registers only the C++
+    source and keeps no Python reference to a ``StaticProvider``, so an anonymous temporary loses
+    its ``SharedPV`` wrappers to the first cyclic collection and the put handler with them. The
+    switch then refuses every write for the life of the process (pvxs 1.5.1 reports it as the
+    copy-pasted "RPC not implemented by this PV"), while the gets keep passing from the C++ cache.
+    This test went red that way four times in CI, every time on 3.12, which is a scheduling
+    accident rather than a version difference: a collection merely has to fall between the
+    construction and the put. The forced collection below makes it fall there on every run, so the
+    guard states the property instead of sampling it.
     """
+    provider = cli_testpv.build_provider()
     with (
-        Server(providers=[cli_testpv.build_provider()], isolate=True) as server,
+        Server(providers=[provider], isolate=True) as server,
         Context("pva", conf=server.conf(), useenv=False) as ctx,
     ):
         analogue = ctx.get(cli_testpv.ANALOGUE_PV, timeout=10).raw
@@ -173,6 +187,11 @@ def test_the_served_pvs_answer_a_real_client() -> None:
         assert analogue["display.units"] == "C"
         assert analogue["timeStamp.secondsPastEpoch"] > 0  # not 1970
         assert str(switch) == "Off"
+
+        # Red proof for the paragraph above: with the provider passed anonymously, the put below
+        # raises RemoteError("RPC not implemented by this PV") after these two lines.
+        gc.collect()
+        gc.collect()
 
         ctx.put(cli_testpv.SWITCH_PV, "On", timeout=10)
 

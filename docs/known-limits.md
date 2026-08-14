@@ -22,6 +22,7 @@ retired, and where it went, is listed at the end.
 [15 the https write path](#15--the-remote-https-write-path-has-no-live-probe-any-more-only-in-memory-coverage) ·
 [16 CI and the display tests](#16--ci-cannot-run-the-display-coupled-tests-and-no-switch-inside-this-repository-changes-that) ·
 [17 the service-URL redaction](#17--the-service-url-redaction-removes-a-userinfo-not-every-secret-a-url-can-carry) ·
+[18 one line is not one field set](#18--the-audit-record-is-one-line-which-is-not-the-same-as-one-set-of-fields) ·
 [retired](#retired-entries-and-where-they-went)
 
 ---
@@ -43,10 +44,13 @@ member, or the `N of the M` shape) over `git ls-files "*.md"`.
 that list to the registrations.** Only the operator guide's inventory block is checked
 (`test_guide_matches_code`). What is checked on `docs/tools.md` is narrower than its tool table and
 touches none of it: the resource URIs (`test_readme_resources`), that no page advertises an
-`epics-*` command the package does not install (`test_examples_match_entry_points`), and that its
+`epics-*` command the package does not install (`test_examples_match_entry_points`), that its
 "part of the core install" sentence names the same commands as the engine gate
-(`test_cli_without_display_engine`). It is a second inventory of the same thing with one of them
-guarded.
+(`test_cli_without_display_engine`), and that every status name it pairs with a glyph uses the
+glyph `cli_doctor` renders (`test_guide_matches_code`, which names this page explicitly so a rename
+cannot drop it out of the scan). SIX test modules read the file, measured with
+`grep -rln 'tools\.md' tests/`, and not one of them reads the tool table. It is a
+second inventory of the same thing with one of them guarded.
 
 ## 9 · The language guard finds German by vocabulary, not by understanding
 
@@ -105,8 +109,10 @@ in for a dash, a tab or a non-breaking space as the neighbour, or the pair glued
 exception frees the whole LINE rather than one character on it.
 
 ⚠️ Do not assume ruff covers any of this. Probed one at a time through
-`ruff --isolated --select RUF001,RUF002,RUF003`, it recognises five of the nine (the en dash, the
-apostrophe, the multiplication sign and both single curly quotes) and nothing at all outside `.py`.
+`ruff --isolated --select RUF001,RUF002,RUF003`, it recognises five of the nine characters this
+repository once listed in `allowed-confusables` (the en dash, the typographic apostrophe, the
+multiplication sign and both single curly quotes) and nothing at all outside `.py`. That set is not
+the nine this guard blocks, which is the list below.
 The em dash, the three double curly quotes and the ellipsis produce no finding in a string, a
 docstring or a comment alike.
 
@@ -124,7 +130,7 @@ shared:** longest identical run of lines, `difflib` over the whole files, is fou
 one non-blank is `"""`. The remaining shared lines are class and method signatures the REST endpoint
 dictates, which is API shape rather than code. The exceptions module is not slimmed from anything:
 upstream derives its errors from its own root, ours from `services/rest_exceptions.py` like the
-other three REST planes, and `NamingServiceNotFound` exists only here.
+other four REST planes, and `NamingServiceNotFound` exists only here.
 
 The honest limit: this compares two files at one point in time. It says nothing about what a court
 would say and it is not a licence review. It is enough to establish that the modules were
@@ -245,9 +251,10 @@ reason, stated in `pyproject.toml` next to the `displays` group and in `CONTRIBU
 exactly the standalone core a public user gets. What was wrong is a different thing, and it is
 fixed: the green report said nothing about the **145 tests** (measured 2026-08-09 with
 `pytest --collect-only` over that list) it had not run,
-so a reader could not tell a full run from a partial one. Every run that drops those modules now
-carries a gap line in its report header, and `EPICS_MCP_REQUIRE_DISPLAYS=1` turns the silent skip
-into a refusal for anyone who demands the full suite locally.
+so a reader could not tell a full run from a partial one. Every run that drops those modules AND
+prints a header now carries a gap line in it, which is the honest reach: `-q` and `--no-header`
+suppress the header block and the line with it. `EPICS_MCP_REQUIRE_DISPLAYS=1` turns the silent
+skip into a refusal for anyone who demands the full suite locally.
 
 What that does NOT do is make the display tests run in CI, and the reason is not oversight either.
 Measured on 2026-08-03: this repository is PUBLIC (`gh repo view --json visibility`) and carries
@@ -317,11 +324,20 @@ outright, and since the parser refuses it the address is withheld rather than pr
 lookalike (`＠`) is a different character again and is not a userinfo to any parser. None of these
 spellings can connect, so the plane is dead either way.
 
-**And it covers the RESOURCE, not every route out of the process.** Measured 2026-08-13: a REST
-failure carries the request URL in its message text, and `diagnose_connection` puts that text into
-a `note` of a SUCCESSFUL payload, so a credential in a service URL reaches the client along that
-path even though `epics-pv://config` no longer prints it. That is a separate open item; until it
-lands, a credential in a `*_URL` should be treated as disclosed regardless of this entry.
+**The error route is closed, and it redacts on a different rule than this resource.** Measured
+2026-08-13 it carried the whole request URL, including into a `note` of a SUCCESSFUL payload;
+measured 2026-08-14 after the fix, across both failure kinds and every REST-backed tool, it
+carries none. The rule differs on purpose: a message names an ADDRESS, so it drops the userinfo
+and the query and prints `(unparseable)` where it cannot prove the result names the same address,
+while this resource is meant to be COMPARED against a configured value character for character and
+therefore keeps the query. Do not read "the query is gone from error messages" as a statement
+about this resource.
+
+**What still carries a configured credential, measured the same day.** The server log, by decision
+rather than oversight (`docs/safety.md`, `SECURITY.md`): the shared REST layer logs the request URL
+at DEBUG and an unexpected internal error logs its cause at ERROR. `epics-doctor`, whose
+pattern-based redaction cuts at the FIRST `@` and does not recognise a bare user name. And the
+Naming plane, which has no `*_AUTH` variable, so a credential it needs has nowhere else to live.
 
 Three things follow for an adopter. Put credentials in `EPICS_MCP_*_AUTH`, which four of the
 planes have (ChannelFinder, Archiver, Alarm, Olog; the Naming plane has none, and its URL is not
@@ -330,6 +346,35 @@ could not be shown to be a removable userinfo", never as "not configured", which
 And do not read the withheld case as a short list: it covers a URL the parser refuses, a URL with
 no scheme or no host, an `@` urllib3 does not read as a userinfo, an `@` that survives the removal,
 and a cut whose result no longer names the same address.
+
+## 18 · The audit record is one LINE, which is not the same as one set of FIELDS
+
+**Measured 2026-08-14**, when the record separator was closed.
+
+`epics_mcp.audit_record` escapes every character a reader might treat as the end of a line, so one
+gate verdict is one record for a byte-oriented reader and for a Unicode-aware one alike. It
+deliberately does NOT escape the space, because the space separates the `key=value` pairs INSIDE a
+record, and escaping it would rewrite every legitimate line.
+
+**What that leaves open:** a caller-chosen field that contains a space can add further `key=value`
+pairs to a record it is part of. Measured on the Olog gate, whose `in_reply_to` reaches the audit
+unvalidated (a logbook is checked against the allowlist and a level against the server's vocabulary,
+but a reply target is a plain string): a `FAILED` record, which the gate's own comment pins as
+metadata-only and ownerless, was made to carry `owner=` and a second `event=` on the same line. The
+PV gate has the same shape through the PV name in its `DENY` record.
+
+**Why this is a limit rather than a defect to fix here.** The forgery a separator buys is a whole
+RECORD, indistinguishable from a genuine one; the forgery a space buys is extra fields inside a
+record that is still attributable to the verdict that emitted it, so a parser reading the FIRST
+occurrence of each key is unaffected and a naive scan is not. Closing it properly means quoting
+identifier fields, which changes the shape of every audit line and therefore every consumer of one.
+That is a wire change with no urgency behind it, so it is written down rather than rushed into a
+release.
+
+**What to do with it as an operator:** read an audit line's fields left to right and take the first
+occurrence of each key, which is what the gate wrote. And note that neither gate promises anything
+about a field a caller chose beyond recording it faithfully.
+
 
 ## Retired entries, and where they went
 

@@ -436,3 +436,34 @@ def test_naming_lookup_consumes_the_read_throttle(monkeypatch: pytest.MonkeyPatc
     client._get_device_name("DEV-B")
     with pytest.raises(RateLimitError):
         client._get_device_name("DEV-C")
+
+
+def test_a_device_name_failure_reports_the_status_and_not_the_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Naming plane makes its OWN request (a direct ``session.get``, not ``rest_get_json``), so
+    it is the one place outside the shared substrate that catches an ``HTTPError`` itself, and the
+    measured leak is exactly there: requests builds that message from the PREPARED url, which
+    keeps its userinfo.
+
+    This path had no text assertion of any kind before, so reverting the fix went unnoticed in a
+    mutation sweep; that gap is what this test closes.
+
+    Red-proof against the pre-fix code (``{exc}`` instead of ``shown_cause(exc)``): the secret
+    assertion fails.
+    """
+    client = NamingServiceClient("http://svc:s3cr3t@naming.example.org")
+    response = Mock(status_code=500)
+    failing = Mock()
+    failing.raise_for_status.side_effect = requests.exceptions.HTTPError(
+        "500 Server Error: Internal for url: http://svc:s3cr3t@naming.example.org/rest/x",
+        response=response,
+    )
+    monkeypatch.setattr(client.session, "get", Mock(return_value=failing))
+
+    with pytest.raises(NamingServiceResponseError) as excinfo:
+        client._get_device_name("SIM-PS-01")
+
+    message = str(excinfo.value)
+    assert "HTTP 500" in message
+    assert "s3cr3t" not in message

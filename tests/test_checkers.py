@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from unittest.mock import Mock
 
 import pytest
+import requests
 
 from epics_mcp.config import EpicsConfig
 from epics_mcp.errors import EpicsConnectionError, EpicsError
@@ -442,3 +443,52 @@ async def test_query_naming_lookup_timeout_reaches_client(
     monkeypatch.setattr(checkers, "NamingServiceClient", factory)
     await checkers.query_naming_lookup("DEV-TEST01:Ctrl-EVR-01", timeout=9.0)
     factory.assert_called_once_with(base_url="http://naming", timeout=9.0)
+
+
+def _session_that_serves(status: int) -> Mock:
+    """A session double at the TRANSPORT seam: HEAD succeeds, GET is answered with *status*.
+
+    Deliberately NOT a client-class double. This module fakes clients that way elsewhere and it is
+    right for what those tests ask, but it cannot answer THIS question: the message under test is
+    built inside the real client and the real ``_http``, from the url requests really prepared, so
+    a fake client would produce the assertion's own input (CLAUDE.md, evidence point 8).
+    """
+    failing = Mock()
+    failing.raise_for_status.side_effect = requests.exceptions.HTTPError(
+        f"{status} Server Error: x for url: http://svc:s3cr3t@naming.example.org/rest/deviceNames/D",
+        response=Mock(status_code=status),
+    )
+    session = Mock()
+    session.head.return_value = Mock(status_code=200)
+    session.get.return_value = failing
+    return session
+
+
+@pytest.mark.asyncio
+async def test_the_naming_withheld_note_carries_no_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``lookup_device_name`` answers SUCCESSFULLY with ``withheld: true`` and a note explaining
+    why, and that note is a payload the client keeps. Measured before BG-DERR-A: it carried the
+    whole prepared url, credential included.
+
+    Red-proof by mutant, since the fix is upstream of this line: reverting either half of
+    ``_http``'s message, or ``naming_client``'s own HTTPError arm, puts ``s3cr3t`` back in the note
+    and fails the second assertion.
+    """
+    monkeypatch.setattr(
+        checkers,
+        "get_config",
+        lambda: EpicsConfig(naming_url="http://svc:s3cr3t@naming.example.org"),
+    )
+    monkeypatch.setattr(
+        "epics_mcp.services.naming_client.get_shared_session",
+        lambda **_kwargs: _session_that_serves(500),
+    )
+
+    result = await checkers.query_naming_lookup("DEV-TEST01")
+
+    note = str(result.get("note", ""))
+    assert result["withheld"] is True
+    assert "HTTP 500" in note
+    assert "s3cr3t" not in note

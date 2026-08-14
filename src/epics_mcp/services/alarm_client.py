@@ -24,7 +24,7 @@ Session + Retry on 502/503/504, per-service exceptions).
 
 from __future__ import annotations
 
-from epics_mcp.services._http import get_shared_session, rest_get_json
+from epics_mcp.services._http import get_shared_session, rest_get_json, shown_failure
 from epics_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
 from epics_mcp.services.alarm_time import normalize_alarm_time
 from epics_mcp.services.redact import project_allowlist
@@ -176,7 +176,7 @@ class AlarmClient:
         except OSError as exc:
             # requests.exceptions.RequestException ⊂ OSError (see naming_client.check_connectivity).
             raise AlarmConnectionError(
-                f"Failed to connect to Alarm Logger at {self.base_url}: {exc}"
+                f"Failed to connect to Alarm Logger at {shown_failure(self.base_url, exc)}"
             ) from exc
 
     def is_alarm_configured(

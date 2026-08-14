@@ -131,9 +131,11 @@ can be an arbitrary host must confine *where* a write can physically go, in addi
   ⚠️ **Scope, because the sentence above is about what the GATE produces and a caller can be handed the
   target on the way to a gate verdict.** A gate whose verdict needs a pre-write READ (the logbook
   allowlist is keyed on the target entry's own logbooks) performs that read first, and a transport
-  failure there carries the request URL in its own message, which is a different layer's contract, not
-  this one's. State that limit where the gate is described rather than letting the reader infer that
-  passing this point makes the tool credential-free.
+  failure there is reported by a different layer with its own contract, not this one's. That layer
+  now names the address without its userinfo (measured 2026-08-14), so the pre-write read no longer
+  hands a caller what this point withholds; state the boundary where the gate is described anyway,
+  rather than letting a reader infer that passing this point is what makes the tool
+  credential-free.
   Guarded by `tests/test_write_gate_contract.py`: every registered deny row must produce a refusal with
   no address-shaped fragment and no configured service host in it, message and `details` alike, with no
   per-row opt-out (a field that could be set to "not applicable" was tried and a mutant switched it off

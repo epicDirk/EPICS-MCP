@@ -32,4 +32,5 @@ What you expected instead.
 
 Paste the error, the tool output, or a relevant `logger` line (redact any hostnames/PVs you
 consider sensitive). Please do not paste secrets or `Authorization` header values: the REST planes
-each take an `EPICS_MCP_*_AUTH` credential, and an error string can carry the request URL.
+each take an `EPICS_MCP_*_AUTH` credential. An error string names the request URL without its
+userinfo, but a `logger` line at DEBUG carries it in full, so a pasted log can disclose one.

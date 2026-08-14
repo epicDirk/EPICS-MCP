@@ -41,6 +41,7 @@ import threading
 import time
 from collections import deque
 
+from epics_mcp.audit_record import OneRecordFormatter
 from epics_mcp.config import EpicsConfig, get_config
 from epics_mcp.errors import OlogWriteDeniedError, RateLimitError, SafetyConfigError
 from epics_mcp.services._http import is_https_url, is_loopback_url, url_host
@@ -454,7 +455,13 @@ class OlogWriteGate:
         """Single audit sink. The message is pre-formatted from discrete metadata only (no free
         text), and passed with NO logging args so a literal ``%`` in a logbook name is never treated
         as a format directive. The stdlib logging layer absorbs handler errors via
-        ``Handler.handleError``, so an audit emission never turns a denial/failure into a crash."""
+        ``Handler.handleError``, so an audit emission never turns a denial/failure into a crash.
+
+        "Discrete metadata" bounds what a field MEANS, not what it CONTAINS: a logbook, a level and
+        a reply target reach this gate as caller-chosen strings, so a record separator inside one
+        of them would end the record and start a fabricated one. That is handled where the record
+        is finished rather than here, by :class:`epics_mcp.audit_record.OneRecordFormatter` on this
+        logger's handler, which keeps this sink's totality intact."""
         self._audit_logger.info(message)
 
     def _purge_old(self, now: float) -> None:
@@ -505,7 +512,7 @@ class OlogWriteGate:
         # UTC timestamps: the formatter stays on framework time (no datetime.now() in the
         # logic); only the converter is switched to gmtime. The literal 'Z' in datefmt marks
         # UTC, because %z would be empty under gmtime, so it is written out instead.
-        formatter = logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%dT%H:%M:%SZ")
+        formatter = OneRecordFormatter("%(asctime)s %(message)s", datefmt="%Y-%m-%dT%H:%M:%SZ")
         formatter.converter = time.gmtime
         handler.setFormatter(formatter)
         # Attach at most one handler (dedup on repeated init). The handler above was built

@@ -16,8 +16,9 @@ EPICS service landscape behaves. This file is the standing policy that keeps tha
   everything below. Keep it short; reference depth belongs in `docs/`.
 - `docs/` holds the reference pages the README indexes: `tools.md`, `configuration.md`, `safety.md`,
   `mcp-clients.md`, **`deployment.md`** (bringing the server up in a new facility, the first thing
-  an outside adopter needs) and **`write-gate-contract.md`** (the specification every in-server
-  write gate must meet).
+  an outside adopter needs), **`write-gate-contract.md`** (the specification every in-server
+  write gate must meet) and **`known-limits.md`** (what is deliberately not guarded, dated and
+  measured, which the README indexes as well).
 - `ARCHITECTURE.md`: the `server → tools → services → clients` layering and the plane model.
 - `CONTRIBUTING.md`: dev setup, the gate chain, Definition of Done, commit style.
 - `SECURITY.md`: reporting channel, security posture, and an explicit statement of what the write
@@ -216,8 +217,8 @@ work.
    `guard_audit.PINNED_COVERAGE` and are checked only by `guard_audit.py sham --check
    --coverage-db <db>`, deliberately: reaching them costs a full ctrace run, and a check that
    claimed to have verified them without one would be the sham guard this audit exists to find.
-   Run without a database it verifies the cheap pair and NAMES the pins it could not reach, on the
-   clean run as well as the failing one. Two directions, because
+   Run without a database it verifies the four cheap pins and NAMES the two it could not reach, on
+   the clean run as well as the failing one. Two directions, because
    a mutation sweep alone answers the wrong question: it asks whether ANY test notices a guard
    disappearing, so a guard covered by a real test AND a sham one reads as "guarded" and the sham
    is acquitted. ⚠️ That double-cover risk is argued, not observed: in the one proven case
@@ -292,7 +293,10 @@ the two do not agree.** The producing workspace states the duty the other way ro
 the engine, in EITHER of the two packages its wheel carries, moves the pin, always. Its wording
 names the sibling server rather than this one, which is how the gap opened in the first place.
 Read only the sentence above and the pin drifts without anyone doing anything wrong, and that is
-what happened: it was pulled once, a day after it was first written, and has stood still since.
+what happened: it stood still for over a week, was then pulled twice in two days (`4a74e2e`
+2026-08-08, `9694984` 2026-08-09), and has not moved since. Measure its age rather than trusting
+this note, which is a snapshot and will be stale again:
+`git log -L <pin line>,+1:pyproject.toml`.
 
 Two guards exist, and they answer different questions. `tests/test_dependency_pin.py` (here)
 checks that `pyproject.toml` and `uv.lock` name the SAME revision, which is the failure a half-done
@@ -324,5 +328,6 @@ words, umlauts, German word formation) and `scripts/check_typography.py` (em/en 
 curly quotes, doubled hyphen) make that sweep hard to undo. Translate rather than delete, replace
 the character rather than exempt it; the exception files are for text where the German or the
 character IS the subject. Their honest reach is `docs/known-limits.md` sections 9 and 10. ⚠️ Do not
-assume ruff covers the characters: probed one at a time, it recognises **three** of the nine
-(en dash, apostrophe, multiplication sign) and nothing at all outside `.py`.
+assume ruff covers the characters: probed one at a time, it recognises **five** of the nine
+characters this repository once listed in ``allowed-confusables`` (en dash, typographic apostrophe,
+multiplication sign and both single curly quotes) and nothing at all outside `.py`.

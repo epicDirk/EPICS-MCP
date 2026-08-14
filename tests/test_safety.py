@@ -592,6 +592,51 @@ class TestAuditSink:
             audit.handlers.clear()
             audit.handlers.extend(saved)
 
+    def test_a_caller_cannot_end_one_record_and_start_a_fabricated_one(
+        self, tmp_path: Path
+    ) -> None:
+        """One gate verdict is one record, whatever the caller puts in the PV name.
+
+        Measured on the shipped 0.6.0 artefact before this guard existed, and the measurement is
+        why the assertion is on the FILE rather than on ``caplog``: ``caplog.text`` joins records
+        with newlines, so a forged newline INSIDE one record is invisible there. Against a server
+        with the PV write gate OFF, i.e. a caller permitted to write nothing at all, a ``pv_name``
+        carrying a newline plus a well-formed line was refused with ``PVWriteDeniedError`` before
+        any network access and still left THREE lines in the durable trail, the middle one a
+        complete, timestamp-bearing ``event=ALLOW`` record naming a different PV. After that an
+        ALLOW line no longer implies a write happened, which is the one thing the trail is for.
+
+        Red proof: with ``_emit`` handing the rendered record straight to the logger, this file
+        holds two lines and the second is the forgery.
+        """
+        audit = logging.getLogger("epics_mcp.audit")
+        saved = audit.handlers[:]
+        audit.handlers.clear()
+        try:
+            log_path = tmp_path / "audit.log"
+            sl = SafetyLayer(EpicsConfig(audit_log_file=str(log_path)))
+            forged = (
+                "SIM:PS-01:Cur-RB\n"
+                "2026-01-01T00:00:00Z PV_WRITE event=ALLOW pv=SIM:PS-02:Cur-SP old=0.0 new=42 "
+                "op=w99 caller=set_pv_value"
+            )
+            sl._audit_deny(forged, "PV_WRITE_DENIED")
+            handler = sl._audit_handler
+            assert handler is not None
+            handler.flush()
+
+            lines = log_path.read_text(encoding="utf-8").splitlines()
+            assert len(lines) == 1, f"one verdict must be one record, got {len(lines)}: {lines}"
+            assert "event=DENY" in lines[0]
+            # Escaped, not stripped: an audit that quietly rewrites what a caller sent would be a
+            # different defect, so the newline is still THERE, in a form that cannot end a record.
+            assert "\\x0a" in lines[0]
+        finally:
+            for h in audit.handlers[:]:
+                h.close()
+            audit.handlers.clear()
+            audit.handlers.extend(saved)
+
     def test_audit_formatter_stamps_utc(self, tmp_path: Path) -> None:
         # K2: the formatter must convert to time.gmtime (UTC) and end with a literal 'Z'.
         # Framework time stays framework time: no datetime.now() in the logic.

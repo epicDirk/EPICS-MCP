@@ -797,12 +797,42 @@ def test_list_logbooks_unreadable_2xx_raises(
 
     S31: the diagnosis must also name the endpoint that was ACTUALLY requested. All three listing
     labels were hand-written literals, decoupled from the URL the route builds, a swapped route
-    would have produced a correctly-worded error about the wrong address."""
+    would have produced a correctly-worded error about the wrong address.
+
+    BG-DERR-A: the label is now the ROUTE rather than the whole URL, because the whole URL carried
+    a credential into this message. The coupling S31 bought is unchanged and this assertion is what
+    holds it: ``route_label`` derives the route from the same expression the request used, so a
+    swapped route still shows up here. What no longer appears is the host, and with it the
+    userinfo; the sibling test below pins that half."""
     client = OlogClient("http://olog")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
     with pytest.raises(OlogResponseError) as excinfo:
         client.list_logbooks()
-    assert f"{client.base_url}/logbooks" in str(excinfo.value)
+    assert "GET /logbooks" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    ("listing", "route"),
+    [("list_logbooks", "/logbooks"), ("list_tags", "/tags"), ("list_log_levels", "/levels")],
+)
+def test_a_listing_error_names_its_route_and_not_the_credential(
+    listing: str, route: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of S31 after BG-DERR-A, on all three listings: the route is named, the
+    configured host and its userinfo are not.
+
+    Red-proof against the pre-fix code, where the label was ``f"GET {self.base_url}/logbooks"``:
+    the secret assertion fails on every one of the three routes."""
+    client = OlogClient("http://svc:s3cr3t@olog")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp({"not": "a list"})))
+
+    with pytest.raises(OlogResponseError) as excinfo:
+        getattr(client, listing)()
+
+    message = str(excinfo.value)
+    assert f"GET {route}" in message
+    assert "s3cr3t" not in message
+    assert "olog" not in message
 
 
 @pytest.mark.parametrize(

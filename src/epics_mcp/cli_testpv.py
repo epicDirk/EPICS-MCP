@@ -200,10 +200,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # BOUND to a name, never passed as an anonymous temporary, and that is load-bearing rather
+    # than style. p4p's Server registers only the C++ source and keeps a Python reference to the
+    # provider ONLY for the dict form of ``providers`` (its own comment: "Normally user code is
+    # responsible for keeping the StaticProvider alive"). Unbound, the two SharedPV wrappers then
+    # survive on nothing but the reference cycle p4p documents, so the FIRST cyclic collection
+    # deallocates them; ``SharedPV.__dealloc__`` calls ``detachHandler``, which nulls ``onPut`` on a
+    # C++ SharedPV this server is still serving, and never restores the read-only handler. The
+    # switch then refuses EVERY write for the life of the process, while gets keep working from the
+    # C++ cache, and pvxs 1.5.1 reports the refusal with a copy-pasted "RPC not implemented by this
+    # PV" (its "PUT not implemented" wording arrived after that release). Measured, same client,
+    # same collection: anonymous -> refused, bound -> accepted. It is also the cause of the four red
+    # CI runs of test_the_served_pvs_answer_a_real_client, which built its server the same way.
+    provider = build_provider()
     try:
-        server = Server(
-            providers=[build_provider()], useenv=False, conf=server_conf(args.interface)
-        )
+        server = Server(providers=[provider], useenv=False, conf=server_conf(args.interface))
     except RuntimeError as exc:
         # p4p raises RuntimeError for an interface it cannot bind, which a caller meets by typing a
         # name or address this host does not have. Without this it arrives as a traceback, and the

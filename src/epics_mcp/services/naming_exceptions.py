@@ -5,9 +5,9 @@ not a dependency here (that project is GPL-3.0-only and Linux/SWIG-only, this re
 standalone).
 
 All four classes derive from the shared :mod:`epics_mcp.services.rest_exceptions` roots like the
-other three REST planes (so ``except RestClientError`` catches every plane, ``except
-NamingServiceError`` just this one). :class:`NamingServiceNotFound` is this repository's own, added
-for S13.
+other four REST planes, ChannelFinder, Archiver, Alarm and Olog (so ``except RestClientError``
+catches every plane, ``except NamingServiceError`` just this one).
+:class:`NamingServiceNotFound` is this repository's own, added for S13.
 """
 
 from epics_mcp.services.rest_exceptions import (

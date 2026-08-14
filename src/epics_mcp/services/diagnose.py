@@ -38,6 +38,7 @@ from pydantic import BaseModel, ConfigDict
 
 from epics_mcp.config import get_config
 from epics_mcp.errors import EpicsError
+from epics_mcp.services._http import shown_cause
 from epics_mcp.services.checkers import (
     query_alarm_configured,
     query_archived,
@@ -378,7 +379,7 @@ async def _gather_channelfinder(
         result = await query_channels(record, timeout=timeout)
     except Exception as exc:  # noqa: BLE001 (TOTAL: any failure withholds, never crashes diagnose())
         return ChannelFinderEvidence(
-            consulted=False, withheld=True, note=f"ChannelFinder error: {exc}"
+            consulted=False, withheld=True, note=f"ChannelFinder error: {shown_cause(exc)}"
         )
     if not result.get("enabled"):
         note = result.get("note")
@@ -439,7 +440,9 @@ async def _gather_naming(pv_name: str, requested: bool, timeout: float) -> Namin
     try:
         return await asyncio.to_thread(_run)
     except Exception as exc:  # noqa: BLE001 (any Naming failure withholds, never a false verdict)
-        return NamingEvidence(consulted=False, withheld=True, note=f"Naming error: {exc}")
+        return NamingEvidence(
+            consulted=False, withheld=True, note=f"Naming error: {shown_cause(exc)}"
+        )
 
 
 async def _gather_archiver(pv_name: str, requested: bool, timeout: float) -> ArchiverEvidence:
@@ -449,7 +452,9 @@ async def _gather_archiver(pv_name: str, requested: bool, timeout: float) -> Arc
     try:
         result = await query_archived(pv_name, timeout=timeout)
     except Exception as exc:  # noqa: BLE001 (TOTAL: any failure withholds, never crashes diagnose())
-        return ArchiverEvidence(consulted=False, withheld=True, note=f"Archiver error: {exc}")
+        return ArchiverEvidence(
+            consulted=False, withheld=True, note=f"Archiver error: {shown_cause(exc)}"
+        )
     if not result.get("enabled"):
         return ArchiverEvidence(consulted=False, withheld=True, note="Archiver disabled.")
     archived = result.get("archived")
@@ -465,7 +470,9 @@ async def _gather_alarm(pv_name: str, requested: bool, timeout: float) -> AlarmE
     try:
         result = await query_alarm_configured(pv_name, timeout=timeout)
     except Exception as exc:  # noqa: BLE001 (TOTAL: any failure withholds, never crashes diagnose())
-        return AlarmEvidence(consulted=False, withheld=True, note=f"Alarm error: {exc}")
+        return AlarmEvidence(
+            consulted=False, withheld=True, note=f"Alarm error: {shown_cause(exc)}"
+        )
     if not result.get("enabled"):
         return AlarmEvidence(consulted=False, withheld=True, note="Alarm logger disabled.")
     configured = result.get("configured")
