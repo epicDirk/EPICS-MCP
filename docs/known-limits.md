@@ -80,6 +80,11 @@ The mechanical repair, discarding a lowercase `von` before a capitalised word, w
 guard to most genuine German (German nouns ARE capitalised), so the residual stays and the
 per-line exception file is the intended relief; this very paragraph needed those exceptions, which
 doubles as the end-to-end proof of the mechanism. Two sibling classes from the same audit ARE
+repaired mechanically instead, because their fix costs no German recall: URL-shaped tokens are
+blanked before any signal runs, and a word ending in a watched suffix is checked against an
+explicit English lookalike stoplist first. Both carry their own reasoning in
+`scripts/check_language.py`, beside the code that applies them, which is where the retirement rule
+at the end of this page says such a manual belongs.
 
 ⛔ The tempting repair, a general language-detection library, is rejected rather than postponed: a
 statistical detector on a 100-column line of technical English with identifiers in it is noisy in
