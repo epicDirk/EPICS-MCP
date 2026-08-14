@@ -10,7 +10,7 @@ import logging
 import random
 import time
 from http.cookiejar import DefaultCookiePolicy
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 from urllib.parse import urlparse
 
 import pytest
@@ -1297,3 +1297,97 @@ def test_the_route_label_keeps_the_route_and_never_the_host(
     fourth with a credential in it; returning ``url.removeprefix(base)`` unguarded fails the last
     two."""
     assert route_label(base, url) == expected
+
+
+_CREDENTIALLED = "http://svc:s3cr3t@arch.example.org:17665/mgmt"
+
+
+def test_the_substrate_connect_error_redacts_both_halves(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``rest_get_json``'s own connect branch, which no test asserted the text of before.
+
+    Red-proof: reverting the branch to ``f"Failed to connect to {url}: {exc}"`` fails both the
+    address and the secret assertion.
+    """
+    session = build_retrying_session()
+    monkeypatch.setattr(
+        session,
+        "get",
+        Mock(side_effect=requests.exceptions.ConnectionError("HTTPConnectionPool(host='a'): no")),
+    )
+
+    with pytest.raises(ArchiverConnectionError) as excinfo:
+        rest_get_json(
+            session,
+            _CREDENTIALLED,
+            None,
+            1.0,
+            conn_exc=ArchiverConnectionError,
+            resp_exc=ArchiverResponseError,
+        )
+
+    message = str(excinfo.value)
+    assert "Failed to connect to http://arch.example.org:17665/mgmt" in message
+    assert "HTTPConnectionPool(host='a'): no" in message  # the transport cause stays verbatim
+    assert "s3cr3t" not in message
+
+
+def test_the_substrate_redirect_refusal_redacts_the_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refused redirect names the address it refused to leave, and that address was raw.
+
+    Red-proof: reverting to ``from {url} (HTTP ...)`` fails the secret assertion.
+    """
+    session = build_retrying_session()
+    redirect = Mock()
+    redirect.is_redirect = True
+    redirect.status_code = 302
+    monkeypatch.setattr(session, "get", Mock(return_value=redirect))
+
+    with pytest.raises(ArchiverResponseError) as excinfo:
+        rest_get_json(
+            session,
+            _CREDENTIALLED,
+            None,
+            1.0,
+            conn_exc=ArchiverConnectionError,
+            resp_exc=ArchiverResponseError,
+            allow_redirects=False,
+        )
+
+    message = str(excinfo.value)
+    assert "redirect target" in message  # the wording F20 pinned, unchanged
+    assert "from http://arch.example.org:17665/mgmt" in message
+    assert "s3cr3t" not in message
+
+
+def test_the_substrate_size_cap_redacts_the_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The size-cap refusal names the address it stopped reading from.
+
+    Red-proof: reverting to ``Response body from {url}`` fails the secret assertion.
+    """
+    session = build_retrying_session()
+    # MagicMock, not Mock: rest_get_bytes streams, so it uses the response as a context
+    # manager and a plain Mock has no __exit__.
+    oversized = MagicMock()
+    oversized.__enter__.return_value = oversized
+    oversized.is_redirect = False
+    oversized.status_code = 200
+    oversized.headers = {"Content-Length": "999999999", "Content-Type": "application/octet-stream"}
+    oversized.raise_for_status.return_value = None
+    monkeypatch.setattr(session, "get", Mock(return_value=oversized))
+
+    with pytest.raises(ArchiverResponseError) as excinfo:
+        rest_get_bytes(
+            session,
+            _CREDENTIALLED,
+            1.0,
+            max_bytes=1024,
+            conn_exc=ArchiverConnectionError,
+            resp_exc=ArchiverResponseError,
+        )
+
+    message = str(excinfo.value)
+    assert "size cap" in message  # the wording test_olog_attachments pins, unchanged
+    assert "Response body from http://arch.example.org:17665/mgmt" in message
+    assert "s3cr3t" not in message

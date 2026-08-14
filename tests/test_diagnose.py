@@ -9,8 +9,10 @@ withheld, no client).
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import Mock
 
 import pytest
+import requests
 
 from epics_mcp.config import EpicsConfig
 from epics_mcp.errors import EpicsConnectionError, PVTimeoutError
@@ -692,3 +694,93 @@ def test_derive_cause_unknown_state_fails_loud() -> None:
     bogus = cast(State, "bogus_state")
     with pytest.raises(AssertionError):
         derive_cause(bogus, _ev(_live()))
+
+
+def _serving_session(status: int) -> Mock:
+    """A TRANSPORT-seam double: HEAD succeeds, every GET is answered with *status*."""
+    failing = Mock()
+    failing.raise_for_status.side_effect = requests.exceptions.HTTPError(
+        f"{status} Server Error: x for url: http://svc:s3cr3t@plane.example.org/probe",
+        response=Mock(status_code=status),
+    )
+    session = Mock()
+    session.head.return_value = Mock(status_code=200)
+    session.get.return_value = failing
+    return session
+
+
+def _every_string(payload: object) -> list[str]:
+    """Every string anywhere in *payload*, walked structurally.
+
+    A named-key check is what an earlier acceptance run did, and it can only ever prove the keys it
+    already knows about. The question here is whether a credential reaches the CLIENT, and the
+    client keeps the whole payload, so the whole payload is what gets walked.
+    """
+    if isinstance(payload, str):
+        return [payload]
+    if isinstance(payload, dict):
+        return [s for value in payload.values() for s in _every_string(value)]
+    if isinstance(payload, (list, tuple)):
+        return [s for item in payload for s in _every_string(item)]
+    fields = getattr(payload, "__dict__", None)
+    return _every_string(fields) if fields else []
+
+
+def test_no_plane_note_in_a_successful_report_carries_a_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``diagnose_connection`` ANSWERS while three of its planes fail, and each failure becomes a
+    ``note`` in a payload the client keeps. Measured before BG-DERR-A: with a credential in the
+    configured URLs the secret appeared three times on a dead port and five against a server
+    answering 401.
+
+    The planes are faked at the TRANSPORT seam so the real clients and the real ``_http`` build the
+    text; a client-class double would hand this assertion its own input.
+
+    Two positive controls, because an empty report would satisfy the absence on its own: at least
+    one plane must actually be withheld, and its note must name the served status.
+
+    Red-proof by mutant: reverting either half of ``_http``'s message puts ``s3cr3t`` back into
+    three notes at once.
+    """
+    credentialled = "http://svc:s3cr3t@plane.example.org"
+    monkeypatch.setattr(
+        "epics_mcp.services.diagnose.get_config",
+        lambda: EpicsConfig(
+            channelfinder_url=credentialled,
+            naming_url=credentialled,
+            archiver_url=credentialled,
+        ),
+    )
+    for module in ("channelfinder_client", "naming_client", "archiver_client"):
+        monkeypatch.setattr(
+            f"epics_mcp.services.{module}.get_shared_session",
+            lambda **_kwargs: _serving_session(500),
+        )
+    monkeypatch.setattr(
+        "epics_mcp.services.checkers.get_config",
+        lambda: EpicsConfig(
+            channelfinder_url=credentialled,
+            naming_url=credentialled,
+            archiver_url=credentialled,
+        ),
+    )
+
+    report = asyncio.run(
+        diagnose(
+            "SIM:PS-01:Cur-RB",
+            timeout=0.1,
+            check_channelfinder=True,
+            check_naming=True,
+            check_archiver=True,
+        )
+    )
+
+    strings = _every_string(report)
+    assert any("HTTP 500" in s for s in strings), "no plane reported the served status"
+    assert report.evidence.channelfinder.withheld, "the report withheld nothing to speak about"
+    # The HOST stays, deliberately: it is the diagnostic value of the line, and an operator
+    # comparing the note against their own EPICS_MCP_*_URL has to recognise the address. Only the
+    # userinfo goes. Asserting the host away would pin the opposite of the design.
+    assert any("http://plane.example.org" in s for s in strings), "the address was withheld too"
+    assert not [s for s in strings if "s3cr3t" in s]

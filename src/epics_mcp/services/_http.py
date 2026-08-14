@@ -618,7 +618,8 @@ def rest_get_json(
         resp = session.get(url, params=params, timeout=timeout, allow_redirects=allow_redirects)
         if not allow_redirects and resp.is_redirect:
             raise resp_exc(
-                f"Refused to follow a redirect from {url} (HTTP {resp.status_code}): the response "
+                f"Refused to follow a redirect from {shown_url(url)} "
+                f"(HTTP {resp.status_code}): the response "
                 "would come from a redirect target, not the configured URL."
             )
         resp.raise_for_status()
@@ -626,8 +627,8 @@ def rest_get_json(
     except requests.exceptions.RequestException as exc:
         logger.debug("REST GET failed for %s: %s", url, exc)
         if isinstance(exc, requests.exceptions.ConnectionError):
-            raise conn_exc(f"Failed to connect to {url}: {exc}") from exc
-        raise resp_exc(f"Request failed ({url}): {exc}") from exc
+            raise conn_exc(f"Failed to connect to {shown_failure(url, exc)}") from exc
+        raise resp_exc(f"Request failed ({shown_url(url)}): {shown_cause(exc)}") from exc
 
 
 def rest_put_json(
@@ -665,7 +666,8 @@ def rest_put_json(
         )
         if not allow_redirects and resp.is_redirect:
             raise resp_exc(
-                f"Refused to follow a redirect from {url} (HTTP {resp.status_code}): the write "
+                f"Refused to follow a redirect from {shown_url(url)} "
+                f"(HTTP {resp.status_code}): the write "
                 "would land on a redirect target, not the URL the gate approved."
             )
         resp.raise_for_status()
@@ -673,8 +675,8 @@ def rest_put_json(
     except requests.exceptions.RequestException as exc:
         logger.debug("REST PUT failed for %s: %s", url, exc)
         if isinstance(exc, requests.exceptions.ConnectionError):
-            raise conn_exc(f"Failed to connect to {url}: {exc}") from exc
-        raise resp_exc(f"Request failed ({url}): {exc}") from exc
+            raise conn_exc(f"Failed to connect to {shown_failure(url, exc)}") from exc
+        raise resp_exc(f"Request failed ({shown_url(url)}): {shown_cause(exc)}") from exc
 
 
 #: A ``requests`` multipart ``files=`` payload as a LIST of ``(part_name, (filename, content,
@@ -726,7 +728,8 @@ def _request_multipart(
         )
         if not allow_redirects and resp.is_redirect:
             raise resp_exc(
-                f"Refused to follow a redirect from {url} (HTTP {resp.status_code}): the upload "
+                f"Refused to follow a redirect from {shown_url(url)} "
+                f"(HTTP {resp.status_code}): the upload "
                 "would land on a redirect target, not the URL the gate approved."
             )
         resp.raise_for_status()
@@ -734,8 +737,8 @@ def _request_multipart(
     except requests.exceptions.RequestException as exc:
         logger.debug("REST %s (multipart) failed for %s: %s", method, url, exc)
         if isinstance(exc, requests.exceptions.ConnectionError):
-            raise conn_exc(f"Failed to connect to {url}: {exc}") from exc
-        raise resp_exc(f"Request failed ({url}): {exc}") from exc
+            raise conn_exc(f"Failed to connect to {shown_failure(url, exc)}") from exc
+        raise resp_exc(f"Request failed ({shown_url(url)}): {shown_cause(exc)}") from exc
 
 
 def rest_put_multipart(
@@ -826,7 +829,7 @@ def _read_body_capped(
     declared = resp.headers.get("Content-Length")
     if declared is not None and declared.isdigit() and int(declared) > max_bytes:
         raise resp_exc(
-            f"Response body from {url} exceeds the size cap "
+            f"Response body from {shown_url(url)} exceeds the size cap "
             f"({max_bytes} bytes; Content-Length {declared})."
         )
     chunks: list[bytes] = []
@@ -834,7 +837,9 @@ def _read_body_capped(
     for chunk in resp.iter_content(chunk_size=65536):
         total += len(chunk)
         if total > max_bytes:
-            raise resp_exc(f"Response body from {url} exceeds the size cap ({max_bytes} bytes).")
+            raise resp_exc(
+                f"Response body from {shown_url(url)} exceeds the size cap ({max_bytes} bytes)."
+            )
         chunks.append(chunk)
     return b"".join(chunks)
 
@@ -882,7 +887,8 @@ def rest_get_bytes(
         ) as resp:
             if not allow_redirects and resp.is_redirect:
                 raise resp_exc(
-                    f"Refused to follow a redirect from {url} (HTTP {resp.status_code}): the bytes "
+                    f"Refused to follow a redirect from {shown_url(url)} "
+                    f"(HTTP {resp.status_code}): the bytes "
                     "would come from a redirect target, not the configured URL."
                 )
             resp.raise_for_status()
@@ -893,8 +899,8 @@ def rest_get_bytes(
     except requests.exceptions.RequestException as exc:
         logger.debug("REST GET (bytes) failed for %s: %s", url, exc)
         if isinstance(exc, requests.exceptions.ConnectionError):
-            raise conn_exc(f"Failed to connect to {url}: {exc}") from exc
-        raise resp_exc(f"Request failed ({url}): {exc}") from exc
+            raise conn_exc(f"Failed to connect to {shown_failure(url, exc)}") from exc
+        raise resp_exc(f"Request failed ({shown_url(url)}): {shown_cause(exc)}") from exc
 
 
 def http_status(exc: BaseException) -> int | None:
