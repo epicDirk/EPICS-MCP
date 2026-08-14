@@ -612,7 +612,25 @@ def test_mcp_instructions_wired_to_capability_flag() -> None:
 def test_build_instructions_under_2048_bytes() -> None:
     """MA-1 Commit B: the initialize-handshake instructions must stay a tight header, under 2048
     bytes in BOTH capability branches, so the operator guide (epics-pv://guide) carries the detail
-    and MA-2/2b keep head-room for new tool lines. Red at the pre-MA-1 size (3108 / 3003 bytes)."""
+    and MA-2/2b keep head-room for new tool lines. Red at the pre-MA-1 size (3108 / 3003 bytes).
+
+    Two things this assertion is NOT, both measured rather than assumed, and both of which invite
+    the wrong conclusion from a green run.
+
+    It counts BYTES; the host cuts CHARACTERS. The 2048 here started as a self-chosen budget, but
+    the limit it now stands in for is a measured property of the client: a header is truncated at
+    2048 characters, per server, which is a different unit. For pure ASCII the two coincide, and
+    this header is pure ASCII today. Add one umlaut, arrow or dash and they part company, with the
+    byte count running AHEAD of the character count, so this guard fails first. That is the safe
+    direction, and it is still not the same question: a green run here proves the byte budget was
+    kept, never that the host delivered the whole string.
+
+    And it is a wall, not a warning. It answers pass or fail at the budget and reports nothing
+    about what is left, so the first signal anyone gets is a red gate on the commit that overran.
+    No head-room figure is written down here on purpose, for the reason the builder states beside
+    the string itself: a number in prose drifts with every edit and nothing compares it. Measure it
+    when the answer matters, with len(build_instructions(True).encode()) against the cap.
+    """
     from epics_mcp.server import build_instructions
 
     assert len(build_instructions(True).encode("utf-8")) < 2048
