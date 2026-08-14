@@ -151,11 +151,13 @@ This is a controls tool, so the trust questions come first.
   value against a client's own configuration is what the resource is for, and a query string is
   therefore NOT redacted (`docs/known-limits.md`, entry 17). Credentials belong in
   `EPICS_MCP_*_AUTH`, which four of the planes have.
-  ⚠️ **That redaction is not a promise about the whole server.** Measured 2026-08-13, a REST
-  failure carries the request URL in its message, and `diagnose_connection` puts that message into
-  a `note` of a payload it returns successfully, so a credential configured into a service URL
-  still reaches the client along that route. Closing it is an open item, and until it is closed a
-  credential in a `*_URL` is disclosed.
+  ⚠️ **The error route is closed too, on a different rule.** Measured 2026-08-13 a REST failure
+  carried the request URL into a `note` of a successfully returned payload; measured 2026-08-14
+  after the fix it carries none, across both failure kinds and every REST-backed tool. A message
+  names an ADDRESS, so it drops the userinfo AND the query and says `(unparseable)` where it cannot
+  prove the result names the same address; this resource keeps the query because being comparable
+  is what it is for. What still carries a credential is the log above, by decision, and
+  `epics-doctor`, whose pattern-based redaction cuts at the first `@`.
 - **Olog reads return the whole entry, a deliberate prototype decision (2026-08-01).** Every read
   (`search_logbook`, `get_log_entry`, the create/reply/update echoes, attachment listing and
   download) returns the full server record: `title`, `description`, `owner` (the author's

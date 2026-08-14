@@ -317,11 +317,20 @@ outright, and since the parser refuses it the address is withheld rather than pr
 lookalike (`＠`) is a different character again and is not a userinfo to any parser. None of these
 spellings can connect, so the plane is dead either way.
 
-**And it covers the RESOURCE, not every route out of the process.** Measured 2026-08-13: a REST
-failure carries the request URL in its message text, and `diagnose_connection` puts that text into
-a `note` of a SUCCESSFUL payload, so a credential in a service URL reaches the client along that
-path even though `epics-pv://config` no longer prints it. That is a separate open item; until it
-lands, a credential in a `*_URL` should be treated as disclosed regardless of this entry.
+**The error route is closed, and it redacts on a different rule than this resource.** Measured
+2026-08-13 it carried the whole request URL, including into a `note` of a SUCCESSFUL payload;
+measured 2026-08-14 after the fix, across both failure kinds and every REST-backed tool, it
+carries none. The rule differs on purpose: a message names an ADDRESS, so it drops the userinfo
+and the query and prints `(unparseable)` where it cannot prove the result names the same address,
+while this resource is meant to be COMPARED against a configured value character for character and
+therefore keeps the query. Do not read "the query is gone from error messages" as a statement
+about this resource.
+
+**What still carries a configured credential, measured the same day.** The server log, by decision
+rather than oversight (`docs/safety.md`, `SECURITY.md`): the shared REST layer logs the request URL
+at DEBUG and an unexpected internal error logs its cause at ERROR. `epics-doctor`, whose
+pattern-based redaction cuts at the FIRST `@` and does not recognise a bare user name. And the
+Naming plane, which has no `*_AUTH` variable, so a credential it needs has nowhere else to live.
 
 Three things follow for an adopter. Put credentials in `EPICS_MCP_*_AUTH`, which four of the
 planes have (ChannelFinder, Archiver, Alarm, Olog; the Naming plane has none, and its URL is not

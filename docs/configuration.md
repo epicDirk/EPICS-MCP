@@ -62,11 +62,19 @@ single-JVM appliance legitimately leaves it empty.
 printing and withholds the address entirely when it cannot do so provably, and a token in a QUERY
 string is not removed at all.
 
-⚠️ **That redaction covers the resource, not every route out of the process.** Measured
-2026-08-13: a REST failure is reported with the request URL in its text, and
-`diagnose_connection` puts that text into a `note` of a SUCCESSFUL payload, so a credential in a
-service URL still reaches the client that way. The redaction of those paths is a separate open
-item; until it lands, treat a credential in a `*_URL` as disclosed.
+⚠️ **The error route redacts MORE than the resource does, and the difference is deliberate.**
+Measured 2026-08-14: a REST failure message, and every `note` built from one, names the address
+without its userinfo AND without its query, because a message has to name an address rather than
+be compared against one. Where the address cannot be shown to be the same one minus its userinfo,
+the message prints `(unparseable)` instead. The cause half travels verbatim for a transport
+failure, which is the only place "connection refused", "name not resolved", "timed out" and a TLS
+failure are distinguishable; a served status is reported as `HTTP <code> <phrase>` from this
+client's own table, never in the responding server's words.
+
+⚠️ **Two routes still carry a configured credential, and one of them has no alternative.** The
+server log is deliberately unredacted (see `docs/safety.md`), and the Naming plane has no
+`*_AUTH` variable at all, so a credential it needs can only live in its URL. `epics-doctor` also
+still prints a value through a pattern-based redaction that cuts at the first `@`.
 
 Four planes have a header variable to use instead (`CHANNELFINDER`, `ARCHIVER`, `ALARM`, `OLOG`).
 The Naming plane has none, so there is nothing to move a credential into there; its URL is never

@@ -163,11 +163,29 @@ carry breaking changes).
   a spelling in which the `@` is not a userinfo at all, one where an `@` survives the removal, and
   a cut whose result no longer names the same address. `"(disabled)"` still means the plane is not
   configured, and the two are different answers. ⚠️ A token in a QUERY STRING is not removed; that
-  is the price of the character-for-character promise. ⚠️ And this covers the resource, not every
-  route out of the process: a REST error message still carries the whole request URL, and
-  `diagnose_connection` puts such a message into a successful payload. Credentials belong in the
+  is the price of the character-for-character promise, and an error message drops the query for
+  exactly the opposite reason (it names an address rather than being compared against one).
+  ⚠️ This covers the resource, not every route out of the process; the error route was a second one
+  and is closed in the entry below, while the server LOG is deliberately not. Credentials belong in
+  the
   `EPICS_MCP_*_AUTH` header variables of the four planes that have one (ChannelFinder, Archiver,
   Alarm, Olog), never in a URL.
+- **A credential in a service URL reached the client through error text, and through `note` fields
+  of payloads that were returned SUCCESSFULLY.** Measured 2026-08-13 over every REST-backed tool:
+  each one disclosed a userinfo configured into an `EPICS_MCP_*_URL`, most in the error envelope,
+  and four in a payload a client keeps (`diagnose_connection`, `lookup_device_name`,
+  `list_log_levels`, and `search_logbook` with a `level` filter). A server answering 401 disclosed
+  it twice per message, because `requests` keeps the userinfo in the prepared URL that its own
+  error text quotes. **Wire change, three shapes:** an address is now printed without its userinfo
+  and without its query, or as `(unparseable)` where that cannot be proven; a served status reads
+  `HTTP <code> <phrase>` from this client's own table instead of the responding server's words; and
+  the three Olog listing labels and the two ChannelFinder ones name their ROUTE (`GET /levels`)
+  rather than a full URL. A client matching on the old text must be updated. ⚠️ The transport cause
+  is passed through unchanged, deliberately: it is the only place "connection refused", "name not
+  resolved", "timed out" and a TLS failure are distinguishable, and it carries no userinfo.
+  ⚠️ Two routes are unchanged and one of them has no remedy: the server log is deliberately
+  unredacted, and the Naming plane has no `EPICS_MCP_*_AUTH` variable, so a credential it needs can
+  only live in its URL. `epics-doctor`'s own pattern-based redaction is tracked separately.
 - **`epics-doctor` printed a rebuilt Olog address next to a verdict about the configured one.** The
   `Write gates` block prints the write target with its userinfo, query and fragment removed, which
   also lower-cases the host and percent-encodes a space, while the verdict beside it comes from the

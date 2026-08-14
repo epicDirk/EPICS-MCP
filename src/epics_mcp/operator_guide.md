@@ -822,7 +822,16 @@ Four limits, because this returns a SAMPLE and not an enumeration:
 ## Error signatures → which tool answers
 
 Illustrate signatures by the exception **class and shape**, never a copied runtime string (error
-messages embed the full request URL, an internal host would leak into this file).
+messages embed the request host and path, so an internal host would leak into this file).
+
+- **A REST plane fails and the message names a shorter address than you configured.** That is the
+  redaction, not a different target: an error names the address WITHOUT its userinfo and without
+  its query string, and prints `(unparseable)` where it cannot prove the shown address is the
+  configured one minus its credentials. The request itself used the value as configured. The cause
+  half is not abridged for a transport failure, which is the only place refused, not-resolved,
+  timed-out and TLS-broken are told apart; a served status reads `HTTP <code> <phrase>` in this
+  client's own words. A `note` in a SUCCESSFUL payload follows the same rule. To read a full URL
+  back, look at the server log, not at the answer.
 
 - **PV times out / disconnected.** On a PVA name-server a typo **and** a dead IOC both surface as
   `PV_TIMEOUT` (never `PV_NOT_FOUND`), the cause cannot be read off the transport error code. Use
