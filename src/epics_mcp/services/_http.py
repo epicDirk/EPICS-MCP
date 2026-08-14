@@ -1015,7 +1015,7 @@ def _status_phrase(status: int) -> str:
         return ""
 
 
-def _shown_cause(exc: BaseException) -> str:
+def shown_cause(exc: BaseException) -> str:
     """Why a request failed, in a text that provably carries no userinfo.
 
     Measured, and the whole design follows from it: requests hands urllib3 only ``path_url``, so a
@@ -1081,4 +1081,28 @@ def shown_failure(url: str, exc: BaseException) -> str:
     four ``check_connectivity`` bodies and the naming client's own HTTPError catch all want exactly
     this shape. Same role as :func:`is_http_404` over :func:`http_status`.
     """
-    return f"{shown_url(url)}: {_shown_cause(exc)}"
+    return f"{shown_url(url)}: {shown_cause(exc)}"
+
+
+def route_label(base_url: str, url: str) -> str:
+    """*url*'s route relative to *base_url*, for a message that must not name a host.
+
+    The listing errors and the level notes name the endpoint that was ACTUALLY requested, and that
+    is a measured requirement rather than decoration: S31 replaced hand-written literals here
+    precisely because a swapped route produces a correctly-worded error about the wrong address,
+    and one of the two labels had already fallen back to its literal with no test noticing. So the
+    label stays DERIVED from the same expression the request used, and only its host part goes.
+
+    Deriving the route by removing the base is safer than parsing it out. ``urlsplit`` would put a
+    password's tail into ``.path`` for the spelling ``https://svc:p@ss/w0rd@host/x`` (the authority
+    ends at the first slash), which is the same class :func:`shown_url` refuses to print. A prefix
+    removal cannot produce characters the base did not already cover, so what remains is exactly
+    the part beyond the configured base URL.
+
+    Fails closed: if *url* does not start with *base_url* the removal is a no-op and the answer
+    would BE the full url, so it is withheld instead. Every caller builds *url* as
+    ``f"{self.base_url}/..."``, so that branch is unreachable today; it is one line rather than a
+    promise that it stays that way.
+    """
+    route = url.removeprefix(base_url)
+    return route if route and route != url else "(route withheld)"

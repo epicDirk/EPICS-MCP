@@ -775,18 +775,43 @@ def test_list_vocabulary_strict_on_bad_payload(monkeypatch: pytest.MonkeyPatch) 
 
     S31: the diagnosis must also name the endpoint that was ACTUALLY requested. The label used to
     be a hand-written literal, decoupled from ``self.tags_url``/``self.properties_url``, so a
-    swapped route would have produced a correctly-worded error about the wrong address."""
+    swapped route would have produced a correctly-worded error about the wrong address.
+
+    BG-DERR-A: the label is now the ROUTE rather than the whole URL, because the whole URL carried
+    a credential into this message. The coupling is unchanged, ``route_label`` still derives it
+    from ``self.tags_url``/``self.properties_url``, so the swapped-route defect this test exists
+    for still fails here; only the host part is gone. The sibling test below pins that half."""
     client = ChannelFinderClient("http://cf")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp({"not": "a list"})))
     with pytest.raises(ChannelFinderResponseError) as excinfo:
         client.list_tags()
-    assert client.tags_url in str(excinfo.value)
+    assert "GET /resources/tags" in str(excinfo.value)
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([{"owner": "x"}])))
     with pytest.raises(ChannelFinderResponseError) as excinfo:
         client.list_properties()
     # Both halves, not just one: the properties label fell back to its literal without any test
     # noticing until this line existed, so half the change was itself an unobserved guard.
-    assert client.properties_url in str(excinfo.value)
+    assert "GET /resources/properties" in str(excinfo.value)
+
+
+def test_a_vocabulary_error_names_its_route_and_not_the_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half of S31 after BG-DERR-A: the route is named, the configured host and its
+    userinfo are not.
+
+    Red-proof against the pre-fix code, where the label was ``f"GET {self.tags_url}"``: the secret
+    assertion fails."""
+    client = ChannelFinderClient("http://svc:s3cr3t@cf.example.org")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp({"not": "a list"})))
+
+    with pytest.raises(ChannelFinderResponseError) as excinfo:
+        client.list_tags()
+
+    message = str(excinfo.value)
+    assert "GET /resources/tags" in message
+    assert "s3cr3t" not in message
+    assert "cf.example.org" not in message
 
 
 def test_list_vocabulary_empty_is_valid(monkeypatch: pytest.MonkeyPatch) -> None:

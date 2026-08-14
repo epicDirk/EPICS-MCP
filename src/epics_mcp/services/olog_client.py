@@ -96,6 +96,8 @@ from epics_mcp.services._http import (
     rest_post_multipart,
     rest_put_json,
     rest_put_multipart,
+    route_label,
+    shown_failure,
 )
 from epics_mcp.services._time_window import TimeWindowFormatError
 from epics_mcp.services.olog_exceptions import (
@@ -566,7 +568,7 @@ class OlogClient:
         except OSError as exc:
             # requests.exceptions.RequestException ⊂ OSError (see naming_client.check_connectivity).
             raise OlogConnectionError(
-                f"Failed to connect to Olog at {self.base_url}: {exc}"
+                f"Failed to connect to Olog at {shown_failure(self.base_url, exc)}"
             ) from exc
 
     @staticmethod
@@ -719,8 +721,9 @@ class OlogClient:
         keeps only the ``name``, because the names ARE the answer here: the valid filter values
         for ``search_logbook(logbooks=...)``.
         """
-        data = self._get(f"{self.base_url}/logbooks", {})
-        return _named_list(data, f"GET {self.base_url}/logbooks")
+        url = f"{self.base_url}/logbooks"
+        data = self._get(url, {})
+        return _named_list(data, f"GET {route_label(self.base_url, url)}")
 
     def list_tags(self) -> list[str]:
         """Return the names of all Olog tags (``GET /tags``), name-only.
@@ -728,8 +731,9 @@ class OlogClient:
         A ``Tag`` has only ``name``/``state`` (no owner), so this is trivially PII-free. The names
         are the valid filter values for ``search_logbook(tags=...)``.
         """
-        data = self._get(f"{self.base_url}/tags", {})
-        return _named_list(data, f"GET {self.base_url}/tags")
+        url = f"{self.base_url}/tags"
+        data = self._get(url, {})
+        return _named_list(data, f"GET {route_label(self.base_url, url)}")
 
     def list_log_levels(self) -> tuple[list[str], str | None, str | None]:
         """``(names, default_level, note)`` for the Olog levels (``GET /levels``), name-only (OA2).
@@ -744,8 +748,9 @@ class OlogClient:
         A ``Level`` carries no owner, so, like ``/tags``, this is a pure name/flag listing. An
         unreadable listing raises rather than collapsing to an empty list: "there are no levels"
         would tell a caller validating a filter value that none of them exist."""
-        data = self._get(f"{self.base_url}/levels", {})
-        return _level_list(data, f"GET {self.base_url}/levels")
+        url = f"{self.base_url}/levels"
+        data = self._get(url, {})
+        return _level_list(data, f"GET {route_label(self.base_url, url)}")
 
     def create_log_entry(
         self,

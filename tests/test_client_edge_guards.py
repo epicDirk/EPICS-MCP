@@ -139,11 +139,11 @@ _UNOBSERVED: dict[str, str] = {
     "alarm_client.py:247": "any() filter over the config records",
     "archiver_client.py:152": "sample check, masked by the following 'secs'/'val' membership test",
     "archiver_client.py:497": "history block shape",
-    "channelfinder_client.py:91": "list check, masked by the item check at :98",
-    "channelfinder_client.py:98": "the dict half of the item check: no NON-dict item is tested",
-    "channelfinder_client.py:335": "find_channels list check, masked by its item check at :343",
-    "channelfinder_client.py:473": "property name/value pair check (both halves)",
-    "channelfinder_client.py:479": "equivalent mutant: a pure mypy narrowing, provably always true",
+    "channelfinder_client.py:96": "list check, masked by the item check at :98",
+    "channelfinder_client.py:103": "the dict half of the item check: no NON-dict item is tested",
+    "channelfinder_client.py:340": "find_channels list check, masked by its item check at :343",
+    "channelfinder_client.py:478": "property name/value pair check (both halves)",
+    "channelfinder_client.py:484": "equivalent mutant: a pure mypy narrowing, provably always true",
     # The five epics_client rows moved with the QA-31 edit (+1 above pv_monitor, +100 below it)
     # and were RE-LOCATED, not re-judged: each still names the same guard, verified against the
     # surrounding code. This is the offset rot the comment above predicts, not a new finding.
@@ -152,8 +152,8 @@ _UNOBSERVED: dict[str, str] = {
     "epics_client.py:561": "int-or-none column coercion",
     "epics_client.py:590": "NTMatrix dim entries",
     "epics_client.py:792": "NaN alarm field",
-    "olog_client.py:181": "lenient name filter inside an already-anchored entry",
-    "olog_client.py:389": "attachment filename check",
+    "olog_client.py:183": "lenient name filter inside an already-anchored entry",
+    "olog_client.py:391": "attachment filename check",
     # Moved +14 by the OQ11 docstring on ``_expand_log_entry``, then +24 more by OQ12 (the union
     # check in ``add_attachment`` plus its widened docstring, both ABOVE this line), and each time
     # RE-LOCATED, not re-judged: the line still carries the same guard
@@ -164,7 +164,7 @@ _UNOBSERVED: dict[str, str] = {
     # only checks that the key names SOME guard line, so it cannot tell a correct relocation from a
     # coincidence: that comparison is this comment, and it has to be redone by hand whenever the
     # number moves.
-    "olog_client.py:1015": "source default before concatenation",
+    "olog_client.py:1020": "source default before concatenation",
 }
 
 # Neither polarity is noticed, and lines no test executes at all. Both are TEST GAPS at the

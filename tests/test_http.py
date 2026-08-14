@@ -25,7 +25,6 @@ from epics_mcp.errors import RateLimitError, ReadRateLimitError
 from epics_mcp.services._http import (
     ReadThrottle,
     _authority_span,
-    _shown_cause,
     build_retrying_session,
     build_write_session,
     get_read_throttle,
@@ -40,6 +39,8 @@ from epics_mcp.services._http import (
     rest_get_bytes,
     rest_get_json,
     rest_put_json,
+    route_label,
+    shown_cause,
     shown_failure,
     shown_url,
     url_host,
@@ -1092,7 +1093,7 @@ def test_a_served_status_is_named_from_the_client_side_table_not_the_servers_rea
         "401 Client Error: c3ZjOnB3 for url: http://svc:pw@cf.example.org/CF", response=response
     )
 
-    assert _shown_cause(exc) == "HTTP 401 Unauthorized"
+    assert shown_cause(exc) == "HTTP 401 Unauthorized"
 
 
 def test_a_status_no_table_names_still_reports_its_number() -> None:
@@ -1102,7 +1103,7 @@ def test_a_status_no_table_names_still_reports_its_number() -> None:
     """
     response = requests.Response()
     response.status_code = 599
-    assert _shown_cause(requests.exceptions.HTTPError("599", response=response)) == "HTTP 599"
+    assert shown_cause(requests.exceptions.HTTPError("599", response=response)) == "HTTP 599"
 
 
 def test_an_http_error_without_a_response_falls_through_rather_than_inventing_a_code() -> None:
@@ -1113,7 +1114,7 @@ def test_an_http_error_without_a_response_falls_through_rather_than_inventing_a_
 
     Red-proof: reading ``exc.response.status_code`` unguarded raises AttributeError on this row.
     """
-    assert _shown_cause(requests.exceptions.HTTPError("500")) == "500"
+    assert shown_cause(requests.exceptions.HTTPError("500")) == "500"
 
 
 @pytest.mark.parametrize(
@@ -1132,7 +1133,7 @@ def test_a_url_shape_failure_names_the_defect_and_echoes_nothing(exc: Exception)
 
     Red-proof: falling through to ``str(exc)`` puts ``pw``/``s3cr3t`` into the answer.
     """
-    shown = _shown_cause(exc)
+    shown = shown_cause(exc)
 
     assert "not a usable HTTP address" in shown
     assert "pw" not in shown
@@ -1160,7 +1161,7 @@ def test_a_transport_cause_travels_verbatim_and_stays_distinguishable(
     Red-proof: withholding the cause wholesale (the class name for every family) fails all four
     rows, and so does a per-family fixed phrase.
     """
-    shown = _shown_cause(requests.exceptions.ConnectionError(cause))
+    shown = shown_cause(requests.exceptions.ConnectionError(cause))
 
     assert shown == cause
     assert marker in shown
@@ -1181,7 +1182,7 @@ def test_an_unexpected_text_carrying_an_at_is_withheld_and_logged(
     absence assertion and the log assertion.
     """
     with caplog.at_level(logging.WARNING, logger="epics_mcp.services._http"):
-        shown = _shown_cause(ValueError("boom at http://svc:s3cr3t@cf.example.org/CF"))
+        shown = shown_cause(ValueError("boom at http://svc:s3cr3t@cf.example.org/CF"))
 
     assert shown == "ValueError (message withheld: it would echo a credential)"
     assert "s3cr3t" not in shown
@@ -1214,7 +1215,7 @@ def test_requests_still_puts_the_prepared_url_in_the_httperror_message() -> None
 
     The last two lines pin the transcoding that killed the obvious design: requests requotes the
     userinfo, so ``s%65cret`` arrives as ``secret``. A check that searches a message for the
-    CONFIGURED secret is therefore blind, and ``_shown_cause`` looks for the separator instead,
+    CONFIGURED secret is therefore blind, and ``shown_cause`` looks for the separator instead,
     which requote's safe set never touches.
     """
     prepared = requests.Request("GET", "http://svc:s3cr3t@cf.example.org/CF").prepare()
@@ -1231,3 +1232,68 @@ def test_requests_still_puts_the_prepared_url_in_the_httperror_message() -> None
     transcoded = requests.Request("GET", "http://svc:s%65cret@cf.example.org/CF").prepare()
     assert transcoded.url is not None
     assert "svc:secret@" in transcoded.url
+
+
+@pytest.mark.parametrize(
+    ("factory", "service"),
+    [
+        ("epics_mcp.services.channelfinder_client:ChannelFinderClient", "ChannelFinder"),
+        ("epics_mcp.services.alarm_client:AlarmClient", "Alarm Logger"),
+        ("epics_mcp.services.olog_client:OlogClient", "Olog"),
+        ("epics_mcp.services.naming_client:NamingServiceClient", "Naming Service"),
+    ],
+)
+def test_every_connect_failure_names_a_redacted_address(
+    factory: str, service: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """All four ``check_connectivity`` bodies, which had no text assertion of any kind before.
+
+    They are the same six lines four times, and each printed ``{self.base_url}: {exc}``. Nothing in
+    the tree asserted their text, so reverting any one of them would have gone unnoticed; that gap
+    is what this test closes, and it is why the four are checked together rather than one by one.
+
+    The failure is forced at the client's OWN session rather than at the class, so the real body
+    runs and only the socket is replaced.
+
+    Red-proof against the pre-fix code: the secret assertion fails for every one of the four.
+    """
+    import importlib
+
+    module_name, class_name = factory.split(":")
+    client_class = getattr(importlib.import_module(module_name), class_name)
+    client = client_class("http://svc:s3cr3t@svc.example.org:8080/base")
+    monkeypatch.setattr(
+        client.session,
+        "head",
+        Mock(side_effect=requests.exceptions.ConnectionError("HTTPConnectionPool(host='x'): no")),
+    )
+
+    with pytest.raises(RestConnectionError) as excinfo:  # the shared root of all four
+        client.check_connectivity()
+
+    message = str(excinfo.value)
+    assert f"Failed to connect to {service} at http://svc.example.org:8080/base" in message
+    assert "s3cr3t" not in message
+
+
+@pytest.mark.parametrize(
+    ("base", "url", "expected"),
+    [
+        ("http://olog", "http://olog/logbooks", "/logbooks"),
+        ("http://svc:s3cr3t@olog", "http://svc:s3cr3t@olog/levels", "/levels"),
+        ("http://cf/CF", "http://cf/CF/resources/tags", "/resources/tags"),
+        # Fails closed. The removal is a no-op when the prefix does not match, and the answer
+        # would then BE the full url, credential included, so it is withheld instead. No caller
+        # can reach this today (every one builds the url from the base), which is exactly why it
+        # is pinned here rather than left as a branch no input proves.
+        ("http://olog", "http://other:s3cr3t@host/logbooks", "(route withheld)"),
+        ("http://olog", "http://olog", "(route withheld)"),
+    ],
+)
+def test_the_route_label_keeps_the_route_and_never_the_host(
+    base: str, url: str, expected: str
+) -> None:
+    """Red-proof: returning ``url`` fails the first three rows with a host in the answer and the
+    fourth with a credential in it; returning ``url.removeprefix(base)`` unguarded fails the last
+    two."""
+    assert route_label(base, url) == expected

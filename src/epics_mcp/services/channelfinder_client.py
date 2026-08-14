@@ -22,7 +22,12 @@ from __future__ import annotations
 from typing import TypedDict
 
 from epics_mcp.config import EpicsConfig, get_config
-from epics_mcp.services._http import get_shared_session, rest_get_json
+from epics_mcp.services._http import (
+    get_shared_session,
+    rest_get_json,
+    route_label,
+    shown_failure,
+)
 from epics_mcp.services.channelfinder_exceptions import (
     ChannelFinderConnectionError,
     ChannelFinderResponseError,
@@ -267,7 +272,7 @@ class ChannelFinderClient:
             # requests.exceptions.RequestException ⊂ OSError (see naming_client.check_connectivity),
             # so this arm catches Timeout/ConnectionError/SSLError; re-raise as the service error.
             raise ChannelFinderConnectionError(
-                f"Failed to connect to ChannelFinder at {self.base_url}: {exc}"
+                f"Failed to connect to ChannelFinder at {shown_failure(self.base_url, exc)}"
             ) from exc
 
     @property
@@ -418,7 +423,7 @@ class ChannelFinderClient:
             conn_exc=ChannelFinderConnectionError,
             resp_exc=ChannelFinderResponseError,
         )
-        names = _named_list(data, f"GET {self.properties_url}")
+        names = _named_list(data, f"GET {route_label(self.base_url, self.properties_url)}")
         return sorted(name for name in names if name in self._safe_property_names)
 
     def list_tags(self) -> list[str]:
@@ -438,7 +443,7 @@ class ChannelFinderClient:
             conn_exc=ChannelFinderConnectionError,
             resp_exc=ChannelFinderResponseError,
         )
-        return sorted(_named_list(data, f"GET {self.tags_url}"))
+        return sorted(_named_list(data, f"GET {route_label(self.base_url, self.tags_url)}"))
 
     def _project(self, channel: dict[str, object]) -> ChannelInfo:
         """Project a raw channel JSON into a :class:`ChannelInfo`.
