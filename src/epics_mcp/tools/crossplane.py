@@ -43,7 +43,7 @@ async def _crossplane_check(
     *displays_dir* is the project/dataset ROOT (the inventory binds macros via the operator
     top-levels there, a narrow per-IOC subdirectory under-resolves). *context_cap* bounds the
     per-display reachability contexts (higher = more complete, slower; ~60 s for a large dataset
-    like fbis at the default). *windows_paths* resolves embedded ``<file>`` refs case-insensitively
+    at the default). *windows_paths* resolves embedded ``<file>`` refs case-insensitively
     for a Windows host; default Linux (the ESS-console truth, deterministic). *module_db_root*
     (opt-in) is a local directory holding the IOC's e3 module ``.db`` files: when supplied, concrete
     linked PVs are checked against the loaded set and a ``broken`` verdict is emitted ONLY if that

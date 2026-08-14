@@ -161,7 +161,7 @@ async def crossplane_check(
         int,
         Field(
             description="Max per-display reachability contexts the PV-inventory explores (higher "
-            "= more complete, slower; a large dataset like fbis takes ~60 s at the default). "
+            "= more complete, slower; a large dataset takes ~60 s at the default). "
             "Capped displays are reported as a lower bound in 'displays_incomplete', and the "
             "notes call this limit the per-display context cap. The walk "
             "has a SECOND limit this argument cannot raise, the glob cap: a <file> reference "
