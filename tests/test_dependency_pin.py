@@ -165,9 +165,9 @@ def pin_mismatches(pyproject_text: str, lock_text: str) -> list[str]:
     if len(resolved_urls) != _EXPECTED_RESOLVED_ENTRIES:
         return [
             f"uv.lock holds {len(resolved_urls)} resolved git entry for {_PINNED_PACKAGE!r}, "
-            f"expected {_EXPECTED_RESOLVED_ENTRIES}. That entry is what --frozen installs: "
-            f"without it the engine comes from somewhere else, and with several the file no "
-            f"longer says which."
+            f"expected {_EXPECTED_RESOLVED_ENTRIES}. That entry is what a lockfile install "
+            f"resolves the engine from: without it the engine comes from somewhere else, and "
+            f"with several the file no longer says which."
         ]
     if not required_urls:
         return [
@@ -194,8 +194,9 @@ def pin_mismatches(pyproject_text: str, lock_text: str) -> list[str]:
     if stale:
         return [
             f"pyproject.toml pins {declared[0]}, uv.lock names {stale}. The bump was only half "
-            f"made: after changing the rev, `uv lock` has to run, or --frozen keeps installing "
-            f"the old engine without saying so."
+            f"made: after changing the rev, `uv lock` has to run. Under --locked the mismatch "
+            f"stops the sync; under the older --frozen it kept installing the old engine in "
+            f"silence, which is why this guard exists."
         ]
     return []
 
