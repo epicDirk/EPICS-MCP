@@ -46,6 +46,17 @@ def translate_epics_errors[**P, R](
         except Exception as e:
             # Full detail stays server-side (message via %s + traceback via exc_info); the client
             # gets only the class name so an unexpected bug cannot leak an internal string.
+            #
+            # ⚠️ The detail this line writes CAN be a service URL with credentials in it, and that
+            # is a decided posture rather than an oversight (BG-DERR-B, 2026-08-14). The redaction
+            # posture of this server governs what travels toward the CLIENT, a tool answer or a
+            # resource payload the client keeps; the log is a different channel with a different
+            # reader. Dropping exc_info would not even close it (the %s argument carries the same
+            # string, measured) and would cost the debuggability of the one path where the caller
+            # is told nothing but a class name. What that means for an operator, and what they can
+            # do about it, is stated in docs/safety.md and SECURITY.md; the assertion that pins it
+            # is tests/test_tool_errors.py::test_generic_exception_is_confined_to_the_class_name_
+            # and_logged, which checks BOTH halves, nothing on the wire and the detail in the log.
             logger.error("[INTERNAL] %s at a tool boundary: %s", type(e).__name__, e, exc_info=True)
             raise ToolError(f"[INTERNAL] {type(e).__name__}") from e
 

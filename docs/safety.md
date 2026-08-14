@@ -85,6 +85,26 @@ This is a controls tool, so the trust questions come first.
   (`EPICS_MCP_OLOG_WRITE_LOGBOOKS`; empty = deny-all) **and** a rate limit. The author is the write
   service account (`EPICS_MCP_OLOG_WRITE_USER`), set server-side and not spoofable; the audit line
   is metadata-only (never the title/description free text). **`ALLOW_PV_WRITE` is untouched by it.**
+  ⚠️ **A refusal from the URL boundary names the variable, not its value**, and that is deliberate:
+  `EPICS_MCP_OLOG_URL` is an unvalidated string that accepts `https://user:password@host/Olog`, this
+  refusal fires on the gate's ordinary state ("remote and not allowlisted", nothing has to be
+  broken), and its text reaches the caller verbatim. Measured 2026-08-14, before it was closed, all
+  four write tools answered with the configured password in clear text. The address itself is in
+  `epics-doctor`'s `Write gates` block, with any userinfo removed. The logbook-allowlist refusal
+  does still name the logbooks it refused: a logbook name cannot carry a credential, and which
+  denials may name their target is decided per surface, never copied from a sibling gate.
+- **The server's own log is NOT a redacted surface, and it is a different channel from the answer.**
+  Everything above is about what travels toward the MCP client. An UNEXPECTED internal error is
+  handled the other way round on purpose: the caller gets only the exception's class name
+  (`[INTERNAL] <ClassName>`), while the full message and its traceback go to the server log, which
+  is what makes such a bug debuggable at all. That detail can include a service URL exactly as
+  configured, credentials included, and the shared REST layer additionally logs the request URL at
+  `DEBUG`. **Treat the log as carrying whatever the process environment carries.** Two consequences
+  worth acting on before you meet them: this server speaks stdio, so its stderr is captured by
+  whatever launched it rather than by a path you chose, and with no `EPICS_MCP_AUDIT_LOG_FILE` set
+  the Olog audit goes to that same stderr. If that is not acceptable in your deployment, configure a
+  durable audit path and keep the log level above `DEBUG`; put credentials in `EPICS_MCP_*_AUTH`
+  rather than in a `*_URL`, which is the only thing that removes them from this channel entirely.
 - **The effective write posture is inspectable, so you do not have to take this page's word for it.**
   `epics-doctor` prints a `Write gates` block, and `epics-doctor --json` carries the same under
   `write_safety`. A gate that is OFF gets one line saying so, which is the whole answer for it. For

@@ -55,6 +55,14 @@ setting.
   saying so, and an ARMED one what it allows and where a write could go. `--json` carries the same
   under `write_safety`, every field present either way. It reads the environment of the command you
   run, which need not be the one a running server was started with.
+- **The server log is deliberately unredacted, and it is a different channel from the answer.** An
+  unexpected internal error tells the caller only the exception's class name and puts the full
+  message and traceback in the server log, so the bug stays debuggable. That detail can carry a
+  service URL as configured, credentials included, and the shared REST layer logs request URLs at
+  `DEBUG`. This server speaks stdio, so its stderr belongs to whatever launched it, and with no
+  `EPICS_MCP_AUDIT_LOG_FILE` the audit goes there too. Configure a durable audit path, keep the
+  level above `DEBUG`, and put credentials in `EPICS_MCP_*_AUTH` rather than in a `*_URL`. Details
+  and the reasoning: `docs/safety.md`.
 - **Output redaction (ChannelFinder only).** ChannelFinder owners and property values pass a
   site-configurable allowlist. Olog entries come back WHOLE (title, text, author, attachments):
   the former Olog read redaction was removed 2026-08-01 as a deliberate prototype decision, see

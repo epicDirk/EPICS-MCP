@@ -44,8 +44,18 @@ async def test_generic_exception_is_confined_to_the_class_name_and_logged(
     an internal detail (a request URL, a live PV name, a filesystem path). The CLIENT-facing
     ToolError keeps ONLY the exception class name; the FULL detail is logged SERVER-SIDE so
     debuggability is preserved. Provably RED on the pre-hardening code, which put ``str(e)`` on the
-    wire (``[INTERNAL] ValueError: <raw>``)."""
-    secret = "host.internal.example:8090/ChannelFinder?leaked-detail"
+    wire (``[INTERNAL] ValueError: <raw>``).
+
+    ⚠️ **The second assertion is a DECISION, not an accident, and it is asserted so that changing it
+    is deliberate** (BG-DERR-B, 2026-08-14). The detail this branch logs, message plus traceback,
+    can be a service URL with the operator's own credentials in it, which is why the probe below is
+    spelled that way. The server log is NOT a redacted surface: the redaction posture of this server
+    governs what travels toward the CLIENT (a tool answer, a resource payload a client keeps), and
+    the log is a different channel with a different reader. Stripping ``exc_info`` here would not
+    even close it, the ``%s`` message argument carries the same string, and it would cost the
+    debuggability of the one path where the caller is told nothing but a class name. What that
+    means operationally, and what an operator has to do about it, is in ``docs/safety.md``."""
+    secret = "https://svc:s3cr3tP4ss@cf.example.org:8090/ChannelFinder"
 
     @translate_epics_errors
     async def boom() -> str:
