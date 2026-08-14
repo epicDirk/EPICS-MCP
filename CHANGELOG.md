@@ -116,6 +116,13 @@ carry breaking changes).
   wording said; the sentence has been wrong in `coverage_audit` and `crossplane_check` since they
   shipped and is corrected in all three.
 
+- **Python 3.14 joins the supported set, and CI tests it.** The trove classifiers, which ship
+  in both the wheel and the sdist, now advertise 3.12, 3.13 and 3.14, and the CI matrix runs the
+  suite on all three rather than on the two it used to. `requires-python` is unchanged at
+  `>=3.12`, so nothing an installer resolves moves; what changes is that the top of the
+  advertised range is now tested rather than merely permitted, which is the gap a classifier
+  cannot express on its own.
+
 ### Fixed
 
 - **A caller could write fabricated records into the audit trail.** Both write gates build their
@@ -125,11 +132,16 @@ carry breaking changes).
   a `set_pv_value` call that was refused before any network access left three lines in the file, the
   middle one a complete, timestamp-bearing `event=ALLOW` record naming a PV nobody wrote. After that
   an `ALLOW` line no longer implies a write happened, which is what the trail exists to say. Every
-  record is now escaped as it is written, so a control character cannot end it; the escaping is on
-  the finished record in each gate's single sink, so it also covers any field added later. **No
-  legitimate record changes**: the fields of a real record are identifiers, error codes and
-  `repr`-formatted scalars, none of which carries a control character. A record that DID carry one
-  now shows it as `\x0a` rather than breaking the line, so nothing a caller sent is lost.
+  record is now escaped as it is FORMATTED, in the audit handler itself, so it also covers any
+  field added later and any caller that never heard of the rule. The escape covers every
+  character some reader treats as the end of a line, which is wider than it first looks: C0 and
+  DEL for a byte-oriented reader such as `grep`, plus C1 (which contains U+0085 NEL) and U+2028
+  and U+2029 for `str.splitlines` and any Unicode-aware log reader. **No legitimate record
+  changes**: a real record's fields are identifiers, error codes and `repr`-formatted scalars,
+  and the non-ASCII characters one does carry (units, accented names) all sit above U+009F. A
+  record that DID carry a separator now shows it as `
+` rather than breaking the line, so
+  nothing a caller sent is lost.
 - **`epics-testpv`'s writable switch stopped accepting writes after the first garbage collection.**
   `TEST:Heater` is documented as a writable switch, and `docs/mcp-clients.md` shows a write-enabled
   configuration whose allowlist is `^TEST:.*` so that a documented write has a target. The command
@@ -138,7 +150,10 @@ carry breaking changes).
   handler from a server that kept serving. Reads were unaffected, which is why nothing looked
   broken. The refusal also named the wrong operation: the pinned pvxs answers an unhandled write
   with `RPC not implemented by this PV`. Writes to `TEST:Heater` now work for the life of the
-  process.
+  process. ⚠️ **No published version was affected**: the command itself is new in this release
+  (see Added), so this repairs it before it ships rather than after. It is recorded because it
+  is what a user would have met, and because it is the cause of four red CI runs on this
+  repository that had been read as a flaky test.
 - **An Olog write refused by the URL boundary no longer hands the caller the configured
   `EPICS_MCP_OLOG_URL`.** That field accepts `https://user:password@host/Olog`, and the refusal
   reaches a caller verbatim, so a credential written into it was disclosed on the gate's most
@@ -155,7 +170,8 @@ carry breaking changes).
   ⚠️ **This closes the refusal, and the other route out for the same value is closed separately in
   this release.** A credential in `EPICS_MCP_OLOG_URL` also travelled with an ordinary HTTP failure
   of a PERMITTED target, including a loopback sandbox URL spelled with a userinfo; that is the
-  shared REST layer, and the entry above closes it. The server LOG stays unredacted by decision.
+  shared REST layer, and the entry BELOW, "A credential in a service URL reached the client
+  through error text", closes it. The server LOG stays unredacted by decision.
 
 - **`epics-doctor`'s final verdict named one problem and hid the others.** The line an operator
   reads last named only the highest-ranking of the three honest-but-not-healthy categories

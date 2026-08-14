@@ -229,12 +229,15 @@ The write gate is the stricter of the two and demands both, which is why the `Wr
 computes its own reach line rather than pointing at this one. The REST
 planes stay off until their `*_URL` is set. PV writes are gated off by default
 (`EPICS_MCP_ALLOW_PV_WRITE=false`) and additionally need a regex allowlist, a rate limit, an audit
-log and a loopback-only EPICS search reach. Logbook writes sit behind a SECOND, independent gate
-(`EPICS_MCP_ALLOW_OLOG_WRITE=false`), which shares only the durable audit log: it has no name
-pattern and no loopback condition of its own, and demands instead a logbook allowlist and a write
-target that is either loopback or exactly allowlisted and `https`. Arming one never arms the other. That last one is why the network posture above and the
-write gate are not independent settings: writes on plus a reach beyond loopback is a start-time
-refusal, not a warning.
+log and a loopback-only EPICS search reach. That last condition is why the network posture above and
+the PV write gate are not independent settings: writes on plus a reach beyond loopback is a
+start-time refusal, not a warning.
+
+Logbook writes sit behind a SECOND, independent gate (`EPICS_MCP_ALLOW_OLOG_WRITE=false`), which
+shares only the durable audit log: it has no name pattern and no loopback condition of its own, and
+demands instead a logbook allowlist and a write target that is either loopback or exactly
+allowlisted and `https`. Arming one never arms the other, and an Olog-write-enabled server starts
+with the ordinary subnet broadcast search on.
 
 ## 3. TLS / CA bundle (the common first-deploy snag)
 

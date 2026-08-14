@@ -170,8 +170,9 @@ def test_the_lint_chain_runs_in_the_same_workflow_that_publishes() -> None:
     second behind, so a release was built and uploaded without ruff, without ruff-format, without
     mypy --strict and without the two prose guards. The consequence is not symmetric with a failing
     test, which is why this is not merely tidiness: ``pre-commit`` is the only place
-    ``scripts/check_no_ess_internal.py`` runs, that script is the only thing in this repository
-    that looks for a credential, a facility-internal host name or a personal name in the tree,
+    ``scripts/check_no_ess_internal.py`` runs, the only thing in this repository that scans the
+    tree for a credential at all (its built-in formats; the site-specific patterns live in a
+    git-ignored file that no runner checkout materialises, which ``CLAUDE.md`` records as well),
     ``src/`` ships in the wheel and ``docs/`` in the sdist, and a version on a package index can be
     superseded but never withdrawn. Nothing upstream compensates: ``main`` carries no branch
     protection and no ruleset, so no required status check stands between a red commit and a tag.

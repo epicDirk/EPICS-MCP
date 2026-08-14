@@ -56,9 +56,12 @@ jobs:
       # `test` job into the workflow that uploads, for the reason the comment above gives, while
       # ci.yml's `lint` job stayed behind: the release built and shipped without ruff, without
       # ruff-format, without mypy --strict and, the one that decides the severity, without
-      # scripts/check_no_ess_internal.py. That script is the only thing in this repository that
-      # looks for a credential, a facility-internal host name or a personal name in the tree, and
-      # `src/` ships in the wheel while `docs/` ships in the sdist. CI would go red on the same tag
+      # scripts/check_no_ess_internal.py, the only thing in this repository that scans the tree for
+      # a credential at all, and `src/` ships in the wheel while `docs/` ships in the sdist. What it
+      # scans FOR is narrower on a runner than locally, and that is worth knowing rather than
+      # assuming: its site-specific patterns are loaded from a git-ignored file that no checkout
+      # materialises, so a fresh runner runs the built-in credential formats only. Those are the
+      # ones that matter here. CI would go red on the same tag
       # push, but this workflow neither waits for it nor can be blocked by it (main carries no
       # branch protection and no ruleset), and a package index never lets a version be reused: a
       # secret published this way can only be superseded, never withdrawn.

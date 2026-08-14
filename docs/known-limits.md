@@ -22,6 +22,7 @@ retired, and where it went, is listed at the end.
 [15 the https write path](#15--the-remote-https-write-path-has-no-live-probe-any-more-only-in-memory-coverage) ·
 [16 CI and the display tests](#16--ci-cannot-run-the-display-coupled-tests-and-no-switch-inside-this-repository-changes-that) ·
 [17 the service-URL redaction](#17--the-service-url-redaction-removes-a-userinfo-not-every-secret-a-url-can-carry) ·
+[18 one line is not one field set](#18--the-audit-record-is-one-line-which-is-not-the-same-as-one-set-of-fields) ·
 [retired](#retired-entries-and-where-they-went)
 
 ---
@@ -344,6 +345,35 @@ could not be shown to be a removable userinfo", never as "not configured", which
 And do not read the withheld case as a short list: it covers a URL the parser refuses, a URL with
 no scheme or no host, an `@` urllib3 does not read as a userinfo, an `@` that survives the removal,
 and a cut whose result no longer names the same address.
+
+## 18 · The audit record is one LINE, which is not the same as one set of FIELDS
+
+**Measured 2026-08-14**, when the record separator was closed.
+
+`epics_mcp.audit_record` escapes every character a reader might treat as the end of a line, so one
+gate verdict is one record for a byte-oriented reader and for a Unicode-aware one alike. It
+deliberately does NOT escape the space, because the space separates the `key=value` pairs INSIDE a
+record, and escaping it would rewrite every legitimate line.
+
+**What that leaves open:** a caller-chosen field that contains a space can add further `key=value`
+pairs to a record it is part of. Measured on the Olog gate, whose `in_reply_to` reaches the audit
+unvalidated (a logbook is checked against the allowlist and a level against the server's vocabulary,
+but a reply target is a plain string): a `FAILED` record, which the gate's own comment pins as
+metadata-only and ownerless, was made to carry `owner=` and a second `event=` on the same line. The
+PV gate has the same shape through the PV name in its `DENY` record.
+
+**Why this is a limit rather than a defect to fix here.** The forgery a separator buys is a whole
+RECORD, indistinguishable from a genuine one; the forgery a space buys is extra fields inside a
+record that is still attributable to the verdict that emitted it, so a parser reading the FIRST
+occurrence of each key is unaffected and a naive scan is not. Closing it properly means quoting
+identifier fields, which changes the shape of every audit line and therefore every consumer of one.
+That is a wire change with no urgency behind it, so it is written down rather than rushed into a
+release.
+
+**What to do with it as an operator:** read an audit line's fields left to right and take the first
+occurrence of each key, which is what the gate wrote. And note that neither gate promises anything
+about a field a caller chose beyond recording it faithfully.
+
 
 ## Retired entries, and where they went
 
