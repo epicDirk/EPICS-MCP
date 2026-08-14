@@ -337,6 +337,11 @@ named four, so the sentence announcing the correction was itself the incomplete 
   a production write is a deliberate, auditable double action, and the write session is env-independent
   (a remote's CA comes from `EPICS_MCP_CA_BUNDLE`, not the env). The host is read only from the URL's
   parsed hostname, so a `user@host` trick cannot smuggle a loopback prefix past a production host.
+  ⚠️ **Error signature:** this refusal names the VARIABLE (`EPICS_MCP_OLOG_URL`) and never its
+  value, so do not expect the address back from it and do not treat its absence as the tool having
+  no target. The reason is that the value is an unvalidated string operators do spell as
+  `https://user:password@host/Olog`, and the message reaches the caller verbatim. Where the address
+  itself is the question, `epics-doctor`'s `Write gates` block prints it with any userinfo removed.
 - **Logbook allowlist.** Every target logbook must be in `EPICS_MCP_OLOG_WRITE_LOGBOOKS`; an EMPTY
   allowlist with the gate on is **deny-all** (fail-closed). (The PV write pattern is fail-closed too,
   but differently: an empty pattern with writes on is refused at startup, not treated as allow-all.)

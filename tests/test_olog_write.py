@@ -173,6 +173,46 @@ class TestUrlBoundary:
         with pytest.raises(OlogWriteDeniedError):
             gate.check_write_allowed(["Ops"])
 
+    def test_boundary_refusal_carries_no_service_url(self) -> None:
+        """The URL boundary refuses without echoing the URL it refused, in message OR details.
+
+        This branch fires on the ORDINARY path: "remote and not allowlisted" is the gate's
+        documented normal state, so nothing has to be broken for the refusal to be produced, and
+        before this fix every such refusal handed the caller whatever the operator had spelled into
+        ``EPICS_MCP_OLOG_URL``, userinfo included (BG-DERR-B).
+
+        The exact message is asserted rather than "the password does not appear": a criterion built
+        from the configured secret is blind wherever a transport re-encodes it (decision WY), and a
+        substring check would also pass on a message that still printed the host. Its wire-level
+        twin, the same text with the ``[OLOG_WRITE_DENIED]`` tag a caller sees, lives in
+        ``tests/test_write_gate_contract.py``; both are literal on purpose.
+
+        Why no redaction instead of no address: neither existing helper is both safe and useful
+        here. ``url_without_userinfo`` keeps a query-string token (``docs/known-limits.md`` 17),
+        and ``url_without_credentials`` normalises, which would print an address that differs from
+        the one this gate compares EXACTLY and case-sensitively against the allowlist. The address
+        an operator does need is in ``epics-doctor``'s write-gate block.
+
+        RED-PROOF: restore the pre-fix raise and both assertions fail.
+        """
+        secret_url = "https://svc:s3cr3tP4ss@olog.example.org:8181/Olog"
+        gate = OlogWriteGate(_write_config(olog_url=secret_url))
+
+        with pytest.raises(OlogWriteDeniedError) as denial:
+            gate.check_write_allowed(["Ops"])
+
+        assert str(denial.value) == (
+            "Olog write refused: the configured EPICS_MCP_OLOG_URL is not a permitted write "
+            "target. Only a loopback host, or an https URL that is in "
+            "EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true, may "
+            "be written to (a plain-http remote is refused, Basic creds are cleartext). Run "
+            "epics-doctor to see the effective target."
+        )
+        # The in-process copy follows the message. It reaches no client today (nothing in ``src/``
+        # reads ``EpicsError.details``), so this is hygiene rather than a second leak closed, and
+        # it is the shape the sibling env branch already uses for a round-tripping caller.
+        assert denial.value.details == {"caller": "create_log_entry"}
+
     def test_non_loopback_denied_with_allowlist_but_no_remote_flag(self) -> None:
         # Allowlisted but EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE not set → still denied.
         gate = OlogWriteGate(

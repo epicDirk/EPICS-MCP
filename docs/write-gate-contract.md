@@ -113,6 +113,20 @@ can be an arbitrary host must confine *where* a write can physically go, in addi
 - **Fail-closed on the boundary itself:** an unparseable or unresolvable target is **denied first**, before
   any allowlist check: a bad target is a clean, audited DENY, and the allowlist can never override a target
   that fails to parse.
+- **The refusal must not hand the caller a target that can carry a secret.** A per-write URL is an
+  unvalidated configuration string, and `https://user:password@host/path` is a spelling operators use, so a
+  refusal that echoes it back discloses a credential on the gate's most ordinary path: "not allowlisted" is
+  the boundary's normal state, and no service has to be down for the message to be produced. Name the
+  VARIABLE, point at the diagnostic command, and let the address be read from the surface built for it.
+  ⚠️ **Stated per data class, not as a ban on naming targets**, because the two are different questions: a
+  PV name or a logbook name cannot carry a credential, and both gates deliberately DO name those (the PV
+  allowlist miss names its PV beside an escalation sentence; the logbook allowlist names the refused
+  logbooks). Which of its refusals may name their target is a per-surface decision each gate makes and
+  writes down, exactly as point 2 requires for empty-allowlist semantics. Do not redact the value instead
+  of omitting it unless the redaction is proven for the shape being printed: measured here, one existing
+  redaction leaves a query-string token in place and the other normalises the address, which prints a
+  string that differs from the one an exact allowlist compares. Guarded per row by
+  `tests/test_write_gate_contract.py`'s `secret_bearing_target`.
 
 **6. An honest scope statement: the gate is a guardrail on the sanctioned path, not a security boundary.**
 State this plainly where the gate is described, because the word "gate" invites a category error:

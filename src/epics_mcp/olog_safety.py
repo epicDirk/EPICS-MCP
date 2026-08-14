@@ -199,14 +199,40 @@ class OlogWriteGate:
             )
 
         # 2. Test-server URL boundary (the critical check, prevents an accidental production write)
+        #
+        # ⚠️ This refusal names the VARIABLE and never its VALUE, and putting the value back would
+        # reopen a measured leak (BG-DERR-B). ``olog_url`` is an unvalidated string that operators
+        # do spell as ``https://user:password@host/Olog``, this branch is the gate's documented
+        # NORMAL state ("remote and not allowlisted", nothing has to be broken for it to fire), and
+        # the message reaches the caller verbatim through ``tool_errors.translate_epics_errors``.
+        # Measured before the fix: all four write tools answered with the configured password in
+        # clear text on the everyday path.
+        #
+        # Redacting instead of omitting was considered and does not work here. ``url_without_
+        # userinfo`` keeps a query-string token (``docs/known-limits.md`` 17), which is the very
+        # thing that must not travel; ``url_without_credentials`` rebuilds and therefore normalises,
+        # and an address printed in a different spelling than the one this gate compares (EXACTLY
+        # and case-sensitively, see ``write_target_allowed``) invites an operator to copy the
+        # printed line into the allowlist and build themselves a deny-all. Omitting the value needs
+        # no redaction to be correct, which is decision WY's criterion in its strongest form.
+        # The operator's own route to the address is ``epics-doctor``'s write-gate block, which
+        # prints it beside the caveat that it need not match the configured string byte for byte.
+        # Naming a target is a per-surface decision (contract point 2), NOT a rule this reverses
+        # for the sibling gate: a PV name or a logbook name cannot carry a credential, so
+        # ``safety.py`` and the logbook-allowlist branch below deliberately keep naming theirs.
         if not self._url_write_allowed():
             self._audit_deny("OLOG_WRITE_DENIED", caller)
             raise OlogWriteDeniedError(
-                f"Olog write refused: target {self._config.olog_url!r} is not a permitted write "
+                "Olog write refused: the configured EPICS_MCP_OLOG_URL is not a permitted write "
                 "target. Only a loopback host, or an https URL that is in "
                 "EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true, "
-                "may be written to (a plain-http remote is refused, Basic creds are cleartext).",
-                details={"olog_url": self._config.olog_url},
+                "may be written to (a plain-http remote is refused, Basic creds are cleartext). "
+                "Run epics-doctor to see the effective target.",
+                # The in-process copy follows the message. Nothing in ``src/`` reads
+                # ``EpicsError.details`` today, so this is hygiene rather than a second wire leak
+                # closed; it is the shape the env branch above already hands a round-tripping
+                # caller, which keeps the two halves of this method saying the same kind of thing.
+                details={"caller": caller},
             )
 
     def check_write_preconditions(

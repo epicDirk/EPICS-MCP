@@ -101,6 +101,7 @@ from pathlib import Path
 from typing import Protocol
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 import epics_mcp.config as config_module
 import epics_mcp.olog_safety as olog_safety_module
@@ -132,6 +133,10 @@ _AUDIT_DENY = "_audit_deny"
 _PV_TARGET = "SIM:PS-01:Cur-SP"
 _PV_ALLOWLIST = r"^SIM:PS-01:.*-SP$"
 _PV_OFF_ALLOWLIST = "SIM:PS-02:Cur-SP"
+
+#: The remote Olog the URL-boundary row refuses. A module constant because two places must agree on
+#: it: the arm function configures it, and the row registers it as that row's secret-bearing target.
+_OLOG_REMOTE_TARGET = "http://logbook-remote:8080/Olog"
 
 # Small enough to fill the window in two calls, and >=1 so the deque is never empty, an empty
 # deque would make the no-token assertion vacuous (see module docstring).
@@ -175,6 +180,23 @@ class DenyPath:
     exception_error_code: str
     audit_error_code: str
     """The code in the DENY audit line. NOT always the exception's own, see attach_too_large."""
+    secret_bearing_target: str | None = None
+    """The refused target's configured VALUE, set only where that value can carry a secret.
+
+    Contract point 5 forbids disclosing such a value to the caller, and the rule is stated per DATA
+    CLASS rather than as a blanket ban on naming a target, because the two are genuinely different
+    questions. A configuration URL is an unvalidated string that operators do spell as
+    ``https://user:password@host/path``, so echoing it back hands the caller a credential. A PV name
+    or a logbook name cannot carry one, and both gates deliberately DO name those: ``safety.py``
+    puts the refused PV in its allowlist-miss message beside an escalation sentence, and the Olog
+    gate names the refused logbooks, pinned live in
+    ``tests/test_write_gate_live.py::test_add_log_attachment_denies_a_logbook_the_server_reported``
+    and its ``update_log_entry`` sibling. A rule worded
+    "a refusal must not name its target" would be false for those rows and vacuous everywhere else.
+
+    ``None`` therefore means "this row's target is not secret-bearing", not "unchecked": the
+    assertion is skipped for it deliberately, which is what keeps the guard true for all nine rows
+    while still going red on the one that matters (BG-DERR-B)."""
 
 
 # ======================================================================================
@@ -251,7 +273,7 @@ def _arm_olog_env_off() -> tuple[_WriteGate, Callable[[], None]]:
 
 def _arm_olog_boundary_reject() -> tuple[_WriteGate, Callable[[], None]]:
     # Non-loopback and not exactly allowlisted → refused (contract point 5).
-    gate = OlogWriteGate(_olog_config(olog_url="http://logbook-remote:8080/Olog"))
+    gate = OlogWriteGate(_olog_config(olog_url=_OLOG_REMOTE_TARGET))
     return gate, lambda: gate.check_write_allowed(["Ops"])
 
 
@@ -330,6 +352,9 @@ DENY_PATHS: tuple[DenyPath, ...] = (
         exception=OlogWriteDeniedError,
         exception_error_code="OLOG_WRITE_DENIED",
         audit_error_code="OLOG_WRITE_DENIED",
+        # The only row today whose refused target is a configuration URL, i.e. a value that can
+        # carry a credential. It must match the URL _arm_olog_boundary_reject configures.
+        secret_bearing_target=_OLOG_REMOTE_TARGET,
     ),
     DenyPath(
         path_id="olog_allowlist_miss",
@@ -383,6 +408,9 @@ def test_deny_path_satisfies_the_contract(path: DenyPath, caplog: pytest.LogCapt
       path (e.g. ``self._timestamps.append(time.monotonic())`` before the raise) → the content
       comparison fails on every row, including the two rate-limit rows where a length comparison
       would stay green because the full deque merely evicts its oldest entry.
+    * (v): interpolate the refused URL back into ``olog_safety``'s boundary refusal (its pre-fix
+      shape, ``f"... target {self._config.olog_url!r} ..."``) → the ``olog_boundary_reject`` row
+      fails. It is the only row that carries a ``secret_bearing_target``, see that field.
     """
     gate, fire = path.arm()
     tokens_before = list(gate._timestamps)
@@ -405,6 +433,17 @@ def test_deny_path_satisfies_the_contract(path: DenyPath, caplog: pytest.LogCapt
 
     # (iii) a write denied BY THE GATE consumes no rate token (contract point 3)
     assert list(gate._timestamps) == tokens_before, "a gate denial must not consume a rate token"
+
+    # (v) contract point 5: where the refused target is a value that can carry a secret, the
+    # refusal must not hand it back. Checked on BOTH carriers the raise fills in, because the
+    # message is what reaches the caller and ``details`` is the in-process copy of it.
+    if path.secret_bearing_target is not None:
+        assert path.secret_bearing_target not in str(excinfo.value), (
+            f"{path.path_id}: the refusal message discloses the target it refused"
+        )
+        assert path.secret_bearing_target not in str(excinfo.value.details), (
+            f"{path.path_id}: the refusal's details disclose the target it refused"
+        )
 
 
 def test_rate_limited_rows_deny_on_a_non_empty_window() -> None:
@@ -615,6 +654,77 @@ async def test_round_trip_write_is_gate_denied_before_any_read(
     assert read_excinfo.value.error_code == "OLOG_HTTP_404", (
         f"{tool}: the permitted call must get past the gate and perform the read"
     )
+
+
+# The URL-boundary refusal exactly as a CALLER receives it, tag included. Spelled out rather than
+# imported from the code it guards: a wire string compared against itself proves nothing. Its
+# gate-level twin lives in ``tests/test_olog_write.py`` beside the raise; both must be edited
+# together, which is the point of writing a wire contract down twice.
+_BOUNDARY_DENY_ANSWER = (
+    "[OLOG_WRITE_DENIED] Olog write refused: the configured EPICS_MCP_OLOG_URL is not a permitted "
+    "write target. Only a loopback host, or an https URL that is in "
+    "EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true, may be "
+    "written to (a plain-http remote is refused, Basic creds are cleartext). Run epics-doctor to "
+    "see the effective target."
+)
+
+#: A credential-bearing, non-allowlisted remote Olog. Synthetic host, synthetic password.
+_CREDENTIALED_OLOG_URL = "https://svc:s3cr3tP4ss@logbook-remote:8181/Olog"
+
+#: The four Olog write tools with the minimal arguments each one's schema requires. Names and
+#: arguments, not callables: this table exists to drive the REGISTERED tools, so anything resolved
+#: ahead of time would move the assertion off the boundary it is about.
+_WRITE_TOOL_CALLS: tuple[tuple[str, dict[str, object]], ...] = (
+    ("create_log_entry", {"title": "probe", "logbooks": "Ops"}),
+    ("reply_to_log", {"log_id": "17", "title": "probe", "logbooks": "Ops"}),
+    ("add_log_attachment", {"log_id": "17", "attachments": "probe.png"}),
+    ("update_log_entry", {"log_id": "17", "title": "probe"}),
+)
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments"),
+    _WRITE_TOOL_CALLS,
+    ids=[name for name, _ in _WRITE_TOOL_CALLS],
+)
+async def test_url_boundary_refusal_never_discloses_the_target(
+    tool_name: str, arguments: dict[str, object]
+) -> None:
+    """Contract point 5 at the REAL tool boundary: the refusal hands back no service URL.
+
+    Driven through ``mcp.get_tool(...).run(...)``, i.e. the registered tool with its
+    ``translate_epics_errors`` decorator, because that decorator is what turns the gate's exception
+    into the single string a caller receives. A gate-object assertion cannot see that string, and a
+    client-class double cannot either.
+
+    Three assertions, deliberately of different kinds. The exact answer is the wire contract and is
+    the one that fails on a reworded message. The two structural ones are secret-agnostic (decision
+    WY): a criterion built from the CONFIGURED password would be blind exactly where the transport
+    re-encodes it, so what is asserted instead is that no address-shaped fragment survives at all.
+
+    This needs no Olog and no network: the boundary refuses before any client is constructed.
+
+    RED-PROOF: revert ``olog_safety.check_write_env_and_url``'s URL branch to its pre-fix shape
+    (``f"... target {self._config.olog_url!r} is not a permitted write target. ..."`` plus
+    ``details={"olog_url": ...}``) and all four rows fail, on the exact answer and on both
+    structural assertions.
+    """
+    from epics_mcp.server import mcp  # imported here: only this test needs the whole server built
+
+    config_module._config = _olog_config(olog_url=_CREDENTIALED_OLOG_URL)
+    olog_safety_module._olog_safety = None  # rebuild the gate from this config
+
+    tool = await mcp.get_tool(tool_name)
+    # Not type appeasement: the four Olog write tools are registered unconditionally (unlike the
+    # display-gated ones), so a None here is a registration regression, not a missing extra.
+    assert tool is not None, f"{tool_name} is not a registered tool"
+    with pytest.raises(ToolError) as excinfo:
+        await tool.run(arguments)
+
+    answer = str(excinfo.value)
+    assert answer == _BOUNDARY_DENY_ANSWER, tool_name
+    assert "://" not in answer, f"{tool_name}: the answer still carries an address"
+    assert "@" not in answer, f"{tool_name}: the answer still carries a userinfo separator"
 
 
 @pytest.mark.parametrize(
