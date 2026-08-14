@@ -24,6 +24,7 @@ from epics_mcp.services.diagnose import (
     LiveEvidence,
     NamingEvidence,
     State,
+    _gather_channelfinder,
     derive_cause,
     diagnose,
 )
@@ -784,3 +785,36 @@ def test_no_plane_note_in_a_successful_report_carries_a_credential(
     # userinfo goes. Asserting the host away would pin the opposite of the design.
     assert any("http://plane.example.org" in s for s in strings), "the address was withheld too"
     assert not [s for s in strings if "s3cr3t" in s]
+
+
+def test_a_foreign_exception_in_a_plane_note_is_checked_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The four plane gatherers catch ``Exception``, the widest possible arm, deliberately: any
+    failure must withhold rather than crash the report. That width is also why their notes cannot
+    be called clean by inheritance. A raw exception from OUTSIDE this server's hierarchy reaches
+    them without passing any of the substrate's redaction sites, and two such paths are real: a
+    bad ``EPICS_MCP_CA_BUNDLE`` makes requests raise a bare ``OSError``, and ``resp.json()`` on the
+    declared requests floor raises a plain ``ValueError``.
+
+    So the note applies the output check itself. It is defence in depth rather than the primary
+    mechanism, and it is the reason the plane gatherers were not simply declared safe.
+
+    ⚠️ Honest limit, stated here rather than implied: this closes a foreign string carrying a
+    CREDENTIAL. It does not close a foreign string carrying something else, and the CA-bundle
+    ``OSError`` above carries a local filesystem path, which is a different defect on a different
+    guard (the facility-agnostic rule) and is not fixed here.
+
+    Red-proof: dropping ``shown_cause`` from any of the four notes puts the credential back.
+    """
+
+    async def _boom(*_args: object, **_kwargs: object) -> object:
+        raise ValueError("upstream said http://svc:s3cr3t@cf.example.org/CF")
+
+    monkeypatch.setattr("epics_mcp.services.diagnose.query_channels", _boom)
+
+    evidence = asyncio.run(_gather_channelfinder("SIM:PS-01:Cur-RB", True, 0.1))
+    note = str(evidence.note or "")
+
+    assert "s3cr3t" not in note
+    assert "ValueError" in note
