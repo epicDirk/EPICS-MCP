@@ -14,7 +14,7 @@ The full surface: every MCP tool grouped by plane, the standalone command-line t
 |------|-------------|
 | `get_pv_value` | Read a single PV's current value (+ best-effort metadata) |
 | `get_pvs` | Batch-read multiple PVs in one call |
-| `get_pv_info` | Connection state, data type, alarm status, display/control limits |
+| `get_pv_info` | The value plus whatever metadata the record carries: alarm (severity and status, with their text and the message), timestamp, display (units, limits, precision or format, description), control (drive limits), the `value_alarm` thresholds and, on an enum, index/label/choices. No connection state and no data type: an unreachable PV raises instead, `monitor_pv` carries `connection`, and `diagnose_connection` explains a disconnect |
 | `monitor_pv` | Subscribe to PV updates for a bounded duration; reports the channel `connection` so an empty result is readable |
 | `discover_pvs` | Probe a concrete PV name (wildcards need ChannelFinder) |
 | `set_pv_value` | Write a value to a PV, **gated off by default** (see Safety) |
@@ -80,7 +80,11 @@ epics-coverage   --displays <project-root> --scope DEV: # coverage matrix (needs
 `epics-init` prints the MCP client-configuration block for one of four deployment shapes
 (`sandbox`, `ioc-only`, `ioc-archiver`, `full`; `--list` describes them) and then runs the
 `epics-doctor` checks against exactly that block, so generating a configuration and checking it are
-one step. It writes nothing unless asked to: `--out PATH` writes the block as UTF-8 with LF, which a
+one step, with two exceptions. While the block still carries a `<placeholder>`, which every preset
+except `sandbox` does until you fill it in with `--set NAME=VALUE`, the placeholders are named on
+stderr and NO check runs, because probing `<archiver-host>` would produce a DNS failure shaped
+exactly like a real finding; and `--no-check` skips the check outright.
+It writes nothing unless asked to: `--out PATH` writes the block as UTF-8 with LF, which a
 shell redirect cannot promise (in Windows PowerShell 5.1 both `>` and `Set-Content -Encoding utf8`
 produce bytes a strict JSON parser rejects). `--out` refuses an existing file unless `--force` is
 given, and writes nothing at all while placeholders remain. `--absolute-command` names the installed
@@ -103,9 +107,11 @@ asked for.
 
 `epics-mcp`, `epics-init`, `epics-testpv`, `epics-doctor` and `epics-diagnose` are part of the
 core install; `epics-crossplane` and `epics-coverage` need the `opi_navigation` engine, which a
-published install cannot obtain (see above). None of them writes to a service of yours: the only
-things written anywhere are the file `epics-init --out` names and the PVs `epics-testpv` serves
-itself.
+published install cannot obtain (see above). None of the six DIAGNOSTIC commands writes to a service
+of yours: the only things written anywhere are the file `epics-init --out` names and the PVs
+`epics-testpv` serves itself. `epics-mcp` is the exception, and the only one, because it is not a
+diagnostic: it is the server, and once a write gate is armed its `set_pv_value` writes to your IOC
+and its Olog tools post to your logbook (see [Safety](safety.md)).
 
 Every console command answers `--help` and `--version` with its own name and the package version, on a
 core-only install as well: they parse their arguments before asking for the display engine, so the
@@ -155,7 +161,8 @@ command you ran, which need not be the one a running server was started with.
 | `epics-pv://guide` | Operational cookbook: service planes, recipes, error signatures |
 
 The guide's source is `src/epics_mcp/operator_guide.md`: one file, shipped in the wheel and served
-as the resource (and mirrored for human readers by [`OPERATING.md`](../OPERATING.md)).
+as the resource. [`OPERATING.md`](../OPERATING.md) points human readers at it and is deliberately a
+signpost rather than a copy, so the two cannot drift.
 
 | Prompt | Description |
 |--------|-------------|

@@ -184,7 +184,9 @@ cache of its own under its home directory, which `FASTMCP_CHECK_FOR_UPDATES=off`
    a path-based reverse proxy can serve the real API behind a base URL naming another service
    (measured). The found name rides in the detail and is your first clue when the config IS wrong.
 
-   Every plane has its own identity beacon (see the operator guide). Scripting this? Read
+   Every REST plane has its own identity beacon (see the operator guide); the live plane has none,
+   so it never joins `identified_planes`, and on a deployment with no REST plane that list stays
+   empty even after a successful `--probe-pv`. Scripting this? Read
    `verification_complete` / `unverified_planes` / `inconclusive_identity_planes` /
    `degraded_planes` from `--json`, and `write_safety` for the write posture (that one never moves
    the verdict, so a script that only wants pass or fail can ignore it). A failed probe lands in
@@ -225,9 +227,12 @@ genuinely localhost-isolated instance needs every list unset **and** `*_AUTO_ADD
 auto-addr switch only, so it can print that line while the other provider's switch is still open.
 The write gate is the stricter of the two and demands both, which is why the `Write gates` block
 computes its own reach line rather than pointing at this one. The REST
-planes stay off until their `*_URL` is set. Writes are gated off by default
+planes stay off until their `*_URL` is set. PV writes are gated off by default
 (`EPICS_MCP_ALLOW_PV_WRITE=false`) and additionally need a regex allowlist, a rate limit, an audit
-log and a loopback-only EPICS search reach. That last one is why the network posture above and the
+log and a loopback-only EPICS search reach. Logbook writes sit behind a SECOND, independent gate
+(`EPICS_MCP_ALLOW_OLOG_WRITE=false`), which shares only the durable audit log: it has no name
+pattern and no loopback condition of its own, and demands instead a logbook allowlist and a write
+target that is either loopback or exactly allowlisted and `https`. Arming one never arms the other. That last one is why the network posture above and the
 write gate are not independent settings: writes on plus a reach beyond loopback is a start-time
 refusal, not a warning.
 
@@ -408,10 +413,13 @@ so an environment that names nothing still broadcasts into the local subnets). R
 ran. A server started by an MCP client was given that client's environment, which is the block in
 its configuration file, so compare the two rather than assuming they match. To see it from the
 running server instead, read its `epics-pv://config` and `epics-pv://health` resources through the
-client; those describe the process that is actually answering. `config` prints each service URL
-character for character, so the comparison is a comparison, with one exception: a userinfo
-(`user:password@`) is removed from it, and an address whose userinfo could not be removed provably
-is `null` rather than printed. Credentials belong in the `EPICS_MCP_*_AUTH` header variables, not
+client; those describe the process that is actually answering. `config` prints THREE of the service
+URLs, ChannelFinder, Archiver (mgmt) and Alarm, character for character, so those comparisons are
+comparisons. Two things happen even to those three: a userinfo (`user:password@`) is removed, and an
+address whose userinfo could not be removed provably is `null` rather than printed. The Naming, Olog
+and archiver-retrieval URLs are not in that payload at all, deliberately, and appear in `health` as
+the booleans below instead, so for those three planes the address stays a question for
+`epics-doctor` and the environment the server was started with. Credentials belong in the `EPICS_MCP_*_AUTH` header variables, not
 in a URL, see [Configuration](configuration.md). `health` carries one boolean per
 SERVICE plane, six of the seven, so "which of the REST planes is even configured" is answerable
 there. The seventh, `live`, has no such key because it is always configured; `pv_search` reports
@@ -503,7 +511,7 @@ environment and tells you whether the older build still understands it.
 
 ⚠️ **A caveat about the `git+` install route**, which the README also offers. That one tracks the
 branch rather than a release, so it has no version to go back to and changes whenever the branch
-does. Pin a tag (`git+https://github.com/epicDirk/EPICS-MCP@v0.5.0`) if you install that way and
+does. Pin a tag (`git+https://github.com/epicDirk/EPICS-MCP@v0.6.0`) if you install that way and
 want a fixed point.
 
 ## 8. Where to look next

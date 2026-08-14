@@ -20,7 +20,9 @@ This is a controls tool, so the trust questions come first.
   you. None of it is reported anywhere else, and this server has no telemetry of its own.
   ⚠️ **What was READ is not recoverable afterwards, and that cuts both ways.** The audit log records
   write attempts and gate verdicts only; no read leaves a line, and on a read-only deployment, the
-  default, there is no audit log at all. So "what did the assistant take out of my facility in the
+  default, the only records that can arise at all are the DENY lines of refused write attempts, and
+  with no `EPICS_MCP_AUDIT_LOG_FILE` configured they go to the process's stderr rather than into a
+  file. So "what did the assistant take out of my facility in the
   last hour" has no answer on this side, and the record that does exist is the MCP client's own
   conversation log. Decide with that in mind rather than discovering it later. The operational half
   of these questions is in the deployment guide: whether a running instance is pointed at the
@@ -96,9 +98,12 @@ This is a controls tool, so the trust questions come first.
   command arms the gate, and a URL its parser refuses prints as `(unparseable)`. The
   logbook-allowlist refusal does still name the logbooks it refused: a logbook name cannot carry a
   credential, and which denials may name their target is decided per surface, never copied from a
-  sibling gate. ⚠️ This is the REFUSAL, not the whole tool: a credential in the URL still travels
-  with an ordinary HTTP failure of a PERMITTED target, including a loopback sandbox spelled with a
-  userinfo, which is the open item the entry below already names.
+  sibling gate. ⚠️ This covers the REFUSAL, and the ordinary HTTP failure of a PERMITTED target
+  used to be a second route out for the same value, including a loopback sandbox spelled with a
+  userinfo. That route is closed as well since 2026-08-14, in the shared REST layer rather than
+  here: measured at the built artefact over every REST-backed tool and both failure kinds, 16 of 16
+  disclosed a configured password before the fix and none does after it. What remains open, by
+  decision rather than oversight, is the LOG, which the entry below is about.
 - **The server's own log is NOT a redacted surface, and it is a different channel from the answer.**
   Everything above is about what travels toward the MCP client. An UNEXPECTED internal error is
   handled the other way round on purpose: the caller gets only the exception's class name
@@ -134,12 +139,13 @@ This is a controls tool, so the trust questions come first.
   question, the `olog_write` block for that gate's allowlist, rate limit and target predicates,
   `pv_search` for the live plane's reach, and a posture group for REST TLS verification, the REST
   read throttle, the opt-in file boundary and the ChannelFinder redaction. Read through the client,
-  it needs no shell and no guess about whose environment you are looking at. Four things it
+  it needs no shell and no guess about whose environment you are looking at. Three things it
   withholds are things the CLI does print as a VALUE and this payload carries only as a boolean or
-  a count, because a resource payload is kept by the client: the Olog target URL, the audit path,
-  the raw search-reach strings and the ChannelFinder allowlist entries. Two more, the CA-bundle
-  path and the allowed roots, are withheld here and printed by no surface at all; for those the
-  answer is the server's environment. So for the write gates the
+  a count, because a resource payload is kept by the client: the Olog target URL, the raw
+  search-reach strings and the ChannelFinder allowlist entries. The audit path is a fourth the CLI
+  prints, and this payload does not carry it in ANY form, not even as a boolean. Two more, the
+  CA-bundle path and the allowed roots, are withheld here and printed by no surface at all; for
+  those the answer is the server's environment. So for the write gates the
   block above remains the fuller answer; for TLS verification, the read throttle and the file
   boundary the resource is the ONLY answer, and in both cases it is the trustworthy one about
   **this** process.
@@ -158,10 +164,13 @@ This is a controls tool, so the trust questions come first.
   prove the result names the same address; this resource keeps the query because being comparable
   is what it is for. What still carries a credential is the log above, by decision, and
   `epics-doctor`, whose pattern-based redaction cuts at the first `@`.
-- **Olog reads return the whole entry, a deliberate prototype decision (2026-08-01).** Every read
-  (`search_logbook`, `get_log_entry`, the create/reply/update echoes, attachment listing and
-  download) returns the full server record: `title`, `description`, `owner` (the author's
-  account), `source`, `properties` and the raw attachments. **Consequence, stated plainly:** an
+- **Olog reads return the whole entry, a deliberate prototype decision (2026-08-01).** Every ENTRY
+  read (`search_logbook`, `get_log_entry`, the create/reply/update echoes) returns the full server
+  record: `title`, `description`, `owner` (the author's
+  account), `source`, `properties` and the raw attachments. The two ATTACHMENT tools project
+  narrowly instead: the listing returns an attachment's id, filename and description, the download
+  returns the bytes with their size and content type, and neither carries the entry's title, body
+  or owner, even though the listing has to read the whole entry to find the attachments. **Consequence, stated plainly:** an
   AI assistant reading a production logbook hands its clear text, author names included, onward
   to the MCP client, the model provider, the conversation transcript and any client-side logs.
   The former DS-PRIVACY read redaction was removed because it was built against an *assumed*

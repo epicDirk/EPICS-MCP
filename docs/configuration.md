@@ -57,10 +57,13 @@ One variable in the table below is outside that heading, and the row says so: an
 single-JVM appliance legitimately leaves it empty.
 
 ⚠️ **Put credentials in the `*_AUTH` header variables, not into a `*_URL`.** A URL accepts
-`https://user:password@host/path` and nothing here rejects it, but that string is also what
-`epics-pv://config` reports to a client, which keeps it. That resource removes a userinfo before
-printing and withholds the address entirely when it cannot do so provably, and a token in a QUERY
-string is not removed at all.
+`https://user:password@host/path` and nothing here rejects it, and for `CHANNELFINDER_URL`,
+`ARCHIVER_URL` and `ALARM_URL` that string is also what `epics-pv://config` reports to a client,
+which keeps it. That resource removes a userinfo before printing and withholds the address entirely
+when it cannot do so provably, and a token in a QUERY string is not removed at all. The Naming, Olog
+and archiver-retrieval URLs are not in that payload at all, which is a decision about the payload
+and not about the variables: a credential written into one of them is still read by this process,
+and still reaches its service.
 
 ⚠️ **The error route redacts MORE than the resource does, and the difference is deliberate.**
 Measured 2026-08-14: a REST failure message, and every `note` built from one, names the address
@@ -102,7 +105,7 @@ part of the `epics-pv://config` payload either.
 | `EPICS_MCP_OLOG_WRITE_RATE_LIMIT` | `5` | Max Olog writes per 60 s window |
 | `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` | _(empty)_ | Comma-separated exact base URLs allowed as non-loopback write targets (only with `_ALLOW_REMOTE`) |
 | `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE` | `false` | Permit writes to a non-loopback (allowlisted) Olog. Default false: only loopback is writable. A remote **must** be `https://`; a plain-http remote is refused (Basic creds are cleartext). The write session is env-independent (no proxy/`REQUESTS_CA_BUNDLE` env): give a remote's CA via `EPICS_MCP_CA_BUNDLE` |
-| `EPICS_MCP_OLOG_ATTACH_MAX_BYTES` | `52428800` | Client-side cap on total upload bytes (checked before files are read; the server enforces its own 413) |
+| `EPICS_MCP_OLOG_ATTACH_MAX_BYTES` | `52428800` | Client-side cap on attachment bytes in BOTH directions. On upload it is the total, checked before the files are read (the server enforces its own 413); on download it bounds the response body, a larger declared `Content-Length` being refused before any read. The base64 download lane caps itself smaller still, to bound the response |
 
 ## EPICS network (standard EPICS env; controls what the server can reach)
 
@@ -114,8 +117,8 @@ searches explicitly disabled. Run `epics-doctor` to see what your instance actua
 provider's auto-address switch only, so it can say `localhost-isolated` while the other provider's
 switch is still open. The `Write gates` block judges BOTH, because the PV write gate does, so its
 reach line is the one to read when you are asking about a write. It answers ONE of the PV gate's
-three start conditions, not the question of whether the server would start: nothing in that block
-evaluates the three together.
+four start conditions, not the question of whether the server would start: nothing in that block
+evaluates the four together.
 
 | Variable | Default | Description |
 |----------|---------|-------------|

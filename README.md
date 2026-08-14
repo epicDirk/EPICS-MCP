@@ -18,10 +18,13 @@ allowlist, and a rate limit. Logbook writes sit behind their own separate gate.
 > **Project status: pre-1.0 and under active development.** Tools and APIs may still change
 > between minor versions, so pin one if you depend on it.
 
-**Maturity.** CI runs the full suite on every push against Python 3.12, 3.13 and 3.14, which is
-every version `requires-python` permits, on a standalone install with no EPICS infrastructure at
-all; the live-stack tests are opt-in and skip without a stack. `mypy --strict` covers `src`,
-`tests` and `scripts`, and the package ships `py.typed`.
+**Maturity.** CI runs the standalone core suite on every push against Python 3.12, 3.13 and 3.14,
+which is every version `requires-python` permits, on an install with no EPICS infrastructure at
+all; the live-stack tests are opt-in and skip without a stack, and the seven display-coupled test
+modules are not collected there at all, because the engine they need is not installable from a
+public checkout. That last part is a deliberate choice rather than a gap in the report: CI tests
+exactly the standalone core a public user gets, and a run that drops those modules says so in its
+own header. `mypy --strict` covers `src`, `tests` and `scripts`, and the package ships `py.typed`.
 
 ## Where to start
 
@@ -30,9 +33,13 @@ all; the live-stack tests are opt-in and skip without a stack. `mypy --strict` c
 obtain: no facility, no IOC, no EPICS Base, no ChannelFinder, no archiver.
 
 **I want to point it at my facility.** Start with `epics-init --list`, pick the shape that matches
-what you run, and let `epics-init --preset <shape> --out .mcp.json` write the client-configuration
-block and check it for you (`--out` rather than a shell redirect, which cannot promise an encoding
-the client can read). When your facility does not match one of the four shapes, the
+what you run, and pass its open values with `--set NAME=VALUE`; then
+`epics-init --preset <shape> --set ... --out .mcp.json` writes the client-configuration block and
+checks it for you (`--out` rather than a shell redirect, which cannot promise an encoding the
+client can read). Every facility shape ships placeholders, and while one is still standing the
+block is only PRINTED: no file is written and no check runs, and the command says which value it is
+waiting for. Only `sandbox` has nothing left to fill in, which is why the quick start above needs
+no `--set` at all. When your facility does not match one of the four shapes, the
 [deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md) walks through the variables plane by plane, the CA-bundle
 recipe for internal HTTPS, and the documented assumptions. Either way you end at `epics-doctor`,
 which probes every configured plane read-only and tells you what your instance actually reaches,
@@ -161,6 +168,20 @@ Three commands, and nothing to obtain beyond the install above.
    each service plane that was consulted, and last the next steps, any notes, and any plane that
    was asked for but is unavailable.
 
+   ⚠️ **That command reads YOUR shell, not the file step 2 just wrote.** The block in `.mcp.json`
+   configures the server your MCP CLIENT launches; a command you run yourself sees the environment
+   of your terminal, and a fresh terminal points at no PV at all. Measured: run exactly as shown in
+   a shell with no `EPICS_*` variables, it answers `disconnected (PV_TIMEOUT)` while the test PV is
+   serving perfectly well. Two ways round it, neither of which edits anything. Set in that terminal
+   the search path the `sandbox` preset sets, which for the test PV is
+   `EPICS_PVA_AUTO_ADDR_LIST=NO` plus `EPICS_PVA_ADDR_LIST=127.0.0.1`; or let step 2's own check
+   answer, since it applies the preset itself. Without `--out` it writes no file, printing the
+   block on stdout and the check on stderr:
+
+   ```bash
+   epics-init --preset sandbox --probe-pv TEST:Temperature
+   ```
+
    ⚠️ **If the client reports only that the server did not start**, the likeliest cause is that
    `"command": "epics-mcp"` is a bare name and a client launched from a desktop icon does not
    inherit your shell's `PATH`. Rerun step 2 with `--absolute-command`, which writes the resolved
@@ -174,12 +195,16 @@ is already taken.
 
 To reach a real control system instead, pick the matching preset and follow the
 [deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md), which walks the variables plane by plane and ends at the
-same self-check. The one variable every facility shape needs is the PV search path, so that a
-`--set` looks like this in practice:
+same self-check. What every facility shape needs is the PV search path, and a preset leaves one
+placeholder per protocol for it, so a `--set` looks like this in practice:
 
 ```bash
-epics-init --preset ioc-only --set EPICS_PVA_ADDR_LIST=<gateway-or-ioc-host> --out <my config>
+epics-init --preset ioc-only --set EPICS_PVA_ADDR_LIST=<host> --set EPICS_CA_ADDR_LIST=<host> --out <my config>
 ```
+
+Fill in only one of the two and the command writes nothing rather than a half-configured file: it
+names the placeholder still standing, says the file was not written, and leaves the exit code at
+`0`, because an unfinished configuration is a step you have not taken yet rather than an error.
 
 A containerised IOC usually needs `EPICS_PVA_NAME_SERVERS=<ioc-host>:5075` **alongside** that
 rather than instead of it, since it publishes a TCP port and answers no broadcast. The deployment

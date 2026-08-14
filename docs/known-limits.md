@@ -43,10 +43,12 @@ member, or the `N of the M` shape) over `git ls-files "*.md"`.
 that list to the registrations.** Only the operator guide's inventory block is checked
 (`test_guide_matches_code`). What is checked on `docs/tools.md` is narrower than its tool table and
 touches none of it: the resource URIs (`test_readme_resources`), that no page advertises an
-`epics-*` command the package does not install (`test_examples_match_entry_points`), and that its
+`epics-*` command the package does not install (`test_examples_match_entry_points`), that its
 "part of the core install" sentence names the same commands as the engine gate
-(`test_cli_without_display_engine`). It is a second inventory of the same thing with one of them
-guarded.
+(`test_cli_without_display_engine`), and that every status name it pairs with a glyph uses the
+glyph `cli_doctor` renders (`test_guide_matches_code`, which names this page explicitly so a rename
+cannot drop it out of the scan). Four guards read the file; none reads the tool table. It is a
+second inventory of the same thing with one of them guarded.
 
 ## 9 · The language guard finds German by vocabulary, not by understanding
 
@@ -105,8 +107,10 @@ in for a dash, a tab or a non-breaking space as the neighbour, or the pair glued
 exception frees the whole LINE rather than one character on it.
 
 ⚠️ Do not assume ruff covers any of this. Probed one at a time through
-`ruff --isolated --select RUF001,RUF002,RUF003`, it recognises five of the nine (the en dash, the
-apostrophe, the multiplication sign and both single curly quotes) and nothing at all outside `.py`.
+`ruff --isolated --select RUF001,RUF002,RUF003`, it recognises five of the nine characters this
+repository once listed in `allowed-confusables` (the en dash, the typographic apostrophe, the
+multiplication sign and both single curly quotes) and nothing at all outside `.py`. That set is not
+the nine this guard blocks, which is the list below.
 The em dash, the three double curly quotes and the ellipsis produce no finding in a string, a
 docstring or a comment alike.
 
@@ -124,7 +128,7 @@ shared:** longest identical run of lines, `difflib` over the whole files, is fou
 one non-blank is `"""`. The remaining shared lines are class and method signatures the REST endpoint
 dictates, which is API shape rather than code. The exceptions module is not slimmed from anything:
 upstream derives its errors from its own root, ours from `services/rest_exceptions.py` like the
-other three REST planes, and `NamingServiceNotFound` exists only here.
+other four REST planes, and `NamingServiceNotFound` exists only here.
 
 The honest limit: this compares two files at one point in time. It says nothing about what a court
 would say and it is not a licence review. It is enough to establish that the modules were
@@ -245,9 +249,10 @@ reason, stated in `pyproject.toml` next to the `displays` group and in `CONTRIBU
 exactly the standalone core a public user gets. What was wrong is a different thing, and it is
 fixed: the green report said nothing about the **145 tests** (measured 2026-08-09 with
 `pytest --collect-only` over that list) it had not run,
-so a reader could not tell a full run from a partial one. Every run that drops those modules now
-carries a gap line in its report header, and `EPICS_MCP_REQUIRE_DISPLAYS=1` turns the silent skip
-into a refusal for anyone who demands the full suite locally.
+so a reader could not tell a full run from a partial one. Every run that drops those modules AND
+prints a header now carries a gap line in it, which is the honest reach: `-q` and `--no-header`
+suppress the header block and the line with it. `EPICS_MCP_REQUIRE_DISPLAYS=1` turns the silent
+skip into a refusal for anyone who demands the full suite locally.
 
 What that does NOT do is make the display tests run in CI, and the reason is not oversight either.
 Measured on 2026-08-03: this repository is PUBLIC (`gh repo view --json visibility`) and carries
