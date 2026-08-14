@@ -7,26 +7,7 @@ carry breaking changes).
 
 ## [Unreleased]
 
-### Fixed
-
-- **An Olog write refused by the URL boundary no longer hands the caller the configured
-  `EPICS_MCP_OLOG_URL`.** That field accepts `https://user:password@host/Olog`, and the refusal
-  reaches a caller verbatim, so a credential written into it was disclosed on the gate's most
-  ordinary path: "remote and not allowlisted" is the boundary's normal state, and no service has to
-  be unreachable for the message to be produced. Measured before the fix, all four write tools
-  (`create_log_entry`, `reply_to_log`, `add_log_attachment`, `update_log_entry`) answered with the
-  password in clear text. **Wire change:** the message now names the variable instead of its value,
-  points at `olog_write.target_allowed` in `epics-pv://health` for the gate's own verdict, and ends
-  with an instruction not to route around the refusal; a client matching on the old text must be
-  updated. The configured address is disclosed to a caller on no surface, which is the posture
-  `epics-pv://health` and `epics-pv://config` already held for this field; an operator reads it from
-  `epics-doctor`'s `Write gates` block, which needs that command's own environment to arm the gate.
-  The logbook-allowlist refusal still names the logbooks it refused, which cannot carry a credential.
-  ⚠️ **This closes the refusal, not every route.** A credential in `EPICS_MCP_OLOG_URL` still
-  travels with an ordinary HTTP failure of a PERMITTED target, including a loopback sandbox URL
-  spelled with a userinfo; that is a separate open item in the shared REST layer.
-
-## [0.6.0] - 2026-08-13
+## [0.6.0] - 2026-08-14
 
 ### Added
 
@@ -136,6 +117,45 @@ carry breaking changes).
   shipped and is corrected in all three.
 
 ### Fixed
+
+- **A caller could write fabricated records into the audit trail.** Both write gates build their
+  audit records out of values a caller chooses (a PV name; logbook and level names), and the trail
+  is one record per line, so a newline in such a value ended the record and started the next one.
+  Measured on a server with the PV write gate OFF, i.e. a caller permitted to write nothing at all:
+  a `set_pv_value` call that was refused before any network access left three lines in the file, the
+  middle one a complete, timestamp-bearing `event=ALLOW` record naming a PV nobody wrote. After that
+  an `ALLOW` line no longer implies a write happened, which is what the trail exists to say. Every
+  record is now escaped as it is written, so a control character cannot end it; the escaping is on
+  the finished record in each gate's single sink, so it also covers any field added later. **No
+  legitimate record changes**: the fields of a real record are identifiers, error codes and
+  `repr`-formatted scalars, none of which carries a control character. A record that DID carry one
+  now shows it as `\x0a` rather than breaking the line, so nothing a caller sent is lost.
+- **`epics-testpv`'s writable switch stopped accepting writes after the first garbage collection.**
+  `TEST:Heater` is documented as a writable switch, and `docs/mcp-clients.md` shows a write-enabled
+  configuration whose allowlist is `^TEST:.*` so that a documented write has a target. The command
+  passed its PV provider to the p4p server as an anonymous temporary, and p4p keeps no Python
+  reference to one, so the first cyclic collection deallocated the shared PVs and removed the write
+  handler from a server that kept serving. Reads were unaffected, which is why nothing looked
+  broken. The refusal also named the wrong operation: the pinned pvxs answers an unhandled write
+  with `RPC not implemented by this PV`. Writes to `TEST:Heater` now work for the life of the
+  process.
+- **An Olog write refused by the URL boundary no longer hands the caller the configured
+  `EPICS_MCP_OLOG_URL`.** That field accepts `https://user:password@host/Olog`, and the refusal
+  reaches a caller verbatim, so a credential written into it was disclosed on the gate's most
+  ordinary path: "remote and not allowlisted" is the boundary's normal state, and no service has to
+  be unreachable for the message to be produced. Measured before the fix, all four write tools
+  (`create_log_entry`, `reply_to_log`, `add_log_attachment`, `update_log_entry`) answered with the
+  password in clear text. **Wire change:** the message now names the variable instead of its value,
+  points at `olog_write.target_allowed` in `epics-pv://health` for the gate's own verdict, and ends
+  with an instruction not to route around the refusal; a client matching on the old text must be
+  updated. The configured address is disclosed to a caller on no surface, which is the posture
+  `epics-pv://health` and `epics-pv://config` already held for this field; an operator reads it from
+  `epics-doctor`'s `Write gates` block, which needs that command's own environment to arm the gate.
+  The logbook-allowlist refusal still names the logbooks it refused, which cannot carry a credential.
+  ⚠️ **This closes the refusal, and the other route out for the same value is closed separately in
+  this release.** A credential in `EPICS_MCP_OLOG_URL` also travelled with an ordinary HTTP failure
+  of a PERMITTED target, including a loopback sandbox URL spelled with a userinfo; that is the
+  shared REST layer, and the entry above closes it. The server LOG stays unredacted by decision.
 
 - **`epics-doctor`'s final verdict named one problem and hid the others.** The line an operator
   reads last named only the highest-ranking of the three honest-but-not-healthy categories
@@ -396,8 +416,12 @@ carry breaking changes).
   than growing, which is this repository's own convention for that. Nothing about the gates or the
   wire changed. ⚠️ What a refusal at the IOC looks like from here is stated in the guide as **not
   measured**: no live test in this project has an IOC decline a write. What is measured, and what
-  the guide sends you to instead, is the always-on readback: a value that did not land comes back
-  `verified=false` whatever the reason.
+  the guide sends you to instead, is the always-on readback: where the server can read the value
+  back and compare it, a value that did not land comes back `verified=false`. Where it cannot,
+  `verified` is `null` with a note saying why, which is the answer on three measured paths (the
+  readback `pv_get` itself failed, the readback carried no live reading, or the written value is
+  not comparable with what came back). `false` is a measurement and `null` is the absence of one;
+  neither is a statement about the IOC's reason.
 - **The alarm reply says which of its two levels answers "why".** `get_pv_info` now states in its
   own description that `alarm.status_text` is the coarse pvData NT category of the alarm SOURCE
   (DEVICE, RECORD, DB and the like) while the fine CA STAT condition (HIHI, LOLO, UDF, SIMM) is
