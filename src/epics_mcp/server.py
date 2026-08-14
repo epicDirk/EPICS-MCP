@@ -120,9 +120,18 @@ def _display_tools_available() -> bool:
 def build_instructions(display_tools_available: bool) -> str:
     """Render the server ``instructions`` from the actual capability set (S26/N06).
 
-    The display-gated capabilities (validate_pvs / crossplane_check / find_device) are advertised
-    only when the ``displays`` group is installed, so a core-only install does not over-claim
-    them. A pure function of the flag → both branches are directly testable without a reimport.
+    The display-gated capabilities are advertised only when the ``displays`` group is installed,
+    so a core-only install does not over-claim them. A pure function of the flag → both branches
+    are directly testable without a reimport.
+
+    ⚠️ Advertised is a SMALLER set than gated, and the difference is not an oversight to repair
+    here. ``display_tools.register`` gates FOUR tools; the clause below names three of them
+    (validate_pvs, crossplane_check, find_device) and ``coverage_audit`` is in neither branch of
+    this header. There is no room for it: the budget below is measured at the guard and what is
+    left of it is a handful of bytes, so a fourth clause would truncate the whole header rather
+    than add a line. The tool is registered, described and guided like the others; it is only this
+    one pre-choice channel that cannot afford to mention it. Read the enumeration as "what fits",
+    never as "what the group installs".
     """
     display_clause = (
         # "file or display view" earns its bytes: without it this clause reads as a promise that
