@@ -33,7 +33,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # v7, not the newest release: setup-uv publishes v8.x and v9.x, but has NOT published a
       # floating `v8` or `v9` major tag (measured, both fail to resolve), so `@v9` would break this
       # workflow outright. v7 is the newest major that resolves AND runs on node24.
@@ -175,7 +175,7 @@ jobs:
     permissions:
       contents: write # create a release; the OIDC token stays in the publish job
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Create the release from the changelog section
         env:
           GH_TOKEN: ${{ github.token }}

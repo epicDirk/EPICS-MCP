@@ -225,7 +225,7 @@ def test_every_action_reference_is_pinned_in_order() -> None:
     ]
 
     assert refs == [
-        "actions/checkout@v5",
+        "actions/checkout@v7",
         "astral-sh/setup-uv@v7",
         "actions/upload-artifact@v7",
         "actions/download-artifact@v8",
@@ -233,7 +233,7 @@ def test_every_action_reference_is_pinned_in_order() -> None:
         # The github-release job's own checkout, added consciously: it needs CHANGELOG.md and the
         # slicer script. Everything else that job does is `gh`, which is preinstalled on the runner,
         # so no THIRD-PARTY action joined the release's supply chain here.
-        "actions/checkout@v5",
+        "actions/checkout@v7",
     ], f"the action set or its versions changed, decide consciously: {refs}"
 
 
