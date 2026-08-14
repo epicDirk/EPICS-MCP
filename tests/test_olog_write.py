@@ -187,13 +187,19 @@ class TestUrlBoundary:
         twin, the same text with the ``[OLOG_WRITE_DENIED]`` tag a caller sees, lives in
         ``tests/test_write_gate_contract.py``; both are literal on purpose.
 
-        Why no redaction instead of no address: neither existing helper is both safe and useful
-        here. ``url_without_userinfo`` keeps a query-string token (``docs/known-limits.md`` 17),
-        and ``url_without_credentials`` normalises, which would print an address that differs from
-        the one this gate compares EXACTLY and case-sensitively against the allowlist. The address
-        an operator does need is in ``epics-doctor``'s write-gate block.
+        Why no redaction instead of no address, and the honest version of that reason: measured,
+        ``url_without_credentials`` WOULD be safe here (userinfo, query and fragment all go). What
+        rules it out is not safety but posture, this server discloses the Olog target address to a
+        caller on no surface at all, deliberately and in writing (``resources.py``: "olog as an
+        enabled-boolean only (never the URL...)"), and a refusal is the same kind of surface kept by
+        the same client. The sibling ``url_without_userinfo`` would not even be safe: it keeps a
+        query-string token (``docs/known-limits.md`` 17).
 
-        RED-PROOF: restore the pre-fix raise and both assertions fail.
+        The escalation sentence is not decoration either. It mirrors ``safety.py``'s, and this
+        branch needs it more than the PV gate does, because its remedy is a change to the server's
+        own write configuration, which is exactly what an assistant must not make for a user.
+
+        RED-PROOF: restore the pre-fix raise and every assertion here fails.
         """
         secret_url = "https://svc:s3cr3tP4ss@olog.example.org:8181/Olog"
         gate = OlogWriteGate(_write_config(olog_url=secret_url))
@@ -201,13 +207,27 @@ class TestUrlBoundary:
         with pytest.raises(OlogWriteDeniedError) as denial:
             gate.check_write_allowed(["Ops"])
 
-        assert str(denial.value) == (
-            "Olog write refused: the configured EPICS_MCP_OLOG_URL is not a permitted write "
-            "target. Only a loopback host, or an https URL that is in "
-            "EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true, may "
-            "be written to (a plain-http remote is refused, Basic creds are cleartext). Run "
-            "epics-doctor to see the effective target."
+        # Secret-agnostic first (see the WY note above), the wire contract second: written the
+        # other way round the first would be unreachable behind the equality. The two service
+        # schemes rather than a bare "://", because the message deliberately names the MCP resource
+        # ``epics-pv://health`` and a rule rejecting every scheme would forbid its own remedy.
+        assert "http://" not in str(denial.value)
+        assert "https://" not in str(denial.value)
+        assert "@" not in str(denial.value)
+        # Enough of the text to tell this branch from the gate's three other refusals, NOT the whole
+        # string: the full wire contract is pinned once, at the boundary a caller actually reads it
+        # from (``tests/test_write_gate_contract.py``). A second byte-for-byte copy here would be a
+        # strictly weaker duplicate of that one and a third place to edit on every rewording.
+        assert "the configured EPICS_MCP_OLOG_URL is not a permitted write target" in str(
+            denial.value
         )
+        # The escalation, asserted by its load-bearing phrases rather than by the whole string, so
+        # this half stays meaningful if the sentence around it is reworded. Same shape as the PV
+        # gate's guard in tests/test_safety.py.
+        assert "Do NOT work around this" in str(denial.value)
+        assert "repointing the server" in str(denial.value)
+        assert "another logbook" in str(denial.value)
+        assert "Report the refusal to the operator on duty" in str(denial.value)
         # The in-process copy follows the message. It reaches no client today (nothing in ``src/``
         # reads ``EpicsError.details``), so this is hygiene rather than a second leak closed, and
         # it is the shape the sibling env branch already uses for a round-tripping caller.

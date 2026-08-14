@@ -208,15 +208,30 @@ class OlogWriteGate:
         # Measured before the fix: all four write tools answered with the configured password in
         # clear text on the everyday path.
         #
-        # Redacting instead of omitting was considered and does not work here. ``url_without_
-        # userinfo`` keeps a query-string token (``docs/known-limits.md`` 17), which is the very
-        # thing that must not travel; ``url_without_credentials`` rebuilds and therefore normalises,
-        # and an address printed in a different spelling than the one this gate compares (EXACTLY
-        # and case-sensitively, see ``write_target_allowed``) invites an operator to copy the
-        # printed line into the allowlist and build themselves a deny-all. Omitting the value needs
-        # no redaction to be correct, which is decision WY's criterion in its strongest form.
-        # The operator's own route to the address is ``epics-doctor``'s write-gate block, which
-        # prints it beside the caveat that it need not match the configured string byte for byte.
+        # Why NOT a redaction, and this is not the reason a first draft gave. Measured over nine
+        # spellings, :func:`~epics_mcp.services._http.url_without_credentials` IS safe here: the
+        # userinfo, the query and the fragment all go, and an address the parser refuses comes back
+        # as ``(unparseable)``. So "no redaction would be safe" would simply be false. The reason is
+        # the VALUE: this server does not disclose the Olog target address to a CALLER on any
+        # surface, deliberately and in writing. ``resources.py`` carries "olog as an
+        # enabled-boolean only (never the URL...)" in the health payload, and ``epics-pv://config``
+        # prints the three other planes' URLs and not this one. A refusal is the same kind of
+        # surface kept by the same client, so it follows the same posture. (The sibling
+        # :func:`~epics_mcp.services._http.url_without_userinfo` would not even be safe here:
+        # measured, it keeps a query-string token, ``docs/known-limits.md`` 17.)
+        #
+        # What the caller gets instead is the gate's OWN verdict, in band and out of the process
+        # that is actually answering: ``olog_write.target_allowed`` in ``epics-pv://health``. The
+        # address stays with the operator, whose route is ``epics-doctor``'s write-gate block. The
+        # message does NOT send a caller there, and that is measured rather than tidy: that command
+        # reads the environment it is RUN in, so from an ordinary shell it prints
+        # "Olog write: OFF" and no target at all, which contradicts the refusal it was meant to
+        # explain (this branch is only reachable on a server whose gate IS armed).
+        #
+        # The escalation sentence mirrors ``safety.py``'s, and this branch needs it more than the PV
+        # gate does: its remedy is a change to the server's own write configuration, which is
+        # precisely what an assistant must not make on a user's behalf.
+        #
         # Naming a target is a per-surface decision (contract point 2), NOT a rule this reverses
         # for the sibling gate: a PV name or a logbook name cannot carry a credential, so
         # ``safety.py`` and the logbook-allowlist branch below deliberately keep naming theirs.
@@ -226,8 +241,10 @@ class OlogWriteGate:
                 "Olog write refused: the configured EPICS_MCP_OLOG_URL is not a permitted write "
                 "target. Only a loopback host, or an https URL that is in "
                 "EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true, "
-                "may be written to (a plain-http remote is refused, Basic creds are cleartext). "
-                "Run epics-doctor to see the effective target.",
+                "may be written to. This gate's own verdict is olog_write.target_allowed in "
+                "epics-pv://health; the target address is never disclosed to a caller. Do NOT work "
+                "around this by repointing the server or by writing to another logbook. Report the "
+                "refusal to the operator on duty.",
                 # The in-process copy follows the message. Nothing in ``src/`` reads
                 # ``EpicsError.details`` today, so this is hygiene rather than a second wire leak
                 # closed; it is the shape the env branch above already hands a round-tripping

@@ -68,14 +68,23 @@ async def test_generic_exception_is_confined_to_the_class_name_and_logged(
         await boom()
 
     wire = str(exc_info.value)
-    assert wire == "[INTERNAL] ValueError"  # class name only, no raw detail on the wire
+    # The leak-shaped criterion runs FIRST and the equality second, so each has its own mutant:
+    # putting str(e) back on the wire reddens the first, any retagging reddens the second. The other
+    # order leaves the first unreachable, since a wire that equals the tag cannot contain a secret.
     assert secret not in wire  # the exact leak the hardening closes (RED on the old code)
+    assert wire == "[INTERNAL] ValueError"  # class name only, no raw detail on the wire
     # ...but the full detail survives SERVER-SIDE (message + traceback) for debugging:
     logged = "\n".join(
         rec.getMessage() + ("\n" + (rec.exc_text or "") if rec.exc_info else "")
         for rec in caplog.records
     )
     assert secret in logged, "the internal detail must be logged server-side, not dropped"
+    # The TRACEBACK half, asserted separately because the line above does not reach it: the %s
+    # argument alone satisfies "the detail is logged", so deleting ``exc_info=True`` left the whole
+    # suite green and the decision it belongs to was pinned by nothing (measured, BG-DERR-B).
+    assert any(rec.exc_info for rec in caplog.records), (
+        "the INTERNAL branch must log the traceback, not only the message"
+    )
 
 
 async def test_success_passes_through_and_preserves_signature() -> None:

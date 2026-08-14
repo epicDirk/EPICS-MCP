@@ -340,8 +340,12 @@ named four, so the sentence announcing the correction was itself the incomplete 
   ⚠️ **Error signature:** this refusal names the VARIABLE (`EPICS_MCP_OLOG_URL`) and never its
   value, so do not expect the address back from it and do not treat its absence as the tool having
   no target. The reason is that the value is an unvalidated string operators do spell as
-  `https://user:password@host/Olog`, and the message reaches the caller verbatim. Where the address
-  itself is the question, `epics-doctor`'s `Write gates` block prints it with any userinfo removed.
+  `https://user:password@host/Olog`, and the message reaches the caller verbatim. The gate's own
+  verdict IS available in band, as `olog_write.target_allowed` in `epics-pv://health`, out of the
+  process that answered. The address itself is operator-side only: `epics-doctor`'s `Write gates`
+  block rebuilds it without userinfo, query or fragment, and prints it **only when that command's
+  own environment arms the gate**, which a shell beside an MCP-launched server usually does not; a
+  URL its parser refuses prints as `(unparseable)` rather than as an address.
 - **Logbook allowlist.** Every target logbook must be in `EPICS_MCP_OLOG_WRITE_LOGBOOKS`; an EMPTY
   allowlist with the gate on is **deny-all** (fail-closed). (The PV write pattern is fail-closed too,
   but differently: an empty pattern with writes on is refused at startup, not treated as allow-all.)

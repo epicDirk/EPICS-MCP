@@ -124,9 +124,20 @@ can be an arbitrary host must confine *where* a write can physically go, in addi
   logbooks). Which of its refusals may name their target is a per-surface decision each gate makes and
   writes down, exactly as point 2 requires for empty-allowlist semantics. Do not redact the value instead
   of omitting it unless the redaction is proven for the shape being printed: measured here, one existing
-  redaction leaves a query-string token in place and the other normalises the address, which prints a
-  string that differs from the one an exact allowlist compares. Guarded per row by
-  `tests/test_write_gate_contract.py`'s `secret_bearing_target`.
+  redaction leaves a query-string token in place, and the other is safe but rebuilds the address, which
+  prints a string differing from the one an exact allowlist compares. Deciding to omit rather than to
+  redact was, in this server's case, settled by a posture it already held, that the logbook target
+  address is disclosed to a caller on no surface at all.
+  ⚠️ **Scope, because the sentence above is about what the GATE produces and a caller can be handed the
+  target on the way to a gate verdict.** A gate whose verdict needs a pre-write READ (the logbook
+  allowlist is keyed on the target entry's own logbooks) performs that read first, and a transport
+  failure there carries the request URL in its own message, which is a different layer's contract, not
+  this one's. State that limit where the gate is described rather than letting the reader infer that
+  passing this point makes the tool credential-free.
+  Guarded by `tests/test_write_gate_contract.py`: every registered deny row must produce a refusal with
+  no address-shaped fragment and no configured service host in it, message and `details` alike, with no
+  per-row opt-out (a field that could be set to "not applicable" was tried and a mutant switched it off
+  while a credential sat on the wire).
 
 **6. An honest scope statement: the gate is a guardrail on the sanctioned path, not a security boundary.**
 State this plainly where the gate is described, because the word "gate" invites a category error:
