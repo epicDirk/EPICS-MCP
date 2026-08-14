@@ -48,7 +48,8 @@ touches none of it: the resource URIs (`test_readme_resources`), that no page ad
 "part of the core install" sentence names the same commands as the engine gate
 (`test_cli_without_display_engine`), and that every status name it pairs with a glyph uses the
 glyph `cli_doctor` renders (`test_guide_matches_code`, which names this page explicitly so a rename
-cannot drop it out of the scan). Four guards read the file; none reads the tool table. It is a
+cannot drop it out of the scan). SIX test modules read the file, measured with
+`grep -rln 'tools\.md' tests/`, and not one of them reads the tool table. It is a
 second inventory of the same thing with one of them guarded.
 
 ## 9 · The language guard finds German by vocabulary, not by understanding

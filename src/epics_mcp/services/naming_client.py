@@ -63,7 +63,7 @@ class NamingServiceClient:
         # ``base_url`` is REQUIRED and caller-provided (from ``EPICS_MCP_NAMING_URL`` via config):
         # there is deliberately NO built-in default host, so this client never reaches a hard-coded
         # ESS endpoint. Callers gate on an unset URL (see checkers.build_naming_client + diagnose).
-        # Normalise like the other three REST clients (channelfinder/archiver/alarm): strip a
+        # Normalise like the other four REST clients (channelfinder/archiver/alarm/olog): strip a
         # trailing slash so a URL configured with OR without it yields the same endpoints (M10;
         # without this, ``http://naming:8080/enotify-web`` gave ``...enotify-webrest/...`` → 404).
         self.base_url = base_url.rstrip("/")
