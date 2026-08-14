@@ -244,7 +244,7 @@ installation](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md
 The gate chain is [uv](https://docs.astral.sh/uv/)-based:
 
 ```bash
-uv sync --extra dev --group displays --frozen  # full local install (toolchain + display engine)
+uv sync --extra dev --group displays --locked  # full local install (toolchain + display engine)
 uv run pytest                                  # test suite
 uv run pytest --cov=src --cov-branch           # with coverage
 uv run pre-commit run --all-files              # ruff + format + mypy --strict + guards

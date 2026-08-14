@@ -19,7 +19,7 @@ prog pin of QA-41 from one command to the whole set.
 display-aware commands ran their engine check BEFORE the parser was built, so ``--version`` could
 not be reached on a core-only install; this module carried a branch asserting the OTHER outcome for
 them (the engine refusal, exit 2) and a matching skip in the agreement test below. The engine is
-deliberately absent in CI (``uv sync --extra dev --frozen``, no ``--group displays``;
+deliberately absent in CI (``uv sync --extra dev --locked``, no ``--group displays``;
 ``pyproject.toml`` says why), which is precisely the environment that branch described.
 
 QA-42 moved the check behind ``parse_args``, and ``action="version"`` prints through

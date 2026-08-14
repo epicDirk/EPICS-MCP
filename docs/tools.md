@@ -85,9 +85,13 @@ shell redirect cannot promise (in Windows PowerShell 5.1 both `>` and `Set-Conte
 produce bytes a strict JSON parser rejects). `--out` refuses an existing file unless `--force` is
 given, and writes nothing at all while placeholders remain. `--absolute-command` names the installed
 server by its resolved path instead of a bare name, for a client that does not inherit your `PATH`.
-⚠️ **`--list` is exclusive and says so**: it prints the shapes and returns before any other option
-is read, so combining it with one is a usage error (exit `2`) rather than a silently ignored flag.
-That holds for every option the command has, including ones added after this page was written.
+⚠️ **`--list` refuses every option it would SWALLOW**: it prints the shapes and returns before
+those are read, so combining it with one is a usage error (exit `2`) rather than a silently
+ignored flag. The rule is derived from the parser rather than written out, so an option added
+later is refused the day it is added. ⚠️ **Two options are not swallowed and therefore not
+refused**, measured: `--help` and `--version` answer and exit `0`, because argparse acts on them
+inside the parse, before any rule of ours runs. That is the difference between an option that
+does nothing and an option that does its own thing.
 
 `epics-testpv` serves two synthetic PVs so the quick start needs no control system at all:
 `TEST:Temperature`, an analogue reading with a unit, and `TEST:Heater`, a writable switch, which is

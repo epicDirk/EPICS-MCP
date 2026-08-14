@@ -133,8 +133,12 @@ displays = ["opi-navigation"]
 # it, and measured against `uv help sync` that flag enforces the opposite: it "uses the versions in
 # the lockfile as the source of truth", and changes in pyproject.toml that are not in the lockfile
 # yet "will not be present in the environment". So a half-done bump resolved the OLD engine in
-# silence. (`--locked` would have caught it. Swapping the flag is a wider change than pinning the
-# promise with a test, so the promise got the test.) Note also that this CI syncs without
+# silence. (`--locked` would have caught it. Swapping the flag was judged a wider change than
+# pinning the promise with a test, so the promise got the test first. ⚠️ The flag HAS since been
+# swapped, in both workflows and in the two documented local commands, so the two now overlap
+# rather than substitute for each other: `--locked` refuses a lockfile that disagrees with
+# pyproject.toml, while this test additionally reads the RESOLVED entry, which `--locked` does not
+# look at. The test stays for that second half.) Note also that this CI syncs without
 # `--group displays` and therefore never resolves this dependency at all: the lock entry is checked
 # here, not exercised there.
 [tool.uv.sources]

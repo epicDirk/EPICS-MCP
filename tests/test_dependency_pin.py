@@ -1,13 +1,19 @@
 """Drift guard for the engine pin: one revision, named the same in pyproject.toml and uv.lock.
 
 WHY THIS EXISTS. The comment above `[tool.uv.sources]` promises that a bump moves the rev and
-`uv lock` together, and names `uv sync --frozen` in CI as the thing that enforces it. Measured
-against `uv help sync`, that flag enforces the opposite: "Instead of checking if the lockfile is
-up-to-date, uses the versions in the lockfile as the source of truth. [...] If the pyproject.toml
-includes changes to dependencies that have not been included in the lockfile yet, they will not be
-present in the environment." A half-done bump therefore resolves the OLD engine in silence, and
-nothing here noticed. (`--locked` would notice. Switching CI to it is a wider change than this
-guard, so the promise gets a test instead of the flag getting swapped.)
+`uv lock` together, and USED TO NAME `uv sync --frozen` in CI as the thing that enforces it.
+Measured against `uv help sync`, that flag enforces the opposite: "Instead of checking if the
+lockfile is up-to-date, uses the versions in the lockfile as the source of truth. [...] If the
+pyproject.toml includes changes to dependencies that have not been included in the lockfile yet,
+they will not be present in the environment." A half-done bump therefore resolves the OLD engine in
+silence, and nothing here noticed. (`--locked` would notice. Switching CI to it was judged a wider
+change than this guard, so the promise got a test first.)
+
+⚠️ **CI has since been switched to `--locked`, and that does NOT retire this guard.** The two
+overlap rather than substitute: `--locked` refuses a lockfile whose dependency set disagrees with
+``pyproject.toml``, while this module additionally reads the RESOLVED entry for the pinned revision,
+which ``--locked`` never looks at. The half-done bump this was written for is now caught twice; the
+resolved-entry half is caught only here.
 
 WHAT IT CANNOT DO, said plainly because the sibling guard in the display MCP says it too: it
 compares the two places that live in THIS repository. It cannot tell whether the pinned revision is

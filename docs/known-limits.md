@@ -238,7 +238,7 @@ are whole. It is not scheduled here.
 
 Measured 2026-08-03, while closing the silent half of the same gap (GB-27).
 
-`.github/workflows/ci.yml` syncs with `uv sync --extra dev --frozen` and passes no `--group`, so
+`.github/workflows/ci.yml` syncs with `uv sync --extra dev --locked` and passes no `--group`, so
 the `opi_navigation`-coupled test modules listed in `tests/conftest.py` are not collected there.
 That is a decision with a
 reason, stated in `pyproject.toml` next to the `displays` group and in `CONTRIBUTING.md`: CI tests

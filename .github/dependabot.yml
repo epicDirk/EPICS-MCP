@@ -1,7 +1,9 @@
 version: 2
 updates:
   # Python dependencies through uv, so an update arrives as a uv.lock change that the CI gate
-  # (`uv sync --frozen`) actually exercises rather than a loose version bump nothing resolves.
+  # (`uv sync --locked`) actually exercises rather than a loose version bump nothing resolves.
+  # The uv ecosystem moves pyproject.toml and uv.lock together, which is also what keeps such a
+  # pull request green under `--locked`: that flag refuses the two disagreeing.
   # p4p and requests are the two that carry real exposure: p4p bundles the EPICS Base libraries,
   # requests reaches every REST plane.
   - package-ecosystem: "uv"

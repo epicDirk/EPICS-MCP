@@ -38,7 +38,7 @@ treat a reference to "the sandbox" as meaning a stack you supply yourself. It is
 The gate chain is [uv](https://docs.astral.sh/uv/)-based:
 
 ```bash
-uv sync --extra dev --group displays --frozen  # full local install (toolchain + display engine)
+uv sync --extra dev --group displays --locked  # full local install (toolchain + display engine)
 uv run pytest                                  # run the test suite
 uv run pytest --cov=src --cov-branch           # with coverage
 uv run pre-commit run --all-files              # ruff + format + mypy --strict + guards
@@ -52,9 +52,16 @@ install it by any route; as an extra it both advertised a promise nobody could k
 a direct git reference, made the package unpublishable, which is the single thing PyPI refuses
 outright.
 
-CI runs `uv sync --extra dev --frozen` and passes no `--group`, so it tests exactly the
+CI runs `uv sync --extra dev --locked` and passes no `--group`, so it tests exactly the
 standalone core a public user gets. The `opi_navigation`-coupled test modules are dropped at
 collection when the package is absent, so the core suite stays green.
+
+**`--locked`, not `--frozen`, and the local line above says so too.** Both install from the
+lockfile without re-resolving; only `--locked` also verifies that the lockfile still MATCHES
+`pyproject.toml`. Under `--frozen` an edit committed without its `uv lock` installs the old set in
+silence. The two commands were deliberately made the same so that a divergence fails on your
+machine rather than on a runner, and, since the release build uses `--locked` as well, rather than
+on the tag.
 
 **That drop is no longer silent (GB-27).** A green report over a hundred tests that never ran is
 indistinguishable from a full one, so a run that drops those modules now says so in its report
@@ -182,10 +189,18 @@ the gates.
 
 **Every release:**
 
-1. Bump `[project].version` in `pyproject.toml` **and** the hardcoded fallback in
-   `src/epics_mcp/__init__.py`. This is not optional bookkeeping: with no installed metadata
-   (a source checkout) the stale literal becomes a silent version lie, and
+1. Bump `[project].version` in `pyproject.toml`, the hardcoded fallback in
+   `src/epics_mcp/__init__.py`, **and `uv.lock`** (run `uv lock`, do not hand-edit). The first two
+   are not optional bookkeeping: with no installed metadata (a source checkout) the stale literal
+   becomes a silent version lie, and
    `tests/test_packaging.py::test_version_fallback_matches_pyproject` goes red if they drift.
+   ⚠️ **The third is newly load-bearing and this step did not name it before.** `uv.lock` carries
+   the project's own version (`[[package]] name = "epics-mcp"`), so a bump leaves it stale, and
+   both workflows now sync with `--locked`, which REFUSES a lockfile that disagrees with
+   `pyproject.toml`. Under the previous `--frozen` this passed unnoticed. The trap is that the
+   local gates hide it: `uv run` refreshes `uv.lock` on disk without committing it, so step 3 goes
+   green on your machine and the tag build fails, after the tag is already pushed. `git status`
+   after `uv lock` is the cheap check.
 2. Close the `[Unreleased]` section in `CHANGELOG.md` under the new version.
 3. Run the gates one more time, then rehearse: `rm -rf dist && uv build && uv run python
    scripts/check_release_ready.py dist/*`. The gate reads the BUILT metadata, never
