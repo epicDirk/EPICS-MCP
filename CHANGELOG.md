@@ -20,7 +20,33 @@ carry breaking changes).
   (the rebuild lower-cased it), and a URL whose spelling the parser refuses is withheld instead of
   approximated. Put credentials in `EPICS_MCP_OLOG_AUTH` rather than in the URL either way.
 
+### Removed
+
+- **`epics-doctor`'s own credential redaction, which 0.6.0 documented as a residual exposure, is
+  gone rather than repaired, and the entry that tracked it overstated what it covered.** The
+  command had a local guard substituting `scheme://***@` into its cause texts. It matched only
+  `user:password@` and only up to the first `@`, so it left the tail of a password containing `@`
+  in the clear, passed a bare user name through untouched, and in every case produced a value
+  still carrying an `@`, which is precisely the character that says an address was never proven
+  redacted. No unredacted exception was found that could reach it, so four statements in
+  `SECURITY.md`, `docs/safety.md`, `docs/configuration.md` and `docs/known-limits.md` described an
+  exposure on that route which measurement does not support, and they now say what was measured.
+  The cause texts go through the same barrier as every other client-facing message: a proven-clean
+  text is passed verbatim, a text carrying an `@` is withheld rather than rewritten. That withheld
+  form is a shape you can meet in ordinary use, so `epics-pv://guide` says what to do about it.
+  The one real credential leak on this command was elsewhere and is listed above.
+
 ### Changed
+
+- **An unreadable `EPICS_MCP_CA_BUNDLE` is now reported as `ca_error` naming that variable,
+  instead of as `unreachable` on every https plane at once.** `requests` refuses such a bundle with
+  a bare `OSError` before any handshake, which carries no status and no chained SSL error, so the
+  classifier had nothing to recognise it by and fell through to the transport verdict. An operator
+  was then told to check the host and port of six services that were fine. The verdict names the
+  variable and deliberately NOT the bundle path, because such a path routinely carries an account
+  name; read the value back from the environment of the process that reported it. This also
+  restores a diagnosis that the credential redaction had been suppressing: the original message
+  put the path in its text, and a path containing an `@` is withheld whole by the output barrier.
 
 - **Releasing now takes an approval, and the tag is no longer the point of no return.** Two
   repository settings arrived in front of the upload: only an administrator can create a `v*` tag,

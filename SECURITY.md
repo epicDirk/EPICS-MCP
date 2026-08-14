@@ -77,9 +77,14 @@ setting.
   its query, or as `(unparseable)` where that cannot be proven, and a served status is reported in
   this client's own words rather than the responding server's. **The two channels therefore differ
   on purpose**: the answer is redacted, the log is not, and an operator who treats them alike will
-  be wrong about one of them. One caller-facing surface is not covered by that fix and is tracked
-  separately: `epics-doctor` still prints a value through a pattern-based redaction that cuts at
-  the first `@` and does not recognise a bare user name.
+  be wrong about one of them. **Two things happened to `epics-doctor` on 2026-08-14 and they are not
+  the same event.** Its write-gate block printed a fragment of a configured Olog password for one
+  spelling of `EPICS_MCP_OLOG_URL`, on every run with an armed gate rather than on a failure,
+  because it rebuilt the address from the parse; that was a real disclosure and it is FIXED, by
+  deleting the userinfo and withholding what cannot be proven. Separately, this document tracked
+  the command's own pattern-based redaction as a residual exposure; no unredacted exception was
+  found that could reach it, so that entry is withdrawn and the redaction removed rather than
+  repaired.
 - **Output redaction (ChannelFinder only).** ChannelFinder owners and property values pass a
   site-configurable allowlist. Olog entries come back WHOLE (title, text, author, attachments):
   the former Olog read redaction was removed 2026-08-01 as a deliberate prototype decision, see

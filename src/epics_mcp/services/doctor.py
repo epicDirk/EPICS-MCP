@@ -43,7 +43,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import re
 import stat
 from typing import Literal
 
@@ -55,9 +54,11 @@ from epics_mcp.errors import EpicsError
 from epics_mcp.services._http import (
     build_retrying_session,
     http_status,
+    is_ca_bundle_error,
     is_retry_error,
     is_ssl_error,
     rest_get_json,
+    shown_cause,
 )
 from epics_mcp.services.alarm_client import AlarmClient
 from epics_mcp.services.archiver_client import ArchiverClient
@@ -406,7 +407,8 @@ def _classify_failure(
     existed, and a remedy guard parametrized over statuses rather than over these returns would have
     inherited that miscount: two of them are ``api_error``):
 
-    * a TLS/CA failure (:func:`is_ssl_error`) → ``ca_error`` (reachable False, ca_ok False);
+    * a TLS/CA failure (:func:`is_ssl_error`), or the configured CA bundle being unreadable in the
+      first place (:func:`is_ca_bundle_error`) → ``ca_error`` (reachable False, ca_ok False);
     * a *served* non-2xx (:func:`http_status` gives a code) → ``api_error``, the host answered, so
       transport + CA are fine (reachable True, ca_ok True), but the endpoint is wrong / erroring;
     * a retry-exhausted 5xx (:func:`is_retry_error`) → ``api_error`` as well, for the same reason;
@@ -419,6 +421,17 @@ def _classify_failure(
     ``ca_error`` leaves it out deliberately: its remedy is about the CA bundle, not about this
     URL.
     """
+    if is_ca_bundle_error(exc):
+        # Not a verification failure: the bundle itself could not be READ, so no handshake was ever
+        # attempted. Same verdict on purpose, because the remedy is the same variable and this
+        # fails every https plane at once, where "unreachable" would send the operator to check
+        # six services that are fine. The cause names the variable, never the path.
+        return (
+            False,
+            False,
+            "ca_error",
+            _with_remedy("ca_error", f"TLS/CA setup failed: {shown_cause(exc)}."),
+        )
     if is_ssl_error(exc):
         return (False, False, "ca_error", _with_remedy("ca_error", "TLS/CA verification failed."))
     code = http_status(exc)
@@ -446,7 +459,9 @@ def _classify_failure(
         False,
         None,
         "unreachable",
-        _with_remedy("unreachable", f"could not reach the service at {url_var}: {_safe(str(exc))}"),
+        _with_remedy(
+            "unreachable", f"could not reach the service at {url_var}: {shown_cause(exc)}"
+        ),
     )
 
 
@@ -479,21 +494,16 @@ def _is_archiver_version_string(version: str) -> bool:
     return version == _ARCHIVER_PRODUCT or version.startswith(_ARCHIVER_PRODUCT + " ")
 
 
-#: ``scheme://user:password@`` anywhere inside free text. Applied to what doctor PRINTS, not to
-#: what it sends, this is an output guard, not a transport change.
-_URL_CREDENTIALS = re.compile(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@")
-
-
-def _safe(text: str) -> str:
-    """Redact ``user:password@`` out of anything doctor is about to print.
-
-    Not cosmetic: requests' error text embeds the full request URL, and ``epics-doctor`` output is
-    precisely what an operator pastes into a ticket when something is already going wrong.
-    Credentials do not belong in a config URL (the documented path is ``EPICS_MCP_*_AUTH``, a
-    header), but a URL that carries them anyway must not be echoed back verbatim. This is a local
-    output guard; the shared ``services/redact.py`` barrier is a different contract and untouched.
-    """
-    return _URL_CREDENTIALS.sub(r"\g<scheme>***@", text)
+# There is deliberately no local redaction helper here any more, and the deletion is the point.
+# This module carried a ``_safe`` that substituted ``scheme://***@`` into free text. It read like
+# a guard and was not one, in two independent ways. It matched only ``user:password@`` and only up
+# to the FIRST ``@``, so measured it left ``ter2`` standing in ``http://svc:hun@ter2@host/x``,
+# passed ``http://loneuser@host/x`` through untouched, and left ``ss/w0rd`` in
+# ``https://svc:p@ss/w0rd@host/x``. And a substitution cannot answer the question a printed value
+# raises: ``***@`` is still an ``@``, so nothing about the result says it was ever proven to be an
+# address. The cause texts here now go through :func:`~epics_mcp.services._http.shown_cause`, the
+# same output-side barrier every REST client uses, which passes a proven-clean text verbatim and
+# withholds anything carrying an ``@`` rather than rewriting it.
 
 
 def _fetch_beacon(
@@ -669,10 +679,10 @@ def _identity_fetch_failure(plane: str, exc: BaseException) -> PlaneCheck:
         return _unverified(
             plane,
             "transport reachable; the endpoint answered 2xx but its body was not readable JSON, so "
-            f"its identity could not be checked: {_safe(str(exc))}",
+            f"its identity could not be checked: {shown_cause(exc)}",
         )
     return _identity_probe_failed(
-        plane, f"transport reachable, but the identity probe FAILED: {_safe(str(exc))}"
+        plane, f"transport reachable, but the identity probe FAILED: {shown_cause(exc)}"
     )
 
 
@@ -876,7 +886,11 @@ def _archiver_ingest_verdict(
     )
     if isinstance(payload, Exception):
         return _archiver_verdict(
-            identity, f"ingest not measured: {_safe(str(payload))}", ingesting=True
+            # ``payload`` is narrowed to Exception one line up: the name comes from the union
+            # ``_fetch_beacon`` returns, not from a body ever reaching this branch.
+            identity,
+            f"ingest not measured: {shown_cause(payload)}",
+            ingesting=True,
         )
     row = _archiver_metrics_row(payload, identity)
     if row is None:

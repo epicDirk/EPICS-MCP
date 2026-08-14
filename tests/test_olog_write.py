@@ -187,13 +187,16 @@ class TestUrlBoundary:
         twin, the same text with the ``[OLOG_WRITE_DENIED]`` tag a caller sees, lives in
         ``tests/test_write_gate_contract.py``; both are literal on purpose.
 
-        Why no redaction instead of no address, and the honest version of that reason: measured,
-        ``url_without_credentials`` WOULD be safe here (userinfo, query and fragment all go). What
-        rules it out is not safety but posture, this server discloses the Olog target address to a
-        caller on no surface at all, deliberately and in writing (``resources.py``: "olog as an
-        enabled-boolean only (never the URL...)"), and a refusal is the same kind of surface kept by
-        the same client. The sibling ``url_without_userinfo`` would not even be safe: it keeps a
-        query-string token (``docs/known-limits.md`` 17).
+        Why no redaction instead of no address, and the honest version of that reason: a redaction
+        that is safe here does exist, ``shown_url``. What rules it out is not safety but posture,
+        this server discloses the Olog target address to a caller on no surface at all,
+        deliberately and in writing (``resources.py``: "olog as an enabled-boolean only (never the
+        URL...)"), and a refusal is the same kind of surface kept by the same client.
+        ⚠️ Neither of the other two would do, and this paragraph named the wrong one until
+        2026-08-14. ``url_without_credentials`` REBUILDS from the parse, and on
+        ``https://svc:p@ss/w0rd@host/Olog`` urllib3 reads host ``ss``, so the rebuild prints a
+        fragment of the password in the path; that cost the ``epics-doctor`` write block a real
+        leak. ``url_without_userinfo`` keeps a query-string token (``docs/known-limits.md`` 17).
 
         The escalation sentence is not decoration either. It mirrors ``safety.py``'s, and this
         branch needs it more than the PV gate does, because its remedy is a change to the server's

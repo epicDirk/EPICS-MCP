@@ -336,9 +336,25 @@ about this resource.
 
 **What still carries a configured credential, measured the same day.** The server log, by decision
 rather than oversight (`docs/safety.md`, `SECURITY.md`): the shared REST layer logs the request URL
-at DEBUG and an unexpected internal error logs its cause at ERROR. `epics-doctor`, whose
-pattern-based redaction cuts at the FIRST `@` and does not recognise a bare user name. And the
-Naming plane, which has no `*_AUTH` variable, so a credential it needs has nowhere else to live.
+at DEBUG and an unexpected internal error logs its cause at ERROR. And the Naming plane, which has
+no `*_AUTH` variable, so a credential it needs has nowhere else to live.
+
+⚠️ **This list named a third entry until 2026-08-14, `epics-doctor`, and the two halves of that
+entry ended differently (measured 2026-08-14, not on this section's heading date).** Its cause
+texts went through a local pattern-based redaction that cut at the FIRST `@` and did not recognise
+a bare user name, which is why it was listed. **No unredacted exception was found that could reach
+that redaction**, so the entry is DELISTED rather than fixed: the redaction was removed instead of
+repaired, and the cause texts cross the same barrier as every other message. Read that as the
+result of a search, not as a proof, and the search has a known hole: of the six probe sites, four
+re-raise through the shared barrier, but the archiver and archiver_retrieval planes go through
+`rest_get_json`, which catches `RequestException` only, so a bare `OSError` reaches the verdict
+unwrapped. The one instance anybody has produced, an unreadable `EPICS_MCP_CA_BUNDLE`, is now
+recognised by name and reported as `ca_error`; the hole it came through is still open for any other
+bare `OSError`. Both catch sites are bare `except Exception`, so the population is whatever those
+call trees can raise. The half that was real sat somewhere this entry did
+not name, the write-gate block, which REBUILT its target address and printed a fragment of the
+password in the path for `https://svc:p@ss/w0rd@host/Olog` on every run with an armed gate. That
+one is FIXED, and it is the only credential disclosure of the two.
 
 Three things follow for an adopter. Put credentials in `EPICS_MCP_*_AUTH`, which four of the
 planes have (ChannelFinder, Archiver, Alarm, Olog; the Naming plane has none, and its URL is not

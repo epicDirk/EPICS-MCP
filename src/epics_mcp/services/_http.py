@@ -81,31 +81,37 @@ def url_host(url: str) -> str | None:
 def url_without_credentials(url: str) -> str:
     """*url* rebuilt without its userinfo, query and fragment, for printing.
 
-    Not a regex redaction, and that distinction was measured rather than argued. The pattern-based
-    redactor in ``services/doctor.py`` matches ``scheme://user:pass@`` up to the FIRST ``@``, while
-    urllib3 (the parser ``requests`` connects with, and the one this function uses) splits the
-    authority at the LAST one. So a password that legitimately contains ``@``, say
-    ``https://svc:hun@ter2@host/Olog``, keeps its tail in the clear under the regex, and a bare
-    ``https://svc@host/Olog`` username is not touched by it at all. Rebuilding drops the whole
-    userinfo whatever it contains.
+    ⚠️ **It has no caller, and the reason is a leak of its own.** It was built to replace the
+    pattern-based redactor that used to live in ``services/doctor.py``, which matched
+    ``scheme://user:pass@`` only up to the FIRST ``@`` while urllib3 (the parser ``requests``
+    connects with, and the one this function uses) splits the authority at the LAST one: a password
+    containing ``@`` kept its tail in the clear under that regex, and a bare ``https://svc@host/x``
+    username was untouched. Rebuilding does drop the whole userinfo, so it fixed both. What it does
+    NOT survive is a spelling where the parse itself puts the secret somewhere else: for
+    ``https://svc:p@ss/w0rd@host/Olog`` urllib3 reads host ``ss`` and path ``/w0rd@host/Olog``, so
+    the rebuild prints a fragment of the password IN THE PATH, with no ``@`` left in a userinfo
+    position for a structural check to catch. Measured on the ``epics-doctor`` write block, which
+    printed it on every run with an armed gate until that caller moved to :func:`shown_url`.
+
+    Read what follows as the record of a design that was superseded, not as guidance. Prefer
+    :func:`shown_url` for a message and :func:`url_without_userinfo` for a value a client compares
+    character for character. The row that breaks this one is pinned in
+    ``tests/test_doctor.py::test_the_olog_target_rebuild_keeps_the_address_and_drops_a_plain_credential``.
 
     Query and fragment go too, because a base URL does not need them and a token is a normal thing
     to find in a query string. Returns ``"(unparseable)"`` when the parser refuses the URL: such a
     value is already a hard veto at every boundary that reads it, and echoing the raw string would
     reintroduce exactly the leak this function exists to close.
 
-    ⚠️ The result is NOT a string an operator can hold against
+    ⚠️ The result was NOT a string an operator could hold against
     ``EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST``, and an earlier version of this docstring said it was.
     The gate compares the RAW configured value, exactly and case-sensitively
-    (``olog_safety.write_target_allowed``), while this rebuild normalises: measured, the host comes
-    back lower-cased, a query or fragment is dropped, and a space in the path is percent-encoded,
-    so four out of five realistic spellings print differently from the string the boundary
-    compared. What it IS good for is naming the ADDRESS a write would reach, host and port
-    included, which is the question the report asks around it.
-
-    Where a reader has to COMPARE the answer against a configured value instead of reading an
-    address off it, :func:`url_without_userinfo` is the one to reach for: it deletes the userinfo
-    and leaves every other character alone, at the price of withholding what it cannot prove.
+    (``olog_safety.write_target_allowed``), while this rebuild normalises: measured, the host came
+    back lower-cased, a query or fragment was dropped, and a space in the path was percent-encoded,
+    so four out of five realistic spellings printed differently from the string the boundary
+    compared. It was kept anyway for naming the ADDRESS a write would reach, host and port
+    included, and that is the justification the leak above retired: the address it names is wrong
+    on the one spelling where being wrong costs a password.
     """
     try:
         parsed = urllib3.util.parse_url(url)
@@ -181,8 +187,11 @@ def url_without_userinfo(url: str) -> str | None:
 
     The sibling of :func:`url_without_credentials`, and the two are not interchangeable. That one
     REBUILDS the address from the parse, which normalises (lower-cased host, dropped query and
-    fragment, percent-encoded path), and is right where the question is "which ADDRESS would a
-    write reach". This one DELETES a span out of the string, and is right where a reader has to
+    fragment, percent-encoded path); it was once described here as right where the question is
+    "which ADDRESS would a write reach", and it is NOT, because on one spelling the rebuild carries
+    a password fragment into the path. It has no caller left. For naming an address in a message,
+    reach for :func:`shown_url`, which builds on this function. This one DELETES a span out of the
+    string, and is right where a reader has to
     COMPARE the answer against a configured value character for character, which is what
     ``epics-pv://config`` exists for (``docs/deployment.md``): a normalised address makes that
     comparison false-negative, showing a difference where there is none.
@@ -950,6 +959,51 @@ def is_ssl_error(exc: BaseException) -> bool:
     return isinstance(getattr(exc, "__cause__", None), requests.exceptions.SSLError)
 
 
+#: The opening of the message ``requests`` puts on the bare ``OSError`` it raises when the
+#: configured CA bundle cannot be read (``HTTPAdapter.cert_verify``, before any socket exists).
+#: Matching TEXT is the weakest discriminator in this module and it is used here because nothing
+#: better survives the raise: measured, that exception carries no ``errno``, no ``filename`` and no
+#: ``__cause__``, and its type is plain ``OSError``. Two things make it acceptable. It is checked
+#: against the REAL library rather than a fixture, so a reworded upgrade turns a test red instead of
+#: silently reclassifying (``tests/test_http.py``), and being wrong costs a verdict of
+#: ``unreachable`` rather than ``ca_error``, which is where this case already sat.
+_CA_BUNDLE_MESSAGE = "Could not find a suitable TLS CA certificate bundle"
+
+#: What :func:`shown_cause` prints for it. The PATH is deliberately not echoed, and that is a
+#: change from what the doctor printed before this family was recognised: a bundle path routinely
+#: contains an account name (``/home/svc@site/certs/ca.pem`` is what raised this in the first
+#: place), and a user name is its own disclosure class, separate from a credential. The variable is
+#: named instead, which is the actionable half, and ``_REMEDY["ca_error"]`` says what to put in it.
+_CA_BUNDLE_CAUSE = (
+    "the configured TLS CA bundle could not be read (EPICS_MCP_CA_BUNDLE). Its path is not echoed "
+    "here because such a path routinely carries an account name; read the value back from this "
+    "process's environment"
+)
+
+
+def is_ca_bundle_error(exc: BaseException) -> bool:
+    """True iff *exc* is, or wraps, requests' refusal to use the configured CA bundle.
+
+    Both directions are needed and that is measured, not defensive: the four planes whose transport
+    probe is a direct ``session.head`` catch this under ``except OSError`` and re-raise their own
+    exception ``from`` it, so the doctor sees it on ``__cause__``; the archiver and
+    archiver_retrieval planes go through ``rest_get_json``, whose ``except`` clause is
+    ``RequestException`` only, so there the bare ``OSError`` arrives unwrapped with no ``__cause__``
+    at all.
+
+    Why it is worth recognising rather than leaving as "unreachable": this failure hits EVERY
+    https plane at once and has nothing to do with a host or a port, so the ``unreachable`` remedy
+    sends the operator to check six services that are fine. It is also the one cause whose text
+    :func:`shown_cause` would otherwise withhold whole, because a bundle path may contain an ``@``.
+    """
+    cause = getattr(exc, "__cause__", None)
+    return any(
+        isinstance(candidate, OSError) and str(candidate).startswith(_CA_BUNDLE_MESSAGE)
+        for candidate in (exc, cause)
+        if candidate is not None
+    )
+
+
 def is_retry_error(exc: BaseException) -> bool:
     """True iff *exc* wraps a retry-exhausted 5xx response.
 
@@ -1051,9 +1105,18 @@ def shown_cause(exc: BaseException) -> str:
     only then requotes, and ``@`` is in requote's safe set. A surviving userinfo therefore always
     brings a literal ``@``, whatever its parts now look like.
 
+    ⚠️ The CA-bundle branch is FIRST, and it exists because the ``@`` check is a shape test that
+    cannot know what it is looking at. An unreadable ``EPICS_MCP_CA_BUNDLE`` raises a bare
+    ``OSError`` naming the path, and a bundle path routinely contains an account name, so the
+    check withheld the one sentence that said which file was broken and left the operator with
+    "unreachable" on every https plane at once. Recognising the family is what lets the message be
+    replaced by a useful one instead of suppressed; the path still does not travel.
+
     The withheld branch logs at WARNING on purpose. A net that silently repairs makes the defect it
     repaired invisible, and the site that produced an unexpected ``@`` is worth finding.
     """
+    if is_ca_bundle_error(exc):
+        return _CA_BUNDLE_CAUSE
     if isinstance(
         exc,
         (

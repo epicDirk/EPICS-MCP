@@ -242,8 +242,11 @@ def _pv_write_lines(pv: PvWriteGateReport) -> list[str]:
 #: chain short-circuits first. In a seventh, a plain-http allowlisted target, the comparison ran and
 #: SUCCEEDED and the https rule is what denies. A sentence naming the comparison sent the reader of
 #: all seven hunting for a character difference that is not the cause, which is the class of defect
-#: this whole line of tickets exists to remove. It also no longer calls the value an ADDRESS: on an
-#: unparseable URL the slot holds the literal ``(unparseable)``, and nothing would reach it.
+#: this whole line of tickets exists to remove. It also no longer calls the value an ADDRESS: the
+#: slot can hold the literal ``(unparseable)``. ⚠️ That token does NOT imply nothing would reach
+#: the target, and an earlier version of this note said it did. It means the redaction could not be
+#: PROVEN, which includes a URL that parses perfectly well: ``https://svc:p@ss/w0rd@host/Olog`` has
+#: host ``ss``, so a site where that name resolves would be reached while this line shows a word.
 _TARGET_IS_NOT_THE_CONFIGURED_STRING = (
     "              (shown for reading. The string the gate works from is EPICS_MCP_OLOG_URL",
     "              exactly as configured, and this line need not match it character for character)",
@@ -259,15 +262,21 @@ def _olog_write_lines(olog: OlogWriteGateReport) -> list[str]:
     an allowlisted REMOTE target is called what it is: those writes reach a real logbook, which is
     a different approval from a loopback sandbox even though the gate permits both.
 
-    ⚠️ The printed address is the NORMALISING redaction, which is the right one here because the
-    question this block asks is which address a write would reach. The two branches whose verdict
-    can rest on the ALLOWLIST, refused and allowlisted-remote, say so out loud; the loopback branch
-    does not, because being loopback is a property of the address itself and no configured string
-    is being matched. That the allowed branch needs it too was a QA finding, not the first draft:
-    the word "allowlisted" IS the result of a comparison, and measured, a target configured as
-    ``https://Olog.Example.org/Olog`` and allowlisted under that same spelling prints
-    ``https://olog.example.org/Olog``, so an operator tidying the allowlist from that line turns a
-    working gate into a deny-all.
+    ⚠️ The printed address is the DELETING redaction ``shown_url``, which withholds where it
+    cannot prove the shown value names the configured address. It used to be the NORMALISING one,
+    and this paragraph said so until that function was measured to print part of a password in the
+    path; see the note above :data:`_TARGET_IS_NOT_THE_CONFIGURED_STRING`. The two branches whose
+    verdict can rest on the ALLOWLIST, refused and allowlisted-remote, say so out loud; the
+    loopback branch does not, because being loopback is a property of the address itself and no
+    configured string is being matched. That the allowed branch needs it too was a QA finding, not
+    the first draft: the word "allowlisted" IS the result of a comparison, and an operator tidying
+    the allowlist from that line can turn a working gate into a deny-all.
+
+    ⚠️ **The QA case that first showed this is dead and its replacement is not.** It used a
+    mixed-case host, which the rebuild lower-cased into its own allowlisted twin; ``shown_url``
+    preserves case, so ``https://Olog.Example.org/Olog`` now prints as configured (measured). What
+    still produces the collision is anything this line legitimately DROPS: a userinfo, and a query
+    string. The pinned case in ``tests/test_doctor.py`` moved to the userinfo for that reason.
     """
     if not olog.armed:
         return ["  Olog write: OFF (no logbook entry can leave this server)"]

@@ -58,9 +58,9 @@ from epics_mcp.services.doctor import (
     _identify_archiver,
     _identify_naming,
     _identify_retrieval_plane,
+    _identity_fetch_failure,
     _privacy_report,
     _probe_audit_sink,
-    _safe,
     _with_remedy,
     _write_safety_report,
     run_doctor,
@@ -1453,14 +1453,111 @@ async def test_retrieval_plane_is_actually_identity_probed(
     )
 
 
-def test_credentials_in_a_url_are_never_echoed() -> None:
-    """doctor output is what gets pasted into a ticket; requests' error text embeds the full URL."""
-    leaky = "Failed to connect to http://admin:hunter2@olog.example/Olog: timed out"
-    assert "hunter2" not in _safe(leaky)
-    assert "***@olog.example" in _safe(leaky)
-    # A URL without credentials must survive untouched.
-    plain = "Failed to connect to http://olog.example/Olog: timed out"
-    assert _safe(plain) == plain
+@pytest.mark.parametrize(
+    ("secret", "message"),
+    [
+        ("hunter2", "Failed to connect to http://admin:hunter2@cf.example.org/CF: timed out"),
+        ("ter2", "Failed to connect to http://svc:hun@ter2@cf.example.org/CF: timed out"),
+        ("loneuser", "Failed to connect to http://loneuser@cf.example.org/CF: timed out"),
+        ("w0rd", "Failed to connect to https://svc:p@ss/w0rd@cf.example.org/CF: timed out"),
+    ],
+    ids=["plain", "at-in-password", "bare-username", "at-and-slash-in-password"],
+)
+def test_no_plane_verdict_echoes_a_credential_its_exception_still_carries(
+    monkeypatch: pytest.MonkeyPatch, secret: str, message: str
+) -> None:
+    """doctor output is what gets pasted into a ticket, so a verdict may not carry a credential.
+
+    Four spellings, because one is what the guard this replaces could see. It matched
+    ``scheme://user:pass@`` up to the FIRST ``@`` and substituted ``***@``, which is right for row
+    one and wrong for the other three: measured against it, row two came back as
+    ``http://***@ter2@cf.example.org/CF`` with the password's tail in the clear, row three was
+    untouched because a bare user name is not ``user:pass``, and row four kept ``ss/w0rd``. Its
+    name said "never", its coverage said row one.
+
+    ⚠️ A credential does NOT reach a reader through these verdicts today, and the hedge in that
+    sentence is doing real work: it is a search result, not a proof, and the search has a measured
+    hole. Of the SIX ``_run_probe`` sites, four wrap their transport probe in ``except OSError``
+    and re-raise through ``shown_failure``; the archiver and archiver_retrieval planes go through
+    ``rest_get_json``, whose ``except`` clause is ``RequestException`` only, so a bare ``OSError``
+    walks out of it unwrapped with ``__cause__ is None``. Measured, ``requests`` raises exactly
+    that for an unreadable ``EPICS_MCP_CA_BUNDLE``. A second unbarriered arrival is already written
+    down one function away, in ``_beacon_reached_but_unreadable``: on the ``requests>=2.25`` floor a
+    stdlib ``json.JSONDecodeError`` is not a ``RequestException`` and arrives raw.
+    Both catch sites here are bare ``except Exception``, so the population is whatever those call
+    trees can raise, now or after the next edit. Hence this test: it asserts the property on the
+    LAST layer that can still get it wrong, and its exceptions are built by hand because that is
+    the shape an unbarriered caller does deliver.
+
+    It covers ALL FOUR sites in ``services/doctor.py`` that interpolate a cause into a verdict, and
+    the completeness is the point rather than a detail: a fifth site added later is exactly how
+    this property would be lost, and three-of-four is what that looks like on the way there.
+
+    Red-proof: all four rows against the deleted ``_safe`` guard, and WHICH assertion catches each
+    is the finding. Rows two, three and four fail on the secret itself (``ter2``, ``loneuser``,
+    ``w0rd``). Row one fails only on the second assertion, because ``***@`` is what a substituting
+    redaction leaves behind: the secret really is gone there, and the surviving ``@`` is what says
+    the value was never proven to be an address. That is why the second assertion is not belt and
+    braces here, it is the one that generalises.
+    """
+    exc = RestConnectionError(message)
+    verdicts = (
+        _classify_failure(exc, _PROBE_VAR)[3],
+        _identity_fetch_failure("channelfinder", exc).detail or "",
+        _identity_fetch_failure("channelfinder", ValueError(message)).detail or "",
+        # The fourth site, and it needs the routed seam rather than a direct call: the archiver's
+        # ingest verdict is reached only THROUGH a successful identity probe, so a direct call
+        # would assert on a branch the plane cannot enter. Covering three of four was how the
+        # first version of this test read like an enumeration while leaving one site to nobody.
+        _archiver_check(monkeypatch, exc).detail or "",
+    )
+    for verdict in verdicts:
+        assert secret not in verdict, verdict
+        assert "@" not in verdict, f"an address-shaped '@' survived: {verdict}"
+
+
+def test_an_unreadable_ca_bundle_is_a_ca_error_on_both_arrival_shapes() -> None:
+    """The one failure that is not about a host, reported as what it is rather than as a host.
+
+    An unreadable ``EPICS_MCP_CA_BUNDLE`` fails EVERY https plane at once and no service is even
+    contacted. Reported as ``unreachable`` it sends the operator to check six healthy services
+    with the "check the host and port" remedy; reported as ``ca_error`` it names the one variable
+    that fixes it. That was the state until 2026-08-14: the classifier reads ``__cause__`` through
+    ``is_ssl_error``, and this exception has none.
+
+    Both arrival shapes, because the planes genuinely differ (bare for archiver and
+    archiver_retrieval, wrapped for the other four; see ``is_ca_bundle_error``).
+
+    ⚠️ The verdict must NOT carry the bundle path. It is not a credential, it is the account-name
+    class, and the original message puts the path in plain text.
+
+    Red-proof: remove the ``is_ca_bundle_error`` arm from ``_classify_failure`` and both rows come
+    back ``unreachable``; echo ``str(exc)`` in that arm and the path assertion fails.
+    """
+    raw = OSError(
+        "Could not find a suitable TLS CA certificate bundle, invalid path: "
+        "/home/svc@site.example/certs/ca.pem"
+    )
+    wrapped = RestConnectionError("Failed to connect to https://cf.example.org/CF")
+    wrapped.__cause__ = raw
+
+    for exc in (raw, wrapped):
+        reachable, ca_ok, status, detail = _classify_failure(exc, _PROBE_VAR)
+        assert (reachable, ca_ok, status) == (False, False, "ca_error"), exc
+        assert "EPICS_MCP_CA_BUNDLE" in detail, detail
+        assert "svc@site.example" not in detail, detail
+        assert "host and port" not in detail, "the unreachable remedy is the wrong one here"
+
+
+def test_a_verdict_keeps_a_cause_that_carries_no_credential() -> None:
+    """The other half, and the reason withholding is not free: a clean cause must survive intact.
+
+    The barrier upstream has already redacted the address by the time this text is built, so
+    discarding it here would delete the only place "refused" is distinguishable from "timed out"
+    from a TLS failure, and the remedy line is static per status and supplies none of that.
+    """
+    clean = "Failed to connect to http://cf.example.org/CF: timed out"
+    assert clean in _classify_failure(RestConnectionError(clean), _PROBE_VAR)[3]
 
 
 async def test_unverified_plane_does_not_fail_but_is_reported(
@@ -3233,11 +3330,21 @@ def test_only_the_allowlist_verdicts_warn_that_the_address_is_not_the_configured
     """Presence AND absence, over all four target shapes, because presence alone is half a guard.
 
     The ALLOWLISTED-REMOTE row is the one this test exists for. Its verdict says "allowlisted",
-    which IS the result of the membership test, and it prints the same rebuilt address: measured,
-    a target configured and allowlisted as ``https://Olog.Example.org/Olog`` prints
-    ``https://olog.example.org/Olog``, so an operator tidying the allowlist to match what the
-    report shows turns a working gate into a deny-all. That branch had no note, and a mutant
-    copying the note onto it survived the entire suite, so nothing held the question either way.
+    which IS the result of the membership test, so the reader is invited to compare the printed
+    address against the allowlist even on the branch that permits. That branch had no note, and a
+    mutant copying the note onto it survived the entire suite, so nothing held the question either
+    way.
+
+    ⚠️ The measurement that first justified this row is DEAD and is not repeated here, which is
+    why the row now carries the same spelling in both columns. It used to read: configured and
+    allowlisted as ``https://Olog.Example.org/Olog``, printed as ``https://olog.example.org/Olog``,
+    because the rebuilding redaction lower-cased the host. ``shown_url`` deletes instead of
+    rebuilding and preserves case, so that spelling now prints as configured (measured). The
+    collision it demonstrated survives on what the line still DROPS, a userinfo and a query string,
+    and is pinned there by
+    ``test_a_denied_target_does_not_read_as_the_string_the_gate_compared``. Do not restore the old
+    measurement to make this paragraph read better: restoring the behaviour behind it reopens a
+    credential leak.
 
     The two absent rows are not decoration. Loopback is a property of the ADDRESS rather than of a
     configured string, and the no-URL branch has nothing to compare at all; a note there would
@@ -3520,6 +3627,28 @@ def test_a_credential_in_the_olog_url_never_reaches_the_report() -> None:
         assert report.olog.target_url == expected, url
         assert secret not in report.olog.target_url, url
         assert "ter2" not in report.olog.target_url, "a first-@ split would leave this behind"
+
+
+def test_a_permitted_target_can_be_one_the_block_cannot_name() -> None:
+    """A state the previous redaction could not produce, pinned because it now renders.
+
+    The rebuild answered "(unparseable)" only where the PARSER refused, and such a URL is a hard
+    veto at the gate as well, so "cannot be shown" and "cannot be written to" were the same set.
+    ``shown_url`` withholds on a different question, whether the cut is PROVABLE, and those two
+    questions come apart: measured, ``https://@127.0.0.1:8181/Olog`` has an ``@`` that urllib3
+    reads as no userinfo at all, so the redaction cannot prove itself, while ``url_host`` returns
+    ``127.0.0.1`` and the gate permits the write.
+
+    The report is not wrong here, and that is why this is a pin and not a fix: ``target_allowed``
+    and ``target_is_loopback`` carry the truth, and the address line says it cannot name the
+    address rather than guessing at one. It is asserted so that the day someone makes the token
+    self-explaining, or gives the permitting branches their own note, they change a red test
+    instead of discovering this state in a ticket.
+    """
+    report = _write_safety_report(_write_config(olog_url="https://@127.0.0.1:8181/Olog"))
+    assert report.olog.target_url == "(unparseable)"
+    assert report.olog.target_allowed is True
+    assert report.olog.target_is_loopback is True
 
 
 def test_the_probe_refuses_a_non_regular_file_without_opening_it(

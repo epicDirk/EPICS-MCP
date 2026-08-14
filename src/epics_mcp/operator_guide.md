@@ -343,9 +343,12 @@ named four, so the sentence announcing the correction was itself the incomplete 
   `https://user:password@host/Olog`, and the message reaches the caller verbatim. The gate's own
   verdict IS available in band, as `olog_write.target_allowed` in `epics-pv://health`, out of the
   process that answered. The address itself is operator-side only: `epics-doctor`'s `Write gates`
-  block rebuilds it without userinfo, query or fragment, and prints it **only when that command's
-  own environment arms the gate**, which a shell beside an MCP-launched server usually does not; a
-  URL its parser refuses prints as `(unparseable)` rather than as an address.
+  block deletes the userinfo and drops the query and fragment, and prints it **only when that
+  command's own environment arms the gate**, which a shell beside an MCP-launched server usually
+  does not; where it cannot PROVE the shown value names the same address it prints `(unparseable)`
+  rather than a best effort. ⚠️ That is not the same as the parser refusing the URL, and the
+  difference matters when you go looking: `https://svc:p@ss/w0rd@host/Olog` parses fine (host `ss`)
+  and is withheld anyway, because a rebuild of it would print part of the password in the path.
 - **Logbook allowlist.** Every target logbook must be in `EPICS_MCP_OLOG_WRITE_LOGBOOKS`; an EMPTY
   allowlist with the gate on is **deny-all** (fail-closed). (The PV write pattern is fail-closed too,
   but differently: an empty pattern with writes on is refused at startup, not treated as allow-all.)
@@ -830,8 +833,31 @@ messages embed the request host and path, so an internal host would leak into th
   configured one minus its credentials. The request itself used the value as configured. The cause
   half is not abridged for a transport failure, which is the only place refused, not-resolved,
   timed-out and TLS-broken are told apart; a served status reads `HTTP <code> <phrase>` in this
-  client's own words. A `note` in a SUCCESSFUL payload follows the same rule. To read a full URL
-  back, look at the server log, not at the answer.
+  client's own words. A `note` in a SUCCESSFUL payload follows the same rule, and so does an
+  `epics-doctor` plane verdict, which had a redaction of its own until 2026-08-14. To read a full
+  URL back, look at the server log, not at the answer.
+- **A cause reads `<ExceptionClass> (message withheld: it would echo a credential)`.** The rule
+  above is enforced on the OUTPUT, not on the configured secret, because the transport rewrites a
+  userinfo in flight and a search for the configured value would find nothing. What cannot be
+  rewritten is the separator, so any text still carrying an `@` is withheld whole rather than
+  patched. **Two causes, and the first is by far the likelier: a credential is spelled into that
+  plane's `*_URL` and the parser did not read all of it as userinfo.** Measured,
+  `https://svc:p@ss/w0rd@host/Olog` parses with host `ss` and path `/w0rd@host/Olog`, so the
+  transport's own text carries an `@` outside the userinfo and the barrier cannot clear it. Move
+  the credential into that plane's `EPICS_MCP_*_AUTH` variable and the cause text comes back
+  whole; four planes have one (ChannelFinder, Archiver, Alarm, Olog). Otherwise a site built a
+  message that skipped the barrier: that is a server defect, the same event is logged at WARNING
+  naming the exception class, and it should be reported.
+  ⚠️ **An `@` that was never a credential is the trap this rule cannot see by itself**, because it
+  is a shape test. One such case is recognised by name and reports `ca_error` instead, see the next
+  entry; any other one still reads as a withheld cause.
+- **Every configured https plane fails at once and the finding says `ca_error`, naming
+  `EPICS_MCP_CA_BUNDLE`.** No service was contacted: the bundle itself could not be read, which
+  fails before any handshake. The verdict names the variable and NOT the file path, deliberately,
+  because such a path routinely carries an account name; read the value back from the environment
+  of the process that reported it. ⚠️ Do not read this as a certificate being rejected, which is a
+  different finding with the same status: that one happens after a handshake was attempted, and it
+  fails only the planes whose trust root is missing rather than all of them.
 
 - **PV times out / disconnected.** On a PVA name-server a typo **and** a dead IOC both surface as
   `PV_TIMEOUT` (never `PV_NOT_FOUND`), the cause cannot be read off the transport error code. Use

@@ -30,6 +30,7 @@ from epics_mcp.services._http import (
     get_read_throttle,
     get_shared_session,
     http_status,
+    is_ca_bundle_error,
     is_http_404,
     is_https_url,
     is_loopback_url,
@@ -468,6 +469,66 @@ def test_is_ssl_error_false_for_plain_connection_and_no_cause() -> None:
     conn.__cause__ = requests.exceptions.ConnectionError("connection refused")
     assert is_ssl_error(conn) is False
     assert is_ssl_error(ArchiverConnectionError("x")) is False  # no __cause__
+
+
+def test_an_unreadable_ca_bundle_is_recognised_from_the_real_library() -> None:
+    """The one text-matching predicate in this module, held against ``requests`` itself.
+
+    It matches TEXT because nothing else survives the raise: measured here, not assumed, the
+    exception carries no ``errno``, no ``filename``, no ``__cause__``, and its type is plain
+    ``OSError``. So the wording IS the contract, and this test is what makes that safe: it drives
+    the real library rather than building the exception by hand, so an upgrade that rewords the
+    message turns this red instead of silently reclassifying every https plane back to
+    "unreachable".
+
+    Red-proof: change one word of ``_CA_BUNDLE_MESSAGE`` and this fails; build the exception by
+    hand instead and the test passes while the production path stops working, which is the whole
+    reason it is written this way.
+    """
+    session = requests.Session()
+    session.verify = "/home/svc@site.example/certs/ca.pem"
+    with pytest.raises(OSError) as raised:
+        session.get("https://service.example.org/probe", timeout=1)
+
+    exc = raised.value
+    assert not isinstance(exc, requests.exceptions.RequestException), (
+        "the premise of the whole branch: this escapes rest_get_json's except clause"
+    )
+    assert (exc.errno, exc.filename, exc.__cause__) == (None, None, None)
+    assert is_ca_bundle_error(exc) is True
+
+
+def test_a_ca_bundle_failure_is_recognised_through_a_wrapper_and_names_no_path() -> None:
+    """Both arrival shapes, and the redaction that has to hold for both.
+
+    Two shapes because the planes differ and the difference is measured: the four whose transport
+    probe is a direct ``session.head`` catch this under ``except OSError`` and re-raise their own
+    exception ``from`` it, so it arrives on ``__cause__``; the archiver and archiver_retrieval
+    planes reach the doctor with the bare ``OSError``, because ``rest_get_json`` catches
+    ``RequestException`` only.
+
+    The path must not travel in either. It is not a credential, it is the other disclosure class
+    this repository forbids in output, an account name in a filesystem path, and the original
+    ``OSError`` puts it in the message.
+
+    Red-proof: drop the ``cause`` half of the predicate and the wrapper row fails; return
+    ``str(exc)`` from the branch in ``shown_cause`` and both path assertions fail.
+    """
+    raw = OSError(
+        "Could not find a suitable TLS CA certificate bundle, invalid path: "
+        "/home/svc@site.example/certs/ca.pem"
+    )
+    wrapped = ArchiverConnectionError("Failed to connect to Archiver at http://arch:17665")
+    wrapped.__cause__ = raw
+
+    assert is_ca_bundle_error(raw) is True
+    assert is_ca_bundle_error(wrapped) is True
+    assert is_ca_bundle_error(ArchiverConnectionError("timed out")) is False
+
+    for exc in (raw, wrapped):
+        shown = shown_cause(exc)
+        assert "svc@site.example" not in shown, shown
+        assert "EPICS_MCP_CA_BUNDLE" in shown, shown
 
 
 def test_http_status_reads_chained_response_code() -> None:

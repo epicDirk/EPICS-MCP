@@ -135,7 +135,14 @@ class OlogWriteGateReport(_Model):
     #: words: the naive reading of an empty allowlist is the exact opposite of what it means.
     logbooks: list[str]
     rate_limit_per_minute: int
-    #: The configured Olog base URL, credentials redacted. Empty when the plane is off.
+    #: The configured Olog base URL with its userinfo, query and fragment removed. Empty when the
+    #: plane is off. ⚠️ This is a machine surface, so its two non-address values are named rather
+    #: than left to be discovered. It holds the literal ``"(unparseable)"`` wherever the redaction
+    #: could not be PROVEN, which is NOT the same as the parser refusing the URL and does NOT imply
+    #: the target is unreachable: ``https://svc:p@ss/w0rd@host/Olog`` parses with host ``ss``, and
+    #: ``target_allowed`` can be True beside it. And a scheme-less configured value is passed
+    #: through as written, since there is no userinfo to delete from it. Read this field for
+    #: display; the gate's own verdict is ``target_allowed``.
     target_url: str
     #: True iff a write to that URL would pass the gate's test-server boundary, decided by
     #: :func:`~epics_mcp.olog_safety.write_target_allowed`, the SAME predicate the gate applies.

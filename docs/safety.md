@@ -166,8 +166,10 @@ This is a controls tool, so the trust questions come first.
   after the fix it carries none, across both failure kinds and every REST-backed tool. A message
   names an ADDRESS, so it drops the userinfo AND the query and says `(unparseable)` where it cannot
   prove the result names the same address; this resource keeps the query because being comparable
-  is what it is for. What still carries a credential is the log above, by decision, and
-  `epics-doctor`, whose pattern-based redaction cuts at the first `@`.
+  is what it is for. What still carries a credential is the log above, by decision. `epics-doctor`
+  stood here too until 2026-08-14, on the strength of a local pattern-based redaction that cut at
+  the first `@`; that redaction is gone, its cause texts cross the same barrier as everything else,
+  and no unredacted exception was found that could reach the old one in the first place.
 - **Olog reads return the whole entry, a deliberate prototype decision (2026-08-01).** Every ENTRY
   read (`search_logbook`, `get_log_entry`, the create/reply/update echoes) returns the full server
   record: `title`, `description`, `owner` (the author's

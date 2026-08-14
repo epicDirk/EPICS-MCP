@@ -76,8 +76,12 @@ client's own table, never in the responding server's words.
 
 ⚠️ **Two routes still carry a configured credential, and one of them has no alternative.** The
 server log is deliberately unredacted (see `docs/safety.md`), and the Naming plane has no
-`*_AUTH` variable at all, so a credential it needs can only live in its URL. `epics-doctor` also
-still prints a value through a pattern-based redaction that cuts at the first `@`.
+`*_AUTH` variable at all, so a credential it needs can only live in its URL. A third was listed
+until 2026-08-14, `epics-doctor`'s own pattern-based redaction, and it is DELISTED rather than
+closed: no unredacted exception was found that could reach it, so the redaction was removed instead
+of repaired and the cause texts now cross the same barrier as everything else. Where a credential
+really did print is a different place, that command's write-gate block, which rebuilt its target
+address; it deletes the userinfo now (`SECURITY.md`).
 
 Four planes have a header variable to use instead (`CHANNELFINDER`, `ARCHIVER`, `ALARM`, `OLOG`).
 The Naming plane has none, so there is nothing to move a credential into there; its URL is never
