@@ -9,7 +9,7 @@ import time
 from collections import deque
 from collections.abc import Mapping
 
-from epics_mcp.audit_record import as_one_record
+from epics_mcp.audit_record import OneRecordFormatter
 from epics_mcp.config import EpicsConfig, get_config
 from epics_mcp.epics_address import write_reach_violations
 from epics_mcp.errors import PVWriteDeniedError, RateLimitError, SafetyConfigError
@@ -345,13 +345,14 @@ class SafetyLayer:
         emission never turns a denial/failure into a crash nor hides the original
         raise, hence no ``try/except`` guard is needed here.
 
-        The record is rendered HERE and passed with no logging args, so the sanitising below sees
-        the finished line and a literal ``%`` in a caller's PV name is never read as a directive
-        (the Olog gate's sink reached the same shape from the other direction). Why the sanitising
-        is on the rendered record rather than on the one field that was the hole:
-        :mod:`epics_mcp.audit_record`.
+        ⚠️ That property is why the arguments stay LAZY here, and it was briefly lost: rendering
+        ``message % args`` in this function moved the rendering out of the logging layer, so a
+        value whose ``__repr__`` raises propagated out of the sink and replaced the very refusal
+        or failure the record was about, which ``docs/write-gate-contract.md`` forbids in as many
+        words. Making a record safe to be ONE line is the formatter's job instead, see
+        :class:`epics_mcp.audit_record.OneRecordFormatter`, which runs inside ``Handler.emit``.
         """
-        self._audit_logger.info(as_one_record(message % args))
+        self._audit_logger.info(message, *args)
 
     def _purge_old(self, now: float) -> None:
         """Remove timestamps older than the sliding window."""
@@ -397,7 +398,7 @@ class SafetyLayer:
         # UTC timestamps: the formatter stays on framework time (no datetime.now() in the
         # logic); only the converter is switched to gmtime. The literal 'Z' in datefmt marks
         # UTC, because %z would be empty under gmtime, so it is written out instead.
-        formatter = logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%dT%H:%M:%SZ")
+        formatter = OneRecordFormatter("%(asctime)s %(message)s", datefmt="%Y-%m-%dT%H:%M:%SZ")
         formatter.converter = time.gmtime
         handler.setFormatter(formatter)
         # Attach at most one handler (dedup on repeated init). The handler above was built
