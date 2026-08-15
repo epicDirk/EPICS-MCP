@@ -5,9 +5,13 @@ obvious from the tool signatures, and the error signatures that tell you which t
 A fresh session should read this once instead of re-deriving it.
 
 It is served verbatim as the `epics-pv://guide` MCP resource and shipped inside the package, so it
-travels with the server: no external skill or project folder required. Every example uses a
-synthetic placeholder name (`SIM:PS-01:Cur-RB`, `sim://ramp`, `http://archiver:17665`,
-`http://channelfinder:8080/ChannelFinder`), never a real one.
+travels with the server: no external skill or project folder required.
+
+**Every example uses a synthetic placeholder name, never a real one, and a new example draws from
+this declared set rather than inventing a name:** `SIM:PS-01:Cur-RB` (a PV), `sim://ramp` (a
+non-channel reference), `http://archiver:17665` and `http://channelfinder:8080/ChannelFinder`
+(service roots). This is a RULE for whoever adds an example, not a description of the text below:
+measured 2026-08-15, only the first of the four appears anywhere else in this document.
 
 ## Posture (read this first)
 
@@ -21,7 +25,9 @@ synthetic placeholder name (`SIM:PS-01:Cur-RB`, `sim://ramp`, `http://archiver:1
 - **Writes enabled ⇒ loopback-only search reach, enforced at boot.** With `ALLOW_PV_WRITE=true` the
   server refuses to start (`SafetyConfigError`) unless the EPICS client search env is loopback-only:
   every `EPICS_PVA/CA_ADDR_LIST` / `_NAME_SERVERS` token a loopback host AND both `*_AUTO_ADDR_LIST`
-  parser-faithfully disabled (`NO`; unset means ON). If a write-enabled process won't boot, the
+  parser-faithfully disabled, which is NOT the same test on both providers: PVA (pvxs) accepts
+  exactly `NO` in any case or exactly `0`, CA (libca) disables on any value CONTAINING `no`/`NO`,
+  so `false` and `0` keep CA broadcasting. Unset means ON for both. If a write-enabled process won't boot, the
   message names the offending var, the fix is to loopback-scope the reach or disable writes, NEVER
   to weaken the assert (a mis-scoped allowlist over a facility-reaching env is the exact footgun this
   removes). The name-pattern scopes *what*, this scopes *where*.
@@ -70,7 +76,7 @@ Two caveats:
   spends one token for its identity beacon, and the archiver spends FIVE all told, because its
   reachability probe is a GET as well and its retrieval half is probed as a plane of its own even
   when it falls back to the management URL. All six planes configured spend NINE; the archiver
-  alone already spends five. The two multi-GET tools are measured
+  alone already spends five. The two multi-GET tools whose cost SCALES with the input are measured
   (2026-07-31) rather than estimated, and they do NOT behave alike, so size each from its own
   figure or the tool aborts mid-run with a loud `READ_RATE_LIMIT_EXCEEDED` (never a silent partial
   result):
@@ -85,6 +91,11 @@ Two caveats:
     name, ChannelFinder once for the prefix, the same for one display PV or a thousand. It costs
     3 when the device name is not registered, which is the finding it exists to report, because a
     definitive negative is only given after the Naming service's identity is probed.
+  - A THIRD tool can spend several tokens, and only its defaults keep it off that list:
+    `diagnose_connection` runs one gatherer per explanatory plane, and only ChannelFinder is on by
+    default (one GET). Switch the other three on and it costs five requests, because Naming spends
+    two (a reachability probe plus the name lookup). Its cost does not scale with anything, so size
+    it as a constant, not per PV.
 
 ## The planes
 
@@ -96,7 +107,10 @@ single source of truth. In short:
 - **Live PV access** (p4p PVAccess/Channel Access), the *only* authority for connected/disconnected.
 - **ChannelFinder**: which IOC/host serves a PV, plus its tags/properties. `EPICS_MCP_CHANNELFINDER_URL`.
 - **Archiver Appliance**: is a PV archived, how, and its history. `EPICS_MCP_ARCHIVER_URL`
-  (MGMT root, `/mgmt/bpl`) + optionally `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` (retrieval root, `/retrieval/data`).
+  (MGMT root, `/mgmt/bpl`) + optionally `EPICS_MCP_ARCHIVER_RETRIEVAL_URL`, the retrieval root,
+  which serves **two** context paths and is the root of both rather than of either: `/retrieval/data`
+  (the samples) and `/retrieval/bpl` (its own version beacon). Setting the URL one level too deep is
+  the ordinary cause of a 404 here.
 - **Phoebus Alarm Logger**: is a PV alarm-configured, and its alarm history. `EPICS_MCP_ALARM_URL`.
 - **Naming Service**: is a device name registered + ACTIVE. `EPICS_MCP_NAMING_URL`.
 - **Phoebus Olog**: logbook search and reading, whole entries (title, text, author, attachments).
@@ -282,8 +296,11 @@ operation exists, and each is a single self-contained line. The stages:
 - `event=DENY`: the gate refused it (writes off / not in the allowlist / rate limit); nothing was sent.
 - `event=BOUNDS_DENY`: the value gate (O2) refused it: the PV is in the allowlist but the written
   value is outside the record's own drive limits (`control` DRVL/DRVH). Refused **before** the put,
-  so nothing reached the IOC; carries the value + limits. (A record with no declared limits is not
-  bounds-checked and this line does not appear.)
+  so nothing reached the IOC; carries the value + limits. **Three cases are not bounds-checked at
+  all, and this line then does not appear:** a record with no declared limits, a degenerate range
+  (`limit_low >= limit_high`, which includes the two-equal-limits case), and a non-numeric written
+  value such as an enum label. The opposite case is `nan`/`inf`: it IS float-coercible, lies outside
+  every finite range, and is refused fail-closed.
 - `event=ATTEMPT`: emitted **before** the I/O; a durable record that this write was dispatched.
 - `event=ALLOW`: the put returned successfully.
 - `event=FAILED error_code=...`: the put raised (timeout, connection, or a bug tagged `INTERNAL`).
@@ -394,13 +411,17 @@ read and RE-CHECKED while reading, a file that grew past the cap between stat an
 with at most one byte over budget ever read). Any file type is accepted (only HEIC is refused
 server-side, by content-sniff); an over-limit request is the server's HTTP 413. The audit line carries
 attachment COUNT + total BYTES, never a filename (a filename is author free text). Each attachment gets
-a client-minted UUID and an id-prefixed unique filename (`<uuid>_<name>`), so a by-name download can
-never hit the server's duplicate-filename 404. That prefix carries a second, heavier job: because
+a client-minted UUID; a FILE keeps its own name behind that id (`<uuid>_<name>`), while an inline
+image has no name to keep and is stored as `<uuid>.png`, with an image markup pointing at
+`attachment/<uuid>` (the CS-Studio inline convention) handed back to append to the description.
+Either way a by-name download can never hit the server's duplicate-filename 404. That prefix carries a second, heavier job: because
 retention below is filename-keyed and case-insensitive, a FRESH uuid per upload is what keeps a new
 file from taking the place of an existing attachment with the same name.
 
 **Attach to an existing entry** (`add_log_attachment` → `POST /logs/multipart`) is a third write tool,
 gated identically, with the logbook allowlist keyed on the TARGET entry's OWN logbooks (read first).
+It takes `embed_image_base64` as well, not only file paths: the same argument, the same `<uuid>.png`
+naming, so an inline image can be added to an entry that already exists.
 Olog's update endpoint is destructive, it `retainAll`-prunes any attachment not
 resubmitted and overwrites title/body/logbooks/tags/level/properties, so a safe attach
 round-trips the target entry's FULL content. The write is purely ADDITIVE for CONTENT:
@@ -488,8 +509,9 @@ services do that no tool description can tell you.
 `get_archive_info` tools each require a PV name. Under the hood it calls the MGMT `getAllPVs` (whole
 appliance) or, with `this_appliance=true`, `getPVsForThisAppliance` (this member); `capped` is honest
 (over-fetch by one). It deliberately does **not** use `getMatchingPVs`, a standard endpoint too, but
-one that **may 404 on proxied/split deployments**. Cluster shape: `getApplianceInfo` /
-`getAppliancesInCluster`.
+one that **may 404 on proxied/split deployments**. Cluster shape: ask `get_appliance_info`, the tool
+answers exactly this question without a PV and hands back the MGMT body whole; going at the API
+directly it is `getApplianceInfo` / `getAppliancesInCluster`.
 
 **The name filter works on ONE of those two endpoints.** `getAllPVs` honours a `pv` glob.
 `getPVsForThisAppliance` has **no name filter at all**, measured, it ignores `pv`, `regex`, `pattern`
@@ -512,9 +534,9 @@ automates the whole walk.
 
 Also know your SITE'S cluster layout before
 enumerating: a facility may run **several archiver clusters split by purpose** (e.g. scalars vs.
-large waveforms vs. per-network instances, each with its own MGMT root), `getApplianceInfo`'s
-`identity` tells you which appliance a URL actually is, and enumerating the wrong cluster silently
-yields a complete-looking list of the wrong population.
+large waveforms vs. per-network instances, each with its own MGMT root), the `identity` that
+`get_appliance_info` returns tells you which appliance a URL actually is, and enumerating the wrong
+cluster silently yields a complete-looking list of the wrong population.
 
 ### Verify a deployment's config: `epics-doctor`
 <!-- BEGIN:status-prose (the plane statuses named outside the legend below are drift-guarded against PlaneStatus, see tests/test_guide_matches_code.py) -->
@@ -522,9 +544,11 @@ The `epics-doctor` CLI (core install) is a read-only self-check: it probes every
 (a transport probe, refined on success by an identity probe, up to two requests for a healthy
 plane, THREE on the archiver, whose identified appliance is also asked whether it is actually
 ingesting; retries on a 5xx add more) and
-reports, per plane, whether it is reachable, whether the CA bundle works, whether the
-service **identifies itself as the one that URL should point at**, and what the ChannelFinder
-redaction is set to. A disabled plane (empty `*_URL`) is reported honestly, never a failure. Exit
+reports, per plane, whether it is reachable, whether the CA bundle works, and whether the
+service **identifies itself as the one that URL should point at**. The ChannelFinder redaction is
+printed too, in a `Privacy` block of its own: it belongs to no plane and is not a plane field, so
+look for it below the per-plane lines rather than on one of them.
+A disabled plane (empty `*_URL`) is reported honestly, never a failure. Exit
 `0` = nothing failed and no identity probe failed, `1` = a configured plane HARD-failed
 (`unreachable` / `ca_error` / `api_error` / `config_error` / `backend_down` / `disconnected`),
 `2` = a usage error,
@@ -732,8 +756,8 @@ Four limits, because this returns a SAMPLE and not an enumeration:
 
 ## Error signatures → which tool answers
 
-Illustrate signatures by the exception **class and shape**, never a copied runtime string (error
-messages embed the request host and path, so an internal host would leak into this file).
+Each signature below is an exception **class and shape**, never a copied runtime string, so match on
+the class and the field rather than on wording your server may phrase differently.
 
 - **A REST plane fails and the message names a shorter address than you configured.** That is the
   redaction, not a different target: an error names the address WITHOUT its userinfo and without
@@ -808,8 +832,9 @@ messages embed the request host and path, so an internal host would leak into th
 - **Narrow an alarm-history query.** `get_alarm_history` has optional SERVER-SIDE filters:
   `root` (config tree name(s), comma-separated), `command` (`Enabled`/`Disabled`, the config
   change that turned an alarm on/off; maps to the `enabled` field and is restricted to config-change
-  docs so state events do not swamp it), and `severity`/`current_severity` (the 9 EPICS severities
-  `OK`/`MINOR`/`MAJOR`/`INVALID`/`UNDEFINED` and their `_ACK` variants). ⚠ **UNVERIFIED, and the
+  docs so state events do not swamp it), and `severity`/`current_severity` (the 9 EPICS severities:
+  `OK`/`MINOR`/`MAJOR`/`INVALID`/`UNDEFINED`, plus an `_ACK` variant of each of those **except**
+  `OK`, so five and four rather than five doubled; there is no `OK_ACK`). ⚠ **UNVERIFIED, and the
   failure mode is silent:** the Alarm Logger IGNORES a query parameter it does not support (its
   parser's default branch is a bare `break;`), so an older logger BROADENS the result instead of
   erroring, a returned set can be wider than the filter implies. Confirm a filter with a
