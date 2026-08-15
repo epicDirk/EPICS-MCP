@@ -978,8 +978,9 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   the cap cannot be raised from here; `crossplane_check`, `coverage_audit` and `find_device` do
   take one, and they walk the same inventory, so ask one of those when the fuller picture matters.
   **Three:** a glob cap left the embedded screens out of the expansion, so the file was never
-  reached through the parent that binds its macros. That one has its own `notes` entry (next
-  bullet), and ⚠ raising the `context_cap` does NOT help against it: no tool exposes a glob cap.
+  reached through the parent that binds its macros. That one has its own `notes` entry (see "There
+  is a THIRD incompleteness source" below), and ⚠ raising the `context_cap` does NOT help against
+  it: no tool exposes a glob cap.
 - **The two `capped` signals answer different questions, and the display one is deliberately
   pessimistic.** `shown_by_display_capped` is always the DISPLAY view's verdict. The `notes` cap
   entry belongs to whichever view you asked for: under `view="file"` it is the file verdict, under
