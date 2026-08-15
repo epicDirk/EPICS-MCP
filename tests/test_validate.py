@@ -380,42 +380,139 @@ async def test_a_bad_displays_dir_is_still_reported_as_such_for_a_non_bob_file(
         config_module._config = None
 
 
-def test_our_suffixes_are_exactly_the_engines_collecting_suffixes() -> None:
-    """The COUPLING, as a set equality in BOTH directions.
+def _engine_suffix_declarations() -> dict[str, object]:
+    """Every ``*_SUFFIX`` / ``*_SUFFIXES`` module attribute in the WHOLE engine, by qualified name.
 
-    ⚠️ **Two earlier shapes of this guard were wrong, in opposite ways, and the second one is
-    the interesting failure.** The first compared ``DISPLAY_SUFFIX == _BOB_SUFFIX`` and claimed
-    to be "the only assertion that goes red for a widening": both constants stay ``".bob"``
-    through a widening that puts a second suffix NEXT TO the first, so it survived exactly the
-    change it advertised. The second asked whether ours was the engine's ONLY collecting suffix.
-    That one DID go red for the widening, which is how GB-79 was signalled at all, but it was
-    unrepairable by construction: once we legitimately collect two, "is there only one" has no
-    correct answer, and keeping it would have meant deleting a guard rather than fixing it.
+    Walking the package rather than reading one module is the first half of GB-91. The previous
+    shape read ``dir(opi_navigation.discovery)`` alone, and a declaration one module over was
+    invisible to it: measured 2026-08-15, ``opi_navigation.extraction`` carries
+    ``_TREND_TARGET_SUFFIX``, so the blind spot was not hypothetical.
 
-    What is asked now is neither, and it survives the next widening as well: our set IS the
-    engine's set. A suffix the ENGINE gains reddens it, because we would then refuse files the
-    inventory reads, which is the GB-79 defect itself. A suffix WE accept and the engine does not
-    reddens it too, because we would run a full walk for an answer that was already settled. Only
-    an equality states both halves, and only the second half is new.
-
-    Measuring the module's attributes rather than importing named constants is deliberate: a
-    further suffix arrives under a name this test cannot know in advance, and a named import
-    would have to be edited before it could notice anything.
-
-    Red-proven in both directions before this was committed, not merely reasoned about: removing
-    ``TREND_SUFFIX`` from ``INVENTORY_SUFFIXES`` fails naming ``.plt`` as the engine's surplus,
-    and adding a suffix the engine does not collect fails naming it as ours.
+    A module that cannot be imported is REPORTED rather than skipped. A guard that quietly passes
+    over the module carrying the declaration it exists to find is the sham shape this repository
+    keeps meeting.
     """
-    import opi_navigation.discovery as discovery
+    import importlib
+    import pkgutil
 
-    engine_suffixes = {
-        name: getattr(discovery, name)
-        for name in dir(discovery)
-        if name.endswith("_SUFFIX") and isinstance(getattr(discovery, name), str)
-    }
-    assert set(engine_suffixes.values()) == set(INVENTORY_SUFFIXES), (
+    import opi_navigation
+
+    declarations: dict[str, object] = {}
+    for found in pkgutil.walk_packages(opi_navigation.__path__, f"{opi_navigation.__name__}."):
+        try:
+            module = importlib.import_module(found.name)
+        except Exception as exc:  # noqa: BLE001 - reported, never swallowed
+            pytest.fail(
+                f"cannot import engine module {found.name} ({exc}), so its suffix declarations "
+                "were not read at all; fix the import rather than letting this guard run on a "
+                "partial view of the engine"
+            )
+        for attribute in dir(module):
+            if attribute.endswith(("_SUFFIX", "_SUFFIXES")):
+                declarations[f"{found.name}.{attribute}"] = getattr(module, attribute)
+    return declarations
+
+
+def _declared_suffix_candidates(declarations: dict[str, object]) -> set[str]:
+    """The declared values that are FILE SUFFIXES, with a non-string value refused loudly.
+
+    The second half of GB-91. The previous shape filtered on ``isinstance(value, str)``, which
+    silently dropped anything else: a widening arriving as ``_COLLECTED_SUFFIXES = (".bob",
+    ".plt", ".opi")`` NEXT TO a surviving ``_BOB_SUFFIX`` left the guard green through the exact
+    change it exists to catch. Sequences are therefore UNFOLDED, and a value that is neither a
+    string nor a flat sequence of strings fails by name instead of vanishing.
+
+    "Is a file suffix" is decided by the leading dot, which is ``Path.suffix``'s own definition,
+    not by a list of names. That is what keeps ``fragment.FRAGMENT_NAME_SUFFIXES`` (``_widget``,
+    ``_array``, ...) out on a RULE: those are name fragments, not extensions. A name-based
+    exception list was the tempting alternative and is rejected here, because it would be edited
+    the next time the guard went red and would then blind it permanently.
+    """
+    candidates: set[str] = set()
+    for qualified_name, value in sorted(declarations.items()):
+        if isinstance(value, str):
+            values = [value]
+        elif isinstance(value, (tuple, list, set, frozenset)) and all(
+            isinstance(item, str) for item in value
+        ):
+            values = sorted(value)
+        else:
+            pytest.fail(
+                f"engine declaration {qualified_name} is {type(value).__name__}, neither a string "
+                "nor a flat sequence of strings, so this guard cannot tell whether it names a "
+                "collected file kind. Give it a readable shape, or say here why it is not a "
+                "suffix; do NOT let it be filtered out, which is how GB-91 stayed green."
+            )
+        candidates.update(item for item in values if item.startswith("."))
+    return candidates
+
+
+#: Suffixes the inventory must NOT collect, probed alongside the declared ones. They are the
+#: cover for a widening that carries no constant at all: an extension added as an inline literal
+#: inside the walk would otherwise never enter the candidate set. ``.opi`` is the realistic one
+#: (the BOY format this project migrates away from), the other two are ordinary neighbours in a
+#: display repository. Honest limit, stated rather than implied: a widening onto some FOURTH
+#: extension with no declaration anywhere still passes here, and its cover is the behaviour
+#: guard below, which asks the inventory itself.
+_MUST_NOT_BE_COLLECTED = (".opi", ".txt", ".xml")
+
+
+def test_our_suffixes_are_exactly_the_engines_collecting_suffixes(tmp_path: Path) -> None:
+    """The COUPLING, as a set equality in BOTH directions, with "collecting" MEASURED.
+
+    ⚠️ **Three earlier shapes of this guard were wrong, and each failure is worth keeping.** The
+    first compared ``DISPLAY_SUFFIX == _BOB_SUFFIX`` and claimed to be "the only assertion that
+    goes red for a widening": both constants stay ``".bob"`` through a widening that puts a second
+    suffix NEXT TO the first, so it survived exactly the change it advertised. The second asked
+    whether ours was the engine's ONLY collecting suffix; that one DID go red for the widening,
+    which is how GB-79 was signalled at all, but it was unrepairable by construction, since "is
+    there only one" has no correct answer once we legitimately collect two. The third, replaced
+    here, compared our set against the string constants of ONE module, and both of its filters
+    were evadable (GB-91): a declaration in a sibling module, or one arriving as a tuple.
+
+    WHAT DECIDES "COLLECTING" IS NO LONGER A NAME, IT IS A MEASUREMENT, and that is the whole
+    point of the rebuild. The ticket's own counter-force is why: with a name rule, every future
+    NON-collecting ``_SUFFIX`` constant turns this red for no defect, and the cheap repair would
+    be a name exception list that blinds it again. So the declarations only supply CANDIDATES;
+    which of them the engine actually collects is answered by running ``find_repo_files`` over a
+    directory of probe files. Measured 2026-08-15, that function decides purely on the suffix
+    (``eimer.get(candidate.suffix.lower())``, no parsing), so a probe of any content is a valid
+    question, and ``extraction._TREND_TARGET_SUFFIX`` is simply not collected rather than a false
+    alarm.
+
+    The equality then states both halves. A suffix the ENGINE gains reddens it, because we would
+    refuse files the inventory reads, which is the GB-79 defect itself. A suffix WE accept and the
+    engine does not reddens it too, because we would run a full walk for an answer already
+    settled.
+
+    Red-proven against the real engine before this was committed, each mutation restored
+    byte-identically: our set shrunk (reports ``.plt`` as the engine's surplus), the engine
+    widened by a tuple declaration with ``_BOB_SUFFIX`` left in place (the GB-91 shape: the
+    PREVIOUS guard stayed green, this one goes red), the engine widened by an inline literal with
+    no declaration at all (caught by the controls), and a non-string declaration (fails by name).
+    """
+    from opi_navigation.discovery import find_repo_files
+
+    declarations = _engine_suffix_declarations()
+    assert declarations, (
+        "the engine declares no *_SUFFIX attribute at all, so nothing was probed. Either the "
+        "package layout moved and this walk no longer reaches it, or the declarations are gone; "
+        "both are findings, not a green run."
+    )
+    probed = _declared_suffix_candidates(declarations) | set(_MUST_NOT_BE_COLLECTED)
+
+    for index, suffix in enumerate(sorted(probed)):
+        # The stem is unique per suffix so two candidates cannot collide on one file name, and
+        # the body is irrelevant by the measurement above: this function reads names, not content.
+        (tmp_path / f"probe{index}{suffix}").write_text(_FRAGMENT, encoding="utf-8")
+
+    repo_files = find_repo_files(tmp_path)
+    collected = {Path(name).suffix.lower() for name in repo_files.displays + repo_files.trends}
+
+    assert collected == set(INVENTORY_SUFFIXES), (
         "the display-PV engine and this server disagree about which files the inventory reads. "
-        f"engine: {sorted(engine_suffixes.items())}, ours: {sorted(INVENTORY_SUFFIXES)}. "
+        f"engine collects: {sorted(collected)}, ours: {sorted(INVENTORY_SUFFIXES)} "
+        f"(probed: {sorted(probed)}, from {sorted(declarations)}). "
         "A suffix only the ENGINE has means the refusal in _run_validate rejects files the "
         "inventory would read; a suffix only WE have means it accepts files that can only ever "
         "come back empty after a full walk."
