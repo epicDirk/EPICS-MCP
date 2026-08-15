@@ -28,6 +28,7 @@ import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from typing import Literal
 
 __all__ = [
     "AMBIENT_GROUPS",
@@ -36,6 +37,8 @@ __all__ = [
     "SERVER_COMMAND",
     "SERVER_KEY",
     "AmbientGroup",
+    "AmbientReport",
+    "AmbientSurface",
     "Preset",
     "ambient_influences",
     "configures_a_rest_plane",
@@ -44,6 +47,7 @@ __all__ = [
     "open_placeholders",
     "render_client_config",
     "stale_config_vars",
+    "tls_decision",
     "with_overrides",
 ]
 
@@ -131,6 +135,20 @@ _TLS_VERIFY_VAR = "EPICS_MCP_TLS_VERIFY"
 #: on ``display_files.INVENTORY_SUFFIXES``.
 _FALSE_SPELLINGS = frozenset({"0", "off", "false", "f", "n", "no"})
 
+#: How to take a variable out for ONE run, spelled for both shells this project is used from. A
+#: bare "unset it" is not an instruction: ``unset`` changes the shell rather than the run, and it
+#: does not exist in PowerShell at all, which is the default console on the machine this is
+#: developed on. A remedy a reader cannot type is the same as no remedy.
+_UNSET_HOWTO = "POSIX: env -u NAME epics-init ...; PowerShell: Remove-Item Env:NAME, then re-run"
+
+
+#: What a group acts on. ONE field rather than two flags that happen to agree today, because both
+#: conditions follow from the same fact: a ``rest-http`` group can only bite when the block enables
+#: a REST plane at all, and an explicit TLS decision pins ``trust_env=False`` and takes the whole
+#: ambient HTTP environment out of play. An ``epics-search`` group is neither: it acts on the live
+#: plane, which is always present, and no TLS setting reaches it.
+AmbientSurface = Literal["rest-http", "epics-search"]
+
 
 @dataclass(frozen=True)
 class AmbientGroup:
@@ -141,15 +159,18 @@ class AmbientGroup:
     becomes noise, and noise gets dismissed. Four messages in this repository were measured to read
     as an invitation to switch the check OFF rather than repair the cause.
 
-    *silenced_by_explicit_tls* marks the groups that stop mattering once the block itself decides
-    TLS, because that decision pins ``trust_env=False`` and takes the whole ambient HTTP environment
-    out of play at once.
+    ⚠ A REMEDY IS ALSO A THING SOMEBODY WILL DO, which is the harder half and was got wrong here
+    once. The first version of the proxy remedy offered ``EPICS_MCP_CA_BUNDLE`` as a way to take the
+    group out of play. That is TRUE and it is bad advice: the variable goes into the emitted block,
+    so it reconfigures the SERVER the reader is about to run, replacing its whole trust store and
+    switching off its proxy, and the warning disappearing looks like a repair. A remedy that
+    silences a symptom by changing production belongs nowhere near a message like this.
     """
 
     variables: tuple[str, ...]
     effect: str
     remedy: str
-    silenced_by_explicit_tls: bool
+    surface: AmbientSurface
 
 
 #: What the caller's shell keeps contributing to a probe AFTER :func:`stale_config_vars` has run.
@@ -197,15 +218,19 @@ AMBIENT_GROUPS: tuple[AmbientGroup, ...] = (
         effect=(
             "every REST plane is contacted THROUGH the proxy named here, so a healthy plane can be "
             "reported unreachable, and the failure names a host that appears nowhere in the block "
-            "above"
+            "above. Your server will inherit whatever its launcher sets, which is usually not this "
+            "shell, so check and runtime can disagree in either direction"
         ),
         remedy=(
-            "unset for this run if these services are reachable directly, or read the failures as "
-            f"being about the proxy; setting {_CA_BUNDLE_VAR} in the block also takes this whole "
-            "group out of play, because an explicit TLS decision makes the session "
-            "environment-independent"
+            "carry them INTO the block, which makes check and server agree: --set "
+            "HTTP_PROXY=<url> --set NO_PROXY=<hosts>. To take them out instead, remove ALL of them "
+            "together for this run, never some: NO_PROXY is the EXEMPTION list, and dropping it "
+            "alone sends internal hosts through the proxy that were bypassing it "
+            f"({_UNSET_HOWTO}). Do NOT reach for {_CA_BUNDLE_VAR} to make this message go away: it "
+            "would silence it by making the SERVER ignore your proxy and trust only that one "
+            "bundle"
         ),
-        silenced_by_explicit_tls=True,
+        surface="rest-http",
     ),
     AmbientGroup(
         variables=("CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE"),
@@ -214,10 +239,12 @@ AMBIENT_GROUPS: tuple[AmbientGroup, ...] = (
             "and fail for the running server, which does not inherit your shell"
         ),
         remedy=(
-            f"put the bundle in the block as {_CA_BUNDLE_VAR}=<path> instead, which is the setting "
-            "the server itself reads and which pins the session environment-independent"
+            f"put the bundle in the block as --set {_CA_BUNDLE_VAR}=<path>, which is the setting "
+            "the server itself reads. ⚠ That path becomes the WHOLE trust store, so combine your "
+            "internal CA with the public roots into one PEM first (docs/deployment.md section 3), "
+            "or a plane signed by a public CA starts failing"
         ),
-        silenced_by_explicit_tls=True,
+        surface="rest-http",
     ),
     AmbientGroup(
         variables=(
@@ -228,13 +255,15 @@ AMBIENT_GROUPS: tuple[AmbientGroup, ...] = (
         ),
         effect=(
             "the PORT a PV search goes to is decided here, so this decides WHO answers; the "
-            "check's 'search paths:' line reports the addresses only and says nothing about it"
+            "check's 'search paths:' line reports the addresses only and says nothing about it. "
+            "Your server inherits its launcher's environment, not this shell, so a port set only "
+            "here means the check and the running server search different ones"
         ),
         remedy=(
-            "unset for this run, or state it in the block with --set NAME=VALUE so the "
-            "configuration you hand your client is the one that was checked"
+            "state it in the block with --set NAME=VALUE, so the configuration you hand your "
+            f"client is the one that was checked; or take it out for this run ({_UNSET_HOWTO})"
         ),
-        silenced_by_explicit_tls=False,
+        surface="epics-search",
     ),
 )
 
@@ -410,47 +439,98 @@ def stale_config_vars(environ: Iterable[str]) -> list[str]:
     )
 
 
-def decides_tls_explicitly(env: Mapping[str, str]) -> bool:
-    """True when *env* itself decides TLS, which silences the ambient HTTP environment.
+def tls_decision(env: Mapping[str, str]) -> str | None:
+    """The setting in *env* that makes the read sessions ignore the ambient HTTP environment.
 
-    The two settings are not symmetric and both have to be read: a non-empty ``CA_BUNDLE`` is a
-    decision by its presence, while ``TLS_VERIFY`` is one only when it is FALSE (its default, true,
-    is what leaves ``trust_env`` on in the first place). Either way the resulting ``verify`` is not
-    plain ``True``, and that is the condition ``build_retrying_session`` pins ``trust_env=False``
-    on.
+    Returns the variable NAME responsible, or ``None``. The two are not symmetric and both have to
+    be read: a non-empty ``CA_BUNDLE`` is a decision by its presence, while ``TLS_VERIFY`` is one
+    only when it is FALSE (its default, true, is what leaves ``trust_env`` on in the first place).
+    Either way the resulting ``verify`` is not plain ``True``, which is the condition
+    ``build_retrying_session`` pins ``trust_env=False`` on.
+
+    The NAME rather than a boolean, because the two have very different things to say to a reader:
+    a bundle is a deliberate trust configuration, verification-off is a last resort, and a report
+    that fell silent for the second reason without saying so would look like a clean environment.
     """
     if env.get(_CA_BUNDLE_VAR, "").strip():
-        return True
-    return env.get(_TLS_VERIFY_VAR, "").strip().lower() in _FALSE_SPELLINGS
+        return _CA_BUNDLE_VAR
+    if env.get(_TLS_VERIFY_VAR, "").strip().lower() in _FALSE_SPELLINGS:
+        return _TLS_VERIFY_VAR
+    return None
 
 
-def ambient_influences(
-    environ: Iterable[str], env: Mapping[str, str]
-) -> list[tuple[AmbientGroup, tuple[str, ...]]]:
+def decides_tls_explicitly(env: Mapping[str, str]) -> bool:
+    """True when *env* itself decides TLS. The boolean face of :func:`tls_decision`."""
+    return tls_decision(env) is not None
+
+
+@dataclass(frozen=True)
+class AmbientReport:
+    """What the caller's shell contributes to a check, and what provably cannot contribute.
+
+    *findings* are ``(group, names)`` pairs worth printing. *tls_silenced* names the HTTP variables
+    that ARE set and were withheld because the block decides TLS: they are reported separately
+    rather than dropped, because a reader whose environment stops being mentioned would otherwise
+    read that as "my environment is clean" when the truth is "the sessions ignore it now".
+    *tls_decided_by* is the setting responsible, or ``None``.
+    """
+
+    findings: tuple[tuple[AmbientGroup, tuple[str, ...]], ...]
+    tls_silenced: tuple[str, ...]
+    tls_decided_by: str | None
+
+
+def ambient_influences(environ: Iterable[str], env: Mapping[str, str]) -> AmbientReport:
     """The shell variables that survive the strip AND can still change what the check reports.
 
     The whole question in ONE call, deliberately: which families exist, which of their members the
-    caller has set, and which of them the composed block has already taken out of play. Splitting
-    the last part out to the caller would put half the answer next to the printing code, which is
-    the scattering the decision's own proviso forbids.
+    caller has set, and which of them provably cannot act on THIS block. Splitting any of that out
+    to the caller would put half the answer next to the printing code, which is the scattering the
+    decision's own proviso forbids.
 
     *environ* is the caller's variable NAMES, the same shape :func:`stale_config_vars` takes, and
     for the same reason: no value is needed to name a variable, and a proxy URL can carry a
-    password. *env* is the COMPOSED block, read only for :func:`decides_tls_explicitly`.
+    password. *env* is the COMPOSED block.
 
-    Returns ``(group, names set by this caller)`` pairs in :data:`AMBIENT_GROUPS` order, groups with
-    nothing set omitted. Empty means the check below is about the block and nothing else.
+    Three subtractions, each of which was missing once and each of which made the message WRONG
+    rather than merely noisy:
+
+    * **A name the block itself states is not ambient.** ``_run_check`` applies the block ON TOP of
+      the environment, so the block's value is the one that acts. Without this, the remedy "state
+      it in the block with --set" produced the identical warning on the next run, under a heading
+      claiming these are not part of the block. Measured; a remedy that visibly does not work is
+      the fastest way to teach a reader to skip the whole paragraph.
+    * **An HTTP group cannot act on a block with no REST plane.** ``sandbox`` and ``ioc-only``
+      enable none, so a proxy has nothing to route: the very first command
+      ``docs/deployment.md`` teaches would have asserted an effect on "every REST plane" for a
+      block that has none.
+    * **An explicit TLS decision pins ``trust_env=False``**, which switches off the proxy and
+      ``*_CA_BUNDLE`` environment together. Those names go to ``tls_silenced`` rather than
+      vanishing.
+
+    The same reasoning is applied in all three, and it is the one the coverage audit uses about its
+    own figures: name a cause that can bite, never one that provably cannot.
     """
     present = set(environ)
-    tls_decided = decides_tls_explicitly(env)
+    stated = set(env)
+    decided_by = tls_decision(env)
+    rest_plane = configures_a_rest_plane(env)
     findings: list[tuple[AmbientGroup, tuple[str, ...]]] = []
+    silenced: list[str] = []
     for group in AMBIENT_GROUPS:
-        if group.silenced_by_explicit_tls and tls_decided:
+        names = tuple(n for n in group.variables if n in present and n not in stated)
+        if not names:
             continue
-        names = tuple(name for name in group.variables if name in present)
-        if names:
-            findings.append((group, names))
-    return findings
+        if group.surface == "rest-http":
+            if decided_by is not None:
+                silenced.extend(names)
+                continue
+            if not rest_plane:
+                continue  # nothing to route: this block enables no REST plane at all
+        findings.append((group, names))
+    return AmbientReport(
+        findings=tuple(findings), tls_silenced=tuple(silenced), tls_decided_by=decided_by
+    )
 
 
 def render_client_config(env: Mapping[str, str], *, command: str = SERVER_COMMAND) -> str:

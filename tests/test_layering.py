@@ -106,3 +106,72 @@ def test_tool_layer_import_detector_catches_all_forms() -> None:
     assert not _tool_layer_imports("from ..config import get_config\n")
     assert not _tool_layer_imports("from .checkers import query_channels\n")
     assert not _tool_layer_imports("from epics_mcp.services.checkers import query_channels\n")
+
+
+# --- The declared exception is ONE call wide, and until GB-98 nothing held that (QA finding) ---
+
+#: The client modules of the services layer: the p4p edge and the five REST clients.
+_CLIENT_MODULES = frozenset(
+    {
+        "epics_mcp.services.epics_client",
+        "epics_mcp.services.alarm_client",
+        "epics_mcp.services.archiver_client",
+        "epics_mcp.services.channelfinder_client",
+        "epics_mcp.services.naming_client",
+        "epics_mcp.services.olog_client",
+    }
+)
+
+#: The only client ``diagnose`` may import, and the reason the layering diagram grants it an
+#: exception at all: a connection diagnosis IS a live probe (decision VY (c)).
+_DIAGNOSE_ALLOWED_CLIENT = "epics_mcp.services.epics_client"
+
+
+def _client_modules_imported_by(source: str) -> set[str]:
+    """The client modules *source* imports, absolute and relative forms alike."""
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom):
+            resolved = _resolve_relative(node.level, node.module) if node.level else node.module
+            if resolved in _CLIENT_MODULES:
+                found.add(resolved)
+        elif isinstance(node, ast.Import):
+            found |= {alias.name for alias in node.names if alias.name in _CLIENT_MODULES}
+    return found
+
+
+def test_diagnose_imports_exactly_the_one_client_its_exception_covers() -> None:
+    """``ARCHITECTURE.md`` states in four places that ``diagnose``'s exception is ONE call wide.
+
+    Nothing held that. Until GB-98 the module imported two clients (``pv_get`` and a hand-built
+    ``NamingServiceClient``); the second was a duplicate of ``checkers.query_naming_lookup`` and is
+    gone, and the four statements were narrowed to match. Re-adding any client import here would
+    leave the whole suite green and make all four false at once, which is the shape of drift this
+    repository keeps paying for: a claim in prose that no assertion reaches.
+
+    The other four planes go through ``services.checkers``, the same seam the MCP tools use, so an
+    import of one of those clients here would be a second exception nobody decided on.
+
+    Provably red: put ``from epics_mcp.services.naming_client import NamingServiceClient`` back into
+    ``services/diagnose.py``.
+    """
+    source = (_SERVICES_DIR / "diagnose.py").read_text(encoding="utf-8")
+
+    assert _client_modules_imported_by(source) == {_DIAGNOSE_ALLOWED_CLIENT}
+
+
+def test_the_client_module_population_is_the_real_one() -> None:
+    """The guard above is only as good as its list, so the list is held against the tree.
+
+    A client module added later and forgotten here would make the exception guard silently
+    permissive: it would see no import because it does not know the module exists.
+    """
+    on_disk = {
+        f"epics_mcp.services.{path.stem}"
+        for path in _SERVICES_DIR.glob("*_client.py")
+        if not path.stem.startswith("_")
+    }
+
+    assert on_disk == _CLIENT_MODULES, (
+        f"missing {on_disk - _CLIENT_MODULES}, stale {_CLIENT_MODULES - on_disk}"
+    )

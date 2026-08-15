@@ -8,7 +8,7 @@ build_* config gates, and the query_* error→EpicsConnectionError translation.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 import requests
@@ -492,6 +492,60 @@ async def test_the_naming_withheld_note_carries_no_credential(
     assert result["withheld"] is True
     assert "HTTP 500" in note
     assert "s3cr3t" not in note
+
+
+@pytest.mark.parametrize("caller", ["query", "diagnose"])
+async def test_the_last_resort_at_sign_net_is_on_the_naming_note(caller: str) -> None:
+    """The output-side net that needs no knowledge of the secret, on BOTH callers of this note.
+
+    ``shown_cause`` withholds any message carrying a literal ``@``, because requests rewrites a
+    userinfo in flight (a search for the configured value finds nothing) while the SEPARATOR always
+    survives. It is defence in depth: the client edge redacts every address it names, so this only
+    catches text an exception carries for some other reason.
+
+    It is pinned here because GB-98 measured it disappearing. ``diagnose._gather_naming`` used to
+    apply ``shown_cause`` on its own side; routing it through ``query_naming_lookup``, whose note
+    was built from a raw ``{exc}``, silently dropped the net for that caller, and
+    ``lookup_device_name`` had never had it at all. Measured on the same input: the old diagnose
+    path withheld, the new one printed the message in full. The net now lives in the shared
+    function, so both callers inherit it.
+
+    An ``@`` really can reach this text without any credential being involved: the message
+    interpolates the requested device name, and ``_device_name`` does not validate it.
+
+    Red-provable: put ``{exc}`` back in ``query_naming_lookup``'s note and both cases fail.
+    """
+    naming_error = NamingServiceResponseError(
+        "Failed to query device name 'SYS:D@V': HTTP 500 Internal Server Error"
+    )
+
+    class _Boom:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def check_connectivity(self) -> bool:
+            return True
+
+        def validate_name(self, name: str) -> object:
+            raise naming_error
+
+    with (
+        patch.object(checkers, "get_config", lambda: EpicsConfig(naming_url="http://naming")),
+        patch.object(checkers, "NamingServiceClient", _Boom),
+    ):
+        if caller == "query":
+            note = str((await checkers.query_naming_lookup("SYS:D@V"))["note"])
+        else:
+            from epics_mcp.services import diagnose as diagnose_module
+
+            with patch.object(
+                diagnose_module, "get_config", lambda: EpicsConfig(naming_url="http://naming")
+            ):
+                evidence = await diagnose_module._gather_naming("SYS:D@V", True, 1.0)
+            note = str(evidence.note)
+
+    assert "withheld" in note, note
+    assert "SYS:D@V" not in note, note
 
 
 def _session_whose_head_fails() -> Mock:

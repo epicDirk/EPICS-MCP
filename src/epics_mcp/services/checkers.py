@@ -28,7 +28,7 @@ from typing import Any, TypedDict
 
 from epics_mcp.config import get_config
 from epics_mcp.errors import EpicsConnectionError, EpicsError
-from epics_mcp.services._http import http_status
+from epics_mcp.services._http import http_status, shown_cause
 from epics_mcp.services._time_window import TimeWindowFormatError
 from epics_mcp.services.alarm_client import AlarmClient
 from epics_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmError
@@ -809,5 +809,13 @@ async def query_naming_lookup(name: str, timeout: float = 5.0) -> NameLookupResu
             "name": name,
             "registered": None,
             "withheld": True,
-            "note": f"Naming lookup withheld: {exc}",
+            # ``shown_cause`` rather than a raw ``{exc}``, and this is the LAST-RESORT net
+            # rather than the primary one: the client edge already redacts every address it
+            # names. What it does not cover is text the exception carries for other reasons,
+            # and the output-side rule needs no knowledge of the secret (it withholds any
+            # message carrying an ``@``). GB-98 measured why it belongs HERE: diagnose used
+            # to apply it on its own side, and routing the gatherer through this function
+            # would have dropped it for that caller while ``lookup_device_name``, which
+            # never had it, kept going without. One net, both callers.
+            "note": f"Naming lookup withheld: {shown_cause(exc)}",
         }

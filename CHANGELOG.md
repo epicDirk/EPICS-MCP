@@ -38,9 +38,8 @@ carry breaking changes).
   to carry their own copy of the three-step lookup (config gate, reachability first, then
   validate), which is how two answers to one question start to disagree. The gatherer calls the
   shared query now, like its three sibling planes already did. Semantics are unchanged, including
-  that an unreachable service is withheld rather than read as "not registered". Visible on the
-  wire only in the wording of `evidence.naming.note` on the withheld path, which now reads
-  `Naming lookup withheld: ...` instead of `Naming error: ...`.
+  that an unreachable service is withheld rather than read as "not registered". On the wire,
+  `evidence.naming.note` reads `Naming lookup withheld: ...` where it read `Naming error: ...`.
 
 - **`epics-init` names the variables from your own shell that reach its check.** It strips what it
   owns (`EPICS_MCP_*` plus the six EPICS search-path variables) and probes the block it just

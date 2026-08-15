@@ -312,22 +312,40 @@ def _warn_about_ambient_environment(env: Mapping[str, str]) -> None:
     there is no report for these variables to qualify and the warning would be pure noise.
 
     Names, effects and handles, never VALUES. A proxy URL routinely carries a password, and naming
-    the variable is what the reader needs; the value is already in their own shell.
+    the variable is what the reader needs; how to look one up is one line and leaks nothing.
 
-    Which variables, and why they are not listed here: :data:`presets.AMBIENT_GROUPS` holds them at
-    one address with its admission criterion, because the decision's own proviso is that this list
-    ages and must not be spread across the code.
+    ⚠ A REMEDY IS AN ACTION SOMEBODY WILL TAKE, and the first version of this got that wrong in the
+    most expensive direction: it offered ``EPICS_MCP_CA_BUNDLE`` as a way to take the proxy group
+    out of play. True, and bad advice, because that variable goes into the emitted BLOCK and so
+    reconfigures the server the reader is about to run. The warning vanishing would have looked
+    like a repair. Every remedy here now points at making the check and the runtime AGREE, never at
+    making the message quieter.
+
+    Which variables, what can act on this block, and what provably cannot:
+    :func:`presets.ambient_influences` decides all of it, at one address with its admission
+    criterion, because the decision's own proviso is that this list ages and must not be spread
+    across the code. This function only prints.
     """
-    findings = ambient_influences(os.environ, env)
-    if not findings:
+    report = ambient_influences(os.environ, env)
+    if report.tls_silenced:
+        # Said rather than left silent. This block's TLS decision pins ``trust_env=False``, so these
+        # ARE set and CANNOT act. A reader who simply stopped seeing them would conclude their
+        # environment is clean, and for EPICS_MCP_TLS_VERIFY=false that reading is dangerous: the
+        # variables are ignored because verification is off, not because trust is intact.
+        sys.stderr.write(
+            f"epics-init: {', '.join(sorted(report.tls_silenced))} are set in your shell but do "
+            f"NOT reach this check, because the block sets {report.tls_decided_by} and the read "
+            "sessions then ignore the environment entirely (proxy included).\n"
+        )
+    if not report.findings:
         return
-    total = sum(len(names) for _group, names in findings)
+    total = sum(len(names) for _group, names in report.findings)
     sys.stderr.write(
-        f"epics-init: {total} variable(s) from your shell survive into the check below and can "
-        "change what it reports. They are NOT part of the block above, and this command "
-        "deliberately does not remove them:\n"
+        f"epics-init: {total} variable(s) from your shell reach the check below and can change "
+        "what it reports. They are NOT in the block above, and this command deliberately does not "
+        "remove them. To see what they are set to: printenv NAME (PowerShell: $env:NAME).\n"
     )
-    for group, names in findings:
+    for group, names in report.findings:
         sys.stderr.write(f"  {', '.join(names)}\n")
         sys.stderr.write(f"    what it does:  {group.effect}\n")
         sys.stderr.write(f"    what to do:    {group.remedy}\n")

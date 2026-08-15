@@ -118,9 +118,19 @@ cache of its own under its home directory, which `FASTMCP_CHECK_FOR_UPDATES=off`
    report, with what it does and what to do about it. Two examples, both measured: an `HTTP_PROXY`
    can turn six healthy REST planes into six `unreachable`, each naming a host the block never
    mentions; an `EPICS_PVA_BROADCAST_PORT` decides who answers a PV search while the report's
-   `search paths:` line is unchanged word for word. Setting `EPICS_MCP_CA_BUNDLE` in the block
-   silences the HTTP half of that list, because an explicit TLS decision makes the read sessions
-   ignore the ambient environment altogether.
+   `search paths:` line is unchanged word for word.
+
+   It names only what can actually act on YOUR block: a name you stated with `--set` is the block's
+   value rather than your shell's, and a proxy is not mentioned for a block that enables no REST
+   plane at all (`sandbox`, `ioc-only`).
+
+   ⛔ **`EPICS_MCP_CA_BUNDLE` is not a way to silence this, even though it would work.** An explicit
+   TLS decision makes the read sessions ignore the whole ambient environment, so the message does
+   fall quiet. It also goes into the block, which means the SERVER you are about to run stops using
+   your proxy and trusts only that one PEM. Set it because you have an internal CA (section 3, and
+   combine it with the public roots first), never to make a warning go away. When a block does
+   decide TLS, the command says which variables it silenced and which setting did it, so the quiet
+   is visible rather than assumed.
 
    The block goes to stdout and everything the command has to SAY goes to stderr. Where the block
    belongs is in [MCP client integration](mcp-clients.md), together with the restart that finishes

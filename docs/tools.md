@@ -95,6 +95,10 @@ does and what to do about it: it strips what it owns (`EPICS_MCP_*` plus the six
 variables) so the report is about the block, and deliberately leaves your proxy, CA-bundle and
 EPICS port variables alone, because removing those would break every site behind a proxy and every
 site with an internal CA. Naming them is what keeps the report honest about its own reach.
+It names only what can act on that block: a variable you stated with `--set` is the block's,
+a proxy is not mentioned for a block with no REST plane, and a block that decides TLS
+(`EPICS_MCP_CA_BUNDLE`, or verification off) makes the sessions ignore the environment, which
+is reported as such rather than by falling silent.
 It writes nothing unless asked to: `--out PATH` writes the block as UTF-8 with LF, which a
 shell redirect cannot promise (in Windows PowerShell 5.1 both `>` and `Set-Content -Encoding utf8`
 produce bytes a strict JSON parser rejects). `--out` refuses an existing file unless `--force` is

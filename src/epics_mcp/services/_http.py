@@ -330,7 +330,7 @@ def build_retrying_session(
     rather than carrying a ``status_forcelist`` that ``total=0`` would never consult anyway.
 
     TLS trust is resolved HERE, the single place every REST session is built, so all four clients
-    (and the crossplane/coverage adapters and the direct diagnose naming client) inherit it without
+    (and the crossplane/coverage adapters) inherit it without
     threading a ``verify`` argument through nine construction sites. ``verify`` defaults to the
     config (``ca_bundle`` path > ``tls_verify=False`` > ``True``); pass it explicitly only in tests.
     When the effective ``verify`` is anything other than plain ``True`` (a CA-bundle path, or

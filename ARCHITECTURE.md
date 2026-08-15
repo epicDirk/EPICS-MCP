@@ -41,7 +41,7 @@ gathers all five planes in one `asyncio.gather`.
 steps for the standalone `lookup_device_name` tool, its own comment saying it MIRRORED the
 gatherer. That was two copies of one probe, not a second exception, so the gatherer now calls the
 query like its three siblings do. What remains is `pv_get`, which is the thing the decision behind
-this exception actually justified. The other four planes were never client calls: they go through
+this exception actually justified. The other THREE planes were never client calls: they go through
 the same `checkers` query functions as the MCP tools, which is why widening this box to "it probes
 the planes itself" reads as more of an exception than the code has ever needed.
 
