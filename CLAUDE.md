@@ -29,6 +29,14 @@ EPICS service landscape behaves. This file is the standing policy that keeps tha
   work-item ids, or internal refactors with no user-visible effect: those go to the tiers below, and
   the work itself is narrated in the commit body. It drifted into a 763-line work journal once,
   because no rule claimed it.
+  ⚠️ **That rule names a KIND, and a kind alone did not hold, so there is a SIZE as well: one entry
+  under `## [Unreleased]` is at most 1400 bytes.** Held by `tests/test_changelog_discipline.py`,
+  where the number is derived from the measured distribution rather than picked (it clears every
+  entry standing today and would have stopped 13 of the 45 in `[0.6.0]`). It works **forward only,
+  by construction and not by exemption**: the guard reads the `[Unreleased]` section and no other,
+  so published history is out of scope rather than excused. An entry that needs more room is
+  usually the analysis, not the change; that half belongs in the commit body, the guard's own
+  docstring, or the operator guide.
 - `.env.example`: the canonical, commented configuration template (every `EPICS_MCP_*` var).
 - `examples/` holds a sample `.bob` and an `mcp.json`: the path for someone with no facility at all.
   The `test.db` beside them is the ALTERNATIVE rather than the starting point, since running it needs
