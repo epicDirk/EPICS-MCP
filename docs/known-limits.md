@@ -13,7 +13,7 @@ share is what this page states, together with the rule to re-derive it.
 a citation elsewhere in this repository still means what it meant when it was written. What was
 retired, and where it went, is listed at the end.
 
-**On this page:** [1 markdown prose](#1--markdown-prose-is-unguarded-and-a-guard-over-it-was-rejected) ·
+**On this page:** [1 markdown figures](#1--markdown-figures-are-unguarded-and-a-guard-over-them-was-rejected) ·
 [9 the language guard](#9--the-language-guard-finds-german-by-vocabulary-not-by-understanding) ·
 [10 the typography guard](#10--the-typography-guard-forbids-a-named-set-not-typography-in-general) ·
 [11 Naming-client provenance](#11--the-naming-service-clients-provenance-is-a-measurement-not-an-opinion) ·
@@ -30,10 +30,18 @@ retired, and where it went, is listed at the end.
 
 ---
 
-## 1 · Markdown prose is unguarded, and a guard over it was rejected
+## 1 · Markdown FIGURES are unguarded, and a guard over them was rejected
 
 The prose-counter guard reads Python comments and docstrings. It does not read markdown files, so
-no figure written on any page in this repository is re-run by anything.
+no figure written on any page in this repository is re-run by **it**.
+
+⚠️ **The heading used to say "markdown prose is unguarded", and that was already too wide before
+this entry was written.** Markdown IS read by several guards, they just do not read figures:
+`test_doc_links` resolves every relative link against `git ls-files`, `test_guide_matches_code`
+checks tool names, `EPICS_MCP_*` variables and status glyphs across the tracked pages,
+`test_write_posture_sites` holds the write-posture claim and its pointers, and
+`test_changelog_discipline` caps the size of a new `[Unreleased]` entry. The claim below is about
+SIZE-NAMING FIGURES in markdown, and only about those.
 
 Why no guard: size-naming phrases are spread across the tracked markdown, and the largest share of
 them sits in `CHANGELOG.md` and `CLAUDE.md`, where the exemptions would have to live. A release
@@ -518,11 +526,17 @@ another.
 **The ten codes outside `errors.py` under the first rule split in half, and the halves are not the
 same kind of thing.**
 
-- **Five are input validation, and they are out by decision.** `INVALID_INPUT`,
-  `INVALID_TIME_WINDOW`, `INVALID_ARGUMENT`, `BATCH_TOO_LARGE`, `PATH_OUTSIDE_WORKSPACE`. They tell
-  a caller that the ARGUMENTS were wrong, before any service was contacted. An operator reading the
-  error-signature section is asking which tool answers a fault in the control system; a bad
-  argument is answered by the tool's own schema and message, at the point of the call.
+- **Five are input validation, and they are out of the GUARD, which is not the same as out of the
+  section.** `INVALID_INPUT`, `INVALID_TIME_WINDOW`, `INVALID_ARGUMENT`, `BATCH_TOO_LARGE`,
+  `PATH_OUTSIDE_WORKSPACE`. ⚠️ Measured rather than argued: **three of them already stand in that
+  section** (`INVALID_INPUT`, `INVALID_TIME_WINDOW`, `INVALID_ARGUMENT`), and only
+  `BATCH_TOO_LARGE` and `PATH_OUTSIDE_WORKSPACE` do not. So the claim here is NOT that a
+  validation code does not belong there; the document already disagrees with that, and an earlier
+  draft of this entry made it anyway. The claim is narrower and is about the guard: these codes
+  tell a caller their ARGUMENTS were wrong, before any service was contacted, so the tool's own
+  schema and message are the primary channel and a missing entry is not a hole a running operator
+  falls into. Requiring all of them would put a wall of argument validation into a section a
+  reader opens to diagnose a control system.
 - **Five are operational signatures, and they are measurably missing.** `UPSTREAM_CONTRACT_ERROR`
   (`services/epics_client.py`), `OLOG_HTTP_404`, `OLOG_ATTACH_TOO_LARGE_AT_READ`, `FILE_EXISTS`,
   `INTERNAL`. Each says something happened out in a service or on disk, which is exactly what that

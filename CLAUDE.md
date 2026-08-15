@@ -35,8 +35,13 @@ EPICS service landscape behaves. This file is the standing policy that keeps tha
   entry standing today and would have stopped 13 of the 45 in `[0.6.0]`). It works **forward only,
   by construction and not by exemption**: the guard reads the `[Unreleased]` section and no other,
   so published history is out of scope rather than excused. An entry that needs more room is
-  usually the analysis, not the change; that half belongs in the commit body, the guard's own
-  docstring, or the operator guide.
+  usually carrying the analysis as well as the change; that half belongs in the commit body, the
+  guard's own docstring, or the operator guide. ⚠️ **Those three are not interchangeable.** The
+  sdist ships `src`, `docs` and the top-level documents, never `tests/` or `scripts/`, so a package
+  consumer reaches the operator guide and `docs/` and neither of the other two. For something a
+  USER has to act on, the operator guide is the alternative that actually arrives. And the cap is
+  about the length of one claim, never about whether the entry belongs: measured, the entries it
+  would have stopped in `[0.6.0]` include a BREAKING change and four credential fixes.
 - `.env.example`: the canonical, commented configuration template (every `EPICS_MCP_*` var).
 - `examples/` holds a sample `.bob` and an `mcp.json`: the path for someone with no facility at all.
   The `test.db` beside them is the ALTERNATIVE rather than the starting point, since running it needs

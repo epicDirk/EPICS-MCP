@@ -24,7 +24,9 @@ setting.
 - **Read-only by default.** Every mutating tool is off unless explicitly enabled. `set_pv_value`
   needs `EPICS_MCP_ALLOW_PV_WRITE=true` **and** a non-empty regex allowlist of writable PV names
   **and** a per-minute rate limit. Writes enabled with an empty pattern makes the server refuse to
-  start, rather than silently permitting every PV.
+  start, rather than silently permitting every PV. The fullest statement of this posture, including
+  what leaves your machine on every plane, is [docs/safety.md](docs/safety.md); this page is the
+  security-review view of it.
 - **Two independent write gates.** The Olog logbook gate (`EPICS_MCP_ALLOW_OLOG_WRITE`) is separate
   from the PV gate, with its own allowlist, its own rate limit and its own URL boundary. Enabling
   one never enables the other. The two are not the same SIZE either: the PV gate is three checks,

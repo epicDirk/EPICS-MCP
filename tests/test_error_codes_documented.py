@@ -35,11 +35,13 @@ clean result.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[1]
 _ERRORS = _REPO / "src" / "epics_mcp" / "errors.py"
 _GUIDE = _REPO / "src" / "epics_mcp" / "operator_guide.md"
+_GUIDE_LABEL = "src/epics_mcp/operator_guide.md"
 
 #: The section that OWNS the explanation of an error code. If it is renamed, rename it here; the
 #: anchor test below turns a rename into a red test rather than into a silent empty search.
@@ -104,18 +106,36 @@ def test_the_population_and_the_section_both_exist() -> None:
     )
 
 
+def _names(section: str, code: str) -> bool:
+    """Whether *section* names *code* as a WHOLE token.
+
+    ⛔ Not `code in section`. Exactly one pair in this population nests
+    (`RATE_LIMIT_EXCEEDED` inside `READ_RATE_LIMIT_EXCEEDED`), and it is the pair whose
+    distinction the section exists to teach: an audited write-gate denial against an unaudited
+    read throttle. Under a substring test, deleting every standalone explanation of the shorter
+    one leaves this guard green, measured. A word boundary costs nothing and removes the class.
+    """
+    return re.search(rf"(?<![A-Z_]){re.escape(code)}(?![A-Z_])", section) is not None
+
+
 def test_every_named_error_code_is_in_the_owning_section() -> None:
     """The rule: a code a caller can branch on is explained where a caller is told to look."""
+    guide = _GUIDE.read_text(encoding="utf-8")
+    section = section_of(guide, OWNING_SECTION)
+    if not section:
+        # The anchor test owns this failure. Reporting "all 11 codes are explained nowhere" on a
+        # renamed heading would be true of the search and false of the document, and a reader
+        # acting on it would add eleven duplicate entries.
+        return
     codes = error_codes_of(_ERRORS.read_text(encoding="utf-8"))
-    section = section_of(_GUIDE.read_text(encoding="utf-8"), OWNING_SECTION)
-    missing = sorted(code for code in codes if code not in section)
+    missing = sorted(code for code in codes if not _names(section, code))
     assert not missing, (
-        f"{len(missing)} error code(s) reach a caller and are explained nowhere in "
-        f"{OWNING_SECTION!r}: "
+        f"{len(missing)} error code(s) reach a caller and are explained nowhere in section "
+        f"{OWNING_SECTION!r} of {_GUIDE_LABEL}: "
         + ", ".join(f"{code} ({codes[code]})" for code in missing)
-        + ". Add a signature entry for each, in the form the section already uses: a bold symptom "
-        "sentence, then what the caller should do about it. A mention elsewhere in the guide does "
-        "not count, because this is the section a caller is sent to."
+        + f". Add a signature entry for each to {_GUIDE_LABEL}, in the form the section already "
+        "uses: a bold symptom sentence, then what the caller should do about it. A mention "
+        "elsewhere in the guide does not count, because this is the section a caller is sent to."
     )
 
 

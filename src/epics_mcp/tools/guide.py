@@ -15,22 +15,22 @@ document**. The server side answers that with a ``ToolResult`` carrying one text
 structured payload (see the tool in ``server.py``); this module answers the other half, which is
 that a document this size is still too much to hand over for a question about one error signature.
 
-⚠️ **The sizes here are ROUNDED, and that is the fix rather than sloppiness.** An exact byte count
-stood in three files, eight times over. It was written on the day the tool was built and was
-already stale by the next commit; over one day the document took four different sizes, spanning
-nearly 8 KB in both directions, and the pinned figure never moved once. A size that changes
-whenever anyone edits a sentence cannot be carried in prose. What IS stable is the RATIO (two
-copies per call), so that is what this paragraph states, and
-``tests/test_guide_tool.py::test_the_rounded_size_claims_still_hold`` measures the real figures
-and goes red when a rounded word here stops being true. Re-measure rather than trust:
-``len(get_guide().encode("utf-8"))``.
+⚠️ **The sizes here are ROUNDED and DECIMAL, and that is the fix rather than sloppiness.** An
+exact byte count stood in three files, eight times over. It was stale in its own commit, which
+raised the document by 50 B in the same change, and across one day the document took SIX different
+sizes spanning nearly 8 KB in both directions while the pinned figure never moved. A size that
+changes whenever anyone edits a sentence cannot be carried in prose. What IS stable is the RATIO
+(two copies per call), so that is what this paragraph states, and
+``tests/test_guide_tool.py::test_the_rounded_size_claims_still_hold`` reads these very sentences,
+measures the real figures, and goes red when a rounded word here stops being true. Re-measure
+rather than trust: ``len(get_guide().encode("utf-8"))``.
 
 **Two levels of key, because one is not enough here.** Splitting only on ``## `` leaves sections
 of 27 KB and more, each larger than a sibling surface's ENTIRE guide. So the keys PARTITION the
 document instead: a ``## `` key serves that section's own text and a ``### `` key serves one
 subsection, in one flat namespace, with no overlap and no gap. The practical effect is the point:
 a caller asking which tool answers a question gets the tool inventory, roughly 1.5 KB, not the
-27 KB section that opens with it.
+28 KB section that opens with it.
 
 **Deterministic by construction.** The text comes from one packaged file, the split is a plain
 line-anchored heading boundary that loses nothing (the parts re-assemble into the file byte for

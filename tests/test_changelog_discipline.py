@@ -14,25 +14,42 @@ released history is out of scope by construction rather than by a list. `[0.6.0]
 rule that reached it would be asking for a rewrite of something published.
 
 THE CAP IS MEASURED, NOT CHOSEN. Bytes per top-level entry, produced by `entries_of` below rather
-than by a separate script, on 2026-08-15. That matters more than it looks: a first pass measured
-the same sections with an ad-hoc counter whose treatment of the trailing blank line differed, and
-every figure came out 20 to 30 B high. A byte figure is only a figure together with the code that
-produced it, so these come from the function this module actually uses.
+than by a separate script. That matters more than it looks: a first pass measured the same
+sections with an ad-hoc counter whose treatment of the trailing blank line differed, and every
+figure came out 20 to 30 B high. A byte figure is only a figure together with the code that
+produced it, so these come from the function this module actually uses. **Mean and median are
+ROUNDED to the nearest integer; p90 is the NEAREST RANK,** `sorted[ceil(0.9 * n) - 1]`, stated
+because six textbook definitions give six answers and one of them differs by 269 B here.
 
     section        entries   mean   median    p90    max   above 1400
-    [Unreleased]         9    822      869   1093   1233            0
-    [0.6.0]             45   1015      839   1751   2021           13
-    [0.5.0]             21    790      655   1073   1618            2
-    [0.4.0]             28    500      534    758    958            0
-    [0.3.0]             38    410      380    650   1086            0
-    [0.2.0]              3    274      308    308    372            0
+    [Unreleased]        10    828      872   1093   1233            0
+    [0.6.0]             45   1015      839   1778   2021           13
+    [0.5.0]             21    791      655   1342   1618            2
+    [0.4.0]             28    500      534    818    958            0
+    [0.3.0]             38    411      380    674   1086            0
+    [0.2.0]              3    275      308    372    372            0
 
 1400 clears every entry standing in `[Unreleased]` today (167 B of headroom above the largest),
 sits above the p90 of five of the six sections, and would have stopped 13 of the 45 entries in
-`[0.6.0]`, the section whose mean of 1015 against `[0.3.0]`'s 410 is what the ticket calls a
-factor of 2.4. So it does not forbid writing an entry; it forbids the analysis appended to one.
-The longest entry in the file (2021 B) carries a whole measurement (a dataset size, four
-sub-datasets, seven views), which is the kind `CLAUDE.md` already excludes in prose.
+`[0.6.0]`, the section whose mean of 1015 against `[0.3.0]`'s 411 is what the ticket calls a
+factor of 2.4.
+
+⚠️ **THOSE 13 ARE NOT ALL "ANALYSIS", AND SAYING SO WOULD BE THE COMFORTABLE READING.** Measured,
+they include one BREAKING change and four credential-disclosure fixes, which is exactly the
+category `CLAUDE.md` requires a changelog to carry. The cap therefore does NOT say "this did not
+belong here"; it says "this belonged here SHORTER". The honest claim is about where the detail
+goes, not about whether the entry exists.
+
+⚠️ **And where it goes is not free either.** `pyproject.toml` ships `src`, `docs` and the top-level
+documents in the sdist; `tests/` and `scripts/` are excluded. Of the three alternative homes the
+convention names, a package consumer reaches the operator guide and `docs/`, never a commit body
+and never a guard docstring. For a fix a USER has to act on, the operator guide is the alternative
+that actually arrives.
+
+⚠️ **The rule is per ENTRY, so splitting one entry into three bullets passes it.** Measured, and it
+is not worth closing: a cap on the section would punish a busy release, and a cap on the whole
+file is what `docs/known-limits.md` section 1 rejected. This one makes the length of a single
+claim visible; it cannot make someone write a short one.
 
 ⚠️ The number is a threshold, not a measurement of anything, so it does NOT belong to the class of
 figures `tests/test_prose_counters.py` re-derives. If a later section makes it wrong, change it
@@ -78,6 +95,21 @@ UNRELEASED_HEADING = "## [Unreleased]"
 _TOP_LEVEL_ENTRY = re.compile(r"^[-*] ")
 _SUBHEADING = re.compile(r"^#{3,} ")
 
+#: ⛔ The message a RELEASE produces, and the reason it is written out rather than left to a bare
+#: assert. `CONTRIBUTING.md` step 2 says "Close the [Unreleased] section under the new version",
+#: which read literally means renaming the heading, and that reddens this module. The right move
+#: is what both shipped releases actually did, measured at the tags: leave an EMPTY
+#: `## [Unreleased]` heading standing above the new version. Without that sentence here the
+#: cheapest way out of a red release is deleting the guard, which is the outcome this whole module
+#: exists to prevent.
+_NO_HEADING = (
+    f"CHANGELOG.md has no {UNRELEASED_HEADING!r} line, so this guard reads nothing and would "
+    "otherwise pass in silence. If you are cutting a RELEASE: keep an empty "
+    f"{UNRELEASED_HEADING!r} heading above the new version section, which is what v0.5.0 and "
+    "v0.6.0 both did, and this goes green again. If the heading was renamed for another reason, "
+    "rename it here in the same commit. Removing this guard is the wrong repair in both cases."
+)
+
 
 def _unreleased_body(text: str) -> str:
     """The body under `[Unreleased]`, or the empty string when the section is present and empty.
@@ -90,11 +122,7 @@ def _unreleased_body(text: str) -> str:
     proven to exist first, and only the exit that names an EMPTY section is accepted; anything else
     is re-raised as a failure that says what happened.
     """
-    assert UNRELEASED_HEADING in text.split("\n"), (
-        f"CHANGELOG.md has no {UNRELEASED_HEADING!r} line. Without it this guard reads nothing and "
-        "would otherwise pass in silence. If the heading was renamed, rename it here in the same "
-        "commit; if the section was removed, this guard has no subject and must be removed too."
-    )
+    assert UNRELEASED_HEADING in text.split("\n"), _NO_HEADING
     try:
         return extract(text, "Unreleased")
     except SystemExit as exit_signal:
@@ -135,8 +163,12 @@ def oversized(body: str, cap: int = MAX_ENTRY_BYTES) -> list[tuple[str, int]]:
 
 
 def test_the_unreleased_heading_exists() -> None:
-    """The assertion that keeps every test below from passing on an unread file."""
-    assert UNRELEASED_HEADING in _CHANGELOG.read_text(encoding="utf-8").split("\n")
+    """The assertion that keeps every test below from passing on an unread file.
+
+    It carries the same message as the reader, deliberately: this is the test a RELEASE trips
+    over, and a bare assert there prints a diff of the changelog and no instruction at all.
+    """
+    assert UNRELEASED_HEADING in _CHANGELOG.read_text(encoding="utf-8").split("\n"), _NO_HEADING
 
 
 def test_no_unreleased_entry_exceeds_the_cap() -> None:
@@ -147,9 +179,11 @@ def test_no_unreleased_entry_exceeds_the_cap() -> None:
         "an entry under [Unreleased] is longer than "
         f"{MAX_ENTRY_BYTES} B: "
         + "; ".join(f"{size} B at {first[:70]!r}" for first, size in too_long)
-        + ". A changelog entry says what changed for a USER. The measurement that justified the "
-        "change belongs in the commit body, the guard's docstring or the operator guide "
-        "(CLAUDE.md, Knowledge Persistence Policy)."
+        + ". A changelog entry says what changed for a USER, and the cap is about the LENGTH of "
+        "that sentence, never about whether the entry belongs (a BREAKING change and a credential "
+        "fix are among the entries it would have stopped in 0.6.0). Move the measurement that "
+        "justified the change: for something a user has to act on, the operator guide is the only "
+        "alternative home that ships with the package; a commit body and a guard docstring do not."
     )
 
 
@@ -167,8 +201,13 @@ def test_released_sections_are_out_of_scope() -> None:
         "longer prove that released history is out of scope. Pick another published section that "
         "does, or retire this test with a reason."
     )
-    assert not oversized(_unreleased_body(whole)), (
-        "sanity: [Unreleased] is within the cap while [0.6.0] is not, which is the whole point"
+    # The counts, not the bodies: an over-cap entry in [Unreleased] reddens the cap test above,
+    # and this one used to print several KB of changelog beside it, which reads as "the guard is
+    # broken" rather than as "your entry is long".
+    assert len(oversized(_unreleased_body(whole))) == 0, (
+        "this test cannot say anything about scope while [Unreleased] itself is over the cap. "
+        "Fix the entry that test_no_unreleased_entry_exceeds_the_cap names; this one is a "
+        "consequence, not a second finding."
     )
 
 

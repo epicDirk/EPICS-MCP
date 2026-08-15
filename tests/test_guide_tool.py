@@ -327,13 +327,22 @@ async def test_the_tool_key_serves_the_inventory_rather_than_the_whole_palette()
     )
 
 
-#: KB here means 1024 bytes, stated because the prose does not: "around 80 KB" was written about a
-#: document of just over 82 000 B, so KiB is the unit those sentences have always used.
-_KB = 1024
+#: KB here means 1000 bytes, and that was MEASURED rather than assumed. The predecessor sentence
+#: "around 80 KB" entered the tree in ``ead7f08``, where the guide was 79 535 B: 79.5 decimal, but
+#: only 77.7 in KiB. So these sentences have always rounded decimally, and an earlier version of
+#: this comment asserted the opposite from a size taken off a different commit. Keeping the unit
+#: decimal also keeps the two live claims consistent with each other, which KiB would not
+#: (85 359 B is "85" decimal and "83" binary; 28 024 B is "28" decimal and "27" binary).
+_KB = 1000
 
 #: How far a rounded word may sit from the measurement and still be honest. One number, applied to
 #: every claim, so nobody can widen the tolerance of the one claim that has gone wrong.
-_ROUNDING_TOLERANCE_KB = 5.0
+#:
+#: ⚠️ 3, not 5, and the difference is the whole point: the drift this guard exists for moved the
+#: document by 5.2 kB, so a tolerance of 5 would have accepted the stale sentence it was built to
+#: catch. Measured: with 5.0, restoring the pre-fix "around 80 KB" against today's 85.4 kB stayed
+#: GREEN. A guard whose band is wider than the failure is decoration.
+_ROUNDING_TOLERANCE_KB = 3.0
 
 _MODULE_DOC = Path(guide_module.__file__).read_text(encoding="utf-8")
 _SERVER_DOC = (Path(__file__).resolve().parents[1] / "src" / "epics_mcp" / "server.py").read_text(
@@ -359,12 +368,12 @@ def test_the_rounded_size_claims_still_hold() -> None:
     """GP-20: the prose rounds, and this measures whether the rounding is still true.
 
     ⛔ WHY ROUNDED AND NOT PINNED. An exact byte count for this document stood in three files,
-    eight occurrences over seven lines. It was written on the day the tool was built, was already
-    stale at the next commit, and over a single day the document took four different sizes
+    eight occurrences over seven lines. It was stale in its OWN commit, which raised the guide by
+    50 B in the same change, and across a single day the document took six different sizes
     spanning nearly 8 KB in both directions while the pinned figure never moved. Two further
     figures were DERIVED from it (the structuredContent copy and their sum) and inherited the
-    error, and a fourth, the tool inventory, was 50 B out on its own. Nothing re-ran any of them:
-    measured, no test in this repository checked the size of the guide at all.
+    error, and a fourth, the tool inventory, moved by the same 50 B in the same commit. Nothing
+    re-ran any of them: measured, no test in this repository checked the size of the guide at all.
 
     ⚠️ WHAT IS ASSERTED IS THE SENTENCE, NOT A CONSTANT. Each claim is parsed out of the prose that
     makes it and compared against the live measurement within one shared tolerance. So the two
@@ -393,6 +402,8 @@ def test_the_rounded_size_claims_still_hold() -> None:
     # applies, so this measures the cost the ToolResult shape avoids rather than restating it.
     doubled = whole_bytes + len(json.dumps({"result": guide_text()}).encode("utf-8"))
     ratio = doubled / whole_bytes
+    # ⚠️ The lower bound is a tautology and is kept as documentation, not as a check: JSON escaping
+    # only ever adds bytes, so the ratio cannot fall below 2. The UPPER bound is the live half.
     assert 2.0 < ratio <= 2.2, (
         f"one call would cost {ratio:.2f}x the document, so 'a little over twice' no longer "
         "describes it. That phrase is in tools/guide.py, server.py and this module."
@@ -407,9 +418,15 @@ def test_the_rounded_size_claims_still_hold() -> None:
 
     _, sections = split_sections(guide_text())
     palette = next((s for s in sections if s.startswith("## Tool palette")), "")
-    assert palette, "the tool palette section was renamed; the '27 KB section' claim names it"
+    assert palette, (
+        "the tool palette section was renamed. The 'not the NN KB section' claim in "
+        "tools/guide.py names it, so rename it there in the same commit and adjust this lookup."
+    )
     palette_kb = len(palette.encode("utf-8")) / _KB
-    claimed_palette = _claimed(_MODULE_DOC, r"not the\s+(\d+) KB\s*\n?section", "tools/guide.py")
+    # ``\s+`` on both sides, so a reflow that puts the number and its unit on different lines from
+    # the words around them does not redden a claim that is still true. Measured: the earlier
+    # pattern anchored on a single optional newline and broke on exactly that.
+    claimed_palette = _claimed(_MODULE_DOC, r"not the\s+(\d+)\s+KB\s+section", "tools/guide.py")
     assert abs(palette_kb - claimed_palette) <= _ROUNDING_TOLERANCE_KB, (
         f"the tool palette measures {palette_kb:.1f} KB and the claim says {claimed_palette:.0f} "
         "KB. Re-word it in tools/guide.py."
@@ -423,26 +440,44 @@ def test_the_rounded_size_claims_still_hold() -> None:
     )
 
 
-def test_no_pinned_byte_figure_came_back() -> None:
-    """The other half of GP-20, and the half the ticket's own acceptance command was too narrow for.
+def test_the_four_retired_figures_have_not_been_re_pinned() -> None:
+    """A denylist of the four figures GP-20 retired. NOT a rule against pinning any figure.
 
-    Its ``grep -o '87 268' -r src tests`` checks the first of the four figures and lets the other
-    three through, including the two that sat on the SAME line as it. All four are named here, and
-    the sweep includes markdown, because a rounded sentence can be moved into the shipped guide,
-    where nothing else would read it.
+    ⚠️ The name says denylist because the honest scope is a denylist, and the earlier name
+    ("no pinned byte figure came back") promised a rule this cannot keep: writing a FRESH exact
+    size into the same docstring passes here, measured. What stops that is the review, plus
+    :func:`test_the_rounded_size_claims_still_hold`, which reads the sentences and would redden as
+    soon as a fresh figure drifted from the document.
+
+    The ticket's own acceptance command was narrower still: ``grep -o '87 268' -r src tests`` names
+    the first of the four and lets the other three through, including the two that sat on the SAME
+    line as it. Markdown is swept as well, because a rounded sentence can be moved into the shipped
+    guide, where nothing else would read it.
+
+    Two further limits, stated rather than implied. Only the space-separated spelling is caught
+    (``87268`` and ``87,268`` are not; measured, this tree writes thousands with a plain ASCII
+    space and nothing else). And ``CHANGELOG.md`` is outside the sweep by design: it records what a
+    release said, so a figure frozen there is history rather than a live claim.
     """
     stale = ("87 268", "88 868", "176 136", "1 471")
     root = Path(__file__).resolve().parents[1]
     offenders: dict[str, list[str]] = {}
+    read = 0
     for folder in ("src", "tests"):
         for path in sorted((root / folder).rglob("*")):
             if path.suffix not in {".py", ".md"} or "__pycache__" in path.parts:
                 continue
+            read += 1
             text = path.read_text(encoding="utf-8")
             hits = [figure for figure in stale if figure in text]
             # This module names the figures in prose, as the history that explains the rounding.
             if hits and path.name != Path(__file__).name:
                 offenders[str(path.relative_to(root))] = hits
+    # The anchor: an empty population would make the loop above pass on nothing at all, which is
+    # the failure a sweeping test is least likely to be caught in.
+    assert read > 100, (
+        f"the sweep read only {read} files; src/ or tests/ moved and it reads nothing"
+    )
     assert not offenders, (
         f"a byte figure that went stale within a day is pinned again: {offenders}. Round it and "
         "let test_the_rounded_size_claims_still_hold measure the real one."

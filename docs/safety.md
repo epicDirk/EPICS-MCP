@@ -5,12 +5,14 @@ What this server does by default, what the write gates guarantee, and what decid
 [Back to the README](../README.md)
 
 **This page is the fullest statement of that posture, and the shorter statements elsewhere point
-here.** `README.md`, `SECURITY.md`, `docs/tools.md`, `docs/deployment.md` and the shipped operator
-guide each keep a version sized for their own reader, deliberately: someone who finds only a
-cross-reference on the page they opened is worse off than someone who finds the answer. What those
-copies must not do is age apart, which is what `tests/test_write_posture_sites.py` holds. The gate
-SPECIFICATION is a different question for a different reader (whoever builds the next gate) and
-lives in [write-gate-contract.md](write-gate-contract.md).
+here.** Six of them: `README.md`, `SECURITY.md`, `docs/tools.md`, `docs/deployment.md`, the shipped
+operator guide, and the server's own `instructions` header, which reaches a client that has no
+repository and therefore points at the `get_guide` tool instead of at this file. Each keeps a
+version sized for its own reader, deliberately: someone who finds only a cross-reference on the
+page they opened is worse off than someone who finds the answer. What those copies must not do is
+age apart, which is what `tests/test_write_posture_sites.py` holds, over exactly this list. The
+gate SPECIFICATION is a different question for a different reader (whoever builds the next gate)
+and lives in [write-gate-contract.md](write-gate-contract.md).
 
 This is a controls tool, so the trust questions come first.
 

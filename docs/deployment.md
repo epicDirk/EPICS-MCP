@@ -229,7 +229,8 @@ The write gate is the stricter of the two and demands both, which is why the `Wr
 computes its own reach line rather than pointing at this one. The REST
 planes stay off until their `*_URL` is set. PV writes are gated off by default
 (`EPICS_MCP_ALLOW_PV_WRITE=false`) and additionally need a regex allowlist, a rate limit, an audit
-log and a loopback-only EPICS search reach. That last condition is why the network posture above and
+log and a loopback-only EPICS search reach; the fullest statement of that posture is
+[safety](safety.md), and this page carries only the part you need while bringing a server up. That last condition is why the network posture above and
 the PV write gate are not independent settings: writes on plus a reach beyond loopback is a
 start-time refusal, not a warning.
 
