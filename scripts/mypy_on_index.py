@@ -1,13 +1,18 @@
 """Run mypy against the git INDEX instead of the working tree (GB-83).
 
-WHY. The lint and type hooks of this repository declare ``pass_filenames: false``, so
-their tools walk the WORKING TREE. A single untracked file belonging to a parallel
-window therefore blocks EVERY commit in the repository, including commits that do not
-touch it. That happened twice, and the second time it was mutual: two windows held each
-other, each one recording the other as the cause, so waiting was not a way out. CI does
-not have the problem, because it runs on a clean checkout where untracked files do not
-exist. The local gate was, in other words, stricter than CI at a place that has nothing
-to do with the commit.
+WHY. The type hook of this repository declares ``pass_filenames: false``, so mypy walks
+the WORKING TREE. A single untracked file belonging to a parallel window therefore
+blocks EVERY commit in the repository, including commits that do not touch it. That
+happened twice, and the second time it was mutual: two windows held each other, each one
+recording the other as the cause, so waiting was not a way out. CI does not have the
+problem, because it runs on a clean checkout where untracked files do not exist. The
+local gate was, in other words, stricter than CI at a place that has nothing to do with
+the commit.
+
+Measured 2026-08-15 in all three repositories that carry this file byte-identically:
+``mypy`` is the ONLY hook declaring ``pass_filenames: false``. The sentence above read
+"the lint and type hooks" until then, which was true before ``efa613c`` and contradicted
+the WHY NOT FOR RUFF paragraph below it ever since.
 
 WHAT. ``git checkout-index`` materialises exactly the index into a scratch tree, and
 mypy runs there. That is constructively the set CI checks. The alternative that suggests
