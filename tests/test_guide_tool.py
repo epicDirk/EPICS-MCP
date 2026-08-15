@@ -18,6 +18,8 @@ docstring carries is a promise the caller never sees.
 from __future__ import annotations
 
 import ast
+import json
+import re
 from pathlib import Path
 
 import pytest
@@ -275,9 +277,10 @@ async def test_the_answer_carries_no_structured_copy_of_itself() -> None:
 
     A ``-> str`` return makes FastMCP wrap the value in ``{"result": ...}`` and send it BOTH as a
     text block and as ``structuredContent``, so the document crosses the wire twice, the second
-    copy JSON-escaped and therefore longer. Measured on 2026-08-15 against this guide (87 268 B):
-    87 268 B of text plus 88 868 B of structuredContent, 176 136 B for one call. The tool
-    therefore returns a ``ToolResult`` with one text block and nothing else.
+    copy JSON-escaped and therefore longer: one call costs a little over TWICE the document. The
+    tool therefore returns a ``ToolResult`` with one text block and nothing else. The exact byte
+    figures that used to stand here are gone on purpose (they were stale within a day); the ratio
+    is measured by :func:`test_the_rounded_size_claims_still_hold` below.
 
     Red-proof: change the tool's return annotation to ``str`` and return the text directly.
     """
@@ -321,6 +324,128 @@ async def test_the_tool_key_serves_the_inventory_rather_than_the_whole_palette()
     assert "BEGIN:tool-inventory" in text, "the 'tools' key no longer serves the tool inventory"
     assert "### " not in text, (
         "the 'tools' key serves its subsections too, so the inventory costs their bytes as well"
+    )
+
+
+#: KB here means 1024 bytes, stated because the prose does not: "around 80 KB" was written about a
+#: document of just over 82 000 B, so KiB is the unit those sentences have always used.
+_KB = 1024
+
+#: How far a rounded word may sit from the measurement and still be honest. One number, applied to
+#: every claim, so nobody can widen the tolerance of the one claim that has gone wrong.
+_ROUNDING_TOLERANCE_KB = 5.0
+
+_MODULE_DOC = Path(guide_module.__file__).read_text(encoding="utf-8")
+_SERVER_DOC = (Path(__file__).resolve().parents[1] / "src" / "epics_mcp" / "server.py").read_text(
+    encoding="utf-8"
+)
+
+
+def _claimed(source: str, pattern: str, where: str) -> float:
+    """The number a rounded claim in *source* actually states.
+
+    ⛔ THE CLAIM IS READ OUT OF THE PROSE, never hard-coded here, and that is the whole design. A
+    test carrying its own copy of the figure checks that the DOCUMENT is a certain size; it says
+    nothing about whether the sentence a reader meets is true, so editing the sentence to a wrong
+    value leaves it green. Reading the sentence closes that loop in both directions: the guide
+    growing past its description is red, and mis-describing the guide is red as well.
+    """
+    match = re.search(pattern, source)
+    assert match, f"the rounded size claim {pattern!r} is gone from {where}"
+    return float(match.group(1))
+
+
+def test_the_rounded_size_claims_still_hold() -> None:
+    """GP-20: the prose rounds, and this measures whether the rounding is still true.
+
+    ⛔ WHY ROUNDED AND NOT PINNED. An exact byte count for this document stood in three files,
+    eight occurrences over seven lines. It was written on the day the tool was built, was already
+    stale at the next commit, and over a single day the document took four different sizes
+    spanning nearly 8 KB in both directions while the pinned figure never moved. Two further
+    figures were DERIVED from it (the structuredContent copy and their sum) and inherited the
+    error, and a fourth, the tool inventory, was 50 B out on its own. Nothing re-ran any of them:
+    measured, no test in this repository checked the size of the guide at all.
+
+    ⚠️ WHAT IS ASSERTED IS THE SENTENCE, NOT A CONSTANT. Each claim is parsed out of the prose that
+    makes it and compared against the live measurement within one shared tolerance. So the two
+    ways this can be wrong are both caught: the guide drifting away from its description, and a
+    description edited to something the guide is not.
+
+    ⛔ WHEN THIS GOES RED, EDIT THE PROSE. Widening the tolerance to fit is how the pinned figure
+    survived four sizes; it is one number for all four claims precisely so that it cannot be
+    stretched for whichever one has gone wrong.
+    """
+    whole_bytes = len(guide_text().encode("utf-8"))
+    whole_kb = whole_bytes / _KB
+    claimed_whole = _claimed(_MODULE_DOC, r"guide is around (\d+) KB", "tools/guide.py")
+    assert abs(whole_kb - claimed_whole) <= _ROUNDING_TOLERANCE_KB, (
+        f"the guide measures {whole_bytes} B ({whole_kb:.1f} KB) and tools/guide.py says around "
+        f"{claimed_whole:.0f} KB. Re-word the claim, in tools/guide.py AND in the get_guide "
+        "docstring in server.py, which is the copy a caller reads."
+    )
+    claimed_by_server = _claimed(_SERVER_DOC, r"document is around (\d+) KB", "server.py")
+    assert claimed_by_server == claimed_whole, (
+        f"the two roundings disagree: server.py says {claimed_by_server:.0f} KB, tools/guide.py "
+        f"says {claimed_whole:.0f} KB. They describe the same document and must not drift apart."
+    )
+
+    # The second copy a ``-> str`` return would add. json.dumps is the same escaping the protocol
+    # applies, so this measures the cost the ToolResult shape avoids rather than restating it.
+    doubled = whole_bytes + len(json.dumps({"result": guide_text()}).encode("utf-8"))
+    ratio = doubled / whole_bytes
+    assert 2.0 < ratio <= 2.2, (
+        f"one call would cost {ratio:.2f}x the document, so 'a little over twice' no longer "
+        "describes it. That phrase is in tools/guide.py, server.py and this module."
+    )
+
+    inventory_kb = len(serve_guide("tools").encode("utf-8")) / _KB
+    claimed_inventory = _claimed(_MODULE_DOC, r"inventory, roughly ([\d.]+) KB", "tools/guide.py")
+    assert abs(inventory_kb - claimed_inventory) <= 0.5, (
+        f"the tool inventory measures {inventory_kb:.2f} KB and the claim says roughly "
+        f"{claimed_inventory} KB. Re-word it in tools/guide.py."
+    )
+
+    _, sections = split_sections(guide_text())
+    palette = next((s for s in sections if s.startswith("## Tool palette")), "")
+    assert palette, "the tool palette section was renamed; the '27 KB section' claim names it"
+    palette_kb = len(palette.encode("utf-8")) / _KB
+    claimed_palette = _claimed(_MODULE_DOC, r"not the\s+(\d+) KB\s*\n?section", "tools/guide.py")
+    assert abs(palette_kb - claimed_palette) <= _ROUNDING_TOLERANCE_KB, (
+        f"the tool palette measures {palette_kb:.1f} KB and the claim says {claimed_palette:.0f} "
+        "KB. Re-word it in tools/guide.py."
+    )
+
+    largest = max(len(part.encode("utf-8")) for part in resolve_topics(guide_text()).values())
+    assert largest < whole_bytes / 3, (
+        f"the largest single part is {largest / whole_bytes:.1%} of the document, so the tool "
+        "description's 'the largest single part is under a third of the whole' is now false. That "
+        "sentence is a promise to a CALLER, in the get_guide docstring in server.py."
+    )
+
+
+def test_no_pinned_byte_figure_came_back() -> None:
+    """The other half of GP-20, and the half the ticket's own acceptance command was too narrow for.
+
+    Its ``grep -o '87 268' -r src tests`` checks the first of the four figures and lets the other
+    three through, including the two that sat on the SAME line as it. All four are named here, and
+    the sweep includes markdown, because a rounded sentence can be moved into the shipped guide,
+    where nothing else would read it.
+    """
+    stale = ("87 268", "88 868", "176 136", "1 471")
+    root = Path(__file__).resolve().parents[1]
+    offenders: dict[str, list[str]] = {}
+    for folder in ("src", "tests"):
+        for path in sorted((root / folder).rglob("*")):
+            if path.suffix not in {".py", ".md"} or "__pycache__" in path.parts:
+                continue
+            text = path.read_text(encoding="utf-8")
+            hits = [figure for figure in stale if figure in text]
+            # This module names the figures in prose, as the history that explains the rounding.
+            if hits and path.name != Path(__file__).name:
+                offenders[str(path.relative_to(root))] = hits
+    assert not offenders, (
+        f"a byte figure that went stale within a day is pinned again: {offenders}. Round it and "
+        "let test_the_rounded_size_claims_still_hold measure the real one."
     )
 
 

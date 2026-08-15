@@ -7,21 +7,30 @@ model is meant to FETCH BY ITSELF therefore has to be a tool. A resource is not 
 pulls from, and this guide has been exactly that: complete, guarded against drift, and never
 fetched. The resource stays; this module adds the half a model can reach.
 
-**Why a topic at all, measured rather than assumed.** The guide is 87 268 bytes. Served from a
+**Why a topic at all, measured rather than assumed.** The guide is around 85 KB. Served from a
 tool returning ``str``, FastMCP 3.4.4 wraps the value in ``{"result": ...}`` and sends it BOTH as
 a text block AND as ``structuredContent``, so the same document crosses the wire twice, the second
-copy JSON-escaped and therefore slightly longer: 87 268 B of text plus 88 868 B of
-``structuredContent``, 176 136 B for one call. The server side answers that with a ``ToolResult``
-carrying one text block and no structured payload (see the tool in ``server.py``); this module
-answers the other half, which is that 87 268 B is still too much to hand over for a question about
-one error signature.
+copy JSON-escaped and therefore slightly longer: **one call costs a little over twice the
+document**. The server side answers that with a ``ToolResult`` carrying one text block and no
+structured payload (see the tool in ``server.py``); this module answers the other half, which is
+that a document this size is still too much to hand over for a question about one error signature.
+
+⚠️ **The sizes here are ROUNDED, and that is the fix rather than sloppiness.** An exact byte count
+stood in three files, eight times over. It was written on the day the tool was built and was
+already stale by the next commit; over one day the document took four different sizes, spanning
+nearly 8 KB in both directions, and the pinned figure never moved once. A size that changes
+whenever anyone edits a sentence cannot be carried in prose. What IS stable is the RATIO (two
+copies per call), so that is what this paragraph states, and
+``tests/test_guide_tool.py::test_the_rounded_size_claims_still_hold`` measures the real figures
+and goes red when a rounded word here stops being true. Re-measure rather than trust:
+``len(get_guide().encode("utf-8"))``.
 
 **Two levels of key, because one is not enough here.** Splitting only on ``## `` leaves sections
 of 27 KB and more, each larger than a sibling surface's ENTIRE guide. So the keys PARTITION the
 document instead: a ``## `` key serves that section's own text and a ``### `` key serves one
 subsection, in one flat namespace, with no overlap and no gap. The practical effect is the point:
-a caller asking which tool answers a question gets the 1 471 B tool inventory, not the 27 KB
-section that opens with it.
+a caller asking which tool answers a question gets the tool inventory, roughly 1.5 KB, not the
+27 KB section that opens with it.
 
 **Deterministic by construction.** The text comes from one packaged file, the split is a plain
 line-anchored heading boundary that loses nothing (the parts re-assemble into the file byte for

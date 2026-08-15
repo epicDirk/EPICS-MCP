@@ -299,7 +299,7 @@ async def get_guide(
     prove. It reads nothing but its own packaged document: no PV, no REST plane, no file of
     yours, so it can neither time out nor depend on how this instance is configured.
 
-    The whole document is around 80 KB, which is why 'topic' exists and why omitting it should be
+    The whole document is around 85 KB, which is why 'topic' exists and why omitting it should be
     the exception. The keys partition the document: each returns exactly its own part, VERBATIM,
     so an excerpt is a real excerpt and never a rendering, and the largest single part is under a
     third of the whole. An unknown topic is refused with [UNKNOWN_TOPIC] naming every valid key.
@@ -311,9 +311,11 @@ async def get_guide(
     # document to READ, not a measurement to index: beside the text there is no field a caller
     # could want. And the choice is measured rather than tasteful. A ``-> str`` return makes
     # FastMCP 3.4.4 wrap the value in ``{"result": ...}`` and send it BOTH ways, so the document
-    # crosses the wire twice, the second copy JSON-escaped and therefore longer. Measured against
-    # this guide on 2026-08-15 (87 268 B): 87 268 B of text plus 88 868 B of structuredContent,
-    # 176 136 B for one call, versus 87 268 B for the shape below.
+    # crosses the wire twice, the second copy JSON-escaped and therefore longer, so one call costs
+    # a little over TWICE the document versus once for the shape below. Deliberately a ratio and
+    # not a byte count: the exact figure stood here and in two other files, was wrong within a day
+    # of being written, and nothing re-ran it. The measured version lives in
+    # tests/test_guide_tool.py::test_the_rounded_size_claims_still_hold.
     return ToolResult(content=[TextContent(type="text", text=_serve_guide(topic))])
 
 
