@@ -21,6 +21,17 @@ carry breaking changes).
   first call of a session. New error codes on the wire: `UNKNOWN_TOPIC` for a bad key,
   `GUIDE_DRIFT` if the shipped document and the topic table disagree.
 
+- **The operator guide explains every error code this server names.** Eight codes could reach a
+  caller with no entry in the guide's "Error signatures" section, five of them absent from the
+  guide entirely: `PV_WRITE_DENIED`, `PV_WRITE_OUT_OF_BOUNDS`, `OLOG_WRITE_DENIED`,
+  `RATE_LIMIT_EXCEEDED`, `READ_RATE_LIMIT_EXCEEDED`, `SAFETY_CONFIG_INVALID`, `UNKNOWN_TOPIC` and
+  `GUIDE_DRIFT`. They are grouped by the distinction a caller has to make rather than listed: a
+  write refused by the gate against a value refused by the record's own drive limits (only the
+  second has already spent a rate token), and an audited write-gate rate limit against the
+  unaudited read throttle, which can fire on the reads a write tool performs before its gate is
+  consulted. Nothing changed on the wire; what changed is that the codes are explained where the
+  server sends you to look.
+
 ### Changed
 
 - **`coverage_audit` announces a capped display ABOVE the figures it invalidates, not below them.**
