@@ -472,6 +472,14 @@ tokens), so a huge attachment cannot OOM the process.
 
 ## Operational recipes (the non-obvious parts)
 
+⚠️ **Bringing a deployment UP is not on this surface, and that is deliberate.** Generating a client
+configuration (`epics-init`), reading a report glyph by glyph and scripting its exit code are things
+a HUMAN does at a terminal, and they are written for that reader in
+[docs/deployment.md](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md) section 1
+and [docs/tools.md](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/tools.md). Conversationally,
+the same walkthrough is the `setup_epics_mcp` prompt. What follows is the other half: what the
+services do that no tool description can tell you.
+
 ### List archived PVs: `list_archived_pvs` (or the MGMT API directly)
 `list_archived_pvs` enumerates the archived PV names, the sibling `is_archived`/`get_pv_history`/
 `get_archive_info` tools each require a PV name. Under the hood it calls the MGMT `getAllPVs` (whole
@@ -505,64 +513,6 @@ large waveforms vs. per-network instances, each with its own MGMT root), `getApp
 `identity` tells you which appliance a URL actually is, and enumerating the wrong cluster silently
 yields a complete-looking list of the wrong population.
 
-### Start a deployment's config: `epics-init`
-
-`epics-init` (core install) is the step before the doctor: it prints the MCP client-configuration
-block for one of four named deployment shapes, then runs the doctor against exactly that block.
-`--list` describes the shapes: `sandbox` (loopback only, the shape to start with and the only one
-that needs no editing), `ioc-only`, `ioc-archiver` (the most common partial deployment) and `full`.
-
-Three things about it are worth knowing before you read its output:
-
-- **The block goes to stdout, everything else to stderr**, so a redirect never captures a warning
-  paragraph. ⚠️ Do not tell a user to save it with `>` anyway: a shell redirect writes the encoding
-  its shell prefers, and this block is JSON that a client has to parse. Measured in Windows
-  PowerShell 5.1, `>` writes UTF-16 with a byte-order mark and `Set-Content -Encoding utf8` writes
-  UTF-8 with one, and a strict parser rejects both (POSIX shells and PowerShell 7 are fine). Use
-  `--out PATH`, which writes UTF-8 with LF whatever the shell is. It refuses an existing file unless
-  `--force` is given, because a client configuration usually holds other servers; and it writes
-  nothing while placeholders remain, so the fill-in-and-rerun loop stays open. `--absolute-command`
-  additionally names the installed server by its resolved path, which is what a client that does not
-  inherit an interactive `PATH` needs.
-- **It probes the preset, not your shell.** The doctor reads `os.environ`, so the command clears
-  every `EPICS_MCP_*` variable and the six EPICS search-path variables before applying the preset.
-  Without that, a variable you exported earlier would be probed as though it were part of the
-  preset, and the report would describe a configuration that exists nowhere. Transport tuning
-  outside those two groups is left alone.
-- **A shape with no REST plane confirms very little on its own.** Without `--probe-pv NAME` the
-  live plane is reported and never contacted, so a clean run on `sandbox` or `ioc-only` says
-  nothing is misconfigured, not that anything works. The command says so; `--probe-pv` is what
-  turns it into a real answer.
-
-A preset still carrying placeholders (`<archiver-host>`) makes the command REFUSE the check and
-name them, rather than report a DNS failure shaped like a genuine finding. Fill them in the emitted
-block or pass `--set NAME=VALUE`. The refusal reads the VALUE, not a word list, so it also catches a
-placeholder you typed yourself in any case (`<ARCHIVER-HOST>`, `<archiver_host>`); it deliberately
-does not fire on a named regex group (`(?P<dev>...)`), which a write-gate pattern legitimately
-carries.
-
-**If the user has no PV to point at yet, they have one:** `epics-testpv` (core install) serves
-`TEST:Temperature`, an analogue reading with a unit, and `TEST:Heater`, a writable switch, over
-PVAccess until Ctrl-C. It needs no EPICS Base and no IOC, since p4p ships with this package, which
-makes it the thing to suggest before `--probe-pv` on a machine with nothing else running. It binds
-LOOPBACK unless `--interface` says otherwise, and it prints the port it actually bound, which is not
-the default one when that is already taken. Say that port out loud if you relay its output: a client
-configured with `EPICS_PVA_NAME_SERVERS` alone will not find a server that fell back.
-
-**A loopback preset has to search BOTH ways, and `sandbox` does.** `EPICS_PVA_ADDR_LIST=127.0.0.1`
-searches by UDP broadcast on the PVA search port (5076), which an IOC started directly on the host
-answers. A containerised IOC usually publishes only its PVA **TCP** port (commonly 5075) and no UDP
-search port, so a broadcast-only config finds nothing and the probe reports `PV_TIMEOUT` while the
-IOC is perfectly healthy. `sandbox` therefore also sets `EPICS_PVA_NAME_SERVERS=127.0.0.1:5075`, the
-TCP-unicast search path. Measured over all four cells, both IOC shapes against both configurations:
-the line turns the container from `disconnected` to `connected` and leaves a native server
-connected, because the UDP search still runs alongside it. If your IOC serves another port, change
-it; and outside this preset, `EPICS_PVA_NAME_SERVERS` is the right answer whenever the server you
-want is reachable by address and port but not by broadcast.
-
-The same walkthrough is available conversationally as the `setup_epics_mcp` prompt, which asks
-about each plane in turn and ends by telling the user which `epics-init` command to run.
-
 ### Verify a deployment's config: `epics-doctor`
 <!-- BEGIN:status-prose (the plane statuses named outside the legend below are drift-guarded against PlaneStatus, see tests/test_guide_matches_code.py) -->
 The `epics-doctor` CLI (core install) is a read-only self-check: it probes every CONFIGURED plane
@@ -582,15 +532,6 @@ either. Run it first in a new facility to confirm the environment the launcher h
 pass/fail the live PVA plane against a real PV. Full deployment/config guide:
 [docs/deployment.md](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md).
 <!-- END:status-prose -->
-
-Every line that reports a PROBLEM also carries its remedy, appended to the observation and never
-replacing it, so a `--json` reader gets both from the same `detail` field. That includes
-`identity_probe_failed` (`!`), which is inconclusive rather than failing and carries one anyway.
-The honest-but-not-healthy states do not, because there is nothing here to act on: `unverified`
-(`?`) already reports the specific clue it measured, and `no_ingest` (`~`) is a fault inside the
-appliance, not in this configuration. What the guard behind this proves is that a remedy is PRESENT
-and imperative, not that it is right
-([docs/known-limits.md](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/known-limits.md)).
 
 **Reachable is not identified, and identified is not working: read the `?`, `!` and `~` lines.**
 The transport probe is a HEAD for ChannelFinder, Alarm, Olog and Naming (the archiver's is a real
@@ -617,13 +558,6 @@ identity probe hits the 401. Each plane is therefore also asked to **name itself
 | `✗` | `backend_down` | reachable AND the service named itself, but a backend it depends on is measurably down, the alarm logger reports its Elasticsearch as not `Connected`, so its search/history tools will fail. Unlike `unverified`, identity IS proven here and the service reports its OWN backend broken. Exit `1` |
 | `~` | `no_ingest` | reachable, identity PROVEN, and the service is measurably not doing its job: an Archiver appliance holding channels with **none** connected, or reporting one of its own webapps stopped. The wiring fault this tool exists to catch. Exit stays `0` on purpose (a freshly commissioned or fully paused appliance is legitimately in this state, and a hard failure would cry wolf in every CI job), so it is surfaced instead: this glyph, its own verdict line, and `degraded_planes` in `--json`. Not `?`: that means "we could not tell what this is", and here we can |
 <!-- END:status-glyphs -->
-
-`unverified` is not a failure on purpose: that a healthy service answers its beacon anonymously is
-measured at one site, and making that a hard failure everywhere would be an overclaim. The same
-holds when the beacon names a *different* known service. Measured: a path-based reverse proxy
-served the real ChannelFinder API while the base GET answered as Olog, so a foreign name cannot
-prove a misconfiguration. The doctor reports it honestly and keeps the found name in the detail as
-the first clue for when the config IS wrong.
 
 Each plane has its own beacon, because they do not share one:
 
@@ -654,38 +588,6 @@ The Naming `/rest/swagger.json` beacon is single-sourced (title + path in `servi
 and now backs **two** surfaces: epics-doctor's naming plane AND `lookup_device_name`'s S13
 definitive-negative gate (a 204/404 is trusted only after this beacon confirms the responder, see
 "not found vs not registered" below).
-
-The report also carries a write-gate block, and it answers a different question from every plane
-line above it: not "is this service reachable" but "can this server write anywhere, and where". A
-gate that is OFF, which is what a default install has for both, gets ONE line saying so and nothing
-else, because that is the whole answer for it. For an ARMED gate the block adds what it allows (the
-PV name pattern, the Olog logbook allowlist), the rate limit, and the destination a write would
-actually take, which is the EPICS search reach for one gate and the Olog target URL for the other.
-It names the audit log either way, and says whether it can be appended to, cannot, or could not be
-decided without creating the file. In `--json` every field is present whether a gate is armed or
-not, and the whole lives under `write_safety`.
-
-Three of its states read backwards if you skim them, so it spells them out: an empty PV pattern on
-an armed gate makes the server REFUSE TO START rather than permitting everything, an empty logbook
-allowlist DENIES every write rather than permitting any, and an allowlisted remote target reaches a
-real logbook rather than a sandbox. Two limits are worth carrying: the block is informative and
-never moves the verdict or the exit code, and it describes the environment of the process that ran
-the command, which need not be the one a running server was started with. It reports what the gates
-are set to; it does not evaluate whether such a server would start.
-
-Scripting against this? Exit `0` means "nothing failed", **not** "everything confirmed", read
-`verification_complete` / `unverified_planes` / `inconclusive_identity_planes` / `degraded_planes`
-from `--json`, never the exit code alone (and `write_safety` for the write posture, which never
-moves the verdict, so a pass-or-fail script may ignore it). A FAILED identity probe lands in
-`inconclusive_identity_planes` (exit `3`), NOT
-in `unverified_planes` (exit `0`), a script hunting identity problems must read both. And for
-**positive** confirmation assert `identified_planes` is non-empty: `verification_complete` is
-vacuously true on an empty config, so it alone cannot tell "all confirmed" from "nothing ran".
-⚠️ `degraded_planes` is the one none of the others covers, and it is the one that would be missed
-by a script written against this list before it existed: a plane there PROVED its identity and is
-measurably not doing its job, so it appears **in** `identified_planes`, leaves `ok` and
-`verification_complete` `True`, stays out of `unverified_planes`, and exits `0`. Reading
-`identified_planes` alone would count a non-archiving appliance as positively confirmed.
 
 ### Retrieval-cluster-aware appliances
 An Archiver Appliance may run as an **N-member failover cluster**. Such a cluster is retrieval-aware: a

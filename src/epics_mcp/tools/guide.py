@@ -75,7 +75,6 @@ TOPICS: Mapping[str, str] = {
     "olog-attachments": "Olog attachment posture",
     "recipes": "Operational recipes",
     "archived-pvs": "List archived PVs",
-    "init": "Start a deployment's config",
     "doctor": "Verify a deployment's config",
     "cluster": "Retrieval-cluster-aware appliances",
     "ca-bundle": "CA-bundle: combine the trust anchors",

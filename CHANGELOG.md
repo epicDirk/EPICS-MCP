@@ -19,6 +19,19 @@ carry breaking changes).
   first call of a session. New error codes on the wire: `UNKNOWN_TOPIC` for a bad key,
   `GUIDE_DRIFT` if the shipped document and the topic table disagree.
 
+### Changed
+
+- **The operator guide no longer repeats the command-line walkthrough, and is 9 % smaller for it.**
+  Two things had two homes: `epics-init`'s whole section, and the parts of the `epics-doctor`
+  section that teach how to READ its report (the remedy rule, the `unverified` rationale, the write
+  gates block, the exit-code and `--json` scripting advice). All of it is written for a human at a
+  terminal, and all of it is in [the deployment guide](docs/deployment.md) section 1, in
+  [docs/tools.md](docs/tools.md), or beside the code it describes. Nothing was dropped without a
+  home: what the guide keeps is the half no tool description carries, the plane beacons, the
+  archiver ingest question, and what "reachable but not identified" means. `epics-pv://guide` and
+  `get_guide` therefore serve 79 535 B where they served 87 415 B before, and the recipes section
+  in particular went from 29 194 B to 21 411 B.
+
 ### Fixed
 
 - **`epics-doctor` printed a fragment of the Olog password for one spelling of
