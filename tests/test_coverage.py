@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from epics_mcp.services.coverage import IndexRow, audit_coverage
+from epics_mcp.services.coverage import IndexRow, audit_coverage, render_markdown
 from epics_mcp.services.crossplane import CFRegistryCapped
 
 
@@ -385,3 +385,46 @@ def test_a_withheld_gap_is_named_as_excluded_from_critical_uncovered() -> None:
     assert "DEV:A" not in report.critical_uncovered
     assert any("have a withheld gap and no proven gap" in n for n in report.notes), report.notes
     assert any("1 delivered PV(s)" in n for n in report.notes), report.notes
+
+
+def test_the_cap_warning_stands_in_the_head_above_every_gap_figure() -> None:
+    """A capped display is announced BEFORE the numbers it makes a lower bound, not after them.
+
+    Position is the whole point of this guard, so it asserts an ORDER, not a substring: the cap
+    warning used to sit under the figures, in the Notes and in a bare counting line, and a reader
+    who takes ``critical_uncovered`` at face value has drawn the conclusion by the time the caveat
+    arrives. The warning names the consequence (``has_display`` withheld) rather than the count
+    alone, because the count answers "how many displays", not "what does this report still mean".
+
+    ⚠ It deliberately claims NO percentage: the numerator names embed targets from the walk, the
+    inventory's ``displays`` are the tops carrying a PV, and a capped fragment WITHOUT a PV is in
+    the first and not in the second (probed 2026-08-15), so a share could exceed 100%. That is
+    asserted here too, so a later "improvement" that divides the two has to face this line.
+
+    RED-PROOF: move the warning back below ``critical_uncovered`` and the order assertion fails;
+    drop the consequence clause and the wording assertion fails.
+    """
+    report = audit_coverage(
+        [_row("DEV:A")],
+        scope="DEV:",
+        channelfinder=_FakeCF({"DEV:A", "DEV:B"}),
+        cf_requested=True,
+        context_capped=("capped.bob",),
+    )
+    markdown = render_markdown(report)
+
+    assert "hit the per-display context cap" in markdown
+    assert "LOWER BOUND" in markdown
+    assert "capped.bob" in markdown
+    warning_at = markdown.index("hit the per-display context cap")
+    figures_at = markdown.index("critical_uncovered (delivered + proven gap)")
+    assert warning_at < figures_at, (
+        "the cap warning must stand ABOVE the gap figures it qualifies, "
+        f"found at {warning_at} against {figures_at}"
+    )
+    line_end = markdown.index(chr(10), warning_at)
+    head_line = markdown[warning_at:line_end]
+    assert "%" not in head_line, (
+        "the cap line must not claim a share: numerator and denominator come from different "
+        f"populations, see the comment in render_markdown. Line: {head_line!r}"
+    )

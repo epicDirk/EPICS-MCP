@@ -23,6 +23,15 @@ carry breaking changes).
 
 ### Changed
 
+- **`coverage_audit` announces a capped display ABOVE the figures it invalidates, not below them.**
+  A display that hit the per-display context cap makes every gap figure in the report a lower bound
+  (a PV missing from the display set is reported `withheld` rather than `no`), but the report said
+  so twice at the bottom: a bare counting line under the numbers, and a note under that. Now one
+  warning stands in the head, names the consequence, and lists the capped displays; the counting
+  line below is gone, so the caveat is not split across two places. The report claims no
+  percentage: the capped displays and the inventory's display list are different populations, so a
+  share of the two could exceed 100%.
+
 - **`crossplane_check` now says HOW MANY non-channel references there are per protocol, not just
   that four protocols exist.** The note used to read `N distinct non-channel reference(s)
   (loc/sim/sys/other)`, which named every protocol the tool knows and no number for any of them; on

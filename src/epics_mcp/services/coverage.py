@@ -443,6 +443,26 @@ def render_markdown(report: CoverageReport) -> str:
     lines.append(f"- **Scope:** `{report.scope or '* (whole site)'}`")
     lines.append(f"- **Planes live:** {', '.join(report.planes_live)}")
     lines.append(f"- **ChannelFinder registered (under scope):** {report.cf_registered}")
+    # The cap warning belongs HERE, above the numbers, not in the Notes below them: it does not
+    # qualify one figure, it makes EVERY gap figure in this report a lower bound (a not-in-D PV is
+    # reported `withheld` rather than `no`, see audit_coverage). A reader who takes
+    # critical_uncovered at face value and meets the caveat afterwards has already drawn the
+    # conclusion.
+    # ⚠ NO PERCENTAGE, and that is measured rather than an omission: a share needs a denominator
+    # from the SAME population as the numerator, and the server has none. `context_capped` names
+    # embed TARGETS from the walk, while the inventory's `displays` are the tops that carry at
+    # least one PV; probed 2026-08-15 on a fixture, a capped fragment WITHOUT a PV appears in the
+    # first and not in the second, so the "share" could exceed 100%. Reporting one anyway would be
+    # the two-denominators defect this project forbids (see services/inventory_adapter.py). The
+    # honest denominator lives in the engine's walk and does not cross the seam today.
+    if report.displays_incomplete:
+        lines.append(
+            f"- ⚠️ **{len(report.displays_incomplete)} display(s) hit the per-display context cap, "
+            "so THIS WHOLE REPORT IS A LOWER BOUND:** a PV that is not in the display set may sit "
+            "on one of them, so its `has_display` is WITHHELD rather than `no`, and blind_spots "
+            "and critical_uncovered undercount accordingly (re-run with a higher context cap)."
+        )
+        lines.extend(f"  - {display}" for display in report.displays_incomplete)
     lines.append("")
     lines.append(f"- **Registered AND on a screen (cf_and_display):** {len(report.cf_and_display)}")
     lines.append(f"- **Registered but on NO screen (cf_only / blind-spot):** {len(report.cf_only)}")
@@ -458,11 +478,6 @@ def render_markdown(report: CoverageReport) -> str:
         f"  - blind_spots: {len(report.blind_spots)}, unarchived: {len(report.unarchived)}, "
         f"unalarmed: {len(report.unalarmed)}"
     )
-    if report.displays_incomplete:
-        lines.append(
-            f"- **Displays with incomplete inventory (lower bound):** "
-            f"{len(report.displays_incomplete)}"
-        )
     if report.notes:
         lines.append("")
         lines.append("## Notes")
