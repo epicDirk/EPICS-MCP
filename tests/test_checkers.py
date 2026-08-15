@@ -492,3 +492,76 @@ async def test_the_naming_withheld_note_carries_no_credential(
     assert result["withheld"] is True
     assert "HTTP 500" in note
     assert "s3cr3t" not in note
+
+
+def _session_whose_head_fails() -> Mock:
+    """A transport-seam double whose HEAD dies, so ``check_connectivity`` is the failing call."""
+    session = Mock()
+    session.head.side_effect = requests.exceptions.ConnectionError(
+        "HTTPConnectionPool: failed to establish a new connection to "
+        "http://svc:s3cr3t@naming.example.org"
+    )
+    return session
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_fragment"),
+    [
+        ("connectivity", "Failed to connect to Naming Service"),
+        ("identity", "swagger beacon"),
+    ],
+)
+async def test_the_other_two_naming_withheld_notes_carry_no_credential_either(
+    monkeypatch: pytest.MonkeyPatch, case: str, expected_fragment: str
+) -> None:
+    """The same promise on the two withheld routes the test above cannot reach.
+
+    WHY this is not a duplicate, and the distinction is the whole point. That test drives ONE route,
+    a 5xx inside ``_get_device_name``, whose message is built by ``shown_cause``. Two further routes
+    reach a caller of ``lookup_device_name`` with a note, and each is composed by a DIFFERENT
+    function of the substrate:
+
+    * ``check_connectivity`` fails at the transport and composes ``shown_failure`` (address AND
+      cause, so a leak could enter through either half);
+    * the S13 identity gate refuses a would-be definitive "not registered" and composes
+      ``shown_url`` (address only).
+
+    Neither function is exercised by the 5xx route, so "there is a test for that" was a claim about
+    a route rather than about the promise. Measured 2026-08-15 across all four withheld routes of
+    this function, including the S11 unreadable-payload one: every one is clean today. This guard
+    holds the two that nothing else held.
+
+    Red-provable, both cases measured on a mutant and the source restored byte for byte:
+    replacing ``shown_failure(self.base_url, exc)`` with an f-string of the two raw halves in
+    ``naming_client.check_connectivity`` fails ``connectivity``; replacing ``shown_url(...)`` with
+    ``self.base_url`` in ``naming_client._require_verified_identity`` fails ``identity``.
+
+    Positive control in both cases: an empty answer would satisfy the absence of a credential on its
+    own, so the note must exist AND name its own route. The two fragments are deliberately chosen
+    from the part of each message the mutants leave STANDING. Picked from the redacted part instead,
+    the control fires first and the mutant is recorded as caught by the wrong assertion, which says
+    nothing about whether the credential one bites.
+    """
+    monkeypatch.setattr(
+        checkers,
+        "get_config",
+        lambda: EpicsConfig(naming_url="http://svc:s3cr3t@naming.example.org"),
+    )
+    # 404 on deviceNames is the service's "not registered", which the S13 gate then refuses to
+    # trust until the responder proves it is the Naming Service, so this is the identity route.
+    session = _session_whose_head_fails() if case == "connectivity" else _session_that_serves(404)
+    monkeypatch.setattr(
+        "epics_mcp.services.naming_client.get_shared_session", lambda **_kwargs: session
+    )
+    # The identity probe builds its OWN session (build_retrying_session), so it needs its own
+    # double; without it this case would reach for a real socket.
+    monkeypatch.setattr(
+        "epics_mcp.services.naming_identity.build_retrying_session", lambda **_kwargs: session
+    )
+
+    result = await checkers.query_naming_lookup("DEV-TEST01")
+
+    note = str(result.get("note", ""))
+    assert result["withheld"] is True, result
+    assert expected_fragment in note, note
+    assert "s3cr3t" not in note
