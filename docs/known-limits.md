@@ -24,6 +24,7 @@ retired, and where it went, is listed at the end.
 [17 the service-URL redaction](#17--the-service-url-redaction-removes-a-userinfo-not-every-secret-a-url-can-carry) ·
 [18 one line is not one field set](#18--the-audit-record-is-one-line-which-is-not-the-same-as-one-set-of-fields) ·
 [19 the repository posture is unguarded](#19--the-repository-side-release-protections-are-unguarded-and-a-guard-over-them-was-rejected) ·
+[20 the commit-message guard](#20--the-commit-message-guard-is-per-clone-state-and-its-site-pattern-half-needs-a-git-ignored-file) ·
 [retired](#retired-entries-and-where-they-went)
 
 ---
@@ -446,6 +447,49 @@ gh api repos/<owner>/<repo>/actions/permissions/selected-actions
 
 A cheaper signal costs nothing: if a `v*` tag push starts the upload **without** stopping for an
 approval, one of the two protections is gone.
+
+
+## 20 · The commit-message guard is per-clone state, and its site-pattern half needs a git-ignored file
+
+**Measured 2026-08-15**, when the guard was built.
+
+The commit MESSAGE is a leak surface no file guard reaches: `test_guide.py` scans what
+`git ls-files` reports, and commit metadata is outside that population by construction. It is not a
+theoretical surface. `git log --format='%ae' | sort | uniq -c` counts **614** commits carrying the
+facility address, out of the **670** that predate the identity switch, and running the shared
+detector over `git log --format=%B` flags **2 of 722** bodies for a real device name. None of it can
+be corrected afterwards: tags and published releases pin the commit ids.
+
+`scripts/check_commit_message.py` closes it going forward, at the `commit-msg` stage. **Two halves
+of that guard are outside what any test here can hold.**
+
+**(a) The installation.** `.pre-commit-config.yaml` carries the wiring, and
+`tests/test_commit_message_guard.py` pins it: the stage entry, `pass_filenames`, `always_run`, and
+`default_stages`, so the hook cannot go inert or silently widen onto the file hooks. But
+`.git/hooks/commit-msg` is per-clone state outside the tree. **A fresh clone has no message guard
+until somebody runs it:**
+
+```bash
+uv run pre-commit install --hook-type commit-msg
+ls .git/hooks/commit-msg          # the only honest check
+```
+
+⚠️ `uv run pre-commit run --all-files` drives the **pre-commit stage only**, so a green gate run is
+no evidence at all about this hook. That is why its decision function is pure and pinned by
+ordinary tests, which is the half CI can check.
+
+**(b) The site patterns.** `check_no_ess_internal.load_patterns()` reads
+`scripts/.pii_patterns.local`, which is **git-ignored**. On the FILE surface that gap has a
+fallback, the committed repo-wide test CI runs (see the facility-agnostic guardrail in
+`CLAUDE.md`). Here there is none, because CI never reaches this stage. A clone without that file
+runs the message guard with the built-in secret formats and the structural device-name detector
+only. The structural detector is the half that depends on no local file, and it is the half the
+measured leak needed.
+
+**The tempting repair, probed and rejected.** A test asserting `.git/hooks/commit-msg` exists would
+be red on every fresh clone and every CI run, which trains people to ignore it, and green the moment
+someone writes any file with that name. Neither direction says anything about whether the hook runs.
+The check is the `ls` above, at the moment it matters.
 
 
 ## Retired entries, and where they went

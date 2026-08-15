@@ -104,7 +104,9 @@ strings (they embed the full request URL), or notes from a live session into a c
 enforced by `test_guide.py`'s `test_knowledge_files_are_facility_agnostic` over the committed knowledge
 files: a site/username/person/local-drive-path **denylist** repo-wide, plus a **structural
 device-PV-name detector** over the **same repo-wide population**, flagging anything ESS-PV-shaped
-which is not a declared synthetic placeholder. That detector used to read only doc-suffixed files
+which is not a declared synthetic placeholder. That detector itself lives in
+`scripts/pv_leak_scan.py`, because a second surface needs the same needle (the commit message, see
+Gates below) and the rule is to link it, never to copy it. That detector used to read only doc-suffixed files
 outside `tests/` and `src/`, which was 20 of 180 tracked files; measured, the path half of that
 filter excluded nothing and the **suffix** half hid every `.py`, which is where the one real leak
 this repo has had (QA-27) actually sat. Widening it cost zero hits, because the test fixtures pass
@@ -323,13 +325,17 @@ below). Conventional commit prefixes, one logical change per commit.
 
 **The commit MESSAGE is guarded too, and it is the one guard a clone can be missing.** The tracked
 files are covered by `test_guide.py`; commit metadata is outside that population by construction,
-and it is where this repository's measured leak sat (a facility identity in 507 of 563 signatures,
-real device names in bodies, all public and unrewritable because tags and releases pin the commit
-ids). `scripts/check_commit_message.py` applies the EXISTING detectors to the message at the
-`commit-msg` stage. ⚠️ `pre-commit run --all-files` drives the pre-commit stage only, so a green
-gate run says nothing about it, and `.git/hooks/commit-msg` exists only after
+and it is where this repository's measured leak sat: on 2026-08-15, `git log --format='%ae' | sort
+| uniq -c` counts 614 commits carrying the facility address out of the 670 that predate the
+identity switch, and the shared detector over `git log --format=%B` flags 2 of 722 bodies for a
+real device name. All public, and unrewritable because tags and releases pin the commit ids.
+`scripts/check_commit_message.py` applies the EXISTING detectors to the message at the `commit-msg`
+stage. ⚠️ `pre-commit run --all-files` drives the pre-commit stage only, so a green gate run says
+nothing about it, and `.git/hooks/commit-msg` exists only after
 `pre-commit install --hook-type commit-msg`. Check with `ls .git/hooks/commit-msg` rather than
-assuming; the wiring is guarded, the installation cannot be.
+assuming; the wiring is guarded, the installation cannot be, and the site-pattern half of the scan
+depends on a git-ignored local file that a fresh clone does not have. Both limits are dated in
+`docs/known-limits.md`.
 
 **English, and ASCII punctuation, both mechanised.** This repository grew out of a German-speaking
 project and carried German comments and an em dash as its default connector for months; removing

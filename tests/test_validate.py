@@ -1,6 +1,7 @@
 """Tests for epics_mcp.tools.validate."""
 
 import os
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -388,17 +389,39 @@ def _engine_suffix_declarations() -> dict[str, object]:
     invisible to it: measured 2026-08-15, ``opi_navigation.extraction`` carries
     ``_TREND_TARGET_SUFFIX``, so the blind spot was not hypothetical.
 
-    A module that cannot be imported is REPORTED rather than skipped. A guard that quietly passes
-    over the module carrying the declaration it exists to find is the sham shape this repository
-    keeps meeting.
+    ⚠️ THE ROOT PACKAGE IS SEEDED SEPARATELY, and leaving it out was a real hole rather than a
+    tidiness point: ``pkgutil.walk_packages`` yields SUBmodules only, so a declaration in
+    ``opi_navigation/__init__.py`` was invisible to a walk whose docstring said "the whole engine".
+    That is the same blind-spot class as GB-91 itself, in the one module the phrase most obviously
+    covers. Latent today (measured: the root declares none), which is exactly when it is cheap.
+
+    A module that cannot be imported is REPORTED rather than skipped, and the ``onerror`` callback
+    is what makes that structural. Without it ``walk_packages`` SWALLOWS an ImportError raised
+    while descending into a subpackage and silently stops walking its children: measured, breaking
+    ``opi_navigation.pv_analysis`` dropped the walk from 36 modules to 27 with no error raised, and
+    the guard only reddened by luck, because the parent is yielded first and re-raises here.
     """
     import importlib
     import pkgutil
 
     import opi_navigation
 
-    declarations: dict[str, object] = {}
-    for found in pkgutil.walk_packages(opi_navigation.__path__, f"{opi_navigation.__name__}."):
+    def _unreadable(name: str) -> None:
+        pytest.fail(
+            f"cannot walk engine module {name}, so its suffix declarations and those of every "
+            "module below it were not read at all; fix the import rather than letting this guard "
+            "run on a partial view of the engine"
+        )
+
+    declarations: dict[str, object] = {
+        f"{opi_navigation.__name__}.{attribute}": getattr(opi_navigation, attribute)
+        for attribute in dir(opi_navigation)
+        if attribute.endswith(("_SUFFIX", "_SUFFIXES"))
+    }
+    walk = pkgutil.walk_packages(
+        opi_navigation.__path__, f"{opi_navigation.__name__}.", onerror=_unreadable
+    )
+    for found in walk:
         try:
             module = importlib.import_module(found.name)
         except Exception as exc:  # noqa: BLE001 - reported, never swallowed
@@ -422,39 +445,140 @@ def _declared_suffix_candidates(declarations: dict[str, object]) -> set[str]:
     change it exists to catch. Sequences are therefore UNFOLDED, and a value that is neither a
     string nor a flat sequence of strings fails by name instead of vanishing.
 
-    "Is a file suffix" is decided by the leading dot, which is ``Path.suffix``'s own definition,
-    not by a list of names. That is what keeps ``fragment.FRAGMENT_NAME_SUFFIXES`` (``_widget``,
-    ``_array``, ...) out on a RULE: those are name fragments, not extensions. A name-based
-    exception list was the tempting alternative and is rejected here, because it would be edited
-    the next time the guard went red and would then blind it permanently.
+    ⚠️ A DECLARATION WITHOUT ITS DOT IS STILL PROBED, and an earlier shape here dropped it. Keeping
+    only values that already start with a dot read like ``Path.suffix``'s definition, but the
+    engine writes the CONSTANT, not the parsed suffix, and nothing stops a future one from saying
+    ``"opi"``. Probing a value that turns out not to be collected costs a single empty file and
+    cannot produce a false red, so the dot is ADDED rather than required, and the set stays a
+    superset of anything the engine might mean.
+
+    ``fragment.FRAGMENT_NAME_SUFFIXES`` (``_widget``, ``_array``, ...) therefore joins the probe as
+    ``._widget`` and simply comes back uncollected. It drops out on the MEASUREMENT, which is
+    stronger than the rule it used to drop out on, and no name-based exception list is needed: such
+    a list was the tempting alternative and is rejected here, because it would be edited the next
+    time the guard went red and would then blind it permanently.
+
+    A MAPPING IS UNFOLDED BY ITS KEYS rather than refused, and that repair came from the review.
+    Refusing it made a defect-FREE declaration red: the engine's collecting structure is literally
+    a dict (``eimer = {_BOB_SUFFIX: displays, ...}``), so hoisting it to a module constant, the
+    most natural refactor there is, turned this guard red while nothing was wrong. That is exactly
+    the counter-force the rebuild set out to avoid, reintroduced by the shape check.
+
+    A value carrying a path separator, or an empty one, is not a suffix in any reading and is
+    reported rather than silently normalised into something else.
     """
     candidates: set[str] = set()
     for qualified_name, value in sorted(declarations.items()):
         if isinstance(value, str):
             values = [value]
-        elif isinstance(value, (tuple, list, set, frozenset)) and all(
+        # A mapping is unfolded by its KEYS and a sequence by its items; iterating either yields
+        # exactly those, so the two cases are one branch rather than a repetition.
+        elif isinstance(value, (dict, tuple, list, set, frozenset)) and all(
             isinstance(item, str) for item in value
         ):
             values = sorted(value)
         else:
             pytest.fail(
-                f"engine declaration {qualified_name} is {type(value).__name__}, neither a string "
-                "nor a flat sequence of strings, so this guard cannot tell whether it names a "
-                "collected file kind. Give it a readable shape, or say here why it is not a "
-                "suffix; do NOT let it be filtered out, which is how GB-91 stayed green."
+                f"engine declaration {qualified_name} is {type(value).__name__}, none of a "
+                "string, a flat sequence of strings or a mapping keyed by strings, so this guard "
+                "cannot tell whether it names a collected file kind. Give it a readable shape, or "
+                "say here why it is not a suffix; do NOT let it be filtered out, which is how "
+                "GB-91 stayed green."
             )
-        candidates.update(item for item in values if item.startswith("."))
+        for item in values:
+            if not item or "/" in item or "\\" in item:
+                pytest.fail(
+                    f"engine declaration {qualified_name} carries {item!r}, which is empty or "
+                    "holds a path separator, so it cannot be probed as a file suffix. Say here "
+                    "what it is instead of letting it be dropped."
+                )
+            candidates.add(item if item.startswith(".") else f".{item}")
     return candidates
 
 
-#: Suffixes the inventory must NOT collect, probed alongside the declared ones. They are the
-#: cover for a widening that carries no constant at all: an extension added as an inline literal
-#: inside the walk would otherwise never enter the candidate set. ``.opi`` is the realistic one
-#: (the BOY format this project migrates away from), the other two are ordinary neighbours in a
-#: display repository. Honest limit, stated rather than implied: a widening onto some FOURTH
-#: extension with no declaration anywhere still passes here, and its cover is the behaviour
-#: guard below, which asks the inventory itself.
+#: A string constant that LOOKS like a file extension: a dot and up to eight alphanumerics. The
+#: shape is deliberately loose, because a candidate that turns out not to be collected costs one
+#: empty file and can never produce a false red, while a candidate missed is a blind spot.
+_SUFFIX_SHAPED_LITERAL = re.compile(r"^\.[A-Za-z0-9]{1,8}$")
+
+
+def _engine_literal_candidates() -> set[str]:
+    """Suffix-shaped string literals in the COMPILED CODE of every engine function.
+
+    ⚠️ THIS EXISTS BECAUSE THE DECLARATION SWEEP ALONE WAS PROVEN INSUFFICIENT, and the proof came
+    from the review rather than from reasoning. A widening written as an inline literal inside the
+    collecting dict (``eimer = {_BOB_SUFFIX: displays, ".json": displays, ...}``) declares nothing
+    at module level, so it entered no candidate set: measured against a mutated engine, the entire
+    suite stayed green while the engine collected ``.json`` and this server refused it. That is
+    the GB-79 defect itself, alive again one rename away from the shape GB-91 closed.
+
+    A literal cannot hide from ``co_consts``, so this reads them, recursively (a comprehension or
+    a nested function is its own code object). It is still DISCOVERY only: what any of these means
+    is decided by probing, exactly as for the declarations, so ``.3f`` (a format spec, measured
+    present) simply comes back uncollected instead of needing an exemption.
+    """
+    import importlib
+    import pkgutil
+    import types
+
+    import opi_navigation
+
+    found: set[str] = set()
+
+    def _walk_code(code: types.CodeType) -> None:
+        for constant in code.co_consts:
+            if isinstance(constant, types.CodeType):
+                _walk_code(constant)
+            elif isinstance(constant, str) and _SUFFIX_SHAPED_LITERAL.match(constant):
+                found.add(constant)
+
+    modules = [opi_navigation] + [
+        importlib.import_module(found_module.name)
+        for found_module in pkgutil.walk_packages(
+            opi_navigation.__path__, f"{opi_navigation.__name__}."
+        )
+    ]
+    for module in modules:
+        for attribute in dir(module):
+            code = getattr(getattr(module, attribute, None), "__code__", None)
+            if isinstance(code, types.CodeType):
+                _walk_code(code)
+    return found
+
+
+#: Suffixes the inventory must NOT collect, probed alongside everything discovered. ``.opi`` is
+#: the realistic one (the BOY format this project migrates away from), the other two are ordinary
+#: neighbours in a display repository.
+#:
+#: Honest limit, stated rather than implied, and NARROWER than it was: with declarations and code
+#: literals both swept, what remains uncovered is a collecting suffix that appears in neither, for
+#: instance one read at runtime from a configuration file. These three are the cover for the
+#: plausible names of such a case, and nothing pretends they are the cover for all of them.
 _MUST_NOT_BE_COLLECTED = (".opi", ".txt", ".xml")
+
+
+def _probed_suffixes() -> set[str]:
+    """The one set BOTH coupling guards below probe: declarations, code literals, controls.
+
+    Sharing it is the repair for a gap the review measured: the two guards were described as
+    complementary and had IDENTICAL blind spots, because the behaviour guard wrote a typed
+    five-name fixture that reached no further than the controls. Deriving both from one set means
+    a candidate discovered at either layer is asked at both, so a widening of the DISCOVERY
+    (``find_repo_files``) and a widening of the INVENTORY (``analyze_pv_inventory``, which could
+    add a walk of its own) are each caught by the guard that measures that layer.
+    """
+    declarations = _engine_suffix_declarations()
+    assert declarations, (
+        "the engine declares no *_SUFFIX attribute at all, so nothing was probed. Either the "
+        "package layout moved and this walk no longer reaches it, or the declarations are gone; "
+        "both are findings, not a green run."
+    )
+    literals = _engine_literal_candidates()
+    assert literals, (
+        "no suffix-shaped literal was found anywhere in the engine's compiled code, which cannot "
+        "be true while it collects files at all; the sweep is reading nothing."
+    )
+    return _declared_suffix_candidates(declarations) | literals | set(_MUST_NOT_BE_COLLECTED)
 
 
 def test_our_suffixes_are_exactly_the_engines_collecting_suffixes(tmp_path: Path) -> None:
@@ -478,28 +602,28 @@ def test_our_suffixes_are_exactly_the_engines_collecting_suffixes(tmp_path: Path
     directory of probe files. Measured 2026-08-15, that function decides purely on the suffix
     (``eimer.get(candidate.suffix.lower())``, no parsing), so a probe of any content is a valid
     question, and ``extraction._TREND_TARGET_SUFFIX`` is simply not collected rather than a false
-    alarm.
+    alarm. (``eimer`` is the engine's own identifier. The engine is a German-language package, and
+    these are quotations of its source: translating a symbol name inside a quotation would make the
+    quotation wrong and unfindable by grep. Every word this repository writes is still English.)
 
     The equality then states both halves. A suffix the ENGINE gains reddens it, because we would
     refuse files the inventory reads, which is the GB-79 defect itself. A suffix WE accept and the
     engine does not reddens it too, because we would run a full walk for an answer already
     settled.
 
-    Red-proven against the real engine before this was committed, each mutation restored
-    byte-identically: our set shrunk (reports ``.plt`` as the engine's surplus), the engine
-    widened by a tuple declaration with ``_BOB_SUFFIX`` left in place (the GB-91 shape: the
-    PREVIOUS guard stayed green, this one goes red), the engine widened by an inline literal with
-    no declaration at all (caught by the controls), and a non-string declaration (fails by name).
+    Red-proven against the real engine, each mutation restored byte-identically: our set shrunk
+    (reports ``.plt`` as the engine's surplus), the engine widened by a tuple declaration with
+    ``_BOB_SUFFIX`` left in place (the GB-91 shape: the PREVIOUS guard stayed green, this one goes
+    red), the engine widened by an inline ``.json`` literal that no declaration mentions (found
+    through :func:`_engine_literal_candidates`, which the review's proof made necessary), and a
+    declaration that is neither a string, a sequence nor a mapping (fails by name).
+
+    The residual hole is named at :data:`_MUST_NOT_BE_COLLECTED` rather than here, because that is
+    where the cover for it lives.
     """
     from opi_navigation.discovery import find_repo_files
 
-    declarations = _engine_suffix_declarations()
-    assert declarations, (
-        "the engine declares no *_SUFFIX attribute at all, so nothing was probed. Either the "
-        "package layout moved and this walk no longer reaches it, or the declarations are gone; "
-        "both are findings, not a green run."
-    )
-    probed = _declared_suffix_candidates(declarations) | set(_MUST_NOT_BE_COLLECTED)
+    probed = _probed_suffixes()
 
     for index, suffix in enumerate(sorted(probed)):
         # The stem is unique per suffix so two candidates cannot collide on one file name, and
@@ -512,7 +636,7 @@ def test_our_suffixes_are_exactly_the_engines_collecting_suffixes(tmp_path: Path
     assert collected == set(INVENTORY_SUFFIXES), (
         "the display-PV engine and this server disagree about which files the inventory reads. "
         f"engine collects: {sorted(collected)}, ours: {sorted(INVENTORY_SUFFIXES)} "
-        f"(probed: {sorted(probed)}, from {sorted(declarations)}). "
+        f"(probed: {sorted(probed)}). "
         "A suffix only the ENGINE has means the refusal in _run_validate rejects files the "
         "inventory would read; a suffix only WE have means it accepts files that can only ever "
         "come back empty after a full walk."
@@ -544,6 +668,21 @@ def test_the_inventory_reads_exactly_the_suffixes_we_accept(tmp_path: Path) -> N
 
     The case folding stays measured rather than restated (``UPPER.BOB`` is a display), because
     a test that re-implements the rule it checks proves only that the author is consistent.
+
+    ⚠️ **THE FIXTURE IS NO LONGER FIVE TYPED NAMES, and the reason is a measured failure of the
+    PAIR rather than of this test.** Those five reached exactly ``.txt`` and ``.opi`` beyond our
+    own two, which is precisely what the sibling's controls already cover, so the two guards were
+    described as complementary while having IDENTICAL blind spots: a widening onto ``.json``
+    passed both, and a widening added inside ``analyze_pv_inventory`` alone passed both as well,
+    since the sibling never asks this layer. Both now probe :func:`_probed_suffixes`, so every
+    candidate is asked at BOTH layers, and the five named fixtures stay on top as the readable,
+    hand-chosen core (the case pair among them).
+
+    The probed sweep is a SECOND assertion below rather than more entries in this fixture, and
+    that is forced by the layer: each probed suffix has to be written twice, once with a display
+    body and once with a trend body, because a suffix routed to the trend bucket yields nothing
+    from display XML. Judging those two files individually would report the BODY, not the suffix,
+    so the sweep compares suffixes while the five named files keep comparing names.
     """
     from opi_navigation.pv_analysis import analyze_pv_inventory
 
@@ -576,6 +715,38 @@ def test_the_inventory_reads_exactly_the_suffixes_we_accept(tmp_path: Path) -> N
         "display from a trend on this field, so it must not silently become 'display'"
     )
     assert kinds["kept.bob"] == "display"
+
+
+def test_the_inventory_collects_exactly_the_probed_suffixes_we_accept(tmp_path: Path) -> None:
+    """The sweep half of the inventory guard: every candidate the engine could mean, at THIS layer.
+
+    Its sibling above names five files by hand, which is readable and was measured insufficient:
+    those five reach ``.txt`` and ``.opi`` beyond our own two, exactly what the discovery guard's
+    controls already cover, so the pair had one blind spot rather than two coverages. A widening
+    onto ``.json`` passed both, and so did a widening added inside ``analyze_pv_inventory``
+    alone, which the discovery guard cannot see by construction because it asks ``find_repo_files``.
+
+    Both layers now probe :func:`_probed_suffixes`. Each candidate is written TWICE, with a display
+    body and with a trend body, and counts as collected if EITHER appears: this layer parses
+    content, so a suffix routed to the trend bucket yields nothing from display XML, and judging
+    the two files separately would report the body rather than the suffix.
+    """
+    from opi_navigation.pv_analysis import analyze_pv_inventory
+
+    probed = sorted(_probed_suffixes())
+    for index, suffix in enumerate(probed):
+        (tmp_path / f"probe{index}d{suffix}").write_text(_FRAGMENT, encoding="utf-8")
+        (tmp_path / f"probe{index}t{suffix}").write_text(_TREND, encoding="utf-8")
+
+    inventory = analyze_pv_inventory(tmp_path)
+    collected = {Path(entry.display_path).suffix.lower() for entry in inventory.displays}
+
+    assert collected == set(INVENTORY_SUFFIXES), (
+        "the display-PV inventory does not collect the set of suffixes this server accepts "
+        f"(inventory collects: {sorted(collected)}, ours: {sorted(INVENTORY_SUFFIXES)}, "
+        f"probed: {probed}). A surplus on the inventory side means _run_validate refuses files it "
+        "would read; a surplus on ours means it accepts files that can only come back empty."
+    )
 
 
 async def test_a_standalone_trend_is_answered_rather_than_refused(tmp_path: Path) -> None:

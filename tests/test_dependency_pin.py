@@ -222,23 +222,55 @@ def unpinned_group_members(pyproject_text: str) -> list[str]:
     guard, and the failure message asks for that decision to be written down rather than assumed.
     On a supply-chain surface a red that demands a decision is the correct outcome.
 
-    ``{include-group = ...}`` entries are not distributions and carry no source by construction,
-    so they are skipped; the skip is a rule about the PEP 735 shape, not an exception for a name.
+    ⚠️ **"PINNED" MEANS PINNED AWAY FROM THE INDEX, not "has an entry", and that distinction came
+    from the review.** A source of the form ``{ index = "..." }`` is still an index lookup: it
+    tells uv WHICH index, and pip, which reads none of this, still resolves the bare name from the
+    public one. Accepting it would have made the guard green on the very hole it exists to close,
+    for every future member. Only a source that names an origin outside an index (``git``,
+    ``path``, ``url``, ``workspace``) removes the confusion surface.
+
+    ``{include-group = ...}`` entries are not distributions and carry no source by construction, so
+    they are skipped BY THAT KEY. An earlier shape skipped every non-string member, which read as
+    the same thing and was not: any other table shape vanished silently, and the test that claimed
+    to prove the include-group case could not fail for the reason its name gave.
+
+    A member this cannot name is REPORTED, not dropped. Fail-open on an unparseable requirement
+    would be the one branch where the guard says "clean" about something it did not understand.
     """
     data = tomllib.loads(pyproject_text)
     groups = data.get("dependency-groups")
     sources = data.get("tool", {}).get("uv", {}).get("sources", {})
-    pinned = {_normalised(name) for name in sources} if isinstance(sources, dict) else set()
+    pinned = _off_index_sources(sources if isinstance(sources, dict) else {})
 
     unpinned: list[str] = []
     for members in (groups or {}).values() if isinstance(groups, dict) else []:
         for member in members if isinstance(members, list) else []:
+            if isinstance(member, dict) and set(member) == {"include-group"}:
+                continue  # a reference to another group, not a package
             if not isinstance(member, str):
-                continue  # an include-group table: a reference to another group, not a package
+                unpinned.append(f"<unreadable group member: {member!r}>")
+                continue
             name = _requirement_name(member)
-            if name and _normalised(name) not in pinned:
+            if not name:
+                unpinned.append(f"<unnamed group member: {member!r}>")
+            elif _normalised(name) not in pinned:
                 unpinned.append(name)
     return sorted(set(unpinned))
+
+
+#: The source keys that move a requirement OFF the public index. ``index``/``registry`` are
+#: deliberately absent: they select an index rather than replace one, so the bare name stays
+#: resolvable for every resolver that does not read this table.
+_OFF_INDEX_KEYS = frozenset({"git", "path", "url", "workspace"})
+
+
+def _off_index_sources(sources: dict[str, object]) -> set[str]:
+    """The normalised names whose `[tool.uv.sources]` entry names an origin outside an index."""
+    return {
+        _normalised(name)
+        for name, source in sources.items()
+        if isinstance(source, dict) and _OFF_INDEX_KEYS & set(source)
+    }
 
 
 #: A PEP 508 requirement starts with its name; extras, a version specifier and a marker follow.
@@ -264,9 +296,14 @@ def test_every_dependency_group_member_is_source_pinned() -> None:
     pyproject = (_ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
     # Positive control first, for the reason the sibling above states: an empty group would
-    # satisfy the assertion below by having nothing left to report.
+    # satisfy the assertion below by having nothing left to report. The SHAPE is asserted too,
+    # because truthiness alone was not enough: a group written as a bare string is truthy while
+    # the walk iterates nothing, so a malformed file read as clean (found by the review).
     data = tomllib.loads(pyproject)
-    assert data["dependency-groups"]["displays"], "the displays group is empty, nothing was checked"
+    members = data["dependency-groups"]["displays"]
+    assert isinstance(members, list) and members, (
+        f"the displays group is {members!r}, not a non-empty list, so nothing was checked"
+    )
 
     assert unpinned_group_members(pyproject) == [], (
         "a [dependency-groups] member has no [tool.uv.sources] entry, so every resolver that is "
@@ -303,7 +340,12 @@ def test_a_source_pinned_member_is_accepted_across_the_two_spellings() -> None:
 
 def test_an_include_group_reference_is_not_read_as_a_package() -> None:
     """PEP 735 lets a group include another group. That table names no distribution, so demanding
-    a source for it would be a permanent false red on a shape the standard defines."""
+    a source for it would be a permanent false red on a shape the standard defines.
+
+    The skip reads the KEY, so this can fail for the reason its name gives. While the code skipped
+    every non-string member, only the generic type check could ever fail here and the test proved
+    nothing about ``include-group`` at all; its sibling below is the other half of that repair.
+    """
     pyproject = (
         "[dependency-groups]\n"
         'displays = ["opi-navigation"]\n'
@@ -313,6 +355,50 @@ def test_an_include_group_reference_is_not_read_as_a_package() -> None:
     )
 
     assert unpinned_group_members(pyproject) == []
+
+
+def test_a_table_member_that_is_not_an_include_group_is_reported() -> None:
+    """The other half: only ``include-group`` is a known non-package shape, so anything else in
+    table form is reported rather than dropped. A guard that silently passes over what it cannot
+    read is the shape this repository keeps finding."""
+    pyproject = (
+        "[dependency-groups]\n"
+        'displays = [{ package = "opi-navigation" }]\n'
+        "[tool.uv.sources]\n"
+        f'opi-navigation = {{ git = "{_URL}", rev = "{_SHA_A}" }}\n'
+    )
+
+    reported = unpinned_group_members(pyproject)
+
+    assert len(reported) == 1 and "unreadable" in reported[0], reported
+
+
+def test_a_member_sourced_from_an_index_is_still_reported() -> None:
+    """The measured hole in the first shape of this guard: ``{ index = ... }`` counted as pinned.
+
+    It selects WHICH index for uv; it does not take the name off an index, and pip reads none of
+    this table. So a future member bought its way out of this guard with one line while the
+    confusion surface stayed exactly as it was. Only an origin outside an index closes it.
+    """
+    pyproject = (
+        "[dependency-groups]\n"
+        'displays = ["opi-navigation", "some-tool"]\n'
+        "[tool.uv.sources]\n"
+        f'opi-navigation = {{ git = "{_URL}", rev = "{_SHA_A}" }}\n'
+        'some-tool = { index = "pypi" }\n'
+    )
+
+    assert unpinned_group_members(pyproject) == ["some-tool"]
+
+
+def test_an_unparseable_member_is_reported_rather_than_dropped() -> None:
+    """Fail-closed on a shape the requirement parser cannot name. Returning nothing for it would
+    be the one branch where this guard says "clean" about something it did not understand."""
+    pyproject = '[dependency-groups]\ndisplays = ["-e .", "   "]\n'
+
+    reported = unpinned_group_members(pyproject)
+
+    assert len(reported) == 2 and all("unnamed" in entry for entry in reported), reported
 
 
 def test_the_pinned_revision_is_the_same_in_pyproject_and_uv_lock() -> None:

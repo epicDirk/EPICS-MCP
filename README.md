@@ -275,7 +275,13 @@ uv sync --extra dev --group displays --locked  # full local install (toolchain +
 uv run pytest                                  # test suite
 uv run pytest --cov=src --cov-branch           # with coverage
 uv run pre-commit run --all-files              # ruff + format + mypy --strict + guards
+uv run pre-commit install --hook-type commit-msg   # one-off: the commit-message guard
 ```
+
+The last line is a **one-off per clone**. Six hooks run over files at commit time; a seventh scans
+the commit *message*, which no file guard can see, and it lives in `.git/hooks/`, outside the tree.
+Until that command is run, a clone has no message guard. Details and the limits:
+[CONTRIBUTING.md](https://github.com/epicDirk/EPICS-MCP/blob/main/CONTRIBUTING.md).
 
 `dev` is the only extra, and it is the toolchain. The `opi_navigation` PV engine is a separate
 **dependency group** (`--group displays`), because it lives in a private repository: a group

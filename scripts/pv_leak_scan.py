@@ -10,8 +10,10 @@ and neither may carry a copy of it (the repository rule is "never copy it, link 
 
   * ``tests/test_guide.py`` scans every TRACKED text file, which is the CI-effective check,
   * ``scripts/check_commit_message.py`` scans the COMMIT MESSAGE, a surface no file guard can
-    reach. That gap was measured, not imagined: 507 of 563 commits carried a facility identity,
-    and some bodies carried real device names (GB-33).
+    reach. That gap is measured rather than imagined, and the measuring rule belongs with the
+    figure: running this detector over ``git log --format=%B`` flags 2 of 722 commit bodies
+    (2026-08-15). The signature half of the same surface is larger and is stated where it is
+    acted on, in ``check_commit_message.py``.
 
 ⚠️ THIS MODULE IS NOT SHIPPED. ``scripts/`` is absent from ``[tool.hatch.build.targets.sdist]
 only-include`` in pyproject.toml, deliberately and with its reason stated there, so this detector

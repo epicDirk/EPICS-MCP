@@ -12,7 +12,7 @@ A short summary of the change and the motivation.
 ## Checklist
 
 - [ ] `uv run pytest` is green (offline default; add `-m live` runs only if you have a sandbox).
-- [ ] `uv run pre-commit run --all-files` is green (ruff, ruff-format, mypy --strict, PII guard).
+- [ ] `uv run pre-commit run --all-files` is green (ruff, ruff-format, mypy --strict, PII guard, and the language and typography guards). Note this drives the **pre-commit stage only**: it never exercises the commit-message guard, which runs at commit time and only in a clone where `pre-commit install --hook-type commit-msg` has been run.
 - [ ] New/changed behaviour is covered by a test.
 - [ ] Read-only posture preserved (no new default-on network egress; any new write surface meets `docs/write-gate-contract.md`).
 - [ ] Public tool/CLI signatures and their descriptions are consistent with the change.
