@@ -762,6 +762,8 @@ Four limits, because this returns a SAMPLE and not an enumeration:
 Each signature below is an exception **class and shape**, never a copied runtime string, so match on
 the class and the field rather than on wording your server may phrase differently.
 
+### A plane fails and the message reads short: redaction, a withheld cause, a bundle that never opened
+
 - **A REST plane fails and the message names a shorter address than you configured.** That is the
   redaction, not a different target: an error names the address WITHOUT its userinfo and without
   its query string, and prints `(unparseable)` where it cannot prove the shown address is the
@@ -794,6 +796,8 @@ the class and the field rather than on wording your server may phrase differentl
   different finding with the same status: that one happens after a handshake was attempted, and it
   fails only the planes whose trust root is missing rather than all of them.
 
+### A PV will not connect, and whether the device is registered at all
+
 - **PV times out / disconnected.** On a PVA name-server a typo **and** a dead IOC both surface as
   `PV_TIMEOUT` (never `PV_NOT_FOUND`), the cause cannot be read off the transport error code. Use
   `diagnose_connection`: the live probe is the sole authority for connected/disconnected; ChannelFinder
@@ -806,6 +810,9 @@ the class and the field rather than on wording your server may phrase differentl
   registered/ACTIVE answer skips the identity probe, the measured hazard is a foreign 404, not a
   foreign ACTIVE record.) The extra swagger round-trip fires only on the not-registered path and is
   cached per client instance; when it withholds, a server-side `logger.debug` records the probe verdict.
+
+### Archiver: history, which appliance answered, and refusals that do not mean "down"
+
 - **Archived? how? history?** `is_archived` / `get_archive_info` / `get_pv_history`. History `status` is
   `ok` / `empty` / `withheld`, a bare `[]` means only a truly empty history, not "could not read";
   a single unreadable sample withholds the whole result rather than being silently skipped.
@@ -826,6 +833,15 @@ the class and the field rather than on wording your server may phrase differentl
   split/proxied deployment's plane layout. `version` is omitted when the appliance lacks it (not
   "always present"). A served **404** here means the wrong endpoint, the retrieval webapp serves
   `/retrieval/bpl`, not `/mgmt/bpl`, and propagates as an error, never a false empty answer.
+- **An Archiver call answers `ARCHIVER_HTTP_5xx` / `INVALID_TIME_WINDOW` / `INVALID_ARGUMENT`.**
+  None of these means the appliance is down: it answered, or the call never left. A 5xx on
+  `get_pv_history` is nearly always the time format (this plane reads zone-explicit ISO and nothing
+  else); `INVALID_TIME_WINDOW` is a window the plane cannot express (e.g. a relative amount);
+  `INVALID_ARGUMENT` is an argument combination that cannot be answered at all. Only
+  `EPICS_CONNECTION_FAILED` means unreachable.
+
+### Alarm: configuration, history filters, and why a correct tree name still withholds
+
 - **Alarm configured / history?** `is_alarm_configured` (`configured` is `true`/`false`/`null`;
   `null` = withheld; the recipe "Discover the alarm config-tree names" above says where a tree name
   comes from, and why a correct one can still be withheld) / `get_alarm_history` (`start` + `end`
@@ -842,6 +858,22 @@ the class and the field rather than on wording your server may phrase differentl
   parser's default branch is a bare `break;`), so an older logger BROADENS the result instead of
   erroring, a returned set can be wider than the filter implies. Confirm a filter with a
   differential probe (a value that must match vs. one that must not) before trusting it.
+- **`is_alarm_configured` answers `configured:null`.** The alarm tree itself returned nothing, so
+  "this PV is not configured" cannot be told apart from "that is not the tree name", the answer is
+  withheld, and a `note` says so. The tree name is **REQUIRED** (no default, the trees are
+  site-specific, so there is no correct universal one; a guessed default silently matches nothing)
+  and **case-sensitive** in the query even though the server lower-cases it to pick the index, so a
+  mis-cased name (`mytree` vs `MyTree`) selects the right index yet matches nothing. Re-run with the
+  tree spelled exactly as the logger stores it. The `config` field in the response echoes your input;
+  it is not the server confirming the tree. ⚠ **Spelling is not the only way to land here, so do not
+  stop at re-typing the name**, and the note says as much with its third cause, "or an empty tree".
+  This tool is pinned to the config index, while the discovery recipe reads every alarm index, so a
+  correctly spelled tree that simply holds nothing in the config index answers `null` too. Which of
+  the two you have follows from where the name came from: see "Discover the alarm config-tree names"
+  above.
+
+### Olog reads: a 401 that is not about credentials, and an empty list that is not empty
+
 - **An Olog search answers 401.** On an anonymous read that is almost never a credentials problem:
   Olog's error dispatch requires authentication, so it returns **401 in place of its own 400**:
   every server-side rejection looks like "unauthorized". Check the query (the time window first);
@@ -849,12 +881,9 @@ the class and the field rather than on wording your server may phrase differentl
 - **An Olog search answers 200 with an empty list.** Not necessarily "nothing matched", an
   unreadable `start`/`end` degrades to *now* server-side and matches nothing (see the recipe
   above). Re-run with a relative amount (`7 days`) to tell a real empty from a dead window.
-- **An Archiver call answers `ARCHIVER_HTTP_5xx` / `INVALID_TIME_WINDOW` / `INVALID_ARGUMENT`.**
-  None of these means the appliance is down: it answered, or the call never left. A 5xx on
-  `get_pv_history` is nearly always the time format (this plane reads zone-explicit ISO and nothing
-  else); `INVALID_TIME_WINDOW` is a window the plane cannot express (e.g. a relative amount);
-  `INVALID_ARGUMENT` is an argument combination that cannot be answered at all. Only
-  `EPICS_CONNECTION_FAILED` means unreachable.
+
+### ChannelFinder: filters, the anchored glob, and a silent zero that is not a refusal
+
 - **Which IOC/host serves a PV?** `find_channels`.
 - **Filter or count channels by property/tag.** `find_channels` takes optional server-side filters
   (`has_properties`/`lacks_properties`/`not_property_values`/`has_tags`/`lacks_tags`) and `count_only`
@@ -884,23 +913,13 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   live connect; use `get_pvs`/`get_pv_value` for liveness). A concrete name instead does a live p4p
   probe. Wildcard enumeration needs `EPICS_MCP_CHANNELFINDER_URL`; unset, it returns an honest
   'requires ChannelFinder' note, never a bare empty that reads as 'no such PV'.
-- **`is_alarm_configured` answers `configured:null`.** The alarm tree itself returned nothing, so
-  "this PV is not configured" cannot be told apart from "that is not the tree name", the answer is
-  withheld, and a `note` says so. The tree name is **REQUIRED** (no default, the trees are
-  site-specific, so there is no correct universal one; a guessed default silently matches nothing)
-  and **case-sensitive** in the query even though the server lower-cases it to pick the index, so a
-  mis-cased name (`mytree` vs `MyTree`) selects the right index yet matches nothing. Re-run with the
-  tree spelled exactly as the logger stores it. The `config` field in the response echoes your input;
-  it is not the server confirming the tree. ⚠ **Spelling is not the only way to land here, so do not
-  stop at re-typing the name**, and the note says as much with its third cause, "or an empty tree".
-  This tool is pinned to the config index, while the discovery recipe reads every alarm index, so a
-  correctly spelled tree that simply holds nothing in the config index answers `null` too. Which of
-  the two you have follows from where the name came from: see "Discover the alarm config-tree names"
-  above.
 - **A ChannelFinder glob finds nothing / finds odd casing.** The glob is **anchored**: a bare
   substring (`Ctrl-EVR-01`) matches 0, wrap it in stars (`*Ctrl-EVR-01*`). And it is
   **case-insensitive**: `*Temp*` legitimately matches `...MorTemPrd`, so a hit may differ in case
   from what you asked.
+
+### What a REST 404 is allowed to mean, and what an unreadable 2xx does instead
+
 - **A REST 404 = `found:false`** only where documented (`getPVTypeInfo`, Olog `get_log_entry`); any other
   error propagates, could-not-read is never silently "not there". An **unreadable 2xx** is part of
   that rule: every REST client validates the payload against its measured schema and raises (or
@@ -914,6 +933,9 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   foreign archiver/olog 404 is corroboration, not a device-identity verdict). With the Olog plane
   *disabled*, `get_log_entry` answers `found:null` (not checked), mirroring the
   `archived`/`configured`/`registered` siblings.
+
+### The display tools: which files they read, and the three ways to get `total: 0`
+
 - **`validate_pvs` reads TWO kinds of file: a `.bob` display and a `.plt` Data Browser trend.**
   A trend is not a screen and the inventory does not pretend it is, it reports the kind on its own
   field; but its trace PVs are real channels and the tool checks them like any other. How a trend
@@ -989,11 +1011,17 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
 - **`coverage_audit` refuses "alarm plane, no tree named" with `INVALID_INPUT`.** Same shape as
   above: the verdict follows from the arguments, so it is given before the display-PV walk rather
   than after it. Name the tree (`alarm_config`); there is no correct default, they are site-specific.
+
+### Arguments refused before a request exists
+
 - **Every `timeout` is refused at zero or below, on every tool that takes one.** A validation error
   naming the argument, before any request exists. A `timeout=0` did not fail honestly: measured, it
   made `find_device` answer "No operator-facing screen references this device", `validate_pvs`
   report the PV as disconnected, `diagnose_connection` name a cause, and `discover_pvs`/`get_pvs`
   return empty. So repeat any EARLIER `timeout=0` call before believing its "nothing found".
+
+### The write gates, the read throttle, and a server that declines to start
+
 - **`set_pv_value` is refused, and WHICH code it carries is the whole diagnosis.**
   `PV_WRITE_DENIED` means the gate said no: either `EPICS_MCP_ALLOW_PV_WRITE` is not `true` (the
   shipping default) or the name is outside `EPICS_MCP_PV_WRITE_PATTERN`. Nothing was sent, an audit
@@ -1021,6 +1049,9 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   malformed `EPICS_MCP_PV_WRITE_PATTERN`, PV writes enabled with an empty pattern, PV writes
   enabled while the EPICS search reach extends beyond loopback, and either gate armed without a
   durable `EPICS_MCP_AUDIT_LOG_FILE`. A server that starts with the gates off never meets it.
+
+### The guide tool itself: your key, or the shipped document
+
 - **`get_guide` refuses a key with `UNKNOWN_TOPIC`, or the guide itself with `GUIDE_DRIFT`.** The
   first is yours to fix: the key does not exist and the message lists every one that does, so no
   second call is needed to find out. Nothing is guessed and nothing falls back to the whole

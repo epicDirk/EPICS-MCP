@@ -34,6 +34,18 @@ carry breaking changes).
 
 ### Changed
 
+- **`get_guide`: the error signatures are eleven addressable groups now, and `errors` serves the
+  section's lead.** That section had become the largest single part of the guide, thirty signatures
+  with no subheading in it, so a question about one of them cost the other twenty-nine as well. It
+  is cut by plane and by kind, each group a topic key of its own: `err-transport`, `err-pv`,
+  `err-archiver`, `err-alarm`, `err-olog`, `err-channelfinder`, `err-rest`, `err-displays`,
+  `err-arguments`, `err-gates`, `err-guide`. **The `errors` key therefore serves the section's own
+  lead, not the signatures below it**, exactly as `tools` has always served the inventory rather
+  than its subsections; ask for the group you need, and every key is listed in the argument
+  description and in every refusal. No signature's text changed; three moved so that each group is
+  contiguous. The largest single part of the whole guide drops from 24 741 B to 8 092 B, and it is
+  in a different section now.
+
 - **`coverage_audit` announces a capped display ABOVE the figures it invalidates, not below them.**
   A display that hit the per-display context cap makes every gap figure in the report a lower bound
   (a PV missing from the display set is reported `withheld` rather than `no`), but the report said

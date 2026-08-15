@@ -32,6 +32,16 @@ subsection, in one flat namespace, with no overlap and no gap. The practical eff
 a caller asking which tool answers a question gets the tool inventory, roughly 1.5 KB, not the
 28 KB section that opens with it.
 
+⚠️ **The error signatures were the second section this argument applies to, and for a while they
+were the counter-example to it.** They are what a caller reaches this surface for most often, and
+the section had grown past 24 KB carrying THIRTY signatures with no ``### `` at all, so asking
+about one of them cost every other one as well. It is now cut into eleven groups, one per plane or
+per kind: ``errors`` serves the section's own lead and each group is a key of its own, exactly as
+for the palette above. Splitting it was a REARRANGEMENT of a shipped document rather than a
+deduplication, which is why it was its own decision and not a tidy-up: three signatures moved so
+that every group would be contiguous, and no signature's text changed by a byte (measured as a
+fingerprint over the signatures, not asserted).
+
 **Deterministic by construction.** The text comes from one packaged file, the split is a plain
 line-anchored heading boundary that loses nothing (the parts re-assemble into the file byte for
 byte, which ``tests/test_guide_tool.py`` measures in both directions), and a topic is an exact key
@@ -95,6 +105,22 @@ TOPICS: Mapping[str, str] = {
     "olog-window": "Olog search time window",
     "alarm-tree": "Discover the alarm config-tree names",
     "errors": "Error signatures",
+    # The error signatures, one group per plane or per kind. ⚠️ The ``err-`` prefix is deliberate
+    # rather than decorative: without it two of these would be ``archiver`` and ``alarm``, standing
+    # beside the recipe keys ``archiver-window``, ``alarm-window`` and ``alarm-tree``, and no
+    # caller could tell a signature group from a recipe by its name. Prefixing is the house
+    # pattern; the five ``olog-`` keys above do the same for the same reason.
+    "err-transport": "redaction, a withheld cause",
+    "err-pv": "whether the device is registered",
+    "err-archiver": "refusals that do not mean",
+    "err-alarm": "why a correct tree name still withholds",
+    "err-olog": "a 401 that is not about credentials",
+    "err-channelfinder": "a silent zero that is not a refusal",
+    "err-rest": "What a REST 404 is allowed to mean",
+    "err-displays": "the three ways to get",
+    "err-arguments": "Arguments refused before a request exists",
+    "err-gates": "a server that declines to start",
+    "err-guide": "The guide tool itself",
 }
 
 

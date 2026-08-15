@@ -327,6 +327,90 @@ async def test_the_tool_key_serves_the_inventory_rather_than_the_whole_palette()
     )
 
 
+async def test_the_errors_key_serves_the_lead_and_not_one_single_signature() -> None:
+    """GP-15: the error signatures are reached one GROUP at a time, never all thirty at once.
+
+    ⛔ THE ASSERTION IS "NO SIGNATURE", NOT "NO SUBHEADING", and the difference is the whole guard.
+    A ``"### " not in text`` check is what the sibling test above can afford, because it has a
+    positive assertion beside it (the inventory marker) that pins WHICH text arrived. Here it would
+    be a sham: delete the FIRST ``### `` of the section and its signatures fall into the lead,
+    which then still contains no ``### `` at all, because the lead ends at the NEXT subheading.
+    The guard would stay green over exactly the regression it exists to catch.
+
+    A signature is a top-level list item, so the lead containing none of them is the property that
+    matters, and it holds however many groups there are. Deliberately zero numbers: the count of
+    groups and their sizes are what a later editor is entitled to change.
+
+    ⚠️ WHAT THIS GUARD IS FOR, corrected against a measurement rather than reasoned. The obvious
+    red-proof, deleting a ``### `` line, does NOT reach this assertion: :func:`resolve_topics`
+    raises ``GUIDE_DRIFT`` first, because the orphaned key then anchors on nothing. So this test is
+    the SECOND line, and the case it owns is the one the first cannot see: a CONSISTENT rollback,
+    where a heading and its key go together. That leaves every remaining topic resolving cleanly
+    while its signatures pile back into the lead, silently, which is precisely how the section grew
+    to thirty signatures in the first place.
+
+    Red-proof, run: remove the first ``### `` line of the section AND its ``err-transport`` entry
+    from ``TOPICS``. Reddens here, naming the strays, with ``resolve_topics`` staying green.
+    """
+    async with Client(mcp) as client:
+        text, _ = await _answer(client, topic="errors")
+    strays = [line for line in text.split("\n") if line.startswith("- ")]
+    assert not strays, (
+        f"the 'errors' key serves {len(strays)} signature(s) rather than the section's lead alone, "
+        "so asking about one error signature pays for its neighbours again. A signature belongs "
+        "under one of the 'err-' subsections. First stray: " + strays[0][:80]
+    )
+    assert text.lstrip().startswith("## Error signatures"), (
+        "the 'errors' key no longer serves the signature section's own lead"
+    )
+
+
+def test_the_unguarded_pages_do_not_restate_the_size_promise() -> None:
+    """GP-15: the size of the guide is promised where it is measured, and nowhere else.
+
+    ⛔ WHY A GUARD AND NOT JUST A CLEANUP. ``docs/tools.md`` carried its own two figures for this
+    document ("~80 KB", "the largest single part is a quarter"). Both were copies of the promise
+    made in ``server.py``, both disagreed with it, and the second was measurably false when it was
+    found: the largest part was 29% of the document, which is not a quarter. Nothing held them,
+    because ``docs/known-limits.md`` already records that this tool table is unchecked. Rewriting
+    them would have produced a fourth accurate copy that ages on the next edit, so the page points
+    at the carrier instead. This is the guard that keeps a figure from creeping back in, and it is
+    the same shape ``tests/test_write_posture_sites.py`` uses for the write posture (GP-4).
+
+    SCOPE, stated because a guard reading wider than it says is worse than a narrow one: the pages
+    are the two that describe the tool WITHOUT being able to measure it. ``server.py`` and
+    ``tools/guide.py`` are excluded because they ARE the carriers, and their wording is checked
+    against the live measurement by :func:`test_the_rounded_size_claims_still_hold`.
+    ``CHANGELOG.md`` is excluded because a release note records what a version said; a guard needs
+    historical exemptions, the construction ``docs/known-limits.md`` section 1 rejects in writing.
+
+    Red-proof: put "the largest single part is a quarter of the document" back into docs/tools.md.
+    """
+    repo = Path(__file__).resolve().parents[1]
+    # A size claim about THIS document: a KB figure, or a fraction of the whole. Both are the
+    # shapes the removed sentence took. Narrow on purpose: a guard that fires on every "quarter"
+    # anywhere would be noise, and noise gets suppressed.
+    claim = re.compile(
+        r"(\d+\s*KB\s+document|document\s+is\s+(around|about|~)?\s*\d+\s*KB"
+        r"|largest\s+single\s+part\s+is\s+(a|under|about)\s+\w+)",
+        re.IGNORECASE,
+    )
+    for page in ("docs/tools.md", "README.md"):
+        text = (repo / page).read_text(encoding="utf-8")
+        for number, line in enumerate(text.split("\n"), start=1):
+            if "get_guide" not in line and "guide" not in line.lower():
+                continue
+            found = claim.search(line)
+            assert not found, (
+                f"{page}:{number} restates the size of the operator guide ({found.group(0)!r}). "
+                "That promise is made in get_guide's own description in src/epics_mcp/server.py "
+                "and guarded by test_the_rounded_size_claims_still_hold, which measures the live "
+                "document. A second copy here is unguarded and will age: point at the carrier "
+                "instead. If a figure genuinely belongs on this page, add the page to the carrier "
+                "list in that test in the same commit, with a reason."
+            )
+
+
 #: KB here means 1000 bytes, and that was MEASURED rather than assumed. The predecessor sentence
 #: "around 80 KB" entered the tree in ``ead7f08``, where the guide was 79 535 B: 79.5 decimal, but
 #: only 77.7 in KiB. So these sentences have always rounded decimally, and an earlier version of
