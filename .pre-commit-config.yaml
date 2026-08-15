@@ -60,8 +60,13 @@ repos:
         pass_filenames: true
         require_serial: true
       # Typography: em/en dashes, ellipses, curly quotes and the doubled hyphen. Ruff cannot do
-      # this job (it recognises only the en dash of that set, measured; see pyproject's
-      # allowed-confusables comment), and it would only ever see .py anyway.
+      # this job: of the NINE characters this guard forbids it recognises THREE (the en dash,
+      # U+2018 and U+201A), probed one at a time through RUF001-003 on 2026-08-15, and it would
+      # only ever see .py anyway.
+      # ⚠ Do not read that three against the "five of the nine" in CLAUDE.md and known-limits:
+      # that five counts the OTHER nine, the old allowed-confusables list, whose typographic
+      # apostrophe and multiplication sign this guard deliberately allows. Two sets, two numbers;
+      # naming the set is what keeps them apart.
       - id: typography
         name: no typographic punctuation
         entry: uv run python scripts/check_typography.py
