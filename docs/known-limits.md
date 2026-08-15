@@ -549,6 +549,34 @@ that direction is unbuildable here: the section legitimately names members of th
 whose literal spellings exist nowhere in the source, so every one would be reported as an
 invention. A guard whose noise outnumbers its findings gets suppressed, and then it guards nothing.
 
+## 22 · The cross-plane block sees three patterns, and each is blind in a stated way
+
+`epics-doctor`'s `Installation` block compares the planes with one another. What it cannot see is
+recorded here rather than in the block itself, because a report that listed its own blind spots on
+every run would train the reader to skip it. Measured 2026-08-16.
+
+**It reports a SIGNATURE, not a cause.** Both the archiver-pair and the one-host findings match on
+statuses and configuration alone. A gateway answering 5xx for both archiver webapps, and two URLs
+that are each one path segment too deep, produce the same evidence as an exchanged pair; nothing
+in the block separates them, and its text says so and names a check rather than a change. The
+`evidence` field on the wire carries `signature` for exactly this reason, so a future confirming
+probe is an additive change rather than a rewrite of the contract.
+
+**The one-host finding is deliberately conservative in one direction and suppressed in another.**
+It needs two distinct host-and-port authorities on the host, so a single-JVM appliance (two planes
+on one address) and a path-based reverse proxy never trigger it, even when they really are down.
+And it stays silent when EVERY configured plane on EVERY host has failed: that shape was measured
+twice here with the cause on the caller's side rather than on any host (an unreadable CA bundle,
+and an `HTTP_PROXY`), so naming hosts would point at the wrong end.
+
+**The TLS comparison is invisible with `EPICS_MCP_TLS_VERIFY=false`.** No `ca_error` is raised
+then, so a host presenting a certificate this process would otherwise reject produces no finding
+at all. It also withholds both findings when fewer than two HTTPS planes are configured (with one,
+the host and the bundle are indistinguishable) and when no HTTPS plane completed a handshake at
+all, because "the others are fine" would then be a claim about handshakes that never ran.
+It names an observation and never a cause: `ca_error` is raised for any SSL failure, so an expired
+certificate, a hostname mismatch and an interception proxy all look the same from here.
+
 ## Retired entries, and where they went
 
 An entry is retired when the limit it records belongs beside the guard it describes, where the next

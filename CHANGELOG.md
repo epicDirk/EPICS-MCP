@@ -95,6 +95,16 @@ carry breaking changes).
 
 ### Fixed
 
+- **`epics-doctor` reports what no single plane can see.** It checked each plane on its own, so
+  three failure shapes that only appear in the comparison went unnamed: the two archiver URLs
+  exchanged, every service on one host dead rather than N services broken, and a TLS failure on
+  some HTTPS planes but not all (which points at those hosts) as against all of them (which points
+  at `EPICS_MCP_CA_BUNDLE`). An `Installation` block now names them, printed only when a pattern
+  matches, and `--json` gains `installation.findings`. It never moves the verdict or the exit
+  code: every pattern keys on a status that already drives one. Each finding says what it could
+  NOT tell apart and names a check rather than a change; the blind spots are dated in
+  `docs/known-limits.md` section 22.
+
 - **`epics-doctor`'s `search paths:` line named addresses but not ports, and a port decides who
   answers.** The line was word for word identical with and without `EPICS_PVA_BROADCAST_PORT`,
   while the client dialled a different port. It now resolves every entry to the endpoint actually

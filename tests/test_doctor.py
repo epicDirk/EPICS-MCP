@@ -66,6 +66,7 @@ from epics_mcp.services.doctor import (
     _write_safety_report,
     run_doctor,
 )
+from epics_mcp.services.doctor_crosscut import InstallationFinding, InstallationReport
 from epics_mcp.services.rest_exceptions import RestConnectionError, RestResponseError
 from epics_mcp.write_posture import (
     _ALLOW_EVERY_PV_NAME,
@@ -2047,6 +2048,75 @@ async def test_the_resolution_caveat_appears_only_for_a_name(
     assert "NAMES rather than IP literals" in with_a_name
 
 
+def _report_with_installation(findings: list[InstallationFinding]) -> DoctorReport:
+    """A hand-built report carrying *findings*, otherwise as clean as run_doctor can make one."""
+    return DoctorReport(
+        planes=[PlaneCheck(plane="channelfinder", configured=True, status="unreachable")],
+        privacy=PrivacyReport(cf_safe_owner_accounts=[], cf_safe_property_names=[]),
+        write_safety=_disarmed_write_safety(),
+        installation=InstallationReport(findings=findings),
+        ok=False,
+        verification_complete=True,
+        degraded_planes=[],
+        unverified_planes=[],
+        inconclusive_identity_planes=[],
+        identified_planes=[],
+    )
+
+
+_A_FINDING = InstallationFinding(
+    pattern="host_down",
+    evidence="signature",
+    planes=["channelfinder", "alarm"],
+    variables=["EPICS_MCP_CHANNELFINDER_URL", "EPICS_MCP_ALARM_URL"],
+    host="services.example.org",
+    detail="2 services on services.example.org failed and none on it answered, so check the host.",
+)
+
+
+def test_the_installation_block_renders_where_the_reader_sees_it() -> None:
+    """Sliced out of the FINISHED report, so a block computed and never appended cannot pass.
+
+    It sits directly under the plane lines because it explains them, and before the privacy and
+    write blocks, which answer different questions.
+    """
+    rendered = cli_doctor._render(_report_with_installation([_A_FINDING])).splitlines()
+    heading = next(i for i, line in enumerate(rendered) if line.startswith("Installation ("))
+    privacy = next(i for i, line in enumerate(rendered) if line.startswith("Privacy "))
+    assert heading < privacy
+    assert any("services.example.org" in line for line in rendered[heading:privacy])
+    # The variables are printed, not only carried on the wire: a plane name is not actionable.
+    assert any("EPICS_MCP_CHANNELFINDER_URL" in line for line in rendered[heading:privacy])
+
+
+def test_a_report_without_findings_prints_no_installation_block() -> None:
+    """Absence is the signal. A permanent "nothing found" line gets read once and skipped after."""
+    assert "Installation (" not in cli_doctor._render(_report_with_installation([]))
+
+
+def test_an_installation_finding_moves_neither_ok_nor_the_exit_category() -> None:
+    """Informative, exactly like the write block, and for a reason rather than by convention.
+
+    Every status the cross-cut keys on already drives a verdict: the three hard ones give exit 1,
+    ``identity_probe_failed`` gives exit 3. A finding is therefore always the EXPLANATION of a
+    verdict already reached, so letting it move the verdict would double-count the same evidence.
+    """
+    without = _report_with_installation([])
+    with_one = _report_with_installation([_A_FINDING])
+    assert with_one.ok == without.ok
+    assert cli_doctor._exit_category(with_one) == cli_doctor._exit_category(without)
+
+
+async def test_run_doctor_carries_the_installation_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The field exists on a real run and is empty when nothing matched, not absent."""
+    _set_config(monkeypatch)
+    report = await run_doctor()
+    assert report.installation.findings == []
+    assert "installation" in report.model_dump(mode="json")
+
+
 # --- cli_doctor.main: exit codes + render (the deliberate 0/1/2 convention) ---
 
 
@@ -2226,6 +2296,7 @@ def test_render_and_exit_agree() -> None:
             planes=[],
             privacy=privacy,
             write_safety=write_safety,
+            installation=InstallationReport(findings=[]),
             ok=ok,
             verification_complete=complete,
             degraded_planes=degraded or [],
@@ -2318,6 +2389,7 @@ def test_the_verdict_names_every_honest_but_not_healthy_state(
         planes=[],
         privacy=PrivacyReport(cf_safe_owner_accounts=[], cf_safe_property_names=[]),
         write_safety=_disarmed_write_safety(),
+        installation=InstallationReport(findings=[]),
         ok=ok,
         # The invariant run_doctor holds (services/doctor.py): a state built any other way is not
         # one the tool can produce, and pinning it here keeps the rows honest.
@@ -2381,6 +2453,7 @@ def test_the_problem_verdict_names_what_failed_before_what_did_not() -> None:
         planes=planes,
         privacy=PrivacyReport(cf_safe_owner_accounts=[], cf_safe_property_names=[]),
         write_safety=_disarmed_write_safety(),
+        installation=InstallationReport(findings=[]),
         ok=False,
         verification_complete=False,
         degraded_planes=["archiver"],

@@ -161,6 +161,13 @@ is measurably not doing its job reports `no_ingest` (`~`), exit `0`.
 from `--json` rather than the exit code alone, and asserts `identified_planes` is non-empty for
 positive confirmation, because `verification_complete` is vacuously true on an empty config.
 
+`--json` also carries `installation.findings`: patterns visible only in the COMPARISON of several
+planes (an exchanged archiver URL pair, every service on one host dead, a TLS failure on some
+HTTPS planes but not all). It is empty on a healthy run and, like `write_safety`, never moves the
+verdict or the exit code, so a script that only wants pass or fail can ignore it. Each finding
+carries `evidence`, which is `signature` when the pattern matched on statuses and configuration
+alone; its limits are dated in [known-limits.md](known-limits.md) section 22.
+
 The same report carries `write_safety`, which answers a different question: what each of the two
 write gates would allow, and where a write could go. It is informative and never moves the verdict
 or the exit code, so a pass-or-fail script can ignore it, while a review of a deployment starts

@@ -72,6 +72,7 @@ from epics_mcp.services.channelfinder_client import (
     resolve_safe_owner_accounts,
     resolve_safe_property_names,
 )
+from epics_mcp.services.doctor_crosscut import InstallationReport, installation_findings
 from epics_mcp.services.epics_client import effective_provider, pv_get
 from epics_mcp.services.naming_client import NamingServiceClient
 from epics_mcp.services.naming_identity import NAMING_SWAGGER_PATH, NAMING_SWAGGER_TITLE
@@ -359,6 +360,12 @@ class DoctorReport(_Model):
     #: What the two write gates would allow, and where. Informative: it never moves ``ok``, the
     #: verdict category or the exit code.
     write_safety: WriteSafetyReport
+    #: Patterns visible only in the COMPARISON of several planes (QA-96). Empty on a healthy run
+    #: and on most broken ones. Informative in the same sense as ``write_safety``: it never moves
+    #: ``ok``, the verdict category or the exit code, because every status it keys on already
+    #: drives one of them. ⚠️ A finding CAN stand beside ``ok: true``: ``identity_probe_failed``
+    #: leaves ``ok`` True while driving exit 3, and it is deliberately a trigger.
+    installation: InstallationReport
     #: True iff no configured plane HARD-FAILED (nothing in ``_FAILING_STATUSES``). Note what this
     #: does NOT say: a plane can be reachable with its identity ``unverified`` (still exit 0) OR its
     #: identity probe ``identity_probe_failed`` (exit 3) and still leave ``ok`` True, ``ok`` alone
@@ -1671,6 +1678,8 @@ async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = Non
         planes=planes,
         privacy=_privacy_report(cfg),
         write_safety=_write_safety_report(cfg),
+        # Pure, no I/O, and computed AFTER the gather because it is a function of its results.
+        installation=installation_findings(cfg, planes),
         ok=ok,
         verification_complete=not unverified and not inconclusive,
         degraded_planes=degraded,

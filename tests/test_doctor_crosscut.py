@@ -1,0 +1,363 @@
+"""The cross-plane patterns (QA-96): what no single plane can see.
+
+Every test here builds ``PlaneCheck`` objects and an ``EpicsConfig`` BY HAND. No client double, no
+transport fake, no network, because the code under test has no client in its call path at all: it
+is a pure function of ``(config, planes)``. That sidesteps the double-at-the-client-class hazard
+this repository records (CLAUDE.md evidence rule 8) rather than navigating it, and it is worth
+stating so nobody "improves" these tests into faking a seam that is not there.
+
+⚠️ What these tests can NOT establish is that the patterns occur in reality. Two of the three are
+reproduced end to end against a throwaway HTTP server in ``test_doctor_crosscut_e2e.py``, because
+QA-96 says in as many words that a pattern only its own fixture produces does not count.
+"""
+
+from __future__ import annotations
+
+import typing
+
+import pytest
+
+from epics_mcp.config import EpicsConfig
+from epics_mcp.services.doctor import PlaneCheck, PlaneStatus
+from epics_mcp.services.doctor_crosscut import (
+    _NEVER_TRIGGERS,
+    _TRIGGERS,
+    installation_findings,
+)
+
+
+def _cfg(**urls: str) -> EpicsConfig:
+    """A config with only the named plane URLs set."""
+    return EpicsConfig(**urls)  # type: ignore[arg-type]
+
+
+def _plane(name: str, status: PlaneStatus, *, ca_ok: bool | None = None) -> PlaneCheck:
+    return PlaneCheck(plane=name, configured=True, status=status, ca_ok=ca_ok)
+
+
+def _patterns(cfg: EpicsConfig, planes: list[PlaneCheck]) -> list[str]:
+    return [f.pattern for f in installation_findings(cfg, planes).findings]
+
+
+# --- the archiver pair ---
+
+_SPLIT = {
+    "archiver_url": "http://appliance.example.org:17665",
+    "archiver_retrieval_url": "http://appliance.example.org:17668",
+}
+
+
+def test_a_swapped_archiver_pair_is_reported() -> None:
+    """Both webapps erroring while pointing at different URLs is the signature of an exchange."""
+    cfg = _cfg(**_SPLIT)
+    planes = [_plane("archiver", "api_error"), _plane("archiver_retrieval", "api_error")]
+    assert "archiver_url_pair" in _patterns(cfg, planes)
+
+
+def test_a_single_failing_archiver_plane_is_not_a_pair_finding() -> None:
+    """One broken webapp is one broken webapp. Widening this to ``or`` is the obvious mistake."""
+    cfg = _cfg(**_SPLIT)
+    planes = [_plane("archiver", "api_error"), _plane("archiver_retrieval", "ok")]
+    assert "archiver_url_pair" not in _patterns(cfg, planes)
+
+
+def test_a_single_jvm_appliance_can_never_look_like_a_swapped_pair() -> None:
+    """The retrieval variable is empty there and both planes resolve to the mgmt URL.
+
+    Structural rather than filtered: with one variable unset there is no pair to exchange. This is
+    the false positive that would hit the most common deployment, so it is closed by the trigger
+    itself and not by a caveat in the text.
+    """
+    cfg = _cfg(archiver_url="http://appliance.example.org:17665")
+    planes = [_plane("archiver", "api_error"), _plane("archiver_retrieval", "api_error")]
+    assert "archiver_url_pair" not in _patterns(cfg, planes)
+
+
+def test_two_identical_archiver_urls_are_not_a_swapped_pair() -> None:
+    """Both variables set to the same value: exchanging them changes nothing."""
+    one = "http://appliance.example.org:17665"
+    cfg = _cfg(archiver_url=one, archiver_retrieval_url=one)
+    planes = [_plane("archiver", "api_error"), _plane("archiver_retrieval", "api_error")]
+    assert "archiver_url_pair" not in _patterns(cfg, planes)
+
+
+def test_the_pair_finding_names_a_check_and_never_an_exchange() -> None:
+    """It is a SIGNATURE, and the invited action has to match that.
+
+    A gateway erroring for both webapps produces the same evidence. An operator told to swap two
+    values on this evidence would turn a correct configuration into a wrong one, and quietly: the
+    retrieval fallback keeps answering. So the text may say "check" and must not say "swap them".
+    """
+    cfg = _cfg(**_SPLIT)
+    planes = [_plane("archiver", "api_error"), _plane("archiver_retrieval", "api_error")]
+    finding = installation_findings(cfg, planes).findings[0]
+    assert finding.evidence == "signature"
+    assert "verify a route before you change a value" in finding.detail
+    assert "gateway" in finding.detail
+
+
+# --- one host down ---
+
+_TWO_ON_ONE_HOST = {
+    "channelfinder_url": "http://services.example.org:8080/ChannelFinder",
+    "alarm_url": "http://services.example.org:8081",
+}
+
+
+def test_two_dead_services_on_one_host_are_reported_as_the_host() -> None:
+    cfg = _cfg(**_TWO_ON_ONE_HOST, naming_url="http://elsewhere.example.org:8099")
+    planes = [
+        _plane("channelfinder", "unreachable"),
+        _plane("alarm", "unreachable"),
+        _plane("naming", "ok"),
+    ]
+    findings = installation_findings(cfg, planes).findings
+    assert [f.pattern for f in findings] == ["host_down"]
+    assert findings[0].host == "services.example.org"
+    # The other host is NAMED, so the reader learns this is one host rather than everything.
+    assert "elsewhere.example.org" in findings[0].detail
+
+
+def test_one_dead_plane_on_a_shared_host_is_not_a_dead_host() -> None:
+    """Needs at least two authorities; one failure among several on a host is a service fault."""
+    cfg = _cfg(**_TWO_ON_ONE_HOST)
+    planes = [_plane("channelfinder", "unreachable"), _plane("alarm", "ok")]
+    assert _patterns(cfg, planes) == []
+
+
+def test_two_planes_on_ONE_authority_are_one_service_not_two() -> None:
+    """A single-JVM appliance, and a path-based reverse proxy, put several planes on one address.
+
+    Counting PLANES instead of authorities would call that "2 services down" on a host where
+    exactly one thing is broken. Conservative on purpose: this block removes false all-clears, it
+    must not add false alarms.
+    """
+    one = "http://appliance.example.org:17665"
+    cfg = _cfg(archiver_url=one, olog_url="http://elsewhere.example.org:8080/Olog")
+    planes = [
+        _plane("archiver", "unreachable"),
+        _plane("archiver_retrieval", "unreachable"),
+        _plane("olog", "ok"),
+    ]
+    assert _patterns(cfg, planes) == []
+
+
+def test_two_dead_planes_on_two_hosts_are_not_one_dead_host() -> None:
+    cfg = _cfg(
+        channelfinder_url="http://cf.example.org:8080/ChannelFinder",
+        alarm_url="http://alarm.example.org:8081",
+        naming_url="http://naming.example.org:8099",
+    )
+    planes = [
+        _plane("channelfinder", "unreachable"),
+        _plane("alarm", "unreachable"),
+        _plane("naming", "ok"),
+    ]
+    assert _patterns(cfg, planes) == []
+
+
+def test_everything_dead_everywhere_is_not_reported_as_a_dead_host() -> None:
+    """The measured false positive, twice over, and both times the cause was on THIS machine.
+
+    An unreadable CA bundle turned all six HTTPS planes ``unreachable`` without a request leaving,
+    and an ``HTTP_PROXY`` did the same. Firing here would name several innocent hosts, and print
+    them INSTEAD of the only true statement: nothing left this machine at all.
+    """
+    cfg = _cfg(**_TWO_ON_ONE_HOST, naming_url="http://elsewhere.example.org:8099")
+    planes = [
+        _plane("channelfinder", "unreachable"),
+        _plane("alarm", "unreachable"),
+        _plane("naming", "unreachable"),
+    ]
+    assert "host_down" not in _patterns(cfg, planes)
+
+
+def test_a_lone_host_is_named_as_the_whole_deployment() -> None:
+    """With no other host configured, "one host of several" would be the wrong sentence."""
+    cfg = _cfg(**_TWO_ON_ONE_HOST, naming_url="http://services.example.org:8099")
+    planes = [
+        _plane("channelfinder", "unreachable"),
+        _plane("alarm", "unreachable"),
+        _plane("naming", "ok"),
+    ]
+    findings = installation_findings(cfg, planes).findings
+    # naming is healthy on the same host, so the host has an answer: nothing is claimed.
+    assert findings == []
+
+
+def test_a_healthy_plane_on_the_host_withdraws_the_finding() -> None:
+    """ "None on it answered" is part of the claim, so one answer refutes it."""
+    cfg = _cfg(
+        **_TWO_ON_ONE_HOST,
+        olog_url="http://services.example.org:8082/Olog",
+    )
+    planes = [
+        _plane("channelfinder", "unreachable"),
+        _plane("alarm", "unreachable"),
+        _plane("olog", "ok"),
+    ]
+    assert _patterns(cfg, planes) == []
+
+
+# --- the TLS comparison ---
+
+_THREE_HTTPS = {
+    "channelfinder_url": "https://cf.example.org:8080/ChannelFinder",
+    "alarm_url": "https://alarm.example.org:8081",
+    "naming_url": "https://naming.example.org:8099",
+}
+
+
+def test_one_failing_https_plane_beside_a_verified_one_points_at_that_host() -> None:
+    cfg = _cfg(**_THREE_HTTPS)
+    planes = [
+        _plane("channelfinder", "ca_error", ca_ok=False),
+        _plane("alarm", "ok", ca_ok=True),
+        _plane("naming", "ok", ca_ok=True),
+    ]
+    findings = installation_findings(cfg, planes).findings
+    assert [f.pattern for f in findings] == ["trust_root"]
+    # It must NOT name a cause: ca_error covers an expired cert and a hostname mismatch too.
+    assert "foreign" not in findings[0].detail
+    # And it must repeat the whole-trust-store warning, or the invited fix breaks what works.
+    assert "combine your internal roots WITH the public ones" in findings[0].detail
+
+
+def test_a_proper_subset_larger_than_one_still_points_at_those_hosts() -> None:
+    """Not "exactly one": the shipped guide already says "the planes whose trust root is missing".
+
+    A threshold of one would make the code contradict prose that ships with the server, and no
+    guard compares the two.
+    """
+    cfg = _cfg(**_THREE_HTTPS)
+    planes = [
+        _plane("channelfinder", "ca_error", ca_ok=False),
+        _plane("alarm", "ca_error", ca_ok=False),
+        _plane("naming", "ok", ca_ok=True),
+    ]
+    assert "trust_root" in _patterns(cfg, planes)
+
+
+def test_every_https_plane_failing_points_at_the_bundle_instead() -> None:
+    """The inverse finding, and it names a different fix.
+
+    Swapping the two branches is the mutant this pair of tests exists to catch.
+    """
+    cfg = _cfg(**_THREE_HTTPS)
+    planes = [
+        _plane("channelfinder", "ca_error", ca_ok=False),
+        _plane("alarm", "ca_error", ca_ok=False),
+        _plane("naming", "ca_error", ca_ok=False),
+    ]
+    findings = installation_findings(cfg, planes).findings
+    assert [f.pattern for f in findings] == ["ca_bundle"]
+    assert "trust material this process uses" in findings[0].detail
+
+
+def test_a_single_https_plane_cannot_discriminate_and_says_nothing() -> None:
+    """With n=1 the host and the bundle are indistinguishable, so neither finding is earned."""
+    cfg = _cfg(channelfinder_url="https://cf.example.org:8080/ChannelFinder")
+    planes = [_plane("channelfinder", "ca_error", ca_ok=False)]
+    assert _patterns(cfg, planes) == []
+
+
+def test_an_http_plane_is_never_counted_as_a_healthy_https_one() -> None:
+    """``ca_ok`` is True on every successful path INCLUDING plain http.
+
+    It means "no TLS failure happened", not "TLS was verified". Reading it as the latter would let
+    an http plane act as the "other planes are fine" half of a comparison that never ran, and the
+    population would then be decided by a field instead of by the scheme.
+    """
+    cfg = _cfg(
+        channelfinder_url="https://cf.example.org:8080/ChannelFinder",
+        alarm_url="http://alarm.example.org:8081",
+    )
+    planes = [
+        _plane("channelfinder", "ca_error", ca_ok=False),
+        _plane("alarm", "ok", ca_ok=True),
+    ]
+    assert _patterns(cfg, planes) == []
+
+
+def test_a_failure_with_no_completed_handshake_anywhere_is_withheld() -> None:
+    """ "The others are fine" would be a claim about handshakes that never ran."""
+    cfg = _cfg(**_THREE_HTTPS)
+    planes = [
+        _plane("channelfinder", "ca_error", ca_ok=False),
+        _plane("alarm", "unreachable"),
+        _plane("naming", "unreachable"),
+    ]
+    assert "trust_root" not in _patterns(cfg, planes)
+
+
+# --- properties that hold across every pattern ---
+
+
+def test_a_disabled_plane_never_enters_a_pattern() -> None:
+    """A plane with no URL carries no host and is not part of any comparison."""
+    cfg = _cfg(channelfinder_url="http://services.example.org:8080/ChannelFinder")
+    planes = [_plane("channelfinder", "unreachable"), _plane("alarm", "disabled")]
+    assert _patterns(cfg, planes) == []
+
+
+def test_an_unreadable_url_is_excluded_rather_than_grouped() -> None:
+    """Fail closed: a URL the connecting parser cannot read is no evidence of a shared host."""
+    cfg = _cfg(
+        channelfinder_url="http://services.example.org:8080/ChannelFinder",
+        alarm_url="not a url at all",
+    )
+    planes = [_plane("channelfinder", "unreachable"), _plane("alarm", "unreachable")]
+    assert "host_down" not in _patterns(cfg, planes)
+
+
+def test_the_crosscut_sorts_every_plane_status() -> None:
+    """The two declared sets tile ``PlaneStatus`` exactly.
+
+    So a status added to the report is RED here until somebody decides whether a pattern may key
+    on it, instead of silently meaning nothing to this module. The annotation is the ``Literal``
+    type, so mypy catches a typo in either set as well.
+    """
+    every = set(typing.get_args(PlaneStatus))
+    assert every == _TRIGGERS | _NEVER_TRIGGERS, "a PlaneStatus is in neither set"
+    assert not _TRIGGERS & _NEVER_TRIGGERS, "a PlaneStatus is in both sets"
+
+
+@pytest.mark.parametrize(
+    ("cfg", "planes"),
+    [
+        (
+            _cfg(**_SPLIT),
+            [_plane("archiver", "api_error"), _plane("archiver_retrieval", "api_error")],
+        ),
+        (
+            _cfg(**_TWO_ON_ONE_HOST, naming_url="http://elsewhere.example.org:8099"),
+            [
+                _plane("channelfinder", "unreachable"),
+                _plane("alarm", "unreachable"),
+                _plane("naming", "ok"),
+            ],
+        ),
+        (
+            _cfg(**_THREE_HTTPS),
+            [
+                _plane("channelfinder", "ca_error", ca_ok=False),
+                _plane("alarm", "ok", ca_ok=True),
+                _plane("naming", "ok", ca_ok=True),
+            ],
+        ),
+    ],
+    ids=["archiver_url_pair", "host_down", "trust_root"],
+)
+def test_every_finding_names_a_variable_and_something_to_do(
+    cfg: EpicsConfig, planes: list[PlaneCheck]
+) -> None:
+    """A plane name is not actionable; a variable is, and the detail has to say what to do.
+
+    Asserted on non-empty CONTENT rather than on presence: a table of empty strings satisfies
+    every containment check while telling the reader nothing, which this repository has met before.
+    """
+    for finding in installation_findings(cfg, planes).findings:
+        assert finding.variables and all(v.startswith("EPICS_MCP_") for v in finding.variables)
+        assert len(finding.detail) > 80
+        assert "check" in finding.detail.lower()
+        assert "above" not in finding.detail and "below" not in finding.detail

@@ -310,6 +310,34 @@ def _olog_write_lines(olog: OlogWriteGateReport) -> list[str]:
     return lines
 
 
+def _installation_lines(report: DoctorReport) -> list[str]:
+    """The cross-plane block: what no single plane above could see. Empty when nothing matched.
+
+    Printed only on a finding, and that ABSENCE is meaningful rather than ambiguous: the guide
+    says the block appears only when a pattern matches, so nothing is the report's way of saying
+    "the planes disagree in no way I recognise". A permanent "nothing found" line would be read
+    once and skipped forever.
+
+    Glyph-free, like the write block and for the same reason: the marks are the per-plane
+    vocabulary, explained by a legend that ships with the server, and borrowing one here would
+    either invent a pairing that legend has to carry or reuse a mark for a different question.
+
+    Placed directly under the plane lines because it EXPLAINS them: every finding is a statement
+    about failures the reader has just seen, never a new verdict.
+    """
+    findings = report.installation.findings
+    if not findings:
+        return []
+    lines = ["Installation (patterns no single plane can see):"]
+    for finding in findings:
+        planes = ", ".join(finding.planes)
+        lines.append(f"  {_escaped(planes)}: {_escaped(_one_line(finding.detail, 600))}")
+        if finding.variables:
+            lines.append(f"      variables: {_escaped(', '.join(finding.variables))}")
+    lines.append("")
+    return lines
+
+
 def _write_safety_lines(report: DoctorReport) -> list[str]:
     """The write-gate block: what may be written, and where. Informative, and glyph-free.
 
@@ -454,6 +482,7 @@ def _render(report: DoctorReport) -> str:
         if plane.detail:
             lines.append(f"      {_escaped(plane.detail)}")
     lines.append("")
+    lines += _installation_lines(report)
     lines.append("Privacy (ChannelFinder redaction):")
     owners = _escaped(", ".join(report.privacy.cf_safe_owner_accounts)) or (
         "(empty, all owners redacted)"

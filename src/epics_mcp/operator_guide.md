@@ -618,6 +618,29 @@ Each plane has its own beacon, because they do not share one:
 Probing the latter on the retrieval port 404s and tells you nothing, that mistake is exactly how an
 earlier pass concluded retrieval had no beacon at all.
 
+**Some faults are only visible when you compare the planes with each other.** Under the plane lines
+the report prints an `Installation` block, and only when a pattern matches, so nothing there means
+the planes disagree in no way it recognises. It never moves the verdict or the exit code: every
+pattern keys on statuses that already failed, so the block explains a verdict rather than adding
+one. Three patterns, and each says what it could NOT tell apart:
+
+- **The two archiver URLs look exchanged.** Both webapps erroring while the two variables point at
+  different URLs. A gateway erroring for both, and two URLs each one segment too deep, look the
+  same, so verify a route before you change a value. On a single-JVM appliance the retrieval
+  variable is empty and this can never fire.
+- **Every service on one host is dead.** Two or more host-and-port pairs on the same host, none of
+  them answering, while another host does. It stays SILENT when everything configured is dead
+  everywhere: that shape is usually a proxy, a resolver or a VPN on your own machine, and naming a
+  host would point at the wrong end.
+- **TLS failed for some HTTPS planes but not all.** Then the trust material is not wholly wrong and
+  those hosts are what differs. If every HTTPS plane failed, it names `EPICS_MCP_CA_BUNDLE`
+  instead. ⚠️ It reports the observation and not a cause: a missing root, an expired certificate
+  and a hostname mismatch all raise the same status. And if you set a new bundle, combine your
+  internal roots WITH the public ones, because that path becomes the whole trust store.
+
+In `--json` this is `installation.findings`; each finding carries `evidence`, which is `signature`
+when the pattern matched on statuses and configuration alone rather than on a confirming probe.
+
 The archiver is the one plane with a SECOND question, because naming itself proves too little there:
 an appliance whose engine has never spoken to its IOCs answers `getApplianceInfo` exactly like a
 healthy one. `getApplianceMetrics` is parameterless and appliance-wide, and the row whose `instance`

@@ -214,7 +214,10 @@ cache of its own under its home directory, which `FASTMCP_CHECK_FOR_UPDATES=off`
    empty even after a successful `--probe-pv`. Scripting this? Read
    `verification_complete` / `unverified_planes` / `inconclusive_identity_planes` /
    `degraded_planes` from `--json`, and `write_safety` for the write posture (that one never moves
-   the verdict, so a script that only wants pass or fail can ignore it). A failed probe lands in
+   the verdict, so a script that only wants pass or fail can ignore it). `installation.findings`
+   carries the same never-moves-the-verdict promise and holds what only the comparison of several
+   planes shows: an exchanged archiver URL pair, every service on one host dead, a TLS failure on
+   some HTTPS planes but not all. A failed probe lands in
    `inconclusive_identity_planes`, not in
    `unverified_planes`; a degraded one in `degraded_planes` and in neither of those. The exit code
    alone says "nothing failed", not "everything confirmed", so for positive confirmation assert
