@@ -297,6 +297,32 @@ def _patch(monkeypatch: pytest.MonkeyPatch, name: str, value: object) -> None:
     monkeypatch.setattr(f"epics_mcp.services.diagnose.{name}", value)
 
 
+def _patch_naming_client(
+    monkeypatch: pytest.MonkeyPatch, client: object, *, naming_url: str
+) -> None:
+    """Install the Naming double ONE LAYER DOWN, in ``checkers``, and gate the url there too.
+
+    ⚠ THE DEPTH IS THE POINT, and getting it wrong would quietly delete three of the four tests
+    that use this. ``diagnose._gather_naming`` no longer builds a client; it calls
+    ``checkers.query_naming_lookup``, which holds the url gate and the probe-connectivity-FIRST
+    ordering. Faking ``query_naming_lookup`` itself would therefore replace exactly the code each of
+    those tests exists to hold: the gate would never run, the ordering would never run, and every
+    assertion would pass against a stub while the defect it names walked straight back in. Faking
+    the CLIENT instead leaves the real query in the path, so the gate and the ordering still
+    execute and every one of these tests is still red-provable (each mutant is named in its own
+    docstring).
+
+    ``get_config`` is patched in BOTH modules on purpose: ``checkers`` reads it for the naming gate,
+    and ``diagnose`` reads it for its own timeout. Patching only the first would leave ``diagnose``
+    building the real config singleton out of the ambient environment.
+    """
+    monkeypatch.setattr("epics_mcp.services.checkers.NamingServiceClient", client)
+    monkeypatch.setattr(
+        "epics_mcp.services.checkers.get_config", lambda: EpicsConfig(naming_url=naming_url)
+    )
+    _patch(monkeypatch, "get_config", lambda: EpicsConfig(naming_url=naming_url))
+
+
 @pytest.mark.asyncio
 async def test_shell_connected_healthy_cf_disabled_withholds(
     monkeypatch: pytest.MonkeyPatch,
@@ -402,7 +428,23 @@ async def test_shell_cf_error_withholds_not_false_negative(monkeypatch: pytest.M
 async def test_shell_naming_gate_empty_url_withholds_no_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """check_naming=True but naming_url empty → withheld, NamingServiceClient NEVER built."""
+    """check_naming=True but naming_url empty → withheld, NamingServiceClient NEVER built.
+
+    ⚠ THE DOUBLE RECORDS, IT DOES NOT RAISE, and that is a repair rather than a style choice. It
+    used to raise ``AssertionError`` to announce an unwanted construction, and the gatherer catches
+    ``Exception`` deliberately and widely, so the announcement was swallowed and turned into exactly
+    the ``withheld`` result this test asserts. Measured against the pre-refactor code, its own
+    layering and its own gate: deleting the url gate from ``_gather_naming`` left this test GREEN.
+    The egress half of it was a no-op, and had been one before this change touched anything.
+
+    Recording separates the two questions the name promises: WAS a client built (the ``built``
+    list), and WAS the plane withheld (the report). An exception can only ever answer the second.
+
+    Red-provable now, in the current layering: delete the ``if not cfg.naming_url: return None`` arm
+    from ``checkers.build_naming_client`` and the first assertion fails. The gate moved one layer
+    down with the code; what changed here is that the test can finally see it.
+    """
+    built: list[object] = []
 
     async def fake_pv_get(name: str, timeout: float | None = None) -> dict[str, object]:
         raise PVTimeoutError("timeout")
@@ -410,21 +452,28 @@ async def test_shell_naming_gate_empty_url_withholds_no_client(
     async def fake_find(name: str, timeout: float = 5.0) -> dict[str, object]:
         return {"enabled": True, "channels": [], "total": 0, "capped": False}
 
-    def _boom(*args: object, **kwargs: object) -> object:
-        raise AssertionError("NamingServiceClient must not be constructed when naming_url is empty")
+    def _record(*args: object, **kwargs: object) -> object:
+        built.append(kwargs)
+        return Mock()
 
     _patch(monkeypatch, "pv_get", fake_pv_get)
     _patch(monkeypatch, "query_channels", fake_find)
-    _patch(monkeypatch, "NamingServiceClient", _boom)
-    _patch(monkeypatch, "get_config", lambda: EpicsConfig(naming_url=""))
+    _patch_naming_client(monkeypatch, _record, naming_url="")
 
     report = await diagnose("SYS:PV", check_naming=True)
+    assert built == [], "no client may be constructed while naming_url is empty (that is egress)"
     assert report.evidence.naming.consulted is False
     assert "naming" in report.withheld
 
 
 @pytest.mark.asyncio
 async def test_shell_naming_enabled_splits_unregistered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A registered-ACTIVE name plus a ChannelFinder miss is ``unregistered``, not a typo.
+
+    Red-provable: return ``registered=None`` from ``_gather_naming`` instead of the query's answer
+    and the cause falls back to ``indeterminate``.
+    """
+
     async def fake_pv_get(name: str, timeout: float | None = None) -> dict[str, object]:
         raise PVTimeoutError("timeout")
 
@@ -443,8 +492,7 @@ async def test_shell_naming_enabled_splits_unregistered(monkeypatch: pytest.Monk
 
     _patch(monkeypatch, "pv_get", fake_pv_get)
     _patch(monkeypatch, "query_channels", fake_find)
-    _patch(monkeypatch, "NamingServiceClient", _FakeNaming)
-    _patch(monkeypatch, "get_config", lambda: EpicsConfig(naming_url="http://naming"))
+    _patch_naming_client(monkeypatch, _FakeNaming, naming_url="http://naming")
 
     report = await diagnose("SYS:PV:Val", check_naming=True)
     assert report.evidence.naming.consulted is True
@@ -543,8 +591,14 @@ async def test_shell_naming_unreachable_is_withheld_not_false_typo(
     """Finding B: a Naming transport failure must WITHHOLD, never become a confident name_typo.
 
     The shared client's ``validate_name`` swallows a transport error into a definitive
-    ``registered=False``; the gatherer must probe connectivity first so an UNREACHABLE service is
+    ``registered=False``; the probe must check connectivity first so an UNREACHABLE service is
     withheld (``withheld != no``) instead of read as a spelling mistake.
+
+    That ordering now lives in ``checkers.query_naming_lookup``, which is precisely why the double
+    below is a CLIENT and not that function: deleting ``client.check_connectivity()`` from
+    ``query_naming_lookup._run`` makes ``_DownNaming.validate_name`` answer "not registered", the
+    cause becomes ``name_typo``, and this test goes red. Faked one layer higher it could not,
+    because the line under test would not run at all.
     """
 
     async def fake_pv_get(name: str, timeout: float | None = None) -> dict[str, object]:
@@ -566,8 +620,7 @@ async def test_shell_naming_unreachable_is_withheld_not_false_typo(
 
     _patch(monkeypatch, "pv_get", fake_pv_get)
     _patch(monkeypatch, "query_channels", fake_find)
-    _patch(monkeypatch, "NamingServiceClient", _DownNaming)
-    _patch(monkeypatch, "get_config", lambda: EpicsConfig(naming_url="http://naming"))
+    _patch_naming_client(monkeypatch, _DownNaming, naming_url="http://naming")
 
     report = await diagnose("SYS:DEV:Val", check_naming=True)
     assert "naming" in report.withheld
@@ -601,8 +654,7 @@ async def test_shell_naming_reachable_unregistered_stays_name_typo(
 
     _patch(monkeypatch, "pv_get", fake_pv_get)
     _patch(monkeypatch, "query_channels", fake_find)
-    _patch(monkeypatch, "NamingServiceClient", _UpUnregNaming)
-    _patch(monkeypatch, "get_config", lambda: EpicsConfig(naming_url="http://naming"))
+    _patch_naming_client(monkeypatch, _UpUnregNaming, naming_url="http://naming")
 
     report = await diagnose("SYS:DEV:Val", check_naming=True)
     assert report.likely_cause == "name_typo"

@@ -188,8 +188,8 @@ def build_cf_checker(query_channelfinder: bool) -> ChannelFinderChecker | None:
 def build_naming_client(query_naming: bool, timeout: float = 5.0) -> NamingServiceClient | None:
     """Build the ESS Naming-Service client iff requested AND a URL is configured.
 
-    Mirrors :func:`build_cf_checker` and the diagnose gate: requested but ``naming_url`` unset →
-    ``None`` (no client, no egress). The client carries no hard-coded ESS prod default, so
+    Mirrors :func:`build_cf_checker`: requested but ``naming_url`` unset → ``None``
+    (no client, no egress). The client carries no hard-coded ESS prod default, so
     crossplane_check never reaches ESS production naming unless ``EPICS_MCP_NAMING_URL`` is set.
 
     *timeout* is forwarded to the client (DS-2): the ``lookup_device_name`` tool passes its
@@ -755,7 +755,9 @@ async def query_naming_lookup(name: str, timeout: float = 5.0) -> NameLookupResu
     Read-only, config-gated. Default-disabled: with ``EPICS_MCP_NAMING_URL`` unset, returns a
     structured ``enabled: false`` result and makes NO network call (no ESS egress). Backs the
     standalone ``lookup_device_name`` tool, the one naming plane that had no ``query_*`` sibling
-    (it was only reachable indirectly via ``diagnose_connection``/``crossplane_check``).
+    (it was only reachable indirectly via ``diagnose_connection``/``crossplane_check``). Since
+    GB-98 ``diagnose._gather_naming`` calls THIS function too, so the naming probe has one
+    implementation rather than a pair that agreed by inspection.
 
     Answer semantics (DS-2, a service error must NEVER masquerade as "not registered"):
 
@@ -764,7 +766,7 @@ async def query_naming_lookup(name: str, timeout: float = 5.0) -> NameLookupResu
       DEFINITIVE answer.
     * **Reachable + OBSOLETE/DELETED/unknown** → ``registered: false`` with the status preserved.
     * **Unreachable / 5xx / bad JSON / timeout** → ``registered: null`` + ``withheld: true`` with a
-      note; the reachability is probed FIRST (``check_connectivity``, like ``diagnose``) so a
+      note; the reachability is probed FIRST (``check_connectivity``) so a
       down/slow service is withheld rather than read as a definitive answer.
 
     Surfaces only the privacy-safe :class:`NameStatus` projection (``registered/status/message``);
@@ -776,8 +778,11 @@ async def query_naming_lookup(name: str, timeout: float = 5.0) -> NameLookupResu
         return {"enabled": False, "name": name, "registered": None, "note": _NAMING_DISABLED_NOTE}
 
     def _run() -> NameLookupResult:
-        # Probe reachability FIRST (mirrors diagnose._gather_naming) so an unreachable/timing-out
-        # service is WITHHELD by the ``except`` below, not read as a definitive answer. A reachable
+        # Probe reachability FIRST so an unreachable/timing-out service is WITHHELD by the
+        # ``except`` below, not read as a definitive answer. ⚠ This used to say it MIRRORED
+        # diagnose._gather_naming, and that was the problem rather than the reassurance it read as:
+        # two copies of one probe. The gatherer calls this function now, so this ordering is the
+        # only copy and both callers inherit it. A reachable
         # HEAD plus a 404 on deviceNames = the real "not registered" (validate_name returns
         # registered=False); a NON-404 deviceNames failure PROPAGATES out of validate_name (DS-2)
         # and is caught below -> withheld, never a false registered=False.

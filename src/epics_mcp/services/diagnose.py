@@ -43,10 +43,10 @@ from epics_mcp.services.checkers import (
     query_alarm_configured,
     query_archived,
     query_channels,
+    query_naming_lookup,
 )
 from epics_mcp.services.crossplane import _record_name
 from epics_mcp.services.epics_client import ConnectionState, pv_get
-from epics_mcp.services.naming_client import NamingServiceClient
 
 # --- Enums (Literal so mypy checks exhaustiveness in the ``match`` below) ---
 #: Aliased rather than restated: ``monitor_pv`` reports the same three states about the same
@@ -402,47 +402,57 @@ async def _gather_channelfinder(
 
 
 async def _gather_naming(pv_name: str, requested: bool, timeout: float) -> NamingEvidence:
-    """ESS Naming lookup, GATED HERE: only when requested AND ``naming_url`` is configured.
+    """ESS Naming lookup through the services-layer query. Disabled/errored → withheld.
 
-    The shared :class:`NamingServiceClient` and its two other callers (crossplane tool + CLI) are
-    left UNTOUCHED; this is the empty-URL-disables-client discipline used for CF/Archiver/Alarm. A
-    FRESH instance per call (the client caches per-instance) wrapped in a thread (sync requests).
+    ⚠ THIS FUNCTION USED TO BUILD ITS OWN ``NamingServiceClient``, and removing that is the whole
+    point of the change. :func:`~.checkers.query_naming_lookup` already did the same three steps
+    (config gate, ``check_connectivity`` first, then ``validate_name``) for the standalone
+    ``lookup_device_name`` tool; its own comment said it MIRRORED this function. Two copies of one
+    probe is the second truth this project forbids, and a mirror that names its original is a copy
+    that has already been noticed and kept anyway.
+
+    What that leaves is the point of the exception in ``ARCHITECTURE.md``. ``diagnose`` now imports
+    exactly ONE client, ``pv_get``, and that one is the live probe this module exists to run
+    (decision VY (c): a connection diagnosis IS a live probe). The other three planes were never
+    client calls at all, they go through the same ``checkers`` query functions as the MCP tools.
+
+    The three semantics DS-2 and S13 established are unchanged, they simply live one layer down
+    now: reachability is probed FIRST so an unreachable service is withheld rather than read as a
+    definitive answer; a NON-404 ``deviceNames`` failure propagates instead of collapsing into a
+    false "not registered"; and a 204/404 from a wrong base path or a foreign host is withheld
+    until the swagger-beacon identity gate confirms the responder.
+
+    The shape is now the same as the other three gatherers (query, then ``except``, then the
+    ``enabled`` gate, then map), which is what makes the four comparable at a glance. The ``except``
+    stays and stays WIDE: ``query_naming_lookup`` catches only ``NamingServiceError``, so an
+    unexpected failure still has to be caught HERE for this gatherer to be total.
     """
     if not requested:
         return NamingEvidence(
             consulted=False, note="Naming not requested (default off, no ESS egress)."
         )
-    cfg = get_config()
-    if not cfg.naming_url:
+    try:
+        result = await query_naming_lookup(_device_name(pv_name), timeout=timeout)
+    except Exception as exc:  # noqa: BLE001 (TOTAL: any failure withholds, never crashes diagnose())
+        return NamingEvidence(
+            consulted=False, withheld=True, note=f"Naming error: {shown_cause(exc)}"
+        )
+    if not result.get("enabled"):
         return NamingEvidence(
             consulted=False,
             withheld=True,
             note="Naming withheld: set EPICS_MCP_NAMING_URL to enable (default off = no egress).",
         )
-    device_name = _device_name(pv_name)
-
-    def _run() -> NamingEvidence:
-        client = NamingServiceClient(base_url=cfg.naming_url, timeout=timeout)
-        # Probe reachability FIRST so an unreachable / timing-out service is WITHHELD by the
-        # gatherer's ``except`` below. A REACHABLE service that answers HTTP 404 ("not registered")
-        # yields ``registered=False`` → name_typo, which is correct. Since DS-2, a reachable HEAD
-        # but a NON-404 deviceNames failure (5xx / bad JSON) PROPAGATES out of ``validate_name`` and
-        # is caught by the ``except`` below → withheld, not a false ``registered=False``/name_typo.
-        # S13: a 404/204 from a WRONG base path or FOREIGN host (was the RESIDUAL) is now WITHHELD
-        # too, ``validate_name`` trusts a definitive "not registered" only after its swagger-beacon
-        # identity gate confirms the responder is the Naming Service.
-        client.check_connectivity()
-        status = client.validate_name(device_name)
+    if result.get("withheld"):
+        # The query already redacted this text at the client edge; it is passed through rather than
+        # rebuilt, so the reason the service gave survives into the report.
+        note = result.get("note")
         return NamingEvidence(
-            consulted=True, registered=status["registered"], status=status["status"] or None
+            consulted=False, withheld=True, note=str(note) if note else "Naming withheld."
         )
-
-    try:
-        return await asyncio.to_thread(_run)
-    except Exception as exc:  # noqa: BLE001 (any Naming failure withholds, never a false verdict)
-        return NamingEvidence(
-            consulted=False, withheld=True, note=f"Naming error: {shown_cause(exc)}"
-        )
+    return NamingEvidence(
+        consulted=True, registered=result.get("registered"), status=result.get("status") or None
+    )
 
 
 async def _gather_archiver(pv_name: str, requested: bool, timeout: float) -> ArchiverEvidence:

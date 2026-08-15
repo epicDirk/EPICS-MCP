@@ -13,7 +13,7 @@ graph TD
     B["<b>tools/</b><br/>thin adapters: translate arguments, shape results<br/>no protocol logic"]
     C["<b>services/</b> · pure analysis cores<br/>crossplane · coverage<br/>same input, same output, no clock/random/network"]
     D["<b>services/</b> · protocol clients<br/>epics_client (p4p) · *_client (REST)"]
-    E["<b>services/</b> · diagnose<br/>the declared exception: it probes the planes itself"]
+    E["<b>services/</b> · diagnose<br/>the declared exception: it runs the LIVE probe itself"]
 
     A --> B
     B --> C
@@ -33,8 +33,17 @@ graph TD
 The dotted edge is the load-bearing one. The two **pure** cores never import a client; they receive
 protocol access as **injected checker callables**, which is what makes them testable with no
 network and deterministic by construction. `diagnose` is the declared exception, and it has its own
-box for that reason: a connection diagnosis IS a live probe, so it calls `pv_get` and constructs the
-naming client itself, and gathers all five planes in one `asyncio.gather`.
+box for that reason: a connection diagnosis IS a live probe, so it calls `pv_get` directly and
+gathers all five planes in one `asyncio.gather`.
+
+⚠️ **The exception is exactly one call wide, and it used to be two.** `diagnose` also built its own
+`NamingServiceClient`, while `services/checkers.query_naming_lookup` already ran the same three
+steps for the standalone `lookup_device_name` tool, its own comment saying it MIRRORED the
+gatherer. That was two copies of one probe, not a second exception, so the gatherer now calls the
+query like its three siblings do. What remains is `pv_get`, which is the thing the decision behind
+this exception actually justified. The other four planes were never client calls: they go through
+the same `checkers` query functions as the MCP tools, which is why widening this box to "it probes
+the planes itself" reads as more of an exception than the code has ever needed.
 
 - **`server.py`** is the MCP entry point. It declares the tool, resource and prompt surface and
   delegates. Nothing here talks to EPICS directly.
@@ -43,7 +52,7 @@ naming client itself, and gathers all five planes in one `asyncio.gather`.
   That engine is a LOCAL dependency group, not a published extra: see `pyproject.toml`.
 - **`tools/`** are thin MCP adapters. They translate arguments and shape results.
 - **`services/`** is the substance: the p4p client (`epics_client.py`), the REST clients
-  (`*_client.py`), the two pure analysis cores, and `diagnose`, which probes directly.
+  (`*_client.py`), the two pure analysis cores, and `diagnose`, which runs the live probe directly.
 - **Cross-cutting:** `config.py` (env-var settings, fail-fast validation), `safety.py` and
   `olog_safety.py` (the two write gates plus audit), `errors.py` (machine-readable error
   hierarchy), `tool_errors.py` (the error to ToolError decorator), `paths.py` (path boundary).
@@ -115,8 +124,9 @@ this PV was in alarm" is a join this server does not yet make.
   (`withheld ≠ no`).
 - The **pure** analysis cores (`crossplane`, `coverage`) are deterministic: same input, same output,
   no hidden clock, random source or network. Protocol access arrives as injected checker callables.
-  `diagnose` is the one declared exception: it probes the planes itself, because that probe is the
-  answer it exists to give.
+  `diagnose` is the one declared exception, and it is one CALL wide: it runs the live `pv_get`
+  itself, because that probe is the answer it exists to give. Its four explanatory planes go
+  through the shared `checkers` queries like every other caller.
 - The server **reads by default and mutates only through a gate.** `set_pv_value` is triple-gated
   (a further refusal, the drive-limit bounds check, runs AFTER the gate admits the write and is
   therefore not a fourth gate), and the four Olog write tools (`create_log_entry`, `reply_to_log`,
