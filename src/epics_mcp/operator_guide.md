@@ -759,8 +759,16 @@ Four limits, because this returns a SAMPLE and not an enumeration:
 
 ## Error signatures → which tool answers
 
-Each signature below is an exception **class and shape**, never a copied runtime string, so match on
+Each signature here is an exception **class and shape**, never a copied runtime string, so match on
 the class and the field rather than on wording your server may phrase differently.
+
+⚠️ **This part is the lead only. The signatures are grouped below and each group is a topic key of
+its own**, so ask `get_guide` for the group rather than for `errors`: `err-transport` (an address
+that reads short, a withheld cause, the CA bundle) · `err-pv` (a PV that will not connect, a device
+that may not be registered) · `err-archiver` · `err-alarm` · `err-olog` (reads; a refused WRITE is
+`err-gates`) · `err-channelfinder` · `err-rest` (what a 404 may mean) · `err-displays` (the display
+and trend tools, and `total: 0`) · `err-arguments` · `err-gates` (both write gates, the read
+throttle, and a server that will not start) · `err-guide`.
 
 ### A plane fails and the message reads short: redaction, a withheld cause, a bundle that never opened
 
@@ -879,8 +887,9 @@ the class and the field rather than on wording your server may phrase differentl
   every server-side rejection looks like "unauthorized". Check the query (the time window first);
   a deployment configured with read credentials sees the real 400 and its message.
 - **An Olog search answers 200 with an empty list.** Not necessarily "nothing matched", an
-  unreadable `start`/`end` degrades to *now* server-side and matches nothing (see the recipe
-  above). Re-run with a relative amount (`7 days`) to tell a real empty from a dead window.
+  unreadable `start`/`end` degrades to *now* server-side and matches nothing (see the recipe "Olog
+  search time window", topic `olog-window`). Re-run with a relative amount (`7 days`) to tell a real
+  empty from a dead window.
 
 ### ChannelFinder: filters, the anchored glob, and a silent zero that is not a refusal
 
@@ -1013,7 +1022,7 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   above: the verdict follows from the arguments, so it is given before the display-PV walk rather
   than after it. Name the tree (`alarm_config`); there is no correct default, they are site-specific.
 
-### Arguments refused before a request exists
+### A refusal that happens before any request exists (the tool-specific ones sit with their tool)
 
 - **Every `timeout` is refused at zero or below, on every tool that takes one.** A validation error
   naming the argument, before any request exists. A `timeout=0` did not fail honestly: measured, it

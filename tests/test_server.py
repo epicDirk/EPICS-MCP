@@ -3280,9 +3280,10 @@ async def test_stripped_tool_still_returns_structured_content(
 # machine-readable (the core value of S29) and cost only ~1% more context per agent turn, so the
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
-# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-13 after OQ11: the
-# core lane is 67_100 and the full lane 79_905 (the docstring below carries the deltas, and the
-# pair 66_062 / 78_867 measured after BG-DOC earlier the same day, the pairs 65_692 / 78_497 and
+# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-15 after GP-15: the
+# core lane is 70_291 and the full lane 83_154 (the docstring below carries the deltas, and the
+# pair 67_100 / 79_905 measured after OQ11 on 2026-08-13,
+# the pair 66_062 / 78_867 measured after BG-DOC earlier that day, the pairs 65_692 / 78_497 and
 # 65_402 / 78_207 from earlier still, 64_719 / 77_524 measured on
 # the tree before BG-DOC began, 64_719 / 75_853 from 2026-08-08, 64_719 / 74_899 from 2026-08-06
 # and 63_017 / 72_508 from 2026-08-02 are superseded).
@@ -3305,9 +3306,20 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 67_100 and the full lane
-    79_905, re-measured 2026-08-13 on both lanes with the engine hidden for the core one, since a
-    lane estimated rather than measured is the error the constant's comment records.
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 70_291 and the full lane
+    83_154, re-measured 2026-08-15 on both lanes with the display-gated tools excluded for the core
+    one, since a lane estimated rather than measured is the error the constant's comment records.
+
+    GP-15 moved core +3191 and full +3249, from 67_100 / 79_905, and the split of that figure is
+    the honest half. Only 472 chars are the edit itself: the ``get_guide`` topic description gained
+    334 chars of prose about the eleven ``err-`` groups, and the key list it interpolates from
+    ``TOPICS`` grew 138 by carrying those eleven names. The remaining ~2_700 had accumulated
+    UNRECORDED since 2026-08-13 across edits that never re-measured, which is the drift this
+    instruction exists to catch and the fourth time this docstring records it happening. The two
+    lanes differ by 58 in their delta because a handful of those unrecorded chars sat in
+    display-gated tools; ``get_guide`` itself is core, so its own 472 land on both lanes alike.
+    ⚠️ GP-15's first commit did NOT re-measure, in breach of the instruction below; the post-build
+    review caught it and this is the correction.
 
     OQ11 moved both by +1038: description and source are the same body in two shapes, one raw and
     one rendered by the server, and nothing on the wire said which one a caller may write back, so

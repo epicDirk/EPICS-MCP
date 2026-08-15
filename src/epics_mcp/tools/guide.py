@@ -38,9 +38,13 @@ the section had grown past 24 KB carrying THIRTY signatures with no ``### `` at 
 about one of them cost every other one as well. It is now cut into eleven groups, one per plane or
 per kind: ``errors`` serves the section's own lead and each group is a key of its own, exactly as
 for the palette above. Splitting it was a REARRANGEMENT of a shipped document rather than a
-deduplication, which is why it was its own decision and not a tidy-up: three signatures moved so
-that every group would be contiguous, and no signature's text changed by a byte (measured as a
-fingerprint over the signatures, not asserted).
+deduplication, which is why it was its own decision and not a tidy-up: TWO signatures moved so that
+every group would be contiguous, and no signature's text changed by a byte (measured as a
+fingerprint over the signatures, not asserted). ⚠️ Two, not the three the first write-up claimed:
+three edits were made, but one of them only restored an order the other two had already produced.
+The measurement is the permutation's longest increasing subsequence, 28 of 30, and the difference
+between "edits I made" and "entries that moved" is exactly the kind of claim this repository
+requires to be measured rather than counted from memory.
 
 **Deterministic by construction.** The text comes from one packaged file, the split is a plain
 line-anchored heading boundary that loses nothing (the parts re-assemble into the file byte for
@@ -118,7 +122,7 @@ TOPICS: Mapping[str, str] = {
     "err-channelfinder": "a silent zero that is not a refusal",
     "err-rest": "What a REST 404 is allowed to mean",
     "err-displays": "the three ways to get",
-    "err-arguments": "Arguments refused before a request exists",
+    "err-arguments": "before any request exists",
     "err-gates": "a server that declines to start",
     "err-guide": "The guide tool itself",
 }

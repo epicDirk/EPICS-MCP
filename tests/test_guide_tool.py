@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -341,13 +342,17 @@ async def test_the_errors_key_serves_the_lead_and_not_one_single_signature() -> 
     matters, and it holds however many groups there are. Deliberately zero numbers: the count of
     groups and their sizes are what a later editor is entitled to change.
 
-    ⚠️ WHAT THIS GUARD IS FOR, corrected against a measurement rather than reasoned. The obvious
-    red-proof, deleting a ``### `` line, does NOT reach this assertion: :func:`resolve_topics`
-    raises ``GUIDE_DRIFT`` first, because the orphaned key then anchors on nothing. So this test is
-    the SECOND line, and the case it owns is the one the first cannot see: a CONSISTENT rollback,
-    where a heading and its key go together. That leaves every remaining topic resolving cleanly
-    while its signatures pile back into the lead, silently, which is precisely how the section grew
-    to thirty signatures in the first place.
+    ⚠️ WHAT THIS GUARD IS FOR, and its reach is NARROW, which the first write-up of it got wrong.
+    The obvious red-proof, deleting a ``### `` line, does not reach this assertion at all:
+    :func:`resolve_topics` raises ``GUIDE_DRIFT`` first, because the orphaned key then anchors on
+    nothing. So this is a SECOND line, over a CONSISTENT rollback where a heading and its key go
+    together. But it only sees such a rollback of the FIRST group: remove any later one and its
+    signatures fall into the PRECEDING group, not into the lead, and this assertion stays green.
+    Measured, not reasoned: dropping ``err-olog`` and its heading leaves the whole module green,
+    and rolling back ten of the eleven leaves the ENTIRE suite green with 24 666 B back behind one
+    key. The guard for that is
+    :func:`test_no_error_group_is_the_largest_part_of_the_guide`, written after this one was
+    measured and found to be a sham for ten of its eleven cases.
 
     Red-proof, run: remove the first ``### `` line of the section AND its ``err-transport`` entry
     from ``TOPICS``. Reddens here, naming the strays, with ``resolve_topics`` staying green.
@@ -365,6 +370,55 @@ async def test_the_errors_key_serves_the_lead_and_not_one_single_signature() -> 
     )
 
 
+def test_no_error_group_is_the_largest_part_of_the_guide() -> None:
+    """GP-15: the error signatures stopped being the document's outlier, and stay stopped.
+
+    ⛔ THIS IS THE GUARD THAT ACTUALLY HOLDS THE SPLIT, and it exists because the sibling above
+    does not. That one asserts the LEAD carries no signature, which only catches a rollback of the
+    FIRST group; a rollback of any later one pours its signatures into the preceding GROUP, where
+    nothing was looking. Measured on a copy: removing ten of the eleven headings together with
+    their keys left the full suite green at 2386 passed while one key served 24 666 B, which is
+    the exact payload GP-15 was built to remove. A guard that green is the defect it was meant to
+    find.
+
+    THE PROPERTY IS RELATIVE, SO IT CANNOT AGE. Before the split the signature section was the
+    single largest addressable part of the guide, at 24 741 B against 8 092 B for the runner-up.
+    After it, the largest part is somewhere else entirely, and that sentence is what the commit,
+    the changelog and the tool description all claim. This asserts exactly that claim: no ``err-``
+    part may be the biggest. No byte figure is pinned, so ordinary growth on either side is free,
+    and the threshold recalibrates itself whenever any other section grows.
+
+    ⚠️ WHAT IT DOES NOT CATCH, so nobody reads it as more: merging two ADJACENT small groups. That
+    stays under the maximum and is invisible here, which is deliberate rather than an oversight,
+    because a smaller number of larger groups is a judgement about the document and not the
+    regression this guards. What it does catch is any rollback big enough to matter, which is the
+    one that happened.
+
+    Red-proof, run on a copy: remove any ``### `` heading in the section together with its key,
+    repeatedly, until one group carries more than the largest part outside. One suffices in the
+    limit; ten certainly do.
+    """
+    parts = resolve_topics(guide_text())
+    inside = {
+        key: len(body.encode("utf-8")) for key, body in parts.items() if key.startswith("err-")
+    }
+    outside = {
+        key: len(body.encode("utf-8"))
+        for key, body in parts.items()
+        if not key.startswith("err-") and key != "errors"
+    }
+    assert inside, "no 'err-' topics at all: the signature section is no longer split"
+    biggest_key, biggest = max(inside.items(), key=lambda item: item[1])
+    ceiling_key, ceiling = max(outside.items(), key=lambda item: item[1])
+    assert biggest < ceiling, (
+        f"the error group '{biggest_key}' is {biggest} B, which makes it the largest single part "
+        f"of the guide again (the next biggest elsewhere is '{ceiling_key}' at {ceiling} B). "
+        "Before GP-15 that section WAS the outlier, at three times the runner-up, and one "
+        "question about one signature paid for all of them. Either the section lost subheadings "
+        "or one group grew past the rest of the document: split it further."
+    )
+
+
 def test_the_unguarded_pages_do_not_restate_the_size_promise() -> None:
     """GP-15: the size of the guide is promised where it is measured, and nowhere else.
 
@@ -377,38 +431,94 @@ def test_the_unguarded_pages_do_not_restate_the_size_promise() -> None:
     at the carrier instead. This is the guard that keeps a figure from creeping back in, and it is
     the same shape ``tests/test_write_posture_sites.py`` uses for the write posture (GP-4).
 
-    SCOPE, stated because a guard reading wider than it says is worse than a narrow one: the pages
-    are the two that describe the tool WITHOUT being able to measure it. ``server.py`` and
-    ``tools/guide.py`` are excluded because they ARE the carriers, and their wording is checked
-    against the live measurement by :func:`test_the_rounded_size_claims_still_hold`.
-    ``CHANGELOG.md`` is excluded because a release note records what a version said; a guard needs
-    historical exemptions, the construction ``docs/known-limits.md`` section 1 rejects in writing.
+    ⛔ THE POPULATION IS DERIVED, NOT LISTED, and that was the first version's flaw. It named two
+    pages by hand out of nineteen tracked markdown files; measured, the same removed sentence
+    appended to ``OPERATING.md`` or ``docs/safety.md``, both of which name this tool, left the
+    suite green. So the population is ``git ls-files "*.md"``, the shape
+    ``tests/test_write_posture_sites.py`` uses for the same reason, and a page added tomorrow is
+    covered the day it is tracked.
 
-    Red-proof: put "the largest single part is a quarter of the document" back into docs/tools.md.
+    SCOPE. ``server.py`` and ``tools/guide.py`` are not markdown and are the CARRIERS anyway;
+    their wording is checked against the live measurement by
+    :func:`test_the_rounded_size_claims_still_hold`. ``CHANGELOG.md`` is excluded because a
+    release note records what a version said, so a guard over it would need historical
+    exemptions, the construction ``docs/known-limits.md`` section 1 rejects in writing.
+
+    ⚠️ IT MUST FIRE ON A CLAIM AND NOT ON A POINTER, which is why it does not simply grep for
+    "largest part": the pointer that replaced the removed sentence has to name the thing it points
+    at. The needles are therefore a KB figure, or a fraction WORD next to "part", or a percentage.
+    A pointer carries none of the three.
+
+    WHAT IT DOES NOT CATCH, stated so nobody relies on it: a size described in words no pattern
+    anticipates ("about a fifth of a megabyte"). That is the standing limit of every phrase guard;
+    the first version of this one let TWELVE of fifteen probed rewordings through, including a
+    plain "biggest" for "largest", and widening it to these three shapes is what closed that.
+
+    Red-proof: put "the largest single part is a quarter of the document" back into docs/tools.md,
+    or any of its rewordings.
     """
     repo = Path(__file__).resolve().parents[1]
-    # A size claim about THIS document: a KB figure, or a fraction of the whole. Both are the
-    # shapes the removed sentence took. Narrow on purpose: a guard that fires on every "quarter"
-    # anywhere would be noise, and noise gets suppressed.
-    claim = re.compile(
-        r"(\d+\s*KB\s+document|document\s+is\s+(around|about|~)?\s*\d+\s*KB"
-        r"|largest\s+single\s+part\s+is\s+(a|under|about)\s+\w+)",
-        re.IGNORECASE,
+    pages = [
+        page
+        for page in subprocess.run(
+            ["git", "ls-files", "*.md"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        if page != "CHANGELOG.md"
+    ]
+    assert len(pages) > 10, (
+        f"only {len(pages)} markdown pages found; git ls-files answered nothing useful and this "
+        "guard would be reading an empty population"
     )
-    for page in ("docs/tools.md", "README.md"):
+    # Three shapes, because one was not enough: a KB figure, a fraction word beside "part", and a
+    # percentage. Each is a CLAIM about a size; none of them appears in a sentence that merely
+    # points at where the claim is made and guarded.
+    needles = (
+        re.compile(r"\d+\s*KB", re.IGNORECASE),
+        re.compile(r"\b(quarter|third|half|fifth|tenth|sixth)\b", re.IGNORECASE),
+        re.compile(r"\d+(\.\d+)?\s*%"),
+    )
+    kb_figure, fraction_word, percentage = needles
+    offenders: list[str] = []
+    for page in pages:
         text = (repo / page).read_text(encoding="utf-8")
         for number, line in enumerate(text.split("\n"), start=1):
-            if "get_guide" not in line and "guide" not in line.lower():
+            lowered = line.lower()
+            if not any(
+                token in lowered
+                for token in ("get_guide", "operator guide", "epics-pv://guide", "operator_guide")
+            ):
                 continue
-            found = claim.search(line)
-            assert not found, (
-                f"{page}:{number} restates the size of the operator guide ({found.group(0)!r}). "
-                "That promise is made in get_guide's own description in src/epics_mcp/server.py "
-                "and guarded by test_the_rounded_size_claims_still_hold, which measures the live "
-                "document. A second copy here is unguarded and will age: point at the carrier "
-                "instead. If a figure genuinely belongs on this page, add the page to the carrier "
-                "list in that test in the same commit, with a reason."
-            )
+            hits = [match for needle in needles if (match := needle.search(line))]
+            if not hits:
+                continue
+            # A fraction word only claims a size when it is talking about a PART of something,
+            # so "half the recipes" is not a size claim while "half the document" is. A KB figure
+            # or a percentage on the same line is a claim on its own and settles it either way.
+            if (
+                fraction_word.search(line)
+                and not kb_figure.search(line)
+                and not percentage.search(line)
+                and "part" not in lowered
+            ):
+                continue
+            offenders.append(f"{page}:{number} ({hits[0].group(0)!r})")
+
+    # Collected rather than raised on the first hit, so a page carrying three copies is one round
+    # of work instead of three.
+    assert not offenders, (
+        "these lines state the size of the operator guide: "
+        + "; ".join(offenders)
+        + ". That promise is made in get_guide's own description in src/epics_mcp/server.py and "
+        "guarded by test_the_rounded_size_claims_still_hold, which measures the live document. A "
+        "second copy is unguarded and will age, which is exactly what happened to the two figures "
+        "docs/tools.md used to carry. Point at the carrier instead, naming it without restating "
+        "the number. If a figure genuinely belongs on a page, exempt it here in the same commit, "
+        "with a reason."
+    )
 
 
 #: KB here means 1000 bytes, and that was MEASURED rather than assumed. The predecessor sentence

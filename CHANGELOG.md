@@ -42,7 +42,7 @@ carry breaking changes).
   `err-arguments`, `err-gates`, `err-guide`. **The `errors` key therefore serves the section's own
   lead, not the signatures below it**, exactly as `tools` has always served the inventory rather
   than its subsections; ask for the group you need, and every key is listed in the argument
-  description and in every refusal. No signature's text changed; three moved so that each group is
+  description and in every refusal. No signature's text changed; two moved so that each group is
   contiguous. The largest single part of the whole guide drops from 24 741 B to 8 092 B, and it is
   in a different section now.
 
