@@ -90,6 +90,11 @@ one step, with two exceptions. While the block still carries a `<placeholder>`, 
 except `sandbox` does until you fill it in with `--set NAME=VALUE`, the placeholders are named on
 stderr and NO check runs, because probing `<archiver-host>` would produce a DNS failure shaped
 exactly like a real finding; and `--no-check` skips the check outright.
+Before the check it names the variables from your own shell that reach it anyway, with what each
+does and what to do about it: it strips what it owns (`EPICS_MCP_*` plus the six EPICS search-path
+variables) so the report is about the block, and deliberately leaves your proxy, CA-bundle and
+EPICS port variables alone, because removing those would break every site behind a proxy and every
+site with an internal CA. Naming them is what keeps the report honest about its own reach.
 It writes nothing unless asked to: `--out PATH` writes the block as UTF-8 with LF, which a
 shell redirect cannot promise (in Windows PowerShell 5.1 both `>` and `Set-Content -Encoding utf8`
 produce bytes a strict JSON parser rejects). `--out` refuses an existing file unless `--force` is

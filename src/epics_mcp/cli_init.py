@@ -68,6 +68,7 @@ from epics_mcp.cli_common import add_version_argument, configure_stdout
 from epics_mcp.presets import (
     PRESETS,
     SERVER_COMMAND,
+    ambient_influences,
     configures_a_rest_plane,
     format_listing,
     open_placeholders,
@@ -291,6 +292,47 @@ def _warn_about_write_gate(env: Mapping[str, str], *, check_follows: bool) -> No
     )
 
 
+def _warn_about_ambient_environment(env: Mapping[str, str]) -> None:
+    """Name the shell variables that reach the check but are not in the block, and what to do.
+
+    WHY, and it is the one thing ``_run_check``'s strip cannot promise. That strip removes what this
+    command OWNS so the report describes the block just printed. Variables it does not own survive,
+    and some of them decide the answer: a ``HTTP_PROXY`` turns healthy REST planes into
+    ``unreachable`` with a host the block never mentions, and an ``EPICS_PVA_BROADCAST_PORT``
+    decides who answers a PV search while the report's ``search paths:`` line stays word for word
+    the same. Stripping those too was considered and refused (decision UE): it would break every
+    site that reaches the network through a proxy and every site with an internal CA. So the report
+    names them.
+
+    BEFORE the check, not after, and that is a lesson this repository already paid for once. The
+    coverage audit moved its cap warning ABOVE the figures for exactly this reason: a reader who
+    meets the caveat after the verdicts has already drawn the conclusion.
+
+    ONLY when a check follows. With ``--no-check`` or an unfinished block nothing is probed, so
+    there is no report for these variables to qualify and the warning would be pure noise.
+
+    Names, effects and handles, never VALUES. A proxy URL routinely carries a password, and naming
+    the variable is what the reader needs; the value is already in their own shell.
+
+    Which variables, and why they are not listed here: :data:`presets.AMBIENT_GROUPS` holds them at
+    one address with its admission criterion, because the decision's own proviso is that this list
+    ages and must not be spread across the code.
+    """
+    findings = ambient_influences(os.environ, env)
+    if not findings:
+        return
+    total = sum(len(names) for _group, names in findings)
+    sys.stderr.write(
+        f"epics-init: {total} variable(s) from your shell survive into the check below and can "
+        "change what it reports. They are NOT part of the block above, and this command "
+        "deliberately does not remove them:\n"
+    )
+    for group, names in findings:
+        sys.stderr.write(f"  {', '.join(names)}\n")
+        sys.stderr.write(f"    what it does:  {group.effect}\n")
+        sys.stderr.write(f"    what to do:    {group.remedy}\n")
+
+
 def _warn_that_nothing_was_verified(preset_name: str) -> None:
     """Say that a clean report confirmed nothing, when that is what happened.
 
@@ -507,6 +549,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.no_check:
         return 0
 
+    # Last thing before the report, so the reader meets the caveat ahead of the verdicts it
+    # qualifies rather than after them. Here rather than beside the write-gate warning above,
+    # because this one is about the CHECK and the two paths in between return without running one.
+    _warn_about_ambient_environment(env)
     exit_code = _run_check(env, args.probe_pv)
     if not args.probe_pv and not configures_a_rest_plane(env):
         _warn_that_nothing_was_verified(args.preset)

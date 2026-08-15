@@ -109,6 +109,19 @@ cache of its own under its home directory, which `FASTMCP_CHECK_FOR_UPDATES=off`
    as well (section 3 explains the bundle), or this first check reports `ca_error` for that plane and
    you have to run it again.
 
+   ⚠️ **The check describes the block PLUS whatever your own shell still contributes, and the
+   command now says which.** It removes the variables it owns (`EPICS_MCP_*` and the six EPICS
+   search-path variables) before checking, so the report is about the block rather than a blend.
+   That strip stops there on purpose: removing your proxy configuration would break every site that
+   reaches the network through one, and removing `REQUESTS_CA_BUNDLE` would break every site with an
+   internal CA. What survives can still decide the answer, so it is NAMED on stderr ahead of the
+   report, with what it does and what to do about it. Two examples, both measured: an `HTTP_PROXY`
+   can turn six healthy REST planes into six `unreachable`, each naming a host the block never
+   mentions; an `EPICS_PVA_BROADCAST_PORT` decides who answers a PV search while the report's
+   `search paths:` line is unchanged word for word. Setting `EPICS_MCP_CA_BUNDLE` in the block
+   silences the HTTP half of that list, because an explicit TLS decision makes the read sessions
+   ignore the ambient environment altogether.
+
    The block goes to stdout and everything the command has to SAY goes to stderr. Where the block
    belongs is in [MCP client integration](mcp-clients.md), together with the restart that finishes
    the job.
@@ -131,7 +144,8 @@ cache of its own under its home directory, which `FASTMCP_CHECK_FOR_UPDATES=off`
    reads the environment of the process YOU start, not the `env` block of a client-configuration
    file. Run it with the same variables set in your own shell, or it will report a healthy nothing
    and mean it. Step 1 avoids that trap by design: `epics-init` puts the block it just printed into
-   the environment and checks THAT.
+   the environment and checks THAT, up to the ambient variables it names rather than removes (step
+   1). Run bare, `epics-doctor` makes no such claim in the first place: its subject IS your shell.
 
    ```bash
    epics-doctor --probe-pv <a-connected-pv>   # the REST planes, plus one live PV: pass or fail

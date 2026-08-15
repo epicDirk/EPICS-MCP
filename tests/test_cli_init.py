@@ -26,12 +26,16 @@ import pytest
 
 from epics_mcp import cli_doctor, cli_init
 from epics_mcp.presets import (
+    _FALSE_SPELLINGS,
     _PLACEHOLDER_RE,
+    AMBIENT_GROUPS,
     PRESETS,
     SERVER_COMMAND,
     SERVER_KEY,
     Preset,
+    ambient_influences,
     configures_a_rest_plane,
+    decides_tls_explicitly,
     open_placeholders,
     render_client_config,
     stale_config_vars,
@@ -928,6 +932,169 @@ class TestWritingTheBlock:
         cli_init.main(["--preset", "sandbox", "--no-check"])
 
         assert "ARMS a write gate" not in capsys.readouterr().err
+
+
+class TestTheAmbientEnvironmentIsNamed:
+    """QA-69, decision UE way (b): the strip cannot own the whole environment, so the report says
+    which of the rest reached the check, what it does, and what to do about it."""
+
+    @pytest.fixture
+    def check_runs(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+        """A doctor that only records, over a throwaway environment the code may delete from."""
+        record: dict[str, object] = {}
+        monkeypatch.setattr(os, "environ", {"PATH": "/usr/bin"})
+
+        def fake_doctor(argv: list[str] | None = None) -> int:
+            record["ran"] = True
+            return 0
+
+        monkeypatch.setattr(cli_doctor, "main", fake_doctor)
+        return record
+
+    def test_a_proxy_in_the_shell_is_named_before_the_report(
+        self, check_runs: dict[str, object], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The first of the two probes decision UE was taken on, as a regression.
+
+        Measured 2026-08-01: an ``HTTP_PROXY`` turned ``live ok, six planes reachable`` into six
+        ``unreachable``, each naming a host that appears nowhere in the emitted block. Nothing said
+        the shell had taken part. Deterministic here and with no network: what is asserted is that
+        the variable is NAMED, which is the whole of way (b).
+        """
+        os.environ["HTTP_PROXY"] = "http://127.0.0.1:9"
+
+        cli_init.main(["--preset", "sandbox"])
+
+        err = capsys.readouterr().err
+        assert "HTTP_PROXY" in err
+        assert check_runs.get("ran") is True
+
+    def test_a_search_port_in_the_shell_is_named_before_the_report(
+        self, check_runs: dict[str, object], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The second probe. ``EPICS_PVA_BROADCAST_PORT`` tipped the live plane from ``ok`` to
+        ``disconnected`` while the report's ``search paths:`` line stayed word for word the same, so
+        the report explained its own reach incompletely. It is not in ``stale_config_vars`` and
+        deliberately stays out: it is the caller's transport, not this command's configuration."""
+        os.environ["EPICS_PVA_BROADCAST_PORT"] = "5999"
+
+        cli_init.main(["--preset", "sandbox"])
+
+        err = capsys.readouterr().err
+        assert "EPICS_PVA_BROADCAST_PORT" in err
+        assert check_runs.get("ran") is True
+
+    def test_the_warning_carries_a_handle_and_not_only_a_name(
+        self, check_runs: dict[str, object], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A warning that names a cause without naming an ACTION becomes noise, and noise is
+        dismissed: four messages in this repository were measured to read as an invitation to switch
+        the check off rather than repair the cause. So every group emitted must print its remedy,
+        and the assertion reads the group's OWN remedy text rather than a phrase copied here, which
+        would pass just as happily against a hard-coded sentence."""
+        os.environ["HTTP_PROXY"] = "http://127.0.0.1:9"
+        os.environ["EPICS_PVA_BROADCAST_PORT"] = "5999"
+
+        cli_init.main(["--preset", "sandbox"])
+
+        err = capsys.readouterr().err
+        emitted = ambient_influences(os.environ, dict(PRESETS["sandbox"].env))
+        assert emitted, "the fixture set nothing the list knows about"
+        for group, _names in emitted:
+            assert group.remedy in err, group.variables
+
+    def test_a_quiet_shell_gets_no_warning_at_all(
+        self, check_runs: dict[str, object], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The negative control. Without it the two probes above would also pass against a message
+        printed unconditionally, which would say nothing about the environment and would train the
+        reader to skip it."""
+        cli_init.main(["--preset", "sandbox"])
+
+        assert "survive into the check below" not in capsys.readouterr().err
+
+    def test_nothing_is_said_when_no_check_follows(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """These variables qualify a REPORT. With ``--no-check`` there is none, so the warning would
+        be qualifying nothing. The same reasoning the write-gate warning gets, in reverse: that one
+        is a property of the BLOCK and is emitted on every path."""
+        os.environ["HTTP_PROXY"] = "http://127.0.0.1:9"
+
+        cli_init.main(["--preset", "sandbox", "--no-check"])
+
+        assert "survive into the check below" not in capsys.readouterr().err
+
+    def test_an_explicit_ca_decision_silences_the_http_half_but_not_the_ports(
+        self, check_runs: dict[str, object], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The precision a naive build gets wrong, and it runs both ways in one probe.
+
+        ``build_retrying_session`` pins ``trust_env=False`` as soon as the effective ``verify`` is
+        anything but plain ``True``, which switches off the proxy environment and the
+        ``*_CA_BUNDLE`` environment together. Naming them anyway would send the reader after a cause
+        that provably cannot bite. The EPICS ports are not HTTP and are untouched by that switch, so
+        a message that fell silent altogether would be the opposite error.
+        """
+        os.environ["HTTP_PROXY"] = "http://127.0.0.1:9"
+        os.environ["REQUESTS_CA_BUNDLE"] = "/etc/ssl/internal.pem"
+        os.environ["EPICS_PVA_BROADCAST_PORT"] = "5999"
+
+        cli_init.main(["--preset", "sandbox", "--set", "EPICS_MCP_CA_BUNDLE=/etc/ssl/combined.pem"])
+
+        err = capsys.readouterr().err
+        assert "HTTP_PROXY" not in err
+        assert "REQUESTS_CA_BUNDLE" not in err
+        assert "EPICS_PVA_BROADCAST_PORT" in err
+
+    def test_no_value_is_printed_only_names(
+        self, check_runs: dict[str, object], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A proxy URL routinely carries a password, and this message goes to a terminal and into
+        whatever captures it. The reader needs the NAME; the value is already in their own shell.
+        Pinned because printing the value is the obvious next 'improvement' to make this message
+        more helpful."""
+        os.environ["HTTP_PROXY"] = "http://svc:s3cr3t@proxy.example.org:8080"
+
+        cli_init.main(["--preset", "sandbox"])
+
+        assert "s3cr3t" not in capsys.readouterr().err
+
+
+class TestTheAmbientListItself:
+    """Properties of :data:`AMBIENT_GROUPS` that no single run exercises."""
+
+    def test_no_variable_is_both_stripped_and_named_as_surviving(self) -> None:
+        """The two lists answer opposite questions and a name in both would make the message lie:
+        it would report a variable as reaching the check that ``_run_check`` had just deleted."""
+        named = {name for group in AMBIENT_GROUPS for name in group.variables}
+        assert not named & set(stale_config_vars(named))
+
+    def test_every_group_states_an_effect_and_a_remedy(self) -> None:
+        """The dataclass requires both fields; this requires them to be non-empty. A group added
+        with an empty remedy would satisfy the constructor and produce exactly the actionless
+        warning the design forbids."""
+        for group in AMBIENT_GROUPS:
+            assert group.variables, group
+            assert group.effect.strip(), group.variables
+            assert group.remedy.strip(), group.variables
+
+    @pytest.mark.parametrize("spelling", sorted(_FALSE_SPELLINGS))
+    def test_the_false_spellings_are_the_ones_epics_config_really_accepts(
+        self, spelling: str
+    ) -> None:
+        """The coupling this module cannot import its way out of.
+
+        ``presets`` holds no I/O and must not build the config singleton, so it cannot ask
+        ``EpicsConfig`` at run time what counts as false; it carries the spellings instead. That is
+        a second copy of somebody else's parser, so the copy is pinned against the original HERE,
+        the same shape as the suffix coupling in ``display_files``: a widened or narrowed parser is
+        a red test rather than a silent disagreement about when the ambient warning falls silent.
+        """
+        from epics_mcp.config import EpicsConfig
+
+        assert EpicsConfig(tls_verify=spelling).tls_verify is False  # type: ignore[arg-type]
+        assert decides_tls_explicitly({"EPICS_MCP_TLS_VERIFY": spelling.upper()})
 
 
 def test_no_import_builds_the_config_singleton() -> None:

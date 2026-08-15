@@ -34,6 +34,17 @@ carry breaking changes).
 
 ### Changed
 
+- **`epics-init` names the variables from your own shell that reach its check.** It strips what it
+  owns (`EPICS_MCP_*` plus the six EPICS search-path variables) and probes the block it just
+  printed, and that claim held only up to the variables it does not own. Measured: an `HTTP_PROXY`
+  turns six healthy REST planes into six `unreachable`, each naming a host the block never
+  mentions, and an `EPICS_PVA_BROADCAST_PORT` decides who answers a PV search while the report's
+  `search paths:` line is unchanged word for word. Stripping those too would break every site
+  behind a proxy and every site with an internal CA, so they are named instead, on stderr and
+  ahead of the report, each with what it does and what to do about it. Names only, never values: a
+  proxy URL routinely carries a password. Setting `EPICS_MCP_CA_BUNDLE` in the block silences the
+  HTTP half, because an explicit TLS decision makes the read sessions ignore the environment.
+
 - **`get_guide`: the error signatures are eleven addressable groups now, and `errors` serves the
   section's lead.** That section had become the largest single part of the guide, thirty signatures
   with no subheading in it, so a question about one of them cost the other twenty-nine as well. It

@@ -29,6 +29,24 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
+__all__ = [
+    "AMBIENT_GROUPS",
+    "PRESETS",
+    "REST_PLANE_VARS",
+    "SERVER_COMMAND",
+    "SERVER_KEY",
+    "AmbientGroup",
+    "Preset",
+    "ambient_influences",
+    "configures_a_rest_plane",
+    "decides_tls_explicitly",
+    "format_listing",
+    "open_placeholders",
+    "render_client_config",
+    "stale_config_vars",
+    "with_overrides",
+]
+
 #: The key this server is conventionally registered under in an MCP client config, and the console
 #: command that starts it. Both are held here rather than spelled inline, because
 #: ``tests/test_presets_match_examples.py`` asserts them against ``examples/mcp.json`` and against
@@ -95,6 +113,131 @@ REST_PLANE_VARS = frozenset(
         "EPICS_MCP_OLOG_URL",
     }
 )
+
+#: The two block settings that make an EXPLICIT TLS decision, which is what silences the ambient
+#: HTTP environment. ``build_retrying_session`` resolves ``verify = ca_bundle or tls_verify`` and
+#: pins ``trust_env=False`` whenever the result is anything other than plain ``True``; that switch
+#: turns off the proxy environment and the ``*_CA_BUNDLE`` environment together
+#: (``services/_http.py``, measured with a negative control: with ``trust_env=False`` requests
+#: merges no proxies and keeps ``verify`` at ``True``).
+_CA_BUNDLE_VAR = "EPICS_MCP_CA_BUNDLE"
+_TLS_VERIFY_VAR = "EPICS_MCP_TLS_VERIFY"
+
+#: The spellings ``EPICS_MCP_TLS_VERIFY`` accepts for FALSE. Held here rather than re-parsed,
+#: because this module has no I/O and must not build the config singleton (see ``cli_init``: the
+#: singleton would freeze the caller's PRE-strip environment). Deliberately not an import of
+#: pydantic's parser; ``tests/test_cli_init.py`` pins these against ``EpicsConfig`` itself, so a
+#: widened parser is a red test rather than a silent disagreement. Same shape as the coupling guard
+#: on ``display_files.INVENTORY_SUFFIXES``.
+_FALSE_SPELLINGS = frozenset({"0", "off", "false", "f", "n", "no"})
+
+
+@dataclass(frozen=True)
+class AmbientGroup:
+    """One family of variable the caller's SHELL carries into a check, and the handle for it.
+
+    *effect* says what a leftover member does to the report; *remedy* says what to do about it. Both
+    are required, and the second is the point: a warning that names a cause without naming an action
+    becomes noise, and noise gets dismissed. Four messages in this repository were measured to read
+    as an invitation to switch the check OFF rather than repair the cause.
+
+    *silenced_by_explicit_tls* marks the groups that stop mattering once the block itself decides
+    TLS, because that decision pins ``trust_env=False`` and takes the whole ambient HTTP environment
+    out of play at once.
+    """
+
+    variables: tuple[str, ...]
+    effect: str
+    remedy: str
+    silenced_by_explicit_tls: bool
+
+
+#: What the caller's shell keeps contributing to a probe AFTER :func:`stale_config_vars` has run.
+#:
+#: WHY this exists, and why it is one list. ``epics-init`` strips what it OWNS (``EPICS_MCP_*`` plus
+#: the six search-path variables) and applies a preset on top, so the report describes the block it
+#: just printed. That claim is only true up to the variables it does NOT strip, and stripping those
+#: is the wrong repair: it would break every site that reaches the network through a proxy and every
+#: site with an internal CA. So the report NAMES them instead (decision UE, way (b)). A list like
+#: this ages, which is why it lives at exactly one address and carries its own admission criterion:
+#:
+#:     a variable belongs here when it changes WHO ANSWERS or WHETHER an answer arrives.
+#:     Transport tuning (buffer sizes, timeouts) does not, however loudly it is set.
+#:
+#: Measured on this installation rather than recalled, each family with a negative control:
+#:
+#: * The proxy and CA-bundle names are the ones ``requests`` really merges from the environment
+#:   (probed through ``Session.merge_environment_settings``). ``SSL_CERT_FILE`` and ``SSL_CERT_DIR``
+#:   are deliberately ABSENT: they were on the first draft of this list and the probe showed
+#:   ``verify`` unchanged at ``True``, because requests names certifi's bundle explicitly instead of
+#:   falling back to OpenSSL's default paths. ``FTP_PROXY`` is read as well and is also absent: no
+#:   plane here speaks ftp, so it cannot reach a request.
+#: * Both spellings of each proxy variable are listed because both are read, and the LOWER case one
+#:   won on this platform when the two disagreed.
+#: * ``EPICS_PVA_BROADCAST_PORT`` and ``EPICS_PVA_SERVER_PORT`` are the port variables the installed
+#:   p4p/pvxs actually recognises on the client side (the ``EPICS_PVAS_*`` family is the SERVER
+#:   half and cannot apply here). The first is the one measured to flip the live plane from ``ok``
+#:   to ``disconnected`` while the report's ``search paths:`` line stayed word for word the same
+#:   (QA-69, 2026-08-01).
+#: * ⚠️ The two CA-protocol ports are NOT measured here, they are the same role in the other
+#:   protocol and are listed on that reasoning alone. Said out loud rather than blended in with the
+#:   measured ones.
+AMBIENT_GROUPS: tuple[AmbientGroup, ...] = (
+    AmbientGroup(
+        variables=(
+            "ALL_PROXY",
+            "HTTPS_PROXY",
+            "HTTP_PROXY",
+            "NO_PROXY",
+            "all_proxy",
+            "http_proxy",
+            "https_proxy",
+            "no_proxy",
+        ),
+        effect=(
+            "every REST plane is contacted THROUGH the proxy named here, so a healthy plane can be "
+            "reported unreachable, and the failure names a host that appears nowhere in the block "
+            "above"
+        ),
+        remedy=(
+            "unset for this run if these services are reachable directly, or read the failures as "
+            f"being about the proxy; setting {_CA_BUNDLE_VAR} in the block also takes this whole "
+            "group out of play, because an explicit TLS decision makes the session "
+            "environment-independent"
+        ),
+        silenced_by_explicit_tls=True,
+    ),
+    AmbientGroup(
+        variables=("CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE"),
+        effect=(
+            "the TLS trust store of the READ sessions is replaced, so an HTTPS plane can pass here "
+            "and fail for the running server, which does not inherit your shell"
+        ),
+        remedy=(
+            f"put the bundle in the block as {_CA_BUNDLE_VAR}=<path> instead, which is the setting "
+            "the server itself reads and which pins the session environment-independent"
+        ),
+        silenced_by_explicit_tls=True,
+    ),
+    AmbientGroup(
+        variables=(
+            "EPICS_CA_REPEATER_PORT",
+            "EPICS_CA_SERVER_PORT",
+            "EPICS_PVA_BROADCAST_PORT",
+            "EPICS_PVA_SERVER_PORT",
+        ),
+        effect=(
+            "the PORT a PV search goes to is decided here, so this decides WHO answers; the "
+            "check's 'search paths:' line reports the addresses only and says nothing about it"
+        ),
+        remedy=(
+            "unset for this run, or state it in the block with --set NAME=VALUE so the "
+            "configuration you hand your client is the one that was checked"
+        ),
+        silenced_by_explicit_tls=False,
+    ),
+)
+
 
 #: Loopback-only PV search: every route a PV search could take points at 127.0.0.1, and the two
 #: subnet-broadcast switches are OFF. Held as a name because getting it WRONG is silent: EPICS
@@ -265,6 +408,49 @@ def stale_config_vars(environ: Iterable[str]) -> list[str]:
     return sorted(
         name for name in environ if name.startswith(_CONFIG_PREFIX) or name in _SEARCH_VARS
     )
+
+
+def decides_tls_explicitly(env: Mapping[str, str]) -> bool:
+    """True when *env* itself decides TLS, which silences the ambient HTTP environment.
+
+    The two settings are not symmetric and both have to be read: a non-empty ``CA_BUNDLE`` is a
+    decision by its presence, while ``TLS_VERIFY`` is one only when it is FALSE (its default, true,
+    is what leaves ``trust_env`` on in the first place). Either way the resulting ``verify`` is not
+    plain ``True``, and that is the condition ``build_retrying_session`` pins ``trust_env=False``
+    on.
+    """
+    if env.get(_CA_BUNDLE_VAR, "").strip():
+        return True
+    return env.get(_TLS_VERIFY_VAR, "").strip().lower() in _FALSE_SPELLINGS
+
+
+def ambient_influences(
+    environ: Iterable[str], env: Mapping[str, str]
+) -> list[tuple[AmbientGroup, tuple[str, ...]]]:
+    """The shell variables that survive the strip AND can still change what the check reports.
+
+    The whole question in ONE call, deliberately: which families exist, which of their members the
+    caller has set, and which of them the composed block has already taken out of play. Splitting
+    the last part out to the caller would put half the answer next to the printing code, which is
+    the scattering the decision's own proviso forbids.
+
+    *environ* is the caller's variable NAMES, the same shape :func:`stale_config_vars` takes, and
+    for the same reason: no value is needed to name a variable, and a proxy URL can carry a
+    password. *env* is the COMPOSED block, read only for :func:`decides_tls_explicitly`.
+
+    Returns ``(group, names set by this caller)`` pairs in :data:`AMBIENT_GROUPS` order, groups with
+    nothing set omitted. Empty means the check below is about the block and nothing else.
+    """
+    present = set(environ)
+    tls_decided = decides_tls_explicitly(env)
+    findings: list[tuple[AmbientGroup, tuple[str, ...]]] = []
+    for group in AMBIENT_GROUPS:
+        if group.silenced_by_explicit_tls and tls_decided:
+            continue
+        names = tuple(name for name in group.variables if name in present)
+        if names:
+            findings.append((group, names))
+    return findings
 
 
 def render_client_config(env: Mapping[str, str], *, command: str = SERVER_COMMAND) -> str:
