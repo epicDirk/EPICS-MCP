@@ -47,11 +47,25 @@ that list to the registrations.** Only the operator guide's inventory block is c
 touches none of it: the resource URIs (`test_readme_resources`), that no page advertises an
 `epics-*` command the package does not install (`test_examples_match_entry_points`), that its
 "part of the core install" sentence names the same commands as the engine gate
-(`test_cli_without_display_engine`), and that every status name it pairs with a glyph uses the
+(`test_cli_without_display_engine`), that every status name it pairs with a glyph uses the
 glyph `cli_doctor` renders (`test_guide_matches_code`, which names this page explicitly so a rename
-cannot drop it out of the scan). SIX test modules read the file, measured with
-`grep -rln 'tools\.md' tests/`, and not one of them reads the tool table. It is a
-second inventory of the same thing with one of them guarded.
+cannot drop it out of the scan), that its relative links resolve (`test_doc_links`), and that it
+uses no retired name for the display context cap (`test_diagnostics_tail`). Six test modules read
+the file, and **not one of them reads the tool table.** It is a second inventory of the same thing
+with one of them guarded.
+
+⚠️ **How that six was counted matters, and the obvious way to count it is wrong in both
+directions.** This entry used to derive it from `grep -rln 'tools\.md' tests/`, which also yields
+six `.py` modules and is a DIFFERENT six: it finds `test_resources`, which names the page in a
+comment and reads `operator_guide.md` instead, and it misses `test_examples_match_entry_points`,
+which really does read the page but reaches it through `(_ROOT / "docs").glob("*.md")` and
+therefore never spells its name. `test_diagnostics_tail` is in both sets for the same reason in
+reverse: it names the page in a comment AND reads it, through a `docs/` directory prefix. So the
+grep answers "which modules mention the string", the number above answers "which modules open the
+file", and the two agreeing on a total was a coincidence. Re-derive it by looking for a `docs`
+directory walk as well as the name, not by the grep alone. This mattering on the page whose whole
+purpose is honesty about measurement methods is the reason it is written out rather than fixed
+silently.
 
 ## 9 · The language guard finds German by vocabulary, not by understanding
 
