@@ -10,8 +10,8 @@ The facility-agnostic guard has two layers, and both now read the SAME populatio
 text file. A repo-wide DENYLIST (``_SITE_RE`` / ``_PERSON_RE``) catches known site tokens, username
 paths and personal names, a best-effort list, not a proof. On top of it, a
 repo-can't-enumerate-them class (realistic, specific EPICS device/PV names) is handled the other
-way round: an ALLOWLIST-shaped structural detector (``_PV_RE``) flags anything ESS-PV-shaped that
-is not a declared synthetic placeholder.
+way round: an ALLOWLIST-shaped structural detector (``pv_leak_scan.PV_RE``) flags anything
+ESS-PV-shaped that is not a declared synthetic placeholder.
 
 The structural detector used to read a doc-suffix subset outside ``tests/`` and ``src/``, which was
 20 of 180 files, and that is QA-28. Measured, the PATH half of that filter excluded nothing: the
@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,14 @@ import pytest
 from epics_mcp.resources import get_guide
 
 _ROOT = Path(__file__).resolve().parent.parent  # .../EPICS-MCP-Server
+
+# The detector is shared with the commit-message guard, so it lives in scripts/ and is imported
+# rather than duplicated. The sys.path splice is this repository's established way of reaching a
+# scripts/ module from a test (six other modules do the same); scripts/ is not a package, and
+# making it one would change what the packaging guard reads.
+sys.path.insert(0, str(_ROOT / "scripts"))
+
+from pv_leak_scan import pv_leak_tokens  # noqa: E402 (needs the sys.path splice above)
 
 
 def test_guide_loads_as_package_data() -> None:
@@ -120,55 +129,12 @@ _SITE_RE = re.compile(
 # Personal names (case-insensitive): decisions must be attributed impersonally in committed docs.
 _PERSON_RE = re.compile(r"\bDirk\b|\bNordt\b", re.IGNORECASE)
 
-# Realistic, specific EPICS device/PV names are the leak vector the denylist above cannot
-# enumerate: a facility has thousands, all structurally like the synthetic ones. So instead of
-# listing real names, we flag anything ESS-PV-SHAPED and pass only DECLARED synthetic placeholders.
-# The negative lookbehind anchors the match at a run boundary, so it never fires mid-token inside a
-# sanctioned 'SIM:PS-01:Cur-RB' placeholder (it would otherwise re-anchor on 'PS-01'). Three
-# structural gates keep it off non-PV text: (1) a digit must appear SOMEWHERE in the device path, a
-# real ESS numeric index sits either in the Section-Subsection head ('PS-01:...') OR in a later
-# device segment ('QAB-ZZ:Diag-BPM-09:...'); this alone excludes 'NTScalar:Value'. (2) The
-# [A-Z]-led head never anchors on a digit-led ISO-8601 timestamp. (3) The head needs >=1 hyphenated
-# segment (the ESS Sec-Sub## shape), which is what excludes bare ALLCAPS enums like 'MODE1:AUTO'.
-_PV_RE = re.compile(
-    r"(?<![A-Za-z0-9:./-])"  # anchor at a run boundary (not mid SIM:.. / path / date)
-    r"(?=[A-Za-z0-9:-]*[0-9])"  # a digit appears anywhere in the device path (head OR a segment)
-    r"[A-Z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+"  # head: >=1 hyphenated segment (ESS Sec-Sub##)
-    r":[A-Za-z][A-Za-z0-9-]*"  # device segment after ':'
-    r"(?::[A-Za-z][A-Za-z0-9-]*)*"  # optional further ':'-segments (signal)
-)
-# A ca/pva scheme prefix (incl. the TLS forms pvas://, cas://) is stripped before scanning: the '/'
-# in _PV_RE's lookbehind would otherwise stop it anchoring on a pasted 'pvas://<real-pv>', the
-# natural Phoebus/pvget copy form, and the repo steers operators toward TLS-secured planes.
-_PV_SCHEME_RE = re.compile(r"\b(?:pvas?|cas?)://", re.IGNORECASE)
-# Declared "this-is-invented" markers. The COMPOUND ones match as a head PREFIX (DEV-TEST01 splits
-# to ['DEV','TEST01'], so a whole-segment test would miss them); the single-word ones match as a
-# WHOLE '-'-segment only, a prefix test on 'SIM' would wrongly exempt a real head like 'SIMD-01'.
-# Deliberately NO generic ESS abbreviations (VAC/PS/SYS collide with real system names); the
-# lookbehind already lets the one documented doc placeholder (SIM:PS-01:Cur-RB) pass.
-_SYNTHETIC_COMPOUND = ("DEV-TEST", "ZZZ-FAKE")
-_SYNTHETIC_SEGMENTS = frozenset({"SIM", "EXAMPLE", "FAKE", "DEMO", "DUMMY", "MOCK"})
-
-
-def _is_synthetic_pv(token: str) -> bool:
-    """A flagged PV-shaped token is a declared synthetic placeholder when its head (the part before
-    the first ':') is prefixed by a compound marker (DEV-TEST/ZZZ-FAKE) or carries a single-word
-    marker as a whole '-'-segment."""
-    head = token.split(":", 1)[0]
-    if head.startswith(_SYNTHETIC_COMPOUND):
-        return True
-    return any(segment in _SYNTHETIC_SEGMENTS for segment in head.split("-"))
-
-
-def _pv_leak_tokens(text: str) -> list[str]:
-    """The device/PV names in ``text`` that are not a declared synthetic placeholder, the
-    realistic, specific names that must not appear on the knowledge surface. A ca/pva scheme prefix
-    is neutralised first so a pasted 'pvas://<real-pv>' still anchors. (ISO-8601 timestamps need no
-    filter: _PV_RE's [A-Z]-led head never anchors on a digit-led token.)"""
-    scanned = _PV_SCHEME_RE.sub("  ", text)
-    return [
-        token for match in _PV_RE.finditer(scanned) if not _is_synthetic_pv(token := match.group(0))
-    ]
+# The structural device/PV-name detector MOVED to scripts/pv_leak_scan.py, and the move is the
+# point rather than tidying: a second surface needs the same needle. The commit MESSAGE is a leak
+# vector no file guard can reach (GB-33 measured real device names in commit bodies), so
+# scripts/check_commit_message.py scans it with exactly this detector rather than a second copy
+# that would drift. The pattern, its three structural gates and the synthetic markers are
+# documented at the definition; what stays here is the POPULATION this repository scans with it.
 
 
 def _tracked_text_files(*, include_this_file: bool = False) -> list[Path]:
@@ -257,7 +223,7 @@ _PV_SHAPES_DECLARED_HERE = (
     "pvas://QAB-ZZ07:Ctrl-XVR-03",  # TLS-secured PVAccess paste form
     "SIMD-07:Ctrl-XVR-03",  # head merely STARTS with 'SIM', not a whole-segment marker
     "pva://SEC-SUB:Dev-01",  # the _SITE_RE lookbehind example, stated in the comment above
-    "QAB-ZZ:Diag-BPM-09",  # the _PV_RE digit-position example, stated in the comment above
+    "QAB-ZZ:Diag-BPM-09",  # the alpha-only-head example in the detector test's docstring below
 )
 
 
@@ -268,7 +234,7 @@ def _declared_pv_tokens() -> set[str]:
     tokens by hand, because the two differ: a scheme-prefixed shape is stored with its ``pva://``
     and read without it, so a hand-written token list would have drifted from the first entry.
     """
-    return {token for shape in _PV_SHAPES_DECLARED_HERE for token in _pv_leak_tokens(shape)}
+    return {token for shape in _PV_SHAPES_DECLARED_HERE for token in pv_leak_tokens(shape)}
 
 
 def test_knowledge_files_are_facility_agnostic() -> None:
@@ -294,7 +260,7 @@ def test_knowledge_files_are_facility_agnostic() -> None:
     # Widening costs nothing today, measured over the 160 files it newly reads: ZERO hits. The
     # ~200 PV-shaped fixtures under tests/ are not passed by an exemption but by the declared
     # synthetic markers (SIM / DEV-TEST / ZZZ-FAKE / EXAMPLE / FAKE / DEMO / DUMMY / MOCK) that
-    # _is_synthetic_pv already applies. The previous rationale here named an exemption that did
+    # is_synthetic_pv already applies. The previous rationale here named an exemption that did
     # not exist. What the widening buys is the future: a real device name pasted into any tracked
     # text file is now reported, which is the class the denylist above cannot enumerate.
     #
@@ -307,7 +273,7 @@ def test_knowledge_files_are_facility_agnostic() -> None:
         allowed = declared if path.resolve() == this else frozenset()
         problems.extend(
             f"{rel} [pv: {token!r}]"
-            for token in _pv_leak_tokens(path.read_text(encoding="utf-8"))
+            for token in pv_leak_tokens(path.read_text(encoding="utf-8"))
             if token not in allowed
         )
 
@@ -379,7 +345,7 @@ def test_pv_detector_flags_realistic_names_and_passes_synthetic() -> None:
     """
 
     def flags(name: str) -> bool:  # exact production path (scheme-strip + ISO + synthetic filter)
-        return bool(_pv_leak_tokens(name))
+        return bool(pv_leak_tokens(name))
 
     for realistic in _PV_SHAPES_DECLARED_HERE:
         assert flags(realistic), f"detector must flag realistic PV {realistic!r}"
@@ -391,7 +357,7 @@ def test_pv_detector_flags_realistic_names_and_passes_synthetic() -> None:
         "SIM:PS-01:Cur-RB",  # the one documented doc placeholder (CLAUDE.md, operator_guide.md)
         "DEV-TEST01:Ctrl-EVR-01:status",  # canonical sandbox PV, a compound synthetic marker
         "X-SIM-01:Ctrl-Cmd",  # whole-segment 'SIM' marker -> synthetic (vs SIMD-07 above)
-        "2026-07-08T12:45:58",  # ISO-8601: _PV_RE's [A-Z]-led head never anchors on a digit
+        "2026-07-08T12:45:58",  # ISO-8601: PV_RE's [A-Z]-led head never anchors on a digit
         "Ctrl-XVR:Value",  # hyphenated head, no digit index -> not PV-shaped (pins lookahead)
         "MODE1:AUTO",  # ALLCAPS enum, not a PV
         "NTScalar:Value",  # PVA type name

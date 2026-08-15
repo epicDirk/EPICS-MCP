@@ -143,6 +143,11 @@ def _tracked_files() -> set[str]:
 #: in this map and reddens, and an entry that stops being omitted (because it was deleted, or
 #: because somebody added it to only-include) also reddens instead of standing as a stale claim.
 _DELIBERATELY_OUT = {
+    # Both figures carry their measuring rule in pyproject.toml beside the sdist declaration,
+    # because a number without one cannot be rechecked and drifts silently: this one said nine
+    # while the tree held seven. "Imports from scripts/" = splices scripts/ onto sys.path or loads
+    # a script through spec_from_file_location; "three MORE" = builds a path to .github/ or
+    # .pre-commit-config.yaml and is not already in the first set. Measured 2026-08-15: 9 and 3.
     "tests": (
         "development surface. A consumer cannot run this suite from an sdist in any case: nine "
         "test modules import from scripts/ and three more read .github/ and "

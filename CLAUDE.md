@@ -321,6 +321,16 @@ operator guide, or this file.
 ruff-format, mypy --strict, the no-secrets / no-site-internal guards, and the two prose guards
 below). Conventional commit prefixes, one logical change per commit.
 
+**The commit MESSAGE is guarded too, and it is the one guard a clone can be missing.** The tracked
+files are covered by `test_guide.py`; commit metadata is outside that population by construction,
+and it is where this repository's measured leak sat (a facility identity in 507 of 563 signatures,
+real device names in bodies, all public and unrewritable because tags and releases pin the commit
+ids). `scripts/check_commit_message.py` applies the EXISTING detectors to the message at the
+`commit-msg` stage. ⚠️ `pre-commit run --all-files` drives the pre-commit stage only, so a green
+gate run says nothing about it, and `.git/hooks/commit-msg` exists only after
+`pre-commit install --hook-type commit-msg`. Check with `ls .git/hooks/commit-msg` rather than
+assuming; the wiring is guarded, the installation cannot be.
+
 **English, and ASCII punctuation, both mechanised.** This repository grew out of a German-speaking
 project and carried German comments and an em dash as its default connector for months; removing
 both took a multi-day sweep. `scripts/check_language.py` (three independent signals: function

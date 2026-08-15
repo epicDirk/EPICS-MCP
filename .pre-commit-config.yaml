@@ -29,6 +29,30 @@
 # the gate reports success on staged, broken code. On top of that `ruff format` has no
 # `--extend-exclude` at all. That route would not have been stricter, it would have been silently
 # blind. Cost and the rest of the reasoning: the module header of the script.
+#
+# TWO STAGES, TWO SHIMS, AND THEY DO NOT COMPETE. The six hooks below run at the default
+# `pre-commit` stage over FILES; `commit-message` runs at the `commit-msg` stage over the MESSAGE,
+# which is a leak surface no file guard can reach (GB-33). pre-commit installs a SEPARATE
+# .git/hooks/commit-msg shim for it, so nothing about the existing pre-commit shim changes, and
+# `core.hooksPath` (which would switch the framework off in this repository) is not involved. The
+# work item assumed the opposite; measured on pre-commit 4.6.0, the two shims are independent files.
+#
+# ⚠️ `default_install_hook_types` decides what `pre-commit install` WIRES, not what is wired now.
+# A fresh clone runs the message guard only after `uv run pre-commit install --hook-type commit-msg`
+# (or a plain `pre-commit install`, which now honours the list below). CI is unaffected either way:
+# `pre-commit run --all-files` drives the pre-commit stage only, which is why the message guard's
+# behaviour is pinned by tests/test_commit_message_guard.py instead.
+#
+# ⚠️ `default_stages` is NOT decoration here, and this was measured rather than reasoned about. A
+# hook that names no stage runs at EVERY stage, so merely installing the commit-msg shim made the
+# six file hooks run a second time, over `.git/COMMIT_EDITMSG`. The first live commit attempt
+# printed them twice and proved it. Two of them do not belong on that surface: `typography` and
+# `language` police the tracked TREE, and an em dash or a German word in a commit subject is a
+# style question, not a leak, so blocking a commit over one would be a change nobody argued for.
+# Pinning the default to `pre-commit` keeps each hook on the surface it was written for; the
+# message guard names its own stage below.
+default_stages: [pre-commit]
+default_install_hook_types: [pre-commit, commit-msg]
 repos:
   - repo: local
     hooks:
@@ -80,5 +104,17 @@ repos:
         name: English only
         entry: uv run python scripts/check_language.py
         language: system
+        pass_filenames: true
+        require_serial: true
+      # The commit MESSAGE, scanned with the guards that already exist: the secret/site patterns
+      # from check_no_ess_internal and the structural device-PV detector shared with test_guide.
+      # `always_run` because the file pre-commit hands a commit-msg hook is `.git/COMMIT_EDITMSG`,
+      # which carries no extension and would fall outside any `types` filter.
+      - id: commit-message
+        name: no secrets / site identifiers / device names in the commit message
+        entry: uv run python scripts/check_commit_message.py
+        language: system
+        stages: [commit-msg]
+        always_run: true
         pass_filenames: true
         require_serial: true

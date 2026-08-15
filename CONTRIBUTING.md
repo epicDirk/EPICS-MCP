@@ -42,7 +42,16 @@ uv sync --extra dev --group displays --locked  # full local install (toolchain +
 uv run pytest                                  # run the test suite
 uv run pytest --cov=src --cov-branch           # with coverage
 uv run pre-commit run --all-files              # ruff + format + mypy --strict + guards
+uv run pre-commit install --hook-type commit-msg   # ONE-OFF, see below: the message guard
 ```
+
+⚠️ **The last line is a one-off per clone, and nothing can do it for you.** Six hooks run over
+FILES at commit time; a seventh scans the commit MESSAGE, which is a leak surface no file guard can
+reach (real device names have reached commit bodies on this public repository before). Its wiring
+lives in `.pre-commit-config.yaml` and a test holds that wiring, but `.git/hooks/commit-msg` is
+per-clone state outside the tree, so **a fresh clone has no message guard until this command is
+run**. Verify with `ls .git/hooks/commit-msg`. What it refuses, and what it deliberately does not
+look at, is documented at `scripts/check_commit_message.py`.
 
 **Extra vs group.** `dev` is the only published extra and carries the toolchain. The
 `opi_navigation` PV engine, which the display-aware tools need, is a **dependency group**
@@ -87,7 +96,11 @@ instead since 2026-08-04: `docs/known-limits.md`, entry 16.
 
 - `uv run pytest` green and coverage not reduced.
 - `uv run pre-commit run --all-files` green (ruff, ruff-format, **mypy --strict**, the no-secrets
-  guard, and the two prose guards below).
+  guard, and the two prose guards below). ⚠️ That command drives the pre-commit stage only, so it
+  never exercises the **commit-message** guard; that one runs when you commit, and only in a clone
+  where `pre-commit install --hook-type commit-msg` has been run. Its behaviour is pinned by
+  `tests/test_commit_message_guard.py` instead, which is what keeps CI able to check a hook CI does
+  not run.
 - **English, and plain punctuation.** This repository is written in English, with ASCII
   punctuation; `scripts/check_language.py` and `scripts/check_typography.py` enforce both on every
   text file. If a hook blocks you: translate the line rather than deleting the reasoning, and

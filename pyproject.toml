@@ -189,6 +189,14 @@ packages = ["src/epics_mcp"]
 # consumer cannot run the suite from an sdist anyway, because nine test modules import from
 # scripts/ and three more read .github/ and .pre-commit-config.yaml.
 #
+# Both figures carry their measuring rule, because without one they cannot be rechecked and this
+# repository has already found several such numbers wrong (QA-36). "Imports from scripts/" means
+# the module splices scripts/ onto sys.path or loads a script through spec_from_file_location;
+# "three MORE" counts modules building a path to .github/ or .pre-commit-config.yaml that are not
+# already in the first set. Measured 2026-08-15: 9 and 3. ⚠️ The first figure stood at nine while
+# the tree held seven, from 2026-08-09 until the commit-message guard and the guide test brought
+# it back to nine; a number without its rule drifts silently in exactly that way.
+#
 # ⚠️ only-include is a PATH-PREFIX filter, NOT a VCS filter, and that was measured before it was
 # relied on: a stray untracked file INSIDE an included directory still ships. So this declaration
 # alone does not close the hole it was written for, and it is not asked to. What closes it is
