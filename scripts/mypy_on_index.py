@@ -1,18 +1,21 @@
 """Run mypy against the git INDEX instead of the working tree (GB-83).
 
-WHY. The type hook of this repository declares ``pass_filenames: false``, so mypy walks
-the WORKING TREE. A single untracked file belonging to a parallel window therefore
-blocks EVERY commit in the repository, including commits that do not touch it. That
-happened twice, and the second time it was mutual: two windows held each other, each one
-recording the other as the cause, so waiting was not a way out. CI does not have the
-problem, because it runs on a clean checkout where untracked files do not exist. The
-local gate was, in other words, stricter than CI at a place that has nothing to do with
-the commit.
+WHY. A hook that declares ``pass_filenames: false`` is handed no paths, so its tool has
+to pick its own scope. Until 2026-08-09 the two lint hooks declared it alongside the type
+hook and all three tools picked the WORKING TREE, so a single untracked file belonging to
+a parallel window blocked EVERY commit in the repository, including commits that did not
+touch it. That happened twice, and the second time it was mutual: two windows held each
+other, each one recording the other as the cause, so waiting was not a way out. CI never
+had the problem, because it runs on a clean checkout where untracked files do not exist.
+The local gate was, in other words, stricter than CI at a place that has nothing to do
+with the commit.
 
-Measured 2026-08-15 in all three repositories that carry this file byte-identically:
-``mypy`` is the ONLY hook declaring ``pass_filenames: false``. The sentence above read
-"the lint and type hooks" until then, which was true before ``efa613c`` and contradicted
-the WHY NOT FOR RUFF paragraph below it ever since.
+WHAT IS TRUE TODAY, measured 2026-08-15 in all three repositories that carry this file
+byte-identically: ``mypy`` is the ONLY hook that still declares ``pass_filenames: false``,
+and its entry is THIS script, so the tree it walks is the materialised index and not the
+working tree. The paragraph above states the problem, not the present. It is written in
+the past tense on purpose: a present-tense version of it read as a claim about today, and
+that claim is false in the one file that disproves it.
 
 WHAT. ``git checkout-index`` materialises exactly the index into a scratch tree, and
 mypy runs there. That is constructively the set CI checks. The alternative that suggests
@@ -23,7 +26,7 @@ staged, broken code. Materialising has no such failure mode: there is no pattern
 wrong, no command-line length limit, and a foreign untracked file simply is not there.
 
 WHY NOT FOR RUFF. Every rule family this project selects is per-file exact; ruff has no
-cross-file analysis. Those two hooks therefore pass filenames instead, which is both
+cross-file analysis. The two ruff hooks therefore pass filenames instead, which is both
 simpler and structurally immune. See the header of ``.pre-commit-config.yaml``.
 
 COST, measured on this repository at 209 source files: materialising 0.97 s, the first
