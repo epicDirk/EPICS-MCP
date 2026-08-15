@@ -994,3 +994,36 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   made `find_device` answer "No operator-facing screen references this device", `validate_pvs`
   report the PV as disconnected, `diagnose_connection` name a cause, and `discover_pvs`/`get_pvs`
   return empty. So repeat any EARLIER `timeout=0` call before believing its "nothing found".
+- **`set_pv_value` is refused, and WHICH code it carries is the whole diagnosis.**
+  `PV_WRITE_DENIED` means the gate said no: either `EPICS_MCP_ALLOW_PV_WRITE` is not `true` (the
+  shipping default) or the name is outside `EPICS_MCP_PV_WRITE_PATTERN`. Nothing was sent, an audit
+  DENY line was written, and no rate token was spent, so a retry after fixing the configuration is
+  free. `PV_WRITE_OUT_OF_BOUNDS` is a **different event that looks similar**: the gate had already
+  ADMITTED the write and the value failed the record's own drive limits (`control` DRVL/DRVH), so
+  nothing reached the IOC but a rate token IS gone and the audit line is `BOUNDS_DENY`. Fix the
+  configuration for the first, the value for the second. It subclasses the denial, so an
+  `except PVWriteDeniedError` catches both and only the code tells them apart.
+- **A rate-limit refusal, and the two codes are NOT the same event.** `RATE_LIMIT_EXCEEDED` comes
+  from a WRITE gate (PV or Olog), is audited, and means the per-window budget for mutations is
+  spent. `READ_RATE_LIMIT_EXCEEDED` comes from the shared REST read throttle in front of every
+  GET, is **not** audited at all, and can fire on the reads a WRITE tool performs before its gate
+  is even consulted. Reading the second as the first would report a throttled read as a refused
+  write that never happened. Both back off in time; neither is a permission problem.
+- **An Olog write is refused with `OLOG_WRITE_DENIED`.** One code for all six checks of that gate
+  (a named target logbook, the env gate, the URL boundary, the logbook allowlist, the attachment
+  size cap, the rate limit), because they are one gate; the message says which fired. It is
+  independent of the PV gate: `EPICS_MCP_ALLOW_PV_WRITE` neither enables nor explains it. ⚠️ The
+  URL-boundary refusal names the VARIABLE and not its value, deliberately, because that value can
+  carry a credential; read the gate's own verdict from `epics-pv://health` (`olog_write`) instead
+  of trying to get the address out of the error.
+- **The server refuses to START with `SAFETY_CONFIG_INVALID`.** Not a tool error: the process
+  declined to come up, which is fail-closed by design rather than a fault. The conditions are a
+  malformed `EPICS_MCP_PV_WRITE_PATTERN`, PV writes enabled with an empty pattern, PV writes
+  enabled while the EPICS search reach extends beyond loopback, and either gate armed without a
+  durable `EPICS_MCP_AUDIT_LOG_FILE`. A server that starts with the gates off never meets it.
+- **`get_guide` refuses a key with `UNKNOWN_TOPIC`, or the guide itself with `GUIDE_DRIFT`.** The
+  first is yours to fix: the key does not exist and the message lists every one that does, so no
+  second call is needed to find out. Nothing is guessed and nothing falls back to the whole
+  document, because a plausible wrong section costs more than a refusal. The second is **not**
+  yours: the shipped guide's headings and the topic table disagree, so a key would answer with the
+  section next to the one it names. Report it; there is no argument that works around it.

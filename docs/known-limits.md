@@ -25,6 +25,7 @@ retired, and where it went, is listed at the end.
 [18 one line is not one field set](#18--the-audit-record-is-one-line-which-is-not-the-same-as-one-set-of-fields) ·
 [19 the repository posture is unguarded](#19--the-repository-side-release-protections-are-unguarded-and-a-guard-over-them-was-rejected) ·
 [20 the commit-message guard](#20--the-commit-message-guard-is-per-clone-state-and-its-site-pattern-half-needs-a-git-ignored-file) ·
+[21 error codes outside errors.py](#21--the-documented-error-code-population-is-errorspy-and-ten-more-codes-are-raised-elsewhere) ·
 [retired](#retired-entries-and-where-they-went)
 
 ---
@@ -491,6 +492,48 @@ be red on every fresh clone and every CI run, which trains people to ignore it, 
 someone writes any file with that name. Neither direction says anything about whether the hook runs.
 The check is the `ls` above, at the moment it matters.
 
+## 21 · The documented error-code population is `errors.py`, and ten more codes are raised elsewhere
+
+`tests/test_error_codes_documented.py` holds that every class in `src/epics_mcp/errors.py` setting
+its own `error_code` is explained in the operator guide's "Error signatures" section. It reads that
+population out of the syntax tree, so a new class is red the day it is written. It says nothing
+about a code raised anywhere else, and codes ARE raised elsewhere.
+
+**Three counting rules, three numbers, and none of them is "the number of error codes."** State the
+rule with the figure or the figure means nothing:
+
+| Counting rule | Measured 2026-08-15 |
+|---|---|
+| a string literal directly in `error_code="..."`, anywhere under `src/` | **21** fixed codes |
+| plus the literals RETURNED by the four `*_error_code` helpers | **22** fixed plus **4** dynamic families |
+| plus each helper's `*_RESPONSE_ERROR` fallback | **at least 26** fixed plus the same 4 families |
+
+The dynamic families are `ALARM_HTTP_{status}` (`services/checkers.py`),
+`CHANNELFINDER_HTTP_{status}`, `ARCHIVER_HTTP_{status}` and `OLOG_HTTP_{status}`
+(`services/checkers_olog.py`): the served HTTP status becomes part of the code, so their members
+cannot be enumerated at all. The third row is a LOWER BOUND on purpose. Re-derive any of them by
+naming the rule first, and do not compare a figure produced by one rule with a figure produced by
+another.
+
+**The ten codes outside `errors.py` under the first rule split in half, and the halves are not the
+same kind of thing.**
+
+- **Five are input validation, and they are out by decision.** `INVALID_INPUT`,
+  `INVALID_TIME_WINDOW`, `INVALID_ARGUMENT`, `BATCH_TOO_LARGE`, `PATH_OUTSIDE_WORKSPACE`. They tell
+  a caller that the ARGUMENTS were wrong, before any service was contacted. An operator reading the
+  error-signature section is asking which tool answers a fault in the control system; a bad
+  argument is answered by the tool's own schema and message, at the point of the call.
+- **Five are operational signatures, and they are measurably missing.** `UPSTREAM_CONTRACT_ERROR`
+  (`services/epics_client.py`), `OLOG_HTTP_404`, `OLOG_ATTACH_TOO_LARGE_AT_READ`, `FILE_EXISTS`,
+  `INTERNAL`. Each says something happened out in a service or on disk, which is exactly what that
+  section is for. They are open, recorded here rather than papered over, and carried as a work item
+  of their own rather than folded into the guard above, so that guard's effect stays measurable.
+
+**The tempting repair, probed and rejected.** Widening the population to "every code-shaped literal
+under `src/`" also demands the reverse direction (nothing documented that cannot be raised), and
+that direction is unbuildable here: the section legitimately names members of the dynamic families,
+whose literal spellings exist nowhere in the source, so every one would be reported as an
+invention. A guard whose noise outnumbers its findings gets suppressed, and then it guards nothing.
 
 ## Retired entries, and where they went
 
