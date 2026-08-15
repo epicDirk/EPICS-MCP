@@ -14,6 +14,28 @@ gate that does not meet all six points is not done.
 Read the scope statement (point 6) **first**: it fixes what a gate is *for*, and the other five points only
 make sense under it.
 
+⚠️ **Three numbers circulate about the gates, they are different questions, and confusing them is the
+one documented way this page gets misread.** They are written out once, here, so a text elsewhere can
+name its own:
+
+| Number | What it counts |
+|---|---|
+| **six** | the REQUIREMENTS below. A specification every gate must meet, not a count of anything a gate does at runtime. |
+| **three** | the PV gate's per-write CHECKS: env gate, name allowlist, rate limit. |
+| **six** | the logbook gate's per-write CHECKS: named target logbooks, env gate, URL boundary, logbook allowlist, attachment size cap, rate limit. |
+
+The two sixes are unrelated and land on the same value by accident: the requirements map onto the
+logbook gate's checks neither one-to-one nor in order, and two of that gate's checks (the empty-target
+guard and the size cap) answer no requirement at all, while requirement 4 (audit) is no check. A gate's
+**start conditions** are a fourth category again and belong to neither count: the PV gate has five of
+its own, all of them refuse-to-start. The logbook gate is built lazily, so its equivalents (a bad
+rate-limit value, an unwritable audit sink) surface at the FIRST WRITE rather than at boot, and the
+only condition that stops the process itself is the durable audit path both gates share.
+
+So: a text that says "triple-gated" about `set_pv_value` is correct, and one that lists five things
+after it is not a contradiction but a different category. Say which of the four you mean, or give the
+list rather than a number.
+
 **1. An environment on/off gate, default OFF.** Writes for the surface are disabled unless an explicit
 `EPICS_MCP_ALLOW_<SURFACE>_WRITE=true` is set. Off is the shipping default and the safe state; a fresh
 checkout, a missing env file, or a typo in the var name all resolve to *no writes*. Each surface's env gate

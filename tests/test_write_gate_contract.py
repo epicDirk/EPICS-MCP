@@ -94,6 +94,8 @@ import ast
 import collections
 import importlib
 import logging
+import re
+import subprocess
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass
@@ -493,6 +495,7 @@ def test_rate_limited_rows_deny_on_a_non_empty_window() -> None:
 # ======================================================================================
 
 _GATE_PACKAGE_DIR = Path(safety_module.__file__).parent
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_DENY_CALL_SITES: dict[str, Counter[str]] = {
     "safety.py": Counter({"PV_WRITE_DENIED": 2, "RATE_LIMIT_EXCEEDED": 1}),
@@ -1235,4 +1238,133 @@ def test_canonical_map_covers_every_audited_deny_call_site() -> None:
     assert from_rows == EXPECTED_DENY_CALL_SITES, (
         "DENY_PATHS and EXPECTED_DENY_CALL_SITES disagree, every audited deny call site needs "
         f"exactly one executable row. rows={ {k: dict(v) for k, v in from_rows.items()} }"
+    )
+
+
+# ======================================================================================
+# Half 3: the NUMBERS the prose names vs. the deny paths the code has
+# ======================================================================================
+#
+# Three different numbers circulate about the gates, and every one of them has been written down
+# wrongly at least once: this contract's SIX requirements, the PV gate's THREE per-write checks,
+# and the logbook gate's SIX. The measured audit of 2026-08-04 recorded five documents calling
+# `set_pv_value` "triple-gated" and filed them as WRONG, on the premise that the drive-limit bounds
+# check is a fourth gate. Re-measured 2026-08-15 against this very contract (point 4, and the
+# scope note in this module's own docstring): it is not, it fires AFTER admission and has spent a
+# token, so the five were right all along. What was actually wrong was the OTHER direction, half
+# the repository's Olog enumerations silently dropped check 0.
+#
+# Prose cannot be kept honest by re-reading it, so the two number-bearing FORMS are pinned to the
+# AST truth above. Everything else stays prose on purpose: a guard that tried to parse every
+# sentence about a gate would be the kind of over-fitted checker this repository keeps deleting.
+
+#: The single spelling a GATE-SIZE claim uses, so one regex can find every one of them. A count of
+#: something else ("the two checks split out of this one") deliberately does not match: it lacks
+#: the word `gate`. Markdown emphasis around that word is tolerated because the shipped guide
+#: bolds it.
+_GATE_SIZE_RE = re.compile(r"\b([a-z]+)\s+\*{0,2}gate\*{0,2}\s+checks\b", re.IGNORECASE)
+
+#: `<word>-gated`, but only for words that are a COUNT. `display-gated`, `config-gated` and
+#: `un-gated` are about a condition, not a number, and are none of this guard's business.
+_NUMERIC_GATED_RE = re.compile(
+    r"\b(single|double|triple|quadruple|quintuple|sextuple)-gated\b", re.IGNORECASE
+)
+
+_COUNT_WORDS: dict[int, str] = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
+_GATED_WORDS: dict[int, str] = {
+    1: "single",
+    2: "double",
+    3: "triple",
+    4: "quadruple",
+    5: "quintuple",
+    6: "sextuple",
+}
+
+#: Which gate each number-bearing file speaks about. A file that talks about BOTH gates is not in
+#: here: this guard reads whole files, so a mixed one would need sentence-level attribution, which
+#: is exactly the over-fitting the header rejects. Their numbers are covered by the executable
+#: DENY_PATHS rows instead.
+_SINGLE_GATE_FILES: dict[str, str] = {
+    "src/epics_mcp/safety.py": "safety.py",
+    "src/epics_mcp/olog_safety.py": "olog_safety.py",
+}
+
+
+def _gate_check_count(module: str) -> int:
+    """How many checks a gate has, from the audited deny call sites, never from a literal."""
+    return sum(EXPECTED_DENY_CALL_SITES[module].values())
+
+
+def _tracked_files_for_gate_numbers() -> list[Path]:
+    """Every tracked text file, so a NEW document repeating the phrase is covered the day it lands.
+
+    ``git ls-files`` rather than a declared list, the same reasoning (and the same failure policy)
+    as ``test_guide.py``: only a MISSING git binary may skip, a git call that RAN and failed must
+    fail loudly, because a silent skip switches the guard off in exactly the environments where
+    something is already wrong. Binary files are read with ``errors="replace"``, the phrase is
+    ASCII and cannot be hidden by a replacement character.
+    """
+    try:
+        listing = subprocess.run(
+            ["git", "ls-files"],
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout
+    except FileNotFoundError as exc:
+        pytest.skip(f"git binary unavailable, cannot enumerate tracked files: {exc}")
+    except subprocess.SubprocessError as exc:
+        pytest.fail(f"git ls-files failed ({exc}), the gate-number sweep did NOT run")
+    this = Path(__file__).resolve()
+    return [
+        path
+        for rel in listing.splitlines()
+        if (path := _REPO_ROOT / rel).is_file() and path.resolve() != this
+    ]
+
+
+def test_each_gate_module_states_its_own_size_correctly() -> None:
+    """A `<word> gate checks` claim inside a gate module names that gate's measured size.
+
+    RED-PROOF: change either count in ``EXPECTED_DENY_CALL_SITES`` (or write "four gate checks"
+    into ``safety.py``) and this fails naming the file, the word found and the word expected.
+    """
+    findings: list[str] = []
+    for rel, module in _SINGLE_GATE_FILES.items():
+        expected = _COUNT_WORDS[_gate_check_count(module)]
+        text = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+        for match in _GATE_SIZE_RE.finditer(text):
+            found = match.group(1).lower()
+            if found in _COUNT_WORDS.values() and found != expected:
+                line = text[: match.start()].count("\n") + 1
+                findings.append(f"{rel}:{line}: says {found!r}, measured {expected!r}")
+    assert not findings, "a gate module miscounts its own checks:\n  " + "\n  ".join(findings)
+
+
+def test_the_numeric_gated_phrase_matches_the_measured_pv_gate() -> None:
+    """Every `triple-gated`-shaped claim in the tracked tree names the PV gate's measured size.
+
+    The phrase is only ever used about ``set_pv_value`` (measured: six occurrences, all of it),
+    which is why one expected word serves the whole tree. Should it ever be borrowed for the
+    logbook gate, this guard goes red and that is the right answer: the two sizes differ, so the
+    borrowed word would be wrong.
+
+    RED-PROOF: bump ``EXPECTED_DENY_CALL_SITES["safety.py"]`` to four and every occurrence is
+    reported against ``quadruple``.
+    """
+    expected = _GATED_WORDS[_gate_check_count("safety.py")]
+    findings: list[str] = []
+    for path in _tracked_files_for_gate_numbers():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for match in _NUMERIC_GATED_RE.finditer(text):
+            found = match.group(1).lower()
+            if found != expected:
+                line = text[: match.start()].count("\n") + 1
+                rel = path.relative_to(_REPO_ROOT).as_posix()
+                findings.append(f"{rel}:{line}: says {found!r}-gated, measured {expected!r}")
+    assert not findings, (
+        "a counted -gated claim disagrees with the PV gate's audited deny paths:\n  "
+        + "\n  ".join(findings)
     )

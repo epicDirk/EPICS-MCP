@@ -40,13 +40,22 @@ def get_safety() -> "SafetyLayer":
 
 
 class SafetyLayer:
-    """Guards all PV write operations with three checks:
+    """Guards all PV write operations with three gate checks:
 
     1. Environment gate: ``allow_pv_write`` must be True.
     2. Pattern allowlist: PV name must match ``pv_write_pattern`` regex. REQUIRED when writes are
        enabled: an empty pattern with ``allow_pv_write`` on raises ``SafetyConfigError`` at
        construction (fail-closed), never a silent allow-all.
     3. Rate limit: at most ``write_rate_limit`` writes per 60 s window.
+
+    A write the gate ADMITS can still be refused, and that refusal is deliberately not a fourth
+    check here: :func:`bounds.check_value_in_bounds` rejects a value outside the record's own drive
+    limits (``BOUNDS_DENY``, see :meth:`audit_bounds_deny`). It runs on data fetched AFTER
+    admission, so it has already spent a rate token, which is why it carries its own event instead
+    of a ``DENY``. ``docs/write-gate-contract.md`` point 4 requires that such a post-admission
+    refusal be enumerated wherever the gate is described rather than filed under one of the three,
+    and this paragraph is that enumeration for the count above: three gate checks, one further
+    refusal. The start conditions are a third category again and are listed in ``__init__``.
     """
 
     _WINDOW_SECONDS = 60.0

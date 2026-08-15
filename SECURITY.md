@@ -27,7 +27,8 @@ setting.
   start, rather than silently permitting every PV.
 - **Two independent write gates.** The Olog logbook gate (`EPICS_MCP_ALLOW_OLOG_WRITE`) is separate
   from the PV gate, with its own allowlist, its own rate limit and its own URL boundary. Enabling
-  one never enables the other.
+  one never enables the other. The two are not the same SIZE either: the PV gate is three checks,
+  the Olog gate six (its extra two are a non-empty target-logbook list and an attachment size cap).
 - **PV writes require a loopback-only search reach.** A server with `EPICS_MCP_ALLOW_PV_WRITE=true`
   whose EPICS client search environment can reach beyond loopback refuses to start. "Read the
   facility and write the facility" is a start-time impossibility here, not a matter of discipline.

@@ -41,7 +41,10 @@ This is a controls tool, so the trust questions come first.
   `EPICS_MCP_ALLOW_PV_WRITE=true` **and** a regex allowlist (`EPICS_MCP_PV_WRITE_PATTERN`,
   **required** when writes are on: an empty pattern makes the server **refuse to start** rather
   than silently allow every PV; use `.*` to deliberately allow all) **and** a per-minute rate
-  limit. Every write is audit-logged: a rejected one is `DENY`d at the gate (nothing sent); an
+  limit. **Three is the number of GATE checks, and one more refusal sits behind them:** a value
+  outside the record's own drive limits is rejected once the gate has already admitted the write
+  (`BOUNDS_DENY`, nothing reaches the IOC). It is counted separately on purpose, because it has
+  spent a rate token where a gate denial never does. Every write is audit-logged: a rejected one is `DENY`d at the gate (nothing sent); an
   accepted one logs `ATTEMPT` before the I/O, then a terminal `ALLOW`/`FAILED`, or `UNKNOWN_PENDING`
   if it was cancelled mid-put (the value may still land at the IOC, so verify by read-back and never
   blindly retry). A write-enabled server **refuses to start** unless `EPICS_MCP_AUDIT_LOG_FILE` names
@@ -84,7 +87,11 @@ This is a controls tool, so the trust questions come first.
   or an exact **https** URL in `EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST` with
   `EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true`; a non-loopback/private host, and any plain-http remote,
   is refused by default, so a production write is a deliberate double action) **and** a logbook allowlist
-  (`EPICS_MCP_OLOG_WRITE_LOGBOOKS`; empty = deny-all) **and** a rate limit. The author is the write
+  (`EPICS_MCP_OLOG_WRITE_LOGBOOKS`; empty = deny-all) **and** a rate limit. Two further checks are
+  easy to forget because they are not configuration: the entry must NAME at least one target
+  logbook (an empty target list is refused before anything else), and an attachment payload over
+  `EPICS_MCP_OLOG_ATTACH_MAX_BYTES` is refused with its own code. **Six checks in all**, each
+  fail-closed and each audited before the raise. The author is the write
   service account (`EPICS_MCP_OLOG_WRITE_USER`), set server-side and not spoofable; the audit line
   is metadata-only (never the title/description free text). **`ALLOW_PV_WRITE` is untouched by it.**
   ⚠️ **A refusal from the URL boundary names the variable, not its value**, and that is deliberate:

@@ -235,8 +235,10 @@ start-time refusal, not a warning.
 
 Logbook writes sit behind a SECOND, independent gate (`EPICS_MCP_ALLOW_OLOG_WRITE=false`), which
 shares only the durable audit log: it has no name pattern and no loopback condition of its own, and
-demands instead a logbook allowlist and a write target that is either loopback or exactly
-allowlisted and `https`. Arming one never arms the other, and an Olog-write-enabled server starts
+demands instead a logbook allowlist, a named target logbook on the call, an attachment size cap and
+a write target that is either loopback or exactly
+allowlisted and `https`. **Six checks against the PV gate's three**, and the difference is not a
+matter of strictness: they guard different things. Arming one never arms the other, and an Olog-write-enabled server starts
 with the ordinary subnet broadcast search on.
 
 ## 3. TLS / CA bundle (the common first-deploy snag)

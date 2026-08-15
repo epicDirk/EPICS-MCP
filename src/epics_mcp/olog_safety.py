@@ -1,7 +1,8 @@
 """Write gate for Phoebus Olog logbook posts, non-empty logbooks, env gate, test-server URL
 boundary, logbook allowlist, attachment size cap, rate-limit, privacy-clean audit.
 
-Six of those seven can DENY a write (the audit is a record, not a check), and they are spelled out
+Six of those seven can DENY a write (the audit is a record, not a check), so this gate is six gate
+checks wide, and they are spelled out
 here rather than summarised because a shorter version stood here naming four of the six and reading
 as complete.
 
@@ -120,7 +121,7 @@ def write_target_allowed(config: EpicsConfig) -> bool:
 
 
 class OlogWriteGate:
-    """Guards every Olog logbook write with six checks in fixed, fail-closed order.
+    """Guards every Olog logbook write with six gate checks in fixed, fail-closed order.
 
     0. Non-empty logbooks: an empty set slips through the ``⊆`` allowlist check, so guard first.
     1. Environment gate: ``allow_olog_write`` must be True.

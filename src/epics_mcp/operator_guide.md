@@ -11,8 +11,11 @@ synthetic placeholder name (`SIM:PS-01:Cur-RB`, `sim://ramp`, `http://archiver:1
 
 ## Posture (read this first)
 
-- **Read-only by default.** The mutating tools are gated OFF. `set_pv_value` needs
-  `EPICS_MCP_ALLOW_PV_WRITE=true` **plus** a regex allowlist, a rate limit and an audit log. The Olog
+- **Read-only by default.** The mutating tools are gated OFF. `set_pv_value` passes **three** gate
+  checks (`EPICS_MCP_ALLOW_PV_WRITE=true`, a regex allowlist, a rate limit) and needs an audit log,
+  which records the verdict rather than reaching one; a value outside the record's drive limits is
+  refused after the gate has already admitted the write, so it is a fourth refusal, not a fourth
+  gate. The Olog
   logbook writers (`create_log_entry`, `reply_to_log`, `add_log_attachment` and `update_log_entry`) sit behind a **separate** gate, see the Olog
   write posture below; `ALLOW_PV_WRITE` is untouched by it.
 - **Writes enabled ⇒ loopback-only search reach, enforced at boot.** With `ALLOW_PV_WRITE=true` the

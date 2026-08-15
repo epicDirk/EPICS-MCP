@@ -610,8 +610,11 @@ async def query_olog_create(
 
     Default-disabled: with ``EPICS_MCP_OLOG_URL`` unset, returns ``enabled: false`` and makes NO
     network call. When enabled, the CHEAP :class:`~epics_mcp.olog_safety.OlogWriteGate` stages
-    (env gate + test-server URL boundary + logbook allowlist) run BEFORE any I/O, such a denial
-    raises (audited DENY) before a client is even constructed. The two REMAINING stages are later:
+    (non-empty target logbooks + env gate + test-server URL boundary + logbook allowlist) run
+    BEFORE any I/O, such a denial raises (audited DENY) before a client is even constructed.
+    That is FOUR cheap stages: the empty-list guard is one of them and was missing from this
+    sentence, which is how the same omission spread to half the repository's Olog
+    enumerations. The two REMAINING stages are later:
     since the level check was added, a ``GET /levels`` (only when a ``level`` is passed) and the
     attachment ``stat`` both happen BEFORE the attachment size cap and the rate token, so a denial
     from *those* two does follow some I/O. That ordering is deliberate, a bad level must not cost a

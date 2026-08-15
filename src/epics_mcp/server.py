@@ -178,9 +178,9 @@ def build_instructions(display_tools_available: bool) -> str:
         "configuration, Alarm configuration and history, ESS Naming-Service device-name lookup, "
         "and Phoebus Olog logbook search (whole entries: title, text, author, attachments). "
         "It can also WRITE to the Olog logbook (create/reply/update entries, each carrying "
-        "attachments) behind its OWN gate (EPICS_MCP_ALLOW_OLOG_WRITE + a test-server URL "
-        "boundary + a logbook allowlist + an upload-size cap + a rate limit; the author is the "
-        "write service account, not spoofable). "
+        "attachments) behind its OWN gate (EPICS_MCP_ALLOW_OLOG_WRITE, a named target logbook, a "
+        "test-server URL boundary, a logbook allowlist, an upload-size cap, a rate limit; the "
+        "author is the write service account, not spoofable). "
         "The PV-mutating tool set_pv_value is gated OFF by default and additionally requires "
         "EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, a rate limit and an audit log, a "
         "separate gate from the Olog one, and it stays off. "
@@ -391,8 +391,11 @@ async def get_pvs(
     ),
     # Advisory, CLIENT-side consent hint (NOT the load-bearing guard). A client that honours it
     # obtains a human approval before each write; an older / other MCP client ignores it silently.
-    # The load-bearing, client-INDEPENDENT guard stays server-side (env gate + regex allowlist +
-    # rate-limit + audit, see safety.py). Kept red-provable by the consent-invariant test.
+    # The load-bearing, client-INDEPENDENT guard stays server-side: three gate checks (env gate,
+    # regex allowlist, rate-limit) plus the mandatory audit, which records a verdict rather than
+    # reaching one, and the post-admission drive-limit refusal, which is not a gate check either
+    # because it has already spent a rate token (see safety.py). Kept red-provable by the
+    # consent-invariant test.
     meta={"anthropic/requiresUserInteraction": True},
 )
 @translate_epics_errors
@@ -1435,10 +1438,13 @@ async def create_log_entry(
 ) -> OlogCreateResult:
     """Post a new entry to the Phoebus Olog electronic logbook (Olog REST PUT /logs).
 
-    MUTATING. Disabled by default and behind its OWN gate (separate from set_pv_value): it needs
-    EPICS_MCP_ALLOW_OLOG_WRITE=true AND a test-server URL boundary (only a loopback Olog, or an
+    MUTATING. Disabled by default and behind its OWN gate (separate from set_pv_value), SIX checks
+    in fixed order: at least one named target logbook AND EPICS_MCP_ALLOW_OLOG_WRITE=true AND a
+    test-server URL boundary (only a loopback Olog, or an
     allowlisted https URL with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true) AND a logbook allowlist
-    (EPICS_MCP_OLOG_WRITE_LOGBOOKS) AND a rate limit; ALLOW_PV_WRITE is untouched. The author
+    (EPICS_MCP_OLOG_WRITE_LOGBOOKS) AND an attachment size cap AND a rate limit; ALLOW_PV_WRITE is
+    untouched. The first four are refused before any I/O, so a denied write leaves no trace on the
+    server and never learns whether a file exists. The author
     (owner) is the configured write service account, set server-side; a caller cannot spoof it. The
     returned entry is the created entry WHOLE, so a write can verify what it just wrote. A write
     response that is not the created entry raises a loud error, it is never reported as a
@@ -1558,7 +1564,8 @@ async def add_log_attachment(
     MUTATING. Olog's update endpoint is destructive, it prunes any attachment
     not resubmitted and overwrites the entry's fields, so a safe attach round-trips the target
     entry's full content (read first). Same gate as
-    create_log_entry (env gate + test-server URL boundary + rate limit + size cap): the env gate
+    create_log_entry, the same six checks (named target logbooks + env gate + test-server URL
+    boundary + logbook allowlist + size cap + rate limit): the env gate
     and URL boundary are checked BEFORE the round-trip read, and the logbook
     allowlist is keyed on the TARGET entry's OWN logbooks. The attach is purely ADDITIVE:
     existing attachments and every CONTENT field are preserved, but the entry's OWNER is
@@ -1636,7 +1643,8 @@ async def update_log_entry(
     resubmitted and NULLS any field not sent, so a safe edit round-trips the target entry's
     full content. This tool does
     that round-trip for you: any field you omit stays EXACTLY as it was, and attachments and
-    properties are preserved. Same gate as create_log_entry (env gate and test-server URL boundary
+    properties are preserved. Same gate as create_log_entry, all six checks (two of them, the env
+    gate and the test-server URL boundary,
     checked BEFORE the round-trip read), with the logbook allowlist keyed on the
     UNION of the entry's current and resulting logbooks (moving an entry in or out is a write to
     both).

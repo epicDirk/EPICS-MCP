@@ -13,7 +13,9 @@ operator would, instead of you clicking through CS-Studio, the Archiver Applianc
 ChannelFinder by hand.
 
 **Read-only by default.** `set_pv_value` is triple-gated: an env switch, a required regex
-allowlist, and a rate limit. Logbook writes sit behind their own separate gate.
+allowlist, and a rate limit. A value outside the record's own drive limits is refused after those
+three have admitted the write, which is a further refusal and not a fourth gate. Logbook writes sit
+behind their own separate gate, of six checks.
 
 > **Project status: pre-1.0 and under active development.** Tools and APIs may still change
 > between minor versions, so pin one if you depend on it.
