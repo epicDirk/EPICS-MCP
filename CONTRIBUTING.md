@@ -52,6 +52,14 @@ install it by any route; as an extra it both advertised a promise nobody could k
 a direct git reference, made the package unpublishable, which is the single thing PyPI refuses
 outright.
 
+⚠️ **Install that group with uv, or name the source yourself.** What ties `opi-navigation` to the
+private repository is `[tool.uv.sources]`, and that table is uv-only, resolution-time information:
+pip does not read it, and it is not published metadata. So `pip install --group displays` resolves
+the bare name from the public index, where it is **not reserved** (measured 2026-08-15: both
+spellings answer 404). Today that fails honestly; the day somebody claims the name, it succeeds
+with a stranger's code. The reasoning, and the guard that keeps a second group member from
+repeating it, sit at `[dependency-groups]` in `pyproject.toml`.
+
 CI runs `uv sync --extra dev --locked` and passes no `--group`, so it tests exactly the
 standalone core a public user gets. The `opi_navigation`-coupled test modules are dropped at
 collection when the package is absent, so the core suite stays green.

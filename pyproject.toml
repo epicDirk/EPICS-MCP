@@ -122,6 +122,24 @@ dev = [
 # its report header, because a green report over 100 tests that never ran is indistinguishable
 # from a full one. Why CI cannot simply run them, and where they DO run since 2026-08-04:
 # docs/known-limits.md, entry 16.
+#
+# ⚠️ THE NAME BELOW IS NOT RESERVED ON THE PUBLIC INDEX, AND THAT MAKES THIS GROUP A DEPENDENCY-
+# CONFUSION SURFACE FOR ANY RESOLVER THAT IS NOT uv. Measured 2026-08-15: an index lookup of both
+# spellings, `opi-navigation` and `opi_navigation`, answers 404, so the name is free for anyone to
+# claim. What holds the requirement to the private repository is `[tool.uv.sources]` below, and
+# that table is uv-only, resolution-time information: it is neither published metadata nor
+# something pip reads. `pip install --group displays` therefore resolves the bare name straight
+# from the index, and on the day somebody registers it, that install silently succeeds with a
+# stranger's code instead of failing honestly the way it does today.
+#
+# So: install this group with uv, or name the source explicitly. Reserving the name was weighed
+# and NOT taken (it stays deliberately unclaimed); the surface disappears for good once the engine
+# ships as part of one combined distribution rather than as a separately resolvable name.
+#
+# A comment cannot enforce this, and it is not asked to. What does is
+# tests/test_dependency_pin.py::test_every_dependency_group_member_is_source_pinned: a second
+# member added here without a `[tool.uv.sources]` entry of its own is a red test, not a silent new
+# instance of the same hole.
 [dependency-groups]
 displays = ["opi-navigation"]
 

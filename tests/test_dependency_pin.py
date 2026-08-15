@@ -201,6 +201,120 @@ def pin_mismatches(pyproject_text: str, lock_text: str) -> list[str]:
     return []
 
 
+def unpinned_group_members(pyproject_text: str) -> list[str]:
+    """Every ``[dependency-groups]`` requirement with no ``[tool.uv.sources]`` entry of its own.
+
+    THE HOLE THIS ANSWERS (QA-9) IS NOT THE PIN, IT IS THE NAME. ``[tool.uv.sources]`` is uv-only,
+    resolution-time information: pip never reads it and it reaches no published metadata. So a
+    group member without an entry there is a BARE NAME to every other resolver, and
+    ``pip install --group <g>`` fetches it from the public index. Measured 2026-08-15, the one
+    member here is absent from that index in both spellings (404), which means the name is free
+    for anyone to register, and the install that fails honestly today would then succeed with a
+    stranger's code.
+
+    Why this cannot be the sibling checks' job: they compare the two places that already agree
+    the engine is a git dependency. Nothing in them notices a member that never had a source at
+    all, because there is then no revision to disagree about.
+
+    What is DELIBERATELY not built: an allowlist of "comes from the public index on purpose".
+    There is nothing to allow today, and an empty exception list is the shape that quietly grows
+    into a blind spot. A future member that genuinely should resolve from the index reddens this
+    guard, and the failure message asks for that decision to be written down rather than assumed.
+    On a supply-chain surface a red that demands a decision is the correct outcome.
+
+    ``{include-group = ...}`` entries are not distributions and carry no source by construction,
+    so they are skipped; the skip is a rule about the PEP 735 shape, not an exception for a name.
+    """
+    data = tomllib.loads(pyproject_text)
+    groups = data.get("dependency-groups")
+    sources = data.get("tool", {}).get("uv", {}).get("sources", {})
+    pinned = {_normalised(name) for name in sources} if isinstance(sources, dict) else set()
+
+    unpinned: list[str] = []
+    for members in (groups or {}).values() if isinstance(groups, dict) else []:
+        for member in members if isinstance(members, list) else []:
+            if not isinstance(member, str):
+                continue  # an include-group table: a reference to another group, not a package
+            name = _requirement_name(member)
+            if name and _normalised(name) not in pinned:
+                unpinned.append(name)
+    return sorted(set(unpinned))
+
+
+#: A PEP 508 requirement starts with its name; extras, a version specifier and a marker follow.
+_REQUIREMENT_NAME = re.compile(r"\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)")
+
+#: PEP 503 normalisation, the form uv itself uses to match a source to a requirement. Without it
+#: `opi_navigation` in the group and `opi-navigation` in the sources read as two packages, and the
+#: guard would report a hole that is not there.
+_NAME_SEPARATORS = re.compile(r"[-_.]+")
+
+
+def _normalised(name: str) -> str:
+    return _NAME_SEPARATORS.sub("-", name).lower()
+
+
+def _requirement_name(requirement: str) -> str:
+    match = _REQUIREMENT_NAME.match(requirement)
+    return match.group(1) if match else ""
+
+
+def test_every_dependency_group_member_is_source_pinned() -> None:
+    """The real file. A member with no source is a dependency-confusion surface (QA-9)."""
+    pyproject = (_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    # Positive control first, for the reason the sibling above states: an empty group would
+    # satisfy the assertion below by having nothing left to report.
+    data = tomllib.loads(pyproject)
+    assert data["dependency-groups"]["displays"], "the displays group is empty, nothing was checked"
+
+    assert unpinned_group_members(pyproject) == [], (
+        "a [dependency-groups] member has no [tool.uv.sources] entry, so every resolver that is "
+        "not uv fetches that bare name from the public index. Pin it to its real source, or, if "
+        "it is meant to come from the index, record that decision at [dependency-groups] and "
+        "widen this guard deliberately."
+    )
+
+
+def test_a_group_member_without_a_source_is_reported() -> None:
+    """The red direction, from literals: exactly the QA-9 shape, one member and no source."""
+    assert unpinned_group_members('[dependency-groups]\ndisplays = ["opi-navigation"]\n') == [
+        "opi-navigation"
+    ]
+
+
+def test_a_source_pinned_member_is_accepted_across_the_two_spellings() -> None:
+    """The counter-direction, plus the normalisation that decides it.
+
+    uv matches a source to a requirement by the PEP 503 normalised name, so the underscore
+    spelling in the group and the hyphen spelling in the sources are ONE package. A guard
+    comparing raw strings would report a hole that does not exist, which is the false-red failure
+    mode, and it would be repaired by somebody editing the pyproject rather than the guard.
+    """
+    pyproject = (
+        "[dependency-groups]\n"
+        'displays = ["opi_navigation>=1.0"]\n'
+        "[tool.uv.sources]\n"
+        f'opi-navigation = {{ git = "{_URL}", rev = "{_SHA_A}" }}\n'
+    )
+
+    assert unpinned_group_members(pyproject) == []
+
+
+def test_an_include_group_reference_is_not_read_as_a_package() -> None:
+    """PEP 735 lets a group include another group. That table names no distribution, so demanding
+    a source for it would be a permanent false red on a shape the standard defines."""
+    pyproject = (
+        "[dependency-groups]\n"
+        'displays = ["opi-navigation"]\n'
+        'everything = [{ include-group = "displays" }]\n'
+        "[tool.uv.sources]\n"
+        f'opi-navigation = {{ git = "{_URL}", rev = "{_SHA_A}" }}\n'
+    )
+
+    assert unpinned_group_members(pyproject) == []
+
+
 def test_the_pinned_revision_is_the_same_in_pyproject_and_uv_lock() -> None:
     """The real files. Everything else in this module proves the function; this proves the tree."""
     pyproject = (_ROOT / "pyproject.toml").read_text(encoding="utf-8")
