@@ -41,6 +41,15 @@ measured 2026-08-15, only the first of the four appears anywhere else in this do
   PV searches into the local subnets. Run `epics-doctor` for the effective posture; it claims
   `localhost-isolated` only when every search list is unset AND the auto search is explicitly
   disabled.
+  ⚠️ **The PORT is part of the destination.** `EPICS_PVA_BROADCAST_PORT` (default 5076) supplies
+  it for every `EPICS_PVA_ADDR_LIST` entry that carries none of its own, and
+  `EPICS_PVA_SERVER_PORT` (default 5075) does the same for `EPICS_PVA_NAME_SERVERS`; on the CA
+  side it is `EPICS_CA_SERVER_PORT` (5064). `epics-doctor` resolves each entry and names the
+  variable the default came from. Three measured traps it reports rather than hides: a written
+  `:0`, and any number past 65535, is **not** the port you wrote (pvxs wraps it through 16 bits
+  and a result of zero falls back to the default); an entry the client cannot parse or resolve is
+  **dropped from the search entirely**, with only a stderr line to say so; and an entry given
+  without a host takes one of the machine's own interface addresses.
   ⚠️ **`EPICS_MCP_PROVIDER=ca` does not give you Channel Access.** p4p accepts the name and then
   builds a PVAccess context anyway, so every `EPICS_CA_*` search variable is inert in that
   process while `EPICS_PVA_AUTO_ADDR_LIST`, probably unset and therefore ON, decides the real

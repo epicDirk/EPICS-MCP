@@ -47,9 +47,12 @@ The confinement is the four `EPICS_*ADDR_LIST` settings, not the absence of conf
 defaults the auto-address search to **ON**, so leaving them out would broadcast PV searches into
 your local subnets. Drop them when you point this at a real IOC.
 
-`epics-doctor` reports this as `search paths: EPICS_PVA_ADDR_LIST (127.0.0.1); ...` rather than
-`localhost-isolated`, and that is correct: it reserves the latter for a server that searches
-**nowhere at all** (no list set, auto search off), which would not find the test PV above.
+`epics-doctor` reports this as
+`search paths: EPICS_PVA_ADDR_LIST (127.0.0.1:5076; default port 5076 from
+EPICS_PVA_BROADCAST_PORT unset); ...` rather than `localhost-isolated`, and that is correct: it
+reserves the latter for a server that searches **nowhere at all** (no list set, auto search off),
+which would not find the test PV above. The `:5076` is not decoration: the port is half the
+destination, and it comes from a variable this block does not set.
 
 ## 3. A sample display (optional, only if you use Phoebus / CS-Studio)
 

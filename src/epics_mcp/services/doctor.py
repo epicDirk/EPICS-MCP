@@ -49,7 +49,12 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from epics_mcp.config import EpicsConfig, get_config
-from epics_mcp.epics_address import auto_addr_search_disabled
+from epics_mcp.epics_address import (
+    DEFAULT_PORT_VARS,
+    auto_addr_search_disabled,
+    effective_search_entry,
+    is_ip_literal,
+)
 from epics_mcp.errors import EpicsError
 from epics_mcp.services._http import (
     build_retrying_session,
@@ -1286,6 +1291,19 @@ _INERT_NOTE = (
 )
 
 
+#: Appended once when any search entry is a NAME rather than an IP literal.
+#:
+#: The endpoints above are computed from the configuration alone, which is exactly right for a
+#: literal and one step short for a name: the client resolves it at startup and, measured, DROPS
+#: the entry outright when resolution fails, with an ``ignoring invalid`` line on stderr that no
+#: report ever sees. So the printed list is an upper bound in that case, and says so. No trailing
+#: full stop, for the reason recorded at :data:`_INERT_NOTE`.
+_NAME_NOTE = (
+    "One or more entries above are NAMES rather than IP literals, and this client DROPS an entry "
+    "it cannot resolve rather than failing, so its effective list can be SHORTER than this one"
+)
+
+
 def _inert_search_prefix(effective: str) -> str:
     """The ``EPICS_<family>_`` prefix whose search list variables this process ignores.
 
@@ -1326,12 +1344,23 @@ def _live_search_posture(effective: str) -> str:
     paths: list[str] = []
     inert_prefix = _inert_search_prefix(effective)
     saw_inert = False
+    saw_name = False
     for var in _SEARCH_LIST_VARS:
         value = os.environ.get(var, "").strip()
         if value:
             inert = var.startswith(inert_prefix)
             saw_inert = saw_inert or inert
-            paths.append(f"{var} ({value}){' [inert]' if inert else ''}")
+            port_var, fallback = DEFAULT_PORT_VARS[var]
+            written = os.environ.get(port_var, "").strip()
+            default_port = written or fallback
+            tokens = value.split()
+            saw_name = saw_name or any(not is_ip_literal(t) for t in tokens)
+            resolved = " ".join(effective_search_entry(token, default_port) for token in tokens)
+            state = f"={written}" if written else " unset"
+            paths.append(
+                f"{var} ({resolved}; default port {default_port} from {port_var}{state})"
+                f"{' [inert]' if inert else ''}"
+            )
     auto_var = "EPICS_PVA_AUTO_ADDR_LIST" if effective == "pva" else "EPICS_CA_AUTO_ADDR_LIST"
     # Raw value, deliberately NOT normalised: neither parser trims, and normalising here
     # would make the doctor honour spellings the real client rejects (see the helper).
@@ -1341,6 +1370,8 @@ def _live_search_posture(effective: str) -> str:
         paths.append(f"auto-addr subnet broadcast ({auto_var}{state})")
     if paths:
         line = "search paths: " + "; ".join(paths)
+        if saw_name:
+            line = f"{line}. {_NAME_NOTE}"
         return f"{line}. {_INERT_NOTE}" if saw_inert else line
     return "localhost-isolated (no search list set, auto-addr search explicitly disabled)"
 

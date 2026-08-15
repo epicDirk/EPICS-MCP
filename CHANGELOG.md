@@ -45,8 +45,8 @@ carry breaking changes).
   owns (`EPICS_MCP_*` plus the six EPICS search-path variables) and probes the block it just
   printed, and that claim held only up to the variables it does not own. Measured: an `HTTP_PROXY`
   turns six healthy REST planes into six `unreachable`, each naming a host the block never
-  mentions, and an `EPICS_PVA_BROADCAST_PORT` decides who answers a PV search while the report's
-  `search paths:` line is unchanged word for word. Stripping those too would break every site
+  mentions, and an `EPICS_PVA_BROADCAST_PORT` decides who answers a PV search (at the time of that
+  change the `search paths:` line said nothing about it; the entry below made the line resolve it). Stripping those too would break every site
   behind a proxy and every site with an internal CA, so they are named instead, on stderr and
   ahead of the report, each with what it does and what to do about it. Names only, never values: a
   proxy URL routinely carries a password. Setting `EPICS_MCP_CA_BUNDLE` in the block silences the
@@ -94,6 +94,15 @@ carry breaking changes).
   in particular went from 29 194 B to 21 411 B.
 
 ### Fixed
+
+- **`epics-doctor`'s `search paths:` line named addresses but not ports, and a port decides who
+  answers.** The line was word for word identical with and without `EPICS_PVA_BROADCAST_PORT`,
+  while the client dialled a different port. It now resolves every entry to the endpoint actually
+  used and names the variable the default came from (`EPICS_PVA_BROADCAST_PORT` for the address
+  lists, `EPICS_PVA_SERVER_PORT` for the name servers). Three measured client behaviours are
+  reported rather than hidden: a written `:0` or a number past 65535 is not the port you wrote,
+  an entry the client refuses is marked `DROPPED` instead of being shown as a destination, and a
+  list holding names carries a caveat that its effective form can be shorter.
 
 - **`epics-doctor` reported `localhost-isolated` for a `EPICS_MCP_PROVIDER=ca` server that was
   broadcasting PV searches into the local subnets.** p4p offers PVAccess only; it accepts `ca` and

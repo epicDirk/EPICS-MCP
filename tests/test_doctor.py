@@ -1946,13 +1946,105 @@ async def test_an_inert_search_list_is_marked_and_never_dropped(
     report = await run_doctor()
     live = _plane(report, "live")
     assert live.detail is not None
-    assert "EPICS_CA_ADDR_LIST (192.0.2.9)" in live.detail
+    # The VARIABLE and its address, not the exact rendering: the port half of this line is
+    # Paket 2's subject and is pinned by its own tests. What this one guards is that the entry
+    # survives at all.
+    assert "EPICS_CA_ADDR_LIST" in live.detail
+    assert "192.0.2.9" in live.detail
     assert "[inert]" in live.detail
     assert "localhost-isolated" not in live.detail
     # The half that keeps the next reader from "repairing" the disagreement by weakening the
     # write-reach assert. Without this sentence "inert" sits directly above a write block saying
     # the same variable stops a write-enabled server from booting.
     assert "write-reach assert" in live.detail
+
+
+async def test_a_set_search_port_changes_the_posture_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The GQ-17 red proof: on the pre-fix code these two lines were BYTE-IDENTICAL.
+
+    ``EPICS_PVA_BROADCAST_PORT`` decides which port every port-less entry of
+    ``EPICS_PVA_ADDR_LIST`` is dialled on, so it decides WHO answers a PV search. The line
+    reported the addresses and said nothing about it, in both runs the same words, which made a
+    report about reach silent on half of the reach.
+    """
+    _set_config(monkeypatch)
+    monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "192.0.2.5 192.0.2.6:5077")
+    monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", "NO")
+    monkeypatch.setenv("EPICS_CA_AUTO_ADDR_LIST", "NO")
+    before = _plane(await run_doctor(), "live").detail
+
+    monkeypatch.setenv("EPICS_PVA_BROADCAST_PORT", "5099")
+    after = _plane(await run_doctor(), "live").detail
+
+    assert before != after, "a set search port still leaves the reach line word for word the same"
+    assert before is not None and after is not None
+    # The entry WITHOUT a port of its own moves; the one carrying 5077 keeps it. Both halves,
+    # because "the line changed" would also pass if the default had overwritten every entry.
+    assert "192.0.2.5:5076" in before and "192.0.2.5:5099" in after
+    assert "192.0.2.6:5077" in before and "192.0.2.6:5077" in after
+
+
+async def test_each_search_list_reports_its_own_default_port_variable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two lists take their default from two DIFFERENT variables, and the line names which.
+
+    Without naming the variable the number is unactionable: an operator who sees a port they did
+    not choose has to know which of the two knobs produced it.
+    """
+    _set_config(monkeypatch)
+    monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "192.0.2.5")
+    monkeypatch.setenv("EPICS_PVA_NAME_SERVERS", "192.0.2.7")
+    monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", "NO")
+    monkeypatch.setenv("EPICS_CA_AUTO_ADDR_LIST", "NO")
+    detail = _plane(await run_doctor(), "live").detail
+    assert detail is not None
+    assert "192.0.2.5:5076" in detail
+    assert "EPICS_PVA_BROADCAST_PORT" in detail
+    assert "192.0.2.7:5075" in detail
+    assert "EPICS_PVA_SERVER_PORT" in detail
+
+
+async def test_an_entry_the_client_refuses_is_reported_as_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A token the client discards is named as discarded, not rendered as a live destination.
+
+    Measured: ``192.0.2.5:abc`` does not become an entry with an unreadable port, it becomes NO
+    entry, and pvxs says so on stderr where a report never sees it. The first draft of this
+    feature printed such a token as "port unknown", which asserts a destination that is not
+    searched. Reporting reach the process does not have is the failure this whole line exists to
+    remove, so the wording is pinned here.
+    """
+    _set_config(monkeypatch)
+    monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "192.0.2.5:abc")
+    monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", "NO")
+    monkeypatch.setenv("EPICS_CA_AUTO_ADDR_LIST", "NO")
+    detail = _plane(await run_doctor(), "live").detail
+    assert detail is not None
+    assert "DROPPED" in detail
+    assert "port unknown" not in detail
+
+
+async def test_the_resolution_caveat_appears_only_for_a_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both directions, or the caveat is unconditional noise that readers learn to skip."""
+    _set_config(monkeypatch)
+    monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", "NO")
+    monkeypatch.setenv("EPICS_CA_AUTO_ADDR_LIST", "NO")
+
+    monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "192.0.2.5 192.0.2.6")
+    literals_only = _plane(await run_doctor(), "live").detail
+    assert literals_only is not None
+    assert "NAMES rather than IP literals" not in literals_only
+
+    monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "192.0.2.5 gateway.example.org")
+    with_a_name = _plane(await run_doctor(), "live").detail
+    assert with_a_name is not None
+    assert "NAMES rather than IP literals" in with_a_name
 
 
 # --- cli_doctor.main: exit codes + render (the deliberate 0/1/2 convention) ---

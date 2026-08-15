@@ -199,7 +199,11 @@ class AmbientGroup:
 #:   p4p/pvxs actually recognises on the client side (the ``EPICS_PVAS_*`` family is the SERVER
 #:   half and cannot apply here). The first is the one measured to flip the live plane from ``ok``
 #:   to ``disconnected`` while the report's ``search paths:`` line stayed word for word the same
-#:   (QA-69, 2026-08-01).
+#:   (QA-69, 2026-08-01). ⚠️ That last clause is HISTORY as of GQ-17: the line now resolves every
+#:   entry to the port it is really dialled on and names the variable the default came from, so a
+#:   changed port changes the line. This group stays, because it answers a different question: the
+#:   report describes the environment of the CHECK, so a port set only in this shell still means
+#:   the check and the running server search different ones.
 #: * ⚠️ The two CA-protocol ports are NOT measured here, they are the same role in the other
 #:   protocol and are listed on that reasoning alone. Said out loud rather than blended in with the
 #:   measured ones.
@@ -255,7 +259,7 @@ AMBIENT_GROUPS: tuple[AmbientGroup, ...] = (
         ),
         effect=(
             "the PORT a PV search goes to is decided here, so this decides WHO answers; the "
-            "check's 'search paths:' line reports the addresses only and says nothing about it. "
+            "check's 'search paths:' line resolves each entry against it and names it. "
             "Your server inherits its launcher's environment, not this shell, so a port set only "
             "here means the check and the running server search different ones"
         ),

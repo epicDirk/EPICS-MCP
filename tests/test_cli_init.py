@@ -1031,7 +1031,13 @@ class TestTheAmbientEnvironmentIsNamed:
         """The second probe. ``EPICS_PVA_BROADCAST_PORT`` tipped the live plane from ``ok`` to
         ``disconnected`` while the report's ``search paths:`` line stayed word for word the same, so
         the report explained its own reach incompletely. It is not in ``stale_config_vars`` and
-        deliberately stays out: it is the caller's transport, not this command's configuration."""
+        deliberately stays out: it is the caller's transport, not this command's configuration.
+
+        ⚠️ The "word for word" half of that history is CLOSED (GQ-17): the line now resolves each
+        entry against this variable and names it. This warning is unaffected and still earns its
+        place, because it answers the other half: the report describes the environment of THIS
+        command, and a port living only in the caller's shell still means the check and the running
+        server search different ones."""
         os.environ["EPICS_PVA_BROADCAST_PORT"] = "5999"
 
         cli_init.main(["--preset", "sandbox"])
