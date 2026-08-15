@@ -7,7 +7,8 @@ from collections.abc import Callable, Sequence
 from typing import Annotated, Literal
 
 from fastmcp import FastMCP
-from mcp.types import ToolAnnotations
+from fastmcp.tools import ToolResult
+from mcp.types import TextContent, ToolAnnotations
 from pydantic import Field
 
 from epics_mcp import __version__
@@ -18,7 +19,12 @@ from epics_mcp.presets import PRESETS
 from epics_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_mcp.prompts import diagnose_pv as _diagnose_pv
 from epics_mcp.prompts import setup_epics_mcp as _setup_epics_mcp
-from epics_mcp.resources import get_epics_config, get_guide, get_health
+
+# ``get_guide`` under an alias: the module namespace now also carries a TOOL of that name (one
+# name across all three CS-Studio surfaces), and the resource handler below has to keep reaching
+# the packaged TEXT rather than calling the tool.
+from epics_mcp.resources import get_epics_config, get_health
+from epics_mcp.resources import get_guide as _guide_text
 from epics_mcp.safety import get_safety
 from epics_mcp.services.checkers import (
     AlarmConfiguredResult,
@@ -62,6 +68,8 @@ from epics_mcp.tools.archiver import (
 from epics_mcp.tools.channelfinder import _find_channels, _list_channel_vocabulary
 from epics_mcp.tools.diagnose_connection import _diagnose_connection
 from epics_mcp.tools.discover import DiscoverPvsResult, _discover_pvs
+from epics_mcp.tools.guide import TOPICS as _GUIDE_TOPICS
+from epics_mcp.tools.guide import serve_guide as _serve_guide
 from epics_mcp.tools.info import _get_pv_info
 from epics_mcp.tools.monitor import _monitor_pv
 from epics_mcp.tools.naming import _lookup_device_name
@@ -153,9 +161,18 @@ def build_instructions(display_tools_available: bool) -> str:
     return (
         # The guide pointer leads so the header never truncates its own escape hatch; the detail
         # this used to inline (per-tool write clause, full network-reach prose) lives in the guide.
-        "For the service landscape, operational recipes (archiver PV enumeration, "
-        "retrieval-cluster-aware appliances, CA-bundle assembly) and error signatures, "
-        "read the epics-pv://guide resource. "
+        #
+        # It names the get_guide TOOL, not the epics-pv://guide resource it used to name, and that
+        # is the whole point of this sentence rather than a rewording: a resource is
+        # application-controlled and a model does not pull from one, so the old pointer sent the
+        # reader to a channel they could not use. The resource still exists for a human or an
+        # application. ⚠️ The sentence is also the ONLY thing that makes this surface's guide
+        # discoverable before a tool is chosen, so it is pinned by name in
+        # test_guide_tool.py: dropping it while trimming this header would leave the whole guide
+        # unreachable with every other guard still green. Measured: the swap FREED 29 bytes (187
+        # to 158), which is what made it fit at all, the header having had 2 bytes left.
+        "Call get_guide FIRST unless you already know the tool you need: the service landscape, "
+        "operational recipes and error signatures, one named section at a time. "
         "Read-only EPICS PV access by default: read live values and metadata, monitor, "
         "discover, " + display_clause + "ChannelFinder lookups, Archiver history + archive "
         "configuration, Alarm configuration and history, ESS Naming-Service device-name lookup, "
@@ -242,6 +259,58 @@ mcp = FastMCP(
 
 
 # === Tools ===
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        # Closed world: this tool reads its own packaged document and nothing else. It is the one
+        # tool here that contacts no service at all, which is what makes it safe as the very first
+        # call of a session, before epics-doctor has said what this instance even reaches.
+        openWorldHint=False,
+    ),
+)
+@translate_epics_errors
+async def get_guide(
+    topic: Annotated[
+        str | None,
+        Field(
+            description=(
+                "One part of the guide instead of the whole document. The keys, in document "
+                f"order: {', '.join(_GUIDE_TOPICS)}. The five section keys (posture, planes, "
+                "tools, recipes, errors) serve a whole section, the rest one subsection of one. "
+                "Omit it, or pass an empty string, for everything; surrounding whitespace is "
+                "trimmed. Any OTHER unknown topic is a hard error naming the ones that exist, "
+                "never a nearest guess and never a silent fall back to the whole guide."
+            )
+        ),
+    ] = None,
+) -> ToolResult:
+    """The operational cookbook of this surface: service planes, recipes, error signatures.
+
+    Call it before deciding how to attack an operational question. The individual tool
+    descriptions tell you how to CALL one, which is a different question; this says which chain
+    answers which question, what an error signature means, and what the planes can and cannot
+    prove. It reads nothing but its own packaged document: no PV, no REST plane, no file of
+    yours, so it can neither time out nor depend on how this instance is configured.
+
+    The whole document is around 87 KB, which is why 'topic' exists and why omitting it should be
+    the exception. A key returns exactly one part, VERBATIM, so an excerpt is a real excerpt and
+    never a rendering. An unknown topic is refused with [UNKNOWN_TOPIC] naming every valid key.
+
+    The same text is also served as the resource epics-pv://guide, for a human or an application.
+    An application has to ask for it, though, which is why this tool exists beside it.
+    """
+    # ⛔ ToolResult with ONE text block and no structuredContent, deliberately. The guide is a
+    # document to READ, not a measurement to index: beside the text there is no field a caller
+    # could want. And the choice is measured rather than tasteful. A ``-> str`` return makes
+    # FastMCP 3.4.4 wrap the value in ``{"result": ...}`` and send it BOTH ways, so the document
+    # crosses the wire twice, the second copy JSON-escaped and therefore longer. Measured against
+    # this guide on 2026-08-15 (87 268 B): 87 268 B of text plus 88 868 B of structuredContent,
+    # 176 136 B for one call, versus 87 268 B for the shape below.
+    return ToolResult(content=[TextContent(type="text", text=_serve_guide(topic))])
 
 
 @mcp.tool(
@@ -1789,8 +1858,15 @@ def epics_config() -> dict[str, object]:
 
 @mcp.resource("epics-pv://guide")
 def guide() -> str:
-    """Agent-readable operational cookbook: service planes, recipes, error signatures."""
-    return get_guide()
+    """Agent-readable operational cookbook: service planes, recipes, error signatures.
+
+    The same text is served by the ``get_guide`` TOOL, which is the channel a MODEL fetches from;
+    a resource is application-controlled and has to be asked for. This one stays because it costs
+    nothing and is the right shape for a human or an application reading the whole document.
+    """
+    # ``_guide_text``, not ``get_guide``: since the tool of that name exists, the module namespace
+    # carries both, and this handler wants the packaged file.
+    return _guide_text()
 
 
 # === Prompts ===

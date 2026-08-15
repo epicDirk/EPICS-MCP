@@ -8,6 +8,12 @@ The full surface: every MCP tool grouped by plane, the standalone command-line t
 
 ## Tools
 
+**The guide itself** (always available)
+
+| Tool | Description |
+|------|-------------|
+| `get_guide` | The operational cookbook as a tool: service planes, recipes, error signatures. `topic` serves one named part verbatim instead of the whole ~87 KB document, and an unknown topic is refused by name rather than guessed. It contacts nothing, so it is safe as the first call of a session. The same text is the `epics-pv://guide` resource below; a resource is application-controlled, which is why the tool exists beside it |
+
 **Core PV access** (always available)
 
 | Tool | Description |
@@ -163,6 +169,11 @@ command you ran, which need not be the one a running server was started with.
 The guide's source is `src/epics_mcp/operator_guide.md`: one file, shipped in the wheel and served
 as the resource. [`OPERATING.md`](../OPERATING.md) points human readers at it and is deliberately a
 signpost rather than a copy, so the two cannot drift.
+
+The same text is also served by the `get_guide` **tool** above, and the split is not redundancy: a
+resource is application-controlled, so a model does not pull from one, while a tool is exactly the
+channel it does pull from. The tool additionally serves one named part at a time; the resource is
+the whole document, which is the right shape for a human or an application reading it end to end.
 
 | Prompt | Description |
 |--------|-------------|

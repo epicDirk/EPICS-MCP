@@ -939,6 +939,20 @@ _CLAIMS: tuple[_Claim, ...] = (
         lambda: len(ts._TYPED_OUTPUT_TOOLS),
         reads=("_TYPED_OUTPUT_TOOLS",),
     ),
+    # --- family 1b: what the displays group GATES, named in the header builder's own docstring ---
+    # Added because the phrase arrived UNGUARDED and left this module red on the commit that wrote
+    # it: c5d4ad7 put "gates FOUR tools" into build_instructions' docstring and touched neither
+    # _CLAIMS nor _FROZEN nor _INVENTORY_SIZES, so server.py carried three size-naming phrases
+    # against a pin of two. Derived rather than frozen, because the number does follow from a set:
+    # it is exactly what display_tools.py registers, which is the side that would move if a fifth
+    # display tool were ever added.
+    _claim(
+        "display-gated tools (header docstring)",
+        r"gates (\w+) tools",
+        _display_tools,
+        reads=("display_tools.py",),
+        scope="build_instructions",
+    ),
     # --- family 2: the untyped remainder --------------------------------------------------------
     _claim(
         "untyped remainder",
@@ -1468,7 +1482,9 @@ _INVENTORY_SIZES: dict[str, int] = {
     "services/checkers_olog.py": 4,
     "services/checkers.py": 5,
     "tools/archiver.py": 5,
-    "server.py": 2,
+    # 2 -> 3 as the repair of the same defect the "display-gated tools" claim above records: the
+    # third phrase has been in build_instructions' docstring since c5d4ad7 with no pin to match it.
+    "server.py": 3,
 }
 
 

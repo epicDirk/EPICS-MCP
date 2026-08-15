@@ -110,3 +110,29 @@ class SafetyConfigError(EpicsError):
 
     def __init__(self, message: str, details: dict[str, object] | None = None) -> None:
         super().__init__(message, error_code="SAFETY_CONFIG_INVALID", details=details)
+
+
+class UnknownTopicError(EpicsError):
+    """Raised when ``get_guide`` is given a topic key the operator guide does not have.
+
+    A refusal, deliberately, rather than a nearest-neighbour hit or a silent fall back to the
+    whole guide: an answer that looks plausible and is the wrong section costs the reader more
+    than one that says so, because nothing in the text tells them it is wrong. The message names
+    every valid key, so the correction needs no second call.
+    """
+
+    def __init__(self, message: str, details: dict[str, object] | None = None) -> None:
+        super().__init__(message, error_code="UNKNOWN_TOPIC", details=details)
+
+
+class GuideDriftError(EpicsError):
+    """Raised when the operator guide's headings no longer match the topic table that indexes them.
+
+    A DIFFERENT fault from :class:`UnknownTopicError`, which is why it does not share its code: the
+    caller did nothing wrong, the shipped document and ``tools.guide.TOPICS`` disagree. It is
+    raised on the first call that needs the index and in CI, never swallowed, because the silent
+    alternative is a key that keeps answering with the section next to the one it names.
+    """
+
+    def __init__(self, message: str, details: dict[str, object] | None = None) -> None:
+        super().__init__(message, error_code="GUIDE_DRIFT", details=details)

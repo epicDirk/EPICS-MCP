@@ -2333,8 +2333,8 @@ def test_installed_but_broken_extra_keeps_all_surfaces_consistent(
 # without pointing at the decorator that actually causes it. To type a tool, DELETE its kwarg:
 # ``None`` is not "unset", it overrides the annotation-derived schema entirely.
 #
-# These are core tools, so the set is identical on a core-only ([displays] absent, 28 tools) and a
-# full (32) install -> the assertions are RELATIONAL, never a COUNT (which would break core-only).
+# These are core tools, so the set is identical on a core-only ([displays] absent, 29 tools) and a
+# full (33) install -> the assertions are RELATIONAL, never a COUNT (which would break core-only).
 _TYPED_OUTPUT_TOOLS = frozenset(
     {
         "search_logbook",
@@ -2697,7 +2697,7 @@ async def test_typed_output_schema_arrays_declare_their_element_schema() -> None
     all 22 schemas finds zero of either). Deliberately outside: fields typed ``object | None``
     that hold a list at runtime, get_archive_info's ``archive_fields``/``data_stores`` are the
     live example, since _base_type returns None for them; this pins DECLARED arrays, not every
-    field that can carry one. Also outside: the list fields of the 10 tools that are not typed
+    field that can carry one. Also outside: the list fields of the 11 tools that are not typed
     yet, which have no advertised schema to pin.
 
     Red-proof: widen services/checkers.py's ``ChannelVocabularyResult.tags`` to ``list[Any]``."""
@@ -3373,8 +3373,8 @@ async def test_tools_list_within_budget() -> None:
     0.3 % of this ceiling. The guard for that is
     :func:`test_output_schema_typed_only_for_typed_tools`, which asserts the iff in both directions.
 
-    RELATIONAL (a ``<=`` ceiling, not an exact count) so both the core-only lane (28 tools) and the
-    full lane (32) pass, a count-pinned assert would break core-only CI. Provably red: lower the
+    RELATIONAL (a ``<=`` ceiling, not an exact count) so both the core-only lane (29 tools) and the
+    full lane (33) pass, a count-pinned assert would break core-only CI. Provably red: lower the
     ceiling below the current full-lane payload."""
     from mcp.types import ListToolsResult
 
@@ -3481,7 +3481,7 @@ _ANNOTATION_HINTS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openW
 # 2026-07-23 from the ToolAnnotations in server.py + display_tools.py, a human-reviewed snapshot
 # of every tool's client-facing safety labels. Any live annotation change, or a new/renamed tool,
 # turns test_tool_annotations_match_golden_map RED until this map is CONSCIOUSLY updated: that edit
-# is the review checkpoint. Covers all 32 full-lane tools; the 4 display-extra tools are absent in
+# is the review checkpoint. Covers all 33 full-lane tools; the 4 display-extra tools are absent in
 # the core-only lane (tolerated, see _annotation_drift). Regenerate by re-measuring, not by guess.
 _ANNOTATION_GOLDEN: dict[str, tuple[bool, bool, bool, bool]] = {
     "add_log_attachment": (False, False, False, True),
@@ -3494,6 +3494,11 @@ _ANNOTATION_GOLDEN: dict[str, tuple[bool, bool, bool, bool]] = {
     "find_channels": (True, False, True, True),
     "find_device": (True, False, True, True),
     "get_alarm_history": (True, False, True, True),
+    # openWorldHint False, and it is the only tool here with that value: get_guide contacts no
+    # service at all, it reads its own packaged document. That is the label a client uses to
+    # decide how freely it may call something, so the difference is deliberate rather than an
+    # oversight in the row above.
+    "get_guide": (True, False, True, False),
     "get_appliance_info": (True, False, True, True),
     "get_archive_info": (True, False, True, True),
     "get_log_entry": (True, False, True, True),
@@ -3519,7 +3524,7 @@ _ANNOTATION_GOLDEN: dict[str, tuple[bool, bool, bool, bool]] = {
 }
 
 # The display-extra tools live in display_tools.py and register only with the [displays] extra, so
-# they are ABSENT in core-only CI (28 tools) and PRESENT in the full lane (32). AST-scanned, NEVER
+# they are ABSENT in core-only CI (29 tools) and PRESENT in the full lane (33). AST-scanned, NEVER
 # imported: importing display_tools.py pulls opi_navigation (absent in core-only), which would break
 # collection there, the same reason test_guide_matches_code.py AST-scans it.
 _DISPLAY_TOOLS_SRC = (
@@ -3572,10 +3577,10 @@ def test_annotation_drift_set_logic_is_lane_robust() -> None:
     display_extra = _display_tool_names()
     assert display_extra <= golden, "every display-extra tool must be classified in the golden map"
 
-    # Full lane (32): every golden tool present → clean.
+    # Full lane (33): every golden tool present → clean.
     assert _annotation_drift(set(golden), golden, display_extra) == (set(), set())
 
-    # Core-only lane (28): the display-extra tools are absent → tolerated, still clean.
+    # Core-only lane (29): the display-extra tools are absent → tolerated, still clean.
     core_only = golden - display_extra
     assert _annotation_drift(core_only, golden, display_extra) == (set(), set())
 
@@ -3665,7 +3670,7 @@ async def test_tool_annotations_match_golden_map() -> None:
     still documented). A new/renamed tool or any hint change goes red until _ANNOTATION_GOLDEN is
     consciously updated.
 
-    Two-lane robust (core-only CI = 28 tools, full = 32) via _annotation_drift: a golden tool absent
+    Two-lane robust (core-only CI = 29 tools, full = 33) via _annotation_drift: a golden tool absent
     live is tolerated ONLY if it is display-extra. Honest limit: STRUCTURE + DRIFT, not SEMANTICS.
 
     Provably red: change a golden tuple, flip a live annotation, or rename a tool.

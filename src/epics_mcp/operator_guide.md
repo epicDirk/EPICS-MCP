@@ -124,6 +124,9 @@ surface that never reaches the published package); on a core-only install they
 are simply absent, that is an unmet optional dependency group, not a bug.
 
 <!-- BEGIN:tool-inventory (drift-guarded against @mcp.tool registrations, see tests/test_guide_matches_code.py) -->
+**This document, served as a tool:**
+`get_guide`
+
 **Core, live PV + REST planes:**
 `get_pv_value` · `get_pvs` · `set_pv_value` · `get_pv_info` · `monitor_pv` · `discover_pvs` ·
 `find_channels` · `list_channel_vocabulary` · `lookup_device_name` · `is_archived` · `get_pv_history` · `get_archive_info` ·
