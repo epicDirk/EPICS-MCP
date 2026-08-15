@@ -12,7 +12,7 @@ The full surface: every MCP tool grouped by plane, the standalone command-line t
 
 | Tool | Description |
 |------|-------------|
-| `get_guide` | The operational cookbook as a tool: service planes, recipes, error signatures. `topic` serves one named part verbatim instead of the whole ~87 KB document, and an unknown topic is refused by name rather than guessed. It contacts nothing, so it is safe as the first call of a session. The same text is the `epics-pv://guide` resource below; a resource is application-controlled, which is why the tool exists beside it |
+| `get_guide` | The operational cookbook as a tool: service planes, recipes, error signatures. `topic` serves one named part verbatim instead of the whole ~80 KB document. The keys PARTITION the guide, so a section key serves that section's own text and the subsections under it are keys of their own (`tools` is the tool inventory, not the whole palette); the largest single part is a quarter of the document. An unknown topic is refused by name rather than guessed. It contacts nothing, so it is safe as the first call of a session. The same text is the `epics-pv://guide` resource below; a resource is application-controlled, which is why the tool exists beside it |
 
 **Core PV access** (always available)
 

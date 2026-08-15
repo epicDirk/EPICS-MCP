@@ -136,8 +136,8 @@ async def test_a_blank_topic_means_everything_and_the_description_says_so() -> N
 async def test_every_topic_serves_its_own_part_verbatim() -> None:
     """Each key returns exactly its part, and that part occurs in the file as written.
 
-    The two sum checks below are the real guard; this one pins the shape, which is what tells a
-    caller whether they were handed a section or one subsection of it.
+    The sum check below is the real guard; this one pins the shape, which is what tells a caller
+    whether they were handed a section's own text or one subsection of it.
     """
     whole = guide_text()
     async with Client(mcp) as client:
@@ -155,34 +155,29 @@ async def test_every_topic_serves_its_own_part_verbatim() -> None:
             assert text in whole, f"'{key}' served text that is not in the guide as written"
 
 
-def test_the_section_keys_re_assemble_the_file_and_the_sub_keys_their_section() -> None:
-    """⭐ The sum check, in both directions, and it is what makes "verbatim excerpt" a fact.
+def test_the_topics_partition_the_file_with_no_overlap_and_no_gap() -> None:
+    """⭐ The sum check, and it is what makes "verbatim excerpt" a fact rather than a claim.
 
-    Two identities, because the topic space has two levels: the preamble plus every ``## ``
-    section is the file again, and a section's lead plus its ``### `` subsections is that section
-    again. Either one failing means the splitter swallowed or duplicated a byte, which is exactly
-    the failure a reader could not detect in the answer they were given.
+    ONE identity, because the topics are a PARTITION: the preamble plus every topic's body, in
+    document order, is the file again. That covers both failure directions at once. A swallowed or
+    duplicated byte breaks it, and so does an overlap, which is the shape this had before: a
+    section key that carried its own subsections would make the concatenation longer than the file
+    while every individual answer still looked right.
+
+    A second, cheaper assertion states the same property in the units a caller feels: the parts sum
+    to the document's size exactly, so no part can be paying for another one's bytes.
 
     The negative control lives in :func:`test_the_sum_check_can_actually_fail`, so this assertion
     is provably able to go red rather than merely present.
     """
     whole = guide_text()
-    preamble, sections = split_sections(whole)
-    resolved = resolve_topics(whole)
+    preamble, _ = split_sections(whole)
+    ordered = list(resolve_topics(whole).values())
 
-    served_sections = [body for body in resolved.values() if is_section(body)]
-    assert len(served_sections) == len(sections), (
-        f"{len(sections)} sections in the guide but {len(served_sections)} section keys; a "
-        "section without a key cannot be requested on its own"
+    assert _sum_holds(preamble, ordered, whole), (
+        "the topics do not re-assemble the guide; a part was lost, duplicated, or two parts overlap"
     )
-    assert _sum_holds(preamble, served_sections, whole)
-
-    for section in sections:
-        lead, subsections = split_subsections(section)
-        served_subs = [body for body in resolved.values() if body in subsections]
-        assert _sum_holds(lead, served_subs, section), (
-            f"the subsections of {section.splitlines()[0]!r} do not re-assemble their section"
-        )
+    assert len(preamble) + sum(len(part) for part in ordered) == len(whole)
 
 
 def _sum_holds(head: str, parts: list[str], whole: str) -> bool:
@@ -191,16 +186,29 @@ def _sum_holds(head: str, parts: list[str], whole: str) -> bool:
 
 
 def test_the_sum_check_can_actually_fail() -> None:
-    """The negative control: a splitter that loses one byte must break the identity above.
+    """The negative control, in BOTH directions the partition can break.
 
-    Without this, ``_sum_holds`` is an assertion nobody has seen fail, and a guard that cannot go
-    red is the defect it was meant to remove.
+    Without it, ``_sum_holds`` is an assertion nobody has seen fail, and a guard that cannot go
+    red is the defect it was meant to remove. One byte lost is the obvious direction; a part that
+    carries the text of the next one is the direction this design actually had, and it is the one
+    that stays invisible in any single answer.
     """
     whole = guide_text()
     preamble, sections = split_sections(whole)
-    mangled = [sections[0][:-1], *sections[1:]]
-    assert not _sum_holds(preamble, mangled, whole), (
+
+    lost = [sections[0][:-1], *sections[1:]]
+    assert not _sum_holds(preamble, lost, whole), (
         "the sum check accepted a section that lost a byte, so it proves nothing"
+    )
+
+    # The first section that HAS subsections, found rather than hardcoded: which one that is
+    # depends on the guide, and an index would rot the next time a section moves.
+    nested = next(index for index, s in enumerate(sections) if split_subsections(s)[1])
+    _, subsections = split_subsections(sections[nested])
+    overlapping = [*sections[:nested], sections[nested], *subsections, *sections[nested + 1 :]]
+    assert not _sum_holds(preamble, overlapping, whole), (
+        "the sum check accepted a section served ALONGSIDE its own subsections, which is exactly "
+        "the overlap the partition rule exists to forbid"
     )
 
 
@@ -289,7 +297,7 @@ async def test_a_topic_is_a_fraction_of_the_whole_document() -> None:
 
     A ratio rather than a byte figure, so ordinary editing of the guide does not trip it. The
     threshold is deliberately loose: what it catches is a split that collapsed (one topic serving
-    everything), not growth.
+    everything), not growth. Measured on the current guide the worst part is well inside it.
     """
     whole = len(guide_text().encode("utf-8"))
     async with Client(mcp) as client:
@@ -298,6 +306,22 @@ async def test_a_topic_is_a_fraction_of_the_whole_document() -> None:
             assert len(text.encode("utf-8")) < whole * 0.5, (
                 f"topic '{key}' serves more than half the guide; the split is not doing its job"
             )
+
+
+async def test_the_tool_key_serves_the_inventory_rather_than_the_whole_palette() -> None:
+    """The promise the two-level design was built for, asserted rather than described.
+
+    "Which tool answers this" is the question this surface is asked first, and the answer is the
+    drift-guarded inventory block at the top of the tool palette. If ``tools`` served the whole
+    section instead, that question would cost 27 KB, most of it Olog and write-gate detail the
+    asker did not want. Red-proof: make a section body carry its subsections again.
+    """
+    async with Client(mcp) as client:
+        text, _ = await _answer(client, topic="tools")
+    assert "BEGIN:tool-inventory" in text, "the 'tools' key no longer serves the tool inventory"
+    assert "### " not in text, (
+        "the 'tools' key serves its subsections too, so the inventory costs their bytes as well"
+    )
 
 
 # --------------------------------------------------------------------------------------------

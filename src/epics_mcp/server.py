@@ -279,9 +279,12 @@ async def get_guide(
         Field(
             description=(
                 "One part of the guide instead of the whole document. The keys, in document "
-                f"order: {', '.join(_GUIDE_TOPICS)}. The five section keys (posture, planes, "
-                "tools, recipes, errors) serve a whole section, the rest one subsection of one. "
-                "Omit it, or pass an empty string, for everything; surrounding whitespace is "
+                f"order: {', '.join(_GUIDE_TOPICS)}. They PARTITION the guide, so a section key "
+                "(posture, planes, tools, recipes, errors) serves that section's own text and NOT "
+                "the subsections under it, which are keys of their own: 'tools' is the tool "
+                "inventory, the Olog and write-posture detail below it is 'olog-output', "
+                "'olog-filters', 'pv-write', 'audit', 'olog-write', 'olog-attachments'. Omit the "
+                "argument, or pass an empty string, for everything; surrounding whitespace is "
                 "trimmed. Any OTHER unknown topic is a hard error naming the ones that exist, "
                 "never a nearest guess and never a silent fall back to the whole guide."
             )
@@ -296,9 +299,10 @@ async def get_guide(
     prove. It reads nothing but its own packaged document: no PV, no REST plane, no file of
     yours, so it can neither time out nor depend on how this instance is configured.
 
-    The whole document is around 87 KB, which is why 'topic' exists and why omitting it should be
-    the exception. A key returns exactly one part, VERBATIM, so an excerpt is a real excerpt and
-    never a rendering. An unknown topic is refused with [UNKNOWN_TOPIC] naming every valid key.
+    The whole document is around 80 KB, which is why 'topic' exists and why omitting it should be
+    the exception. The keys partition the document: each returns exactly its own part, VERBATIM,
+    so an excerpt is a real excerpt and never a rendering, and the largest single part is under a
+    third of the whole. An unknown topic is refused with [UNKNOWN_TOPIC] naming every valid key.
 
     The same text is also served as the resource epics-pv://guide, for a human or an application.
     An application has to ask for it, though, which is why this tool exists beside it.

@@ -13,9 +13,11 @@ carry breaking changes).
   resource is application-controlled, so a model never fetches one by itself, which left the guide
   correct and unread. The resource stays; the tool is the channel a model pulls from, and the
   server header now points at it. `topic` serves one named part of the guide verbatim instead of
-  the whole document (five section keys, seventeen subsection keys, listed in the argument
-  description); an unknown topic is refused by name, never guessed and never quietly answered with
-  everything. The tool contacts no PV, no REST plane and no file of yours, so it is safe as the
+  the whole document. The keys PARTITION it, so a section key (`posture`, `planes`, `tools`,
+  `recipes`, `errors`) serves that section's own text and the subsections under it are keys of
+  their own: `tools` is the drift-guarded tool inventory at 1 521 B, not the 27 KB palette that
+  opens with it. All keys are listed in the argument description and in every refusal. An unknown
+  topic is refused by name, never guessed and never quietly answered with everything. The tool contacts no PV, no REST plane and no file of yours, so it is safe as the
   first call of a session. New error codes on the wire: `UNKNOWN_TOPIC` for a bad key,
   `GUIDE_DRIFT` if the shipped document and the topic table disagree.
 

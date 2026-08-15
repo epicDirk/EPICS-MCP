@@ -17,10 +17,11 @@ answers the other half, which is that 87 268 B is still too much to hand over fo
 one error signature.
 
 **Two levels of key, because one is not enough here.** Splitting only on ``## `` leaves sections
-of 27 285 B and 29 194 B, each larger than a sibling surface's ENTIRE guide. So a ``## `` key
-serves its whole section and a ``### `` key serves one subsection of it, in one flat namespace.
-The practical effect is the point: a caller asking which tool answers a question wants the 1 471 B
-inventory head, not the 27 285 B section it opens.
+of 27 KB and more, each larger than a sibling surface's ENTIRE guide. So the keys PARTITION the
+document instead: a ``## `` key serves that section's own text and a ``### `` key serves one
+subsection, in one flat namespace, with no overlap and no gap. The practical effect is the point:
+a caller asking which tool answers a question gets the 1 471 B tool inventory, not the 27 KB
+section that opens with it.
 
 **Deterministic by construction.** The text comes from one packaged file, the split is a plain
 line-anchored heading boundary that loses nothing (the parts re-assemble into the file byte for
@@ -105,9 +106,9 @@ def split_sections(text: str) -> tuple[str, tuple[str, ...]]:
 def split_subsections(section: str) -> tuple[str, tuple[str, ...]]:
     """Split one ``## `` section into (lead, ``### `` subsections), same identity one level down.
 
-    The lead is the section heading plus whatever prose follows it before the first ``### ``, and
-    it is the part a caller who asks for the section by its own key is usually after: in the tool
-    palette it is the drift-guarded tool inventory.
+    The lead is the section heading plus whatever prose follows it before the first ``### ``. It
+    is a part in its own right rather than a leftover: in the tool palette it is the drift-guarded
+    tool inventory, which is what a caller asking "which tool answers this" actually wants.
     """
     parts = _SUBSECTION_START.split(section)
     if not parts:  # pragma: no cover - re.split always yields at least one element
@@ -116,7 +117,7 @@ def split_subsections(section: str) -> tuple[str, tuple[str, ...]]:
 
 
 def is_section(body: str) -> bool:
-    """True when *body* is a whole ``## `` section rather than a ``### `` subsection.
+    """True when *body* opens with a ``## `` heading rather than a ``### `` one.
 
     Derived from the text itself so no second list has to be kept in step: a subsection starts
     with three hashes, which fails a ``"## "`` prefix test on the third character.
@@ -125,17 +126,24 @@ def is_section(body: str) -> bool:
 
 
 def _addressable_parts(text: str) -> list[tuple[str, str]]:
-    """Every (heading line, body) a topic may name, in document order.
+    """Every (heading line, body) a topic may name, in document order, as a PARTITION.
 
-    A ``## `` section appears BEFORE the ``### `` subsections it contains, which is what makes a
-    single ordered walk a valid document-order check across both levels. Bodies overlap on
-    purpose: the section body contains its subsections, so a caller chooses the granularity.
+    The parts do not overlap and they do not leave a gap: a section that has ``### `` children
+    contributes its LEAD, then each child; a section without children contributes itself. So the
+    preamble plus every part in this order is the document again, which is the single identity
+    :mod:`tests.test_guide_tool` measures.
+
+    ⚠️ The consequence is worth stating because it decides what a section key MEANS: ``tools``
+    serves the tool palette's own text, the inventory, and NOT the six subsections below it, which
+    are keys of their own. That is the whole point of having two levels. A section body that
+    carried its children would put 27 KB behind the key a caller reaches for first, which is the
+    payload this argument exists to avoid.
     """
     parts: list[tuple[str, str]] = []
     _, sections = split_sections(text)
     for section in sections:
-        parts.append((section.splitlines()[0], section))
-        _, subsections = split_subsections(section)
+        lead, subsections = split_subsections(section)
+        parts.append((section.splitlines()[0], lead))
         parts.extend((subsection.splitlines()[0], subsection) for subsection in subsections)
     return parts
 
