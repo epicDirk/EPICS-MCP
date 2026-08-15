@@ -197,7 +197,8 @@ async def crossplane_check(
     macro-expanded, per-instance PV-inventory (operator-facing displays only); concrete PVs sharing
     the IOC prefix are 'linked' (writable subset surfaced), others 'other_prefix'. PVs the inventory
     cannot resolve to a concrete channel are 'indeterminate' (dynamic/unresolved) and never judged
-    'broken'; non-channel protocols (loc/sim/sys/other) are excluded from the join. A 'broken'
+    'broken'; non-channel protocols (loc/sim/sys/other) are excluded from the join and reported
+    with a per-protocol count that partitions their total. A 'broken'
     verdict (linked PV absent from the IOC .db) is produced only when 'module_db_root' supplies a
     provably complete IOC .db set; otherwise it is withheld.
     """

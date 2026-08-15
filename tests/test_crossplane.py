@@ -172,6 +172,52 @@ def test_non_channel_protocol_excluded() -> None:
     assert any("non-channel" in note for note in report.notes)
 
 
+def test_non_channel_breakdown_is_a_partition_in_the_taught_order() -> None:
+    """The per-protocol counts sum to the headline number, and they come in loc/sim/sys/other.
+
+    Both halves matter and only one of them is about formatting. A breakdown whose parts do not add
+    up to the number beside them is two truths in one report; and reporting it alphabetically would
+    put ``other`` between ``loc`` and ``sim``, so a reader comparing the note to the bucket list in
+    the module docstring would have to re-map it every time.
+    """
+    join = [
+        _jp("a.bob", "other://thing", resolution="resolved", protocol="other"),
+        _jp("a.bob", "sim://ramp", resolution="resolved", protocol="sim"),
+        _jp("a.bob", "loc://count", resolution="resolved", protocol="loc"),
+        _jp("b.bob", "loc://count", resolution="resolved", protocol="loc"),  # distinct, not double
+        _jp("a.bob", "sys://time", resolution="resolved", protocol="sys"),
+        _jp("a.bob", "DEV-TEST01:Ctrl-EVR-01:real"),  # a real channel stays out of the breakdown
+    ]
+    report = crossplane_check(join, _st())
+    assert report.pvs_non_channel_by_protocol == (
+        ("loc", 1),
+        ("sim", 1),
+        ("sys", 1),
+        ("other", 1),
+    )
+    counted = sum(count for _, count in report.pvs_non_channel_by_protocol)
+    assert counted == len(report.pvs_non_channel)
+    assert any("loc: 1, sim: 1, sys: 1, other: 1" in note for note in report.notes)
+
+
+def test_non_channel_breakdown_counts_a_shared_name_once() -> None:
+    """One expanded string arriving under two protocols is counted ONCE, under the first.
+
+    The expander can hand the same text out with different protocols (a value still carrying a
+    macro prefix keeps its occurrence's protocol), and counting each protocol's set on its own
+    would then sum to more than the distinct total. The tie is broken by the fixed report order,
+    never by which row happened to arrive first, so the result does not depend on iteration order.
+    """
+    join = [
+        _jp("a.bob", "$(P)thing", resolution="resolved", protocol="sim"),
+        _jp("b.bob", "$(P)thing", resolution="resolved", protocol="loc"),
+    ]
+    report = crossplane_check(join, _st())
+    assert report.pvs_non_channel == ("$(P)thing",)
+    assert report.pvs_non_channel_by_protocol == (("loc", 1),)
+    assert sum(count for _, count in report.pvs_non_channel_by_protocol) == 1
+
+
 def test_linked_write_split() -> None:
     # The same PV read+write across two displays: distinct 1 linked, but carried as writable.
     join = [
@@ -296,7 +342,10 @@ def test_render_markdown_deterministic_and_new_branches() -> None:
     assert "ACTIVE" in markdown
     assert "**Indeterminate (dynamic+unresolved):** 1 (1 references)" in markdown
     assert "of which writable: 1" in markdown
-    assert "**Non-channel refs (loc/sim/sys/other, excluded):** 1" in markdown
+    # The label lost its bare protocol list ("loc/sim/sys/other") because the line now carries the
+    # protocols that are actually THERE, with their counts. Naming four possibilities said nothing
+    # about the set in front of the reader.
+    assert "**Non-channel refs (excluded):** 1 (loc: 1)" in markdown
     assert "**Displays with incomplete inventory (lower bound):** 1" in markdown
     assert render_markdown(report) == markdown  # deterministic
 

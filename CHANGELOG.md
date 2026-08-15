@@ -23,6 +23,15 @@ carry breaking changes).
 
 ### Changed
 
+- **`crossplane_check` now says HOW MANY non-channel references there are per protocol, not just
+  that four protocols exist.** The note used to read `N distinct non-channel reference(s)
+  (loc/sim/sys/other)`, which named every protocol the tool knows and no number for any of them; on
+  a real repository that hid a 3-orders-of-magnitude spread. It now reads `N distinct non-channel
+  reference(s) (loc: 25154, sim: 36, other: 12)`, listing only the protocols actually present, and
+  the Markdown line changes with it. New report field `pvs_non_channel_by_protocol`, a
+  `(protocol, count)` tuple whose counts sum to `len(pvs_non_channel)` exactly, so the headline
+  number and its breakdown cannot disagree.
+
 - **The operator guide no longer repeats the command-line walkthrough, and is 9 % smaller for it.**
   Two things had two homes: `epics-init`'s whole section, and the parts of the `epics-doctor`
   section that teach how to READ its report (the remedy rule, the `unverified` rationale, the write

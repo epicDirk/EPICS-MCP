@@ -16,7 +16,8 @@ Service registers (:mod:`naming_client`). Pure + deterministic; all network I/O 
   never judged. (Before Wedge 1 this was every PV carrying a ``$(...)`` macro, a regex proxy; now
   it is exactly what the macro-expander could not resolve.)
 - *non_channel*, references on non-channel protocols (loc/sim/sys/other), excluded from the IOC
-  join (not real EPICS channels), reported separately rather than silently dropped.
+  join (not real EPICS channels), reported separately rather than silently dropped, and split by
+  protocol as a partition of the same set (``pvs_non_channel_by_protocol``).
 - *broken*, concrete linked PVs absent from the IOC ``.db`` set, ONLY computed when a
   **provably complete + fully resolved** IOC ``.db`` set is supplied (``ioc_db_complete`` and no
   ``needs-msi`` residue). An incomplete or still-templated set cannot prove a linked PV's ABSENCE
@@ -49,6 +50,14 @@ logger = logging.getLogger(__name__)
 #: ``opi_navigation.pv_analysis.models.REAL_PROTOCOLS`` (kept local, no foreign import).
 _REAL_PROTOCOLS = frozenset({"ca", "pva"})
 
+#: The order the non-channel breakdown is reported in: the one every text in this module already
+#: uses ("loc/sim/sys/other"), so the numbers read in the order the prose taught. Sorting
+#: alphabetically instead would put "other" second, and a reader comparing the note to the bucket
+#: list above would have to re-map it. A protocol NOT listed here (the engine gains one) is not
+#: dropped, it is appended alphabetically, so the breakdown stays total without this tuple having
+#: to know the future.
+_NON_CHANNEL_PROTOCOL_ORDER = ("loc", "sim", "sys", "other")
+
 #: A trailing EPICS record-field suffix: one or more ``.FIELD`` segments at the end of a PV name
 #: (``record.EGU``, ``record.OUT``, ``record.FIELD.SUB``). ESS record names carry no dot (their
 #: segments use ``:`` ``-`` ``_``), so a trailing dot-prefixed field-shaped token is always a field.
@@ -70,6 +79,45 @@ def _record_name(pv: str) -> str:
     (bucketed out by protocol first).
     """
     return _FIELD_SUFFIX_RE.sub("", pv)
+
+
+def _non_channel_breakdown(by_protocol: dict[str, set[str]]) -> tuple[tuple[str, int], ...]:
+    """Split the non-channel set by protocol as a PARTITION: the counts sum to the distinct total.
+
+    Each PV is counted under exactly ONE protocol, the first of :data:`_NON_CHANNEL_PROTOCOL_ORDER`
+    it appears under (unlisted protocols follow alphabetically). That rule exists because the same
+    expanded string CAN arrive under two protocols: a value still carrying a macro prefix keeps the
+    occurrence's protocol instead of the one its own text says (``opi_navigation`` expansion), so
+    counting each protocol's set independently could sum to MORE than the headline number. Two
+    numbers for one category inside one report is the second truth this project forbids, and the
+    breakdown is the half that must yield, because the headline is what every other note counts.
+
+    The assignment is decided by this fixed order rather than by input order, so it is deterministic
+    for any iteration order of *by_protocol* or of the rows that filled it. Protocols left with no
+    PV of their own are omitted, an empty bucket is not information.
+    """
+    ranked = sorted(
+        by_protocol,
+        key=lambda protocol: (
+            _NON_CHANNEL_PROTOCOL_ORDER.index(protocol)
+            if protocol in _NON_CHANNEL_PROTOCOL_ORDER
+            else len(_NON_CHANNEL_PROTOCOL_ORDER),
+            protocol,
+        ),
+    )
+    claimed: set[str] = set()
+    counted: list[tuple[str, int]] = []
+    for protocol in ranked:
+        own = by_protocol[protocol] - claimed
+        claimed |= own
+        if own:
+            counted.append((protocol, len(own)))
+    return tuple(counted)
+
+
+def _format_breakdown(counted: tuple[tuple[str, int], ...]) -> str:
+    """Render a breakdown as ``loc: 25154, sim: 36`` for the prose surfaces."""
+    return ", ".join(f"{protocol}: {count}" for protocol, count in counted)
 
 
 class JoinPv(NamedTuple):
@@ -159,6 +207,12 @@ class CrossPlaneReport(BaseModel):
     pvs_unresolved: tuple[str, ...] = ()
     #: Distinct non-channel references (loc/sim/sys/other) excluded from the IOC join.
     pvs_non_channel: tuple[str, ...] = ()
+    #: The same set split by protocol, ``((protocol, count), ...)``, reported in the
+    #: loc/sim/sys/other order every text here uses. A PARTITION: the counts sum to exactly
+    #: ``len(pvs_non_channel)``, so the headline number and its breakdown can never disagree.
+    #: A pair-tuple rather than a dict because everything else on this model is a tuple and the
+    #: order is part of the promise; a dict would carry it only by convention.
+    pvs_non_channel_by_protocol: tuple[tuple[str, int], ...] = ()
     #: Operator-facing displays whose per-instance PVs are incomplete (per-display context cap):
     #: their linked/other counts are a LOWER BOUND.
     displays_incomplete: tuple[str, ...] = ()
@@ -223,6 +277,10 @@ def crossplane_check(
     dynamic_pvs: set[str] = set()
     unresolved_pvs: set[str] = set()
     non_channel_pvs: set[str] = set()
+    # The same references kept per protocol, filled in the SAME pass: ``jp.protocol`` is a field of
+    # the row being bucketed, so the breakdown costs no second walk and cannot describe a different
+    # population than ``non_channel_pvs``. Turned into a partition by _non_channel_breakdown.
+    non_channel_by_protocol: dict[str, set[str]] = {}
     # Distinct (display, pv) pairs for the honest residue, robust against the same PV appearing
     # under multiple roles/origins within one display (the inventory dedups per display, but a PV
     # can recur with a different role/origin_file); counts references, not raw rows.
@@ -231,6 +289,7 @@ def crossplane_check(
     for jp in join_pvs:
         if jp.protocol not in _REAL_PROTOCOLS:
             non_channel_pvs.add(jp.pv)
+            non_channel_by_protocol.setdefault(jp.protocol, set()).add(jp.pv)
             continue
         if jp.resolution == "resolved":
             if prefix and jp.pv.startswith(prefix):
@@ -325,10 +384,15 @@ def crossplane_check(
             "reference(s)) could not be resolved to a concrete channel (dynamic/unresolved), "
             "honest residue, never judged here."
         )
+    non_channel_counted = _non_channel_breakdown(non_channel_by_protocol)
     if non_channel_pvs:
+        # The breakdown replaces the bare protocol list this note used to carry: naming the four
+        # possible protocols told a reader nothing about the set in front of them, and the numbers
+        # were already in hand (same pass, same rows). Only protocols that actually occur appear.
         notes.append(
-            f"{len(non_channel_pvs)} distinct non-channel reference(s) (loc/sim/sys/other) "
-            "excluded from the IOC join, not real EPICS channels."
+            f"{len(non_channel_pvs)} distinct non-channel reference(s) "
+            f"({_format_breakdown(non_channel_counted)}) excluded from the IOC join, "
+            "not real EPICS channels."
         )
     if context_capped:
         # "per-display", not "per-instance", and the distinction is this module's own to get
@@ -421,6 +485,7 @@ def crossplane_check(
         pvs_dynamic=tuple(sorted(dynamic_pvs)),
         pvs_unresolved=tuple(sorted(unresolved_pvs)),
         pvs_non_channel=tuple(sorted(non_channel_pvs)),
+        pvs_non_channel_by_protocol=non_channel_counted,
         displays_incomplete=tuple(sorted(context_capped)),
         ioc_db_resolved=db_resolved,
         ioc_db_needs_msi=db_needs_msi,
@@ -461,7 +526,8 @@ def render_markdown(report: CrossPlaneReport) -> str:
         )
     if report.pvs_non_channel:
         lines.append(
-            f"- **Non-channel refs (loc/sim/sys/other, excluded):** {len(report.pvs_non_channel)}"
+            f"- **Non-channel refs (excluded):** {len(report.pvs_non_channel)} "
+            f"({_format_breakdown(report.pvs_non_channel_by_protocol)})"
         )
     if report.displays_incomplete:
         lines.append(
