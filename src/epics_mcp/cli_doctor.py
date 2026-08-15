@@ -158,11 +158,15 @@ def _pv_write_lines(pv: PvWriteGateReport) -> list[str]:
 
     The "where" half is the one an approver actually asks for, and it is why the reach appears
     here rather than being left to the live plane's own posture line. Those two answer different
-    questions and can disagree: the live line judges the ACTIVE provider's auto-address switch
-    only, while the write gate demands both providers, so a configuration can read
-    ``localhost-isolated`` up there and still be refused a write-enabled start. Measured, not
-    feared. This line is computed with the gate's own function, so it is the gate's answer rather
-    than a second opinion about it.
+    questions and can disagree: the live line judges the auto-address switch of the provider this
+    client can actually SPEAK (p4p ships PVAccess only, so a ``ca`` configuration builds a PVA
+    context and the ``EPICS_CA_*`` search lists are marked inert there), while the write gate
+    demands both providers, deliberately, because the variables are process-global and another
+    p4p build would honour them. So a configuration can read ``localhost-isolated`` up there, or
+    see a list called inert, and still be refused a write-enabled start over that same variable.
+    Measured, not feared, and the live line now says so itself rather than leaving the reader to
+    conclude that this assert guards something dead. This line is computed with the gate's own
+    function, so it is the gate's answer rather than a second opinion about it.
 
     ⚠️ It predicts ONE of the PV gate's FOUR start conditions. The pattern lines above it cover two
     (a pattern must be set, and it must compile) and the audit line below covers the fourth, and

@@ -70,7 +70,7 @@ in these terms. Full descriptions are in [the tool reference](https://github.com
 
 | Plane | Source | Tools |
 |-------|--------|-------|
-| **Live** | p4p (PVAccess / Channel Access) | `get_pv_value`, `get_pvs`, `get_pv_info`, `monitor_pv`, `discover_pvs`, `set_pv_value` |
+| **Live** | p4p (PVAccess; p4p 4.x offers no Channel Access) | `get_pv_value`, `get_pvs`, `get_pv_info`, `monitor_pv`, `discover_pvs`, `set_pv_value` |
 | **Registry** | ChannelFinder | `find_channels`, `list_channel_vocabulary`, `diagnose_connection`, `coverage_audit` |
 | **History** | EPICS Archiver Appliance | `is_archived`, `get_pv_history`, `get_archive_info`, `get_appliance_info`, `list_archived_pvs` |
 | **Alarm** | Phoebus Alarm Logger | `is_alarm_configured`, `get_alarm_history` |

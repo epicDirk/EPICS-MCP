@@ -10,7 +10,7 @@ Every setting is an environment variable with the `EPICS_MCP_` prefix. [`.env.ex
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `EPICS_MCP_PROVIDER` | `pva` | Protocol: `pva` (PVAccess) or `ca` (Channel Access). Lowercase only |
+| `EPICS_MCP_PROVIDER` | `pva` | Protocol: `pva` (PVAccess) or `ca` (Channel Access). Lowercase only. ⚠️ **p4p 4.x offers PVAccess ONLY.** It accepts `ca` without complaint and then builds a PVAccess context anyway, so every `EPICS_CA_*` variable is inert. `epics-doctor` names this on the live plane |
 | `EPICS_MCP_DEFAULT_TIMEOUT` | `5.0` | PV operation timeout in seconds (> 0) |
 | `EPICS_MCP_MAX_BATCH_SIZE` | `100` | Max PVs per batch read (≥ 1) |
 | `EPICS_MCP_MAX_MONITOR_DURATION` | `60.0` | Max monitor subscription duration in seconds (> 0) |
@@ -117,9 +117,11 @@ part of the `epics-pv://config` payload either.
 it, and an unset `*_AUTO_ADDR_LIST` means EPICS broadcasts PV searches into the local subnets.
 A genuinely localhost-isolated instance needs every address list unset **and** both auto-address
 searches explicitly disabled. Run `epics-doctor` to see what your instance actually reaches.
-⚠️ Read the right line for the right question. The live plane's posture line judges the ACTIVE
-provider's auto-address switch only, so it can say `localhost-isolated` while the other provider's
-switch is still open. The `Write gates` block judges BOTH, because the PV write gate does, so its
+⚠️ Read the right line for the right question. The live plane's posture line judges the switch of
+the provider this client can actually speak, and it names the configured one when the two differ:
+p4p ships PVAccess only, so `EPICS_MCP_PROVIDER=ca` builds a PVA context and every `EPICS_CA_*`
+search variable is inert in that process. Such a list is still printed, marked `[inert]`, never
+dropped. The `Write gates` block judges BOTH providers, because the PV write gate does, so its
 reach line is the one to read when you are asking about a write. It answers ONE of the PV gate's
 four start conditions, not the question of whether the server would start: nothing in that block
 evaluates the four together.

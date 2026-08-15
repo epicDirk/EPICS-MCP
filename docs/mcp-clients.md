@@ -74,8 +74,9 @@ merely read-only, disable the auto search explicitly:
 Run `epics-doctor` to see what your instance actually reaches, and export the same variables into
 its own shell first: it reads the environment of the command YOU run, not this file, which is why
 `epics-init --preset <shape> --set ...` checks the block by injecting it into its own process. It
-reports `localhost-isolated` only when every search list is unset **and** the ACTIVE provider's auto
-search is off, so the other protocol's switch can still be open.
+reports `localhost-isolated` only when every search list is unset **and** the auto search of the
+provider this client can actually speak is off. p4p ships PVAccess only, so `EPICS_MCP_PROVIDER=ca`
+builds a PVA context, the line says so, and the `EPICS_CA_*` search lists are marked `[inert]`.
 
 **With the REST planes enabled**, which assumes you RUN those three services, on this machine, on
 these ports. Replace the URLs with your own, or delete the lines for services you do not have: an

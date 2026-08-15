@@ -29,6 +29,7 @@ import requests
 
 from epics_mcp import cli_doctor
 from epics_mcp.config import EpicsConfig
+from epics_mcp.epics_address import auto_addr_search_disabled
 from epics_mcp.errors import (
     EpicsError,
     OlogWriteDeniedError,
@@ -37,7 +38,7 @@ from epics_mcp.errors import (
 )
 from epics_mcp.olog_safety import OlogWriteGate, write_target_allowed
 from epics_mcp.safety import SafetyLayer
-from epics_mcp.services import doctor
+from epics_mcp.services import doctor, epics_client
 from epics_mcp.services._http import url_without_credentials
 from epics_mcp.services.doctor import (
     _DEGRADED_STATUSES,
@@ -1849,7 +1850,7 @@ async def test_live_posture_rejects_off_spellings_pvxs_does_not_parse(
 
 
 @pytest.mark.parametrize(
-    ("value", "isolated"),
+    ("value", "disabled"),
     [
         ("no", True),
         ("NO", True),
@@ -1859,18 +1860,99 @@ async def test_live_posture_rejects_off_spellings_pvxs_does_not_parse(
         ("0", False),
     ],
 )
-async def test_live_posture_ca_off_is_substring_case_sensitive(
-    monkeypatch: pytest.MonkeyPatch, value: str, isolated: bool
-) -> None:
+def test_ca_auto_addr_off_is_substring_case_sensitive(value: str, disabled: bool) -> None:
     """libca disables the auto search only when the value CONTAINS "no" or "NO" as a
-    case-sensitive substring (epics-base modules/ca/src/client/iocinf.cpp), "false",
-    "0" and even "No" keep broadcasting on a ca provider."""
+    case-sensitive substring (epics-base modules/ca/src/client/iocinf.cpp), so "false",
+    "0" and even "No" keep a ca client broadcasting.
+
+    This used to be asserted through ``run_doctor``'s posture line with ``provider="ca"``,
+    checking that ``localhost-isolated`` appeared for the three disabling spellings. That
+    coupling became FALSE, not stale: the installed p4p offers only ``pva``, so a ``ca``
+    deployment builds a pva context and the posture line can no longer claim isolation from
+    ``EPICS_CA_AUTO_ADDR_LIST`` at all (see
+    ``test_a_ca_provider_with_only_the_ca_switch_off_is_not_called_isolated``). The libca
+    semantics themselves did not change and are still load-bearing: the write-reach boot assert
+    judges BOTH providers through this same helper, deliberately, because the variables are
+    process-global. So the assertion moves down to the helper that owns it instead of being
+    deleted with the report line that used to carry it.
+    """
+    assert auto_addr_search_disabled("ca", value) is disabled
+
+
+async def test_a_ca_provider_with_only_the_ca_switch_off_is_not_called_isolated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The false all-clear, red on the pre-fix code: `provider=ca` plus `EPICS_CA_AUTO_ADDR_LIST=NO`
+    and nothing else used to print `localhost-isolated`.
+
+    Measured against the installed client in that same environment: p4p offers only `pva`, so the
+    context this process really builds has `EPICS_PVA_AUTO_ADDR_LIST` unset, i.e. the auto-address
+    search ON, and its effective address list expands to this host's subnet BROADCAST addresses.
+    The report was acquitting a process that searches the local subnets, which is the one mistake
+    a reach report must not make.
+    """
     _set_config(monkeypatch, provider="ca")
-    monkeypatch.setenv("EPICS_CA_AUTO_ADDR_LIST", value)
+    monkeypatch.setenv("EPICS_CA_AUTO_ADDR_LIST", "NO")
+    for var in ("EPICS_PVA_ADDR_LIST", "EPICS_CA_ADDR_LIST", "EPICS_PVA_NAME_SERVERS"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("EPICS_PVA_AUTO_ADDR_LIST", raising=False)
     report = await run_doctor()
     live = _plane(report, "live")
     assert live.detail is not None
-    assert ("localhost-isolated" in live.detail) is isolated
+    assert "localhost-isolated" not in live.detail
+    # NAMED, not merely denied: the reader has to learn WHICH switch is the open one.
+    assert "EPICS_PVA_AUTO_ADDR_LIST" in live.detail
+
+
+async def test_a_configured_provider_the_client_lacks_is_named_as_such(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The clause that says the configured provider is not the one being spoken.
+
+    Carries its own NEGATIVE control in the second half: with a client that DOES offer `ca` the
+    clause has to disappear. Without that half the sentence could be printed unconditionally and
+    this test would still pass, which is the shape of guard this repository keeps finding.
+    """
+    _set_config(monkeypatch, provider="ca")
+    report = await run_doctor()
+    live = _plane(report, "live")
+    assert live.detail is not None
+    assert "does NOT offer" in live.detail
+
+    monkeypatch.setattr(epics_client, "available_providers", lambda: ("pva", "ca"))
+    report = await run_doctor()
+    live = _plane(report, "live")
+    assert live.detail is not None
+    assert "does NOT offer" not in live.detail
+    assert live.detail.startswith("provider=ca,")
+
+
+async def test_an_inert_search_list_is_marked_and_never_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A search list of the family this client does not speak stays in the report, marked.
+
+    This is the counter-control for the fix above, and it is deliberately NOT the one that was
+    already here: `test_live_posture_isolated_only_when_auto_addr_explicitly_off` sets both
+    switches and NO lists, so it survives an implementation that forgot the CA lists entirely.
+    This one sets a CA list, so narrowing the list enumeration to the effective provider would
+    make the line vanish and let `localhost-isolated` take its place: a fix that removes the
+    message instead of the problem.
+    """
+    _set_config(monkeypatch)
+    monkeypatch.setenv("EPICS_CA_ADDR_LIST", "192.0.2.9")
+    monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", "NO")
+    monkeypatch.setenv("EPICS_CA_AUTO_ADDR_LIST", "NO")
+    report = await run_doctor()
+    live = _plane(report, "live")
+    assert live.detail is not None
+    assert "EPICS_CA_ADDR_LIST (192.0.2.9)" in live.detail
+    assert "[inert]" in live.detail
+    assert "localhost-isolated" not in live.detail
+    # The half that keeps the next reader from "repairing" the disagreement by weakening the
+    # write-reach assert. Without this sentence "inert" sits directly above a write block saying
+    # the same variable stops a write-enabled server from booting.
+    assert "write-reach assert" in live.detail
 
 
 # --- cli_doctor.main: exit codes + render (the deliberate 0/1/2 convention) ---

@@ -44,6 +44,39 @@ def get_context() -> Context:
         return _context
 
 
+def available_providers() -> tuple[str, ...]:
+    """The client providers this p4p build actually offers, as p4p itself reports them.
+
+    Cheap and side effect free, which is the property that lets a no-probe report call it:
+    ``Context.providers()`` is a ``@staticmethod`` returning a literal in p4p 4.x, so it opens
+    no socket, starts no worker thread and builds no Context.
+
+    ASKED rather than hardcoded. A list of our own would be a second opinion about somebody
+    else's build, and it would be wrong in the direction that hides a provider that does work.
+    """
+    return tuple(Context.providers())
+
+
+def effective_provider(configured: str) -> str:
+    """The provider a Context built for *configured* will REALLY speak.
+
+    p4p accepts a provider name it does not implement. Measured on p4p 4.2.2 / PVXS 1.5.1:
+    ``Context("ca")`` builds without raising, keeps ``name == "ca"``, and returns a conf holding
+    ONLY ``EPICS_PVA_*`` keys, so every ``EPICS_CA_*`` variable is dead in that process. Reading
+    the context's own ``name`` would therefore reproduce the exact confusion this resolves, and
+    a caller that needs the truth has to ask the provider REGISTRY instead.
+
+    The fallback is the first offered provider, which is what p4p does in practice. An empty
+    registry is not reachable with any published p4p (pva is always offered), but it is handled
+    rather than asserted: this is called from a report whose whole job is to stay useful when
+    the configuration is wrong.
+    """
+    offered = available_providers()
+    if configured in offered:
+        return configured
+    return offered[0] if offered else configured
+
+
 def _cleanup() -> None:
     global _context
     if _context is not None:

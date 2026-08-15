@@ -247,10 +247,14 @@ one healthy line and one failing line rather than as a single ambiguous verdict.
 Network posture: PV reach is decided by the launcher's EPICS search-path env: address lists, name
 servers, and the auto-addr search, which defaults to **ON** (subnet broadcast) when unset; a
 genuinely localhost-isolated instance needs every list unset **and** `*_AUTO_ADDR_LIST=NO`.
-⚠️ `epics-doctor` claims `localhost-isolated` on the live plane against the ACTIVE provider's
-auto-addr switch only, so it can print that line while the other provider's switch is still open.
-The write gate is the stricter of the two and demands both, which is why the `Write gates` block
-computes its own reach line rather than pointing at this one. The REST
+⚠️ `epics-doctor` claims `localhost-isolated` on the live plane against the auto-addr switch of the
+provider this client can actually speak. That is not always the configured one: p4p ships PVAccess
+only, so `EPICS_MCP_PROVIDER=ca` builds a PVA context, the line says so, and every `EPICS_CA_*`
+search variable is marked `[inert]` rather than dropped. The write gate is the stricter of the two
+and demands BOTH providers, deliberately, because the variables are process-global and another p4p
+build would honour them: it can therefore refuse a write-enabled start over a variable the live
+line calls inert. That is why the `Write gates` block computes its own reach line rather than
+pointing at this one. The REST
 planes stay off until their `*_URL` is set. PV writes are gated off by default
 (`EPICS_MCP_ALLOW_PV_WRITE=false`) and additionally need a regex allowlist, a rate limit, an audit
 log and a loopback-only EPICS search reach; the fullest statement of that posture is

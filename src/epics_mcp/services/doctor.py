@@ -67,7 +67,7 @@ from epics_mcp.services.channelfinder_client import (
     resolve_safe_owner_accounts,
     resolve_safe_property_names,
 )
-from epics_mcp.services.epics_client import pv_get
+from epics_mcp.services.epics_client import effective_provider, pv_get
 from epics_mcp.services.naming_client import NamingServiceClient
 from epics_mcp.services.naming_identity import NAMING_SWAGGER_PATH, NAMING_SWAGGER_TITLE
 from epics_mcp.services.olog_client import OlogClient
@@ -1268,7 +1268,35 @@ _SEARCH_LIST_VARS = (
 # The posture tests in tests/test_doctor.py stay the behaviour pin for this call site.
 
 
-def _live_search_posture(provider: str) -> str:
+#: The sentence appended once when a set search list belongs to a provider this client does not
+#: speak. It has to say BOTH halves, and the second half is the load-bearing one: a reader who
+#: meets "inert" alone, directly above a write block reporting that the very same variable stops
+#: a write-enabled server from booting, concludes that the boot assert guards a dead variable.
+#: The cheapest way to make that contradiction go away is to drop the idle provider from
+#: ``epics_address.CLIENT_REACH_PROVIDERS``, which would delete half the write-reach guarantee.
+#: So the disagreement is stated, and stated as deliberate, rather than left to be discovered.
+#:
+#: No trailing full stop, for the same reason the rest of this function has none: every caller in
+#: ``_check_live`` continues the sentence itself (". Pass --probe-pv ...", "; <pv> connected."), so
+#: a stop here renders as "them.. Pass". Measured on the first draft.
+_INERT_NOTE = (
+    "The [inert] variables above steer no PV search in THIS process, but the write-reach assert "
+    "still counts them and a write-enabled server still refuses to start over them, deliberately: "
+    "these variables are process-global and a differently built p4p would honour them"
+)
+
+
+def _inert_search_prefix(effective: str) -> str:
+    """The ``EPICS_<family>_`` prefix whose search list variables this process ignores.
+
+    Derived from the EFFECTIVE provider rather than the configured one, which is the whole point
+    of the caller: with a configured provider this client cannot speak, the ignored family is the
+    one the operator was configuring.
+    """
+    return "EPICS_CA_" if effective == "pva" else "EPICS_PVA_"
+
+
+def _live_search_posture(effective: str) -> str:
     """The PV search-path posture of THIS process, read from the same env pvxs reads.
 
     Read from ``os.environ``, deliberately NOT from a p4p ``Context.conf()``: the doctor's
@@ -1278,24 +1306,58 @@ def _live_search_posture(provider: str) -> str:
     pvxs ``src/client.cpp`` ``startNS()``), and ``autoAddrList`` DEFAULTS TO TRUE (pvxs
     ``pvxs/client.h``), so even a null environment broadcasts searches into the local
     subnets. ``localhost-isolated`` is therefore claimed ONLY when every search list is
-    unset AND the active provider's auto-addr search is explicitly disabled, never as a
-    default posture.
+    unset AND the auto-addr search is explicitly disabled, never as a default posture.
+
+    *effective* is the provider this process will REALLY speak, not the configured one, and the
+    difference is a measured bug rather than a nicety: p4p 4.x offers only ``pva`` yet accepts
+    ``Context("ca")``, so a ``EPICS_MCP_PROVIDER=ca`` deployment that switched off
+    ``EPICS_CA_AUTO_ADDR_LIST`` used to be told ``localhost-isolated`` while the pva context it
+    actually built had its own switch unset, i.e. broadcasting. A false all-clear about network
+    reach, printed by the one tool whose job is to state that reach.
+
+    ONE half moved to the effective provider, and the other deliberately did NOT. The auto-addr
+    switch is per provider, so it follows the effective one. The LIST enumeration stays
+    provider-blind, every variable of both families, exactly as before: narrowing it would make a
+    set-but-ignored list vanish from the report and let ``localhost-isolated`` take its place,
+    which is a fix that removes the message instead of the problem. A list belonging to the other
+    family is therefore printed and MARKED, never dropped (pinned by
+    ``test_live_posture_names_every_set_search_path``).
     """
     paths: list[str] = []
+    inert_prefix = _inert_search_prefix(effective)
+    saw_inert = False
     for var in _SEARCH_LIST_VARS:
         value = os.environ.get(var, "").strip()
         if value:
-            paths.append(f"{var} ({value})")
-    auto_var = "EPICS_PVA_AUTO_ADDR_LIST" if provider == "pva" else "EPICS_CA_AUTO_ADDR_LIST"
+            inert = var.startswith(inert_prefix)
+            saw_inert = saw_inert or inert
+            paths.append(f"{var} ({value}){' [inert]' if inert else ''}")
+    auto_var = "EPICS_PVA_AUTO_ADDR_LIST" if effective == "pva" else "EPICS_CA_AUTO_ADDR_LIST"
     # Raw value, deliberately NOT normalised: neither parser trims, and normalising here
     # would make the doctor honour spellings the real client rejects (see the helper).
     auto_value = os.environ.get(auto_var, "")
-    if not auto_addr_search_disabled(provider, auto_value):
+    if not auto_addr_search_disabled(effective, auto_value):
         state = f"={auto_value}" if auto_value else " unset, default ON"
         paths.append(f"auto-addr subnet broadcast ({auto_var}{state})")
     if paths:
-        return "search paths: " + "; ".join(paths)
+        line = "search paths: " + "; ".join(paths)
+        return f"{line}. {_INERT_NOTE}" if saw_inert else line
     return "localhost-isolated (no search list set, auto-addr search explicitly disabled)"
+
+
+def _provider_clause(configured: str, effective: str) -> str:
+    """``provider=<what was asked for>`` plus, when they differ, what is actually spoken.
+
+    The clause rather than a bare name, because the bare name was itself part of the false
+    all-clear: ``provider=ca`` reads as a statement that this process speaks Channel Access.
+    """
+    if configured == effective:
+        return f"provider={configured}"
+    return (
+        f"provider={configured}, which the installed p4p does NOT offer (it has only "
+        f"{effective}), so this process builds a {effective} context and every "
+        f"EPICS_{configured.upper()}_* search variable is inert here"
+    )
 
 
 async def _check_live(cfg: EpicsConfig, probe_pv: str | None, timeout: float) -> PlaneCheck:
@@ -1304,8 +1366,16 @@ async def _check_live(cfg: EpicsConfig, probe_pv: str | None, timeout: float) ->
     The live plane has no URL: its config is ``provider`` + the EPICS search-path env. Without a
     probe PV there is nothing to connect to, so this reports the posture (no default egress). Only
     ``probe_pv`` triggers a live read.
+
+    ``base`` is built ONCE and interpolated into all three branches below, so the reach statement
+    is identical whether the plane is info-only, connected or disconnected. That is deliberate:
+    the disconnected branch is the one an operator reads while something is broken, and it is the
+    branch whose remedy tells them to check "the EPICS search path this finding reports". A reach
+    line that appeared only in the healthy branches would send exactly that reader to a sentence
+    they cannot see.
     """
-    base = f"provider={cfg.provider}, {_live_search_posture(cfg.provider)}"
+    effective = effective_provider(cfg.provider)
+    base = f"{_provider_clause(cfg.provider, effective)}, {_live_search_posture(effective)}"
     if not probe_pv:
         return PlaneCheck(
             plane="live",

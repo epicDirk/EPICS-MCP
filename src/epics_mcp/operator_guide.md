@@ -41,6 +41,13 @@ measured 2026-08-15, only the first of the four appears anywhere else in this do
   PV searches into the local subnets. Run `epics-doctor` for the effective posture; it claims
   `localhost-isolated` only when every search list is unset AND the auto search is explicitly
   disabled.
+  ⚠️ **`EPICS_MCP_PROVIDER=ca` does not give you Channel Access.** p4p accepts the name and then
+  builds a PVAccess context anyway, so every `EPICS_CA_*` search variable is inert in that
+  process while `EPICS_PVA_AUTO_ADDR_LIST`, probably unset and therefore ON, decides the real
+  reach. The posture line names the mismatch and marks such lists `[inert]`; it does not drop
+  them, because the write-reach boot assert still counts them (deliberately: the variables are
+  process-global and another p4p build would honour them), so a write-enabled server can refuse
+  to start over a variable this line calls inert.
 - **REST planes are opt-in.** Each REST plane stays disabled until its `*_URL` env var is set; an
   empty URL means no client and no network call. One exception:
   `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` falls back to the mgmt URL and is still probed, because a

@@ -95,6 +95,15 @@ carry breaking changes).
 
 ### Fixed
 
+- **`epics-doctor` reported `localhost-isolated` for a `EPICS_MCP_PROVIDER=ca` server that was
+  broadcasting PV searches into the local subnets.** p4p offers PVAccess only; it accepts `ca` and
+  builds a PVAccess context anyway, so `EPICS_CA_AUTO_ADDR_LIST=NO` switched off nothing while
+  `EPICS_PVA_AUTO_ADDR_LIST`, unset and therefore ON, decided the real reach. The live plane now
+  judges the provider the client can actually speak, names the configured one when the two differ,
+  and marks a search list of the other family `[inert]` instead of dropping it. The write-reach
+  boot assert is unchanged and still judges BOTH providers, deliberately, so it can still refuse a
+  write-enabled start over a variable this line calls inert; the line now says so.
+
 - **`epics-doctor` printed a fragment of the Olog password for one spelling of
   `EPICS_MCP_OLOG_URL`, on every run rather than on a failure.** The write-gate block redacted its
   target address by rebuilding it from the parse. For `https://svc:p@ss/w0rd@host/Olog` urllib3
