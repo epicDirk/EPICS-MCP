@@ -23,7 +23,7 @@ The full surface: every MCP tool grouped by plane, the standalone command-line t
 | `get_pv_info` | The value plus whatever metadata the record carries: alarm (severity and status, with their text and the message), timestamp, display (units, limits, precision or format, description), control (drive limits), the `value_alarm` thresholds and, on an enum, index/label/choices. No connection state and no data type: an unreachable PV raises instead, `monitor_pv` carries `connection`, and `diagnose_connection` explains a disconnect |
 | `monitor_pv` | Subscribe to PV updates for a bounded duration; reports the channel `connection` so an empty result is readable |
 | `discover_pvs` | Probe a concrete PV name (wildcards need ChannelFinder) |
-| `set_pv_value` | Write a value to a PV, **gated off by default** (see Safety) |
+| `set_pv_value` | Write a value to a PV, **gated off by default** (see [Safety](safety.md), which carries the full posture) |
 
 **Connection diagnosis** (always available)
 

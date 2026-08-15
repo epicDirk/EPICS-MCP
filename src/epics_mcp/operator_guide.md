@@ -21,7 +21,10 @@ measured 2026-08-15, only the first of the four appears anywhere else in this do
   refused after the gate has already admitted the write, so it is a fourth refusal, not a fourth
   gate. The Olog
   logbook writers (`create_log_entry`, `reply_to_log`, `add_log_attachment` and `update_log_entry`) sit behind a **separate** gate, see the Olog
-  write posture below; `ALLOW_PV_WRITE` is untouched by it.
+  write posture below; `ALLOW_PV_WRITE` is untouched by it. The fullest statement of this posture,
+  including what leaves your machine on every plane, is
+  [docs/safety.md](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/safety.md); what follows
+  here is the operating half of it.
 - **Writes enabled ⇒ loopback-only search reach, enforced at boot.** With `ALLOW_PV_WRITE=true` the
   server refuses to start (`SafetyConfigError`) unless the EPICS client search env is loopback-only:
   every `EPICS_PVA/CA_ADDR_LIST` / `_NAME_SERVERS` token a loopback host AND both `*_AUTO_ADDR_LIST`

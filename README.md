@@ -15,7 +15,9 @@ ChannelFinder by hand.
 **Read-only by default.** `set_pv_value` is triple-gated: an env switch, a required regex
 allowlist, and a rate limit. A value outside the record's own drive limits is refused after those
 three have admitted the write, which is a further refusal and not a fourth gate. Logbook writes sit
-behind their own separate gate, of six checks.
+behind their own separate gate, of six checks. The fullest statement of the posture, including what
+leaves your machine, is
+[Safety and network posture](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/safety.md).
 
 > **Project status: pre-1.0 and under active development.** Tools and APIs may still change
 > between minor versions, so pin one if you depend on it.
