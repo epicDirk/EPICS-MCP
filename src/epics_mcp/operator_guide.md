@@ -203,10 +203,13 @@ Three shapes a caller meets in an answer and nowhere else:
   `{unsupported_type: <the p4p type id>, note: ...}` rather than by a raw object or an error, so an
   answer carrying it is a SUCCESSFUL read of a shape that cannot be rendered. A retry returns the
   same summary, so quote the `unsupported_type` id rather than reading the answer as an empty value.
-- **`crossplane_check`, `coverage_audit` and `find_device` answer with the same content twice**,
-  `{report: <JSON>, markdown: <the rendered report>}`, so quoting both costs double for nothing.
-  Take `report` to filter, count or diff it, `markdown` when the answer goes to a person.
-  `validate_pvs`, the fourth display tool, has no such pair.
+- **`crossplane_check`, `coverage_audit` and `find_device` answer TWICE**, as
+  `{report: <JSON>, markdown: <the rendered report>}`. ⚠ The two are not the same content and the
+  rendered half is the poorer one: it carries the counts and only some of the member lists, and
+  `coverage_audit`'s per-PV rows are not in it at all. So `report` is the half to work from
+  whenever a PV NAME matters, `markdown` only when the answer goes straight to a person, and
+  quoting both back is the one combination that pays twice for less. `validate_pvs`, the fourth
+  display tool, has no such pair.
 
 ⚠️ **This guide has no free-text search**, so a field name you got back is findable only if
 something maps it to a topic. That is what the table below is: an INDEX, never a second
@@ -223,13 +226,13 @@ explanation. Ask `get_guide` for the topic named beside the field.
 | `displays_incomplete` · `files_walked` | `err-crossplane` |
 | `shown_by_display` · `shown_by_display_capped` · `total` | `err-displays` |
 | `state` · `likely_cause` · `confidence` · `evidence` · `next_steps` | `err-pv` |
-| `registered` · `withheld` · `found` | `err-pv` |
+| `registered` · `withheld` | `err-pv` |
 | `attachment_count` | `olog-output` |
 | `total_matches` · `default_level` | `olog-filters` |
 | `config_msg` · `capped` (alarm history) | `alarm-tree` |
 | `archive_fields` · `host_name` · `creation_time` · `identity` | `err-archiver` |
+| `found` (a REST lookup, not a PV connection) | `err-rest` |
 | `identified_planes` · `verification_complete` · `write_safety` | `doctor` |
-| `notes` (every report has one) | the topic of the tool that returned it |
 
 ### Olog output shape (what a read gives you back)
 
@@ -322,17 +325,14 @@ answers with HTTP 200 and that no filter ever finds again. A blank level is refu
 server accepts it and silently clears the entry's triage level. The match is exact: no casefolding,
 no trimming, no `,`/`;`/`|` splitting. Those are search semantics; a level being written is a scalar.
 
-**A page is not the result set: read `total_matches`.** `search_logbook` pages with `offset` and
-`sort`, and `total_matches` is the true total across all pages (Olog's own hit count), not the
-length of the list you got. Compare the two before concluding anything from a count, and page rather
-than widening the filter when they differ.
-
-**What a write WITHOUT a level lands on is often unknown, and the answer says so.**
-`list_log_levels` returns `default_level` beside the names: the level the server applies to a create
-that passes none. ⚠ It is `null` plus an explaining note whenever the server flags no level as the
-default or flags several, and a stock Olog seed file ships two of them, so `null` is the ordinary
-case rather than an error. Read the note and pass `level` explicitly rather than assuming an entry
-written without one lands on a sensible triage level.
+**Two counters that are allowed to be absent, and both read as a zero if you let them.**
+`total_matches` (`search_logbook`) and `default_level` (`list_log_levels`) are each explained field
+by field in their tool's own description; what that description cannot say is what an OLDER Olog
+does with them. `total_matches` is `null` on a server version that returns no hit count at all, so
+compare it against the length of the page rather than treating a missing total as no matches. And
+`default_level` is `null` far more often than it looks: a stock Olog seed file flags TWO defaults,
+and the server refuses to guess between them, so pass `level` explicitly rather than reading `null`
+as a fault.
 
 An unbalanced double quote in `title` makes the server throw, which an anonymous read sees as **401**
 (Olog's error dispatch requires auth and so masks its own 400). On this read path a 401 almost always
@@ -775,13 +775,15 @@ Any channel name works, so append a field suffix to read record metadata without
 thresholds when an NT `valueAlarm` comes back NaN over a PVA gateway. A cold first connect can be slow:
 pass `timeout` ≥ 8 for the first probe.
 
-⚠ **The cross-plane tools go the other way and STRIP that suffix.** `crossplane_check`,
-`coverage_audit` and `diagnose_connection` reduce a name to its bare record before they join
-anything, so `SIM:PS-01:Cur-RB.EGU` and `SIM:PS-01:Cur-RB.OUT` are both looked up as
-`SIM:PS-01:Cur-RB`, the only form ChannelFinder and an IOC `.db` hold. Two consequences worth
-knowing before reading such a report: a record and its field references collapse into ONE entry, and
-none of the three answers about the field itself. To ask about the field, read it as its own channel
-with `get_pv_info`, as above.
+⚠ **The cross-plane tools strip that suffix before they LOOK a name up**, because ChannelFinder and
+an IOC `.db` hold the bare record and never `record.FIELD`, so `SIM:PS-01:Cur-RB.EGU` is asked about
+as `SIM:PS-01:Cur-RB`. Where that shows up differs per tool, and the difference decides how a report
+reads: `crossplane_check` normalizes only the sets it DERIVES (`broken`, `cf_unregistered` and their
+`_write` twins), so its main buckets still list a record and its field reference separately;
+`coverage_audit` merges them into one row; `diagnose_connection` normalizes its ChannelFinder lane
+only, while the live probe, the Archiver and the Alarm plane all see the name as passed. So do not
+subtract "duplicates" from a `crossplane_check` bucket, and do use `diagnose_connection` on a field
+reference: the probe that decides its verdict reads exactly the channel you named.
 
 ### Naming URL: no trailing `/rest`
 Set `EPICS_MCP_NAMING_URL` to the service root **without** `/rest` and without a trailing slash. The
@@ -963,16 +965,22 @@ the read throttle, and a server that will not start) · `err-guide`.
   registered/ACTIVE answer skips the identity probe, the measured hazard is a foreign 404, not a
   foreign ACTIVE record.) The extra swagger round-trip fires only on the not-registered path and is
   cached per client instance; when it withholds, a server-side `logger.debug` records the probe verdict.
-- **A cause is never quoted without its `confidence`.** A `diagnose_connection` answer is `state`
-  (the live probe's verdict and the only authority), then `likely_cause` paired with a `confidence`
-  of `confirmed`, `likely` or `indeterminate`, then the per-plane `evidence` the level was raised
-  from. The explanatory planes can only LIFT that level, never create a cause of their own, so on
-  `indeterminate` the cause word carries no information and `next_steps` is what to act on.
-- **`next_steps` is the actionable half, and on an indeterminate verdict it names what was
-  missing.** It says which explanatory plane was not consulted, so a re-run with
-  `check_channelfinder=true` (plus `EPICS_MCP_CHANNELFINDER_URL`) or `check_naming=true` (plus
-  `EPICS_MCP_NAMING_URL`) is the next call rather than a second probe of the same PV. ⚠ Both planes
-  are off by default, so a first answer that explains nothing is the expected first answer.
+- **A cause is never quoted without its `confidence`, and the two halves come from different
+  planes.** A `diagnose_connection` answer is `state` (the live probe's verdict and the only
+  authority over connected/disconnected), then `likely_cause` paired with a `confidence` of
+  `confirmed`, `likely` or `indeterminate`, then the per-plane `evidence` both were read from.
+  ⚠ ChannelFinder and Naming DECIDE the cause: without a ChannelFinder answer a disconnect is
+  `indeterminate` whatever else is known. Only the Archiver and the Alarm plane are pure
+  corroboration, lifting `confidence` without ever creating a cause. On `indeterminate` the cause
+  word carries no information and `next_steps` is what to act on.
+- **`next_steps` is the actionable half, and what it names depends on the branch.** Where a plane
+  is missing it says so, and then the fix is that plane rather than a second probe of the same PV.
+  ⚠ `check_channelfinder` is already `true` by default, so setting it again changes nothing: what
+  is usually missing is `EPICS_MCP_CHANNELFINDER_URL`. Naming is the one that is off
+  (`check_naming=false`, plus `EPICS_MCP_NAMING_URL`). On the other branches `next_steps` names an
+  action instead of a plane, and on `state: unknown` it asks for a RETRY, because there the live
+  probe failed for an internal reason rather than diagnosing a disconnect: read it, do not assume
+  it always points at a plane.
 
 ### Archiver: history, which appliance answered, and refusals that do not mean "down"
 
@@ -989,10 +997,11 @@ the read throttle, and a server that will not start) · `err-guide`.
   had no ctrl info, `"0.0"` may mean "no limit configured", not a literal zero.
   Three more of its fields answer questions people ask of the wrong tool: `archive_fields` lists the
   record FIELDS archived alongside the value (so a missing `.EGU` there, not a missing PV, is why a
-  unit never appears in a plot), `host_name` names the engine host that does the archiving for this
-  PV, which is what distinguishes two members of one cluster, and `creation_time` is when the PV was
-  ADDED to the archiver, which is the earliest point any history can exist and therefore the first
-  thing to check when a window comes back empty.
+  unit never appears in a plot), and `creation_time` is when the PV was ADDED to the archiver, the
+  earliest point any history can exist and therefore the first thing to check when a window comes
+  back empty. ⚠️ `host_name` is the SOURCE host, the CA/PVA server the appliance connected to, so
+  it names the IOC and not the archiver. Which cluster member holds the PV is a different field,
+  `appliance`, and reading `host_name` for that question is the natural mistake.
 - **Which appliance am I on? cluster topology?** `get_appliance_info` (no PV) surfaces the whole
   MGMT `getApplianceInfo` body, the appliance `identity`, the per-plane root URLs
   (`mgmt_url`/`engine_url`/`etl_url`/`retrieval_url`/`data_retrieval_url`), `cluster_inet_port` and a
@@ -1222,14 +1231,18 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   withholds `broken` for the whole IOC. Read `ioc_db_resolved` and `ioc_db_needs_msi` first, and use
   the ChannelFinder plane instead: it asks the RUNNING registry rather than the static file set.
 - **`coverage_audit` anchors on ChannelFinder, and its three set names say which side a PV is
-  missing from.** `cf_registered` is the registered set for the scope; against the displayed set it
-  splits into `cf_and_display` (the healthy core), `cf_only` (registered but on NO screen, the
-  operator blind spot this tool exists for) and `display_only` (shown but not registered).
-  `critical_uncovered` is the headline, and `blind_spots`, `unarchived` and `unalarmed` are the same
-  registered PVs split by WHICH plane is missing, so use those three to hand the work out. ⚠ Two
-  fields say how far the answer can be trusted: `displays_incomplete` counts the displays a cap left
-  half-expanded, and `files_walked` is the universe that count is a share of, since 104 capped
-  displays mean something else against 284 walked files than against 3000.
+  missing from.** The registered set is compared with the displayed set and comes back as
+  `cf_and_display` (the healthy core), `cf_only` (registered but on NO screen, the operator blind
+  spot this tool exists for) and `display_only` (shown but not registered). ⚠ `cf_registered` is a
+  COUNT beside them, not the set they partition, and it reads `0` both for an empty registry and
+  for a withheld query, so it never adds up against the three lists.
+  `critical_uncovered` is the headline. `blind_spots`, `unarchived` and `unalarmed` are three
+  OVERLAPPING lists, one per plane, not a split: a PV missing on two planes stands in two of them,
+  and their union is `critical_uncovered`. Hand the work out by plane with them, count with
+  `critical_uncovered`. ⚠ Two fields say how far the answer can be trusted: `displays_incomplete`
+  counts the FILES a cap left half-expanded (a `.plt` trend can be one of them, which is why the
+  report says files rather than displays), and `files_walked` is the universe that count is a share
+  of, since 104 capped files mean something else against 284 walked than against 3000.
 - **`coverage_audit` answers each plane per PV with `yes`, `no` or `withheld`, and `withheld` is
   never `no`.** The four cells are `has_display`, `registered_cf`, `archived` and `alarmed`;
   `withheld` means that plane could not answer (disabled, capped, a per-PV timeout, or a capped
