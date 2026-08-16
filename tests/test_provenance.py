@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import socket
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -294,3 +294,69 @@ async def test_the_decorator_preserves_the_wrapped_signature() -> None:
     assert "IS the wire description" in _named.__doc__
     answer = await _named("VAC:PV")
     assert answer["pv_name"] == "VAC:PV"
+
+
+# --- the field on the WIRE, driven through the registered tools -----------------------------
+#
+# The unit guards above prove the classifier and the decorator. They cannot prove the thing the
+# whole item is about, which is whether the field actually REACHES a client. That question is
+# only answerable through the registered tool, so these two drive it, with the one network seam
+# faked and nothing else.
+
+
+@pytest.mark.asyncio
+async def test_a_single_read_carries_its_reach_to_the_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``get_pv_value`` is the tool the original incident went through.
+
+    Faked at ``epics_mcp.tools.read.pv_get``, the module-namespace seam this repository's other
+    tests for the same tool already use, so the only thing removed is the socket.
+
+    Provably red: drop ``@with_reach("live-pv")`` from ``get_pv_value``.
+    """
+    from epics_mcp.server import mcp
+
+    async def _fake_pv_get(pv_name: str, timeout: float | None = None) -> dict[str, object]:
+        return {"pv_name": pv_name, "value": 42}
+
+    monkeypatch.setattr("epics_mcp.tools.read.pv_get", _fake_pv_get)
+    structured = cast(
+        dict[str, Any],
+        (await mcp.call_tool("get_pv_value", {"pv_name": "SIM:PS-01:Cur-RB"})).structured_content,
+    )
+    assert structured["value"] == 42
+    reach = structured[REACH_KEY]
+    assert set(reach["planes"]) == {"live-pv"}
+    assert reach["planes"]["live-pv"] in {"loopback-only", "beyond-loopback"}
+    assert reach["probed"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_carries_its_reach_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The envelope carries it; the entries do not.
+
+    This is the cost decision as a guard rather than as a note in a commit message: measured,
+    attaching per entry doubles a 100-PV answer, and the fact is identical for every entry
+    anyway because it is a property of the process.
+
+    Provably red: attach the field inside ``services.epics_client._format_value``, or map it
+    over the ``results`` list.
+    """
+    from epics_mcp.server import mcp
+
+    async def _fake_pv_get_batch(
+        names: list[str], timeout: float | None = None
+    ) -> dict[str, object]:
+        return {"results": [{"pv_name": n, "value": 1} for n in names], "errors": []}
+
+    monkeypatch.setattr("epics_mcp.tools.read.pv_get_batch", _fake_pv_get_batch)
+    structured = cast(
+        dict[str, Any],
+        (
+            await mcp.call_tool("get_pvs", {"pv_names": ["SIM:PS-01:Cur-RB", "SIM:PS-02:Cur-RB"]})
+        ).structured_content,
+    )
+    assert REACH_KEY in structured
+    assert len(structured["results"]) == 2
+    assert all(REACH_KEY not in entry for entry in structured["results"])

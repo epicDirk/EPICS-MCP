@@ -19,6 +19,7 @@ from epics_mcp.presets import PRESETS
 from epics_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_mcp.prompts import diagnose_pv as _diagnose_pv
 from epics_mcp.prompts import setup_epics_mcp as _setup_epics_mcp
+from epics_mcp.provenance import with_reach
 
 # ``get_guide`` under an alias: the module namespace now also carries a TOOL of that name (one
 # name across all three CS-Studio surfaces), and the resource handler below has to keep reaching
@@ -335,6 +336,7 @@ async def get_guide(
     ),
 )
 @translate_epics_errors
+@with_reach("live-pv")
 async def get_pv_value(
     pv_name: Annotated[str, Field(description="EPICS PV name")],
     # gt=0 on every timeout in this file (QA-71). A zero timeout was assumed to be the honest
@@ -366,6 +368,7 @@ async def get_pv_value(
     ),
 )
 @translate_epics_errors
+@with_reach("live-pv")
 async def get_pvs(
     pv_names: Annotated[
         list[str],
@@ -468,6 +471,7 @@ async def set_pv_value(
     ),
 )
 @translate_epics_errors
+@with_reach("live-pv")
 async def get_pv_info(
     pv_name: Annotated[str, Field(description="EPICS PV name")],
     timeout: Annotated[
@@ -510,6 +514,7 @@ async def get_pv_info(
     ),
 )
 @translate_epics_errors
+@with_reach("live-pv")
 async def monitor_pv(
     pv_name: Annotated[str, Field(description="EPICS PV name to monitor")],
     duration: Annotated[
