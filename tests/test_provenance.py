@@ -613,3 +613,123 @@ def test_the_inline_form_says_the_same_thing_as_the_field() -> None:
     for name, scope in field["planes"].items():
         assert f"{name}={scope}" in flat, f"{name} is missing from the inline form: {flat}"
     assert "not probed" in flat
+
+
+# --- (c): an empty answer says WHY it is empty ------------------------------------------------
+#
+# The gap, measured: the note pattern in this server fires on ONE cause, a plane with no URL, at
+# every one of its sites. So "never asked" and "asked and found nothing" arrived identically as
+# an empty list, and a reader could not tell a misconfiguration from a real zero.
+
+
+def test_the_empty_note_tells_the_two_causes_apart() -> None:
+    """The whole point of the sentence: a reader must be able to distinguish a plane that was
+    never asked from one that answered nothing.
+
+    Provably red: make ``empty_note`` return the same text for both scopes.
+    """
+    from epics_mcp.provenance import empty_note
+
+    asked = empty_note("olog", "beyond-loopback")
+    never = empty_note("olog", "not-configured")
+    assert asked != never
+    assert "not a plane that was never asked" in asked
+    assert "matched nothing" in asked
+    assert "is not configured" in never
+
+
+def test_the_empty_note_names_the_scope_because_a_zero_means_different_things() -> None:
+    """A zero from a plane confined to this machine is probably an empty test rig; a zero from a
+    plane that reaches a facility is probably a real absence. The sentence has to carry that.
+
+    Provably red: drop the scope clause from ``empty_note``.
+    """
+    from epics_mcp.provenance import empty_note
+
+    local = empty_note("channelfinder", "loopback-only")
+    remote = empty_note("channelfinder", "beyond-loopback")
+    assert "loopback-only" in local and "confined to this machine" in local
+    assert "beyond-loopback" in remote and "able to leave this machine" in remote
+
+
+@pytest.mark.asyncio
+async def test_a_configured_plane_that_matched_nothing_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Driven through the registered tool, with only the transport faked.
+
+    Provably red: drop ``empty_key`` from ``find_channels``, or delete the ``_annotate_empty``
+    call in ``with_reach``.
+    """
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.provenance import NOTE_KEY
+    from epics_mcp.server import mcp
+
+    cfg = EpicsConfig(channelfinder_url="http://localhost:8080/ChannelFinder")
+    monkeypatch.setattr("epics_mcp.services.checkers.get_config", lambda: cfg)
+    monkeypatch.setattr("epics_mcp.provenance.get_config", lambda: cfg)
+
+    async def _no_channels(*args: Any, **kwargs: Any) -> dict[str, object]:
+        return {"enabled": True, "channels": [], "total": 0}
+
+    monkeypatch.setattr("epics_mcp.tools.channelfinder.query_channels", _no_channels)
+    structured = cast(
+        dict[str, Any],
+        (await mcp.call_tool("find_channels", {"name_pattern": "*NOTHING*"})).structured_content,
+    )
+    assert structured["total"] == 0
+    assert "matched nothing" in structured[NOTE_KEY]
+    assert structured["reach"]["planes"]["channelfinder"] == "loopback-only"
+
+
+@pytest.mark.asyncio
+async def test_the_unconfigured_plane_keeps_its_own_note(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The negative control, and the one that makes the test above mean something: without it,
+    annotating EVERY empty answer would look like a fix while erasing the distinction.
+
+    Provably red: drop the ``not-configured`` early return in ``_annotate_empty``, or the
+    "never replace an existing note" condition.
+    """
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.provenance import NOTE_KEY
+    from epics_mcp.server import mcp
+
+    cfg = EpicsConfig(channelfinder_url="")
+    monkeypatch.setattr("epics_mcp.services.checkers.get_config", lambda: cfg)
+    monkeypatch.setattr("epics_mcp.provenance.get_config", lambda: cfg)
+    structured = cast(
+        dict[str, Any],
+        (await mcp.call_tool("find_channels", {"name_pattern": "*ANY*"})).structured_content,
+    )
+    assert structured["enabled"] is False
+    assert "matched nothing" not in structured[NOTE_KEY]
+    assert "ChannelFinder" in structured[NOTE_KEY]
+
+
+@pytest.mark.asyncio
+async def test_a_specific_note_is_never_replaced_by_the_general_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tool that knows a SPECIFIC cause has said something the general sentence cannot improve
+    on. The Olog unknown-level note is the real case: it explains that the server answers an
+    unknown level with zero hits rather than an error.
+
+    Provably red: remove the ``answer.get(NOTE_KEY)`` condition from ``_annotate_empty``.
+    """
+    from epics_mcp.config import EpicsConfig
+    from epics_mcp.provenance import NOTE_KEY
+    from epics_mcp.server import mcp
+
+    cfg = EpicsConfig(olog_url="http://localhost:8080/Olog")
+    monkeypatch.setattr("epics_mcp.services.checkers_olog.get_config", lambda: cfg)
+    monkeypatch.setattr("epics_mcp.provenance.get_config", lambda: cfg)
+
+    async def _own_note(*args: Any, **kwargs: Any) -> dict[str, object]:
+        return {"enabled": True, "entries": [], "total": 0, "note": "A very specific reason."}
+
+    monkeypatch.setattr("epics_mcp.tools.olog.query_olog_search", _own_note)
+    structured = cast(
+        dict[str, Any],
+        (await mcp.call_tool("search_logbook", {"text": "nothing"})).structured_content,
+    )
+    assert structured[NOTE_KEY] == "A very specific reason."

@@ -21,6 +21,16 @@ carry breaking changes).
   reports per branch, since a concrete name is a live PV read and a wildcard is a ChannelFinder
   query. `tools/list` grows 5 427 chars on both lanes.
 
+- **An empty read answer now says WHY it is empty.** The `note` pattern here fired on one
+  cause only, a plane with no URL, at every site that used it. So a plane that was never
+  asked and a plane that was asked and matched nothing arrived identically, as an empty
+  list: a misconfiguration was indistinguishable from a real zero. A configured plane that
+  matched nothing now says so, and names its reach, because a zero from a plane confined to
+  this machine and a zero from one that reaches a facility mean different things. A tool
+  that already knows a more specific cause keeps its own note; the general sentence never
+  replaces one. Covers `find_channels`, `search_logbook`, `list_logbooks`, `list_tags`,
+  `list_log_attachments`, `get_alarm_history`, `list_archived_pvs` and `get_pv_history`.
+
 - **`get_guide`: the operator guide is now a TOOL, not only the `epics-pv://guide` resource.** A
   resource is application-controlled, so a model never fetches one by itself, which left the guide
   correct and unread. The resource stays; the tool is the channel a model pulls from, and the

@@ -208,6 +208,36 @@ def reach_of(
     }
 
 
+def _annotate_empty(
+    answer: dict[str, object], planes: tuple[Plane, ...], empty_key: str | None
+) -> None:
+    """Add :func:`empty_note` when *answer*'s payload list is empty and the plane WAS asked.
+
+    Four conditions, and each one is a case that would otherwise produce a wrong sentence:
+
+    * ``empty_key`` is opt-in per tool, because only the tool knows which of its keys carries
+      the payload. A decorator guessing "the first list" would annotate the wrong field the day
+      a shape gains a second one.
+    * A single plane only. A cross-plane tool's empty result has no single cause, and naming one
+      of its planes would be a guess dressed as a finding.
+    * An existing ``note`` is never replaced. A tool that knows a SPECIFIC cause (an unknown Olog
+      level, an anchored ChannelFinder glob, an unconfigured plane) has said something this
+      function cannot improve on, and overwriting it would trade a precise answer for a general
+      one.
+    ``not-configured`` needs no fourth condition, and the absence is measured rather than
+    assumed: a mutation removing the early return that used to sit here left every test green,
+    because every site that has an unconfigured plane already sets its own note and the
+    never-replace rule catches it first. Untested defensive code is the thing this repository
+    says a guard must not be, so it is gone and :func:`empty_note` answers that case itself.
+    """
+    if empty_key is None or len(planes) != 1 or answer.get(NOTE_KEY):
+        return
+    payload = answer.get(empty_key)
+    if not isinstance(payload, list) or payload:
+        return
+    answer[NOTE_KEY] = empty_note(planes[0], scope_of(planes[0], get_config(), os.environ))
+
+
 def _inline(reach: Reach) -> str:
     """The reach as one short clause, for an error message that has no payload to carry a field.
 
@@ -220,8 +250,45 @@ def _inline(reach: Reach) -> str:
     return f"{planes}, not probed"
 
 
+#: The wire key for the honest-empty note. Same key the per-plane "not configured" stubs already
+#: use, so a caller reads ONE field for "why is this thin", never two.
+NOTE_KEY = "note"
+
+
+def empty_note(plane: Plane, scope: Scope) -> str:
+    """Why an empty answer from *plane* is empty, said in the one sentence a caller needs.
+
+    ⛔ THE GAP THIS CLOSES, measured rather than supposed. The ``note`` pattern in this server
+    fires on ONE cause only: a plane with no URL. Every site does it
+    (``tools/archiver.py``, ``services/checkers.py``, ``services/checkers_olog.py``), all of them
+    behind ``if not cfg.<x>_url``. So the two cases a reader most needs to tell apart looked
+    IDENTICAL on the wire: a plane that was never asked, and a plane that was asked and found
+    nothing. Both arrived as an empty list. A reader could not tell a misconfiguration from a
+    real zero, which is the same class of ambiguity GB-64 removed for the reach.
+
+    The sentence names the plane and its scope, because a zero from a plane confined to this
+    machine and a zero from a plane that reaches a facility mean different things: the first is
+    probably an empty test rig, the second is probably a real absence. It says nothing about
+    WHICH filter narrowed the result, because this function cannot know; the tools that DO know
+    carry their own, more specific note, and :func:`with_reach` never replaces one.
+    """
+    if scope == "not-configured":
+        # Reachable: a tool whose plane is unconfigured and which sets no note of its own lands
+        # here, and the honest answer is that nothing was asked at all.
+        return f"The {plane} plane is not configured, so nothing was asked."
+    reached = (
+        "confined to this machine" if scope == "loopback-only" else "able to leave this machine"
+    )
+    return (
+        f"Not a missing plane: the {plane} plane is configured, was queried and matched nothing. "
+        f"Its reach is {scope} ({reached}), so this is an empty answer from the world named in "
+        f"'reach', not a plane that was never asked."
+    )
+
+
 def with_reach[**P, R](
     *planes: Plane,
+    empty_key: str | None = None,
 ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     """Attach :func:`reach_of` to a read tool's answer, once, under :data:`REACH_KEY`.
 
@@ -283,6 +350,7 @@ def with_reach[**P, R](
             writable = cast(dict[str, object], result)
             if REACH_KEY not in writable:
                 writable[REACH_KEY] = reach_of(*planes)
+            _annotate_empty(writable, planes, empty_key)
             return result
 
         return wrapper
