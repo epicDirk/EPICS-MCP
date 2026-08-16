@@ -387,3 +387,136 @@ def test_the_server_header_names_the_field_and_not_the_command() -> None:
         assert "epics-doctor" not in header, (
             f"display_tools={display_tools}: the header tells a client to run a console script"
         )
+
+
+@pytest.mark.asyncio
+async def test_every_registered_read_tool_carries_the_field() -> None:
+    """The claim "every read answer carries a reach field" is now a MEASUREMENT, not a sentence.
+
+    The post-build review found the first version making that claim in README.md and docs/tools.md
+    while five registered read tools did not carry it, four of them the very cross-plane tools the
+    field's mapping shape is justified by. A missing field is exactly as ambiguous as the missing
+    reach was, so an incomplete surface does not half-solve the item, it re-creates it in a
+    quieter place.
+
+    Derived from the REGISTERED set rather than from a list here, so a read tool added later is
+    red until it answers the question too. The write tools are excluded by name and the exclusion
+    is stated: they mutate, and their gates report their own posture.
+
+    Provably red: drop @with_reach from any read tool, or delete one of the setdefault calls in
+    display_tools.py.
+    """
+    import importlib
+    import inspect
+
+    from epics_mcp import display_tools
+    from epics_mcp.server import mcp
+
+    # Only the tools whose plane is decided at CALL time live here; everything else answers
+    # through the decorator on the wrapper. Kept explicit rather than searched, so adding a
+    # second such tool is a deliberate line rather than a silent widening of this guard.
+    _IMPL_MODULE = {"discover_pvs": "discover"}
+
+    # Tools that WRITE, plus the one tool that reads nothing but its own packaged document.
+    NOT_A_READ = {
+        "set_pv_value",
+        "create_log_entry",
+        "reply_to_log",
+        "add_log_attachment",
+        "update_log_entry",
+        "get_guide",
+    }
+    server_module = __import__("epics_mcp.server", fromlist=["server"])
+    missing: list[str] = []
+    for tool in await mcp.list_tools():
+        if tool.name in NOT_A_READ:
+            continue
+        fn = getattr(server_module, tool.name, None) or getattr(display_tools, tool.name, None)
+        assert fn is not None, f"{tool.name}: registered but not importable, cannot be checked"
+        source = inspect.getsource(fn)
+        # One level down as well: a tool whose plane depends on its argument sets the field in its
+        # implementation rather than through the decorator (discover_pvs is the case), so a check
+        # that read only the wrapper would report it missing when it is not.
+        impl = getattr(
+            importlib.import_module("epics_mcp.tools." + _IMPL_MODULE.get(tool.name, "read"))
+            if tool.name in _IMPL_MODULE
+            else None,
+            "_" + tool.name,
+            None,
+        )
+        if impl is not None:
+            source += inspect.getsource(impl)
+        if "with_reach" not in source and "reach_of" not in source:
+            missing.append(tool.name)
+    assert not missing, (
+        f"these registered read tools answer without a reach field: {sorted(missing)}. An absent "
+        "field is as ambiguous as the absent reach this item removed."
+    )
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        # ⛔ The case the post-build review found, and the reason this module no longer parses
+        # URLs itself. urlparse splits at the LAST '@' and answers 127.0.0.1; urllib3, the parser
+        # requests actually connects through, answers evil.example.org. The first version reported
+        # loopback-only for a configuration whose socket leaves the machine, i.e. it produced the
+        # false all-clear this whole module removes.
+        (r"http://evil.example.org:8080\@127.0.0.1/Olog", "beyond-loopback"),
+        # Userinfo alone, the same trap without a backslash: both parsers agree here, and the
+        # answer is still the remote host.
+        ("http://127.0.0.1@evil.example.org/Olog", "beyond-loopback"),
+        # The other direction, where the shared parser normalises and the stdlib one did not: a
+        # trailing FQDN dot IS localhost. Harmless when wrong, but it made the field disagree
+        # with the Olog read redaction about the same URL, so a reader could not use one to
+        # predict the other.
+        ("http://localhost./Olog", "loopback-only"),
+        (r"http://127.0.0.1\@evil.example.org/Olog", "loopback-only"),
+    ],
+)
+def test_the_classification_follows_the_parser_the_socket_follows(url: str, expected: str) -> None:
+    """Provably red: put ``urllib.parse.urlsplit`` back into ``_scope_of_url``."""
+    assert _scope_of_url(url) == expected
+
+
+def test_the_classification_agrees_with_the_gate_primitive_on_every_case_here() -> None:
+    """Stronger than the table above, and the reason it exists beside it: the table pins four
+    answers, this pins the RELATIONSHIP. The field and the Olog write gate / read redaction must
+    make the same loopback judgement about the same URL, or a reader cannot use the field to
+    predict how the gate will behave.
+
+    Provably red: any second parser in ``_scope_of_url``.
+    """
+    from epics_mcp.services._http import is_loopback_url
+
+    for url in (
+        r"http://evil.example.org:8080\@127.0.0.1/Olog",
+        "http://127.0.0.1@evil.example.org/Olog",
+        "http://localhost./Olog",
+        r"http://127.0.0.1\@evil.example.org/Olog",
+        "http://localhost:8080/ChannelFinder",
+        "https://archiver.example.org:17665",
+        "http://[not-an-ipv6/",
+    ):
+        wanted = "loopback-only" if is_loopback_url(url) else "beyond-loopback"
+        assert _scope_of_url(url) == wanted, f"{url}: the field and the gate primitive disagree"
+
+
+def test_the_archiver_retrieval_plane_is_its_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The post-build review's other high finding: get_pv_history connects to
+    ``archiver_retrieval_url``, every other archiver tool to the mgmt URL, and a split deployment
+    can put those on different HOSTS. One collapsed plane named the wrong world for exactly the
+    tool that fetches the data.
+
+    Provably red: fold ``archiver-retrieval`` back onto ``cfg.archiver_url``.
+    """
+    cfg = EpicsConfig(
+        archiver_url="http://localhost:17665",
+        archiver_retrieval_url="https://archiver.example.org:17668",
+    )
+    assert scope_of("archiver", cfg, {}) == "loopback-only"
+    assert scope_of("archiver-retrieval", cfg, {}) == "beyond-loopback"
+
+    # The single-JVM case, which is why the row falls back rather than reporting not-configured.
+    single = EpicsConfig(archiver_url="http://localhost:17665", archiver_retrieval_url="")
+    assert scope_of("archiver-retrieval", single, {}) == "loopback-only"

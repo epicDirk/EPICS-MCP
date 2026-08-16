@@ -26,6 +26,7 @@ from mcp.types import ToolAnnotations
 from opi_navigation.pv_analysis.lookup import MatchMode
 from pydantic import Field
 
+from epics_mcp.provenance import Plane, reach_of
 from epics_mcp.services.inventory_adapter import DEFAULT_PV_CONTEXT_CAP
 from epics_mcp.tool_errors import translate_epics_errors
 from epics_mcp.tools.coverage_audit import _coverage_audit
@@ -116,13 +117,17 @@ async def validate_pvs(
     ] = None,
 ) -> dict[str, object]:
     """Check PV connectivity. Provide a PV list, or a .bob/.plt path (+ displays_dir ROOT)."""
-    return await _validate_pvs(
+    # GB-64: the file half has no plane, the connection half is the live one, so the answer
+    # names exactly the plane it consulted.
+    answer = await _validate_pvs(
         pvs=pv_names,
         file_path=file_path,
         displays_dir=displays_dir,
         timeout=timeout,
         view=view,
     )
+    answer.setdefault("reach", reach_of("live-pv"))
+    return answer
 
 
 @translate_epics_errors
@@ -202,7 +207,7 @@ async def crossplane_check(
     verdict (linked PV absent from the IOC .db) is produced only when 'module_db_root' supplies a
     provably complete IOC .db set; otherwise it is withheld.
     """
-    return await _crossplane_check(
+    answer = await _crossplane_check(
         displays_dir,
         st_cmd_path,
         query_naming=query_naming,
@@ -211,6 +216,16 @@ async def crossplane_check(
         windows_paths=windows_paths,
         module_db_root=module_db_root,
     )
+    # GB-64: the planes are named from the FLAGS, never statically. A tool that lists a plane it
+    # was told not to query would state that the plane answered, which is the same class of
+    # untrue claim the field exists to remove, one level down.
+    consulted: list[Plane] = []
+    if query_channelfinder:
+        consulted.append("channelfinder")
+    if query_naming:
+        consulted.append("naming")
+    answer.setdefault("reach", reach_of(*consulted))
+    return answer
 
 
 @translate_epics_errors
@@ -276,7 +291,7 @@ async def coverage_audit(
     the cross-coverage matrix (cf_and_display / cf_only=blind-spots / display_only) + verdicts
     + critical_uncovered (delivered AND a proven gap), with honest lower-bound notes.
     """
-    return await _coverage_audit(
+    answer = await _coverage_audit(
         displays_dir,
         scope,
         query_channelfinder,
@@ -286,6 +301,16 @@ async def coverage_audit(
         context_cap,
         windows_paths,
     )
+    # From the flags, for the reason stated at crossplane_check.
+    consulted: list[Plane] = []
+    if query_channelfinder:
+        consulted.append("channelfinder")
+    if query_archiver:
+        consulted.append("archiver")
+    if query_alarm:
+        consulted.append("alarm")
+    answer.setdefault("reach", reach_of(*consulted))
+    return answer
 
 
 @translate_epics_errors
@@ -334,7 +359,12 @@ async def find_device(
     single pva provider. Returns
     {"report": <DeviceLookupReport JSON>, "markdown": <rendered report>}.
     """
-    return await _find_device(query, displays_dir, match, timeout, context_cap, windows_paths)
+    answer = await _find_device(query, displays_dir, match, timeout, context_cap, windows_paths)
+    # Unconditional here: this tool has no per-plane flags, it always asks all three (each
+    # withholds itself when its URL is unset, which the classification then reports as
+    # not-configured rather than hiding).
+    answer.setdefault("reach", reach_of("live-pv", "channelfinder", "naming"))
+    return answer
 
 
 def register_display_tools(mcp: FastMCP) -> None:

@@ -50,8 +50,34 @@ def test_diagnose_pv_teaches_a_counter_check_across_planes() -> None:
     Provably red: delete step 4.
     """
     rendered = diagnose_pv("SIM:PS-01:Cur-RB")
-    for named in ("find_device", "find_channels", "get_pv_history", "search_logbook"):
+    for named in ("find_channels", "get_pv_history", "search_logbook"):
         assert named in rendered, f"the counter-check no longer names {named}"
+
+
+def test_diagnose_pv_names_only_tools_that_exist_in_every_install() -> None:
+    """GB-64 (a), found by the post-build review of the first version and repaired.
+
+    That version named ``find_device``, which is display-gated: on a core-only install it is not
+    registered, so the counter-check would have been the exact kind of unexecutable instruction
+    the posture step in the same prompt was written to remove. This prompt takes no capability
+    argument, so it cannot render a gated tool conditionally the way ``compare_machine_state``
+    does; the constraint is therefore that it names none.
+
+    Asserted against the REAL gated set rather than a list here, so a tool that becomes gated
+    later reddens this instead of ageing quietly.
+
+    Provably red: put find_device (or validate_pvs, crossplane_check, coverage_audit) back into
+    the prompt body.
+    """
+    from epics_mcp.display_tools import register_display_tools  # noqa: F401  (import guard only)
+
+    gated = {"validate_pvs", "crossplane_check", "coverage_audit", "find_device"}
+    rendered = diagnose_pv("SIM:PS-01:Cur-RB")
+    named_but_gated = sorted(tool for tool in gated if tool in rendered)
+    assert not named_but_gated, (
+        f"diagnose_pv names display-gated tool(s) {named_but_gated}; a core-only install does "
+        "not register them, so the step cannot be performed there"
+    )
 
 
 def test_compare_machine_state_with_file() -> None:

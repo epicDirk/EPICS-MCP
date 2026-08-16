@@ -24,6 +24,16 @@ def diagnose_pv(pv_name: str) -> str:
       unanswered while two tools that would have answered it went unused. A PV that does not
       connect is the case where "not found" and "not reachable from here" look identical, and the
       other planes are what tell them apart.
+
+    ⛔ EVERY TOOL NAMED HERE IS REGISTERED IN EVERY INSTALL, and that is a constraint rather than
+    an observation. The first version of the counter-check named ``find_device``, which is
+    display-gated: on a core-only install it does not exist, so the step would have been the very
+    kind of unexecutable instruction the posture step above was written to remove, in the same
+    prompt. ``find_channels`` answers the same question ("is it registered at all?") and is
+    always registered, gating only on its URL, which is a different thing and one the tool
+    reports itself. This prompt takes no capability argument, unlike ``compare_machine_state``,
+    precisely because it now names nothing that needs one; a future edit that reaches for a gated
+    tool has to thread the flag first.
     """
     return (
         f"Diagnose EPICS PV: {pv_name}\n\n"
@@ -38,7 +48,7 @@ def diagnose_pv(pv_name: str) -> str:
         f'3. monitor_pv("{pv_name}", duration=5), watch for value changes over 5 seconds\n'
         "4. Counter-check before concluding, and ALWAYS when the PV did not connect: a silent or "
         "absent PV looks the same whether it does not exist, is down, or is simply out of reach "
-        "from here. find_device or find_channels says whether it is registered at all, "
+        "from here. find_channels says whether it is registered at all, "
         "get_pv_history says whether it was recently archiving, and search_logbook says whether "
         "anyone wrote about it. A negative from one plane is not a finding until a second plane "
         "agrees.\n"

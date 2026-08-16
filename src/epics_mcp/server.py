@@ -19,7 +19,7 @@ from epics_mcp.presets import PRESETS
 from epics_mcp.prompts import compare_machine_state as _compare_machine_state
 from epics_mcp.prompts import diagnose_pv as _diagnose_pv
 from epics_mcp.prompts import setup_epics_mcp as _setup_epics_mcp
-from epics_mcp.provenance import with_reach
+from epics_mcp.provenance import Plane, reach_of, with_reach
 
 # ``get_guide`` under an alias: the module namespace now also carries a TOOL of that name (one
 # name across all three CS-Studio surfaces), and the resource handler below has to keep reaching
@@ -863,7 +863,7 @@ async def is_archived(
     )
 )
 @translate_epics_errors
-@with_reach("archiver")
+@with_reach("archiver-retrieval")
 async def get_pv_history(
     pv_name: Annotated[str, Field(description="EPICS PV name")],
     start: Annotated[
@@ -1862,7 +1862,7 @@ async def diagnose_connection(
     URL that cannot prove its identity (its /rest/swagger.json beacon) withholds rather than
     fabricating name_typo (S13), so a foreign/misconfigured URL yields indeterminate, not a typo.
     """
-    return await _diagnose_connection(
+    answer = await _diagnose_connection(
         pv_name,
         timeout=timeout,
         check_channelfinder=check_channelfinder,
@@ -1870,6 +1870,21 @@ async def diagnose_connection(
         check_archiver=check_archiver,
         check_alarm=check_alarm,
     )
+    # GB-64: the planes come from the FLAGS this call was given, never from a static list.
+    # Naming a plane the caller switched off would say it answered, which is the same
+    # untrue claim the field removes, one level down. live-pv is unconditional: this tool
+    # always probes the PV itself.
+    consulted: list[Plane] = ["live-pv"]
+    if check_channelfinder:
+        consulted.append("channelfinder")
+    if check_naming:
+        consulted.append("naming")
+    if check_archiver:
+        consulted.append("archiver")
+    if check_alarm:
+        consulted.append("alarm")
+    answer.setdefault("reach", reach_of(*consulted))
+    return answer
 
 
 # Register the display-aware tools (validate_pvs / crossplane_check / coverage_audit / find_device),

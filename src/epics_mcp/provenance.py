@@ -53,15 +53,22 @@ import functools
 import os
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Literal, TypedDict, cast
-from urllib.parse import urlsplit
 
 from epics_mcp.config import EpicsConfig, get_config
-from epics_mcp.epics_address import is_loopback_host
+from epics_mcp.services._http import is_loopback_url
 from epics_mcp.write_posture import pv_search_posture
 
 #: The service planes an answer can come from. Same names the doctor's report prints, so an
 #: operator reading both sees one vocabulary rather than two.
-Plane = Literal["live-pv", "channelfinder", "archiver", "alarm", "naming", "olog"]
+Plane = Literal[
+    "live-pv",
+    "channelfinder",
+    "archiver",
+    "archiver-retrieval",
+    "alarm",
+    "naming",
+    "olog",
+]
 
 #: How far the plane that answered can reach.
 #:
@@ -105,27 +112,32 @@ class Reach(TypedDict):
 def _scope_of_url(url: str) -> Scope:
     """Classify one REST plane from its configured URL, without resolving anything.
 
-    Fail-closed in the direction that cannot mislead: only a host this process can PROVE to be
-    loopback is called ``loopback-only``. A name is never resolved (the same posture, and the
-    same helper, as :mod:`epics_mcp.epics_address`), so ``host.docker.internal`` and every FQDN
-    land in ``beyond-loopback`` even where DNS would map them to 127.0.0.1. The two errors are
-    not symmetric: claiming isolation this process does not have is the false all-clear GB-64
-    is about, while over-reporting reach costs an operator one look at ``epics-doctor``.
+    ⛔ THROUGH :func:`~epics_mcp.services._http.is_loopback_url`, NEVER through a parser of its
+    own, and that is a correction paid for by an adversarial review of the first version. This
+    function used to call ``urllib.parse.urlsplit``, which is the parser ``services/_http.py``
+    already REJECTED for exactly this decision, naming exactly this URL as its reason:
+    ``http://evil.example.org:8080\\@127.0.0.1/Olog``. urlparse splits at the last ``@`` and
+    answers ``127.0.0.1``; urllib3, the parser ``requests`` actually connects through, answers
+    ``evil.example.org``. Measured on the first version: the field reported ``loopback-only``
+    for a configuration whose socket goes to a remote host. That is not a rounding error, it is
+    the false all-clear this whole module exists to remove, produced by the module that removes
+    it. One question, one parser.
 
-    An unparseable URL takes the same route, for the same reason: a value we cannot read is not
-    evidence of confinement.
+    Fail-closed in the direction that cannot mislead: only a host the shared primitive can PROVE
+    to be loopback is called ``loopback-only``. A name is never resolved, so
+    ``host.docker.internal`` and every FQDN land in ``beyond-loopback`` even where DNS would map
+    them to 127.0.0.1, and an unparseable URL lands there too, because a value nothing can read
+    is not evidence of confinement. The two errors are not symmetric: claiming isolation this
+    process does not have is the defect above, while over-reporting reach costs an operator one
+    look at ``epics-doctor``.
+
+    ``is_loopback_url`` collapses "parsed, not loopback" and "did not parse" into one False,
+    which its own docstring names as a limitation for the write gate. Here that collapse is
+    exactly right: both are "not provably local", which is one answer, not two.
     """
     if not url:
         return "not-configured"
-    try:
-        host = urlsplit(url).hostname
-    except ValueError:
-        # A URL the stdlib parser refuses (a bad IPv6 literal, for instance). Nothing is
-        # proven about it, so nothing local is claimed.
-        return "beyond-loopback"
-    if host is None:
-        return "beyond-loopback"
-    return "loopback-only" if is_loopback_host(host) else "beyond-loopback"
+    return "loopback-only" if is_loopback_url(url) else "beyond-loopback"
 
 
 def _scope_of_live(environ: Mapping[str, str]) -> Scope:
@@ -150,17 +162,22 @@ def scope_of(plane: Plane, cfg: EpicsConfig, environ: Mapping[str, str]) -> Scop
     function of its arguments and a test can ask the question without mutating process state,
     the same posture :func:`~epics_mcp.write_posture.pv_search_posture` takes.
 
-    ⚠️ The archiver row reads ``archiver_url`` and not ``archiver_retrieval_url``, which looks
-    like an omission and is not. Every archiver tool gates on the mgmt URL, and the retrieval
-    URL falls back to it when unset, so a plane classified from the retrieval value alone would
-    report a reach for a plane that is never used. ``epics-pv://health`` resolves the same pair
-    the same way, for the same reason.
+    ⛔ THE ARCHIVER IS TWO PLANES HERE, and collapsing them into one was a defect in the first
+    version rather than a simplification. ``get_pv_history`` connects to
+    ``archiver_retrieval_url`` when it is set (``tools/archiver.py`` passes it into the client),
+    while every other archiver tool gates on the mgmt URL. In a split deployment those are
+    separate Tomcats and may be separate HOSTS, so a single classification taken from the mgmt
+    URL named the wrong world for exactly the tool that fetches the data. The retrieval row
+    resolves ``archiver_retrieval_url or archiver_url``, the same fallback
+    ``services/doctor.py`` and ``services/doctor_crosscut.py`` already spell, because a
+    single-JVM appliance legitimately leaves the retrieval variable empty.
     """
     if plane == "live-pv":
         return _scope_of_live(environ)
     urls: dict[Plane, str] = {
         "channelfinder": cfg.channelfinder_url,
         "archiver": cfg.archiver_url,
+        "archiver-retrieval": cfg.archiver_retrieval_url or cfg.archiver_url,
         "alarm": cfg.alarm_url,
         "naming": cfg.naming_url,
         "olog": cfg.olog_url,
