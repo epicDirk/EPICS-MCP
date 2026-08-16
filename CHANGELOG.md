@@ -137,8 +137,8 @@ carry breaking changes).
   share could exceed 100%. When no universe is reported the line falls back to the bare count
   rather than dividing by something else.
 
-- **The display engine pin moves to `5aab30e`, and with it four measured corrections to what the
-  display tools say about a screen set.** The pin had stood still at `0ab0d73` while eight commits
+- **The display engine pin moves to `db19c08`, and with it four measured corrections to what the
+  display tools say about a screen set.** The pin had stood still at `0ab0d73` while nine commits
   landed in `opi_navigation`, so every reachability and PV answer this server gave came out of a
   state the engine had already corrected. What arrives: `open_display` targets are matched the way
   Phoebus matches them rather than case-sensitively, and the legacy `<path>` spelling is read too.
