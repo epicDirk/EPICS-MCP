@@ -55,6 +55,7 @@ from epics_mcp.epics_address import (
     effective_default_port,
     effective_search_entry,
     is_ip_literal,
+    split_host,
 )
 from epics_mcp.errors import EpicsError
 from epics_mcp.services._http import (
@@ -1312,6 +1313,25 @@ _NAME_NOTE = (
 )
 
 
+#: Appended once when any search entry was written with NO HOST at all (``:5076``, ``[]:5077``).
+#:
+#: A SEPARATE note rather than a widened :data:`_NAME_NOTE`, and the reason is that the other one
+#: would be false here in both halves: such a token is not a NAME, and "DROPS an entry it cannot
+#: resolve" is not what happens on every platform. Measured on the same token: pvxs substitutes one
+#: of this machine's own interface addresses on Windows, and makes no entry at all on Linux. So
+#: ``epics_address.split_port`` claims nothing for the shape, and this line is where the operator
+#: is told why and what to do instead. Naming the way out is the point: the previous rendering
+#: stated an endpoint that was true on one platform only, and dropping it without a remedy would
+#: leave a reader with less than before. No trailing full stop, see :data:`_INERT_NOTE`.
+_EMPTY_HOST_NOTE = (
+    "One or more entries above were written with NO HOST (for example ':5076'). What this client "
+    "makes of such an entry is decided by the platform resolver, measured: one of this machine's "
+    "own interface addresses on Windows, and no entry at all on Linux. Nothing is claimed for it "
+    "above; write the host out (for example '127.0.0.1:5076') to get a destination this report "
+    "can name"
+)
+
+
 def _inert_search_prefix(effective: str) -> str:
     """The ``EPICS_<family>_`` prefix whose search list variables this process ignores.
 
@@ -1353,6 +1373,7 @@ def _live_search_posture(effective: str) -> str:
     inert_prefix = _inert_search_prefix(effective)
     saw_inert = False
     saw_name = False
+    saw_empty_host = False
     for var in _SEARCH_LIST_VARS:
         value = os.environ.get(var, "").strip()
         if value:
@@ -1376,6 +1397,10 @@ def _live_search_posture(effective: str) -> str:
                 not is_ip_literal(t) and rendered[t] != t and "DROPPED" not in rendered[t]
                 for t in tokens
             )
+            # Read off the TOKEN, not off its rendering: a token written without a host is printed
+            # as written, so it is indistinguishable from every other non-claim once rendered. This
+            # is the one caveat that has to survive the rendering saying nothing.
+            saw_empty_host = saw_empty_host or any(not split_host(t) for t in tokens)
             resolved = " ".join(rendered[token] for token in tokens)
             if default_port is None:
                 origin = (
@@ -1397,6 +1422,8 @@ def _live_search_posture(effective: str) -> str:
         line = "search paths: " + "; ".join(paths)
         if saw_name:
             line = f"{line}. {_NAME_NOTE}"
+        if saw_empty_host:
+            line = f"{line}. {_EMPTY_HOST_NOTE}"
         return f"{line}. {_INERT_NOTE}" if saw_inert else line
     return "localhost-isolated (no search list set, auto-addr search explicitly disabled)"
 

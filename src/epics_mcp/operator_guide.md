@@ -58,12 +58,18 @@ measured 2026-08-15, only the first of the four appears anywhere else in this do
   ⚠️ **The PORT is part of the destination.** `EPICS_PVA_BROADCAST_PORT` (default 5076) supplies
   it for every `EPICS_PVA_ADDR_LIST` entry that carries none of its own, and
   `EPICS_PVA_SERVER_PORT` (default 5075) does the same for `EPICS_PVA_NAME_SERVERS`; on the CA
-  side it is `EPICS_CA_SERVER_PORT` (5064). `epics-doctor` resolves each entry and names the
-  variable the default came from. Three measured traps it reports rather than hides: a written
+  side it is `EPICS_CA_SERVER_PORT` (5064). `epics-doctor` resolves every entry it can and names
+  the variable the default came from. Two measured traps it reports rather than hides: a written
   `:0`, and any number past 65535, is **not** the port you wrote (pvxs wraps it through 16 bits
-  and a result of zero falls back to the default); an entry the client cannot parse or resolve is
-  **dropped from the search entirely**, with only a stderr line to say so; and an entry given
-  without a host takes one of the machine's own interface addresses.
+  and a result of zero falls back to the default); and an entry the client cannot parse or resolve
+  is **dropped from the search entirely**, with only a stderr line to say so.
+  ⚠️ **An entry written without a host (`:5076`) gets NO endpoint in the report**, and that is the
+  one place the line deliberately says less than it could. What the client makes of such an entry
+  is decided by the platform resolver, measured on the same token: one of the machine's own
+  interface addresses on Windows, and no entry at all on Linux, where the context ends up with no
+  search destination. Rather than state an address that is right on one platform and invented on
+  the other, the report prints the token as written and names the shape. Write the host out
+  (`127.0.0.1:5076`) and it becomes a destination the report can resolve again.
   ⚠️ **`EPICS_MCP_PROVIDER=ca` does not give you Channel Access.** p4p accepts the name and then
   builds a PVAccess context anyway, so every `EPICS_CA_*` search variable is inert in that
   process while `EPICS_PVA_AUTO_ADDR_LIST`, probably unset and therefore ON, decides the real

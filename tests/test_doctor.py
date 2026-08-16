@@ -2086,6 +2086,54 @@ async def test_the_resolution_caveat_appears_only_for_a_name(
     assert "NAMES rather than IP literals" not in with_a_refusal
 
 
+async def test_an_entry_without_a_host_is_named_and_not_resolved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fourth direction of the same line: a token written with no host at all.
+
+    Three assertions, and the third is the one that stops this being a pure loss. The report no
+    longer states an endpoint for such a token (measured, the old rendering was true on Windows and
+    invented reach on Linux, where the client keeps no entry at all); it says the shape is there;
+    and it names what to do instead. A caveat that only takes something away leaves the operator
+    with less than the wrong answer did.
+
+    Both directions, or the note is unconditional noise that readers learn to skip.
+
+    ⚠️ TWO empty-host spellings, and the bracketed one carries the red-proof. Measured: on ``:5076``
+    the corrected line and the broken one print the same six characters, because an empty host plus
+    ``":" + "5076"`` reproduces the token by accident. ``[]:5077`` has no such coincidence, so it is
+    the token that can tell a non-claim from an invented endpoint. ``:5076`` stays because it is the
+    shape that turned CI red and the one the note names.
+
+    Provably red, both measured on their mutant: remove the ``saw_empty_host`` branch in
+    ``_live_search_posture`` (the note disappears), or delete the ``split_host`` gate in
+    ``epics_address.split_port`` (``[]:5077`` is then printed as the endpoint ``:5077``, an address
+    nobody wrote).
+    """
+    _set_config(monkeypatch)
+    monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", "NO")
+    monkeypatch.setenv("EPICS_CA_AUTO_ADDR_LIST", "NO")
+
+    monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "192.0.2.5 :5076 []:5077")
+    without_a_host = _plane(await run_doctor(), "live").detail
+    assert without_a_host is not None
+    assert "NO HOST" in without_a_host
+    for token in (":5076", "[]:5077"):
+        assert token in without_a_host, (
+            f"{token!r} is not printed as written, so an endpoint is being claimed for a token "
+            "whose host the platform resolver decides"
+        )
+    assert "host replaced" not in without_a_host
+    assert "write the host out" in without_a_host, (
+        "the note takes a statement away and must say how to get one back"
+    )
+
+    monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "192.0.2.5 192.0.2.6")
+    with_hosts = _plane(await run_doctor(), "live").detail
+    assert with_hosts is not None
+    assert "NO HOST" not in with_hosts
+
+
 def _report_with_installation(findings: list[InstallationFinding]) -> DoctorReport:
     """A hand-built report carrying *findings*, otherwise as clean as run_doctor can make one."""
     return DoctorReport(

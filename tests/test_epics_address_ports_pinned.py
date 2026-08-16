@@ -62,7 +62,9 @@ _TOKENS = (
     "10.0.0.5,",  # a bare trailing comma: the entry disappears
     "10.0.0.5,255",  # a ttl without an interface: the entry survives
     "10.0.0.5,255@127.0.0.1",  # full multicast: survives, interface rewritten
-    ":5076",  # no host: pvxs substitutes one of this machine's own addresses
+    ":5076",  # no host: PLATFORM-dependent, so nothing is claimed (see the empty-host test below)
+    "[]",  # no host either, through the BRACKET branch: the same non-claim by a different route
+    ":abc",  # no host AND an unreadable port: the port refusal decides, and it is platform-blind
 )
 
 
@@ -141,6 +143,12 @@ def test_what_the_doctor_prints_is_what_the_client_uses(token: str, var: str, de
 
     Three permitted outcomes, and no fourth: the rendered endpoint equals the client's, or we said
     DROPPED and the client kept nothing, or we made no claim at all (the token comes back verbatim).
+
+    ⚠️ There used to be a fourth, ``host replaced by a local interface address``, for a token
+    written without a host. It is gone with the claim it qualified: that claim was measured true on
+    Windows and false on Linux, where the client makes no entry at all, so the shape is now a
+    non-claim and leaves through the first branch. A branch kept for a rendering nothing produces
+    looks like coverage and is none.
     """
     rendered = effective_search_entry(token, default)
     entries = _effective_entries(var, token, None, None)
@@ -149,16 +157,42 @@ def test_what_the_doctor_prints_is_what_the_client_uses(token: str, var: str, de
     if "DROPPED" in rendered:
         assert entries == [], f"we invented a refusal for {token!r}; the client kept {entries!r}"
         return
-    if "host replaced" in rendered:
-        # The port is claimed, the host explicitly is not. Check the half we assert, and read the
-        # claimed port out of the rendering rather than assuming it is the list default: the token
-        # may carry one of its own.
-        claimed = rendered.split("port ", 1)[1].split(",", 1)[0]
-        assert entries and _port_of(entries[0]) == claimed
-        return
     assert entries == [rendered], (
         f"the report would print {rendered!r} for {token!r}, the client really uses {entries!r}"
     )
+
+
+@pytest.mark.parametrize("token", [":5076", "[]", "[]:5077"])
+def test_a_token_without_a_host_is_never_claimed_on_any_platform(token: str) -> None:
+    """The empty host is decided by the RESOLVER, so no endpoint is claimed for it anywhere.
+
+    This is the assertion that made CI red and this file honest. Measured on one token, both
+    platforms: ``EPICS_PVA_ADDR_LIST=":5076"`` gives one of this machine's own interface addresses
+    on Windows and NOTHING on Linux (``Error resolving ""``, and the context reports it has no
+    search destination at all). The report used to state the port and say the host had been
+    replaced, which was true on the first platform and invented reach on the second.
+
+    ⚠️ It is a TRADE and not a pure win: a statement that was true on Windows is given up to avoid
+    one that is false on Linux. What replaces it is not silence, it is ``doctor._EMPTY_HOST_NOTE``,
+    which names the way back to a claimable endpoint (write the host out).
+
+    All three spellings, because the gate is on :func:`split_host` and not on the ``:`` partition:
+    ``[]`` and ``[]:5077`` reach the empty host through the BRACKET branch, and a gate placed at
+    the partition would render an endpoint for them while claiming to have fixed the shape.
+
+    ⚠️ BOTH halves are asserted, and the first is why: on ``:5076`` the RENDERING alone is red-proof
+    against nothing. Measured on the mutant with the gate deleted, ``split_port`` claims ``5076``
+    again while the renderer still prints ``:5076``, because an empty host plus ``":" + "5076"``
+    happens to reproduce the token. The string is a coincidence; the decision is what this pins.
+
+    Provably red on every platform: delete the ``if not split_host(token)`` gate at the top of
+    ``split_port``. Measured on that mutant, all three fail on the first assertion and the two
+    bracketed spellings fail on the second as well.
+    """
+    assert split_port(token) is UNMODELLED, (
+        f"a claim is being made about {token!r}, whose host the platform resolver decides"
+    )
+    assert effective_search_entry(token, "5076") == token
 
 
 @pytest.mark.parametrize("token", ["[2001:db8::1]x", "10.0.0.5,", "10.0.0.5,255@127.0.0.1"])

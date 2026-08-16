@@ -300,7 +300,7 @@ def _warn_about_ambient_environment(env: Mapping[str, str]) -> None:
     and some of them decide the answer: a ``HTTP_PROXY`` turns healthy REST planes into
     ``unreachable`` with a host the block never mentions, and an ``EPICS_PVA_BROADCAST_PORT``
     decides who answers a PV search. (Since GQ-17 the report's ``search paths:`` line does resolve
-    each entry against that port and names it; it still describes THIS command's environment
+    every entry it can against that port and names it; it still describes THIS command's environment
     rather than the launcher's, which is what this warning is about.) Stripping those too was
     considered and refused (decision UE): it would break every site that reaches the network
     through a proxy and every site with an internal CA. So the report names them.

@@ -118,7 +118,7 @@ cache of its own under its home directory, which `FASTMCP_CHECK_FOR_UPDATES=off`
    report, with what it does and what to do about it. Two examples, both measured: an `HTTP_PROXY`
    can turn six healthy REST planes into six `unreachable`, each naming a host the block never
    mentions; an `EPICS_PVA_BROADCAST_PORT` decides who answers a PV search, and while the report's
-   `search paths:` line does resolve each entry against that port and name it, the report still
+   `search paths:` line does resolve every entry it can against that port and name it, the report still
    describes the environment of the CHECK rather than the launcher's.
 
    It names only what can actually act on YOUR block: a name you stated with `--set` is the block's

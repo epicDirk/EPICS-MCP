@@ -177,12 +177,23 @@ carry breaking changes).
 
 - **`epics-doctor`'s `search paths:` line named addresses but not ports, and a port decides who
   answers.** The line was word for word identical with and without `EPICS_PVA_BROADCAST_PORT`,
-  while the client dialled a different port. It now resolves every entry to the endpoint actually
-  used and names the variable the default came from (`EPICS_PVA_BROADCAST_PORT` for the address
-  lists, `EPICS_PVA_SERVER_PORT` for the name servers). Three measured client behaviours are
-  reported rather than hidden: a written `:0` or a number past 65535 is not the port you wrote,
-  an entry the client refuses is marked `DROPPED` instead of being shown as a destination, and a
-  list holding names carries a caveat that its effective form can be shorter.
+  while the client dialled a different port. It now resolves every entry it can name to the
+  endpoint actually used and names the variable the default came from (`EPICS_PVA_BROADCAST_PORT`
+  for the address lists, `EPICS_PVA_SERVER_PORT` for the name servers). Three measured client
+  behaviours are reported rather than hidden: a written `:0` or a number past 65535 is not the port
+  you wrote, an entry the client refuses is marked `DROPPED` instead of being shown as a
+  destination, and a list holding names carries a caveat that its effective form can be shorter.
+
+- **An entry written without a host was reported as a destination, and that destination existed on
+  some platforms only.** `EPICS_PVA_ADDR_LIST=":5076"` was rendered as port 5076 with the host
+  replaced by a local interface address. Measured on that one token: pvxs does substitute one of
+  the machine's own interface addresses on Windows, while on Linux it refuses the entry outright
+  and the client is left with no search destination at all. Such a token is now printed as written
+  with nothing claimed about it, the same rule this release already applies to shapes outside the
+  pinned corpus, and the report carries one line saying why and what to do instead: write the host
+  out (`127.0.0.1:5076`). The trade is deliberate and worth stating, because it costs something: a
+  statement that was true on one platform is given up to stop the same statement being invented
+  reach on another.
 
 - **`epics-doctor` reported `localhost-isolated` for a `EPICS_MCP_PROVIDER=ca` server that was
   broadcasting PV searches into the local subnets.** p4p offers PVAccess only; it accepts `ca` and

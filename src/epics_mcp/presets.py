@@ -259,7 +259,7 @@ AMBIENT_GROUPS: tuple[AmbientGroup, ...] = (
         ),
         effect=(
             "the PORT a PV search goes to is decided here, so this decides WHO answers; the "
-            "check's 'search paths:' line resolves each entry against it and names it. "
+            "check's 'search paths:' line resolves every entry it can against it and names it. "
             "Your server inherits its launcher's environment, not this shell, so a port set only "
             "here means the check and the running server search different ones"
         ),

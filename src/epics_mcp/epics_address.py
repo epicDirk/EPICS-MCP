@@ -165,9 +165,28 @@ def split_port(token: str) -> str | None | _Dropped | _Unmodelled:
     runs against the installed library. Widen the corpus first, then widen this function; the other
     order is how the three wrong answers above got written.
 
-    Everything here is about the PORT half. An empty host (``:5076``) has a HOST half this cannot
-    predict either, and the caller says so rather than printing an address the client replaced.
+    Everything below the first line is about the PORT half. The HOST half enters exactly once, at
+    the top, because an EMPTY host is resolved by the platform and this module is deliberately
+    resolution-free (see the module docstring). Measured on the same token, both platforms: pvxs
+    substitutes one of this machine's own interface addresses on Windows, and refuses the entry
+    outright on Linux (``Error resolving ""``), leaving the context with no search destination at
+    all. Naming the port would therefore be false on the platform where no entry exists to carry
+    it, so nothing is claimed for that shape.
+
+    ⚠️ THAT IS A TRADE, not a free win, and it is written down rather than quietly enjoyed: the
+    Windows answer was true, and it is given up to avoid the Linux one that is not. The way back
+    to a claimable endpoint belongs to the operator and is named in the report itself, not only
+    here: spell the host out (``127.0.0.1:5076``).
+
+    ⚠️ The gate reads :func:`split_host`, NOT the ``partition(":")`` further down, and the
+    difference is measured rather than stylistic. ``[]`` and ``[]:5077`` have an empty host too but
+    take the BRACKET branch, so a gate at the partition would miss them and keep rendering an
+    endpoint for them. In the other direction ``split_host(":abc")`` returns the whole token, so
+    the measured-correct DROPPED verdict for a token whose PORT half is unreadable survives here
+    instead of decaying into a non-claim.
     """
+    if not split_host(token):
+        return UNMODELLED
     if "," in token or "@" in token:
         # Multicast ``addr[:port],ttl@iface``. Measured: ``10.0.0.5,`` disappears entirely while
         # ``10.0.0.5,255`` survives, and the interface is rewritten to a platform identifier.
@@ -269,11 +288,10 @@ def effective_search_entry(token: str, default_port: str | None) -> str:
         # resolve anything, and it is the only honest output for a shape nothing has measured.
         return token
     resolved = port if isinstance(port, str) else default_port
+    # An empty host never reaches this point: split_port answers UNMODELLED for it, so the token
+    # has already been printed as written above. The caveat the operator needs for that shape is
+    # the doctor's own _EMPTY_HOST_NOTE, which can say what to do about it; a rendering cannot.
     host = split_host(token)
-    if not host:
-        # ``:5076``: measured, pvxs substitutes one of THIS machine's interface addresses, which
-        # is neither loopback nor predictable from the configuration.
-        return f"{token} (port {resolved}, host replaced by a local interface address)"
     return f"{host}:{resolved}" if ":" not in host else f"[{host}]:{resolved}"
 
 
