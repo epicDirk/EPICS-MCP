@@ -199,6 +199,69 @@ def test_a_healthy_plane_on_the_host_withdraws_the_finding() -> None:
     assert _patterns(cfg, planes) == []
 
 
+def test_a_plane_that_answered_is_never_evidence_that_its_host_is_silent() -> None:
+    """The S4 shape, and the finding it used to produce contradicted the report's own lines.
+
+    A front proxy answering 401 for every path on two ports of one host gives both planes
+    ``identity_probe_failed``, whose per-plane line reads "transport reachable". The block printed
+    "2 services on H failed and none on it answered, so check the host" directly underneath, and
+    told the operator to check a host that had answered every single request. Found by the
+    post-build review; the trigger for this pattern is now ``unreachable`` alone.
+    """
+    cfg = _cfg(
+        channelfinder_url="http://proxy.example.org:8080/ChannelFinder",
+        naming_url="http://proxy.example.org:8099",
+        alarm_url="http://elsewhere.example.org:8081",
+    )
+    planes = [
+        _plane("channelfinder", "identity_probe_failed"),
+        _plane("naming", "identity_probe_failed"),
+        _plane("alarm", "ok"),
+    ]
+    assert "host_down" not in _patterns(cfg, planes)
+
+
+def test_a_tls_failure_that_never_opened_a_socket_is_not_evidence_about_a_host() -> None:
+    """An unreadable CA bundle fails a plane BEFORE any connection exists.
+
+    Measured by the post-build review on an ordinary mixed deployment (two internal HTTPS planes,
+    one HTTP appliance elsewhere): the block named the HTTPS host as dead, told the operator to
+    "check the host before the services", and added the reassurance that the rest of the
+    deployment was fine. Nothing had ever been sent to that host. The whole-deployment suppression
+    could not catch it, because the healthy HTTP plane defeated the all-or-nothing count.
+    """
+    cfg = _cfg(
+        channelfinder_url="https://internal.example.org:8080/ChannelFinder",
+        alarm_url="https://internal.example.org:8081",
+        archiver_url="http://appliance.example.org:17665",
+    )
+    planes = [
+        _plane("channelfinder", "ca_error", ca_ok=False),
+        _plane("alarm", "ca_error", ca_ok=False),
+        _plane("archiver", "ok", ca_ok=True),
+    ]
+    patterns = _patterns(cfg, planes)
+    assert "host_down" not in patterns
+    # The TLS half is still reported, and it is the one that names the real cause.
+    assert "ca_bundle" in patterns
+
+
+def test_a_service_error_beside_a_silent_one_does_not_prop_up_the_finding() -> None:
+    """A plane that answered with an error is evidence about a SERVICE, not about the host.
+
+    So it neither counts towards "none answered" nor rescues the host as a healthy neighbour. With
+    one genuinely silent plane and one erroring plane on the same host there is exactly one silent
+    authority, which is below the threshold, and nothing is claimed.
+    """
+    cfg = _cfg(**_TWO_ON_ONE_HOST, naming_url="http://elsewhere.example.org:8099")
+    planes = [
+        _plane("channelfinder", "unreachable"),
+        _plane("alarm", "api_error"),
+        _plane("naming", "ok"),
+    ]
+    assert "host_down" not in _patterns(cfg, planes)
+
+
 # --- the TLS comparison ---
 
 _THREE_HTTPS = {

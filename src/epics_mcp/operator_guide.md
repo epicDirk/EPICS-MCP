@@ -629,9 +629,11 @@ one. Three patterns, and each says what it could NOT tell apart:
   same, so verify a route before you change a value. On a single-JVM appliance the retrieval
   variable is empty and this can never fire.
 - **Every service on one host is dead.** Two or more host-and-port pairs on the same host, none of
-  them answering, while another host does. It stays SILENT when everything configured is dead
-  everywhere: that shape is usually a proxy, a resolver or a VPN on your own machine, and naming a
-  host would point at the wrong end.
+  them answering at all, while another host does. Only a real transport failure counts: a plane
+  that answered with an error, or whose identity probe was refused, says something about a
+  SERVICE, not about the host. It stays SILENT when everything configured is dead everywhere: that
+  shape is usually a proxy, a resolver or a VPN on your own machine, and naming a host would point
+  at the wrong end.
 - **TLS failed for some HTTPS planes but not all.** Then the trust material is not wholly wrong and
   those hosts are what differs. If every HTTPS plane failed, it names `EPICS_MCP_CA_BUNDLE`
   instead. ⚠️ It reports the observation and not a cause: a missing root, an expired certificate

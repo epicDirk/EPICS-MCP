@@ -52,6 +52,7 @@ from epics_mcp.config import EpicsConfig, get_config
 from epics_mcp.epics_address import (
     DEFAULT_PORT_VARS,
     auto_addr_search_disabled,
+    effective_default_port,
     effective_search_entry,
     is_ip_literal,
 )
@@ -1359,15 +1360,30 @@ def _live_search_posture(effective: str) -> str:
             saw_inert = saw_inert or inert
             port_var, fallback = DEFAULT_PORT_VARS[var]
             written = os.environ.get(port_var, "").strip()
-            default_port = written or fallback
-            tokens = value.split()
-            saw_name = saw_name or any(not is_ip_literal(t) for t in tokens)
-            resolved = " ".join(effective_search_entry(token, default_port) for token in tokens)
-            state = f"={written}" if written else " unset"
-            paths.append(
-                f"{var} ({resolved}; default port {default_port} from {port_var}{state})"
-                f"{' [inert]' if inert else ''}"
+            # Through the SAME arithmetic a port written in a token gets. Printing the variable's
+            # value raw made the line state ports nobody dials (":70000" for an effective 4464,
+            # and ":abc" as a live endpoint), which is the invented reach this whole line removes.
+            default_port = effective_default_port(
+                written, fallback, zero_keeps_fallback="ADDR_LIST" in var
             )
+            tokens = value.split()
+            # Only entries we actually RESOLVED can carry the resolution caveat. An unresolvable
+            # or unmodelled token is printed as written, and calling it a "name" was a second
+            # small untruth beside the first.
+            saw_name = saw_name or any(
+                not is_ip_literal(t) and effective_search_entry(t, default_port) != t
+                for t in tokens
+            )
+            resolved = " ".join(effective_search_entry(token, default_port) for token in tokens)
+            if default_port is None:
+                origin = (
+                    f"{port_var}={written} is not a port this client can read, so it falls back to "
+                    f"its own default and no entry here is resolved"
+                )
+            else:
+                state = f"={written}" if written else " unset"
+                origin = f"default port {default_port} from {port_var}{state}"
+            paths.append(f"{var} ({resolved}; {origin}){' [inert]' if inert else ''}")
     auto_var = "EPICS_PVA_AUTO_ADDR_LIST" if effective == "pva" else "EPICS_CA_AUTO_ADDR_LIST"
     # Raw value, deliberately NOT normalised: neither parser trims, and normalising here
     # would make the doctor honour spellings the real client rejects (see the helper).

@@ -95,6 +95,19 @@ carry breaking changes).
 
 ### Fixed
 
+- **The two doctor changes below shipped with six untruths of their own, found by an adversarial
+  post-build review and fixed here.** The reach line printed the value of a port VARIABLE raw,
+  so `EPICS_PVA_BROADCAST_PORT=70000` named `:70000` where the client dialled `:4464` and `=abc`
+  named a live endpoint on a port that cannot exist; the same arithmetic now covers both sources,
+  and an unreadable value earns no number at all. The address parser answered for shapes nobody
+  had measured and was wrong in both directions (`[2001:db8::1]x` was called DROPPED while the
+  client searches it; `10.0.0.5,` was shown as live while the client drops it) - a shape outside
+  the pinned corpus is now printed as written with nothing claimed about it. The `Installation`
+  block keyed its "none on it answered" finding on statuses that mean the host DID answer, so it
+  contradicted the report's own plane lines and once named a host nothing had ever contacted; it
+  counts only a real transport failure now. The pin was widened from the port helper to the
+  rendering the report actually calls, over a corpus that includes every falsifying shape.
+
 - **`epics-doctor` reports what no single plane can see.** It checked each plane on its own, so
   three failure shapes that only appear in the comparison went unnamed: the two archiver URLs
   exchanged, every service on one host dead rather than N services broken, and a TLS failure on

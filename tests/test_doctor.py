@@ -2008,6 +2008,36 @@ async def test_each_search_list_reports_its_own_default_port_variable(
     assert "EPICS_PVA_SERVER_PORT" in detail
 
 
+@pytest.mark.parametrize(
+    ("written", "expect_in", "expect_not_in"),
+    [
+        ("70000", "10.0.0.5:4464", "10.0.0.5:70000"),  # wraps through 16 bits, silently
+        ("0", "10.0.0.5:5076", "10.0.0.5:0"),  # a written zero is not a port
+        ("abc", "is not a port this client can read", "10.0.0.5:abc"),  # unreadable: no claim
+    ],
+)
+async def test_the_port_variable_goes_through_the_clients_arithmetic_too(
+    monkeypatch: pytest.MonkeyPatch, written: str, expect_in: str, expect_not_in: str
+) -> None:
+    """The value of the port VARIABLE was printed raw while the token's port was not.
+
+    Found by the post-build review, and it is the same defect this whole line exists to remove,
+    one level up: with ``EPICS_PVA_BROADCAST_PORT=abc`` the report named ``10.0.0.5:abc`` as a
+    live endpoint, on a port that cannot exist, while the identical string inside a TOKEN was
+    correctly reported as DROPPED. One rule for both sources now, and an unreadable variable earns
+    no number at all rather than a wrong one.
+    """
+    _set_config(monkeypatch)
+    monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "10.0.0.5")
+    monkeypatch.setenv("EPICS_PVA_BROADCAST_PORT", written)
+    monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", "NO")
+    monkeypatch.setenv("EPICS_CA_AUTO_ADDR_LIST", "NO")
+    detail = _plane(await run_doctor(), "live").detail
+    assert detail is not None
+    assert expect_in in detail
+    assert expect_not_in not in detail
+
+
 async def test_an_entry_the_client_refuses_is_reported_as_dropped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

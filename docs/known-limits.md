@@ -562,12 +562,16 @@ in the block separates them, and its text says so and names a check rather than 
 `evidence` field on the wire carries `signature` for exactly this reason, so a future confirming
 probe is an additive change rather than a rewrite of the contract.
 
-**The one-host finding is deliberately conservative in one direction and suppressed in another.**
-It needs two distinct host-and-port authorities on the host, so a single-JVM appliance (two planes
-on one address) and a path-based reverse proxy never trigger it, even when they really are down.
-And it stays silent when EVERY configured plane on EVERY host has failed: that shape was measured
-twice here with the cause on the caller's side rather than on any host (an unreadable CA bundle,
-and an `HTTP_PROXY`), so naming hosts would point at the wrong end.
+**The one-host finding is deliberately conservative in three directions.** It needs two distinct
+host-and-port authorities on the host, so a single-JVM appliance (two planes on one address) and a
+path-based reverse proxy never trigger it, even when they really are down. It stays silent when
+EVERY configured plane on EVERY host has failed: that shape was measured twice here with the cause
+on the caller's side rather than on any host (an unreadable CA bundle, and an `HTTP_PROXY`), so
+naming hosts would point at the wrong end. And it counts only `unreachable`, because the sentence
+it prints is "none on it answered": `api_error` and `identity_probe_failed` both mean the host DID
+answer, and a `ca_error` from an unreadable bundle is raised before a socket is opened. Keying on
+all four was measured to contradict the report's own plane lines twice, once by calling a host
+that answered every request silent, once by naming a host nothing had ever contacted.
 
 **The TLS comparison is invisible with `EPICS_MCP_TLS_VERIFY=false`.** No `ca_error` is raised
 then, so a host presenting a certificate this process would otherwise reject produces no finding

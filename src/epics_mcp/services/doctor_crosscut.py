@@ -207,19 +207,33 @@ def _host_down(
 ) -> list[InstallationFinding]:
     """Every plane on ONE host failing: one host gone, not N broken services.
 
-    ⛔ SUPPRESSED when EVERY configured plane on EVERY host is failing. That shape is measured in
-    this repository twice and BOTH times the cause was on the caller's side, not on any host: an
-    unreadable CA bundle turned all six HTTPS planes ``unreachable`` without a request leaving,
-    and an ``HTTP_PROXY`` did the same. Printing one confident "this host is dead" finding per
-    host would then name several innocent hosts and, worse, print them INSTEAD of the one true
-    statement, which is that nothing left this machine at all.
+    ⛔ ONLY ``unreachable`` counts here, and that is a correction a post-build review paid for.
+    The sentence this finding prints is "none on it answered", so the only evidence that earns it
+    is a plane that genuinely did not answer. The other three triggers all fail that test:
+    ``api_error`` and ``identity_probe_failed`` mean the host DID answer (the per-plane line for
+    the latter literally reads "transport reachable"), and a ``ca_error`` from an unreadable
+    bundle is raised before a socket is opened at all, so it says nothing about any host.
+    Measured, keying on all four produced two contradictions of the report's own plane lines: a
+    host that answered every request was reported as one where nothing answered, and an
+    unreadable ``EPICS_MCP_CA_BUNDLE`` made the block name an innocent host it had never
+    contacted, complete with the reassurance that the rest of the deployment was fine.
+
+    ⛔ SUPPRESSED as well when EVERY configured plane on EVERY host is failing. That shape is
+    measured in this repository twice and BOTH times the cause was on the caller's side, not on
+    any host: an unreadable CA bundle, and an ``HTTP_PROXY``. Printing one confident "this host is
+    dead" finding per host would then name several innocent hosts and, worse, print them INSTEAD
+    of the one true statement, which is that nothing left this machine at all.
 
     ⚠️ Needs at least two distinct AUTHORITIES on the host, not two planes. A single-JVM appliance
     puts two planes on one address, and a path-based reverse proxy several more; those are one
     service, and calling them "several dead services" would be a false alarm. Conservative on
     purpose: this block exists to remove false all-clears, not to add false alarms.
     """
-    if not failing:
+    # "None on it answered" is only earned by planes that did not answer. See the docstring: the
+    # other three triggers all describe a host that DID answer, or a failure raised before any
+    # socket existed.
+    silent = {plane for plane, status in failing.items() if status == "unreachable"}
+    if not silent:
         return []
     # The caller-side shape: nothing that was configured survived.
     if len(failing) >= len(configured) and configured:
@@ -232,11 +246,13 @@ def _host_down(
         if parsed is None:
             continue  # unparseable: not evidence of a shared host, so it joins nothing
         host, authority = parsed
-        if plane in failing:
+        if plane in silent:
             by_host[host].add(authority)
             planes_by_host[host].append(plane)
-        else:
+        elif plane not in failing:
             healthy_hosts.add(host)
+        # A plane that failed in some OTHER way answered, so it neither supports the finding nor
+        # counts as a healthy neighbour: it is evidence about a service, not about a host.
     findings: list[InstallationFinding] = []
     for host, authorities in sorted(by_host.items()):
         if len(authorities) < 2 or host in healthy_hosts:

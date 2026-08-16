@@ -47,6 +47,24 @@ class _Dropped:
 DROPPED = _Dropped()
 
 
+class _Unmodelled:
+    """This token shape has NOT been held against the real client, so nothing is claimed about it.
+
+    Distinct from :data:`DROPPED`, which is a measured statement that the client throws the token
+    away. This one is the absence of a statement, and it exists because answering for every shape
+    produced two wrong answers in opposite directions (see :func:`split_port`).
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid only
+        return "UNMODELLED"
+
+
+#: The single instance; compare with ``is``, never by equality.
+UNMODELLED = _Unmodelled()
+
+
 def auto_addr_search_disabled(provider: str, value: str) -> bool:
     """Whether *value* actually disables the auto-addr search for THIS provider's parser.
 
@@ -113,46 +131,66 @@ DEFAULT_PORT_VARS: Mapping[str, tuple[str, str]] = {
 
 #: pvxs parses a port with ``parseTo<uint16_t>``, so a number past the 16-bit range WRAPS instead
 #: of being rejected, and a wrap landing on 0 then takes the default like an absent port does.
-#: Both measured (``:70000`` resolves to ``:4464``, ``:65536`` to the default, ``:0`` to the
-#: default). Named rather than inlined because the two call sites below have to agree.
+#: Measured on the PVA side (``:70000`` resolves to ``:4464``, ``:65536`` and ``:0`` to the
+#: default), in a token and in the port variable alike.
+#: ⚠️ NOT measured for the CA rows of :data:`DEFAULT_PORT_VARS`, and they get this arithmetic
+#: anyway. libca range-checks rather than wraps, so a CA entry past the range is probably rendered
+#: with a port libca would refuse. It cannot be measured here at all (this p4p has no CA provider
+#: to read back from), and it is stated rather than quietly inherited, because the ``[inert]``
+#: note tells the reader those variables matter to a differently built client.
 _PORT_MODULUS = 65536
 
 
-def split_port(token: str) -> str | None | _Dropped:
+def split_port(token: str) -> str | None | _Dropped | _Unmodelled:
     """The port written INTO one address-list token, if any.
 
-    Three outcomes, and the third is the one a two-valued answer would have got wrong:
+    FOUR outcomes, and the fourth is a correction paid for by a post-build review:
 
     * ``None``: the token carries no port of its own, so the list's default applies.
     * ``str``: the port this token resolves to, already through pvxs' own uint16 arithmetic.
     * :data:`DROPPED`: the client REFUSES this token and searches nowhere for it.
+    * :data:`UNMODELLED`: this shape is outside what has been measured against the real client,
+      so NOTHING is claimed about it and the caller prints the token as written.
 
-    That third outcome is not a nuance. Measured, ``10.0.0.5:abc`` does not become an entry with
-    an unknown port, it becomes NO ENTRY: the effective address list comes back empty and pvxs
-    logs ``ignoring invalid`` on stderr, where a report never sees it. An earlier draft of this
-    function rendered such a token as "port unknown", which would have described a destination
-    the client had thrown away as a live one. A report about reach must not invent reach.
+    ⛔ WHY THE FOURTH EXISTS, and it is the whole lesson of this function. The first version had
+    only the first three, i.e. it answered for EVERY token. Measured afterwards against the real
+    client, it was wrong in both directions on shapes just outside its corpus: ``[2001:db8::1]x``
+    was reported ``DROPPED`` while pvxs ignores the trailing junk and really searches that
+    globally routable address, and ``10.0.0.5,`` was reported as a live destination while pvxs
+    drops it. An invented refusal HIDES a destination; an invented destination CLAIMS reach that
+    does not exist. Both are the dishonesty this whole line exists to remove, so a shape that has
+    not been held against the client is now a NON-CLAIM rather than a guess.
 
-    Everything here is about the PORT half. Two token shapes have a HOST half this function
-    cannot predict either, and they are handled by the caller rather than swallowed here: an
-    empty host (``:5076``) is replaced by one of this machine's own interface addresses, and a
-    multicast ``@interface`` suffix is rewritten to a platform identifier. Both measured.
+    ⚠️ The corpus that earns a claim is exactly the one ``tests/test_epics_address_ports_pinned.py``
+    runs against the installed library. Widen the corpus first, then widen this function; the other
+    order is how the three wrong answers above got written.
+
+    Everything here is about the PORT half. An empty host (``:5076``) has a HOST half this cannot
+    predict either, and the caller says so rather than printing an address the client replaced.
     """
-    # A multicast token is ``addr[:port],ttl@iface``: only the head can carry a port.
-    head = token.split(",", 1)[0]
-    if head.startswith("["):
-        end = head.find("]")
+    if "," in token or "@" in token:
+        # Multicast ``addr[:port],ttl@iface``. Measured: ``10.0.0.5,`` disappears entirely while
+        # ``10.0.0.5,255`` survives, and the interface is rewritten to a platform identifier.
+        # None of that is in the pinned corpus, so nothing is claimed. ⚠️ Tested for the COMMA,
+        # not for a non-empty tail: ``"10.0.0.5,".partition(",")`` gives an empty tail, so a
+        # trailing comma slipped through the first version of this guard and was rendered
+        # ``10.0.0.5,:5076``, an address the client does not have.
+        return UNMODELLED
+    if token.startswith("["):
+        end = token.find("]")
         if end == -1:
-            return DROPPED  # unclosed bracket, the client cannot read it either
-        rest = head[end + 1 :]
+            return UNMODELLED  # unclosed bracket: never held against the client
+        rest = token[end + 1 :]
         if not rest:
             return None
         if not rest.startswith(":"):
-            return DROPPED
+            # Trailing junk after the bracket. pvxs IGNORES it and keeps the address; reporting a
+            # refusal here hid a live destination until a review caught it.
+            return UNMODELLED
         return _port_value(rest[1:])
-    if head.count(":") != 1:
+    if token.count(":") != 1:
         return None  # bare host, or a bare IPv6 literal (several colons, no port)
-    _, _, port = head.partition(":")
+    _, _, port = token.partition(":")
     return _port_value(port)
 
 
@@ -181,27 +219,61 @@ def is_ip_literal(token: str) -> bool:
     return True
 
 
-def effective_search_entry(token: str, default_port: str) -> str:
-    """One address-list token as this client will really use it, or as a refusal.
+def effective_default_port(written: str, fallback: str, *, zero_keeps_fallback: bool) -> str | None:
+    """The default port a LIST really gets from its port variable, or None when nothing is claimed.
 
-    The rendering the doctor's reach line prints. It states a port for every token that keeps
-    one, says DROPPED for a token the client discards, and flags the two shapes whose HOST it
-    cannot predict rather than printing a host that is not the one dialled.
+    The same arithmetic :func:`split_port` applies to a port written in a token, applied to a port
+    written in the VARIABLE. That it is the same rule is the point: measured, a review found the
+    variable's value being printed raw, so ``EPICS_PVA_BROADCAST_PORT=70000`` rendered every
+    port-less entry as ``:70000`` while the client dialled ``:4464``, and ``=abc`` rendered them
+    as ``:abc``, a live endpoint on a port that cannot exist. One rule, one place, both sources.
+
+    ⚠️ *zero_keeps_fallback* is a MEASURED asymmetry between the two lists, not a preference, and
+    it comes from an ordering quirk in pvxs' own parsing (``src/config.cpp``): the
+    ``tcp_port == 0`` fallback is evaluated while ``nameServers`` is still empty, so it never
+    fires. Read back from the installed client:
+
+    * ``EPICS_PVA_ADDR_LIST`` with ``EPICS_PVA_BROADCAST_PORT=0`` gives ``10.0.0.5:5076``.
+    * ``EPICS_PVA_NAME_SERVERS`` with ``EPICS_PVA_SERVER_PORT=0`` gives ``10.0.0.5``, with NO port.
+
+    ``None`` means no claim: the variable is unreadable, or it resolves to "no port" on a list
+    where that is not the fallback. The caller then prints the entries as written, because naming
+    either number would be a guess.
+    """
+    if not written:
+        return fallback
+    value = _port_value(written)
+    if value is DROPPED:
+        return None  # unreadable: pvxs warns and keeps its own default, which we do not restate
+    if isinstance(value, str):
+        return value
+    return fallback if zero_keeps_fallback else None
+
+
+def effective_search_entry(token: str, default_port: str | None) -> str:
+    """One address-list token as this client will really use it, or as an honest non-claim.
+
+    The rendering the doctor's reach line prints. It states an endpoint only for the shapes held
+    against the real client in ``tests/test_epics_address_ports_pinned.py``; everything else is
+    printed AS WRITTEN with no assertion attached.
+
+    ⚠️ *default_port* is ``None`` when the list's port variable is set to something pvxs cannot
+    read. No entry can then be resolved, because the fallback the client actually uses is not the
+    one the operator wrote, and printing either would be a guess.
     """
     port = split_port(token)
     if port is DROPPED:
         return f"{token} (DROPPED by this client, it is not searched)"
+    if port is UNMODELLED or default_port is None:
+        # No claim. The token stands as written, which is what the line did before it learned to
+        # resolve anything, and it is the only honest output for a shape nothing has measured.
+        return token
     resolved = port if isinstance(port, str) else default_port
-    head = token.split(",", 1)[0]
-    host = split_host(head)
+    host = split_host(token)
     if not host:
         # ``:5076``: measured, pvxs substitutes one of THIS machine's interface addresses, which
         # is neither loopback nor predictable from the configuration.
         return f"{token} (port {resolved}, host replaced by a local interface address)"
-    if "," in token:
-        # Multicast ``addr,ttl@iface``: the address and the port are predictable, the interface
-        # is rewritten (measured: to a GUID on Windows), so the suffix is shown as written.
-        return f"{host}:{resolved},{token.split(',', 1)[1]} (interface rewritten by the client)"
     return f"{host}:{resolved}" if ":" not in host else f"[{host}]:{resolved}"
 
 
