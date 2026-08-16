@@ -563,8 +563,14 @@ def test_an_engine_import_below_module_level_is_guarded() -> None:
     ``def`` (see :func:`_module_level_imports`), which is right: such an import costs nothing at
     COLLECTION. It costs everything at RUN time, and nothing was asking. Measured: on 2026-08-16
     two test functions grew an engine-reaching import in their body, collection stayed clean, both
-    modules were correctly absent from the list, and the engine-less CI lane was red for 21 runs
+    modules were correctly absent from the list, and the engine-less CI lane was red for 8 runs
     while every local run stayed green and every window reporting it was right.
+
+    ⚠️ That count was written as 21 first, taken from a handover instead of measured, in the very
+    repair whose subject is a number nobody checked. 21 was that handover's figure for the whole
+    red period, itself wrong (16), and neither belongs here: this defect entered at 15:08 UTC and
+    the lane went green at 23:45, which is 8 runs
+    (``gh run list --workflow=ci.yml --json conclusion,createdAt``, filtered to that window).
 
     The remedy is NOT the list. Adding such a module would redden the guard above ("listed but not
     coupled"), measured: neither module imports the engine at module level. The remedy is a guard
