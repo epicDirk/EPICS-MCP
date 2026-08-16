@@ -93,6 +93,19 @@ carry breaking changes).
   `get_guide` therefore serve 79 535 B where they served 87 415 B before, and the recipes section
   in particular went from 29 194 B to 21 411 B.
 
+### Changed
+
+- **The display engine pin moves to `5aab30e`, and with it four measured corrections to what the
+  display tools say about a screen set.** The pin had stood still at `0ab0d73` while eight commits
+  landed in `opi_navigation`, so every reachability and PV answer this server gave came out of a
+  state the engine had already corrected. What arrives: `open_display` targets are matched the way
+  Phoebus matches them rather than case-sensitively (and the legacy `<path>` spelling is read too),
+  so jumps that were silently missing from the navigation graph are there; a Data Browser `.plt`
+  is no longer counted as an operator screen by `find_screen`, `change_impact` and `find_device`;
+  displays are no longer pushed out of the entry-point list by guessed edges; and the engine now
+  exports the file universe a capped run walked, which is the honest denominator the
+  `coverage_audit` header needs.
+
 ### Fixed
 
 - **The two doctor changes below shipped with six untruths of their own, found by an adversarial
