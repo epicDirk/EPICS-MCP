@@ -218,7 +218,7 @@ explanation. Ask `get_guide` for the topic named beside the field.
 | A field in the answer | The topic that explains it |
 |---|---|
 | `reach` | `posture` |
-| `pvs_linked` · `pvs_linked_write` · `pvs_other_prefix` · `pvs_indeterminate` · `pvs_dynamic` · `pvs_unresolved` · `pvs_non_channel` · `pvs_non_channel_by_protocol` | `err-crossplane` |
+| `pvs_linked` · `pvs_linked_write` · `pvs_other_prefix` · `pvs_indeterminate` · `pvs_indeterminate_occurrences` · `pvs_dynamic` · `pvs_unresolved` · `pvs_non_channel` · `pvs_non_channel_by_protocol` | `err-crossplane` |
 | `broken` · `broken_write` · `ioc_db_resolved` · `ioc_db_needs_msi` | `err-crossplane` |
 | `cf_unregistered` · `cf_unregistered_write` · `cf_registered` · `cf_capped` | `err-crossplane` |
 | `cf_and_display` · `cf_only` · `display_only` · `critical_uncovered` · `blind_spots` · `unarchived` · `unalarmed` | `err-crossplane` |
@@ -1202,14 +1202,13 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
 
 ### The cross-plane reports: what each bucket means, and which verdicts are withheld
 
-- **`crossplane_check` buckets every display PV, and two of the buckets are bookkeeping rather than
-  findings.** `pvs_linked` are the concrete channels sharing this IOC's prefix, `pvs_other_prefix`
-  the concrete ones that do not (most often another IOC), `pvs_indeterminate` the ones the inventory
-  could not resolve to a concrete channel, reported split as `pvs_dynamic` and `pvs_unresolved` and
-  never judged broken. `pvs_non_channel` holds references on non-channel protocols (loc, sim, sys,
-  other), left out of the IOC join because they are not EPICS channels, with
-  `pvs_non_channel_by_protocol` partitioning that exact total. Read the last two as bookkeeping: a
-  large `pvs_non_channel` is a screen using local variables, not a defect list.
+- **The bucket names on the wire are not the field names in the answer.** `crossplane_check`'s own
+  description calls them linked, other_prefix, indeterminate and non-channel; the fields are
+  `pvs_linked`, `pvs_other_prefix`, `pvs_indeterminate` (with its split `pvs_dynamic` and
+  `pvs_unresolved`), `pvs_non_channel` and `pvs_non_channel_by_protocol`. What that description
+  does not say is how to READ them: `pvs_non_channel` is bookkeeping and not a defect list (a large
+  one is a screen using local variables), and `pvs_indeterminate_occurrences` is a COUNT of distinct
+  display-and-PV pairs, so it is at least as large as the list beside it and is not its length.
 - **Each bucket has a `_write` twin, and that is where triage starts.** `pvs_linked_write`,
   `broken_write` and `cf_unregistered_write` hold the subset that at least one operator display
   actually WRITES, so an entry in `broken_write` is a button or a setpoint wired to a record the IOC

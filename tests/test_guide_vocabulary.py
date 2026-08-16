@@ -233,13 +233,35 @@ def test_every_indexed_topic_exists() -> None:
     )
 
 
+def _named_as_code(field: str, body: str) -> bool:
+    """True when *body* names *field* inside a CODE SPAN rather than in running prose.
+
+    ⛔ A plain substring test is not enough here, and the gap was measured rather than imagined:
+    the index once routed ``found`` to the PV-connection signatures, where the only occurrences are
+    the heading "not found vs not registered" and the sentence "the network search found no
+    server". Both are ordinary English, the row passed, and a reader following it got a full
+    section without their field in it. Requiring a code span rules that class out.
+
+    ⚠️ The span may carry a VALUE, which is why this is a prefix test and not equality: the guide
+    writes ``registered:false``, ``found:null``, ``total: 0`` and ``cf_capped: true``, and each of
+    those is the field named properly. What it must not match is a LONGER identifier, so the next
+    character has to end the name.
+    """
+    return any(
+        span == field or (span.startswith(field) and not _KEY_SHAPE.match(span[len(field)]))
+        for span in _SPAN.findall(body)
+    )
+
+
 def test_every_indexed_field_appears_in_the_topic_it_names() -> None:
-    """The routing claim itself: the named topic has to MENTION the field.
+    """The routing claim itself: the named topic has to NAME the field, as code.
 
     This is the assertion the index exists for. The two above catch a name that is wrong; this one
     catches a name that is right and pointed at the wrong place, which is the failure a reader
     cannot detect for themselves: they receive a real section, in full, without the word they came
-    for. Measured on the first run of the finished index, 19 rows failed exactly this way.
+    for. Measured on the first run of the finished index, 19 rows failed exactly this way, and a
+    twentieth (``found``) survived a plain substring test and was caught only by the code-span
+    requirement in :func:`_named_as_code`.
     """
     parts = resolve_topics(get_guide())
     misrouted: list[str] = []
@@ -248,11 +270,14 @@ def test_every_indexed_field_appears_in_the_topic_it_names() -> None:
             body = parts.get(topic)
             if body is None:  # covered by test_every_indexed_topic_exists
                 continue
-            misrouted.extend(f"{field} -> {topic}" for field in fields if field not in body)
+            misrouted.extend(
+                f"{field} -> {topic}" for field in fields if not _named_as_code(field, body)
+            )
     assert not misrouted, (
-        f"{len(misrouted)} index row(s) route a field to a topic whose text never names it: "
+        f"{len(misrouted)} index row(s) route a field to a topic that never names it as code: "
         + "; ".join(sorted(misrouted))
-        + ". Either explain the field in that topic, or point the row at the topic that does."
+        + ". Either explain the field in that topic, or point the row at the topic that does. A "
+        "bare English occurrence of the word does not count: that is how a misroute survived once."
     )
 
 
