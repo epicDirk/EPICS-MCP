@@ -853,6 +853,9 @@ def _array_items(prop: dict[str, Any]) -> dict[str, object] | None:
 # nullability hides it from a bare-``type`` check (found bool | None -> int | None: mypy-legal since
 # bool ⊆ int, anyOf-shaped so a presence check skips it, but boolean -> integer here).
 _OLOG_FIELD_BASE_TYPE: dict[str, str] = {
+    # GB-64. An object, because the reach is a mapping of plane to classification plus the
+    # probed flag; a flat string would have made a six-plane answer unparseable.
+    "reach": "object",
     "enabled": "boolean",
     "entries": "array",
     "total": "integer",
@@ -887,17 +890,17 @@ _OLOG_FIELD_BASE_TYPE: dict[str, str] = {
 # as a spurious null. Every OTHER advertised property is sometimes-absent and therefore MUST permit
 # null (see test_olog_structured_output_conforms_to_its_schema).
 _OLOG_ALWAYS_PRESENT: dict[str, set[str]] = {
-    "search_logbook": {"enabled", "entries", "total"},
-    "get_log_entry": {"enabled", "id"},
-    "list_logbooks": {"enabled", "logbooks"},
-    "list_tags": {"enabled", "tags"},
-    "list_log_levels": {"enabled", "levels"},
+    "search_logbook": {"enabled", "entries", "total", "reach"},
+    "get_log_entry": {"enabled", "id", "reach"},
+    "list_logbooks": {"enabled", "logbooks", "reach"},
+    "list_tags": {"enabled", "tags", "reach"},
+    "list_log_levels": {"enabled", "levels", "reach"},
     "create_log_entry": {"enabled", "created"},
     "reply_to_log": {"enabled", "created"},
     "add_log_attachment": {"enabled", "added"},
     "update_log_entry": {"enabled", "updated"},
-    "download_log_attachment": {"enabled", "downloaded"},
-    "list_log_attachments": {"enabled", "id", "attachments"},
+    "download_log_attachment": {"enabled", "downloaded", "reach"},
+    "list_log_attachments": {"enabled", "id", "attachments", "reach"},
 }
 
 
@@ -970,7 +973,7 @@ async def test_olog_structured_output_conforms_to_its_schema(
 
 # --- S29: get_pv_history typed output schema (ArchiverHistoryResult) --------------------------
 
-# The JSON base type get_pv_history's outputSchema advertises for each of ArchiverHistoryResult's 11
+# The JSON base type get_pv_history's outputSchema advertises for each of ArchiverHistoryResult's 12
 # fields (the non-null type for an X | None field, the bare type otherwise). Independent source of
 # truth, hardcoded, NOT reflected from the TypedDict, so a base-type WIDENING of an annotation is
 # caught even where nullability hides it from a bare-``type`` check (the _OLOG_FIELD_BASE_TYPE
@@ -984,6 +987,8 @@ async def test_olog_structured_output_conforms_to_its_schema(
 # this table's job: enum membership is guarded by _OUTPUT_ENUM_MEMBERS, array element schemas by
 # _OUTPUT_ARRAY_ITEMS (S31, both relational, both auto-discovering).
 _ARCHIVER_HISTORY_BASE_TYPE: dict[str, str] = {
+    # GB-64, an object: plane -> classification, plus the probed flag.
+    "reach": "object",
     "enabled": "boolean",
     "pv": "string",
     "samples": "array",
@@ -1000,7 +1005,7 @@ _ARCHIVER_HISTORY_BASE_TYPE: dict[str, str] = {
 # The envelope keys get_pv_history emits on EVERY return path (disabled + enabled), FastMCP never
 # serializes them as a spurious null. Every OTHER advertised property is sometimes-absent and MUST
 # permit null (see test_archiver_history_structured_output_conforms_to_its_schema).
-_ARCHIVER_HISTORY_ALWAYS_PRESENT = frozenset({"enabled", "pv", "samples", "total"})
+_ARCHIVER_HISTORY_ALWAYS_PRESENT = frozenset({"enabled", "pv", "samples", "total", "reach"})
 
 
 @pytest.mark.asyncio
@@ -1010,7 +1015,7 @@ async def test_archiver_history_exposes_typed_output_schema() -> None:
     ``dict[str, object]`` return yields. Red before the retype (no ``properties`` at all).
 
     Mirrors test_typed_tools_expose_typed_output_schema's directions for the single archiver tool:
-    (1) the schema title is ArchiverHistoryResult; (2) the advertised properties are EXACTLY the 11
+    (1) the schema title is ArchiverHistoryResult; (2) the advertised properties are EXACTLY the 12
     mapped fields, completeness both ways (mypy --strict guards an undeclared key in a return
     literal; this guards a dropped one); (3) every field carries the right JSON BASE type, read via
     :func:`_base_type` from the bare ``type`` (non-nullable) OR the non-null ``anyOf`` branch
@@ -1109,6 +1114,8 @@ async def test_archiver_history_structured_output_conforms_to_its_schema(
 # _OLOG_FIELD_BASE_TYPE rationale, applied to the alarm-configured result). configured's non-null
 # branch is "boolean", the client returns bool | None (not str), so a widen-to-str trips this.
 _ALARM_CONFIGURED_BASE_TYPE: dict[str, str] = {
+    # GB-64, an object: plane -> classification, plus the probed flag.
+    "reach": "object",
     "enabled": "boolean",
     "pv": "string",
     "configured": "boolean",
@@ -1122,7 +1129,7 @@ _ALARM_CONFIGURED_BASE_TYPE: dict[str, str] = {
 # spurious null, enabled and pv. Every OTHER advertised property is sometimes-absent (configured is
 # present on every path but is None on the disabled/withheld/tree-unknown paths, so it too must
 # permit null) and MUST permit null (see the conformance test below).
-_ALARM_CONFIGURED_ALWAYS_PRESENT = frozenset({"enabled", "pv"})
+_ALARM_CONFIGURED_ALWAYS_PRESENT = frozenset({"enabled", "pv", "reach"})
 
 
 @pytest.mark.asyncio
@@ -1133,7 +1140,7 @@ async def test_alarm_configured_exposes_typed_output_schema() -> None:
     retype (no ``properties`` at all).
 
     Mirrors test_archiver_history_exposes_typed_output_schema for the single alarm tool: (1) the
-    schema title is AlarmConfiguredResult; (2) the advertised properties are EXACTLY the 7 mapped
+    schema title is AlarmConfiguredResult; (2) the advertised properties are EXACTLY the 8 mapped
     fields, completeness both ways (mypy --strict guards an undeclared key in a return literal;
     this guards a dropped one); (3) every field carries the right JSON BASE type, read via
     :func:`_base_type` from the bare ``type`` (non-nullable) OR the non-null ``anyOf`` branch
@@ -1226,6 +1233,8 @@ async def test_alarm_configured_structured_output_conforms_to_its_schema(
 # NameStatus.registered is bool, so query_naming_lookup yields bool | None (not str), and a
 # widen-to-str would trip this.
 _NAME_LOOKUP_BASE_TYPE: dict[str, str] = {
+    # GB-64, an object: plane -> classification, plus the probed flag.
+    "reach": "object",
     "enabled": "boolean",
     "name": "string",
     "registered": "boolean",
@@ -1239,7 +1248,7 @@ _NAME_LOOKUP_BASE_TYPE: dict[str, str] = {
 # never as a spurious null, enabled and name. Every OTHER advertised property is sometimes-absent
 # (registered is present on every path but is None on the disabled/withheld paths, so it too must
 # permit null) and MUST permit null (see the conformance test below).
-_NAME_LOOKUP_ALWAYS_PRESENT = frozenset({"enabled", "name"})
+_NAME_LOOKUP_ALWAYS_PRESENT = frozenset({"enabled", "name", "reach"})
 
 
 @pytest.mark.asyncio
@@ -1249,7 +1258,7 @@ async def test_name_lookup_exposes_typed_output_schema() -> None:
     ``dict[str, object]`` return yields. Red before the retype (no properties at all).
 
     Mirrors test_alarm_configured_exposes_typed_output_schema for the single naming tool: (1) the
-    schema title is NameLookupResult; (2) the advertised properties are EXACTLY the 7 mapped
+    schema title is NameLookupResult; (2) the advertised properties are EXACTLY the 8 mapped
     fields, completeness both ways (mypy --strict guards an undeclared key in a literal; this
     guards a dropped one); (3) every field carries the right JSON BASE type via :func:`_base_type`
     from the bare ``type`` (non-nullable) OR the non-null ``anyOf`` branch (``X | None``). Also
@@ -1340,6 +1349,8 @@ async def test_name_lookup_structured_output_conforms_to_its_schema(
 # accidental narrowing to a wrong scalar. Only ``archived``/``status``/``enabled``/``pv``/``note``
 # are genuine scalars (archived is a computed bool, not str).
 _ARCHIVE_STATUS_BASE_TYPE: dict[str, str | None] = {
+    # GB-64, an object: plane -> classification, plus the probed flag.
+    "reach": "object",
     "enabled": "boolean",
     "pv": "string",
     "archived": "boolean",
@@ -1357,7 +1368,7 @@ _ARCHIVE_STATUS_BASE_TYPE: dict[str, str | None] = {
 
 # The keys is_archived emits on EVERY return path and never as a spurious null, enabled and pv.
 # archived is present on every path but None on the disabled path, so it too must permit null.
-_ARCHIVE_STATUS_ALWAYS_PRESENT = frozenset({"enabled", "pv"})
+_ARCHIVE_STATUS_ALWAYS_PRESENT = frozenset({"enabled", "pv", "reach"})
 
 
 @pytest.mark.asyncio
@@ -1367,7 +1378,7 @@ async def test_is_archived_exposes_typed_output_schema() -> None:
     return yields. Red before the retype (no properties at all).
 
     Mirrors test_name_lookup_exposes_typed_output_schema: (1) the schema title is
-    ArchiveStatusResult; (2) the advertised properties are EXACTLY the 13 mapped fields:
+    ArchiveStatusResult; (2) the advertised properties are EXACTLY the 14 mapped fields:
     completeness both ways (mypy --strict guards an undeclared key in a literal; this guards a
     dropped one); (3) every field carries the expected JSON base type via :func:`_base_type`. The 8
     ``object | None`` enrichment fields must advertise NO base type (``None``), a widening to a
@@ -1447,6 +1458,8 @@ async def test_is_archived_structured_output_conforms_to_its_schema(
 # No object|None field here, all five are concrete scalars/containers; ``capped``/``note`` are
 # ``X | None`` but their non-null branch still carries a type (boolean/string).
 _LIST_ARCHIVED_PVS_BASE_TYPE: dict[str, str | None] = {
+    # GB-64, an object: plane -> classification, plus the probed flag.
+    "reach": "object",
     "enabled": "boolean",
     "pvs": "array",
     "total": "integer",
@@ -1455,7 +1468,7 @@ _LIST_ARCHIVED_PVS_BASE_TYPE: dict[str, str | None] = {
 }
 
 # The keys list_archived_pvs emits on EVERY return path and never as a spurious null.
-_LIST_ARCHIVED_PVS_ALWAYS_PRESENT = frozenset({"enabled", "pvs", "total"})
+_LIST_ARCHIVED_PVS_ALWAYS_PRESENT = frozenset({"enabled", "pvs", "total", "reach"})
 
 
 @pytest.mark.asyncio
@@ -1463,7 +1476,7 @@ async def test_list_archived_pvs_exposes_typed_output_schema() -> None:
     """S29: list_archived_pvs advertises a STRUCTURED outputSchema, its ArchivedPvsResult
     TypedDict's typed ``properties``, not the accept-all schema a plain ``dict[str, object]`` return
     yields. Red before the retype (no properties). Mirrors the is_archived exposes test:
-    (1) properties are non-empty; (2) they are EXACTLY the 5 mapped fields, completeness both ways
+    (1) properties are non-empty; (2) they are EXACTLY the 6 mapped fields, completeness both ways
     (mypy --strict guards an undeclared key in a literal; this guards a dropped one); (3) each field
     carries the expected JSON base type via :func:`_base_type`."""
     from epics_mcp.server import mcp
@@ -1529,6 +1542,8 @@ async def test_list_archived_pvs_structured_output_conforms_to_its_schema(
 # render as ``anyOf[{}, {type: null}]`` (non-null branch has no ``type``) so _base_type returns None
 # for them; a widening to a concrete scalar would flip that and trip the assertion.
 _GET_APPLIANCE_INFO_BASE_TYPE: dict[str, str | None] = {
+    # GB-64, an object: plane -> classification, plus the probed flag.
+    "reach": "object",
     "enabled": "boolean",
     "note": "string",
     "identity": None,
@@ -1542,14 +1557,14 @@ _GET_APPLIANCE_INFO_BASE_TYPE: dict[str, str | None] = {
 }
 
 # The only key get_appliance_info emits on EVERY return path and never as a spurious null.
-_GET_APPLIANCE_INFO_ALWAYS_PRESENT = frozenset({"enabled"})
+_GET_APPLIANCE_INFO_ALWAYS_PRESENT = frozenset({"enabled", "reach"})
 
 
 @pytest.mark.asyncio
 async def test_get_appliance_info_exposes_typed_output_schema() -> None:
     """S29: get_appliance_info advertises a STRUCTURED outputSchema (ApplianceInfoResult), not the
     accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype. Checks
-    properties non-empty, EXACTLY the 10 mapped fields (completeness both ways), and each field's
+    properties non-empty, EXACTLY the 11 mapped fields (completeness both ways), and each field's
     :func:`_base_type`, the 8 object|None topology fields advertise NO base type (None)."""
     from epics_mcp.server import mcp
 
@@ -1613,6 +1628,8 @@ async def test_get_appliance_info_structured_output_conforms_to_its_schema(
 # (non-null branch boolean). The 26 getPVTypeInfo projection fields are object|None → None here (a
 # widening to a concrete scalar, e.g. one wrongly typed str, would flip _base_type and trip this).
 _GET_ARCHIVE_INFO_BASE_TYPE: dict[str, str | None] = {
+    # GB-64, an object: plane -> classification, plus the probed flag.
+    "reach": "object",
     "enabled": "boolean",
     "pv": "string",
     "found": "boolean",
@@ -1647,14 +1664,14 @@ _GET_ARCHIVE_INFO_BASE_TYPE: dict[str, str | None] = {
 
 # The keys get_archive_info emits on EVERY path and never as a spurious null, enabled and pv.
 # found is present on every path but None on the disabled path (tri-state), so it too permits null.
-_GET_ARCHIVE_INFO_ALWAYS_PRESENT = frozenset({"enabled", "pv"})
+_GET_ARCHIVE_INFO_ALWAYS_PRESENT = frozenset({"enabled", "pv", "reach"})
 
 
 @pytest.mark.asyncio
 async def test_get_archive_info_exposes_typed_output_schema() -> None:
     """S29: get_archive_info advertises a STRUCTURED outputSchema (ArchiveInfoResult), not the
     accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype. Checks
-    properties non-empty, EXACTLY the 30 mapped fields (completeness both ways), and each field's
+    properties non-empty, EXACTLY the 31 mapped fields (completeness both ways), and each field's
     :func:`_base_type`, the 26 object|None type-info fields advertise NO base type (None)."""
     from epics_mcp.server import mcp
 
@@ -1721,6 +1738,8 @@ async def test_get_archive_info_structured_output_conforms_to_its_schema(
 # advertise. An INDEPENDENT source of truth (not reflected from the TypedDict). All four are
 # concrete scalars/containers; only ``note`` is nullable (its non-null branch is still a string).
 _LIST_CHANNEL_VOCABULARY_BASE_TYPE: dict[str, str | None] = {
+    # GB-64, an object: plane -> classification, plus the probed flag.
+    "reach": "object",
     "enabled": "boolean",
     "properties": "array",
     "tags": "array",
@@ -1728,14 +1747,14 @@ _LIST_CHANNEL_VOCABULARY_BASE_TYPE: dict[str, str | None] = {
 }
 
 # The keys list_channel_vocabulary emits on EVERY return path and never as a spurious null.
-_LIST_CHANNEL_VOCABULARY_ALWAYS_PRESENT = frozenset({"enabled", "properties", "tags"})
+_LIST_CHANNEL_VOCABULARY_ALWAYS_PRESENT = frozenset({"enabled", "properties", "tags", "reach"})
 
 
 @pytest.mark.asyncio
 async def test_list_channel_vocabulary_exposes_typed_output_schema() -> None:
     """S29: list_channel_vocabulary advertises a STRUCTURED outputSchema (ChannelVocabularyResult),
     not the accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype.
-    Checks properties non-empty, EXACTLY the 4 mapped fields (completeness both ways), and each
+    Checks properties non-empty, EXACTLY the 5 mapped fields (completeness both ways), and each
     field's :func:`_base_type`."""
     from epics_mcp.server import mcp
 
@@ -1797,6 +1816,8 @@ async def test_list_channel_vocabulary_structured_output_conforms_to_its_schema(
 # alarm docs; the enabled-only start/end/total/capped and disabled-only note are X | None but their
 # non-null branch carries a concrete type.
 _GET_ALARM_HISTORY_BASE_TYPE: dict[str, str | None] = {
+    # GB-64, an object: plane -> classification, plus the probed flag.
+    "reach": "object",
     "enabled": "boolean",
     "pv": "string",
     "events": "array",
@@ -1808,14 +1829,14 @@ _GET_ALARM_HISTORY_BASE_TYPE: dict[str, str | None] = {
 }
 
 # The keys get_alarm_history emits on EVERY return path and never as a spurious null.
-_GET_ALARM_HISTORY_ALWAYS_PRESENT = frozenset({"enabled", "pv", "events"})
+_GET_ALARM_HISTORY_ALWAYS_PRESENT = frozenset({"enabled", "pv", "events", "reach"})
 
 
 @pytest.mark.asyncio
 async def test_get_alarm_history_exposes_typed_output_schema() -> None:
     """S29: get_alarm_history advertises a STRUCTURED outputSchema (AlarmHistoryResult), not the
     accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype. Checks
-    properties non-empty, EXACTLY the 8 mapped fields (completeness both ways), and each field's
+    properties non-empty, EXACTLY the 9 mapped fields (completeness both ways), and each field's
     :func:`_base_type`."""
     from epics_mcp.server import mcp
 
@@ -1882,6 +1903,8 @@ async def test_get_alarm_history_structured_output_conforms_to_its_schema(
 # caught even where nullability hides it from a bare-``type`` check. ``pvs`` is an array of
 # heterogeneous entry dicts (concrete hit / miss / registry match), hence "array" over opaque items.
 _DISCOVER_PVS_BASE_TYPE: dict[str, str | None] = {
+    # GB-64, an object: plane -> classification, plus the probed flag.
+    "reach": "object",
     "pattern": "string",
     "pvs": "array",
     "total": "integer",
@@ -1892,7 +1915,7 @@ _DISCOVER_PVS_BASE_TYPE: dict[str, str | None] = {
 
 # The keys discover_pvs emits on EVERY one of its four return paths (concrete hit, concrete miss,
 # wildcard with ChannelFinder disabled, wildcard enabled) and never as a spurious null.
-_DISCOVER_PVS_ALWAYS_PRESENT = frozenset({"pattern", "pvs", "total"})
+_DISCOVER_PVS_ALWAYS_PRESENT = frozenset({"pattern", "pvs", "total", "reach"})
 
 
 @pytest.mark.asyncio
@@ -1901,7 +1924,7 @@ async def test_discover_pvs_exposes_typed_output_schema() -> None:
     accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype, and red
     while the tool still carries the explicit ``@mcp.tool(output_schema=None)`` opt-out, which
     OVERRIDES the annotation-derived schema (that kwarg, not any post-pass, is what keeps the
-    untyped tools schema-less). Checks properties non-empty, EXACTLY the 6 mapped fields
+    untyped tools schema-less). Checks properties non-empty, EXACTLY the 7 mapped fields
     (completeness both ways), and each field's :func:`_base_type`."""
     from epics_mcp.server import mcp
 
@@ -2053,6 +2076,8 @@ async def test_discover_pvs_structured_output_conforms_to_its_schema(
 # WIDENING is caught even where nullability hides it from a bare-``type`` check. ``channels`` is an
 # array of opaque channel objects; the item condition itself is pinned by _OUTPUT_ARRAY_ITEMS.
 _FIND_CHANNELS_BASE_TYPE: dict[str, str | None] = {
+    # GB-64, an object: plane -> classification, plus the probed flag.
+    "reach": "object",
     "enabled": "boolean",
     "channels": "array",
     "total": "integer",
@@ -2067,7 +2092,7 @@ _FIND_CHANNELS_BASE_TYPE: dict[str, str | None] = {
 # splits them again (``note`` only unconfigured, ``capped`` only on the configured list path), so
 # ``enabled`` is the only field every path has. The exact per-path sets are asserted in the
 # conformance test; this constant is only their intersection.
-_FIND_CHANNELS_ALWAYS_PRESENT = frozenset({"enabled"})
+_FIND_CHANNELS_ALWAYS_PRESENT = frozenset({"enabled", "reach"})
 
 
 @pytest.mark.asyncio
@@ -2076,7 +2101,7 @@ async def test_find_channels_exposes_typed_output_schema() -> None:
     accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype, and red
     while the tool still carries ``@mcp.tool(output_schema=None)``, which OVERRIDES the
     annotation-derived schema (that kwarg, not any post-pass, is what keeps the untyped tools
-    schema-less). Checks properties non-empty, EXACTLY the 6 mapped fields (completeness both
+    schema-less). Checks properties non-empty, EXACTLY the 7 mapped fields (completeness both
     ways), and each field's :func:`_base_type`."""
     from epics_mcp.server import mcp
 
@@ -2135,7 +2160,7 @@ async def test_find_channels_structured_output_conforms_to_its_schema(
 
     The STRONGEST assertion here is the per-path EXACT key set (see the comment at the ``paths``
     table): it is what makes all four rows load-bearing and what carries the mode disjointness,
-    which the schema itself cannot express (``total=False`` without ``oneOf`` permits all six keys
+    which the schema itself cannot express (``total=False`` without ``oneOf`` permits all seven keys
     at once). Part B (static) checks nullability in BOTH directions against
     _FIND_CHANNELS_ALWAYS_PRESENT; ``seen == set(properties)`` is the weaker union check, kept
     because it is the direction that reddens when a NEW field is advertised and no row drives it.
@@ -2198,36 +2223,36 @@ async def test_find_channels_structured_output_conforms_to_its_schema(
     # a path could silently take the WRONG branch (measured: deleting the disabled-path count
     # special-case makes disabled-count emit the LIST literal) and nothing would notice, while
     # ``seen`` stays complete because it is a UNION, it is in fact satisfiable by two of the four.
-    # Nor could the schema catch it: ``total=False`` without ``oneOf`` permits all six keys at once,
-    # so disjointness is not expressible there. Four directions, one per row.
+    # Nor could the schema catch it: ``total=False`` without ``oneOf`` permits all seven keys
+    # at once, so disjointness is not expressible there. Four directions, one per row.
     paths: list[tuple[str, EpicsConfig, dict[str, Any], object, set[str]]] = [
         (
             "disabled-list",
             disabled,
             {"name_pattern": "SIM:*"},
             None,
-            {"enabled", "channels", "total", "note"},
+            {"enabled", "channels", "total", "note", "reach"},
         ),
         (
             "disabled-count",
             disabled,
             {"name_pattern": "SIM:*", "count_only": True},
             None,
-            {"enabled", "match_count", "note"},
+            {"enabled", "match_count", "note", "reach"},
         ),
         (
             "enabled-list",
             enabled,
             {"name_pattern": "SIM:*"},
             one_channel,
-            {"enabled", "channels", "total", "capped"},
+            {"enabled", "channels", "total", "capped", "reach"},
         ),
         (
             "enabled-count",
             enabled,
             {"name_pattern": "SIM:*", "count_only": True},
             7,
-            {"enabled", "match_count"},
+            {"enabled", "match_count", "reach"},
         ),
     ]
 
@@ -3280,9 +3305,10 @@ async def test_stripped_tool_still_returns_structured_content(
 # machine-readable (the core value of S29) and cost only ~1% more context per agent turn, so the
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
-# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-15 after GP-15: the
-# core lane is 70_291 and the full lane 83_154 (the docstring below carries the deltas, and the
-# pair 67_100 / 79_905 measured after OQ11 on 2026-08-13,
+# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-16 after GB-64: the
+# core lane is 74_935 and the full lane 87_798 (the docstring below carries the deltas, and the
+# pair 70_291 / 83_154 measured after GP-15 on 2026-08-15,
+# the pair 67_100 / 79_905 measured after OQ11 on 2026-08-13,
 # the pair 66_062 / 78_867 measured after BG-DOC earlier that day, the pairs 65_692 / 78_497 and
 # 65_402 / 78_207 from earlier still, 64_719 / 77_524 measured on
 # the tree before BG-DOC began, 64_719 / 75_853 from 2026-08-08, 64_719 / 74_899 from 2026-08-06
@@ -3306,9 +3332,14 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 70_291 and the full lane
-    83_154, re-measured 2026-08-15 on both lanes with the display-gated tools excluded for the core
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 74_935 and the full lane
+    87_798, re-measured 2026-08-16 on both lanes with the display-gated tools excluded for the core
     one, since a lane estimated rather than measured is the error the constant's comment records.
+    GB-64 moved BOTH lanes by exactly +4_644, from 70_291 / 83_154: the ``reach`` field's schema
+    rides on every typed READ tool, all of which are core, so the display-gated four contribute
+    nothing and the two deltas coincide. It was +14_904 before the ``Reach`` docstring was cut
+    to one line, which is the measurement that made the cut: FastMCP embeds a TypedDict's
+    docstring into every schema carrying it, so rationale written there ships once per tool.
 
     GP-15 moved core +3191 and full +3249, from 67_100 / 79_905, and the split of that figure is
     the honest half. Only 472 chars are the edit itself: the ``get_guide`` topic description gained

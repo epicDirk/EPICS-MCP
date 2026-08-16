@@ -52,7 +52,7 @@ from __future__ import annotations
 import functools
 import os
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, cast
 from urllib.parse import urlsplit
 
 from epics_mcp.config import EpicsConfig, get_config
@@ -80,19 +80,23 @@ Scope = Literal["not-configured", "loopback-only", "beyond-loopback"]
 REACH_KEY = "reach"
 
 
+# ⚠️ THE DOCSTRING BELOW IS ONE LINE, AND THAT IS A MEASURED CONSTRAINT RATHER THAN A STYLE.
+# FastMCP embeds a TypedDict's docstring into the outputSchema of every tool that returns a shape
+# carrying it, so this one ships TWELVE times in ``tools/list``. Measured: the reasoning that now
+# stands in this comment cost 14 904 chars there, a 17.9 percent growth of the whole payload, for
+# text no caller needs at the point of use. A comment reaches the next author, which is who it is
+# for; a docstring reaches every client on every listing.
+#
+# WHY ``planes`` IS A MAPPING rather than a single value: a cross-plane tool answers from several
+# at once, and one shape for both cases beats two shapes that drift apart. A single-plane tool
+# simply has one entry.
+#
+# WHY ``probed`` IS ON THE WIRE while it is a constant False: it is the difference between this
+# field and the defect it removes. Without it a caller reading ``beyond-loopback`` cannot tell a
+# measured statement from a configured one, which is precisely the confusion that produced GB-64.
+# The day a probing variant exists, the key is already there to carry True.
 class Reach(TypedDict):
-    """The reach field as it goes on the wire.
-
-    ``planes`` is a mapping rather than a single value because a cross-plane tool answers from
-    several at once, and one shape for both cases beats two shapes that drift apart. A
-    single-plane tool simply has one entry.
-
-    ``probed`` is a constant False today and is on the wire anyway. It is the difference
-    between this field and the defect it removes: without it, a caller reading
-    ``beyond-loopback`` would have no way to tell a measured statement from a configured one,
-    which is precisely the confusion that produced GB-64. The day a probing variant exists,
-    the key is already there to carry True.
-    """
+    """Which planes answered, how far each reaches, and whether anything probed."""
 
     planes: dict[str, str]
     probed: bool
@@ -182,11 +186,9 @@ def reach_of(
     }
 
 
-def with_reach[**P](
+def with_reach[**P, R](
     *planes: Plane,
-) -> Callable[
-    [Callable[P, Awaitable[dict[str, object]]]], Callable[P, Awaitable[dict[str, object]]]
-]:
+) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     """Attach :func:`reach_of` to a read tool's answer, once, under :data:`REACH_KEY`.
 
     A sibling of :func:`~epics_mcp.tool_errors.translate_epics_errors`, and deliberately the
@@ -205,14 +207,21 @@ def with_reach[**P](
     rule quietly wrong for the specific case, which is the harder bug to find.
     """
 
-    def decorate(
-        fn: Callable[P, Awaitable[dict[str, object]]],
-    ) -> Callable[P, Awaitable[dict[str, object]]]:
+    def decorate(fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
         @functools.wraps(fn)
-        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> dict[str, object]:
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             result = await fn(*args, **kwargs)
-            if REACH_KEY not in result:
-                result[REACH_KEY] = reach_of(*planes)
+            # ⚠️ The ONE cast in this module, and it is deliberate rather than a shortcut. The
+            # return type has to be passed through UNCHANGED, because FastMCP builds each tool's
+            # advertised outputSchema from that annotation, and collapsing it to
+            # ``dict[str, object]`` here would silently un-type every typed tool this decorator
+            # touches. mypy cannot see that a TypedDict is a mutable string-keyed mapping at
+            # runtime (key-type invariance), so the assignment needs the cast even though it is
+            # exactly what the shapes declare: every decorated tool's TypedDict carries a
+            # ``reach`` field, which is what makes the write legal in the first place.
+            writable = cast(dict[str, object], result)
+            if REACH_KEY not in writable:
+                writable[REACH_KEY] = reach_of(*planes)
             return result
 
         return wrapper

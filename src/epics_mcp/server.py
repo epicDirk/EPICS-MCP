@@ -602,6 +602,7 @@ async def discover_pvs(
     ),
 )
 @translate_epics_errors
+@with_reach("channelfinder")
 async def find_channels(
     name_pattern: Annotated[
         str,
@@ -736,6 +737,7 @@ async def find_channels(
     ),
 )
 @translate_epics_errors
+@with_reach("channelfinder")
 async def list_channel_vocabulary(
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
 ) -> ChannelVocabularyResult:
@@ -768,6 +770,7 @@ async def list_channel_vocabulary(
     )
 )
 @translate_epics_errors
+@with_reach("naming")
 async def lookup_device_name(
     name: Annotated[
         str,
@@ -805,6 +808,7 @@ async def lookup_device_name(
     )
 )
 @translate_epics_errors
+@with_reach("archiver")
 async def is_archived(
     pv_name: Annotated[str, Field(description="EPICS PV name")],
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
@@ -836,6 +840,7 @@ async def is_archived(
     )
 )
 @translate_epics_errors
+@with_reach("archiver")
 async def get_pv_history(
     pv_name: Annotated[str, Field(description="EPICS PV name")],
     start: Annotated[
@@ -877,6 +882,7 @@ async def get_pv_history(
     ),
 )
 @translate_epics_errors
+@with_reach("archiver")
 async def get_archive_info(
     pv_name: Annotated[str, Field(description="EPICS PV name")],
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
@@ -912,6 +918,7 @@ async def get_archive_info(
     ),
 )
 @translate_epics_errors
+@with_reach("archiver")
 async def get_appliance_info(
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
 ) -> ApplianceInfoResult:
@@ -940,6 +947,7 @@ async def get_appliance_info(
     ),
 )
 @translate_epics_errors
+@with_reach("archiver")
 async def list_archived_pvs(
     pattern: Annotated[
         str | None,
@@ -994,6 +1002,7 @@ async def list_archived_pvs(
     )
 )
 @translate_epics_errors
+@with_reach("alarm")
 async def is_alarm_configured(
     pv_name: Annotated[str, Field(description="EPICS PV name")],
     config_name: Annotated[
@@ -1057,6 +1066,7 @@ _AlarmCommand = Literal["Enabled", "Disabled"]
     ),
 )
 @translate_epics_errors
+@with_reach("alarm")
 async def get_alarm_history(
     pv_name: Annotated[
         str,
@@ -1176,6 +1186,7 @@ async def get_alarm_history(
     )
 )
 @translate_epics_errors
+@with_reach("olog")
 async def search_logbook(
     text: Annotated[
         str | None, Field(description="Free-text to search in the log description")
@@ -1308,6 +1319,7 @@ async def search_logbook(
     )
 )
 @translate_epics_errors
+@with_reach("olog")
 async def get_log_entry(
     log_id: Annotated[str, Field(description="Olog log entry id")],
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
@@ -1338,6 +1350,7 @@ async def get_log_entry(
     )
 )
 @translate_epics_errors
+@with_reach("olog")
 async def list_logbooks(
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
 ) -> OlogLogbooksResult:
@@ -1359,6 +1372,7 @@ async def list_logbooks(
     )
 )
 @translate_epics_errors
+@with_reach("olog")
 async def list_tags(
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
 ) -> OlogTagsResult:
@@ -1380,6 +1394,7 @@ async def list_tags(
     )
 )
 @translate_epics_errors
+@with_reach("olog")
 async def list_log_levels(
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,
 ) -> OlogLevelsResult:
@@ -1694,6 +1709,7 @@ async def update_log_entry(
     )
 )
 @translate_epics_errors
+@with_reach("olog")
 async def download_log_attachment(
     log_id: Annotated[
         str | None,
@@ -1753,6 +1769,7 @@ async def download_log_attachment(
     )
 )
 @translate_epics_errors
+@with_reach("olog")
 async def list_log_attachments(
     log_id: Annotated[str, Field(description="Id of the Olog entry whose attachments to list")],
     timeout: Annotated[float, Field(description="Timeout in seconds", gt=0)] = 5.0,

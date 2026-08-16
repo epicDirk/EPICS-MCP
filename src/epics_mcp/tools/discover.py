@@ -3,6 +3,7 @@
 from typing import TypedDict
 
 from epics_mcp.errors import EpicsConnectionError, PVNotFoundError, PVTimeoutError
+from epics_mcp.provenance import Reach, reach_of
 from epics_mcp.services.channelfinder_client import DEFAULT_MAX_RESULTS
 from epics_mcp.services.checkers import query_channels
 from epics_mcp.services.epics_client import pv_get
@@ -68,6 +69,7 @@ class DiscoverPvsResult(TypedDict, total=False):
     capped: bool | None
     source: str | None
     note: str | None
+    reach: Reach
 
 
 async def _discover_pvs(pattern: str, timeout: float | None = None) -> DiscoverPvsResult:
@@ -86,8 +88,16 @@ async def _discover_pvs(pattern: str, timeout: float | None = None) -> DiscoverP
     ChannelFinder unconfigured the wildcard branch keeps an honest 'requires ChannelFinder' stub
     rather than a bare empty result.
     """
+    # GB-64: this tool is the ONE read whose plane depends on the argument, so it computes its
+    # own reach per branch instead of carrying a static ``@with_reach`` at the tool boundary. A
+    # fixed plane would be wrong half the time, and wrong in the direction that matters: a
+    # wildcard answered by an unconfigured ChannelFinder would be labelled with the live-PV
+    # reach, i.e. it would report a lane that answered nothing. ``with_reach`` never overwrites
+    # an existing key, so the two mechanisms compose rather than fight.
     if any(c in pattern for c in _WILDCARD_CHARS):
-        return await _discover_by_channelfinder(pattern, timeout)
+        wildcard = await _discover_by_channelfinder(pattern, timeout)
+        wildcard["reach"] = reach_of("channelfinder")
+        return wildcard
 
     # Treat as concrete PV name: try to connect. Keep the client's classification distinct (S3-5):
     # a timeout (IOC down / network) or a connection error must NOT collapse to "not_found", which
@@ -98,6 +108,7 @@ async def _discover_pvs(pattern: str, timeout: float | None = None) -> DiscoverP
             "pattern": pattern,
             "pvs": [{"pv_name": pattern, "status": "found", "value": result.get("value")}],
             "total": 1,
+            "reach": reach_of("live-pv"),
         }
     except PVNotFoundError:
         status = "not_found"
@@ -109,6 +120,7 @@ async def _discover_pvs(pattern: str, timeout: float | None = None) -> DiscoverP
         "pattern": pattern,
         "pvs": [{"pv_name": pattern, "status": status}],
         "total": 0,
+        "reach": reach_of("live-pv"),
     }
 
 

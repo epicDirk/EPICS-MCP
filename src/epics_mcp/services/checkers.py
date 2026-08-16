@@ -28,6 +28,7 @@ from typing import Any, TypedDict
 
 from epics_mcp.config import get_config
 from epics_mcp.errors import EpicsConnectionError, EpicsError
+from epics_mcp.provenance import Reach
 from epics_mcp.services._http import http_status, shown_cause
 from epics_mcp.services._time_window import TimeWindowFormatError
 from epics_mcp.services.alarm_client import AlarmClient
@@ -361,6 +362,7 @@ class ArchiveStatusResult(TypedDict, total=False):
     connection_first_established: object | None
     connection_last_restablished: object | None  # upstream typo, verbatim (getPVStatus wire key)
     note: str | None
+    reach: Reach
 
 
 async def query_archived(pv: str, timeout: float = 5.0) -> ArchiveStatusResult:
@@ -442,6 +444,7 @@ class AlarmConfiguredResult(TypedDict, total=False):
     withheld: bool | None
     detail: dict[str, object] | None
     note: str | None
+    reach: Reach
 
 
 async def query_alarm_configured(
@@ -512,6 +515,7 @@ class AlarmHistoryResult(TypedDict, total=False):
     total: int | None
     capped: bool | None
     note: str | None
+    reach: Reach
 
 
 async def query_alarm_history(
@@ -601,6 +605,7 @@ class ChannelQueryResult(TypedDict, total=False):
     capped: bool | None
     match_count: int | None
     note: str | None
+    reach: Reach
 
 
 async def query_channels(
@@ -691,6 +696,7 @@ class ChannelVocabularyResult(TypedDict, total=False):
     properties: list[str]
     tags: list[str]
     note: str | None
+    reach: Reach
 
 
 async def query_channel_vocabulary(timeout: float = 5.0) -> ChannelVocabularyResult:
@@ -747,6 +753,7 @@ class NameLookupResult(TypedDict, total=False):
     message: str | None
     withheld: bool | None
     note: str | None
+    reach: Reach
 
 
 async def query_naming_lookup(name: str, timeout: float = 5.0) -> NameLookupResult:

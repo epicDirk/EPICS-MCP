@@ -15,6 +15,7 @@ from typing import Literal, TypedDict
 
 from epics_mcp.config import get_config
 from epics_mcp.errors import EpicsConnectionError, EpicsError
+from epics_mcp.provenance import Reach
 from epics_mcp.services._time_window import TimeWindowFormatError
 from epics_mcp.services.archiver_client import (
     DEFAULT_MAX_POINTS,
@@ -63,6 +64,7 @@ ArchiverHistoryResult = TypedDict(
         "status": Literal["ok", "empty", "withheld"] | None,
         "withheld_reason": str | None,
         "note": str | None,
+        "reach": Reach,
     },
     total=False,
 )
@@ -145,6 +147,7 @@ class ArchivedPvsResult(TypedDict, total=False):
     total: int
     capped: bool | None
     note: str | None
+    reach: Reach
 
 
 async def _list_archived_pvs(
@@ -250,6 +253,7 @@ class ArchiveInfoResult(TypedDict, total=False):
     controlling_pv: object | None
     policy_name: object | None
     modification_time: object | None
+    reach: Reach
 
 
 async def _get_archive_info(pv: str, timeout: float = 5.0) -> ArchiveInfoResult:
@@ -361,6 +365,7 @@ class ApplianceInfoResult(TypedDict, total=False):
     data_retrieval_url: object | None
     cluster_inet_port: object | None
     version: object | None
+    reach: Reach
 
 
 async def _get_appliance_info(timeout: float = 5.0) -> ApplianceInfoResult:

@@ -23,6 +23,7 @@ from typing import TypedDict
 from epics_mcp.config import get_config
 from epics_mcp.errors import EpicsConnectionError, EpicsError
 from epics_mcp.olog_safety import get_olog_safety
+from epics_mcp.provenance import Reach
 from epics_mcp.services._http import basic_auth_header, http_status
 from epics_mcp.services._time_window import TimeWindowFormatError
 from epics_mcp.services.olog_attachments import (
@@ -100,6 +101,15 @@ from epics_mcp.services.olog_exceptions import (
 # ``{additionalProperties: true}`` a plain dict yields, provided the tool does not opt out with
 # ``@mcp.tool(output_schema=None)``, which overrides the annotation entirely.
 # mypy --strict checks every ``return {...}`` literal against its declared shape here.
+#
+# ``reach`` (GB-64) is declared on every READ shape below and set by nothing in this module. It is
+# attached at the MCP tool boundary by ``provenance.with_reach``, so for a TOOL it is always
+# present, which is where ``tests/test_server.py``'s per-tool ALWAYS_PRESENT sets record it. It
+# stays OPTIONAL in the type rather than Required, and that is modelling rather than laziness:
+# these shapes are also returned to in-process callers (``find_device``, the diagnose planes) that
+# are not tools and get no field, so a Required annotation would be a promise this module cannot
+# keep. Optional-in-type plus always-present-per-tool is the honest pair, and it is the pair the
+# conformance guard already knows how to check.
 
 
 class OlogSearchResult(TypedDict, total=False):
@@ -109,6 +119,7 @@ class OlogSearchResult(TypedDict, total=False):
     total_matches: int | None
     capped: bool | None
     note: str | None
+    reach: Reach
 
 
 class OlogEntryResult(TypedDict, total=False):
@@ -117,18 +128,21 @@ class OlogEntryResult(TypedDict, total=False):
     found: bool | None
     entry: dict[str, object] | None
     note: str | None
+    reach: Reach
 
 
 class OlogLogbooksResult(TypedDict, total=False):
     enabled: bool
     logbooks: list[str]
     note: str | None
+    reach: Reach
 
 
 class OlogTagsResult(TypedDict, total=False):
     enabled: bool
     tags: list[str]
     note: str | None
+    reach: Reach
 
 
 class OlogLevelsResult(TypedDict, total=False):
@@ -136,6 +150,7 @@ class OlogLevelsResult(TypedDict, total=False):
     levels: list[str]
     default_level: str | None
     note: str | None
+    reach: Reach
 
 
 class OlogCreateResult(TypedDict, total=False):
@@ -171,6 +186,7 @@ class OlogDownloadResult(TypedDict, total=False):
     content_base64: str | None
     output_path: str | None
     note: str | None
+    reach: Reach
 
 
 class OlogListAttachmentsResult(TypedDict, total=False):
@@ -180,6 +196,7 @@ class OlogListAttachmentsResult(TypedDict, total=False):
     attachments: list[dict[str, object]]
     attachment_count: int | None
     note: str | None
+    reach: Reach
 
 
 _OLOG_DISABLED_NOTE = (
