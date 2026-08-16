@@ -464,6 +464,12 @@ def test_the_cap_line_reports_the_share_of_the_walked_universe() -> None:
     ]
 
     assert "25.0%" in head_line, f"2 of 8 walked files is 25.0%; line was {head_line!r}"
+    # ⛔ Both halves of the ratio name the SAME population, and "display(s)" did not. The engine
+    # seeds its walk over displays AND trends and resolves a trend edge in `known_trends`, so a
+    # `.plt` can be capped: the numerator spans both kinds. Calling it "display(s)" over a
+    # denominator of files compared two populations in the label while the arithmetic was right.
+    # Found by the post-build review; measured latent (no capped `.plt` on any reachable dataset).
+    assert "file(s)" in head_line and "display(s)" not in head_line, head_line
     # The denominator is NAMED, not only applied: a share whose base the reader cannot see is the
     # same unanswerable question as the bare count it replaces.
     assert "8 files this walk visited" in head_line

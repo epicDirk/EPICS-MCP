@@ -108,8 +108,10 @@ carry breaking changes).
   display tools say about a screen set.** The pin had stood still at `0ab0d73` while eight commits
   landed in `opi_navigation`, so every reachability and PV answer this server gave came out of a
   state the engine had already corrected. What arrives: `open_display` targets are matched the way
-  Phoebus matches them rather than case-sensitively (and the legacy `<path>` spelling is read too),
-  so jumps that were silently missing from the navigation graph are there; a Data Browser `.plt`
+  Phoebus matches them rather than case-sensitively, and the legacy `<path>` spelling is read too.
+  ⚠️ That one was measured LATENT, and the number belongs with it: over two corpora (5017 and 515
+  files, 2619 `open_display` actions) every spelling is already lowercase, so no jump appears or
+  disappears today; it protects a hand-edited or generator-written file. A Data Browser `.plt`
   is no longer counted as an operator screen by `find_screen`, `change_impact` and `find_device`;
   displays are no longer pushed out of the entry-point list by guessed edges; and the engine now
   exports the file universe a capped run walked, which is the honest denominator the

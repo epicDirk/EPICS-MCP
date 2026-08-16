@@ -102,6 +102,19 @@ def analyze_inventory[T](
     100%. The engine exports the universe for exactly this reason ([GQ-16]); reading anything else
     here would reintroduce the two-denominators defect this module already warns about below.
 
+    ⚠ THE SUM IS DELIBERATE and it contradicts the engine's own field comment, so the reason is
+    written here rather than left looking like an oversight. That comment keeps ``displays_walked``
+    and ``trends_walked`` apart because "how much of my DISPLAYS is incomplete" is a different
+    question from "how much of my FILES", and a sum would leave the reader guessing. True of the
+    counters as a diagnostic; not true of THIS ratio. The numerator is ``context_capped``, and the
+    engine seeds its walk over ``known_displays | known_trends`` while a trend edge resolves its
+    target in ``known_trends`` (``expansion.py``), so a ``.plt`` can be enqueued and therefore
+    capped. The numerator spans both kinds, so a denominator that did not would compare two
+    populations, which is the very defect the paragraph above rejects. The reader is not left
+    guessing because the rendered line names the population it divides by ("files").
+    ⚠ Honest limit: no capped ``.plt`` appears on any dataset reachable here, so the trend half of
+    the numerator is STRUCTURAL rather than observed.
+
     ⚠ ``glob_capped_count`` counts **PAIRS**, not source displays. The engine records
     ``(source display, raw <file> target)``, and one source can cap several distinct targets, so
     counting sources reports a smaller number for the same walk. Both readings are defensible in

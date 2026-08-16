@@ -478,8 +478,16 @@ def render_markdown(report: CoverageReport) -> str:
             # is the defect the paragraph above records.
             else ""
         )
+        # "file(s)", not "display(s)", and that word is the numerator's honest name. The engine
+        # seeds its walk over `known_displays | known_trends` and a TREND edge looks its target up
+        # in `known_trends` (expansion.py), so a `.plt` can be enqueued and therefore capped: the
+        # numerator ranges over both kinds. Measured, no capped `.plt` appears on any dataset
+        # reachable here, so this is a latent mislabel rather than a wrong number today; it is
+        # still the same defect class as the denominator question below, one line further left.
+        # It also makes both halves of the ratio name the same population, which is the property
+        # that makes a share meaningful at all.
         lines.append(
-            f"- ⚠️ **{len(report.displays_incomplete)} display(s){share} hit the per-display "
+            f"- ⚠️ **{len(report.displays_incomplete)} file(s){share} hit the per-display "
             "context cap, so THIS WHOLE REPORT IS A LOWER BOUND:** a PV that is not in the display "
             "set may sit on one of them, so its `has_display` is WITHHELD rather than `no`, and "
             "blind_spots and critical_uncovered undercount accordingly (re-run with a higher "

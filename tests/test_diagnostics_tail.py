@@ -309,16 +309,41 @@ def _tail_reads(source: str) -> list[str]:
     (``crossplane_check(context_capped=...)``), and those are the tail being PASSED ON, which is
     the whole point, not read again.
 
-    ⚠ Named blind spot: a dynamic read (``getattr(inv.diagnostics, name)``) is not an
-    ``ast.Attribute`` and is invisible here. That is a hole in a guard against accident, not
-    against evasion, and no source-level guard closes it.
+    ⚠ It follows ONE hop of local binding, and that was a real hole rather than a theoretical one.
+    ``diag = inventory.diagnostics`` followed by ``diag.displays_walked`` is two ``ast.Attribute``
+    nodes whose parents are both plain ``Name``s, so the direct form above sees neither, and the
+    uniqueness guard reported a clean tree while a second consumer read the tail. That is
+    reachable here rather than contrived: ``analyze_inventory`` hands the whole ``PvInventory`` to
+    a ``project`` callable that lives in another module, so a two-line read there would have been
+    invisible. Found by the post-build review of [GQ-16]; the names bound to ``.diagnostics`` are
+    collected first and then treated as parents in their own right.
+
+    ⚠ Named blind spots that remain. A dynamic read (``getattr(inv.diagnostics, name)``) is not an
+    ``ast.Attribute`` and is invisible here. So is a binding passed through a second name
+    (``a = inv.diagnostics; b = a; b.displays_walked``) or one that leaves the module. Both are
+    holes in a guard against ACCIDENT, not against evasion, and no source-level guard closes them.
     """
+    tree = ast.parse(source)
+    # Names bound directly to a ``.diagnostics`` attribute, so a read through one of them counts.
+    aliases = {
+        target.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "diagnostics"
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
     found: list[str] = []
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(tree):
         if not isinstance(node, ast.Attribute) or node.attr not in _TAIL_FIELDS:
             continue
         parent = node.value
-        if isinstance(parent, ast.Attribute) and parent.attr == "diagnostics":
+        # Two shapes, one meaning: the tail read directly off ``.diagnostics``, or off a local
+        # name bound to it one line earlier.
+        direct = isinstance(parent, ast.Attribute) and parent.attr == "diagnostics"
+        through_alias = isinstance(parent, ast.Name) and parent.id in aliases
+        if direct or through_alias:
             found.append(f"{node.attr}")
     return found
 
@@ -435,8 +460,22 @@ def test_the_detector_recognises_a_read_and_ignores_a_pass_on() -> None:
     assert _tail_reads("audit(rows, context_capped=capped, glob_capped_count=n)") == []
     # The field name on something that is not a diagnostics object.
     assert _tail_reads("x = other.context_capped") == []
-    # The diagnostics object itself, without reaching into the tail.
+    # The diagnostics object itself, without reaching into the tail. Still NOT a read: binding it
+    # is what every pass-on does, and flagging that would make the guard fire on the collection
+    # point's own neighbours.
     assert _tail_reads("d = inventory.diagnostics") == []
+    # ⛔ But a read THROUGH that binding is a read, and it used to be invisible. Two Attribute
+    # nodes whose parents are plain Names slipped past the direct form, so a consumer could hold
+    # the tail while the uniqueness guard reported a clean tree, which is the GB-71 defect the
+    # whole file exists against. Reachable rather than contrived: analyze_inventory hands the whole
+    # inventory to a `project` callable living in another module. Found by the post-build review of
+    # [GQ-16].
+    # RED-PROOF: drop the alias branch in _tail_reads and this line fails while every other
+    # assertion in this function stays green.
+    assert _tail_reads("d = inv.diagnostics\nx = d.displays_walked") == ["displays_walked"]
+    assert _tail_reads("d = inv.diagnostics\nn = len(d.glob_capped)") == ["glob_capped"]
+    # An unrelated name of the same shape must NOT be treated as an alias.
+    assert _tail_reads("d = other.thing\nx = d.displays_walked") == []
 
 
 # --------------------------------------------------------------------------------------------
