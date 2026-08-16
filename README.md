@@ -62,6 +62,9 @@ PV **write** is the one reach the launcher does not decide: enabling it forces a
 search reach, and the process refuses to start otherwise.
 Do not assume isolation from this document. Run `epics-doctor` to see what an instance actually
 reaches, and read [Safety and network posture](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/safety.md).
+An assistant does not have to ask: **every read answer carries a `reach` field** naming the plane
+that served it and its scope, so a value can never be quoted without saying which world it came
+from. That is the configuration rather than a probe, which the field says itself.
 
 ## The planes it sees
 

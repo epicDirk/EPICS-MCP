@@ -8,6 +8,15 @@ The full surface: every MCP tool grouped by plane, the standalone command-line t
 
 ## Tools
 
+**Every read tool answers with a `reach` field**, so this table does not repeat it per row. It
+names the plane that served the answer and how far that plane reaches: `loopback-only` (provably
+confined to this machine), `beyond-loopback` (it can leave this machine) or `not-configured` (no
+request was made at all). `probed: false` rides along and is the important half: this is the
+CONFIGURATION, read without a network call, so a reachable plane may still be down and a
+`beyond-loopback` one is not thereby proven to be production. No host and no port appear in it, by
+the rule that keeps addresses out of every client-facing payload here; for the addresses
+themselves, `epics-doctor` is the command, at a human's terminal.
+
 **The guide itself** (always available)
 
 | Tool | Description |
