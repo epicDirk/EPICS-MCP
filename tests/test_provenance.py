@@ -409,9 +409,18 @@ async def test_every_registered_read_tool_carries_the_field() -> None:
     """
     import importlib
     import inspect
+    import sys
 
-    from epics_mcp import display_tools
     from epics_mcp.server import mcp
+
+    # The capability, read from the same object mcp.list_tools() came from: server.py registers the
+    # display tools only after importing display_tools, so sys.modules holds that module exactly
+    # when a display tool can appear below. On a core-only install it is None and the fallback is
+    # never reached, because no display tool is registered there either.
+    # Deliberately NOT engine_available(): that helper answers True for an engine that is present
+    # but BROKEN (its own docstring says so), and an import here would then raise while
+    # mcp.list_tools() correctly holds no display tool at all.
+    display_tools = sys.modules.get("epics_mcp.display_tools")
 
     # Only the tools whose plane is decided at CALL time live here; everything else answers
     # through the decorator on the wrapper. Kept explicit rather than searched, so adding a

@@ -66,12 +66,29 @@ def test_diagnose_pv_names_only_tools_that_exist_in_every_install() -> None:
     Asserted against the REAL gated set rather than a list here, so a tool that becomes gated
     later reddens this instead of ageing quietly.
 
+    ⚠️ That sentence was false when it was written, and the way it was false is the lesson. The set
+    WAS a list here, and beside it stood an import of ``display_tools`` that nothing used. So the
+    one test whose whole subject is the core-only install became the one test that could not RUN
+    there: measured, it was two of the six failures that held the only surviving CI red for a day.
+    The names now come from the same AST read of ``display_tools.py`` that ``tests/test_server.py``
+    already does, which reaches the real set WITHOUT importing the module, and therefore without
+    the engine.
+
+    ⚠️ Imported from ``tests/test_server.py`` rather than copied, since two AST readers of that one
+    file are already one more than necessary. The coupling is stated because it is real: should
+    ``test_server.py`` ever become engine-coupled itself, this import follows it, and no guard sees
+    that (``test_an_engine_import_below_module_level_is_guarded`` names it among its blind spots).
+
     Provably red: put find_device (or validate_pvs, crossplane_check, coverage_audit) back into
     the prompt body.
     """
-    from epics_mcp.display_tools import register_display_tools  # noqa: F401  (import guard only)
+    from tests.test_server import _display_tool_names
 
-    gated = {"validate_pvs", "crossplane_check", "coverage_audit", "find_device"}
+    gated = _display_tool_names()
+    assert gated, (
+        "the display-gated set derived empty, which would make the assertion below vacuous: "
+        "every prompt would pass by naming nothing that is in an empty set"
+    )
     rendered = diagnose_pv("SIM:PS-01:Cur-RB")
     named_but_gated = sorted(tool for tool in gated if tool in rendered)
     assert not named_but_gated, (

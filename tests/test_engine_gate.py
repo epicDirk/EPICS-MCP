@@ -376,21 +376,30 @@ def _module_level_imports(tree: ast.Module) -> set[str]:
     """
     found: set[str] = set()
     for node in tree.body:
-        if isinstance(node, ast.Import):
-            found.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            if node.level or not node.module:  # relative imports stay inside a package
-                continue
-            found.add(node.module)
-            found.update(f"{node.module}.{alias.name}" for alias in node.names)
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            found |= _names_of(node)
         elif isinstance(node, ast.If | ast.Try):
             for inner in ast.walk(node):
-                if isinstance(inner, ast.Import):
-                    found.update(alias.name for alias in inner.names)
-                elif isinstance(inner, ast.ImportFrom) and not inner.level and inner.module:
-                    found.add(inner.module)
-                    found.update(f"{inner.module}.{a.name}" for a in inner.names)
+                if isinstance(inner, ast.Import | ast.ImportFrom):
+                    found |= _names_of(inner)
     return found
+
+
+def _names_of(node: ast.Import | ast.ImportFrom) -> set[str]:
+    """The dotted names one import statement binds, in every spelling.
+
+    One home, because two walkers ask: this file's module-level guard and the below-module-level
+    one further down. They disagreed once when the logic sat inline in both, which is the failure
+    a shared helper removes rather than documents.
+
+    ``from . import x`` yields nothing: a relative import stays inside its own package and can
+    never name the engine.
+    """
+    if isinstance(node, ast.Import):
+        return {alias.name for alias in node.names}
+    if node.level or not node.module:
+        return set()
+    return {node.module} | {f"{node.module}.{alias.name}" for alias in node.names}
 
 
 def _reaches(name: str, tainted: frozenset[str] | set[str]) -> bool:
@@ -499,4 +508,106 @@ def test_the_coupling_guard_reads_module_level_and_not_function_level() -> None:
     )
     assert "opi_navigation" in _module_level_imports(ast.parse(guarded_at_module_level)), (
         "a guarded import still executes at module level"
+    )
+
+
+# --- The other half: an engine import BELOW module level ---------------------------------------
+
+#: The one spelling that makes a below-module-level engine import legitimate. Both forms of it
+#: ("skipif on the function" and "if engine_available():") name this helper, so one substring
+#: recognises both, and a third form would have to be added here deliberately rather than slip in.
+_ENGINE_GUARD = "engine_available"
+
+
+def _engine_guarded_lines(func: ast.FunctionDef | ast.AsyncFunctionDef) -> set[int]:
+    """Every line of *func* that sits inside an ``if engine_available():`` body."""
+    guarded: set[int] = set()
+    for node in ast.walk(func):
+        if isinstance(node, ast.If) and _ENGINE_GUARD in ast.unparse(node.test):
+            for stmt in node.body:
+                guarded.update(range(stmt.lineno, (stmt.end_lineno or stmt.lineno) + 1))
+    return guarded
+
+
+def _engine_imports_below_module_level(
+    tree: ast.Module, tainted: set[str]
+) -> tuple[list[str], list[str]]:
+    """``(all, unguarded)`` engine-reaching imports inside a function, as ``<func>:<line>``."""
+    every: list[str] = []
+    unguarded: list[str] = []
+    for func in ast.walk(tree):
+        if not isinstance(func, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        # The whole decorator list, not the first: this tree stacks skipif above two parametrize
+        # decorators, and reading only one of them would redden a file that is already correct.
+        skipped = any(_ENGINE_GUARD in ast.unparse(dec) for dec in func.decorator_list)
+        guarded_lines = _engine_guarded_lines(func)
+        for node in ast.walk(func):
+            if not isinstance(node, ast.Import | ast.ImportFrom):
+                continue
+            names = _names_of(node)
+            if not any(_reaches(n, tainted) or n.split(".")[0] == _ENGINE_PKG for n in names):
+                continue
+            where = f"{func.name}:{node.lineno}"
+            every.append(where)
+            if not skipped and node.lineno not in guarded_lines:
+                unguarded.append(where)
+    return every, unguarded
+
+
+def test_an_engine_import_below_module_level_is_guarded() -> None:
+    """The other half of the coupling question, and the half that kept CI red for a day.
+
+    ``ENGINE_COUPLED_MODULES`` and the guard above answer "can this module be IMPORTED without the
+    engine". They are complete for that question and deliberately blind to an import inside a
+    ``def`` (see :func:`_module_level_imports`), which is right: such an import costs nothing at
+    COLLECTION. It costs everything at RUN time, and nothing was asking. Measured: on 2026-08-16
+    two test functions grew an engine-reaching import in their body, collection stayed clean, both
+    modules were correctly absent from the list, and the engine-less CI lane was red for 21 runs
+    while every local run stayed green and every window reporting it was right.
+
+    The remedy is NOT the list. Adding such a module would redden the guard above ("listed but not
+    coupled"), measured: neither module imports the engine at module level. The remedy is a guard
+    on the import itself, either a ``skipif`` on the function or an ``if engine_available():``
+    around it, and this holds that.
+
+    ⚠️ HONEST REACH, because a guard that oversells itself is worse than none. It reads literal
+    ``import`` statements. It does NOT see:
+
+    * ``importlib.import_module`` or ``__import__`` with a COMPUTED name, and this tree has one:
+      ``tests/test_provenance.py`` builds a module name out of a dict, so extending that dict with
+      a display-gated tool would pass here and fail in CI;
+    * one test module importing another, which this tree also has
+      (``tests/test_commit_message_guard.py``), and which the guard above shares, since its taint
+      walk covers ``src/`` only.
+
+    Provably red: put the deleted ``from epics_mcp.display_tools import register_display_tools``
+    back into ``tests/test_prompts.py``, or drop the ``skipif`` from the display-tool test in
+    ``tests/test_server.py``.
+    """
+    tainted = _engine_tainted_modules()
+    every: list[str] = []
+    unguarded: dict[str, list[str]] = {}
+    for path in sorted((_REPO / "tests").glob("test_*.py")):
+        if path.name in ENGINE_COUPLED_MODULES:
+            continue  # the whole module is dropped at collection, so its bodies never run
+        found, bad = _engine_imports_below_module_level(
+            ast.parse(path.read_text(encoding="utf-8")), tainted
+        )
+        every.extend(f"{path.name}::{where}" for where in found)
+        if bad:
+            unguarded[path.name] = bad
+
+    assert every, (
+        "no test function imports the engine below module level at all, so this assertion would "
+        "be vacuous; if that is genuinely the tree now, delete this guard rather than keep a "
+        "green one that checks nothing"
+    )
+    assert not unguarded, (
+        f"engine-reaching import(s) inside a test function with no engine guard: {unguarded}. "
+        "These are collected and RUN on an engine-less install and fail there with "
+        "ModuleNotFoundError. Guard the import with a skipif on the function or an "
+        "'if engine_available():', or drop the import if nothing uses it. Do NOT add the module "
+        "to ENGINE_COUPLED_MODULES: that list is about module-level imports and the guard for it "
+        "would go red."
     )
