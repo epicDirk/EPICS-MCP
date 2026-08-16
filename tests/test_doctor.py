@@ -2077,6 +2077,14 @@ async def test_the_resolution_caveat_appears_only_for_a_name(
     assert with_a_name is not None
     assert "NAMES rather than IP literals" in with_a_name
 
+    # A token that is neither an IP literal nor a name: it is refused outright, and it must not
+    # drag in a caveat about entries that might disappear. It already has.
+    monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "192.0.2.5 192.0.2.9:abc")
+    with_a_refusal = _plane(await run_doctor(), "live").detail
+    assert with_a_refusal is not None
+    assert "DROPPED" in with_a_refusal
+    assert "NAMES rather than IP literals" not in with_a_refusal
+
 
 def _report_with_installation(findings: list[InstallationFinding]) -> DoctorReport:
     """A hand-built report carrying *findings*, otherwise as clean as run_doctor can make one."""

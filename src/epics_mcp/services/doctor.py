@@ -1367,14 +1367,16 @@ def _live_search_posture(effective: str) -> str:
                 written, fallback, zero_keeps_fallback="ADDR_LIST" in var
             )
             tokens = value.split()
-            # Only entries we actually RESOLVED can carry the resolution caveat. An unresolvable
-            # or unmodelled token is printed as written, and calling it a "name" was a second
-            # small untruth beside the first.
+            rendered = {t: effective_search_entry(t, default_port) for t in tokens}
+            # Only an entry we actually RESOLVED to an endpoint can carry the resolution caveat.
+            # A token printed as written carries no claim to qualify, and one reported DROPPED is
+            # already gone: calling either a "name whose entry might disappear" was a second small
+            # untruth beside the first, and it fired on ``10.0.0.9:abc``.
             saw_name = saw_name or any(
-                not is_ip_literal(t) and effective_search_entry(t, default_port) != t
+                not is_ip_literal(t) and rendered[t] != t and "DROPPED" not in rendered[t]
                 for t in tokens
             )
-            resolved = " ".join(effective_search_entry(token, default_port) for token in tokens)
+            resolved = " ".join(rendered[token] for token in tokens)
             if default_port is None:
                 origin = (
                     f"{port_var}={written} is not a port this client can read, so it falls back to "
