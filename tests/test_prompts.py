@@ -20,6 +20,40 @@ def test_diagnose_pv_contains_steps() -> None:
     assert "monitor_pv" in result
 
 
+def test_diagnose_pv_teaches_the_posture_step_through_a_channel_a_client_can_use() -> None:
+    """GB-64 (a). The chain taught three steps and no posture step at all, so a client could reach
+    a confident answer without ever establishing which world it read from.
+
+    The assertion is in two halves and the SECOND is the load-bearing one. Naming the reach is
+    easy; the failure this repairs is that the rest of this repository's prose says "run
+    epics-doctor", which is a console script a client with no shell cannot run. A prompt that
+    repeated it would hand the client an impossible plan, the exact class this repository has
+    already been bitten by twice (the pv_names rename, then QA-33), and it would fail silently
+    because an unexecutable step looks like a skipped one.
+
+    Provably red: put ``epics-doctor`` back into the prompt body, or drop the ``reach`` sentence.
+    """
+    rendered = diagnose_pv("SIM:PS-01:Cur-RB")
+    assert "reach" in rendered
+    assert "probed" in rendered
+    assert "epics-doctor" not in rendered
+
+
+def test_diagnose_pv_teaches_a_counter_check_across_planes() -> None:
+    """GB-64 (a). The incident behind the item left its open question unanswered while two tools
+    that would have answered it went unused, so the chain now ends in corroboration rather than
+    in a monitor.
+
+    Each named tool is asserted, not the sentence, because the sentence can be reworded and the
+    plan still has to name a plane that can actually answer a negative.
+
+    Provably red: delete step 4.
+    """
+    rendered = diagnose_pv("SIM:PS-01:Cur-RB")
+    for named in ("find_device", "find_channels", "get_pv_history", "search_logbook"):
+        assert named in rendered, f"the counter-check no longer names {named}"
+
+
 def test_compare_machine_state_with_file() -> None:
     # Positive control: with the display tools available the reference_file path still uses the
     # display-gated validate_pvs tool, the correct full-install behaviour (NOT a bug pin).

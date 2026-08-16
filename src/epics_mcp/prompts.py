@@ -9,19 +9,48 @@ from epics_mcp.presets import Preset
 
 
 def diagnose_pv(pv_name: str) -> str:
-    """Step-by-step PV diagnosis workflow."""
+    """Step-by-step PV diagnosis workflow.
+
+    GB-64: the chain used to start at ``get_pv_info`` and END at the monitor, which taught a plan
+    that could reach a confident answer without ever establishing WHICH world it read from, and
+    without corroborating a negative. Both halves are now steps, and both are phrased so a client
+    can actually execute them:
+
+    * The posture step reads the ``reach`` field the first answer already carries. It deliberately
+      does NOT say "run epics-doctor", the way the rest of this repository's prose does, because
+      ``epics-doctor`` is a console script and a client with no shell cannot run it: an
+      unexecutable instruction is how the previous version of this advice failed in practice.
+    * The counter-check exists because the incident behind GB-64 left its open question
+      unanswered while two tools that would have answered it went unused. A PV that does not
+      connect is the case where "not found" and "not reachable from here" look identical, and the
+      other planes are what tell them apart.
+    """
     return (
         f"Diagnose EPICS PV: {pv_name}\n\n"
         "Follow these steps:\n"
-        f'1. get_pv_info("{pv_name}"), check connection state, data type, alarm status\n'
+        f'1. get_pv_info("{pv_name}"), check connection state, data type, alarm status. Read the '
+        "'reach' field of this first answer BEFORE interpreting anything else: it says which "
+        "plane answered and how far it reaches. 'loopback-only' means a local test rig, "
+        "'beyond-loopback' means the search can leave this machine, and 'probed': false means "
+        "this is the configuration rather than a measurement. Every later step carries the same "
+        "field, so it can be re-checked rather than assumed to still hold.\n"
         f'2. get_pv_value("{pv_name}"), read current value\n'
         f'3. monitor_pv("{pv_name}", duration=5), watch for value changes over 5 seconds\n'
+        "4. Counter-check before concluding, and ALWAYS when the PV did not connect: a silent or "
+        "absent PV looks the same whether it does not exist, is down, or is simply out of reach "
+        "from here. find_device or find_channels says whether it is registered at all, "
+        "get_pv_history says whether it was recently archiving, and search_logbook says whether "
+        "anyone wrote about it. A negative from one plane is not a finding until a second plane "
+        "agrees.\n"
         "\n"
         "Report:\n"
+        "- Which world this was read from (the 'reach' field), and that it was configured, not "
+        "probed\n"
         "- Connection status (connected/disconnected/timeout)\n"
         "- Current value and data type\n"
         "- Alarm severity and status\n"
         "- Update rate (events/second from monitor)\n"
+        "- What the counter-check planes said, including the ones that answered nothing\n"
         "- Recommended actions if issues found"
     )
 
