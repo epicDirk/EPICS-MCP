@@ -354,7 +354,10 @@ async def get_pv_value(
     """Get the current value of an EPICS Process Variable.
 
     The result carries the same best-effort metadata as get_pv_info
-    (alarm/timestamp/display/control/value_alarm/enum), including which alarm level says what."""
+    (alarm/timestamp/display/control/value_alarm/enum), including which alarm level says what.
+    It also carries `reach`: which plane answered and how far it reaches, read from the
+    configuration rather than probed. get_guide(topic="posture") explains what each value means
+    and why a value quoted without it is a claim rather than a measurement."""
     return await _get_pv_value(pv_name, timeout)
 
 
@@ -496,6 +499,10 @@ async def get_pv_info(
     the WHY is not in this reply at all: severity_text still says how bad it is, and the thresholds
     themselves can be read as record fields (get_pv_info("PV.HIHI") and its siblings). Say the cause
     is unreported rather than reaching for status_text, which answers a different question.
+
+    Every answer here carries `reach`: which plane served it and how far that plane reaches,
+    read from the configuration rather than probed. get_guide(topic="posture") explains the
+    values and why an answer quoted without it is a claim rather than a measurement.
 
     Record fields read directly: pass a channel with a field suffix (e.g. get_pv_info("PV.RTYP"),
     "PV.SCAN", "PV.HIHI") to read individual record metadata / alarm thresholds, useful when a PVA
@@ -714,6 +721,10 @@ async def find_channels(
 
     A malformed registry record (a non-dict element, or one without a usable name) raises a loud
     error, records are never silently dropped into a smaller, fabricated answer.
+
+    Every answer here carries `reach`: which plane served it and how far that plane reaches,
+    read from the configuration rather than probed. get_guide(topic="posture") explains the
+    values and why an answer quoted without it is a claim rather than a measurement.
     """
     return await _find_channels(
         name_pattern,

@@ -9,6 +9,18 @@ carry breaking changes).
 
 ### Added
 
+- **Every read answer now carries a `reach` field: which plane served it and how far that plane
+  reaches.** Values are `loopback-only` (provably confined to this machine), `beyond-loopback` (it
+  can leave this machine) or `not-configured` (no request was made). `probed: false` rides along
+  and means what it says: this is the configuration, read with no network call, so a reachable
+  plane may still be down. The field names no host and no port, so the two planes whose URL is
+  deliberately withheld (naming, olog) disclose nothing new. Until now the reach was only
+  obtainable from `epics-doctor`, a console script an MCP client cannot run, or from the
+  `epics-pv://health` resource, which an application must fetch on the client's behalf: an answer
+  could be given without anything having established which world it came from. `discover_pvs`
+  reports per branch, since a concrete name is a live PV read and a wildcard is a ChannelFinder
+  query. `tools/list` grows 4 644 chars on both lanes.
+
 - **`get_guide`: the operator guide is now a TOOL, not only the `epics-pv://guide` resource.** A
   resource is application-controlled, so a model never fetches one by itself, which left the guide
   correct and unread. The resource stays; the tool is the channel a model pulls from, and the

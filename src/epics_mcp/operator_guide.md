@@ -41,6 +41,20 @@ measured 2026-08-15, only the first of the four appears anywhere else in this do
   PV searches into the local subnets. Run `epics-doctor` for the effective posture; it claims
   `localhost-isolated` only when every search list is unset AND the auto search is explicitly
   disabled.
+  ⭐ **You do not have to ask: every read answer carries its own reach, in band.** `epics-doctor`
+  is a COMMAND, so a client with no shell cannot run it, and `epics-pv://health` is a resource,
+  which an application has to fetch for you. Both are the wrong shape for an assistant, which is
+  why the answer comes to you instead: every read tool returns a `reach` field alongside its
+  payload, saying which plane answered and how far that plane reaches, `loopback-only` (a local
+  test rig), `beyond-loopback` (it can leave this machine) or `not-configured` (no request was
+  made at all). `probed: false` is on every one of them and means what it says: this is the
+  CONFIGURATION, read without a single network call, so a `beyond-loopback` plane may still be
+  down and a reachable one is not thereby proven to be production. The field names no host and no
+  port, by the same rule that keeps addresses out of every client-facing payload here; when you
+  need the addresses themselves, that is what `epics-doctor` is for, at a human's terminal.
+  ⚠️ **State it in your answer.** A value quoted without saying which world it came from is the
+  defect this field exists to remove, and the field is on EVERY read answer precisely so the
+  claim can be re-checked at the fifth call rather than believed from the first.
   ⚠️ **The PORT is part of the destination.** `EPICS_PVA_BROADCAST_PORT` (default 5076) supplies
   it for every `EPICS_PVA_ADDR_LIST` entry that carries none of its own, and
   `EPICS_PVA_SERVER_PORT` (default 5075) does the same for `EPICS_PVA_NAME_SERVERS`; on the CA

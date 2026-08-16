@@ -3306,8 +3306,9 @@ async def test_stripped_tool_still_returns_structured_content(
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
 # RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-16 after GB-64: the
-# core lane is 74_935 and the full lane 87_798 (the docstring below carries the deltas, and the
-# pair 70_291 / 83_154 measured after GP-15 on 2026-08-15,
+# core lane is 75_718 and the full lane 88_581 (the docstring below carries the deltas, and the
+# pair 74_935 / 87_798 measured mid-way through the same item, before its three entry-tool
+# pointers, the pair 70_291 / 83_154 measured after GP-15 on 2026-08-15,
 # the pair 67_100 / 79_905 measured after OQ11 on 2026-08-13,
 # the pair 66_062 / 78_867 measured after BG-DOC earlier that day, the pairs 65_692 / 78_497 and
 # 65_402 / 78_207 from earlier still, 64_719 / 77_524 measured on
@@ -3332,14 +3333,17 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 74_935 and the full lane
-    87_798, re-measured 2026-08-16 on both lanes with the display-gated tools excluded for the core
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 75_718 and the full lane
+    88_581, re-measured 2026-08-16 on both lanes with the display-gated tools excluded for the core
     one, since a lane estimated rather than measured is the error the constant's comment records.
-    GB-64 moved BOTH lanes by exactly +4_644, from 70_291 / 83_154: the ``reach`` field's schema
-    rides on every typed READ tool, all of which are core, so the display-gated four contribute
-    nothing and the two deltas coincide. It was +14_904 before the ``Reach`` docstring was cut
-    to one line, which is the measurement that made the cut: FastMCP embeds a TypedDict's
-    docstring into every schema carrying it, so rationale written there ships once per tool.
+    GB-64 moved BOTH lanes by +5_427 in two steps, from 70_291 / 83_154: +4_644 for the ``reach``
+    field's schema, which rides on every typed READ tool, all of which are core, so the
+    display-gated four contribute nothing and the two deltas coincide; then +783 for the guide
+    pointers added to get_pv_value, get_pv_info and find_channels, description bytes rather than
+    schema bytes and measured separately for that reason. The schema half was +14_904 before
+    the ``Reach`` docstring was cut to one line, which is the measurement that made the cut:
+    FastMCP embeds a TypedDict's docstring into every schema carrying it, so rationale written
+    there ships once per tool.
 
     GP-15 moved core +3191 and full +3249, from 67_100 / 79_905, and the split of that figure is
     the honest half. Only 472 chars are the edit itself: the ``get_guide`` topic description gained
