@@ -43,7 +43,9 @@ def diagnose_pv(pv_name: str) -> str:
         "plane answered and how far it reaches. 'loopback-only' means a local test rig, "
         "'beyond-loopback' means the search can leave this machine, and 'probed': false means "
         "this is the configuration rather than a measurement. Every later step carries the same "
-        "field, so it can be re-checked rather than assumed to still hold.\n"
+        "field, so it can be re-checked rather than assumed to still hold. A PV that does not "
+        "connect at all raises instead of answering, and that refusal carries the same reach "
+        "in its message, so the step is followable in the case you most need it.\n"
         f'2. get_pv_value("{pv_name}"), read current value\n'
         f'3. monitor_pv("{pv_name}", duration=5), watch for value changes over 5 seconds\n'
         "4. Counter-check before concluding, and ALWAYS when the PV did not connect: a silent or "

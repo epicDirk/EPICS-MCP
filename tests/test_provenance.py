@@ -10,6 +10,7 @@ that and nothing else: :func:`test_the_field_never_carries_an_address`,
 from __future__ import annotations
 
 import json
+import pathlib
 import socket
 from collections.abc import Mapping
 from typing import Any, cast
@@ -520,3 +521,95 @@ def test_the_archiver_retrieval_plane_is_its_own(monkeypatch: pytest.MonkeyPatch
     # The single-JVM case, which is why the row falls back rather than reporting not-configured.
     single = EpicsConfig(archiver_url="http://localhost:17665", archiver_retrieval_url="")
     assert scope_of("archiver-retrieval", single, {}) == "loopback-only"
+
+
+def test_the_comment_that_names_how_often_the_shape_ships_is_still_right() -> None:
+    """A number written into a comment is the thing that rots, so this one is derived.
+
+    The post-build review found it wrong: the comment above ``Reach`` claimed the docstring
+    ships TWELVE times in tools/list while the measured count was eighteen, and the arithmetic
+    in the same comment (14 904 / 18 = 828, the length of the docstring it replaced) already
+    said so. The count is not a list anywhere, so nothing could have kept it in step.
+
+    Provably red: change the word in the comment, or type another read tool without updating it.
+    """
+    import asyncio
+    import re
+
+    from epics_mcp import provenance
+    from epics_mcp.server import mcp
+
+    words = {
+        "TWELVE": 12,
+        "THIRTEEN": 13,
+        "FOURTEEN": 14,
+        "FIFTEEN": 15,
+        "SIXTEEN": 16,
+        "SEVENTEEN": 17,
+        "EIGHTEEN": 18,
+        "NINETEEN": 19,
+        "TWENTY": 20,
+    }
+    source = pathlib.Path(provenance.__file__).read_text(encoding="utf-8")
+    claimed = [n for word, n in words.items() if re.search(rf"ships {word} times", source)]
+    assert len(claimed) == 1, f"the comment names {len(claimed)} counts, expected exactly one"
+
+    tools = asyncio.run(mcp.list_tools())
+    carrying = [
+        t
+        for t in (tool.to_mcp_tool() for tool in tools)
+        if "reach" in ((t.outputSchema or {}).get("properties") or {})
+    ]
+    assert claimed[0] == len(carrying), (
+        f"the comment says the shape ships {claimed[0]} times, measured {len(carrying)}: "
+        f"{sorted(t.name for t in carrying)}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_read_that_RAISES_still_says_which_world_failed_to_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The failing read is the one that needs the reach most, and the first version left it out.
+
+    A PV that does not connect is where a diagnosis STARTS, and it is also the case where "does
+    not exist", "is down" and "is not reachable from here" look identical. The first version
+    attached the field only to a successful answer, so that path arrived with no statement about
+    which world had failed to answer, while the shipped prompt told the reader to read the reach
+    of the first answer. On that path there was no first answer: the advice was unfollowable in
+    exactly the situation it was written for.
+
+    The error code must survive, because callers branch on it.
+
+    Provably red: remove the ``except EpicsError`` arm from ``with_reach``.
+    """
+    from epics_mcp.errors import PVTimeoutError
+    from epics_mcp.server import mcp
+
+    async def _timeout(pv_name: str, timeout: float | None = None) -> dict[str, object]:
+        raise PVTimeoutError(f"PV {pv_name} timed out")
+
+    monkeypatch.setattr("epics_mcp.tools.read.pv_get", _timeout)
+    with pytest.raises(Exception) as caught:
+        await mcp.call_tool("get_pv_value", {"pv_name": "SIM:PS-01:Cur-RB"})
+    message = str(caught.value)
+    assert "[PV_TIMEOUT]" in message, f"the error code did not survive: {message}"
+    assert "reach:" in message, f"the failing read says nothing about its world: {message}"
+    assert "live-pv=" in message
+    assert "not probed" in message
+
+
+def test_the_inline_form_says_the_same_thing_as_the_field() -> None:
+    """Two renderings, one source. The flat clause on an error must never be able to disagree
+    with the structured field on an answer, so it is derived from the same mapping rather than
+    built a second time.
+
+    Provably red: give ``_inline`` its own classification call.
+    """
+    from epics_mcp.provenance import _inline
+
+    field = reach_of("live-pv", "olog", cfg=EpicsConfig(), environ=LOOPBACK_ENV)
+    flat = _inline(field)
+    for name, scope in field["planes"].items():
+        assert f"{name}={scope}" in flat, f"{name} is missing from the inline form: {flat}"
+    assert "not probed" in flat

@@ -55,6 +55,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Literal, TypedDict, cast
 
 from epics_mcp.config import EpicsConfig, get_config
+from epics_mcp.errors import EpicsError
 from epics_mcp.services._http import is_loopback_url
 from epics_mcp.write_posture import pv_search_posture
 
@@ -89,10 +90,14 @@ REACH_KEY = "reach"
 
 # ⚠️ THE DOCSTRING BELOW IS ONE LINE, AND THAT IS A MEASURED CONSTRAINT RATHER THAN A STYLE.
 # FastMCP embeds a TypedDict's docstring into the outputSchema of every tool that returns a shape
-# carrying it, so this one ships TWELVE times in ``tools/list``. Measured: the reasoning that now
-# stands in this comment cost 14 904 chars there, a 17.9 percent growth of the whole payload, for
-# text no caller needs at the point of use. A comment reaches the next author, which is who it is
-# for; a docstring reaches every client on every listing.
+# carrying it, so this one ships EIGHTEEN times in ``tools/list``. Measured: the reasoning that
+# now stands in this comment cost 14 904 chars there, a 17.9 percent growth of the whole payload,
+# for text no caller needs at the point of use. A comment reaches the next author, which is who
+# it is for; a docstring reaches every client on every listing.
+# ⚠️ That count said TWELVE until the post-build review counted it: 14 904 / 18 is 828, the length
+# of the docstring it replaced, which is the arithmetic that settles it. Re-count rather than
+# trusting this line: the tools carrying the shape are the ones whose outputSchema has a
+# ``reach`` property, and there is no list of them anywhere that could stay in step by itself.
 #
 # WHY ``planes`` IS A MAPPING rather than a single value: a cross-plane tool answers from several
 # at once, and one shape for both cases beats two shapes that drift apart. A single-plane tool
@@ -203,6 +208,18 @@ def reach_of(
     }
 
 
+def _inline(reach: Reach) -> str:
+    """The reach as one short clause, for an error message that has no payload to carry a field.
+
+    Deliberately NOT a second rendering of the field: it is the same mapping, spelled flat, so
+    there is nothing here that could disagree with the structured form. ``not probed`` is spelled
+    out rather than shown as ``probed=false``, because an error message is read by a human as
+    often as by a client.
+    """
+    planes = ", ".join(f"{name}={scope}" for name, scope in reach["planes"].items())
+    return f"{planes}, not probed"
+
+
 def with_reach[**P, R](
     *planes: Plane,
 ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
@@ -219,15 +236,42 @@ def with_reach[**P, R](
     break.
 
     An answer that already carries the key keeps its own: a tool that computes a finer reach
-    itself (one that consulted a plane only conditionally) stays the authority on its own
-    answer, and the decorator never overwrites it. Silent overwriting would make the general
-    rule quietly wrong for the specific case, which is the harder bug to find.
+    itself stays the authority on its own answer, and the decorator never overwrites it. Silent
+    overwriting would make the general rule quietly wrong for the specific case, which is the
+    harder bug to find.
+
+    ⚠️ HONEST LIMIT, found by the post-build review and stated rather than dressed up: that
+    clause has NO production caller today. Every tool computing its own reach (``discover_pvs``,
+    the four display tools, ``diagnose_connection``) does so without this decorator, so nothing
+    in ``src`` currently exercises the branch and only
+    ``test_the_decorator_does_not_overwrite_a_tool_that_knows_better`` proves it works. It stays
+    because the collision it prevents is silent when it happens, not because it happens today.
     """
 
     def decorate(fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
         @functools.wraps(fn)
         async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-            result = await fn(*args, **kwargs)
+            try:
+                result = await fn(*args, **kwargs)
+            except EpicsError as exc:
+                # ⛔ THE FAILING READ IS THE ONE THAT NEEDS THIS MOST, and the first version left
+                # it out. A read that raises has no answer to carry a field, so a PV that does
+                # not connect, i.e. exactly the case a diagnosis starts from, arrived with no
+                # statement about which world failed to answer. Worse, the shipped prompt tells
+                # the reader to read the reach of the first answer, and on that path there is no
+                # first answer: the advice was unfollowable in the situation it was written for.
+                # Found by the post-build review.
+                #
+                # Appended to the MESSAGE rather than returned as a field because an error has no
+                # payload here; ``translate_epics_errors`` sits outside this decorator and turns
+                # the raised EpicsError into the client-facing text, so the clause travels with
+                # the code the caller already reads. Short on purpose, and address-free like the
+                # field.
+                raise EpicsError(
+                    f"{exc} [reach: {_inline(reach_of(*planes))}]",
+                    error_code=exc.error_code,
+                    details=exc.details,
+                ) from exc
             # ⚠️ The ONE cast in this module, and it is deliberate rather than a shortcut. The
             # return type has to be passed through UNCHANGED, because FastMCP builds each tool's
             # advertised outputSchema from that annotation, and collapsing it to

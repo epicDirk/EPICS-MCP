@@ -19,7 +19,7 @@ carry breaking changes).
   `epics-pv://health` resource, which an application must fetch on the client's behalf: an answer
   could be given without anything having established which world it came from. `discover_pvs`
   reports per branch, since a concrete name is a live PV read and a wildcard is a ChannelFinder
-  query. `tools/list` grows 4 644 chars on both lanes.
+  query. `tools/list` grows 5 427 chars on both lanes.
 
 - **`get_guide`: the operator guide is now a TOOL, not only the `epics-pv://guide` resource.** A
   resource is application-controlled, so a model never fetches one by itself, which left the guide
