@@ -199,9 +199,21 @@ def build_instructions(display_tools_available: bool) -> str:
         # test_build_instructions_under_2048_bytes rather than named here, because a head-room
         # figure written into prose drifts with every edit to this string and nothing compares it.
         # So the qualifier is one word and the detail lives in epics-pv://guide.
-        "READ reach is decided by the LAUNCHER, not this server: a deployment may well point "
-        "the EPICS env at a real facility, so do NOT assume isolation, run epics-doctor to see "
-        "what this instance actually reaches. The write gates hold regardless of reach. "
+        # GB-64 (e): this clause used to end in "run epics-doctor to see what this instance
+        # actually reaches", which is an instruction the reader of THIS text cannot follow.
+        # epics-doctor is a console script; a client with no shell has no way to run it, and the
+        # incident that produced GB-64 had this very sentence in context and was not helped by it.
+        # The sentence now names a channel the reader can use, and binds it to a POSITION, which
+        # is the half that was missing (the imperative was already here).
+        #
+        # ⚠️ Measured before writing, because the header had 11 bytes of head-room on the display
+        # lane: this wording costs +4 bytes against the sentence it replaces. That measurement is
+        # what settled the open question of whether the write-gate prose had to be cut to make
+        # room for it. It did not. Keep any future edit here inside the same budget, which the
+        # guard named test_build_instructions_under_2048_bytes measures rather than this comment.
+        "READ reach is decided by the LAUNCHER, not this server: do NOT assume isolation. Every "
+        "read answer carries a reach field naming the plane that served it and how far it "
+        "reaches; read it before you quote a value. The write gates hold regardless of reach. "
         "File/dir tool arguments are canonicalized and existence-checked; an opt-in "
         "EPICS_MCP_ALLOWED_ROOTS confines them (empty by default = no boundary). See .env.example "
         "for the commented configuration template."

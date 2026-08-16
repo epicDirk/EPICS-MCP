@@ -360,3 +360,30 @@ async def test_a_batch_read_carries_its_reach_once(monkeypatch: pytest.MonkeyPat
     assert REACH_KEY in structured
     assert len(structured["results"]) == 2
     assert all(REACH_KEY not in entry for entry in structured["results"])
+
+
+def test_the_server_header_names_the_field_and_not_the_command() -> None:
+    """GB-64 (e). The header is the ONE text that arrives ungefragt on every connection, and it
+    used to end this clause with "run epics-doctor", a console script the reader of that text
+    cannot run. The incident behind GB-64 had that very sentence in context.
+
+    Both halves are asserted. Naming the field is the easy one; the absence of the command is the
+    load-bearing one, because re-adding it reads like a helpful extra and silently restores an
+    unexecutable instruction on the one channel that cannot afford one.
+
+    The position binding ("before you quote a value") is asserted too: the imperative was already
+    there before this item, what was missing was WHEN.
+
+    Provably red: restore the old clause in ``build_instructions``.
+    """
+    from epics_mcp.server import build_instructions
+
+    for display_tools in (True, False):
+        header = build_instructions(display_tools)
+        assert "reach field" in header, f"display_tools={display_tools}: header lost the field"
+        assert "before you quote a value" in header, (
+            f"display_tools={display_tools}: header lost the position binding"
+        )
+        assert "epics-doctor" not in header, (
+            f"display_tools={display_tools}: the header tells a client to run a console script"
+        )
