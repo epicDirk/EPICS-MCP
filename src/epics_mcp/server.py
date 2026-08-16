@@ -305,7 +305,7 @@ async def get_guide(
     prove. It reads nothing but its own packaged document: no PV, no REST plane, no file of
     yours, so it can neither time out nor depend on how this instance is configured.
 
-    The whole document is around 88 KB, which is why 'topic' exists and why omitting it should be
+    The whole document is around 91 KB, which is why 'topic' exists and why omitting it should be
     the exception. The keys partition the document: each returns exactly its own part, VERBATIM,
     so an excerpt is a real excerpt and never a rendering, and the largest single part is under a
     third of the whole. An unknown topic is refused with [UNKNOWN_TOPIC] naming every valid key.

@@ -132,6 +132,12 @@ class CoverageReport(BaseModel):
     #: Operator displays whose per-instance PVs are incomplete (per-display context cap), a
     #: not-in-D PV may sit on a capped one → ``has_display`` withheld, never a false ``no``.
     displays_incomplete: tuple[str, ...] = ()
+    #: Size of the FILE UNIVERSE the walk visited (displays + trends), the denominator that turns
+    #: ``displays_incomplete`` into a share. 0 when it was not reported, and the render then omits
+    #: the share rather than inventing one.
+    #: ⚠ NOT ``len(display set D)``: a capped file carrying no PV is in the numerator and not in
+    #: that set, so that share could exceed 100%. [GQ-16].
+    files_walked: int = 0
     #: Honest caveats (lower bounds, withholds, skipped planes).
     notes: tuple[str, ...] = ()
 
@@ -166,6 +172,7 @@ def audit_coverage(
     alarm_requested: bool = False,
     context_capped: tuple[str, ...] = (),
     glob_capped_count: int = 0,
+    files_walked: int = 0,
 ) -> CoverageReport:
     """Join the Wedge-0 display-PV index with the CF/Archiver/Alarm planes into a coverage matrix.
 
@@ -325,6 +332,7 @@ def audit_coverage(
         cf_registered=cf_registered,
         cf_capped=cf_capped,
         displays_incomplete=tuple(sorted(context_capped)),
+        files_walked=files_walked,
         notes=tuple(notes),
     )
 
@@ -448,19 +456,34 @@ def render_markdown(report: CoverageReport) -> str:
     # reported `withheld` rather than `no`, see audit_coverage). A reader who takes
     # critical_uncovered at face value and meets the caveat afterwards has already drawn the
     # conclusion.
-    # ⚠ NO PERCENTAGE, and that is measured rather than an omission: a share needs a denominator
-    # from the SAME population as the numerator, and the server has none. `context_capped` names
-    # embed TARGETS from the walk, while the inventory's `displays` are the tops that carry at
-    # least one PV; probed 2026-08-15 on a fixture, a capped fragment WITHOUT a PV appears in the
-    # first and not in the second, so the "share" could exceed 100%. Reporting one anyway would be
-    # the two-denominators defect this project forbids (see services/inventory_adapter.py). The
-    # honest denominator lives in the engine's walk and does not cross the seam today.
+    # ⚠ THE SHARE, and the history of this comment is the reason it may exist. It used to read "NO
+    # PERCENTAGE, and that is measured rather than an omission": `context_capped` names embed
+    # TARGETS from the walk, while the inventory's `displays` are the tops carrying at least one
+    # PV, so a capped fragment WITHOUT a PV is in the numerator and not in that denominator and the
+    # share could exceed 100%. That reasoning still holds for THAT denominator. What changed is
+    # that the engine now exports the one it does not break on: the FILE UNIVERSE the walk visited
+    # ([GQ-16], `displays_walked + trends_walked`). Measured on the engine side over two datasets
+    # before the field shipped, `context_capped` is a subset of it on both, while on one of them 6
+    # of 220 capped files sat OUTSIDE the display list. Structural rather than lucky: a target
+    # outside `known` is discarded BEFORE it can be capped.
+    # A bare count is what sent a reader looking for the denominator in the first place; without
+    # one, "23 displays" reads very differently against 30 files than against 3000.
     if report.displays_incomplete:
+        share = (
+            f" ({len(report.displays_incomplete) / report.files_walked:.1%} of the "
+            f"{report.files_walked} files this walk visited)"
+            if report.files_walked
+            # No universe reported (an engine older than [GQ-16], or a hand-built report): the
+            # count still stands, the share is simply not claimed. Inventing a denominator here
+            # is the defect the paragraph above records.
+            else ""
+        )
         lines.append(
-            f"- ⚠️ **{len(report.displays_incomplete)} display(s) hit the per-display context cap, "
-            "so THIS WHOLE REPORT IS A LOWER BOUND:** a PV that is not in the display set may sit "
-            "on one of them, so its `has_display` is WITHHELD rather than `no`, and blind_spots "
-            "and critical_uncovered undercount accordingly (re-run with a higher context cap)."
+            f"- ⚠️ **{len(report.displays_incomplete)} display(s){share} hit the per-display "
+            "context cap, so THIS WHOLE REPORT IS A LOWER BOUND:** a PV that is not in the display "
+            "set may sit on one of them, so its `has_display` is WITHHELD rather than `no`, and "
+            "blind_spots and critical_uncovered undercount accordingly (re-run with a higher "
+            "context cap)."
         )
         lines.extend(f"  - {display}" for display in report.displays_incomplete)
     lines.append("")

@@ -133,7 +133,7 @@ async def test_coverage_passes_canonical_displays_dir_to_walker(
     raw = str(tmp_path / "sub" / ".." / "displays")  # non-canonical → resolves to tmp_path/displays
     assert Path(raw) != Path(raw).resolve()  # guard: the fixture is genuinely non-canonical
     with patch(
-        "epics_mcp.services.orchestration.analyze_display_index", return_value=([], (), 0)
+        "epics_mcp.services.orchestration.analyze_display_index", return_value=([], (), 0, 0)
     ) as walker:
         await _coverage_audit(raw)
     assert walker.call_args.args[0] == Path(raw).resolve()

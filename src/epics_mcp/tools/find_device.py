@@ -72,7 +72,7 @@ def _run_lookup(
         lookup = find_displays(inventory, query, match=match)
         return lookup, collect_channels(lookup)
 
-    (lookup, channels), context_capped, glob_capped_count = analyze_inventory(
+    (lookup, channels), context_capped, glob_capped_count, _files_walked = analyze_inventory(
         Path(displays_dir), project, context_cap=context_cap, windows_paths=windows_paths
     )
     return lookup, channels, context_capped, glob_capped_count

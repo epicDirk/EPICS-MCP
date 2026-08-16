@@ -192,7 +192,7 @@ def test_the_three_raw_consumers_report_the_identical_tail(tail: _Tail, tmp_path
     root = _dataset(tmp_path)
     with patch(_ENGINE_SEAM, _engine_with_tail(tail)):
         _, crossplane_context, crossplane_globs = analyze_display_pvs(root)
-        _, coverage_context, coverage_globs = analyze_display_index(root)
+        _, coverage_context, coverage_globs, _walked = analyze_display_index(root)
         _, _, device_context, device_globs = _run_lookup(
             str(root), _DEVICE, "prefix", DEFAULT_PV_CONTEXT_CAP, False
         )
@@ -290,7 +290,11 @@ _COLLECTION_POINT = Path("services") / "inventory_adapter.py"
 
 #: The two fields that make up the tail. Read anywhere else, they are a second reading free to
 #: drift from the first, which is the defect GB-71 removed.
-_TAIL_FIELDS = frozenset({"context_capped", "glob_capped"})
+#: ⚠ ``displays_walked``/``trends_walked`` joined this set WITH the read that uses them ([GQ-16]),
+#: and that pairing is the whole point of this guard: a tail field read anywhere the collection
+#: point does not see is a number in a header that no longer describes the body under it. Adding
+#: the read without adding the name here reddens nothing, which is exactly the GB-71 defect.
+_TAIL_FIELDS = frozenset({"context_capped", "glob_capped", "displays_walked", "trends_walked"})
 
 #: The engine entry point that produces a tail. Called anywhere else, a consumer holds an inventory
 #: the collection point never saw, and may report no tail at all.

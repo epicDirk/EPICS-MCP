@@ -1031,6 +1031,14 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   reached through the parent that binds its macros. That one has its own `notes` entry (see "There
   is a THIRD incompleteness source" below), and ⚠ raising the `context_cap` does NOT help against
   it: no tool exposes a glob cap.
+- **`coverage_audit` tells you HOW MUCH of the walk the cap touched, not just that it did.** Its
+  header line carries the capped count as a share of the file universe that walk visited
+  (`files_walked` in `--json`, displays plus trends). A bare count leaves the only question that
+  matters unanswerable: 104 capped displays mean something quite different against 284 walked
+  files than against 3000. ⚠ The denominator is the WALKED UNIVERSE and deliberately not the
+  display set: a capped file that carries no PV is in the count and not in that set, so that share
+  could exceed 100%. When the engine reports no universe the line falls back to the bare count
+  rather than dividing by something else.
 - **The two `capped` signals answer different questions, and the display one is deliberately
   pessimistic.** `shown_by_display_capped` is always the DISPLAY view's verdict. The `notes` cap
   entry belongs to whichever view you asked for: under `view="file"` it is the file verdict, under

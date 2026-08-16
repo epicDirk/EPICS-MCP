@@ -231,9 +231,14 @@ def test_analyze_adapters_smoke_over_real_bob(tmp_path: Path) -> None:
     # than accepted as "read or write" like the display row above: here the value is decidable.
     assert trend_jp.role == "read"
 
-    index_rows, index_capped, index_glob = analyze_display_index(root)
+    index_rows, index_capped, index_glob, index_walked = analyze_display_index(root)
     assert isinstance(index_capped, tuple)
     assert isinstance(index_glob, int)
+    # The file universe, and asserted as a POSITIVE number rather than by type: this fixture holds
+    # a display and a trend, so a walk that reported 0 would be an engine that walked nothing while
+    # the rows above prove it walked something. An `isinstance(..., int)` would pass on exactly that
+    # failure, which is the assertion shape GB-71 already found too weak once.
+    assert index_walked >= 2
     ir = next(r for r in index_rows if r.pv == channel)
     assert isinstance(ir, IndexRow)
     assert "panel.bob" in ir.displays

@@ -95,6 +95,15 @@ carry breaking changes).
 
 ### Changed
 
+- **`coverage_audit`'s cap warning reports a SHARE, not just a count.** The header said "N
+  display(s) hit the per-display context cap" and left the only question that matters
+  unanswerable: 104 capped displays mean something quite different against 284 walked files than
+  against 3000. It now reads "104 display(s) (36.6% of the 284 files this walk visited)", and
+  `--json` carries `files_walked`. ⚠️ The denominator is the walked file universe and deliberately
+  not the display set: a capped file carrying no PV is in the count and not in that set, so that
+  share could exceed 100%. When no universe is reported the line falls back to the bare count
+  rather than dividing by something else.
+
 - **The display engine pin moves to `5aab30e`, and with it four measured corrections to what the
   display tools say about a screen set.** The pin had stood still at `0ab0d73` while eight commits
   landed in `opi_navigation`, so every reachability and PV answer this server gave came out of a

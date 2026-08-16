@@ -146,7 +146,7 @@ def build_coverage_report(request: CoverageRequest) -> CoverageReport:
     channelfinder = build_cf_checker(request.query_channelfinder)
     archived = build_archiver_checker(request.query_archiver)
     alarmed = build_alarm_checker(request.query_alarm, request.alarm_config)
-    index_rows, context_capped, glob_capped_count = analyze_display_index(
+    index_rows, context_capped, glob_capped_count, files_walked = analyze_display_index(
         displays_dir,
         context_cap=request.context_cap,
         windows_paths=request.windows_paths,
@@ -162,4 +162,5 @@ def build_coverage_report(request: CoverageRequest) -> CoverageReport:
         alarm_requested=request.query_alarm,
         context_capped=context_capped,
         glob_capped_count=glob_capped_count,
+        files_walked=files_walked,
     )

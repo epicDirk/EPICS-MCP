@@ -390,7 +390,7 @@ def _run_validate(file_path: str, displays_dir: str | None, view: PvView = "file
     # inventory's diagnostics tail (GB-71). context_cap is passed explicitly although it is the
     # engine's own default: this call took that default implicitly before, and the collection point
     # deliberately has no default of its own, so every caller's budget is visible at its call site.
-    sweep, context_capped, glob_capped_count = analyze_inventory(
+    sweep, context_capped, glob_capped_count, _files_walked = analyze_inventory(
         root,
         lambda inventory: _sweep_display_file(inventory, rel),
         context_cap=DEFAULT_PV_CONTEXT_CAP,

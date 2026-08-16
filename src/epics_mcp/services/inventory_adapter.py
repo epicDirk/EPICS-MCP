@@ -76,7 +76,7 @@ def analyze_inventory[T](
     *,
     context_cap: int,
     windows_paths: bool,
-) -> tuple[T, tuple[str, ...], int]:
+) -> tuple[T, tuple[str, ...], int, int]:
     """Run the Wedge-0 inventory ONCE, project it, and pair the result with the DIAGNOSTICS TAIL.
 
     **The one place that reads the tail.** Every tool that reports the inventory's incompleteness
@@ -91,7 +91,16 @@ def analyze_inventory[T](
     of a single file returns that instead. Narrowing it to ``list[T]``, as it was, is what forced
     the two tools to call the engine directly and grow their own copy of the read.
 
-    Returns ``(projected, context_capped, glob_capped_count)``.
+    Returns ``(projected, context_capped, glob_capped_count, files_walked)``.
+
+    ⚠ ``files_walked`` is ``displays_walked + trends_walked``, i.e. the size of the FILE UNIVERSE
+    the walk actually visited, and it is the only honest denominator for the context-cap share.
+    NOT ``len(inventory.displays)``: those are the tops carrying at least one PV, and a capped
+    fragment without a PV appears in ``context_capped`` while never appearing there. Measured on
+    the engine side over two datasets before this field existed: on one of them 6 of 220 capped
+    files sat outside the display list, so that denominator would have produced a share above
+    100%. The engine exports the universe for exactly this reason ([GQ-16]); reading anything else
+    here would reintroduce the two-denominators defect this module already warns about below.
 
     ⚠ ``glob_capped_count`` counts **PAIRS**, not source displays. The engine records
     ``(source display, raw <file> target)``, and one source can cap several distinct targets, so
@@ -113,6 +122,7 @@ def analyze_inventory[T](
         project(inventory),
         inventory.diagnostics.context_capped,
         len(inventory.diagnostics.glob_capped),
+        inventory.diagnostics.displays_walked + inventory.diagnostics.trends_walked,
     )
 
 
@@ -145,9 +155,13 @@ def analyze_display_pvs(
     honest lower-bound signals into the report. ``windows_paths`` resolves paths case-insensitively
     (Windows hosts); default Linux (= the ESS-console / CI truth, deterministic).
     """
-    return analyze_inventory(
+    # The file universe is DROPPED here on purpose: this projection feeds the join report, which
+    # has no cap-share line to put a denominator in. Returning it anyway would put a fourth value
+    # in every caller's unpacking for nobody to read.
+    join_pvs, context_capped, glob_capped_count, _files_walked = analyze_inventory(
         repo_root, inventory_join_pvs, context_cap=context_cap, windows_paths=windows_paths
     )
+    return join_pvs, context_capped, glob_capped_count
 
 
 def analyze_display_index(
@@ -155,14 +169,17 @@ def analyze_display_index(
     *,
     context_cap: int = DEFAULT_PV_CONTEXT_CAP,
     windows_paths: bool = False,
-) -> tuple[list[IndexRow], tuple[str, ...], int]:
+) -> tuple[list[IndexRow], tuple[str, ...], int, int]:
     """Run the Wedge-0 inventory over *repo_root*; return the ``PV → [displays]`` index as rows.
 
     Symmetric to :func:`analyze_display_pvs`, but reads the inventory's ``index`` field (the global
     operator-facing, resolved, real-protocol PV→[screens] index) instead of the per-display PV
     lists, the input the coverage audit's display set ``D`` needs. *repo_root* must be the dataset
     ROOT (the operator top-levels there bind the display macros). Returns ``(index_rows,
-    context_capped, glob_capped_count)``; the latter two carry the inventory's lower-bound signals.
+    context_capped, glob_capped_count, files_walked)``; the last three carry the inventory's
+    lower-bound signals, and ``files_walked`` is the denominator that turns the cap COUNT into a
+    share ([GQ-16]). This is the one projection that reports a share, which is why it is the one
+    that keeps the fourth value.
     """
     return analyze_inventory(
         repo_root, _index_rows, context_cap=context_cap, windows_paths=windows_paths

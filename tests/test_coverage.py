@@ -396,10 +396,13 @@ def test_the_cap_warning_stands_in_the_head_above_every_gap_figure() -> None:
     arrives. The warning names the consequence (``has_display`` withheld) rather than the count
     alone, because the count answers "how many displays", not "what does this report still mean".
 
-    ⚠ It deliberately claims NO percentage: the numerator names embed targets from the walk, the
-    inventory's ``displays`` are the tops carrying a PV, and a capped fragment WITHOUT a PV is in
-    the first and not in the second (probed 2026-08-15), so a share could exceed 100%. That is
-    asserted here too, so a later "improvement" that divides the two has to face this line.
+    ⚠ NO percentage HERE, and the reason narrowed rather than disappeared. It used to be "no
+    denominator exists at all"; since [GQ-16] the engine reports the file universe it walked, and
+    with one the head line does carry a share (``test_the_cap_line_reports_the_share_of_the_walked
+    _universe``). What stays true is the case this vector builds: no universe reported, so nothing
+    to divide by, and inventing one is the defect the old wording was written against. The
+    forbidden denominator is still forbidden: ``len(display set D)`` puts a capped PV-less file in
+    the numerator and not in the denominator, so that share could exceed 100%.
 
     RED-PROOF: move the warning back below ``critical_uncovered`` and the order assertion fails;
     drop the consequence clause and the wording assertion fails.
@@ -425,6 +428,43 @@ def test_the_cap_warning_stands_in_the_head_above_every_gap_figure() -> None:
     line_end = markdown.index(chr(10), warning_at)
     head_line = markdown[warning_at:line_end]
     assert "%" not in head_line, (
-        "the cap line must not claim a share: numerator and denominator come from different "
-        f"populations, see the comment in render_markdown. Line: {head_line!r}"
+        "no file universe was reported, so the cap line must not claim a share. Inventing a "
+        f"denominator is the defect render_markdown's comment records. Line: {head_line!r}"
     )
+
+
+def test_the_cap_line_reports_the_share_of_the_walked_universe() -> None:
+    """With the universe reported, the cap COUNT becomes a share, against the right denominator.
+
+    [GQ-16]. A bare "23 displays hit the cap" reads very differently against 30 walked files than
+    against 3000, and the reader had no way to tell which. The engine half of this point exports
+    ``displays_walked``/``trends_walked``; this is the consumer half.
+
+    ⛔ The denominator is the FILE UNIVERSE, never ``len(display set D)``. Measured on the engine
+    side over two datasets: ``context_capped`` is a subset of the universe on both, while on one of
+    them 6 of 220 capped files sat outside the display list, which is why that share could exceed
+    100%. Structural rather than lucky: a target outside ``known`` is discarded before it can be
+    capped.
+
+    RED-PROOF: divide by ``len(report.cf_and_display)`` or by any display-derived count and the
+    number below changes; drop the share and the assertion fails outright.
+    """
+    report = audit_coverage(
+        [_row("DEV:A")],
+        scope="DEV:",
+        channelfinder=_FakeCF({"DEV:A"}),
+        cf_requested=True,
+        context_capped=("capped.bob", "other.bob"),
+        files_walked=8,
+    )
+    markdown = render_markdown(report)
+    warning_at = markdown.index("hit the per-display context cap")
+    head_line = markdown[
+        markdown.rindex(chr(10), 0, warning_at) : markdown.index(chr(10), warning_at)
+    ]
+
+    assert "25.0%" in head_line, f"2 of 8 walked files is 25.0%; line was {head_line!r}"
+    # The denominator is NAMED, not only applied: a share whose base the reader cannot see is the
+    # same unanswerable question as the bare count it replaces.
+    assert "8 files this walk visited" in head_line
+    assert report.files_walked == 8
