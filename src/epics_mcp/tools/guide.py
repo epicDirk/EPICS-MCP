@@ -7,7 +7,7 @@ model is meant to FETCH BY ITSELF therefore has to be a tool. A resource is not 
 pulls from, and this guide has been exactly that: complete, guarded against drift, and never
 fetched. The resource stays; this module adds the half a model can reach.
 
-**Why a topic at all, measured rather than assumed.** The guide is around 91 KB. Served from a
+**Why a topic at all, measured rather than assumed.** The guide is around 105 KB. Served from a
 tool returning ``str``, FastMCP 3.4.4 wraps the value in ``{"result": ...}`` and sends it BOTH as
 a text block AND as ``structuredContent``, so the same document crosses the wire twice, the second
 copy JSON-escaped and therefore slightly longer: **one call costs a little over twice the
@@ -30,7 +30,7 @@ of 27 KB and more, each larger than a sibling surface's ENTIRE guide. So the key
 document instead: a ``## `` key serves that section's own text and a ``### `` key serves one
 subsection, in one flat namespace, with no overlap and no gap. The practical effect is the point:
 a caller asking which tool answers a question gets the tool inventory, roughly 1.5 KB, not the
-28 KB section that opens with it.
+31 KB section that opens with it.
 
 ⚠️ **The error signatures were the second section this argument applies to, and for a while they
 were the counter-example to it.** They are what a caller reaches this surface for most often, and
@@ -91,6 +91,13 @@ TOPICS: Mapping[str, str] = {
     "posture": "Posture (read this first)",
     "planes": "The planes",
     "tools": "Tool palette",
+    # The answer-field index. ⚠️ It is an INDEX and not a glossary, which is what makes it belong
+    # here rather than beside each explanation: this surface has no free-text search (see the
+    # paragraph on determinism above), so a caller holding a field NAME and nothing else has no
+    # route to the topic that explains it. The table supplies exactly that route and repeats no
+    # explanation, so it cannot drift away from one. ``tests/test_guide_vocabulary.py`` holds every
+    # entry against the code AND against the topic it names.
+    "answer-fields": "Answer shapes, and which topic explains",
     "olog-output": "Olog output shape",
     "olog-filters": "Olog search filters",
     "pv-write": "PV write posture",
@@ -122,6 +129,13 @@ TOPICS: Mapping[str, str] = {
     "err-channelfinder": "a silent zero that is not a refusal",
     "err-rest": "What a REST 404 is allowed to mean",
     "err-displays": "the three ways to get",
+    # ⚠️ Its own group rather than more bullets under ``err-displays``, and the split was FORCED by
+    # a guard rather than chosen for tidiness:
+    # ``test_no_error_group_is_the_largest_part_of_the_guide``
+    # went red the moment the bucket vocabulary landed there, because reading one report's field
+    # would then have cost the whole display-inventory section as well. The subject differs too: the
+    # neighbour answers "why does this file report 0", this one "what does this bucket mean".
+    "err-crossplane": "what each bucket means",
     "err-arguments": "before any request exists",
     "err-gates": "a server that declines to start",
     "err-guide": "The guide tool itself",

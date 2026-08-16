@@ -9,6 +9,17 @@ carry breaking changes).
 
 ### Added
 
+- **The guide now explains the words an answer uses, and a new `answer-fields` topic maps a field
+  name to the topic that explains it.** A caller meets a field name in a RESULT, not in a question,
+  and this surface has no free-text search, so a name such as `cf_capped`, `config_msg`,
+  `default_level`, `next_steps` or `archive_fields` was unreachable: it rode on the wire and nothing
+  said what it meant. Fifteen such fields are now explained where their subject already lives, and
+  the new index routes to them. The cross-plane report vocabulary moved into its own signature group
+  `err-crossplane` (buckets, the `_write` twins, the withheld ChannelFinder and `.db` verdicts, the
+  coverage cells), so reading one bucket no longer costs the whole display-inventory section.
+  `tools/list` grows 165 chars on both lanes; the guide itself grows about 12 KB and none of that
+  reaches the wire, since it is served on request.
+
 - **Every read answer now carries a `reach` field: which plane served it and how far that plane
   reaches.** Values are `loopback-only` (provably confined to this machine), `beyond-loopback` (it
   can leave this machine) or `not-configured` (no request was made). `probed: false` rides along

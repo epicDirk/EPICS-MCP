@@ -192,6 +192,45 @@ are simply absent, that is an unmet optional dependency group, not a bug.
 Composing the display tools: `find_device` (which screens show device X + live value + serving IOC),
 `coverage_audit` (which delivered PV has no screen/archive/alarm, the blind spots).
 
+### Answer shapes, and which topic explains the field in front of you
+
+Three shapes a caller meets in an answer and nowhere else:
+
+- **An NTTable** comes back as `{labels: [...], columns: {name: [...]}}`, column-major, so one row is
+  the same index taken out of every column. Index by the keys of `columns`, which are the struct
+  field names and need not match the display strings in `labels`.
+- **A value this server cannot convert to JSON** is replaced by
+  `{unsupported_type: <the p4p type id>, note: ...}` rather than by a raw object or an error, so an
+  answer carrying it is a SUCCESSFUL read of a shape that cannot be rendered. A retry returns the
+  same summary, so quote the `unsupported_type` id rather than reading the answer as an empty value.
+- **`crossplane_check`, `coverage_audit` and `find_device` answer with the same content twice**,
+  `{report: <JSON>, markdown: <the rendered report>}`, so quoting both costs double for nothing.
+  Take `report` to filter, count or diff it, `markdown` when the answer goes to a person.
+  `validate_pvs`, the fourth display tool, has no such pair.
+
+⚠️ **This guide has no free-text search**, so a field name you got back is findable only if
+something maps it to a topic. That is what the table below is: an INDEX, never a second
+explanation. Ask `get_guide` for the topic named beside the field.
+
+| A field in the answer | The topic that explains it |
+|---|---|
+| `reach` | `posture` |
+| `pvs_linked` · `pvs_linked_write` · `pvs_other_prefix` · `pvs_indeterminate` · `pvs_dynamic` · `pvs_unresolved` · `pvs_non_channel` · `pvs_non_channel_by_protocol` | `err-crossplane` |
+| `broken` · `broken_write` · `ioc_db_resolved` · `ioc_db_needs_msi` | `err-crossplane` |
+| `cf_unregistered` · `cf_unregistered_write` · `cf_registered` · `cf_capped` | `err-crossplane` |
+| `cf_and_display` · `cf_only` · `display_only` · `critical_uncovered` · `blind_spots` · `unarchived` · `unalarmed` | `err-crossplane` |
+| `has_display` · `registered_cf` · `archived` · `alarmed` (the per-PV cells) | `err-crossplane` |
+| `displays_incomplete` · `files_walked` | `err-crossplane` |
+| `shown_by_display` · `shown_by_display_capped` · `total` | `err-displays` |
+| `state` · `likely_cause` · `confidence` · `evidence` · `next_steps` | `err-pv` |
+| `registered` · `withheld` · `found` | `err-pv` |
+| `attachment_count` | `olog-output` |
+| `total_matches` · `default_level` | `olog-filters` |
+| `config_msg` · `capped` (alarm history) | `alarm-tree` |
+| `archive_fields` · `host_name` · `creation_time` · `identity` | `err-archiver` |
+| `identified_planes` · `verification_complete` · `write_safety` | `doctor` |
+| `notes` (every report has one) | the topic of the tool that returned it |
+
 ### Olog output shape (what a read gives you back)
 
 Entries come back **whole**: `title`, `description`, `owner` (the author), `source`, `properties`
@@ -282,6 +321,18 @@ level is legitimate (the string still sits on old entries), but *writing* one is
 answers with HTTP 200 and that no filter ever finds again. A blank level is refused separately, the
 server accepts it and silently clears the entry's triage level. The match is exact: no casefolding,
 no trimming, no `,`/`;`/`|` splitting. Those are search semantics; a level being written is a scalar.
+
+**A page is not the result set: read `total_matches`.** `search_logbook` pages with `offset` and
+`sort`, and `total_matches` is the true total across all pages (Olog's own hit count), not the
+length of the list you got. Compare the two before concluding anything from a count, and page rather
+than widening the filter when they differ.
+
+**What a write WITHOUT a level lands on is often unknown, and the answer says so.**
+`list_log_levels` returns `default_level` beside the names: the level the server applies to a create
+that passes none. ⚠ It is `null` plus an explaining note whenever the server flags no level as the
+default or flags several, and a stock Olog seed file ships two of them, so `null` is the ordinary
+case rather than an error. Read the note and pass `level` explicitly rather than assuming an entry
+written without one lands on a sensible triage level.
 
 An unbalanced double quote in `title` makes the server throw, which an anonymous read sees as **401**
 (Olog's error dispatch requires auth and so masks its own 400). On this read path a 401 almost always
@@ -674,6 +725,21 @@ and now backs **two** surfaces: epics-doctor's naming plane AND `lookup_device_n
 definitive-negative gate (a 204/404 is trusted only after this beacon confirms the responder, see
 "not found vs not registered" below).
 
+⛔ **Exit `0` means "nothing failed", never "everything is confirmed", and `--json` carries the
+difference.** `identified_planes` is the POSITIVE signal, the planes that proved what they are;
+`verification_complete` is true vacuously on an empty configuration, so it cannot stand alone. A
+script that wants "this deployment is proven" reads `identified_planes` together with
+`unverified_planes`, `inconclusive_identity_planes` and `degraded_planes`, and the last of those is
+the only one covering an appliance that is reachable, proven and simply not ingesting.
+
+Below the plane lines the report prints a glyph-free **`Write gates`** block, `write_safety` in
+`--json`, with one line per gate. ⛔ **It is informative only and it describes the environment of
+THAT command, not of the server answering your client.** It never moves the verdict or the exit
+code, and a shell without the client's variables prints `PV write: OFF` while the MCP-launched
+server has the gate armed, which is the natural confusion here. For the posture of the process that
+actually answered, read `epics-pv://health` instead; a disarmed gate gets one line, an armed one
+names its allowlist, its rate and where a write would go.
+
 ### Retrieval-cluster-aware appliances
 An Archiver Appliance may run as an **N-member failover cluster**. Such a cluster is retrieval-aware: a
 MGMT/retrieval query to **one** member transparently returns data physically owned by **another** member;
@@ -708,6 +774,14 @@ Any channel name works, so append a field suffix to read record metadata without
 `get_pv_info("SIM:PS-01:Cur-RB.RTYP")`, `.SCAN`, `.HIHI`, `.HOPR`. This is the cheap path to alarm
 thresholds when an NT `valueAlarm` comes back NaN over a PVA gateway. A cold first connect can be slow:
 pass `timeout` ≥ 8 for the first probe.
+
+⚠ **The cross-plane tools go the other way and STRIP that suffix.** `crossplane_check`,
+`coverage_audit` and `diagnose_connection` reduce a name to its bare record before they join
+anything, so `SIM:PS-01:Cur-RB.EGU` and `SIM:PS-01:Cur-RB.OUT` are both looked up as
+`SIM:PS-01:Cur-RB`, the only form ChannelFinder and an IOC `.db` hold. Two consequences worth
+knowing before reading such a report: a record and its field references collapse into ONE entry, and
+none of the three answers about the field itself. To ask about the field, read it as its own channel
+with `get_pv_info`, as above.
 
 ### Naming URL: no trailing `/rest`
 Set `EPICS_MCP_NAMING_URL` to the service root **without** `/rest` and without a trailing slash. The
@@ -812,6 +886,21 @@ Four limits, because this returns a SAMPLE and not an enumeration:
   `root` over `state:/<tree>*` and `config:/<tree>*` only, so a `command:` document never matches it,
   and a name derived from one can look wrong under `root` while being perfectly right.
 
+**`capped` is honest by over-fetching, and there is one configuration where it under-reports.**
+`get_alarm_history` asks the logger for one event MORE than `max_events`, so `capped: true` means
+strictly more than `max_events` matched and a full page of exactly `max_events` is not falsely
+flagged. ⚠ On a logger whose own result ceiling sits at or below `max_events` that extra probe
+cannot come back, and a truncated window is then indistinguishable from a complete one. So a
+`capped: false` on a suspiciously round page count is worth one more call with the window moved
+backwards rather than a conclusion.
+
+**The handling instruction rides INSIDE `config_msg`, not beside it.** Alarm answers carry
+`config_msg`, the logger's own serialized copy of the authored alarm configuration, and on a real
+Phoebus Alarm Logger the guidance text is nested in that string rather than in a flat `guidance`
+field. Parse it as JSON to read it, and take `user` and `host` beside it as whoever last changed or
+acknowledged that alarm. ⚠ `config` and `config_msg` are different fields: the first is the tree
+path this section is about, the second is the authored content.
+
 ## Error signatures → which tool answers
 
 Each signature here is an exception **class and shape**, never a copied runtime string, so match on
@@ -822,8 +911,9 @@ its own**, so ask `get_guide` for the group rather than for `errors`: `err-trans
 that reads short, a withheld cause, the CA bundle) · `err-pv` (a PV that will not connect, a device
 that may not be registered) · `err-archiver` · `err-alarm` · `err-olog` (reads; a refused WRITE is
 `err-gates`) · `err-channelfinder` · `err-rest` (what a 404 may mean) · `err-displays` (the display
-and trend tools, and `total: 0`) · `err-arguments` · `err-gates` (both write gates, the read
-throttle, and a server that will not start) · `err-guide`.
+and trend tools, and `total: 0`) · `err-crossplane` (what a bucket of a cross-plane or coverage
+report means, and when its verdict is withheld) · `err-arguments` · `err-gates` (both write gates,
+the read throttle, and a server that will not start) · `err-guide`.
 
 ### A plane fails and the message reads short: redaction, a withheld cause, a bundle that never opened
 
@@ -873,6 +963,16 @@ throttle, and a server that will not start) · `err-guide`.
   registered/ACTIVE answer skips the identity probe, the measured hazard is a foreign 404, not a
   foreign ACTIVE record.) The extra swagger round-trip fires only on the not-registered path and is
   cached per client instance; when it withholds, a server-side `logger.debug` records the probe verdict.
+- **A cause is never quoted without its `confidence`.** A `diagnose_connection` answer is `state`
+  (the live probe's verdict and the only authority), then `likely_cause` paired with a `confidence`
+  of `confirmed`, `likely` or `indeterminate`, then the per-plane `evidence` the level was raised
+  from. The explanatory planes can only LIFT that level, never create a cause of their own, so on
+  `indeterminate` the cause word carries no information and `next_steps` is what to act on.
+- **`next_steps` is the actionable half, and on an indeterminate verdict it names what was
+  missing.** It says which explanatory plane was not consulted, so a re-run with
+  `check_channelfinder=true` (plus `EPICS_MCP_CHANNELFINDER_URL`) or `check_naming=true` (plus
+  `EPICS_MCP_NAMING_URL`) is the next call rather than a second probe of the same PV. ⚠ Both planes
+  are off by default, so a first answer that explains nothing is the expected first answer.
 
 ### Archiver: history, which appliance answered, and refusals that do not mean "down"
 
@@ -887,6 +987,12 @@ throttle, and a server that will not start) · `err-guide`.
   (`upper_alarm_limit`=HIHI ... `*_ctrl_limit`=DRVH/DRVL) and `controlling_pv`/`policy_name`/
   `modification_time`. ⚠️ The nine numeric limits are ALWAYS present and read `"0.0"` when the PV
   had no ctrl info, `"0.0"` may mean "no limit configured", not a literal zero.
+  Three more of its fields answer questions people ask of the wrong tool: `archive_fields` lists the
+  record FIELDS archived alongside the value (so a missing `.EGU` there, not a missing PV, is why a
+  unit never appears in a plot), `host_name` names the engine host that does the archiving for this
+  PV, which is what distinguishes two members of one cluster, and `creation_time` is when the PV was
+  ADDED to the archiver, which is the earliest point any history can exist and therefore the first
+  thing to check when a window comes back empty.
 - **Which appliance am I on? cluster topology?** `get_appliance_info` (no PV) surfaces the whole
   MGMT `getApplianceInfo` body, the appliance `identity`, the per-plane root URLs
   (`mgmt_url`/`engine_url`/`etl_url`/`retrieval_url`/`data_retrieval_url`), `cluster_inet_port` and a
@@ -1084,6 +1190,52 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
 - **`coverage_audit` refuses "alarm plane, no tree named" with `INVALID_INPUT`.** Same shape as
   above: the verdict follows from the arguments, so it is given before the display-PV walk rather
   than after it. Name the tree (`alarm_config`); there is no correct default, they are site-specific.
+
+### The cross-plane reports: what each bucket means, and which verdicts are withheld
+
+- **`crossplane_check` buckets every display PV, and two of the buckets are bookkeeping rather than
+  findings.** `pvs_linked` are the concrete channels sharing this IOC's prefix, `pvs_other_prefix`
+  the concrete ones that do not (most often another IOC), `pvs_indeterminate` the ones the inventory
+  could not resolve to a concrete channel, reported split as `pvs_dynamic` and `pvs_unresolved` and
+  never judged broken. `pvs_non_channel` holds references on non-channel protocols (loc, sim, sys,
+  other), left out of the IOC join because they are not EPICS channels, with
+  `pvs_non_channel_by_protocol` partitioning that exact total. Read the last two as bookkeeping: a
+  large `pvs_non_channel` is a screen using local variables, not a defect list.
+- **Each bucket has a `_write` twin, and that is where triage starts.** `pvs_linked_write`,
+  `broken_write` and `cf_unregistered_write` hold the subset that at least one operator display
+  actually WRITES, so an entry in `broken_write` is a button or a setpoint wired to a record the IOC
+  does not serve. Work those three lists before the full buckets.
+- **`cf_capped: true` means the ChannelFinder verdict is WITHHELD, and an empty `cf_unregistered`
+  then says nothing.** The query came back truncated, and diffing a partial registry would flag real
+  channels as missing, so the tool withholds instead. ⚠ The empty list looks exactly like "every PV
+  is registered", which is the reading to avoid: take the `notes` entry, then narrow the prefix or
+  the scope until the query fits under the cap before believing anything about the registry.
+- **The ChannelFinder plane is opt-in and OFF by default**, `query_channelfinder` on the tool and
+  `--channelfinder` on the `epics-crossplane` CLI. On a default run an empty `cf_unregistered` only
+  means the registry was never asked, and a `notes` entry says so. Switch it on and set
+  `EPICS_MCP_CHANNELFINDER_URL`, or the run returns a skipped note and the same empty list.
+- **A withheld `broken` verdict is the NORMAL outcome on a real IOC, not a wrong `module_db_root`.**
+  The static `.db` route judges nothing unless the record set is provably complete, and it is
+  all-or-nothing: one record that is still macro-templated after substitution lands in
+  `ioc_db_needs_msi` (expanding it needs the EPICS `msi` tool, which this server does not run), and
+  an `iocshLoad` in the `st.cmd` pulls in records that cannot be followed statically. Either one
+  withholds `broken` for the whole IOC. Read `ioc_db_resolved` and `ioc_db_needs_msi` first, and use
+  the ChannelFinder plane instead: it asks the RUNNING registry rather than the static file set.
+- **`coverage_audit` anchors on ChannelFinder, and its three set names say which side a PV is
+  missing from.** `cf_registered` is the registered set for the scope; against the displayed set it
+  splits into `cf_and_display` (the healthy core), `cf_only` (registered but on NO screen, the
+  operator blind spot this tool exists for) and `display_only` (shown but not registered).
+  `critical_uncovered` is the headline, and `blind_spots`, `unarchived` and `unalarmed` are the same
+  registered PVs split by WHICH plane is missing, so use those three to hand the work out. ⚠ Two
+  fields say how far the answer can be trusted: `displays_incomplete` counts the displays a cap left
+  half-expanded, and `files_walked` is the universe that count is a share of, since 104 capped
+  displays mean something else against 284 walked files than against 3000.
+- **`coverage_audit` answers each plane per PV with `yes`, `no` or `withheld`, and `withheld` is
+  never `no`.** The four cells are `has_display`, `registered_cf`, `archived` and `alarmed`;
+  `withheld` means that plane could not answer (disabled, capped, a per-PV timeout, or a capped
+  display walk) and never counts as a gap, which is why `critical_uncovered` lists only PVs with a
+  PROVEN `no`. So the headline is a lower bound by construction: enable or fix the withheld plane
+  and re-run before reading a PV as covered.
 
 ### A refusal that happens before any request exists (the tool-specific ones sit with their tool)
 

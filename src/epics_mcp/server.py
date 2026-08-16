@@ -295,7 +295,9 @@ async def get_guide(
                 f"order: {', '.join(_GUIDE_TOPICS)}. They PARTITION the guide, so a section key "
                 "(posture, planes, tools, recipes, errors) serves that section's own text and NOT "
                 "the subsections under it, which are keys of their own: 'tools' is the tool "
-                "inventory, the Olog and write-posture detail below it is 'olog-output', "
+                "inventory, 'answer-fields' maps a field name you got back to the topic that "
+                "explains it (start there when you hold a word and not a question), and the Olog "
+                "and write-posture detail below is 'olog-output', "
                 "'olog-filters', 'pv-write', 'audit', 'olog-write', 'olog-attachments'. The same "
                 "holds for 'errors', which serves the signature section's lead only: the "
                 "signatures themselves are the 'err-' keys, one group per plane or per kind, so "
@@ -318,7 +320,7 @@ async def get_guide(
     prove. It reads nothing but its own packaged document: no PV, no REST plane, no file of
     yours, so it can neither time out nor depend on how this instance is configured.
 
-    The whole document is around 91 KB, which is why 'topic' exists and why omitting it should be
+    The whole document is around 105 KB, which is why 'topic' exists and why omitting it should be
     the exception. The keys partition the document: each returns exactly its own part, VERBATIM,
     so an excerpt is a real excerpt and never a rendering, and the largest single part is under a
     third of the whole. An unknown topic is refused with [UNKNOWN_TOPIC] naming every valid key.
