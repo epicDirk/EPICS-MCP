@@ -120,11 +120,13 @@ later is refused the day it is added. ⚠️ **Two options are not swallowed and
 refused**, measured: `--help` and `--version` answer and exit `0`, because argparse acts on them
 inside the parse, before any rule of ours runs. That is the difference between an option that
 does nothing and an option that does its own thing.
-⚠️ **No preset arms a write gate**, `sandbox` included: a shape sets the search path and the plane
-URLs, never `EPICS_MCP_ALLOW_PV_WRITE` or `EPICS_MCP_ALLOW_OLOG_WRITE`. So a block generated from
-any preset starts read-only, and arming a gate stays a deliberate `--set`. Reading `sandbox` as a
-write posture because it is the one shape with nothing to fill in is the mistake this sentence
-exists for.
+⚠️ **No preset arms a write gate**, `sandbox` included: what a shape sets is the read posture, the
+provider and the search path, plus the plane URLs it needs, never `EPICS_MCP_ALLOW_PV_WRITE` or
+`EPICS_MCP_ALLOW_OLOG_WRITE`. So a block generated from any preset starts read-only, and arming a
+gate stays a deliberate `--set`. Reading `sandbox` as a write posture because it is the one shape
+with nothing to fill in is the mistake this sentence exists for. The negative half is what the
+sentence promises and the only half a guard can hold; `--list` prints each shape's variables, so
+what a shape sets is answerable without this sentence.
 
 `epics-testpv` serves two synthetic PVs so the quick start needs no control system at all:
 `TEST:Temperature`, an analogue reading with a unit, and `TEST:Heater`, a writable switch, which is

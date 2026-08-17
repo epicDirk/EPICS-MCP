@@ -27,6 +27,7 @@ discipline is written against.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -92,6 +93,16 @@ def test_no_preset_arms_a_write_gate() -> None:
 
     Provably red: give any entry of ``PRESETS`` an ``EPICS_MCP_ALLOW_PV_WRITE`` entry.
     """
+    # The SENTENCE, not only the fact. Found in this build's own QA round: the guard below holds
+    # the behaviour, and nothing held the text, so deleting the paragraph from docs/tools.md would
+    # have left every test green while the delivered channel lost the statement again, which is
+    # the exact defect this whole piece of work exists to repair. The wire claims are pinned on
+    # their descriptions; this is the same pin for the channel that ships as a file.
+    tools_md = Path(__file__).resolve().parent.parent / "docs" / "tools.md"
+    assert "No preset arms a write gate" in tools_md.read_text(encoding="utf-8"), (
+        "docs/tools.md no longer carries the preset/write-gate sentence"
+    )
+
     assert PRESETS, "no presets at all: this guard would pass vacuously"
     for name, preset in PRESETS.items():
         for gate_var in _GATE_VARS:
