@@ -513,50 +513,138 @@ def test_the_coupling_guard_reads_module_level_and_not_function_level() -> None:
 
 # --- The other half: an engine import BELOW module level ---------------------------------------
 
-#: The one spelling that makes a below-module-level engine import legitimate. Both forms of it
-#: ("skipif on the function" and "if engine_available():") name this helper, so one substring
-#: recognises both, and a third form would have to be added here deliberately rather than slip in.
+#: The helper that answers "is the engine there", by name.
+#:
+#: ⛔ MATCHED STRUCTURALLY, NEVER AS A SUBSTRING, and that is a correction paid for by a post-build
+#: review of this very guard. The first version asked ``"engine_available" in ast.unparse(...)``,
+#: which cannot tell a guard from its own inversion. Measured on that version, ALL of these passed:
+#: ``if not engine_available():`` around the import (it then runs exactly when the engine is
+#: ABSENT), ``if engine_available:`` with the call forgotten (always truthy),
+#: ``@pytest.mark.skipif(engine_available(), ...)`` (inverted), and a ``@pytest.mark.skip`` that
+#: merely mentioned the name in its reason text. A one-word mutation switched the guard off in
+#: silence, which is the defect class this file exists to remove.
 _ENGINE_GUARD = "engine_available"
 
 
+def _is_engine_call(node: ast.expr) -> bool:
+    """``engine_available()`` as a CALL, however it is qualified."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+    return name == _ENGINE_GUARD
+
+
+def _is_absent_engine_test(node: ast.expr) -> bool:
+    """``not engine_available()``, the "the engine is missing" spelling."""
+    return (
+        isinstance(node, ast.UnaryOp)
+        and isinstance(node.op, ast.Not)
+        and _is_engine_call(node.operand)
+    )
+
+
+def _skips_a_test_without_the_engine(decorator: ast.expr) -> bool:
+    """``@pytest.mark.skipif(not engine_available(), ...)`` and nothing that merely mentions it."""
+    if not isinstance(decorator, ast.Call):
+        return False
+    func = decorator.func
+    if not (isinstance(func, ast.Attribute) and func.attr == "skipif"):
+        return False
+    return bool(decorator.args) and _is_absent_engine_test(decorator.args[0])
+
+
+def _leaves_the_function(body: list[ast.stmt]) -> bool:
+    """Does this suite abandon the test, by return, raise, or a pytest skip?"""
+    for stmt in body:
+        if isinstance(stmt, ast.Return | ast.Raise):
+            return True
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+            func = stmt.value.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            if name in {"skip", "xfail", "exit"}:
+                return True
+    return False
+
+
 def _engine_guarded_lines(func: ast.FunctionDef | ast.AsyncFunctionDef) -> set[int]:
-    """Every line of *func* that sits inside an ``if engine_available():`` body."""
+    """Lines of *func* that cannot execute without the engine, by either accepted spelling.
+
+    TWO spellings, because this repository documents the second one as the preferred style
+    (``tests/live_gate.py``: the marker decorators were deliberately replaced by a call at the top
+    of the test). A guard that recognised only the ``if`` would redden the direction the tree is
+    moving in, measured on a constructed case before this was written.
+
+    * ``if engine_available():`` guards its BODY.
+    * ``if not engine_available(): pytest.skip(...)`` as a DIRECT statement of the function guards
+      everything AFTER it. Direct only, deliberately: a skip buried in a loop or a branch may never
+      be reached, and treating the rest of the function as covered would be the over-approximation
+      that turns a guard into a rubber stamp.
+    """
     guarded: set[int] = set()
     for node in ast.walk(func):
-        if isinstance(node, ast.If) and _ENGINE_GUARD in ast.unparse(node.test):
+        if isinstance(node, ast.If) and _is_engine_call(node.test):
             for stmt in node.body:
                 guarded.update(range(stmt.lineno, (stmt.end_lineno or stmt.lineno) + 1))
+    for index, stmt in enumerate(func.body):
+        if not (isinstance(stmt, ast.If) and _is_absent_engine_test(stmt.test)):
+            continue
+        if not _leaves_the_function(stmt.body):
+            continue
+        rest = func.body[index + 1 :]
+        if rest:
+            guarded.update(range(rest[0].lineno, (func.end_lineno or rest[0].lineno) + 1))
     return guarded
 
 
 def _engine_imports_below_module_level(
     tree: ast.Module, tainted: set[str]
 ) -> tuple[list[str], list[str]]:
-    """``(all, unguarded)`` engine-reaching imports inside a function, as ``<func>:<line>``."""
+    """``(all, unguarded)`` engine-reaching imports inside a function, as ``<func>:<line>``.
+
+    Resolved through the ANCESTOR CHAIN of each import rather than per function, which is the
+    second correction from the same review. ``ast.walk`` yields a nested function as its own root,
+    so the first version re-asked the question there with the enclosing guard out of view: a helper
+    or a deferred ``def`` inside a properly skipped test was reported unguarded, and counted twice.
+
+    A decorator only counts on a ``test_`` function, because pytest honours a mark on a collected
+    ITEM and on nothing else. A ``skipif`` on a helper or a fixture reads like a guard and does
+    nothing at run time, and putting one there is the obvious way to silence a false positive.
+    """
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
     every: list[str] = []
     unguarded: list[str] = []
-    for func in ast.walk(tree):
-        if not isinstance(func, ast.FunctionDef | ast.AsyncFunctionDef):
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Import | ast.ImportFrom):
             continue
-        # The whole decorator list, not the first: this tree stacks skipif above two parametrize
-        # decorators, and reading only one of them would redden a file that is already correct.
-        skipped = any(_ENGINE_GUARD in ast.unparse(dec) for dec in func.decorator_list)
-        guarded_lines = _engine_guarded_lines(func)
-        for node in ast.walk(func):
-            if not isinstance(node, ast.Import | ast.ImportFrom):
-                continue
-            names = _names_of(node)
-            if not any(_reaches(n, tainted) or n.split(".")[0] == _ENGINE_PKG for n in names):
-                continue
-            where = f"{func.name}:{node.lineno}"
-            every.append(where)
-            if not skipped and node.lineno not in guarded_lines:
-                unguarded.append(where)
+        names = _names_of(node)
+        if not any(_reaches(n, tainted) or n.split(".")[0] == _ENGINE_PKG for n in names):
+            continue
+        enclosing: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+        parent = parents.get(node)
+        while parent is not None:
+            if isinstance(parent, ast.FunctionDef | ast.AsyncFunctionDef):
+                enclosing.append(parent)
+            parent = parents.get(parent)
+        if not enclosing:
+            continue  # module level, class body included: the completeness guard above owns those
+        where = f"{enclosing[0].name}:{node.lineno}"
+        every.append(where)
+        # ANY enclosing function may carry the guard: the innermost one, or the test that owns it.
+        if not any(
+            (
+                func.name.startswith("test_")
+                and any(_skips_a_test_without_the_engine(dec) for dec in func.decorator_list)
+            )
+            or node.lineno in _engine_guarded_lines(func)
+            for func in enclosing
+        ):
+            unguarded.append(where)
     return every, unguarded
 
 
 def test_an_engine_import_below_module_level_is_guarded() -> None:
-    """The other half of the coupling question, and the half that kept CI red for a day.
+    """The other half of the coupling question, and the half nothing was watching.
 
     ``ENGINE_COUPLED_MODULES`` and the guard above answer "can this module be IMPORTED without the
     engine". They are complete for that question and deliberately blind to an import inside a
@@ -594,7 +682,11 @@ def test_an_engine_import_below_module_level_is_guarded() -> None:
     tainted = _engine_tainted_modules()
     every: list[str] = []
     unguarded: dict[str, list[str]] = {}
-    for path in sorted((_REPO / "tests").glob("test_*.py")):
+    # EVERY python file under tests/, not just test_*.py at the top: conftest.py owns autouse
+    # fixtures that run for every test in the suite, and an engine import in one of those is the
+    # worst version of exactly this defect. The first version of this population read
+    # glob("test_*.py") and could not have seen it.
+    for path in sorted((_REPO / "tests").rglob("*.py")):
         if path.name in ENGINE_COUPLED_MODULES:
             continue  # the whole module is dropped at collection, so its bodies never run
         found, bad = _engine_imports_below_module_level(
@@ -605,9 +697,10 @@ def test_an_engine_import_below_module_level_is_guarded() -> None:
             unguarded[path.name] = bad
 
     assert every, (
-        "no test function imports the engine below module level at all, so this assertion would "
-        "be vacuous; if that is genuinely the tree now, delete this guard rather than keep a "
-        "green one that checks nothing"
+        "no test function imports the engine below module level at all, so this TREE-DRIVEN half "
+        "is vacuous. That is allowed to happen and is not a reason to delete the guard: the "
+        "constructed pin below holds the walker's behaviour on its own. Check that the population "
+        "really emptied rather than that the walk broke, then relax this line."
     )
     assert not unguarded, (
         f"engine-reaching import(s) inside a test function with no engine guard: {unguarded}. "
@@ -617,3 +710,98 @@ def test_an_engine_import_below_module_level_is_guarded() -> None:
         "to ENGINE_COUPLED_MODULES: that list is about module-level imports and the guard for it "
         "would go red."
     )
+
+
+#: What the walker must and must not flag, as SOURCE rather than as tree. Every sibling walker in
+#: this file has such a pin; the one that shipped without it is the one whose first version
+#: accepted its own inversion, so this table is the actual repair and the structural matching above
+#: is only how it is met. Left column: does an unguarded engine import get reported.
+_WALKER_CASES = (
+    (True, "unguarded", "def test_x():\n    from epics_mcp.display_tools import y\n"),
+    (
+        False,
+        "skipif on the test",
+        "@pytest.mark.skipif(not engine_available(), reason='x')\n"
+        "def test_x():\n    from epics_mcp.display_tools import y\n",
+    ),
+    (
+        False,
+        "if engine_available(): around it",
+        "def test_x():\n    if engine_available():\n"
+        "        from epics_mcp.display_tools import y\n",
+    ),
+    (
+        False,
+        "the early-skip idiom this repository prefers",
+        "def test_x():\n    if not engine_available():\n        pytest.skip('no engine')\n"
+        "    from epics_mcp.display_tools import y\n",
+    ),
+    (
+        True,
+        "INVERTED if: the import runs exactly when the engine is absent",
+        "def test_x():\n    if not engine_available():\n"
+        "        from epics_mcp.display_tools import y\n",
+    ),
+    (
+        True,
+        "the call forgotten, so the test is always truthy",
+        "def test_x():\n    if engine_available:\n        from epics_mcp.display_tools import y\n",
+    ),
+    (
+        True,
+        "INVERTED skipif",
+        "@pytest.mark.skipif(engine_available(), reason='x')\n"
+        "def test_x():\n    from epics_mcp.display_tools import y\n",
+    ),
+    (
+        True,
+        "the name only mentioned in a reason text",
+        "@pytest.mark.skip(reason='engine_available() says no')\n"
+        "def test_x():\n    from epics_mcp.display_tools import y\n",
+    ),
+    (
+        True,
+        "a fixture, where a decorator cannot help",
+        "@pytest.fixture\ndef reg():\n    from epics_mcp.display_tools import y\n    return y\n",
+    ),
+    (
+        True,
+        "skipif on a HELPER, which pytest does not honour",
+        "@pytest.mark.skipif(not engine_available(), reason='x')\n"
+        "def _load():\n    from epics_mcp.display_tools import y\n",
+    ),
+    (
+        False,
+        "a nested def inside a properly skipped test",
+        "@pytest.mark.skipif(not engine_available(), reason='x')\n"
+        "def test_x():\n    def helper():\n        from epics_mcp.display_tools import y\n"
+        "    return helper()\n",
+    ),
+    (
+        True,
+        "the ELSE branch of if engine_available()",
+        "def test_x():\n    if engine_available():\n        pass\n    else:\n"
+        "        from epics_mcp.display_tools import y\n",
+    ),
+    (
+        False,
+        "module level, which the completeness guard above owns",
+        "from epics_mcp.display_tools import y\n",
+    ),
+)
+
+
+@pytest.mark.parametrize(("flagged", "label", "source"), _WALKER_CASES)
+def test_the_below_module_level_walker_on_constructed_input(
+    flagged: bool, label: str, source: str
+) -> None:
+    """The walker's behaviour pinned on source it cannot have been tuned to, both directions.
+
+    Eight of these thirteen were RED against the first version of the walker, measured, and four of
+    those eight were false NEGATIVES, i.e. it waved through the exact spellings a tired author
+    writes by accident. A tree-driven assertion could not have caught any of them: today's tree
+    contains none of these shapes, which is the whole reason a guard needs constructed input as
+    well as a population.
+    """
+    _, unguarded = _engine_imports_below_module_level(ast.parse(source), _engine_tainted_modules())
+    assert bool(unguarded) is flagged, f"{label}: expected flagged={flagged}, got {unguarded!r}"

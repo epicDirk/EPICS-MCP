@@ -64,7 +64,12 @@ _TOKENS = (
     "10.0.0.5,255@127.0.0.1",  # full multicast: survives, interface rewritten
     ":5076",  # no host: PLATFORM-dependent, so nothing is claimed (see the empty-host test below)
     "[]",  # no host either, through the BRACKET branch: the same non-claim by a different route
-    ":abc",  # no host AND an unreadable port: the port refusal decides, and it is platform-blind
+    ":abc",  # an unreadable port; split_host FAILS CLOSED on it and returns the whole token, so
+    # this one never meets the empty-host gate at all and cannot show a wrong order
+    "[]:abc",  # the same refusal with a host the gate DOES see as empty, through the bracket
+    # branch. It is here because a post-build review measured that the first version of the gate
+    # turned exactly this one from a measured refusal into a non-claim. One token short of the
+    # pair, the claim held.
 )
 
 
@@ -180,6 +185,11 @@ def test_a_token_without_a_host_is_never_claimed_on_any_platform(token: str) -> 
     ``[]`` and ``[]:5077`` reach the empty host through the BRACKET branch, and a gate placed at
     the partition would render an endpoint for them while claiming to have fixed the shape.
 
+    ⚠️ The counter-case is one line down, and it is the half a post-build review had to supply:
+    ``[]:abc`` has an empty host too and must stay DROPPED, because a port the client cannot read
+    is refused before any host is looked up. The first version of the gate ran before the port was
+    read and silently turned that measured refusal into a non-claim.
+
     ⚠️ BOTH halves are asserted, and the first is why: on ``:5076`` the RENDERING alone is red-proof
     against nothing. Measured on the mutant with the gate deleted, ``split_port`` claims ``5076``
     again while the renderer still prints ``:5076``, because an empty host plus ``":" + "5076"``
@@ -193,6 +203,29 @@ def test_a_token_without_a_host_is_never_claimed_on_any_platform(token: str) -> 
         f"a claim is being made about {token!r}, whose host the platform resolver decides"
     )
     assert effective_search_entry(token, "5076") == token
+
+
+@pytest.mark.parametrize("token", [":abc", "[]:abc", "[]:"])
+def test_an_unreadable_port_is_refused_even_when_the_host_is_empty_too(token: str) -> None:
+    """The order inside ``split_port``: a DROPPED port beats the empty host, not the other way.
+
+    A port the client cannot read is refused BEFORE any host is looked up, so that verdict holds on
+    every platform, while the empty host holds on none. Withholding it would be the first half of
+    this module's own definition of dishonesty: an invented refusal hides a destination, and a
+    withheld refusal hides that there is none.
+
+    Measured on this pair, the reason all three spellings are here: ``split_host(":abc")`` returns
+    the whole token (it fails closed on a non-numeric port), so ``:abc`` never meets the empty-host
+    gate at all and cannot detect a wrong order. ``[]:abc`` and ``[]:`` go through the bracket
+    branch, where the host really is empty, and they are the two the first version of this repair
+    silently turned into non-claims.
+
+    Provably red: move the ``if not split_host(token)`` gate back above ``_port_written``, which is
+    where it started. The corpus test then also reddens on these tokens, since the client keeps no
+    entry for them and a non-claim is no longer allowed to explain that.
+    """
+    assert split_port(token) is DROPPED
+    assert "DROPPED" in effective_search_entry(token, "5076")
 
 
 @pytest.mark.parametrize("token", ["[2001:db8::1]x", "10.0.0.5,", "10.0.0.5,255@127.0.0.1"])

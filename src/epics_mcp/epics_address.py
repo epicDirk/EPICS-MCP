@@ -165,28 +165,40 @@ def split_port(token: str) -> str | None | _Dropped | _Unmodelled:
     runs against the installed library. Widen the corpus first, then widen this function; the other
     order is how the three wrong answers above got written.
 
-    Everything below the first line is about the PORT half. The HOST half enters exactly once, at
-    the top, because an EMPTY host is resolved by the platform and this module is deliberately
-    resolution-free (see the module docstring). Measured on the same token, both platforms: pvxs
-    substitutes one of this machine's own interface addresses on Windows, and refuses the entry
-    outright on Linux (``Error resolving ""``), leaving the context with no search destination at
-    all. Naming the port would therefore be false on the platform where no entry exists to carry
-    it, so nothing is claimed for that shape.
+    THE HOST HALF ENTERS ONLY HERE, and only to withhold a claim. An EMPTY host (``:5076``, ``[]``,
+    ``[]:5077``) is resolved by the platform, and this module is deliberately resolution-free (see
+    the module docstring). Measured on ``:5076``, both platforms: pvxs substitutes one of this
+    machine's own interface addresses on Windows, and refuses the entry outright on Linux
+    (``Error resolving ""``; on a list holding nothing else, the context then has no search
+    destination at all). Naming the port would therefore be false on the platform where no entry
+    exists to carry it.
 
     ⚠️ THAT IS A TRADE, not a free win, and it is written down rather than quietly enjoyed: the
     Windows answer was true, and it is given up to avoid the Linux one that is not. The way back
     to a claimable endpoint belongs to the operator and is named in the report itself, not only
     here: spell the host out (``127.0.0.1:5076``).
 
-    ⚠️ The gate reads :func:`split_host`, NOT the ``partition(":")`` further down, and the
-    difference is measured rather than stylistic. ``[]`` and ``[]:5077`` have an empty host too but
-    take the BRACKET branch, so a gate at the partition would miss them and keep rendering an
-    endpoint for them. In the other direction ``split_host(":abc")`` returns the whole token, so
-    the measured-correct DROPPED verdict for a token whose PORT half is unreadable survives here
-    instead of decaying into a non-claim.
+    ⛔ AND THE ORDER IS LOAD-BEARING: a DROPPED port beats the empty host, never the other way
+    round. The first version asked about the host FIRST, and a post-build review measured what that
+    cost: ``[]:abc`` and ``[]:`` stopped being DROPPED and became non-claims, so the report withheld
+    a refusal it had measured AND told the operator a platform resolver might hand them an address,
+    while the real client keeps no entry for either. A port the client cannot read is refused before
+    any host is looked up, which makes that verdict platform-blind and therefore the stronger claim.
     """
+    written = _port_written(token)
+    if written is DROPPED:
+        return DROPPED
     if not split_host(token):
         return UNMODELLED
+    return written
+
+
+def _port_written(token: str) -> str | None | _Dropped | _Unmodelled:
+    """The PORT half of *token* alone, with no question asked about its host.
+
+    Split out from :func:`split_port` so the host question can be asked AFTER this one rather than
+    before it; see the order paragraph there for what asking it first cost.
+    """
     if "," in token or "@" in token:
         # Multicast ``addr[:port],ttl@iface``. Measured: ``10.0.0.5,`` disappears entirely while
         # ``10.0.0.5,255`` survives, and the interface is rewritten to a platform identifier.

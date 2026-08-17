@@ -1323,12 +1323,17 @@ _NAME_NOTE = (
 #: is told why and what to do instead. Naming the way out is the point: the previous rendering
 #: stated an endpoint that was true on one platform only, and dropping it without a remedy would
 #: leave a reader with less than before. No trailing full stop, see :data:`_INERT_NOTE`.
+#:
+#: ⚠️ The remedy names a CONDITION rather than promising an outcome, and a post-build review is why:
+#: "write the host out" repairs ``:5076`` and ``[]:5077``, and does nothing for ``[]x`` or ``[],1``,
+#: whose tails are outside the pinned corpus with or without a host. What the report can resolve is
+#: the shape this states, so the sentence stays true for every token it is appended to.
 _EMPTY_HOST_NOTE = (
-    "One or more entries above were written with NO HOST (for example ':5076'). What this client "
-    "makes of such an entry is decided by the platform resolver, measured: one of this machine's "
-    "own interface addresses on Windows, and no entry at all on Linux. Nothing is claimed for it "
-    "above; write the host out (for example '127.0.0.1:5076') to get a destination this report "
-    "can name"
+    "One or more entries above were written with NO HOST (for example ':5076'). What a client "
+    "makes of such an entry is decided by the platform resolver: measured on that token, one of "
+    "this machine's own interface addresses on Windows, and a refused entry on Linux. Nothing is "
+    "claimed for it above. What this report resolves is a host with an optional numeric port, so "
+    "writing the host out (for example '127.0.0.1:5076') gets you a named destination"
 )
 
 
@@ -1398,9 +1403,17 @@ def _live_search_posture(effective: str) -> str:
                 for t in tokens
             )
             # Read off the TOKEN, not off its rendering: a token written without a host is printed
-            # as written, so it is indistinguishable from every other non-claim once rendered. This
-            # is the one caveat that has to survive the rendering saying nothing.
-            saw_empty_host = saw_empty_host or any(not split_host(t) for t in tokens)
+            # as written, so it is indistinguishable from every other non-claim once rendered.
+            # DROPPED is excluded for the same reason it is excluded above: that entry is already
+            # gone, the port refusal decided it before any host was looked up, and telling the
+            # operator a resolver might substitute an address for it would be false (measured on
+            # "[]:abc", which the client keeps no entry for on either platform).
+            # ⚠️ HONEST REACH: split_host fails closed, so a host-less token whose tail is not a
+            # plain numeric port (":5076,255") is not detected here and gets no caveat. That shape
+            # was equally uncovered before this note existed; it is a stated limit, not a change.
+            saw_empty_host = saw_empty_host or any(
+                not split_host(t) and "DROPPED" not in rendered[t] for t in tokens
+            )
             resolved = " ".join(rendered[token] for token in tokens)
             if default_port is None:
                 origin = (

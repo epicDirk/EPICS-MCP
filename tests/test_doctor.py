@@ -2091,16 +2091,17 @@ async def test_an_entry_without_a_host_is_named_and_not_resolved(
 ) -> None:
     """The fourth direction of the same line: a token written with no host at all.
 
-    Three assertions, and the third is the one that stops this being a pure loss. The report no
-    longer states an endpoint for such a token (measured, the old rendering was true on Windows and
+    Three claims, and the third is the one that stops this being a pure loss. The report no longer
+    states an endpoint for such a token (measured, the old rendering was true on Windows and
     invented reach on Linux, where the client keeps no entry at all); it says the shape is there;
     and it names what to do instead. A caveat that only takes something away leaves the operator
     with less than the wrong answer did.
 
-    Both directions, or the note is unconditional noise that readers learn to skip.
+    Both directions, or the note is unconditional noise that readers learn to skip, plus a third
+    case that is neither: an empty host whose PORT is unreadable.
 
     ⚠️ TWO empty-host spellings, and the bracketed one carries the red-proof. Measured: on ``:5076``
-    the corrected line and the broken one print the same six characters, because an empty host plus
+    the corrected line and the broken one print the same five characters, because an empty host plus
     ``":" + "5076"`` reproduces the token by accident. ``[]:5077`` has no such coincidence, so it is
     the token that can tell a non-claim from an invented endpoint. ``:5076`` stays because it is the
     shape that turned CI red and the one the note names.
@@ -2124,7 +2125,7 @@ async def test_an_entry_without_a_host_is_named_and_not_resolved(
             "whose host the platform resolver decides"
         )
     assert "host replaced" not in without_a_host
-    assert "write the host out" in without_a_host, (
+    assert "writing the host out" in without_a_host, (
         "the note takes a statement away and must say how to get one back"
     )
 
@@ -2132,6 +2133,19 @@ async def test_an_entry_without_a_host_is_named_and_not_resolved(
     with_hosts = _plane(await run_doctor(), "live").detail
     assert with_hosts is not None
     assert "NO HOST" not in with_hosts
+
+    # An empty host whose PORT is unreadable is a REFUSAL, not a non-claim, so it must carry the
+    # DROPPED verdict and NOT the resolver caveat: that entry is gone on every platform, and the
+    # note would tell the operator an address might be substituted for it. Measured on the first
+    # version of this repair, which got exactly this pair wrong.
+    monkeypatch.setenv("EPICS_PVA_ADDR_LIST", "192.0.2.5 []:abc")
+    unreadable_port = _plane(await run_doctor(), "live").detail
+    assert unreadable_port is not None
+    assert "DROPPED" in unreadable_port
+    assert "NO HOST" not in unreadable_port, (
+        "a refused entry is already gone; a caveat about what a resolver might substitute for it "
+        "claims the opposite"
+    )
 
 
 def _report_with_installation(findings: list[InstallationFinding]) -> DoctorReport:

@@ -184,16 +184,15 @@ carry breaking changes).
   you wrote, an entry the client refuses is marked `DROPPED` instead of being shown as a
   destination, and a list holding names carries a caveat that its effective form can be shorter.
 
-- **An entry written without a host was reported as a destination, and that destination existed on
-  some platforms only.** `EPICS_PVA_ADDR_LIST=":5076"` was rendered as port 5076 with the host
-  replaced by a local interface address. Measured on that one token: pvxs does substitute one of
-  the machine's own interface addresses on Windows, while on Linux it refuses the entry outright
-  and the client is left with no search destination at all. Such a token is now printed as written
-  with nothing claimed about it, the same rule this release already applies to shapes outside the
-  pinned corpus, and the report carries one line saying why and what to do instead: write the host
-  out (`127.0.0.1:5076`). The trade is deliberate and worth stating, because it costs something: a
-  statement that was true on one platform is given up to stop the same statement being invented
-  reach on another.
+- **An entry written without a host (`EPICS_PVA_ADDR_LIST=":5076"`) gets no endpoint in the
+  `search paths:` line, and one line says why and what to do instead.** What a client makes of such
+  an entry is decided by the platform resolver, measured on that token: one of the machine's own
+  interface addresses on Windows, a refused entry on Linux. Naming either would be right on one
+  platform and invented reach on the other, so the token is printed as written with nothing claimed
+  about it, the same rule this release already applies to shapes outside the pinned corpus, and the
+  report tells you that writing the host out (`127.0.0.1:5076`) gets a destination it can name. A
+  host-less entry whose PORT is unreadable (`[]:abc`) is unaffected and still reported `DROPPED`:
+  that refusal happens before any host is looked up, so it holds everywhere.
 
 - **`epics-doctor` reported `localhost-isolated` for a `EPICS_MCP_PROVIDER=ca` server that was
   broadcasting PV searches into the local subnets.** p4p offers PVAccess only; it accepts `ca` and

@@ -1,6 +1,5 @@
 """Tests for server-level tool wrappers (EpicsError → ToolError conversion)."""
 
-import ast
 import logging
 import subprocess
 import sys
@@ -14,6 +13,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
 from epics_mcp.errors import PVNotFoundError, PVTimeoutError
+from tests.display_tools_source import display_tool_names
 from tests.engine_gate import engine_available
 
 _Fn = Callable[..., object]
@@ -3580,19 +3580,11 @@ _ANNOTATION_GOLDEN: dict[str, tuple[bool, bool, bool, bool]] = {
 # they are ABSENT in core-only CI (29 tools) and PRESENT in the full lane (33). AST-scanned, NEVER
 # imported: importing display_tools.py pulls opi_navigation (absent in core-only), which would break
 # collection there, the same reason test_guide_matches_code.py AST-scans it.
-_DISPLAY_TOOLS_SRC = (
-    Path(__file__).resolve().parent.parent / "src" / "epics_mcp" / "display_tools.py"
-)
-
-
-def _display_tool_names() -> set[str]:
-    """Top-level ``async def`` names in display_tools.py (the [displays]-extra tools)."""
-    source = _DISPLAY_TOOLS_SRC.read_text(encoding="utf-8")
-    return {
-        node.name
-        for node in ast.iter_child_nodes(ast.parse(source))
-        if isinstance(node, ast.AsyncFunctionDef)
-    }
+#
+# The scan moved to tests/display_tools_source.py when a second module needed the same answer:
+# tests/test_prompts.py must know which tools are gated, and importing THIS module for it cost a
+# measured 3 s and dragged the whole server stack into the lightest file in the suite.
+_display_tool_names = display_tool_names
 
 
 def _annotation_drift(

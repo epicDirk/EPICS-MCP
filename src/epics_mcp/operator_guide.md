@@ -63,13 +63,16 @@ measured 2026-08-15, only the first of the four appears anywhere else in this do
   `:0`, and any number past 65535, is **not** the port you wrote (pvxs wraps it through 16 bits
   and a result of zero falls back to the default); and an entry the client cannot parse or resolve
   is **dropped from the search entirely**, with only a stderr line to say so.
-  ⚠️ **An entry written without a host (`:5076`) gets NO endpoint in the report**, and that is the
-  one place the line deliberately says less than it could. What the client makes of such an entry
-  is decided by the platform resolver, measured on the same token: one of the machine's own
-  interface addresses on Windows, and no entry at all on Linux, where the context ends up with no
-  search destination. Rather than state an address that is right on one platform and invented on
-  the other, the report prints the token as written and names the shape. Write the host out
-  (`127.0.0.1:5076`) and it becomes a destination the report can resolve again.
+  ⚠️ **An entry written without a host (`:5076`) gets NO endpoint in the report.** What a client
+  makes of such an entry is decided by the platform resolver, measured on that token: one of the
+  machine's own interface addresses on Windows, and a refused entry on Linux. Rather than state an
+  address that is right on one platform and invented on the other, the report prints the token as
+  written and names the shape. What it does resolve is a host with an optional numeric port, so
+  writing the host out (`127.0.0.1:5076`) gets you a named destination again. A host-less entry
+  whose PORT the client cannot read (`[]:abc`) is a different case and still reported `DROPPED`:
+  that refusal happens before any host is looked up, so it holds on every platform. More generally,
+  any entry shape the report has not measured against the real client is printed as written with
+  nothing asserted about it, rather than guessed at.
   ⚠️ **`EPICS_MCP_PROVIDER=ca` does not give you Channel Access.** p4p accepts the name and then
   builds a PVAccess context anyway, so every `EPICS_CA_*` search variable is inert in that
   process while `EPICS_PVA_AUTO_ADDR_LIST`, probably unset and therefore ON, decides the real
