@@ -30,9 +30,9 @@ from epics_mcp.services.inventory_adapter import analyze_inventory
 #: the pin move brought that here: the refusal began rejecting files the inventory reads, which is
 #: a malfunction wearing the clothes of a safety check. Two guards in ``tests/test_validate.py``
 #: hold the two sets equal in BOTH directions, so a third suffix reddens them just as the second
-#: one did. Naming ``find_bob_files`` here would be worse than vague: the PV surface stopped
-#: calling it, and the engine deleted it outright on 2026-08-15, so the name would send a
-#: reader looking for a function that is not there.
+#: one did. Naming ``find_bob_files`` here would be worse than vague: the engine deleted it
+#: outright on 2026-08-15, so the name would send a reader looking for a function that is not
+#: there.
 #:
 #: ⚠ What does NOT change with the widening is the SWEEP, and that was measured rather than
 #: assumed before the refusal was opened. The file view matches on ``ev.origin_file`` and the

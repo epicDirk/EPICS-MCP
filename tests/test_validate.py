@@ -291,7 +291,7 @@ async def test_uppercase_bob_suffix_is_accepted_because_the_engine_accepts_it(
     direction that matters: the PV surface stopped calling it, and it returned only ``.bob``, so a
     reader would have taken reassurance about the case fold from a function that had nothing to do
     with this answer. The engine deleted it outright on 2026-08-15. The rule lives in the engine's
-    own collection walk (``discovery.find_repo_files``, which folds ``suffix.lower()``).
+    own collection walk, ``discovery.find_repo_files``.
 
     Measured before this was written: a file named ``UPPER.BOB`` IS collected by the engine, so
     rejecting it would refuse a file the inventory happily reads. The naive ``endswith('.bob')``
@@ -648,11 +648,11 @@ def test_the_inventory_reads_exactly_the_suffixes_we_accept(tmp_path: Path) -> N
     """The same coupling from the behaviour side: what the INVENTORY actually reads.
 
     ⚠️ **This guard used to measure the wrong function, and it was blind three times over.**
-    It called ``find_bob_files``, a display-only view the engine deleted on 2026-08-15. Back then
-    it was blind because (a) the PV surface had stopped calling it, (b) it returned only ``.bob``
-    even in the widened engine, so it stayed green through the widening, and (c) it was checked
-    against a name list that contained no trend file, so even feeding it the widened function
-    would have changed nothing.
+    It called ``find_bob_files``, which the engine deleted on 2026-08-15. Back then it was already
+    blind three times over: (a) the PV surface no longer called it at all, (b) it returned only
+    ``.bob`` even in the widened engine, so it stayed green through the widening, and (c) it was
+    checked against a name list that contained no trend file, so even feeding it the widened
+    function would have changed nothing.
 
     ``analyze_pv_inventory`` is the function whose behaviour the refusal in ``_run_validate``
     actually cites, so it is the one asked here. Its sibling above compares CONSTANTS, which a
