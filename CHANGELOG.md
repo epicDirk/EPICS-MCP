@@ -67,6 +67,12 @@ carry breaking changes).
 
 ### Changed
 
+- **`find_device` now says that every screen comes back with the roles it uses the device in.**
+  The answer has carried `screens[].roles` all along and nothing on the surface said so, so
+  "which screens can WRITE this device?" was answerable and unadvertised. `tools/list` grows 168
+  characters. ⚠️ Its two guards need the `displays` group and are therefore invisible to CI, which
+  syncs the core install on purpose; they run under `EPICS_MCP_REQUIRE_DISPLAYS=1`.
+
 - **`get_pvs` now names the field the engineering unit rides in.** Its description referred to
   `get_pv_info` for the metadata, so a caller asking whether channels labelled alike carry the same
   unit had to take a second hop to learn that one batch call answers it. `units` and `precision`

@@ -344,7 +344,9 @@ async def find_device(
     """Find which operator screens show device X, read its channels live, and join the serving IOC.
 
     Read-only (Wedge-2 live counterpart of the offline find_screen). The reverse-lookup, which
-    operator screens reference the device, is offline + macro-aware. Live values come from p4p;
+    operator screens reference the device, is offline + macro-aware. Each screen comes back with
+    the roles it uses the device in, read and/or write (screens[].roles), so a screen that can
+    WRITE the device is visible without opening one. Live values come from p4p;
     reach follows the launcher's EPICS search env (address lists / name servers / auto-addr search,
     run epics-doctor for the effective posture); the live read is capped to max_batch_size
     channels (honest note; the screen list is not shortened by that cap). The screen list has its

@@ -34,6 +34,7 @@ ENGINE_COUPLED_MODULES = (
     "test_crossplane_tool.py",
     "test_coverage_tool.py",
     "test_find_device_tool.py",
+    "test_gq18_channel_claims_displays.py",
     "test_device_lookup.py",
     "test_inventory_adapter.py",
     "test_diagnostics_tail.py",
