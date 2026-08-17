@@ -442,7 +442,9 @@ async def set_pv_value(
     search reach; a write-enabled server refuses to start without either of the last two. The
     load-bearing, client-independent guard on whether this SERVER attempts the write. Whether it
     LANDS is the IOC's own access security, which this server does not model: an allowlisted name
-    is our policy, not a promise about the record. See the epics-pv://guide resource.
+    is our policy, not a promise about the record. This tool writes a channel directly, with no
+    screen involved: a value written from an operator DISPLAY is put by the widget there, not by
+    this tool. See the epics-pv://guide resource.
 
     Value bounds (always-on, pre-put): the written value is checked against the record's OWN drive
     limits (control DRVL/DRVH, read on the pre-read). An out-of-range value is denied with

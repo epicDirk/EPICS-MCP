@@ -67,6 +67,13 @@ carry breaking changes).
 
 ### Changed
 
+- **`set_pv_value` now says that an operator screen writes through its widget, and `docs/tools.md`
+  that no preset arms a write gate.** Both were facts a caller needed before the call and neither
+  was anywhere the server delivers: an assistant asked to change a value visible on a screen
+  reached for the gated tool and was refused, and `sandbox`, the one shape with nothing left to
+  fill in, reads like the one where writing is on. Nothing changed on the wire beyond the two
+  sentences; `tools/list` grows 149 characters and the `initialize` instructions are untouched.
+
 - **`diagnose_connection`'s naming plane runs the same probe as `lookup_device_name`.** Both used
   to carry their own copy of the three-step lookup (config gate, reachability first, then
   validate), which is how two answers to one question start to disagree. The gatherer calls the
