@@ -27,6 +27,9 @@ discipline is written against.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any
+
 import pytest
 
 from epics_mcp.presets import PRESETS
@@ -96,3 +99,94 @@ def test_no_preset_arms_a_write_gate() -> None:
                 f"preset {name!r} sets {gate_var}, so docs/tools.md's 'No preset arms a write "
                 f"gate' is now false; either drop it from the preset or fix the sentence"
             )
+
+
+# --- get_pvs: the engineering unit rides in the batch ------------------------------------------
+
+
+class _BatchContext:
+    """Stands in for the p4p Context on the BATCH path: ``.get`` takes a LIST and answers a list.
+
+    Faked at the transport seam rather than at a client class, deliberately: the claim under test
+    is about a field mapping (``epics_client._DISPLAY_SPEC``) that runs INSIDE the client, so a
+    class-level double would remove the very code the assertion is about and leave it green. The
+    repository's evidence discipline records that failure mode.
+    """
+
+    def __init__(self, values: list[object]) -> None:
+        self._values = values
+
+    def get(self, names: list[str], timeout: float | None = None) -> list[object]:
+        return self._values
+
+
+@pytest.mark.asyncio
+async def test_get_pvs_says_the_unit_rides_in_display_and_it_does(monkeypatch: Any) -> None:
+    """Wire pin AND measuring proof for GQ-18 (c) unit 3, in one test on purpose.
+
+    The parked line said a batch read shows channels that are labelled alike and carry different
+    engineering units. The delivered description named the metadata only by referring to
+    get_pv_info, so a caller asking "do these share a unit?" had to take a second hop to find out
+    that this tool answers it at all.
+
+    The proof drives the REAL batch path with two channels sharing a description and differing in
+    ``units``, which is the situation the sentence exists for. Asserting the wire text alone would
+    survive the field being dropped from the mapping.
+
+    Provably red, two ways: delete the sentence from the docstring (wire half), or remove
+    ``("units", "units", str)`` from ``epics_client._DISPLAY_SPEC`` (behaviour half).
+    """
+    from epics_mcp.services import epics_client
+    from epics_mcp.tools.read import _get_pvs
+
+    description = await _description("get_pvs")
+    assert "units and precision ride inside display" in description, (
+        "the field location is gone: a caller is back to a second hop through get_pv_info"
+    )
+    assert "carry the same engineering unit" in description, (
+        "the question this tool answers in one call is no longer named"
+    )
+
+    same_label = "Cavity forward power"
+    monkeypatch.setattr(
+        epics_client,
+        "get_context",
+        lambda: _BatchContext(
+            [
+                SimpleNamespace(
+                    raw=SimpleNamespace(
+                        value=1.0,
+                        display=SimpleNamespace(units="W", precision=2, description=same_label),
+                    )
+                ),
+                SimpleNamespace(
+                    raw=SimpleNamespace(
+                        value=2.0,
+                        display=SimpleNamespace(units="dBm", precision=1, description=same_label),
+                    )
+                ),
+            ]
+        ),
+    )
+
+    out = await _get_pvs(["SIM:RF-01:Pwr-R", "SIM:RF-02:Pwr-R"])
+
+    results = out["results"]
+    assert isinstance(results, list) and len(results) == 2
+    displays: list[dict[str, object]] = []
+    for result in results:
+        block = result["display"]
+        # .get below rather than [], so a dropped field fails on the message that explains it
+        # instead of on a bare KeyError. Measured: the first version of this test reddened with
+        # "KeyError: 'units'", which is red but tells the next reader nothing.
+        assert isinstance(block, dict)
+        displays.append(block)
+    assert [d.get("units") for d in displays] == ["W", "dBm"], (
+        "units no longer reaches the batch result, so the description's promise is false"
+    )
+    assert [d.get("precision") for d in displays] == [2, 1], (
+        "precision no longer reaches the result"
+    )
+    assert {d.get("description") for d in displays} == {same_label}, (
+        "the shared label is what makes the differing units worth reporting"
+    )

@@ -403,6 +403,8 @@ async def get_pvs(
 
     Each result carries the same best-effort metadata as get_pv_info
     (alarm/timestamp/display/control/value_alarm/enum), including which alarm level says what.
+    units and precision ride inside display, per PV, so one batch answers whether channels that
+    are labelled alike actually carry the same engineering unit.
     A per-PV read failure lands in the errors
     list; a structural provider fault, the native batch returning a different number of values than
     requested, surfaces loudly as [UPSTREAM_CONTRACT_ERROR] rather than silently dropping PVs."""

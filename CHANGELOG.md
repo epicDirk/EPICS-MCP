@@ -67,6 +67,12 @@ carry breaking changes).
 
 ### Changed
 
+- **`get_pvs` now names the field the engineering unit rides in.** Its description referred to
+  `get_pv_info` for the metadata, so a caller asking whether channels labelled alike carry the same
+  unit had to take a second hop to learn that one batch call answers it. `units` and `precision`
+  are now named where they sit, in `display`, per PV. Nothing changed on the wire beyond the
+  sentence; `tools/list` grows 153 characters.
+
 - **`set_pv_value` now says that an operator screen writes through its widget, and `docs/tools.md`
   that no preset arms a write gate.** Both were facts a caller needed before the call and neither
   was anywhere the server delivers: an assistant asked to change a value visible on a screen
