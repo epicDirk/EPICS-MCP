@@ -32,22 +32,17 @@ own header. `mypy --strict` covers `src`, `tests` and `scripts`, and the package
 
 ## Where to start
 
-**I want to try it, and I have no control system.** Install it (below), then follow
-[Quick start](#quick-start). `epics-testpv` serves the PV for you, so there is nothing else to
-obtain: no facility, no IOC, no EPICS Base, no ChannelFinder, no archiver.
+**I want to try it, and I have no control system.** Install it (below), then follow the
+[quick start](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/quick-start.md): three commands, and `epics-testpv` serves the PV
+for you, so there is nothing else to obtain. No facility, no IOC, no EPICS Base, no ChannelFinder,
+no archiver.
 
-**I want to point it at my facility.** Start with `epics-init --list`, pick the shape that matches
-what you run, and pass its open values with `--set NAME=VALUE`; then
-`epics-init --preset <shape> --set ... --out .mcp.json` writes the client-configuration block and
-checks it for you (`--out` rather than a shell redirect, which cannot promise an encoding the
-client can read). Every facility shape ships placeholders, and while one is still standing the
-block is only PRINTED: no file is written and no check runs, and the command says which value it is
-waiting for. Only `sandbox` has nothing left to fill in, which is why the quick start above needs
-no `--set` at all. When your facility does not match one of the four shapes, the
-[deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md) walks through the variables plane by plane, the CA-bundle
-recipe for internal HTTPS, and the documented assumptions. Either way you end at `epics-doctor`,
-which probes every configured plane read-only and tells you what your instance actually reaches,
-and whether either write gate is armed and where it could write.
+**I want to point it at my facility.** The [deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md) is written for
+that. It starts at `epics-init`, which prints a client-configuration block for one of four
+deployment shapes and checks it in the same step, and it then walks the variables plane by plane,
+the CA-bundle recipe for internal HTTPS, and the documented assumptions. Either way you end at
+`epics-doctor`, which probes every configured plane read-only and tells you what your instance
+actually reaches, and whether either write gate is armed and where it could write.
 
 ## What is this (for EPICS people)?
 
@@ -135,92 +130,11 @@ current Linux distribution refuses a system-wide `pip install`, so use a virtual
 `uv tool install`; and if the install ends in compiler output instead, `p4p` had no prebuilt wheel
 for your platform and fell back to building from source, see [Compatibility](#compatibility).
 
-## Quick start
-
-Three commands, and nothing to obtain beyond the install above.
-
-1. **Serve a test PV**, in a terminal of its own. It runs until Ctrl-C and binds loopback only:
-
-   ```bash
-   epics-testpv
-   ```
-
-2. **Write the client configuration, and check it in the same step.** `--out` writes the file
-   itself, which a shell redirect cannot do reliably: in Windows PowerShell 5.1 it produces bytes
-   a strict JSON parser rejects.
-
-   ```bash
-   epics-init --preset sandbox --out .mcp.json --probe-pv TEST:Temperature
-   ```
-
-   The block goes to stdout, the check to stderr, and a `live ok` line means the server reached the
-   PV from step 1. Without `--probe-pv` no PV is contacted, so a clean report would say only that
-   nothing is misconfigured.
-
-   ⚠️ **Already have a `.mcp.json` with other servers in it?** Then this refuses rather than
-   overwrite it, which is the point. Write to a new file (`--out epics-pv.json`) and paste the one
-   entry into your existing `mcpServers` object, or pass `--force` if the file is yours to replace.
-
-3. **Point your MCP client at that file and restart it**, see
-   [MCP client integration](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/mcp-clients.md): a client reads its configuration at startup, so
-   until it is restarted the tools are simply absent. Then ask the assistant to read
-   `TEST:Temperature`. Or skip the assistant entirely:
-
-   ```bash
-   epics-diagnose TEST:Temperature
-   ```
-
-   which prints a short report: the PV, its state and the likely cause, then one line for the live
-   result (`connected, value=21.5`, plus the alarm severity where the PV reports one) and one for
-   each service plane that was consulted, and last the next steps, any notes, and any plane that
-   was asked for but is unavailable.
-
-   ⚠️ **That command reads YOUR shell, not the file step 2 just wrote.** The block in `.mcp.json`
-   configures the server your MCP CLIENT launches; a command you run yourself sees the environment
-   of your terminal, and a fresh terminal points at no PV at all. Measured: run exactly as shown in
-   a shell with no `EPICS_*` variables, it answers `disconnected (PV_TIMEOUT)` while the test PV is
-   serving perfectly well. Two ways round it, neither of which edits anything. Set in that terminal
-   the search path the `sandbox` preset sets, which for the test PV is
-   `EPICS_PVA_AUTO_ADDR_LIST=NO` plus `EPICS_PVA_ADDR_LIST=127.0.0.1`; or let step 2's own check
-   answer, since it applies the preset itself. Without `--out` it writes no file, printing the
-   block on stdout and the check on stderr:
-
-   ```bash
-   epics-init --preset sandbox --probe-pv TEST:Temperature
-   ```
-
-   ⚠️ **If the client reports only that the server did not start**, the likeliest cause is that
-   `"command": "epics-mcp"` is a bare name and a client launched from a desktop icon does not
-   inherit your shell's `PATH`. Rerun step 2 with `--absolute-command`, which writes the resolved
-   path into the block instead and refuses rather than guessing when it cannot find one. Since
-   step 2 already wrote that file, add `--force` to replace it, or write a new one and copy the
-   entry across.
-
-⚠️ Note what step 1 is: a PVAccess server, and its second PV accepts writes. It binds loopback
-unless you pass `--interface`, and it says which port it got, which is not the default one when that
-is already taken.
-
-To reach a real control system instead, pick the matching preset and follow the
-[deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md), which walks the variables plane by plane and ends at the
-same self-check. What every facility shape needs is the PV search path, and a preset leaves one
-placeholder per protocol for it, so a `--set` looks like this in practice:
-
-```bash
-epics-init --preset ioc-only --set EPICS_PVA_ADDR_LIST=<host> --set EPICS_CA_ADDR_LIST=<host> --out <my config>
-```
-
-Fill in only one of the two and the command writes nothing rather than a half-configured file: it
-names the placeholder still standing, says the file was not written, and leaves the exit code at
-`0`, because an unfinished configuration is a step you have not taken yet rather than an error.
-
-A containerised IOC usually needs `EPICS_PVA_NAME_SERVERS=<ioc-host>:5075` **alongside** that
-rather than instead of it, since it publishes a TCP port and answers no broadcast. The deployment
-guide explains why, and what to do when neither finds anything.
-
 ## Documentation
 
 | Page | What it answers |
 |------|-----------------|
+| [Quick start](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/quick-start.md) | Try it in three commands, with no control system: the test PV, the configuration block, and the client restart |
 | [Tools, CLIs, resources and prompts](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/tools.md) | What can it actually do? Every tool by plane, the standalone CLIs, the resources and prompts |
 | [Configuration](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/configuration.md) | Every `EPICS_MCP_*` variable, including TLS trust and the EPICS network block |
 | [Safety and network posture](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/safety.md) | What is gated, what is audited, what decides network reach |

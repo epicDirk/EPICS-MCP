@@ -15,7 +15,9 @@ EPICS service landscape behaves. This file is the standing policy that keeps tha
 - `README.md` is the landing page: what the server is, the planes, install, and an index of
   everything below. Keep it short; reference depth belongs in `docs/`.
 - `docs/` holds the reference pages the README indexes: `tools.md`, `configuration.md`, `safety.md`,
-  `mcp-clients.md`, **`deployment.md`** (bringing the server up in a new facility, the first thing
+  `mcp-clients.md`, **`quick-start.md`** (three commands to a first answer, with no control system;
+  it lived in the README until it was a quarter of the landing page), **`deployment.md`** (bringing
+  the server up in a new facility, the first thing
   an outside adopter needs), **`write-gate-contract.md`** (the specification every in-server
   write gate must meet) and **`known-limits.md`** (what is deliberately not guarded, dated and
   measured, which the README indexes as well).
