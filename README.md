@@ -22,14 +22,6 @@ leaves your machine, is
 > **Project status: pre-1.0 and under active development.** Tools and APIs may still change
 > between minor versions, so pin one if you depend on it.
 
-**Maturity.** CI runs the standalone core suite on every push against Python 3.12, 3.13 and 3.14,
-which is every version `requires-python` permits, on an install with no EPICS infrastructure at
-all; the live-stack tests are opt-in and skip without a stack, and the seven display-coupled test
-modules are not collected there at all, because the engine they need is not installable from a
-public checkout. That last part is a deliberate choice rather than a gap in the report: CI tests
-exactly the standalone core a public user gets, and a run that drops those modules says so in its
-own header. `mypy --strict` covers `src`, `tests` and `scripts`, and the package ships `py.typed`.
-
 ## Where to start
 
 **I want to try it, and I have no control system.** Install it (below), then follow the
@@ -187,31 +179,14 @@ installation](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md
 
 ## Development
 
-The gate chain is [uv](https://docs.astral.sh/uv/)-based:
+The gate chain is [uv](https://docs.astral.sh/uv/)-based: `uv sync --extra dev --locked`, then
+`uv run pytest` and `uv run pre-commit run --all-files`. A full local install additionally needs
+`--group displays` for the `opi_navigation` PV engine, and a fresh clone needs one further command
+to wire the commit-message guard, which lives outside the tree and which nothing can install for
+you.
 
-```bash
-uv sync --extra dev --group displays --locked  # full local install (toolchain + display engine)
-uv run pytest                                  # test suite
-uv run pytest --cov=src --cov-branch           # with coverage
-uv run pre-commit run --all-files              # ruff + format + mypy --strict + guards
-uv run pre-commit install --hook-type commit-msg   # one-off: the commit-message guard
-```
-
-The last line is a **one-off per clone**. Six hooks run over files at commit time; a seventh scans
-the commit *message*, which no file guard can see, and it lives in `.git/hooks/`, outside the tree.
-Until that command is run, a clone has no message guard. Details and the limits:
-[CONTRIBUTING.md](https://github.com/epicDirk/EPICS-MCP/blob/main/CONTRIBUTING.md).
-
-`dev` is the only extra, and it is the toolchain. The `opi_navigation` PV engine is a separate
-**dependency group** (`--group displays`), because it lives in a private repository: a group
-stays out of the published package, where an unreachable dependency would be a promise nobody
-can keep. CI passes no `--group`, so it tests the standalone core a public user gets, and the
-`opi_navigation`-coupled test modules are dropped when it is absent. A run that drops them says so
-in its report header, and `EPICS_MCP_REQUIRE_DISPLAYS=1` turns that skip into a refusal, so a
-half-installed checkout cannot report green over tests it never ran.
-
-Live tests that need a running EPICS stack are opt-in and skip by default. See
-[CONTRIBUTING.md](https://github.com/epicDirk/EPICS-MCP/blob/main/CONTRIBUTING.md).
+Every one of those, what CI runs and what it deliberately cannot, the Definition of done and the
+commit style: [CONTRIBUTING.md](https://github.com/epicDirk/EPICS-MCP/blob/main/CONTRIBUTING.md).
 
 ## Related and roadmap
 

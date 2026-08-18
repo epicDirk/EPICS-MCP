@@ -73,6 +73,17 @@ CI runs `uv sync --extra dev --locked` and passes no `--group`, so it tests exac
 standalone core a public user gets. The `opi_navigation`-coupled test modules are dropped at
 collection when the package is absent, so the core suite stays green.
 
+**What CI covers, since the README used to say it and a landing page is the wrong place for it.**
+The suite runs on every push against Python 3.12, 3.13 and 3.14, which is every version
+`requires-python` permits, on an install with no EPICS infrastructure at all. `mypy --strict`
+covers `src`, `tests` and `scripts`, and the package ships `py.typed`.
+
+⚠️ **The sentence that moved here carried a number, and the number was wrong**: it said seven
+display-coupled test modules where `ENGINE_COUPLED_MODULES` in `tests/conftest.py` lists eight. It
+is not repaired to eight, it is gone. `tests/engine_gate.py` had already written down why ("a
+number repeated beside a list it does not read is how this paragraph drifted in the first place"),
+and `docs/known-limits.md` entry 16 names the same set deliberately without one.
+
 **`--locked`, not `--frozen`, and the local line above says so too.** Both install from the
 lockfile without re-resolving; only `--locked` also verifies that the lockfile still MATCHES
 `pyproject.toml`. Under `--frozen` an edit committed without its `uv lock` installs the old set in
