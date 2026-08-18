@@ -190,19 +190,30 @@ commit style: [CONTRIBUTING.md](https://github.com/epicDirk/EPICS-MCP/blob/main/
 
 ## Related and roadmap
 
-The display-aware tools join live PVs with the *display* plane, the macro-expanded PV inventory
-of `.bob` operator screens and the `.plt` Data Browser trends reached from them, through the
-`opi_navigation` PV engine. The core PV server installs
-and runs fully **without** them.
+Three different things, kept apart here on purpose: what exists, what is deliberately missing, and
+what is merely intended.
 
-⚠️ **Those four tools are not available in a published install today.** `opi_navigation` lives
-in a private repository, so it is reachable only from a checkout that has access, and it is
-wired in as a local dependency group rather than advertised as an extra. Opening it up is
-planned once the Java live plugin and the CS-Studio MCP have been tested in practice; until
-then this says so plainly rather than offering an install command that cannot work.
+**What exists.** Four tools (`validate_pvs`, `crossplane_check`, `coverage_audit`, `find_device`)
+and two commands (`epics-crossplane`, `epics-coverage`) join live PVs with the *display* plane: the
+macro-expanded PV inventory of `.bob` operator screens and of the `.plt` Data Browser trends
+reached from them, read through the `opi_navigation` PV engine. Everything else in this
+package, the whole PV, registry, history, alarm, naming and logbook surface, installs and runs
+without any of it.
 
-A dedicated **CS-Studio / Phoebus MCP** that complements these tools is in the works and will be
-released separately.
+**What is deliberately missing.** Those six are not available in a published install, and cannot
+be made available by any flag. `opi_navigation` lives in a private repository, so it is wired in as
+a dependency group rather than advertised as an extra: a group stays out of the published
+metadata, where an unreachable dependency would be a promise nobody could keep, and a direct git
+reference is the one thing a package index refuses outright. The tools refuse with an explanation
+instead of failing obscurely, and this page names the gap instead of offering an install command
+that cannot work.
+
+**What is intended, with no date attached.** Two neighbouring pieces exist and are in daily use
+here, both in private repositories: `opi-live`, a plugin that exposes a RUNNING CS-Studio, and
+`CS-Studio-MCP`, an offline MCP server for the display files themselves. Opening the engine up is
+tied to how those two hold up in practice. None of the three carries a release commitment: when
+one is published it will say so here, and until it does, nothing on this page should be read as a
+schedule.
 
 ## License
 
