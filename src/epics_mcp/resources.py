@@ -84,7 +84,9 @@ def get_health() -> dict[str, object]:
     search = pv_search_posture(os.environ)
 
     return {
-        "server": "epics-mcp",
+        # The registered key, the same answer serverInfo gives (see server.py's FastMCP call),
+        # NOT the distribution name: one process must not name itself two ways.
+        "server": "epics-pv",
         "version": __version__,
         "status": "ok",
         "provider": cfg.provider,

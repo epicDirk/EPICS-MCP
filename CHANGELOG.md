@@ -67,6 +67,14 @@ carry breaking changes).
 
 ### Changed
 
+- **The server now names itself `epics-pv`, the key a client registers it under, in both places it
+  answers "which server am I".** `serverInfo` on the handshake and the `server` field of
+  `epics-pv://health` both said `epics-mcp`, which is the DISTRIBUTION name: the package on PyPI
+  and the console script keep it, and neither changes. Nothing hangs behaviour on either value (the
+  MCP specification reserves `serverInfo` for display, logging and debugging), so this costs a
+  reader nothing except the wrong trail it used to lay when two of the three servers in one client
+  log named themselves after something else.
+
 - **`find_device` now says that every screen comes back with the roles it uses the device in.**
   The answer has carried `screens[].roles` all along and nothing on the surface said so, so
   "which screens can WRITE this device?" was answerable and unadvertised. `tools/list` grows 168

@@ -256,7 +256,12 @@ _DISPLAY_TOOLS_AVAILABLE = _display_registrar is not None
 
 # Keep in sync with the epics-pv posture in SKILL.md
 mcp = FastMCP(
-    "epics-mcp",
+    # The name a client sees as serverInfo. It is the KEY this server is registered under in a
+    # client configuration ("epics-pv"), not the distribution name ("epics-mcp"): a serverInfo
+    # that disagrees with the registered key costs a reader seconds at every log line and once a
+    # wrong trail. The distribution name stays where it belongs, on the console scripts and in
+    # pyproject. Its twin is the "server" field of epics-pv://health, which must say the same.
+    "epics-pv",
     version=__version__,
     instructions=build_instructions(_DISPLAY_TOOLS_AVAILABLE),
     # mask_error_details controls ONLY whether the detail text of a NON-ToolError exception (a
