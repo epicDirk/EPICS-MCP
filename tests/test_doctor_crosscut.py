@@ -373,6 +373,50 @@ def test_an_unreadable_url_is_excluded_rather_than_grouped() -> None:
     assert "host_down" not in _patterns(cfg, planes)
 
 
+def test_a_throttled_run_produces_no_cross_plane_finding() -> None:
+    """BG-DTHR: a plane nobody contacted is evidence about this command's budget, not about a host.
+
+    The exact shape a throttled run can build, and the one that made this block contradict the
+    report above it. Measured on the pre-fix code, where a refused probe was classified
+    ``unreachable``: both archiver webapps on ONE host, two distinct authorities, with a healthy
+    plane elsewhere so the caller-side suppression does not fire either. That produced TWO findings
+    at once. ``host_down`` said "2 services on appliance.example.org failed and none on it
+    answered", about a host nothing had asked. ``archiver_url_pair`` said "Both archiver webapps
+    answered with an error" and sent the operator to check two URL variables for a swap that never
+    happened, on a deployment that was correct.
+
+    Both are silenced by membership alone, without a line in either pattern: ``throttled`` is in
+    ``_NEVER_TRIGGERS``, so ``failing`` never contains such a plane. That is the whole reason the
+    two sets are declared rather than derived.
+
+    Red-proof: move ``throttled`` from ``_NEVER_TRIGGERS`` into ``_TRIGGERS`` and both findings
+    come back, which ``test_the_crosscut_sorts_every_plane_status`` cannot see, since the sets
+    still tile ``PlaneStatus``.
+    """
+    cfg = _cfg(**_SPLIT, channelfinder_url="http://elsewhere.example.org:8080/ChannelFinder")
+    planes = [
+        _plane("archiver", "throttled"),
+        _plane("archiver_retrieval", "throttled"),
+        _plane("channelfinder", "ok"),
+    ]
+    assert _patterns(cfg, planes) == []
+
+
+def test_a_throttled_plane_does_not_complete_a_pair_with_a_real_failure() -> None:
+    """The mixed run, which is the one a partial throttle actually produces.
+
+    One archiver half genuinely erroring and the other merely unasked is NOT the swapped-pair
+    signature, because that signature rests on BOTH webapps having answered. Without this the
+    fix would still leave a false finding on every run where the throttle bit one half and a real
+    fault the other.
+
+    Red-proof: same mutation as above; the pair finding returns from a single real failure.
+    """
+    cfg = _cfg(**_SPLIT)
+    planes = [_plane("archiver", "api_error"), _plane("archiver_retrieval", "throttled")]
+    assert "archiver_url_pair" not in _patterns(cfg, planes)
+
+
 def test_the_crosscut_sorts_every_plane_status() -> None:
     """The two declared sets tile ``PlaneStatus`` exactly.
 
