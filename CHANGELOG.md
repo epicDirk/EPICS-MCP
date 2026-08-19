@@ -81,6 +81,20 @@ carry breaking changes).
 
 ### Changed
 
+- **`epics-doctor` no longer blames your services for a limit you set on it.** With
+  `EPICS_MCP_READ_RATE_LIMIT` set tight enough to refuse the doctor's own reads, the report said
+  four different untrue things about a stack that was up. A refused TRANSPORT probe was
+  `unreachable` (exit `1`), telling you to check a host and port nothing had contacted; a refused
+  IDENTITY beacon was `identity_probe_failed`, pointing at a sub-path and an auth wall for a
+  request never sent; the cross-plane block then reported the host as dead and offered a swapped
+  archiver URL pair; and one read below the budget of a full run the refusal landed on the
+  archiver's ingest sub-probe, leaving every plane `✓`, every list empty and exit `0` under this
+  tool's strongest confirmation. A plane this command never asked is now `throttled` (`»`), listed
+  in `throttled_planes` and NOT in `inconclusive_identity_planes`, with a remedy naming the limit
+  instead of a URL. A run denied any read reports `reads_denied`, closes `verification_complete`
+  and exits `3`, which is the only signal for the sub-probe case. **Scripts reading the exit code
+  alone see a `0` become a `3` on a deployment whose configuration did not change.**
+
 - **An unwritable audit path no longer hands its full local path to a tool caller.** The Olog write
   gate is built lazily, on the first write, so its `SAFETY_CONFIG_INVALID` refusal is a tool ANSWER
   rather than a start-up failure: measured through `create_log_entry`, the caller received
