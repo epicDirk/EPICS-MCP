@@ -942,6 +942,169 @@ async def test_a_throttled_run_is_never_reported_as_confirmed(
     assert report.installation.findings == []
 
 
+async def test_a_denied_sub_probe_is_never_reported_as_a_confirmed_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BG-DTHR, the state no PLANE status can express, and the most dangerous one this check
+    could reach.
+
+    Measured on the shipped code at a limit one below what a full run needs: the archiver's third
+    token, the ingest SUB-probe, is the one refused. Its own line stays honest ("ingest not
+    measured: Read rate limit exceeded"), and everything above it does not. Every plane read ok,
+    every honest-but-not-healthy list was empty, verification_complete was True, and the verdict
+    printed this tool's STRONGEST confirmation at exit 0 while a read had been refused. A per-plane
+    status cannot fix it, because nothing about that plane is wrong: it answered, it named itself,
+    and only a question ABOUT it went unasked.
+
+    So the run carries the count, and the count closes verification_complete and drives exit 3.
+    This test builds exactly that shape: one healthy, identified plane, and one refusal that
+    belongs to no plane.
+
+    Red-proof: drop reads_denied from _exit_category -> the category is "clean" and the exit code
+    is 0 again; drop it from verification_complete -> the flag claims the run was confirmed.
+    """
+    healthy = PlaneCheck(
+        plane="archiver",
+        configured=True,
+        reachable=True,
+        ca_ok=True,
+        status="ok",
+        identified=True,
+        detail="appliance identity: appliance0; ingest not measured: Read rate limit exceeded",
+    )
+    report = DoctorReport(
+        planes=[healthy],
+        privacy=PrivacyReport(cf_safe_owner_accounts=[], cf_safe_property_names=[]),
+        write_safety=_disarmed_write_safety(),
+        installation=InstallationReport(findings=[]),
+        ok=True,
+        verification_complete=False,
+        degraded_planes=[],
+        throttled_planes=[],
+        reads_denied=1,
+        unverified_planes=[],
+        inconclusive_identity_planes=[],
+        identified_planes=["archiver"],
+    )
+
+    assert cli_doctor._exit_category(report) == "inconclusive"
+    assert cli_doctor._EXIT_CODE[cli_doctor._exit_category(report)] == 3
+    verdict = next(
+        line for line in cli_doctor._render(report).splitlines() if line.startswith("Overall:")
+    )
+    assert "INCONCLUSIVE" in verdict
+    assert "read throttle" in verdict
+    # The sentence it must NOT print any more, which is the whole finding.
+    assert "AS ITSELF" not in verdict
+
+
+async def test_a_run_that_was_denied_nothing_keeps_its_clean_verdict() -> None:
+    """The negative control for the test above, and it is not decoration.
+
+    A count that made every run inconclusive would satisfy every assertion up there while breaking
+    the tool for everyone whose throttle is off, which is the shipping default. Measured as a
+    positive control in the same shape: same report, zero refusals.
+    """
+    healthy = PlaneCheck(
+        plane="archiver", configured=True, reachable=True, ca_ok=True, status="ok", identified=True
+    )
+    report = DoctorReport(
+        planes=[healthy],
+        privacy=PrivacyReport(cf_safe_owner_accounts=[], cf_safe_property_names=[]),
+        write_safety=_disarmed_write_safety(),
+        installation=InstallationReport(findings=[]),
+        ok=True,
+        verification_complete=True,
+        degraded_planes=[],
+        throttled_planes=[],
+        reads_denied=0,
+        unverified_planes=[],
+        inconclusive_identity_planes=[],
+        identified_planes=["archiver"],
+    )
+    assert cli_doctor._exit_category(report) == "clean"
+    assert cli_doctor._EXIT_CODE[cli_doctor._exit_category(report)] == 0
+    assert "AS ITSELF" in cli_doctor._render(report)
+
+
+class _Socket:
+    """A session double that answers the archiver's three GETs. Only the TRANSPORT is faked.
+
+    The technique is ``tests/test_read_throttle_fanout.py``'s, and it is the point: the real
+    ``rest_get_json`` runs, so the real read throttle is consulted at the real chokepoint. A double
+    that replaced ``rest_get_json`` instead would take the thing under test out of the path.
+    """
+
+    def __init__(self, identity: str = "appliance0") -> None:
+        self._identity = identity
+
+    def get(self, url: str, *_a: object, **_k: object) -> Mock:
+        if "getApplianceMetrics" in url:
+            body: object = [{"instance": self._identity, "status": "Working", "pvCount": "1"}]
+        else:
+            body = {"version": "Archiver Appliance 2.2.1", "identity": self._identity}
+        return Mock(status_code=200, is_redirect=False, json=lambda: body, raise_for_status=Mock())
+
+    def head(self, *_a: object, **_k: object) -> Mock:
+        return Mock(status_code=200, is_redirect=False, raise_for_status=Mock())
+
+
+async def test_run_doctor_closes_verification_complete_on_a_denied_sub_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BG-DTHR: driven through the REAL run_doctor, because the hand-built report above cannot
+    reach the computation this pins.
+
+    Measured with a mutant while this was being written: dropping ``reads_denied`` from
+    ``verification_complete`` left the constructed-report test GREEN, because that one SETS the
+    flag instead of computing it. So the shape is produced for real: the archiver spends one token
+    on its transport GET and one on its identity beacon, and the third, the ingest sub-probe, is
+    refused. Nothing about the plane is wrong, so no plane carries a status, and without the run
+    level count the report would claim a confirmed run.
+
+    Determinism, since the fan-out is otherwise a race: the retrieval plane is stubbed away, so the
+    only reads left are the archiver's three and the refusal lands on the third every time. That
+    stub is the fixture, not the subject; the archiver chain itself runs unmocked down to the
+    socket.
+
+    Red-proof: drop ``reads_denied`` from ``verification_complete`` in run_doctor.
+    """
+    _set_config(monkeypatch, archiver_url="http://archiver.example:17665/mgmt/bpl")
+    # Restore the REAL identity chain over the module's autouse stubs, then fake only the socket.
+    monkeypatch.setattr("epics_mcp.services.doctor._identify_archiver", _identify_archiver)
+    monkeypatch.setattr("epics_mcp.services.doctor.rest_get_json", rest_get_json)
+    monkeypatch.setattr("epics_mcp.services.doctor.build_retrying_session", lambda **_k: _Socket())
+    monkeypatch.setattr(
+        "epics_mcp.services.archiver_client.get_shared_session", lambda **_k: _Socket()
+    )
+
+    # The retrieval plane would spend two more tokens and could take the refusal instead, which is
+    # the race this test must not inherit.
+    async def _no_retrieval(*_a: object, **_k: object) -> PlaneCheck:
+        return PlaneCheck(plane="archiver_retrieval", configured=False, status="disabled")
+
+    monkeypatch.setattr("epics_mcp.services.doctor._check_retrieval_plane", _no_retrieval)
+    monkeypatch.setattr(
+        "epics_mcp.services._http.get_config", lambda: EpicsConfig(read_rate_limit=2)
+    )
+    reset_read_throttle()
+    try:
+        report = await run_doctor()
+    finally:
+        reset_read_throttle()
+
+    archiver = _plane(report, "archiver")
+    assert archiver.status == "ok", (
+        "the plane itself is healthy; only a question about it went unasked"
+    )
+    assert archiver.identified is True
+    assert report.throttled_planes == [], "no plane carries this state, which is the whole point"
+    assert report.ok is True
+    assert report.reads_denied == 1
+    assert report.verification_complete is False
+    assert cli_doctor._exit_category(report) == "inconclusive"
+
+
 def test_naming_identifies_via_its_swagger_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     """The Naming Service DOES have an identity beacon, an earlier pass claimed it had none.
 
@@ -2324,6 +2487,7 @@ def _report_with_installation(findings: list[InstallationFinding]) -> DoctorRepo
         verification_complete=True,
         degraded_planes=[],
         throttled_planes=[],
+        reads_denied=0,
         unverified_planes=[],
         inconclusive_identity_planes=[],
         identified_planes=[],
@@ -2568,6 +2732,7 @@ def test_render_and_exit_agree() -> None:
             verification_complete=complete,
             degraded_planes=degraded or [],
             throttled_planes=throttled or [],
+            reads_denied=len(throttled or []),
             unverified_planes=[],
             inconclusive_identity_planes=inconclusive,
             identified_planes=identified,
@@ -2713,6 +2878,7 @@ def test_the_verdict_names_every_honest_but_not_healthy_state(
         verification_complete=not unverified and not inconclusive and not throttled,
         degraded_planes=degraded,
         throttled_planes=throttled,
+        reads_denied=len(throttled),
         unverified_planes=unverified,
         inconclusive_identity_planes=inconclusive,
         identified_planes=degraded,
@@ -2776,6 +2942,7 @@ def test_the_problem_verdict_names_what_failed_before_what_did_not() -> None:
         verification_complete=False,
         degraded_planes=["archiver"],
         throttled_planes=[],
+        reads_denied=0,
         unverified_planes=["olog"],
         inconclusive_identity_planes=[],
         identified_planes=["archiver"],

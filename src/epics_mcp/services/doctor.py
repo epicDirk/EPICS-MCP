@@ -60,6 +60,7 @@ from epics_mcp.epics_address import (
 from epics_mcp.errors import EpicsError
 from epics_mcp.services._http import (
     build_retrying_session,
+    get_read_throttle,
     http_status,
     is_ca_bundle_error,
     is_read_throttle_error,
@@ -448,6 +449,18 @@ class DoctorReport(_Model):
     #: never measured. ``verification_complete`` is False whenever it is non-empty, which is the
     #: signal a script reads to tell "confirmed" from "not asked".
     throttled_planes: list[str]
+    #: How many reads this run's own throttle REFUSED, counted at the chokepoint rather than
+    #: derived from the plane statuses. It exists because a refusal is not always visible in the
+    #: plane it belongs to, and that gap was the most dangerous state this whole check could reach:
+    #: the archiver spends a third token on an ingest SUB-probe whose failure maps to "ingest not
+    #: measured" while the plane itself stays ``ok``, so at a limit one below what a full run needs
+    #: the report came back with every plane healthy, every list empty, ``verification_complete``
+    #: True and exit 0, under the strongest sentence this tool can print. No per-plane status can
+    #: carry that, because nothing about that plane is wrong. Non-zero closes
+    #: ``verification_complete`` and drives the inconclusive exit 3.
+    #: ⚠️ It is >= the length of ``throttled_planes`` and never a second spelling of it: a plane
+    #: there accounts for one refusal, and a refusal counted here may belong to no plane at all.
+    reads_denied: int
     #: The planes that ANSWERED 2xx but could not prove their identity, anonymous, an unreadable
     #: body, or a foreign name (empty when none). Honest, not a failure → exit 0.
     unverified_planes: list[str]
@@ -1833,6 +1846,11 @@ async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = Non
     """
     cfg = get_config()
     probe_timeout = timeout if timeout is not None else cfg.diagnose_timeout
+    # A DELTA around this run's own fan-out, never the absolute: the counter is monotonic and
+    # process-wide, so bracketing is what makes the figure belong to this report (see
+    # ``ReadThrottle.denials``). Sampled before the gather rather than inside a probe, because the
+    # question is about the RUN and one probe cannot see what another was refused.
+    denials_before = get_read_throttle().denials
     live, channelfinder, archiver, retrieval, alarm, naming, olog = await asyncio.gather(
         _check_live(cfg, probe_pv, probe_timeout),
         _check_channelfinder(cfg, probe_timeout),
@@ -1857,6 +1875,7 @@ async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = Non
     identity_inconclusive = _INCONCLUSIVE_STATUSES - _THROTTLED_STATUSES
     inconclusive = [plane.plane for plane in planes if plane.status in identity_inconclusive]
     throttled = [plane.plane for plane in planes if plane.status in _THROTTLED_STATUSES]
+    reads_denied = get_read_throttle().denials - denials_before
     # Degraded planes deliberately do NOT touch ``ok`` or ``verification_complete``: they are exit
     # 0 by product decision (see _DEGRADED_STATUSES). Their own list is the ONLY signal a machine
     # reader gets, which is exactly why it exists.
@@ -1870,9 +1889,12 @@ async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = Non
         ok=ok,
         # A plane nobody asked is not a plane that was verified, so it closes this flag exactly
         # like the two states that DID get an answer and could not be named by it.
-        verification_complete=not unverified and not inconclusive and not throttled,
+        verification_complete=(
+            not unverified and not inconclusive and not throttled and not reads_denied
+        ),
         degraded_planes=degraded,
         throttled_planes=throttled,
+        reads_denied=reads_denied,
         unverified_planes=unverified,
         inconclusive_identity_planes=inconclusive,
         identified_planes=[plane.plane for plane in planes if plane.identified],

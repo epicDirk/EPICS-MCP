@@ -113,11 +113,13 @@ def _exit_category(report: DoctorReport) -> Literal["failed", "inconclusive", "c
     failed) and ``throttled_planes`` (no probe went out, this command's own read throttle refused
     it). Either one leaves ``ok`` True while making the run not-confirmed, so neither may be
     dropped from this test; they are kept apart because the SENTENCE differs, not the exit code.
-    A ``clean`` run may still be ``unverified`` (answered 2xx, unnameable), that is exit 0,
-    honest-not-confirmed."""
+    ``reads_denied`` is the third and it is not redundant with the second: a refusal can land on a
+    SUB-probe whose plane stays ``ok``, and then no list is non-empty while the run is still
+    incomplete. A ``clean`` run may still be ``unverified`` (answered 2xx, unnameable), that is
+    exit 0, honest-not-confirmed."""
     if not report.ok:
         return "failed"
-    if report.inconclusive_identity_planes or report.throttled_planes:
+    if report.inconclusive_identity_planes or report.throttled_planes or report.reads_denied:
         return "inconclusive"
     return "clean"
 
@@ -557,6 +559,17 @@ def _render(report: DoctorReport) -> str:
                 f"{len(report.inconclusive_identity_planes)} identity probe(s) FAILED (reachable, "
                 f"but the identity endpoint did not return a usable response): {failed_probes} "
                 "('!' lines)"
+            )
+        if report.reads_denied and not report.throttled_planes:
+            # Only when NO plane carries the status, which is exactly the state nothing else in
+            # this report shows: a refused SUB-probe (the archiver's ingest question) leaves its
+            # plane ok and every list empty. When a plane IS throttled the refusal is already
+            # named by the clause below, and saying it twice is how a reader learns to skip a
+            # sentence.
+            clauses.append(
+                f"{report.reads_denied} read(s) were refused by this command's own read throttle "
+                "without any plane failing, so part of this run was not measured (raise "
+                "EPICS_MCP_READ_RATE_LIMIT and run again)"
             )
         if report.throttled_planes:
             named.add("throttled_planes")
