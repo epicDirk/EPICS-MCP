@@ -19,7 +19,7 @@ behind their own separate gate, of six checks. The fullest statement of the post
 leaves your machine, is
 [Safety and network posture](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/safety.md).
 
-> **Project status: pre-1.0 and under active development.** Tools and APIs may still change
+> **Project status.** Pre-1.0 and under active development. Tools and APIs may still change
 > between minor versions, so pin one if you depend on it.
 
 ## Where to start
@@ -50,8 +50,8 @@ search reach, and the process refuses to start otherwise.
 Do not assume isolation from this document. Run `epics-doctor` to see what an instance actually
 reaches, and read [Safety and network posture](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/safety.md).
 An assistant does not have to ask: **every read answer carries a `reach` field** naming the plane
-that served it and its scope, so a value can never be quoted without saying which world it came
-from. That is the configuration rather than a probe, which the field says itself.
+that served it and its scope, so no value can be quoted without both. The reach comes from the
+configuration, not from a probe, and the field says so itself.
 
 ## The planes it sees
 
@@ -75,8 +75,8 @@ configured.
 
 ## Requirements
 
-- **Python 3.12+**
-- **[p4p](https://mdavidsaver.github.io/p4p/)** ≥ 4.2, installed automatically. It bundles the
+- Python 3.12+
+- [p4p](https://mdavidsaver.github.io/p4p/) ≥ 4.2, installed automatically. It bundles the
   EPICS libraries, so no separate EPICS Base build is needed for the client.
 - A reachable EPICS PV. Your control system once you widen the address list, an IOC of your own, or
   the synthetic one `epics-testpv` serves, which needs nothing beyond this package.
@@ -117,10 +117,10 @@ epics-doctor --version    # or: which epics-doctor   /   where.exe epics-doctor
 
 Every command answers `--help` and `--version` with its own name and the installed version, the one
 a bug report asks for, on a core-only install as well. If nothing is found, add the tool directory
-your installer used to your PATH (`uv tool update-shell` does that for uv). Two related notes: a
-current Linux distribution refuses a system-wide `pip install`, so use a virtual environment or
-`uv tool install`; and if the install ends in compiler output instead, `p4p` had no prebuilt wheel
-for your platform and fell back to building from source, see [Compatibility](#compatibility).
+your installer used to your PATH (`uv tool update-shell` does that for uv). A current Linux
+distribution refuses a system-wide `pip install`, so use a virtual environment or
+`uv tool install`. If the install ends in compiler output, `p4p` had no prebuilt wheel for your
+platform and fell back to building from source, see [Compatibility](#compatibility).
 
 ## Documentation
 
@@ -167,14 +167,14 @@ to building from source, which needs a compiler and is not something this projec
 | macOS Intel (x86_64) | yes, via the `universal2` wheel (needs macOS 11+) | not tested here |
 | Linux aarch64 | **no**, source build | not tested here |
 
-**Services.** Exercised against a local EPICS stack: an **e3** test IOC (PVAccess), an **EPICS
-Archiver Appliance** (single- or multi-instance), **ChannelFinder**, and the **Phoebus Alarm**
-server and logger. Archiver topology note: in a single-JVM appliance the MGMT and retrieval webapps
-share a port, so leave `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` empty; in a split deployment MGMT
-(`:17665`) and retrieval (`:17668`) are separate ports.
+**Services.** Exercised against a local EPICS stack: an e3 test IOC (PVAccess), an EPICS Archiver
+Appliance (single- or multi-instance), ChannelFinder, and the Phoebus Alarm server and logger.
+Archiver topology note: in a single-JVM appliance the MGMT and retrieval webapps share a port, so
+leave `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` empty; in a split deployment MGMT (`:17665`) and retrieval
+(`:17668`) are separate ports.
 
-No version of any of those is listed here, and that is deliberate rather than an omission: the
-deployment guide explains [why, and what to run to answer the question for your own
+No version of those services is listed here, and that is deliberate. The deployment guide
+explains [why, and what to run to answer the question for your own
 installation](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md#will-it-work-against-my-version-of-these-services).
 
 ## Development
@@ -190,30 +190,27 @@ commit style: [CONTRIBUTING.md](https://github.com/epicDirk/EPICS-MCP/blob/main/
 
 ## Related and roadmap
 
-Three different things, kept apart here on purpose: what exists, what is deliberately missing, and
-what is merely intended.
+Three things: what exists, what is deliberately missing, and what is only intended.
 
 **What exists.** Four tools (`validate_pvs`, `crossplane_check`, `coverage_audit`, `find_device`)
-and two commands (`epics-crossplane`, `epics-coverage`) join live PVs with the *display* plane: the
-macro-expanded PV inventory of `.bob` operator screens and of the `.plt` Data Browser trends
-reached from them, read through the `opi_navigation` PV engine. Everything else in this
-package, the whole PV, registry, history, alarm, naming and logbook surface, installs and runs
-without any of it.
+and two commands (`epics-crossplane`, `epics-coverage`) join live PVs with the *display* plane:
+the macro-expanded PV inventory of `.bob` operator screens and of the `.plt` Data Browser trends
+reached from them, read through the `opi_navigation` PV engine. Everything else in this package,
+live PVs, registry, history, alarm, naming and logbook, installs and runs without any of it.
 
 **What is deliberately missing.** Those six are not available in a published install, and cannot
-be made available by any flag. `opi_navigation` lives in a private repository, so it is wired in as
-a dependency group rather than advertised as an extra: a group stays out of the published
+be made available by any flag. `opi_navigation` lives in a private repository, so it is wired
+into a dependency group rather than advertised as an extra. A group stays out of the published
 metadata, where an unreachable dependency would be a promise nobody could keep, and a direct git
 reference is the one thing a package index refuses outright. The tools refuse with an explanation
-instead of failing obscurely, and this page names the gap instead of offering an install command
+instead of failing obscurely. This page names the gap rather than offering an install command
 that cannot work.
 
 **What is intended, with no date attached.** Two neighbouring pieces exist and are in daily use
 here, both in private repositories: `opi-live`, a plugin that exposes a RUNNING CS-Studio, and
 `CS-Studio-MCP`, an offline MCP server for the display files themselves. Opening the engine up is
-tied to how those two hold up in practice. None of the three carries a release commitment: when
-one is published it will say so here, and until it does, nothing on this page should be read as a
-schedule.
+tied to how those two hold up in practice. None of the three carries a release commitment, and
+nothing on this page is a schedule. This page will say when one is published.
 
 ## License
 
