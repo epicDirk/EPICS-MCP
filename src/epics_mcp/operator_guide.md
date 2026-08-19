@@ -1329,11 +1329,18 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   URL-boundary refusal names the VARIABLE and not its value, deliberately, because that value can
   carry a credential; read the gate's own verdict from `epics-pv://health` (`olog_write`) instead
   of trying to get the address out of the error.
-- **The server refuses to START with `SAFETY_CONFIG_INVALID`.** Not a tool error: the process
-  declined to come up, which is fail-closed by design rather than a fault. The conditions are a
-  malformed `EPICS_MCP_PV_WRITE_PATTERN`, PV writes enabled with an empty pattern, PV writes
+- **The server refuses to START with `SAFETY_CONFIG_INVALID`.** Usually not a tool error: the
+  process declined to come up, which is fail-closed by design rather than a fault. The conditions
+  are a malformed `EPICS_MCP_PV_WRITE_PATTERN`, PV writes enabled with an empty pattern, PV writes
   enabled while the EPICS search reach extends beyond loopback, and either gate armed without a
   durable `EPICS_MCP_AUDIT_LOG_FILE`. A server that starts with the gates off never meets it.
+  ⚠️ **One case arrives as a tool answer instead, and the asymmetry is deliberate.** The PV gate is
+  built eagerly at start-up, the Olog gate lazily on the first write, so an Olog-only deployment
+  whose audit path exists in the environment but cannot be OPENED meets this code at that first
+  write, from `create_log_entry` / `reply_to_log` / `add_log_attachment` / `update_log_entry`,
+  still before any write I/O. The refusal names `EPICS_MCP_AUDIT_LOG_FILE` and withholds its value,
+  the same posture the URL boundary takes: check the variable and the directory's permissions on
+  the server host.
 
 ### The guide tool itself: your key, or the shipped document
 

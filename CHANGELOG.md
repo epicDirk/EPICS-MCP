@@ -81,6 +81,17 @@ carry breaking changes).
 
 ### Changed
 
+- **An unwritable audit path no longer hands its full local path to a tool caller.** The Olog write
+  gate is built lazily, on the first write, so its `SAFETY_CONFIG_INVALID` refusal is a tool ANSWER
+  rather than a start-up failure: measured through `create_log_entry`, the caller received
+  `Invalid EPICS_MCP_AUDIT_LOG_FILE` followed by the full path, account name included. The
+  message now names the variable and withholds its value, the posture the URL boundary already
+  took. Both halves had to go, the `!r` and the chained `OSError` text, since an `OSError`
+  stringifies with the filename in it and dropping only the first would have looked repaired. The
+  PV gate's identical refusal KEEPS the path on purpose: it is built eagerly, so its only reader is
+  the operator on stderr, for whom the path is the actionable half. The path also stays in the
+  exception's `details`, which nothing in `src/` reads and the tool boundary does not send.
+
 - **The server now names itself `epics-pv`, the key a client registers it under, in both places it
   answers "which server am I".** `serverInfo` on the handshake and the `server` field of
   `epics-pv://health` both said `epics-mcp`, which is the DISTRIBUTION name: the package on PyPI

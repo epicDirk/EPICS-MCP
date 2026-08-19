@@ -512,8 +512,22 @@ class OlogWriteGate:
             # through the environment (an env value cannot carry a NUL), reachable through a
             # config that bypassed validation, which this file already guards against elsewhere.
             except (OSError, ValueError, TypeError) as exc:
+                # NAMES THE VARIABLE, NOT ITS VALUE, and the reason is where this gate is built.
+                # It is LAZY (first write), so unlike SafetyLayer's eager one this refusal is a
+                # TOOL ANSWER: measured through create_log_entry, the caller received
+                # "[SAFETY_CONFIG_INVALID] Invalid EPICS_MCP_AUDIT_LOG_FILE" plus the full path.
+                # The path carried a local account name to whoever called the tool. Same posture
+                # the URL boundary above already takes for a value that can carry a credential.
+                # BOTH halves had to go: the ``!r`` AND the OSError text, because an OSError
+                # stringifies as "[Errno 2] No such file or directory: '<the path>'" and dropping
+                # only the first would have left the leak intact while looking repaired.
+                # ``details`` keeps the path: nothing in ``src/`` reads ``EpicsError.details`` and
+                # the tool boundary (tool_errors.translate_epics_errors) sends only error_code and
+                # str(exc), so it stays in-process for the operator who can act on it.
                 raise SafetyConfigError(
-                    f"Invalid EPICS_MCP_AUDIT_LOG_FILE {self._config.audit_log_file!r}: {exc}",
+                    "Invalid EPICS_MCP_AUDIT_LOG_FILE: the configured audit path could not be "
+                    f"opened for writing ({type(exc).__name__}). Check the variable's value and "
+                    "the directory's permissions on the server host; it is not disclosed here.",
                     details={"audit_log_file": self._config.audit_log_file},
                 ) from exc
         else:

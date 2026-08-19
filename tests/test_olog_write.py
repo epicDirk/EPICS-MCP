@@ -481,6 +481,55 @@ class TestGateConfigFailClosed:
             audit.handlers.clear()
             audit.handlers.extend(saved)
 
+    def test_the_bad_audit_path_refusal_names_the_variable_and_not_the_path(
+        self, tmp_path: Path
+    ) -> None:
+        """BG-DPATH: the message a CALLER receives must not carry the local audit path.
+
+        This gate is built LAZILY, on the first write, so unlike ``SafetyLayer``'s eager one its
+        refusal is a tool ANSWER: measured through ``create_log_entry``, the caller used to receive
+        ``[SAFETY_CONFIG_INVALID] Invalid EPICS_MCP_AUDIT_LOG_FILE`` plus the full path, handing
+        a local account name to whoever called the tool. Same posture the URL boundary already
+        takes for a value that can carry a credential.
+
+        BOTH assertions are load-bearing and the second is the one that pays. The path stood TWICE
+        in one f-string, once from ``!r`` and once inside ``{exc}``, because an ``OSError``
+        stringifies as ``[Errno 2] No such file or directory: '<the path>'``. Dropping only the
+        ``!r`` would have looked repaired and leaked exactly as before, so the segment is asserted
+        against the WHOLE message rather than against the formatted prefix.
+
+        Red-proof (each verified by mutating ``olog_safety.py``): put the ``!r`` back and the
+        directory assertion fails; append ``{exc}`` and the same one fails; drop the variable NAME
+        and the first assertion fails.
+
+        ``details`` deliberately still carries the path: nothing in ``src/`` reads
+        ``EpicsError.details``, and ``tool_errors.translate_epics_errors`` sends only the error code
+        and ``str(exc)``, so it stays in-process for the operator who can act on it.
+        """
+        audit = logging.getLogger(_AUDIT_LOGGER)
+        saved = audit.handlers[:]
+        audit.handlers.clear()
+        secret_dir = tmp_path / "operator-account-name"
+        try:
+            cfg = EpicsConfig(audit_log_file=str(secret_dir / "audit.log"))
+            with pytest.raises(SafetyConfigError) as excinfo:
+                OlogWriteGate(cfg)
+        finally:
+            audit.handlers.clear()
+            audit.handlers.extend(saved)
+
+        message = str(excinfo.value)
+        assert "EPICS_MCP_AUDIT_LOG_FILE" in message, (
+            "the refusal must still NAME the variable, otherwise withholding the value leaves the "
+            "reader with nothing to act on"
+        )
+        assert "operator-account-name" not in message, (
+            f"the audit path leaked to the caller: {message!r}"
+        )
+        assert excinfo.value.details["audit_log_file"] == str(secret_dir / "audit.log"), (
+            "the in-process detail must keep the path; it never crosses the tool boundary"
+        )
+
     def test_audit_path_validated_on_repeated_construction(self, tmp_path: Path) -> None:
         # QA 2026-07-19 (OA1-QA #A3): the audit-path guard must not be skipped just because an
         # EARLIER gate already attached a handler to the process-global olog_audit logger. A later

@@ -398,6 +398,14 @@ class SafetyLayer:
             # os.fspath, and neither is an OSError, so the process died on a bare traceback instead
             # of the named refusal (measured on both gates). Symmetric with OlogWriteGate.
             except (OSError, ValueError, TypeError) as exc:
+                # KEEPS THE PATH, and that is a decision rather than the twin of OlogWriteGate's
+                # (BG-DPATH). This layer is built EAGERLY in server.main, so this refusal is a
+                # start-up failure printed to stderr: its only reader is the operator on the host,
+                # for whom the path is the actionable half. The Olog gate is built lazily on the
+                # first write, so the identical message there reaches a TOOL CALLER, which is why
+                # that one names the variable and withholds its value. Same rule, opposite answer,
+                # because the audience differs; keeping them "symmetric" would either blind the
+                # operator or leak to the caller.
                 raise SafetyConfigError(
                     f"Invalid EPICS_MCP_AUDIT_LOG_FILE {self._config.audit_log_file!r}: {exc}",
                     details={"audit_log_file": self._config.audit_log_file},

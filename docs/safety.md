@@ -187,6 +187,14 @@ This is a controls tool, so the trust questions come first.
   stood here too until 2026-08-14, on the strength of a local pattern-based redaction that cut at
   the first `@`; that redaction is gone, its cause texts cross the same barrier as everything else,
   and no unredacted exception was found that could reach the old one in the first place.
+  ⚠️ **A local FILE PATH is withheld on the same rule, in the one place it could reach a caller.**
+  An unwritable `EPICS_MCP_AUDIT_LOG_FILE` is refused with `SAFETY_CONFIG_INVALID`, and the Olog
+  gate is built lazily, so on an Olog-only deployment that refusal is a tool ANSWER rather than a
+  start-up failure: measured through `create_log_entry` it handed the caller the full path, local
+  account name included. It now names the variable and not its value. The PV gate's identical
+  refusal KEEPS the path deliberately, because it is eager and its reader is the operator on
+  stderr. The path stays in the exception's `details` either way, which nothing in `src/` reads and
+  which the tool boundary does not send.
 - **Olog reads return the whole entry, a deliberate prototype decision (2026-08-01).** Every ENTRY
   read (`search_logbook`, `get_log_entry`, the create/reply/update echoes) returns the full server
   record: `title`, `description`, `owner` (the author's
