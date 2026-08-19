@@ -2183,6 +2183,7 @@ def _report_with_installation(findings: list[InstallationFinding]) -> DoctorRepo
         ok=False,
         verification_complete=True,
         degraded_planes=[],
+        throttled_planes=[],
         unverified_planes=[],
         inconclusive_identity_planes=[],
         identified_planes=[],
@@ -2416,6 +2417,7 @@ def test_render_and_exit_agree() -> None:
         complete: bool,
         identified: list[str],
         degraded: list[str] | None = None,
+        throttled: list[str] | None = None,
     ) -> DoctorReport:
         return DoctorReport(
             planes=[],
@@ -2425,6 +2427,7 @@ def test_render_and_exit_agree() -> None:
             ok=ok,
             verification_complete=complete,
             degraded_planes=degraded or [],
+            throttled_planes=throttled or [],
             unverified_planes=[],
             inconclusive_identity_planes=inconclusive,
             identified_planes=identified,
@@ -2443,6 +2446,21 @@ def test_render_and_exit_agree() -> None:
         assert cli_doctor._exit_category(report) == category
         assert word in cli_doctor._render(report)
         assert cli_doctor._EXIT_CODE[cli_doctor._exit_category(report)] == code
+
+    # BG-DTHR: the SECOND driver of exit 3, and it reaches it with the identity list EMPTY. It
+    # stands here rather than in the mapping above because that dict is keyed BY the category, so
+    # two rows cannot share "inconclusive". Without it the throttled half of _exit_category could
+    # be deleted and every row above would stay green, since each carries an identity plane.
+    throttled_only = _mk(
+        ok=True, inconclusive=[], complete=False, identified=[], throttled=["archiver"]
+    )
+    assert cli_doctor._exit_category(throttled_only) == "inconclusive"
+    assert cli_doctor._EXIT_CODE[cli_doctor._exit_category(throttled_only)] == 3
+    rendered = cli_doctor._render(throttled_only)
+    assert "INCONCLUSIVE" in rendered
+    # And it must not borrow the sentence written for a probe that ran: nothing was measured here.
+    assert "identity probe(s) FAILED" not in rendered
+    assert "NOT PROBED" in rendered and "archiver" in rendered
 
     # A degraded plane is "clean" for the exit code AND must not wear the strongest confirmation
     # sentence. Both halves matter: the verdict line changes, the category (and so the exit code)
@@ -2464,29 +2482,63 @@ def test_render_and_exit_agree() -> None:
 #: of slipping past three hardcoded field names. That is the whole difference between this guard and
 #: a set of literal assertions, and it is why the status sets are named here at all.
 _HONEST_BUT_NOT_HEALTHY: dict[str, frozenset[str]] = {
-    "inconclusive_identity_planes": _INCONCLUSIVE_STATUSES,
+    # MINUS the throttled ones (BG-DTHR): they drive the same exit but ride in their own list,
+    # because the sentence this one feeds is about an identity probe that ran and failed.
+    "inconclusive_identity_planes": _INCONCLUSIVE_STATUSES - _THROTTLED_STATUSES,
+    "throttled_planes": _THROTTLED_STATUSES,
     "degraded_planes": _DEGRADED_STATUSES,
     "unverified_planes": frozenset({"unverified"}),
 }
 
 
 @pytest.mark.parametrize(
-    ("ok", "degraded", "unverified", "inconclusive"),
+    ("ok", "degraded", "unverified", "inconclusive", "throttled"),
     [
         # The three states the ticket measured, plus the pair that is hidden ONLY as a name.
-        pytest.param(True, ["archiver"], ["olog", "naming"], [], id="degraded-hides-unverified"),
-        pytest.param(True, ["archiver"], [], ["channelfinder"], id="inconclusive-hides-degraded"),
-        pytest.param(True, [], ["olog"], ["channelfinder"], id="inconclusive-counts-unverified"),
-        pytest.param(True, ["archiver"], ["olog"], ["channelfinder"], id="inconclusive-hides-both"),
+        pytest.param(
+            True, ["archiver"], ["olog", "naming"], [], [], id="degraded-hides-unverified"
+        ),
+        pytest.param(
+            True, ["archiver"], [], ["channelfinder"], [], id="inconclusive-hides-degraded"
+        ),
+        pytest.param(
+            True, [], ["olog"], ["channelfinder"], [], id="inconclusive-counts-unverified"
+        ),
+        pytest.param(
+            True, ["archiver"], ["olog"], ["channelfinder"], [], id="inconclusive-hides-both"
+        ),
+        # BG-DTHR added a FOURTH category, and it can hide the other three exactly as the third one
+        # could: it wins the same branch, so a throttled plane arriving beside a degraded or
+        # unverified one must not silence them, and it must not be silenced by an identity probe
+        # that failed in the same run either.
+        pytest.param(True, [], [], [], ["archiver"], id="throttled-alone"),
+        pytest.param(
+            True, ["olog"], ["naming"], [], ["archiver"], id="throttled-hides-degraded-and-unver"
+        ),
+        pytest.param(
+            True, [], [], ["channelfinder"], ["archiver"], id="throttled-beside-inconclusive"
+        ),
+        pytest.param(
+            True,
+            ["olog"],
+            ["naming"],
+            ["channelfinder"],
+            ["archiver"],
+            id="all-four-at-once",
+        ),
         # Controls: one category alone is named by its own branch, and a clean report gets no tail.
-        pytest.param(True, ["archiver"], [], [], id="control-degraded-alone"),
-        pytest.param(True, [], ["olog"], [], id="control-unverified-alone"),
-        pytest.param(True, [], [], ["channelfinder"], id="control-inconclusive-alone"),
-        pytest.param(True, [], [], [], id="control-nothing-to-say"),
+        pytest.param(True, ["archiver"], [], [], [], id="control-degraded-alone"),
+        pytest.param(True, [], ["olog"], [], [], id="control-unverified-alone"),
+        pytest.param(True, [], [], ["channelfinder"], [], id="control-inconclusive-alone"),
+        pytest.param(True, [], [], [], [], id="control-nothing-to-say"),
     ],
 )
 def test_the_verdict_names_every_honest_but_not_healthy_state(
-    ok: bool, degraded: list[str], unverified: list[str], inconclusive: list[str]
+    ok: bool,
+    degraded: list[str],
+    unverified: list[str],
+    inconclusive: list[str],
+    throttled: list[str],
 ) -> None:
     """BG-DFIX(a): the verdict named only the HIGHEST-ranking of the three honest-but-not-healthy
     categories and stayed silent about the rest, while ``verification_complete`` said False.
@@ -2518,8 +2570,9 @@ def test_the_verdict_names_every_honest_but_not_healthy_state(
         ok=ok,
         # The invariant run_doctor holds (services/doctor.py): a state built any other way is not
         # one the tool can produce, and pinning it here keeps the rows honest.
-        verification_complete=not unverified and not inconclusive,
+        verification_complete=not unverified and not inconclusive and not throttled,
         degraded_planes=degraded,
+        throttled_planes=throttled,
         unverified_planes=unverified,
         inconclusive_identity_planes=inconclusive,
         identified_planes=degraded,
@@ -2582,6 +2635,7 @@ def test_the_problem_verdict_names_what_failed_before_what_did_not() -> None:
         ok=False,
         verification_complete=False,
         degraded_planes=["archiver"],
+        throttled_planes=[],
         unverified_planes=["olog"],
         inconclusive_identity_planes=[],
         identified_planes=["archiver"],

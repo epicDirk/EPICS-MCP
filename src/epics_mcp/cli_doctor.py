@@ -21,19 +21,24 @@ a scriptable pass/fail):
   code (QA-15, argued at the ``except`` in :func:`main`) and are told apart on stderr, which only
   the internal one writes;
 * ``2``: a usage error, bad arguments only (argparse's own convention);
-* ``3``: INCONCLUSIVE: a configured plane is reachable but its identity probe FAILED (a served
-  non-2xx like a 401/404, a transport error, or a refused redirect on the identity endpoint). Not a
-  hard failure (the plane's TOOL endpoints may work), but not a silent all-clear either.
+* ``3``: INCONCLUSIVE, from either of TWO causes. A configured plane is reachable but its identity
+  probe FAILED (a served non-2xx like a 401/404, a transport error, or a refused redirect on the
+  identity endpoint); or a plane was NOT PROBED AT ALL because this command's own read throttle
+  (``EPICS_MCP_READ_RATE_LIMIT``) refused the request. Neither is a hard failure, the first because
+  the plane's TOOL endpoints may work and the second because nothing about that plane was measured,
+  and neither is a silent all-clear.
 
-The exit code relates to ``--json`` as: ``0`` = ``ok`` ∧ no ``inconclusive_identity_planes``; ``3``
-= ``ok`` ∧ some ``inconclusive_identity_planes``; ``1`` = not ``ok``, or an internal error and no
-report at all; ``2`` = usage. So ``ok`` alone is True for BOTH exit 0 and exit 3, do NOT derive the
-exit code from ``ok`` alone.
+The exit code relates to ``--json`` as: ``0`` = ``ok`` ∧ no ``inconclusive_identity_planes`` ∧ no
+``throttled_planes``; ``3`` = ``ok`` ∧ some of either; ``1`` = not ``ok``, or an internal error and
+no report at all; ``2`` = usage. So ``ok`` alone is True for BOTH exit 0 and exit 3, do NOT derive
+the exit code from ``ok`` alone, and do NOT read the identity list alone either: a run this command
+throttled leaves it empty.
 
 ⚠️ Exit ``0`` means "nothing failed", NOT "everything was confirmed": a plane can be reachable with
 its identity unverified and still exit 0 (that is honest, not healthy, see ``doctor.py``). A
 machine reader must therefore look at ``verification_complete`` / ``unverified_planes`` /
-``inconclusive_identity_planes`` / ``degraded_planes`` in ``--json``, not only at the exit code,
+``inconclusive_identity_planes`` / ``throttled_planes`` / ``degraded_planes`` in ``--json``, not
+only at the exit code,
 and for POSITIVE confirmation assert ``identified_planes`` is non-empty (``verification_complete``
 is vacuously true on an empty config). ``degraded_planes`` is the one none of the others covers: a
 plane there proved its identity and is measurably not doing its job, so it appears IN
@@ -64,7 +69,10 @@ from epics_mcp.write_posture import OlogWriteGateReport, PvWriteGateReport
 #: ``·`` = the plane is OFF, its URL is unset, so no client was built and nothing was probed
 #: (exit 0), ``i`` = the live plane has no URL to probe and no ``--probe-pv`` was given, so the
 #: line states the posture it would use rather than a verdict (exit 0), ``?`` = answered 2xx but
-#: not nameable (exit 0), ``!`` = the identity probe failed (exit 3), ``~`` = identity IS proven
+#: not nameable (exit 0), ``!`` = the identity probe failed (exit 3), ``»`` = no probe went out at
+#: all, this command's own read throttle refused it, so nothing was measured (exit 3, the same
+#: class as ``!`` and deliberately NOT the same mark: one means the answer was unusable, the other
+#: that there was no answer to be had), ``~`` = identity IS proven
 #: and the service is reachable, but it is not doing its job (exit 0, the archiver that archives
 #: nothing). ``~`` is deliberately not ``?``: that one means "we could not tell what this is",
 #: and here we can. ``·`` and ``i`` are likewise not ``✓``: nothing was verified in either case.
@@ -100,13 +108,16 @@ def _exit_category(report: DoctorReport) -> Literal["failed", "inconclusive", "c
     """The ONE verdict precedence, consumed by both :func:`main` (→ exit code) and :func:`_render`
     (→ verdict line) so the two cannot drift. A hard failure dominates an inconclusive identity
     probe, which dominates a clean run: ``failed`` → exit 1, ``inconclusive`` → exit 3, ``clean`` →
-    exit 0. ``report.ok`` is False iff a plane HARD-failed; ``inconclusive_identity_planes`` is
-    non-empty iff a probe failed (with ``ok`` still True, an inconclusive probe is not a hard
-    failure). A ``clean`` run may still be ``unverified`` (answered 2xx, unnameable), that is exit
-    0, honest-not-confirmed."""
+    exit 0. ``report.ok`` is False iff a plane HARD-failed. TWO lists drive the inconclusive
+    category and they are read together: ``inconclusive_identity_planes`` (a probe went out and
+    failed) and ``throttled_planes`` (no probe went out, this command's own read throttle refused
+    it). Either one leaves ``ok`` True while making the run not-confirmed, so neither may be
+    dropped from this test; they are kept apart because the SENTENCE differs, not the exit code.
+    A ``clean`` run may still be ``unverified`` (answered 2xx, unnameable), that is exit 0,
+    honest-not-confirmed."""
     if not report.ok:
         return "failed"
-    if report.inconclusive_identity_planes:
+    if report.inconclusive_identity_planes or report.throttled_planes:
         return "inconclusive"
     return "clean"
 
@@ -423,6 +434,7 @@ def _armed_gate_names(report: DoctorReport) -> list[str]:
 #: be free to drift from the one ``--json`` publishes.
 _OTHER_STATES: tuple[tuple[str, str], ...] = (
     ("inconclusive_identity_planes", "inconclusive"),
+    ("throttled_planes", "not probed"),
     ("degraded_planes", "degraded"),
     ("unverified_planes", "unverified"),
 )
@@ -528,17 +540,41 @@ def _render(report: DoctorReport) -> str:
         # ChannelFinder URL at a week-dead container because a neighbour answered 401. That probe
         # FAILED: it is not a silent OK. Not a hard PROBLEM either (the plane's tool endpoints may
         # work), so it earns its own INCONCLUSIVE verdict and exit 3, never "OK".
-        planes = ", ".join(report.inconclusive_identity_planes)
-        n = len(report.inconclusive_identity_planes)
+        #
+        # TWO causes reach this verdict and they get a clause each (BG-DTHR). One sentence for both
+        # was measured to be worse than no sentence: keyed on inconclusive_identity_planes alone it
+        # told an operator whose read throttle had refused a TRANSPORT probe that "1 identity
+        # probe(s) FAILED (reachable, but the identity endpoint did not return a usable response)",
+        # where no identity probe ran, nothing established reachability, and there was no response.
+        # The clauses are built from the report FIELDS, never re-derived from report.planes, for
+        # the reason recorded at _OTHER_STATES.
+        clauses: list[str] = []
+        named: set[str] = set()
+        if report.inconclusive_identity_planes:
+            named.add("inconclusive_identity_planes")
+            failed_probes = ", ".join(report.inconclusive_identity_planes)
+            clauses.append(
+                f"{len(report.inconclusive_identity_planes)} identity probe(s) FAILED (reachable, "
+                f"but the identity endpoint did not return a usable response): {failed_probes} "
+                "('!' lines)"
+            )
+        if report.throttled_planes:
+            named.add("throttled_planes")
+            not_probed = ", ".join(report.throttled_planes)
+            clauses.append(
+                f"{len(report.throttled_planes)} plane(s) were NOT PROBED, because this command's "
+                f"own read throttle refused the request before it left: {not_probed} "
+                "('»' lines, raise EPICS_MCP_READ_RATE_LIMIT and run again)"
+            )
         # This branch used to carry its own tail, "(N other plane(s) also unverified)", which named
         # ONE of the two categories it outranks and named it as a COUNT. _other_states_clause covers
         # both and names the planes; the count-only form is gone rather than kept beside it, because
         # one sentence disclosing the same kind of fact two ways is how a reader learns to skip it.
         verdict = (
-            f"INCONCLUSIVE, {n} identity probe(s) FAILED (reachable, but the identity endpoint "
-            f"did not return a usable response): {planes}. Not a confirmed failure, but not "
-            "confirmed healthy, see the '!' lines above."
-            + _other_states_clause(report, named=frozenset({"inconclusive_identity_planes"}))
+            "INCONCLUSIVE, "
+            + "; ".join(clauses)
+            + ". Not a confirmed failure, but not confirmed healthy."
+            + _other_states_clause(report, named=frozenset(named))
         )
     elif report.degraded_planes:
         # A degraded plane is exit 0 and leaves verification_complete True, so without this branch

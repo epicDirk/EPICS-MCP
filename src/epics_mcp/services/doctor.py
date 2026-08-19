@@ -409,7 +409,8 @@ class DoctorReport(_Model):
     #: True iff no configured plane HARD-FAILED (nothing in ``_FAILING_STATUSES``). Note what this
     #: does NOT say: a plane can be reachable with its identity ``unverified`` (still exit 0) OR its
     #: identity probe ``identity_probe_failed`` (exit 3) and still leave ``ok`` True, ``ok`` alone
-    #: does not map to the exit code. Read ``inconclusive_identity_planes`` (exit 3 driver),
+    #: does not map to the exit code. Read ``inconclusive_identity_planes`` and
+    #: ``throttled_planes`` (the two exit 3 drivers),
     #: ``degraded_planes`` (proven, reachable, not doing its job) and ``verification_complete``
     #: before treating this as "everything is confirmed".
     ok: bool
@@ -433,6 +434,17 @@ class DoctorReport(_Model):
     #: NOT in ``unverified_planes`` (its identity is proven) and IS in ``identified_planes``, so
     #: neither of those substitutes for reading this one.
     degraded_planes: list[str]
+    #: The planes THIS COMMAND never asked, because its own read throttle refused the probe
+    #: (empty when none). Not a statement about those services: no request left this process, so
+    #: nothing here is evidence about a deployment. They drive the inconclusive exit 3 alongside
+    #: ``inconclusive_identity_planes`` and they are deliberately NOT in that list, because the
+    #: verdict sentence built from it says "identity probe(s) FAILED (reachable, but the identity
+    #: endpoint did not return a usable response)", and all three of those claims are false for a
+    #: plane whose TRANSPORT probe was refused before any socket existed.
+    #: ⚠️ A run can be ``ok`` True with this list non-empty: nothing failed, some of it was simply
+    #: never measured. ``verification_complete`` is False whenever it is non-empty, which is the
+    #: signal a script reads to tell "confirmed" from "not asked".
+    throttled_planes: list[str]
     #: The planes that ANSWERED 2xx but could not prove their identity, anonymous, an unreadable
     #: body, or a foreign name (empty when none). Honest, not a failure → exit 0.
     unverified_planes: list[str]
@@ -1741,7 +1753,8 @@ async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = Non
     address list, for ``probe_pv``) points there, which, on a configured deployment, may well be a
     real facility. ``ok`` is True iff no configured plane HARD-FAILED, a disabled/info plane never
     fails the check, and neither does an ``unverified`` (exit 0), an ``identity_probe_failed``
-    (exit 3) nor a ``no_ingest`` (exit 0) one, so read ``inconclusive_identity_planes``,
+    (exit 3), a ``throttled`` (exit 3, and nothing about that plane was measured at all) nor a
+    ``no_ingest`` (exit 0) one, so read ``inconclusive_identity_planes``, ``throttled_planes``,
     ``degraded_planes`` and ``verification_complete`` alongside ``ok`` before concluding that
     everything was confirmed.
     """
@@ -1765,7 +1778,12 @@ async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = Non
     # ``inconclusive``.
     ok = all(plane.status in _NON_FAILING_STATUSES | _INCONCLUSIVE_STATUSES for plane in planes)
     unverified = [plane.plane for plane in planes if plane.status == "unverified"]
-    inconclusive = [plane.plane for plane in planes if plane.status in _INCONCLUSIVE_STATUSES]
+    # The inconclusive statuses MINUS the throttled ones, and the subtraction is the point: both
+    # drive exit 3, but this list feeds a verdict sentence about a FAILED identity probe, which is
+    # not what happened to a plane this command refused itself. See _THROTTLED_STATUSES.
+    identity_inconclusive = _INCONCLUSIVE_STATUSES - _THROTTLED_STATUSES
+    inconclusive = [plane.plane for plane in planes if plane.status in identity_inconclusive]
+    throttled = [plane.plane for plane in planes if plane.status in _THROTTLED_STATUSES]
     # Degraded planes deliberately do NOT touch ``ok`` or ``verification_complete``: they are exit
     # 0 by product decision (see _DEGRADED_STATUSES). Their own list is the ONLY signal a machine
     # reader gets, which is exactly why it exists.
@@ -1777,8 +1795,11 @@ async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = Non
         # Pure, no I/O, and computed AFTER the gather because it is a function of its results.
         installation=installation_findings(cfg, planes),
         ok=ok,
-        verification_complete=not unverified and not inconclusive,
+        # A plane nobody asked is not a plane that was verified, so it closes this flag exactly
+        # like the two states that DID get an answer and could not be named by it.
+        verification_complete=not unverified and not inconclusive and not throttled,
         degraded_planes=degraded,
+        throttled_planes=throttled,
         unverified_planes=unverified,
         inconclusive_identity_planes=inconclusive,
         identified_planes=[plane.plane for plane in planes if plane.identified],
