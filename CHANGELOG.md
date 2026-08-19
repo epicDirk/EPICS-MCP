@@ -9,12 +9,26 @@ carry breaking changes).
 
 ### Added
 
+- **A write answer and an archived sample now say what their fields mean, and one of them says
+  which epoch it is in.** Both rode on the wire with nothing explaining them. For a write, the
+  costly confusion is that `status` stays `"success"` on a readback mismatch (it describes the PUT,
+  which really did happen) and `new_value` is the value that was SENT, so the two together can read
+  as "it landed" when it did not; the measured pair is `readback` with `verified`, and `note`
+  carries the reason. Nothing about that behaviour changed, only its delivery. For an archived
+  sample, `secs` is UNIX epoch seconds and NOT EPICS epoch seconds: read the other way, every point
+  in a plot shifts by exactly 20 years and still looks plausible. The answer-field index grows from
+  16 rows to 20, routing 66 field names in total. ⚠️ `tolerance` is now documented as NOT
+  sufficient to re-derive the verdict: on the epsilon fallback the same value also feeds a relative
+  axis that is not reported, so a large value can match while differing by far more than
+  `tolerance`. `tools/list` grows 642 chars on both lanes (two description edits, each measured on
+  its own); the guide grows about 3.6 KB and none of that reaches the wire.
+
 - **The guide now explains the words an answer uses, and a new `answer-fields` topic maps a field
   name to the topic that explains it.** A caller meets a field name in a RESULT, not in a question,
   and this surface has no free-text search, so a name such as `cf_capped`, `config_msg`,
   `default_level`, `next_steps` or `archive_fields` was unreachable: it rode on the wire and nothing
-  said what it meant. Fifteen such fields are now explained where their subject already lives, and
-  the new index routes to them. The cross-plane report vocabulary moved into its own signature group
+  said what it meant. That change explained fifteen such fields where their subject already lives
+  and had the new index route to them (the entry below has since added more). The cross-plane report vocabulary moved into its own signature group
   `err-crossplane` (buckets, the `_write` twins, the withheld ChannelFinder and `.db` verdicts, the
   coverage cells), so reading one bucket no longer costs the whole display-inventory section.
   `tools/list` grows 165 chars on both lanes; the guide itself grows about 12 KB and none of that

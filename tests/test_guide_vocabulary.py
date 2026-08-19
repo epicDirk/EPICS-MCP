@@ -103,15 +103,16 @@ _KEY_SHAPE = re.compile(r"^[a-z][a-z0-9_]*$")
 #: green. A ratchet just under the real count is the honest shape, so raise it in the same commit
 #: that adds rows. ``_MIN_RESPONSE_KEYS`` stays a round floor because its only job is to catch a
 #: broken AST walk; the real check on that side is the field-existence assertion.
-#: Re-measured 2026-08-19 with ``len(_response_keys())`` and ``len(_index_rows())``: 477 and 19
-#: (16 rows on 2026-08-16; GQ-33 added two for the write-answer fields and one for the fields of
-#: an archived sample).
+#: Re-measured 2026-08-19 with ``len(_response_keys())`` and ``len(_index_rows())``: 477 and 20
+#: (16 rows on 2026-08-16; GQ-33 added four, two for the write-answer fields and two for an
+#: archived sample, the second of those because ``severity`` has a live-read meaning as well and a
+#: bare row would have routed one name to two subjects).
 #: ⚠️ An earlier version of this comment claimed 444, a draft figure taken before the third birth
 #: was added and never re-measured, and a second draft claimed 597, written before the shape filter
 #: above cut the population down. Both are named because the same slip happened twice in one hour:
 #: a figure copied forward while the thing it counts kept moving.
 _MIN_RESPONSE_KEYS = 100
-_MIN_INDEX_ROWS = 19
+_MIN_INDEX_ROWS = 20
 
 
 def _response_keys() -> set[str]:

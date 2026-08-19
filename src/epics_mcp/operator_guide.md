@@ -237,12 +237,13 @@ explanation. Ask `get_guide` for the topic named beside the field.
 | `state` · `likely_cause` · `confidence` · `evidence` · `next_steps` | `err-pv` |
 | `registered` · `withheld` | `err-pv` |
 | `new_value` · `old_value` · `readback` · `verified` · `tolerance` · `bounds_note` | `pv-write` |
-| `status` (of a PV write, not of an archived sample or a plane) | `pv-write` |
+| `status` · `note` (of a PV write, not of an archived sample or a plane) | `pv-write` |
 | `attachment_count` | `olog-output` |
 | `total_matches` · `default_level` | `olog-filters` |
 | `config_msg` · `capped` (alarm history) | `alarm-tree` |
 | `archive_fields` · `host_name` · `creation_time` · `identity` | `err-archiver` |
-| `secs` · `nanos` · `val` · `severity` (one archived sample) | `err-archiver` |
+| `secs` · `nanos` · `val` (one archived sample) | `err-archiver` |
+| `severity` (of an archived sample; a live read carries its own in its alarm block) | `err-archiver` |
 | `found` (a REST lookup, not a PV connection) | `err-rest` |
 | `identified_planes` · `verification_complete` · `write_safety` | `doctor` |
 
@@ -367,19 +368,26 @@ If the put RAISES, there is no readback and no `verified` at all: the tool call 
 line is `FAILED`, and the caller gets an error rather than a result. Do not go looking for
 `verified` in that case, and do not read its absence as success.
 
-**The fields a write answers with, and which two of them are the measurement.** Three of them
-describe the REQUEST and are not evidence that anything landed. `status` is `"success"` once the
-put executed and was ALLOW-audited: a statement about the PUT, not about the value, and it stays
+**All nine fields a write answers with, and which two of them are the measurement.** Four describe
+the REQUEST and are not evidence that anything landed. `status` is `"success"` once the put
+executed and was ALLOW-audited: a statement about the PUT, not about the value, and it stays
 `"success"` on a readback mismatch, because the write DID happen and a wrong value may now sit at
-the IOC. `new_value` is the value that was SENT, echoed back from the request. `old_value` is what
-the pre-read saw before the put, the same value the audit line carries. The fields that are
-MEASURED after the fact are `readback` (what the read-back actually saw, null when it could not be
-obtained), `verified` (true matched within tolerance, false mismatch, null not verifiable) and
-`tolerance` (the absolute tolerance a numeric compare applied; null for an exact compare or when
-not verifiable). `bounds_note` is null when the value was checked against the record's own drive
-limits, and otherwise names the reason it could not be, a deliberate fail-open. So the pair to
-read for "did it land" is `readback` with `verified`; reading `status` with `new_value` answers a
-different question, namely whether this server sent it.
+the IOC. `new_value` is the value that was SENT, echoed back from the request, `pv_name` likewise.
+`old_value` is what the pre-read saw before the put, the same value the audit line carries. The
+fields MEASURED after the fact are `readback` (what the read-back actually saw, null when it could
+not be obtained) and `verified` (true matched, false mismatch, null not verifiable), with `note`
+carrying the reason whenever `verified` is false or null, and it is the field to quote when
+reporting one. `tolerance` reports the ABSOLUTE tolerance of a numeric compare and is null for an
+exact one (an enum label or a string readback matches exactly, so nothing was tolerated) or when
+the compare was not verifiable. ⚠️ It is NOT the whole test and re-deriving the verdict from it
+will disagree with the server: unless the record supplied a `control.min_step`, the configured
+epsilon feeds a RELATIVE axis as well, which is not reported, so a large value can match while
+differing by far more than `tolerance` (measured: writing 10000 and reading back 10010 is
+`verified: true` with `tolerance: 0.001`). Read `verified`, do not recompute it. `bounds_note` is
+null when the value was checked against the record's own drive limits, and otherwise names the
+reason it could not be, a deliberate fail-open. So the pair to read for "did it land" is `readback`
+with `verified`; reading `status` with `new_value` answers a different question, namely whether
+this server sent it.
 
 ⚠️ **Which of those two shapes an IOC refusal takes is NOT measured here.** No live test in this
 project has an IOC decline a write; the access-security material that exists is static, over the
@@ -1019,11 +1027,14 @@ the read throttle, and a server that will not start) · `err-guide`.
   s, exactly 20 years) is applied when a CA timestamp is converted INTO that epoch and never on the
   way out. Read `secs` the other way and every point moves by 20 years, which is far enough to be a
   different run and close enough to still plot. `nanos` is the sub-second part of the same instant,
-  `val` is the value, and `severity` is the EPICS alarm severity recorded with that sample; the
-  per-sample status code is a third thing again, not the history `status` above. Stated from the
-  appliance's own source (`DBRTimeEvent.toJSONString` and `TimeUtils`) rather than from this
-  server, which passes the field through unconverted and so cannot answer the question from its own
-  code.
+  `val` is the value, and `severity` is the EPICS alarm severity of that sample; the per-sample
+  status code is a third thing again, not the history `status` above. ⚠️ Only `secs` and `val` are
+  required: an appliance that omits `nanos`, `severity` or the sample status gets a 0 from the
+  parser, and for `severity` that 0 is indistinguishable from a real NO_ALARM. Stated from the
+  appliance's own source rather than from this server, which passes the field through unconverted
+  and so cannot answer the question from its own code: the `.json` extension this server requests
+  is served by `JSONResponse`, which prints `secs` from the event's `getEpochSeconds()`, and that is
+  a Java `Instant` epoch second by way of `TimeUtils.getStartOfYearInSeconds`.
   Both status tools harvest fields the appliance already returns in the same call (no extra request):
   `is_archived` adds the getPVStatus connection-history cluster `connection_loss_regain_count` (the
   flapping counter), `connection_first_established` and `connection_last_restablished` (`"Never"` if

@@ -3305,8 +3305,9 @@ async def test_stripped_tool_still_returns_structured_content(
 # machine-readable (the core value of S29) and cost only ~1% more context per agent turn, so the
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
-# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-16 after GB-64 (d): the
-# core lane is 75_883 and the full lane 88_746 (the docstring below carries the deltas, and the
+# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-19 after GQ-33: the
+# core lane is 76_835 and the full lane 89_868 (the docstring below carries the deltas, and the
+# pair 75_883 / 88_746 measured 2026-08-16 after GB-64 (d), the
 # pair 75_718 / 88_581 measured after GB-64's earlier parts on the same day, the
 # pair 74_935 / 87_798 measured mid-way through the same item, before its three entry-tool
 # pointers, the pair 70_291 / 83_154 measured after GP-15 on 2026-08-15,
@@ -3334,10 +3335,18 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 75_883 and the full lane
-    88_746, re-measured 2026-08-16 on both lanes with the display-gated tools excluded for the core
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 76_835 and the full lane
+    89_868, re-measured 2026-08-19 on both lanes with the display-gated tools excluded for the core
     one, since a lane estimated rather than measured is the error the constant's comment records.
-    GB-64 (d) added the last +165 to BOTH lanes, from 75_718 / 88_581: the ``answer-fields`` topic
+    GQ-33 added the last +952 / +1_122 from the pair measured on 2026-08-16, and only +642 of that
+    is its own: two description edits (``set_pv_value``, +300 on both lanes, and ``get_pv_history``,
+    +342 on both lanes), both isolated by stripping the added text in memory and re-measuring. The
+    REST of the gap, +310 core and +480 full, had accumulated unmeasured since 2026-08-16 through
+    description-only commits that did not re-measure, and the split between the lanes is the tell:
+    a core-tool edit moves both by the same amount, so a lane-asymmetric residue can only come from
+    the display-gated tools. That is the drift the instruction above exists to prevent, recorded
+    here rather than folded silently into this ticket's number.
+    GB-64 (d) added +165 to BOTH lanes, from 75_718 / 88_581: the ``answer-fields`` topic
     key and the sentence in the ``topic`` argument that routes a caller to it. Every char of it is
     description text on ``get_guide``, a core tool, which is why the two deltas coincide again; the
     guide itself grew by roughly 12 KB in the same commit and NONE of that reaches the wire, because

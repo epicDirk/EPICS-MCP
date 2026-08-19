@@ -325,7 +325,7 @@ async def get_guide(
     prove. It reads nothing but its own packaged document: no PV, no REST plane, no file of
     yours, so it can neither time out nor depend on how this instance is configured.
 
-    The whole document is around 108 KB, which is why 'topic' exists and why omitting it should be
+    The whole document is around 111 KB, which is why 'topic' exists and why omitting it should be
     the exception. The keys partition the document: each returns exactly its own part, VERBATIM,
     so an excerpt is a real excerpt and never a rendering, and the largest single part is under a
     third of the whole. An unknown topic is refused with [UNKNOWN_TOPIC] naming every valid key.
@@ -908,6 +908,11 @@ async def get_pv_history(
     never mistaken for "no data" when the truth is "could not read". A single unreadable sample
     in the data array withholds the WHOLE result (it is never silently skipped or zero-filled
     into a plausible sample).
+
+    Each sample is {secs, nanos, val, severity, status}. ``secs`` is UNIX epoch seconds (UTC), NOT
+    EPICS epoch seconds: reading it as the latter shifts every point by exactly 20 years and still
+    plots. Only ``secs`` and ``val`` are required; an omitted ``nanos``/``severity``/``status``
+    reads as 0. See epics-pv://guide, topic err-archiver.
     """
     return await _get_pv_history(pv_name, start, end, max_points, timeout)
 
