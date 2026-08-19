@@ -461,7 +461,13 @@ _LOWERCASE_TOKEN_RE = re.compile(r"[a-z][a-z0-9_]*")
 #: argued: a dead entry was green, a real ``PlaneStatus`` declared away was green, and declaring all
 #: five of the region's identifiers at once was green too, leaving the reverse direction inert while
 #: the shipped marker went on promising it.
-_NOT_A_STATUS_IN_THE_PROSE: frozenset[str] = frozenset()
+#: ⚠️ NO LONGER EMPTY, and the first entry is recorded with its reason rather than added quietly.
+#: ``reads_denied`` is a REPORT FIELD, not a plane status, and it belongs in that paragraph because
+#: it is the THIRD driver of exit 3: a refusal can land on a sub-probe whose plane stays healthy,
+#: so the run is inconclusive with no status to show for it (BG-DTHR). Naming the exit codes
+#: without naming it would leave a reader unable to explain an exit 3 whose plane lines are all
+#: ``✓``. It earns its place under the rule above: it IS written in the region.
+_NOT_A_STATUS_IN_THE_PROSE: frozenset[str] = frozenset({"reads_denied"})
 #: EVERY code span of a line, including the whitespace-free ones. Matching them ALL and filtering
 #: afterwards is what keeps the backtick pairing honest, see ``_glyph_status_pairings``.
 _CODE_SPAN_RE = re.compile(r"`([^`]*)`")

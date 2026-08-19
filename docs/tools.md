@@ -160,7 +160,8 @@ install with correct arguments. Install the engine from a checkout with
 `epics-diagnose` / `epics-crossplane` / `epics-coverage` exit `0` even on a negative finding: a
 disconnect or a broken link is a result, not a crash. **`epics-doctor` is the deliberate
 exception**, a scriptable pass/fail with four exit codes: `0` clean, `1` a configured plane
-hard-failed, `2` a usage error, `3` inconclusive. The full contract, the six failing statuses, the
+hard-failed, `2` a usage error, `3` inconclusive (an identity probe that FAILED, or a probe this
+command's own read throttle never SENT). The full contract, the six failing statuses, the
 remedies and the `--json` keys a script must read are in
 [the deployment guide](deployment.md#1-bring-it-up). Run it first in a new facility.
 
@@ -169,12 +170,15 @@ counts any HTTP response as reachable, so a URL aimed at the wrong host can look
 ChannelFinder URL pointing at a dead container read `✓ ok` because an unrelated service on that port
 answered 401). A plane that ANSWERED (2xx) but cannot prove what it is reports `unverified` (`?`),
 honest but **not** healthy, exit `0`. A plane whose identity probe FAILED reports
-`identity_probe_failed` (`!`), reachable but suspect, exit `3`. A plane that proved its identity and
-is measurably not doing its job reports `no_ingest` (`~`), exit `0`.
+`identity_probe_failed` (`!`), reachable but suspect, exit `3`. A plane that was never probed at
+all, because `EPICS_MCP_READ_RATE_LIMIT` refused the request inside this command, reports
+`throttled` (`»`), also exit `3` and a statement about that limit rather than about the service. A
+plane that proved its identity and is measurably not doing its job reports `no_ingest` (`~`),
+exit `0`.
 
 ⚠️ So exit `0` means "nothing failed", **not** "everything confirmed". A script reads
-`verification_complete` / `unverified_planes` / `inconclusive_identity_planes` / `degraded_planes`
-from `--json` rather than the exit code alone, and asserts `identified_planes` is non-empty for
+`verification_complete` / `unverified_planes` / `inconclusive_identity_planes` /
+`throttled_planes` / `reads_denied` / `degraded_planes` from `--json` rather than the exit code alone, and asserts `identified_planes` is non-empty for
 positive confirmation, because `verification_complete` is vacuously true on an empty config.
 
 `--json` also carries `installation.findings`: patterns visible only in the COMPARISON of several

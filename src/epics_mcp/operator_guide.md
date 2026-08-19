@@ -118,7 +118,16 @@ Two caveats:
   spends one token for its identity beacon, and the archiver spends FIVE all told, because its
   reachability probe is a GET as well and its retrieval half is probed as a plane of its own even
   when it falls back to the management URL. All six planes configured spend NINE; the archiver
-  alone already spends five. The two multi-GET tools whose cost SCALES with the input are measured
+  alone already spends five.
+  ⚠️ **What a denied probe REPORTS, since a report about a request that was never sent is the one
+  thing worth getting right here.** The plane is `»` `throttled`, never `unreachable` and never
+  `identity_probe_failed`: nothing left this process, so nothing about the service was measured,
+  and the remedy names `EPICS_MCP_READ_RATE_LIMIT` rather than a host or a URL. The run is
+  INCONCLUSIVE (exit `3`), `verification_complete` is false, and the planes are listed in
+  `throttled_planes`, deliberately NOT in `inconclusive_identity_planes`, whose sentence is about
+  a probe that ran and failed. A refusal can also hit a SUB-probe whose plane stays healthy, the
+  archiver's ingest question being the measured case; that one shows in `reads_denied` alone, and
+  it is why a run can be inconclusive with every plane line reading `✓`. The two multi-GET tools whose cost SCALES with the input are measured
   (2026-07-31) rather than estimated, and they do NOT behave alike, so size each from its own
   figure or the tool aborts mid-run with a loud `READ_RATE_LIMIT_EXCEEDED` (never a silent partial
   result):
@@ -667,18 +676,22 @@ service **identifies itself as the one that URL should point at**. The ChannelFi
 printed too, in a `Privacy` block of its own: it belongs to no plane and is not a plane field, so
 look for it below the per-plane lines rather than on one of them.
 A disabled plane (empty `*_URL`) is reported honestly, never a failure. Exit
-`0` = nothing failed and no identity probe failed, `1` = a configured plane HARD-failed
+`0` = nothing failed, no identity probe failed and no read was refused, `1` = a configured plane
+HARD-failed
 (`unreachable` / `ca_error` / `api_error` / `config_error` / `backend_down` / `disconnected`),
 `2` = a usage error,
-`3` = INCONCLUSIVE, a plane is reachable but its identity probe FAILED (a served non-2xx like a
-401/404, a transport error, or a refused redirect): not a hard failure, but not a silent all-clear
-either. Run it first in a new facility to confirm the environment the launcher handed this process
+`3` = INCONCLUSIVE, from either of two causes: a plane is reachable but its identity probe FAILED
+(a served non-2xx like a 401/404, a transport error, or a refused redirect), or a probe was never
+SENT because this command's own read throttle refused it (`throttled`, and a refusal that hits a
+sub-probe rather than a whole plane shows only as `reads_denied`). Neither is a hard failure, and
+neither is a silent all-clear. Run it first in a new facility to confirm the environment the launcher handed this process
 (there is no `.env` file: configuration is read from `os.environ`); add `--probe-pv NAME` to also
 pass/fail the live PVA plane against a real PV. Full deployment/config guide:
 [docs/deployment.md](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md).
 <!-- END:status-prose -->
 
-**Reachable is not identified, and identified is not working: read the `?`, `!` and `~` lines.**
+**Reachable is not identified, identified is not working, and not asked is neither: read the `?`,
+`!`, `»` and `~` lines.**
 The transport probe is a HEAD for ChannelFinder, Alarm, Olog and Naming (the archiver's is a real
 GET, see above), and it
 counts *any* HTTP response as reachable, so a URL pointing at the wrong host can look alive:

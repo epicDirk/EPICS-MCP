@@ -170,17 +170,17 @@ cache of its own under its home directory, which `FASTMCP_CHECK_FOR_UPDATES=off`
 
    Reading the report, glyph by glyph: `✓` is a plane that passed, `·` one you have not configured,
    `i` a line that informs rather than judges (the live plane, when you did not ask it to probe),
-   and `✗` a failure. Three further glyphs are honest rather than healthy, and they are worth
+   and `✗` a failure. FOUR further glyphs are neither a pass nor a failure, and they are worth
    knowing before you call a deployment done; they are further down this step.
 
    The exit code is the scriptable contract:
 
    | Exit | Meaning |
    |------|---------|
-   | `0` | nothing failed, and no identity probe failed |
+   | `0` | nothing failed, no identity probe failed, and no read was refused |
    | `1` | a configured plane HARD-failed: `unreachable`, `ca_error`, `api_error`, `config_error` (the variables contradict each other, e.g. a retrieval URL with no archiver URL), `backend_down` (identified, but a backend it needs is down), or `disconnected` (only with `--probe-pv`). ALSO an internal error in the check itself, which shares this code deliberately and is the only case that writes a `doctor:` line to stderr and produces no report |
    | `2` | usage error (bad arguments) |
-   | `3` | INCONCLUSIVE: a plane is reachable but its identity probe FAILED, a served non-2xx like a 401/404, a transport error, or a refused redirect |
+   | `3` | INCONCLUSIVE, from either of two causes. A plane is reachable but its identity probe FAILED, a served non-2xx like a 401/404, a transport error, or a refused redirect. OR a probe was never SENT because this command's own read throttle refused it: the plane is `throttled` and nothing about that service was measured, so the remedy names `EPICS_MCP_READ_RATE_LIMIT` and not a URL. A refusal that hits a sub-probe rather than a whole plane leaves every plane line clean and shows only as `reads_denied` |
 
    Every line that reports a problem also carries its remedy: what was observed, then what to
    change. So the common cases need no lookup here, and the sections below are for when you want
@@ -199,9 +199,13 @@ cache of its own under its home directory, which `FASTMCP_CHECK_FOR_UPDATES=off`
    whether a write-enabled block will boot: the write block above reports what the gates are SET
    to, it does not evaluate the start conditions, and its audit line answers only one of them.
 
-   ⚠️ Three states are honest rather than healthy, and none of them fails. Read them before
+   ⚠️ FOUR states are honest rather than healthy, and none of them fails. Read them before
    calling a deployment done. `?` (`unverified`) answered 2xx but could not prove what it is, exit
    `0`. `!` (`identity_probe_failed`) is reachable but suspect, exit `3`, and it carries a remedy.
+   `»` (`throttled`) was never probed at all, because this command's own read throttle refused the
+   request, so it is a statement about your `EPICS_MCP_READ_RATE_LIMIT` and not about that service;
+   exit `3` as well, and it is deliberately kept out of `inconclusive_identity_planes`, whose
+   sentence is about a probe that ran.
    `~` (`no_ingest`) proved what it is and is measurably not doing its job, an Archiver appliance
    holding channels with none connected or reporting one of its own webapps stopped; exit `0` on
    purpose, because a freshly commissioned appliance is legitimately in that state. A URL that
@@ -213,13 +217,15 @@ cache of its own under its home directory, which `FASTMCP_CHECK_FOR_UPDATES=off`
    so it never joins `identified_planes`, and on a deployment with no REST plane that list stays
    empty even after a successful `--probe-pv`. Scripting this? Read
    `verification_complete` / `unverified_planes` / `inconclusive_identity_planes` /
-   `degraded_planes` from `--json`, and `write_safety` for the write posture (that one never moves
+   `throttled_planes` / `reads_denied` / `degraded_planes` from `--json`, and `write_safety` for the write posture (that one never moves
    the verdict, so a script that only wants pass or fail can ignore it). `installation.findings`
    carries the same never-moves-the-verdict promise and holds what only the comparison of several
    planes shows: an exchanged archiver URL pair, every service on one host dead, a TLS failure on
    some HTTPS planes but not all. A failed probe lands in
    `inconclusive_identity_planes`, not in
-   `unverified_planes`; a degraded one in `degraded_planes` and in neither of those. The exit code
+   `unverified_planes`; a probe this command never SENT lands in `throttled_planes` and in neither
+   of those, and a refused sub-probe in `reads_denied` alone, which is the one state no plane list
+   shows; a degraded one in `degraded_planes` and in neither of those. The exit code
    alone says "nothing failed", not "everything confirmed", so for positive confirmation assert
    `identified_planes` is non-empty: `verification_complete` is vacuously true on an empty config,
    and a degraded plane is listed there too, since its identity IS proven.
@@ -482,7 +488,9 @@ and a bundle set does verify, and this field says so instead of calling it unver
 certificate to verify at all, which is why `https_plane_configured` sits beside it: read the two
 together or the first one reads like an all-clear for traffic that is in the clear.
 `rest_read_rate_limit` is the REST GET throttle only (the shared GET path, plus the Naming lookup,
-which consults it itself); a p4p PV read, a monitor and the per-plane liveness probes run past it,
+which consults it itself); a p4p PV read and a monitor run past it, and so do the HEAD-based
+liveness probes of ChannelFinder, Alarm, Olog and Naming, but NOT the archiver's, which is a real
+GET through the shared path and spends a token like any other read,
 which is what the `rest_` prefix is there to say. `allowed_roots_set` says the boundary variable
 holds at least one root, not that the roots are narrow, since a root of `.` satisfies it too. And
 `channelfinder_redaction` counts what the two allowlists DISCLOSE, so zero means every owner and

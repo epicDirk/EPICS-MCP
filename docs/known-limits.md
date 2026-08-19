@@ -569,7 +569,11 @@ EVERY configured plane on EVERY host has failed: that shape was measured twice h
 on the caller's side rather than on any host (an unreadable CA bundle, and an `HTTP_PROXY`), so
 naming hosts would point at the wrong end. And it counts only `unreachable`, because the sentence
 it prints is "none on it answered": `api_error` and `identity_probe_failed` both mean the host DID
-answer, and a `ca_error` from an unreadable bundle is raised before a socket is opened. Keying on
+answer, and a `ca_error` from an unreadable bundle is raised before a socket is opened. A
+`throttled` plane is outside every pattern for a related but distinct reason: nothing was sent, so
+it is evidence about this command's read budget rather than about any host, and both this finding
+and the archiver-pair one would otherwise fire on a healthy deployment under a tight limit
+(BG-DTHR). Keying on
 all four was measured to contradict the report's own plane lines twice, once by calling a host
 that answered every request silent, once by naming a host nothing had ever contacted.
 
