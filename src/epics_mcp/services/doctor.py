@@ -97,6 +97,7 @@ PlaneStatus = Literal[
     "unverified",
     "no_ingest",
     "identity_probe_failed",
+    "throttled",
     "config_error",
     "ca_error",
     "api_error",
@@ -135,14 +136,42 @@ _NON_FAILING_STATUSES: frozenset[str] = frozenset(
     {"ok", "disabled", "info", "unverified", "no_ingest"}
 )
 
-#: Reachable, but the identity probe itself FAILED, a served non-2xx (401/404/5xx), a transport
-#: error, or a refused redirect on the identity endpoint, as opposed to ``unverified``, where the
-#: endpoint ANSWERED 2xx and we merely could not name it. Not a hard failure: a 401 on an INFO
-#: endpoint does not prove the plane's TOOL endpoints are broken, so it never claims "plane failed"
-#: (exit 1). But it is not a silent all-clear either, it drives its own inconclusive exit (3) and
-#: never renders "OK". This is the S4 origin story (a URL at a dead container whose neighbour
-#: answered 401), which used to collapse to a silent exit 0 via ``unverified``.
-_INCONCLUSIVE_STATUSES: frozenset[str] = frozenset({"identity_probe_failed"})
+#: The plane never got a usable answer, and neither "failed" nor "fine" would be true of it. Not a
+#: hard failure, so it never claims "plane failed" (exit 1); not a silent all-clear either, so it
+#: drives its own inconclusive exit (3) and never renders "OK".
+#:
+#: ``identity_probe_failed`` is the S4 origin story (a URL at a dead container whose neighbour
+#: answered 401), which used to collapse to a silent exit 0 via ``unverified``: reachable, but the
+#: identity probe itself FAILED, a served non-2xx (401/404/5xx), a transport error, or a refused
+#: redirect on the identity endpoint, as opposed to ``unverified``, where the endpoint ANSWERED 2xx
+#: and we merely could not name it. A 401 on an INFO endpoint does not prove the plane's TOOL
+#: endpoints are broken.
+#:
+#: ``throttled`` (BG-DTHR) reaches the same exit from the opposite direction: the probe never went
+#: out at all, because THIS command's own read throttle refused it. Nothing was measured, so every
+#: statement the other statuses make about a service would be a claim about something that was
+#: never contacted. It sits here rather than in ``_NON_FAILING_STATUSES`` because a run that could
+#: not ask is not a run that got a clean answer, and rather than in ``_FAILING_STATUSES`` because
+#: no plane failed: the refusal was issued by this process about its own budget. It carries its own
+#: report list and its own verdict sentence, see :data:`_THROTTLED_STATUSES`.
+_INCONCLUSIVE_STATUSES: frozenset[str] = frozenset({"identity_probe_failed", "throttled"})
+
+#: The inconclusive statuses whose cause is THIS command's own read throttle rather than anything
+#: about the service. A strict SUBSET of :data:`_INCONCLUSIVE_STATUSES`, the same shape
+#: :data:`_DEGRADED_STATUSES` has inside ``_NON_FAILING_STATUSES``, and for a reason of the same
+#: kind: the exit CLASS is shared, the SENTENCE is not.
+#:
+#: Measured, that distinction is not cosmetic. ``run_doctor`` used to derive
+#: ``inconclusive_identity_planes`` from ``_INCONCLUSIVE_STATUSES`` whole, and
+#: ``cli_doctor._render`` builds the exit-3 headline out of that field with fixed wording ("N
+#: identity probe(s) FAILED (reachable, but the identity endpoint did not return a usable
+#: response)"). For a plane whose TRANSPORT probe was refused, all three of those claims are
+#: false: no identity probe ran, nothing established that it was reachable, and no response was
+#: involved. Splitting the list here is what lets that sentence stay true for the planes it was
+#: written about.
+#:
+#: A set rather than an equality test, so a second "we never asked" cause is carried automatically.
+_THROTTLED_STATUSES: frozenset[str] = frozenset({"throttled"})
 
 #: Statuses that ARE a hard failure → exit 1. Listed explicitly (rather than "everything else")
 #: only so ``test_status_partition_is_total_and_disjoint`` can prove the three sets tile
@@ -237,6 +266,15 @@ _REMEDY: dict[str, str] = {
         "Check the URL is the service ROOT rather than a sub-path, that it reaches the host you "
         "mean rather than a neighbour answering for a dead one, and that its info endpoint is "
         "not behind authentication. The tool endpoints of this plane may still work."
+    ),
+    # The only remedy here that names a variable of THIS command's environment rather than a
+    # property of the deployment, because the finding is about this command's own budget: nothing
+    # left the process, so there is nothing about the service to check yet.
+    "throttled": (
+        "Set EPICS_MCP_READ_RATE_LIMIT higher, or to 0 to switch the throttle off, and run again. "
+        "This command's own read throttle refused the probe before it left, so nothing here "
+        "describes the service. The operator guide sizes a limit for a WHOLE run rather than for "
+        "one plane, which is the figure this needs."
     ),
 }
 

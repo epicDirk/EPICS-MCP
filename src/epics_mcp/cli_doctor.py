@@ -82,6 +82,11 @@ _STATUS_MARK = {
     "unverified": "?",
     "no_ingest": "~",
     "identity_probe_failed": "!",
+    # Its own mark rather than a second use of "!". The two share an exit code and nothing else:
+    # "!" says a probe went out and came back unusable, this one says no probe went out at all, and
+    # a reader who cannot tell those apart at a glance is being told the wrong thing about their
+    # deployment by the column that is meant to be scannable.
+    "throttled": "»",
     "config_error": "✗",
     "ca_error": "✗",
     "api_error": "✗",

@@ -389,6 +389,7 @@ _IN_THE_GLYPH_TABLE: frozenset[PlaneStatus] = frozenset(
         "unverified",
         "no_ingest",
         "identity_probe_failed",
+        "throttled",
         "config_error",
         "ca_error",
         "api_error",
@@ -500,7 +501,7 @@ _CODE_SPAN_RE = re.compile(r"`([^`]*)`")
 #: versus ``?`` distinction", does NOT exhibit it and was measured rather than assumed: the gap
 #: there is eight characters, well past the limit of three, so that sentence and its siblings
 #: (``vs``, ``, not``) read as nothing at all.
-_GLYPH_CHARACTERS = frozenset("✓✗?!~·i")
+_GLYPH_CHARACTERS = frozenset("✓✗?!~·i»")
 # The surfaces a pairing is EXPECTED on, and therefore the only ones carrying a per-surface floor.
 # Every other tracked docs page is READ, but not required to contain anything: measured, the other
 # five carry no pairing at all today, so a floor over all of them would be red on the first day.

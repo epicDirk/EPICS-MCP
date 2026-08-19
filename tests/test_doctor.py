@@ -47,6 +47,7 @@ from epics_mcp.services.doctor import (
     _NON_FAILING_STATUSES,
     _REMEDY,
     _REMEDY_IMPERATIVES,
+    _THROTTLED_STATUSES,
     DoctorReport,
     PlaneCheck,
     PlaneStatus,
@@ -775,6 +776,30 @@ def test_no_ingest_is_exit_zero_by_decision() -> None:
     assert "no_ingest" in _NON_FAILING_STATUSES
     assert "no_ingest" not in _FAILING_STATUSES
     assert _DEGRADED_STATUSES <= _NON_FAILING_STATUSES  # degraded is a strict subset, never failing
+
+
+def test_throttled_is_inconclusive_by_decision_and_a_subset_of_it() -> None:
+    """BG-DTHR: the exit CLASS of a probe this command refused itself, pinned like the one above.
+
+    Both halves are decisions nothing else records. ``throttled`` must not be CLEAN, or the tool
+    built to remove false all-clears would print one for a run that could not ask; and it must not
+    be a FAILURE, or a plane nobody contacted would be reported as broken and drive exit 1. What is
+    left is inconclusive, which is what the word already means here.
+
+    The subset assertion carries the second half of the design: ``_THROTTLED_STATUSES`` refines
+    ``_INCONCLUSIVE_STATUSES`` rather than standing beside it, exactly as ``_DEGRADED_STATUSES``
+    refines ``_NON_FAILING_STATUSES``. That is what keeps ``ok``'s fail-closed allowlist union
+    unchanged while still letting the report and the verdict tell the two causes apart. Widening it
+    into a fourth top-level set would break the totality the partition guard proves.
+
+    Red-proof: move ``throttled`` into either other set, or declare ``_THROTTLED_STATUSES`` with a
+    status that is not inconclusive.
+    """
+    assert "throttled" in _INCONCLUSIVE_STATUSES
+    assert "throttled" not in _NON_FAILING_STATUSES
+    assert "throttled" not in _FAILING_STATUSES
+    assert _THROTTLED_STATUSES <= _INCONCLUSIVE_STATUSES
+    assert _THROTTLED_STATUSES, "an empty subset would satisfy the line above and mean nothing"
 
 
 def test_naming_identifies_via_its_swagger_contract(monkeypatch: pytest.MonkeyPatch) -> None:

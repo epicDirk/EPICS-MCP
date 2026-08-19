@@ -65,7 +65,13 @@ _TRIGGERS: frozenset[PlaneStatus] = frozenset(
 #: Declared rather than derived, so a new status is red until someone decides which side it is on
 #: (``test_the_crosscut_sorts_every_plane_status``). ``config_error`` is here because it is a
 #: finding about the configuration with no probe behind it, ``disconnected`` because it is the live
-#: plane, which has no URL and therefore no host to group by.
+#: plane, which has no URL and therefore no host to group by, and ``throttled`` (BG-DTHR) because
+#: no request left this process for it: every pattern below compares what the HOSTS answered, and a
+#: plane nobody contacted is evidence about this command's own budget, not about any deployment.
+#: Left in the trigger set it produced the report's own contradictions on a healthy site, measured:
+#: ``host_down`` claiming "none on it answered" about a host that was never asked, and
+#: ``archiver_url_pair`` sending an operator to check two URL variables for a swap that never
+#: happened.
 _NEVER_TRIGGERS: frozenset[PlaneStatus] = frozenset(
     {
         "ok",
@@ -73,6 +79,7 @@ _NEVER_TRIGGERS: frozenset[PlaneStatus] = frozenset(
         "info",
         "unverified",
         "no_ingest",
+        "throttled",
         "config_error",
         "backend_down",
         "disconnected",
