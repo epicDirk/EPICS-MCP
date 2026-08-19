@@ -1016,6 +1016,39 @@ def is_retry_error(exc: BaseException) -> bool:
     return isinstance(getattr(exc, "__cause__", None), requests.exceptions.RetryError)
 
 
+def is_read_throttle_error(exc: BaseException) -> bool:
+    """True iff *exc* is, or wraps, THIS process's own read-throttle refusal.
+
+    A PREDICATE, deliberately, and never a translation: that distinction is the whole reason this
+    function exists rather than a wrapping ``except`` clause in :func:`rest_get_json`.
+    :class:`~epics_mcp.errors.ReadRateLimitError` is raised by :meth:`ReadThrottle.check` BEFORE
+    that ``try``, and it is not a ``RequestException``
+    (``issubclass(ReadRateLimitError, requests.exceptions.RequestException)`` is False, measured),
+    so moving the check inside the ``try`` would catch nothing. Wrapping it there would be worse
+    than useless: the shipped guide promises this refusal reaches the caller under its OWN code,
+    ``READ_RATE_LIMIT_EXCEEDED``, and ``test_rest_get_json_throttled_over_limit`` plus write-gate
+    contract point 4 pin that promise. So a caller that needs to tell this refusal apart ASKS,
+    exactly as it asks :func:`is_ssl_error` and :func:`is_retry_error`, and the exception travels
+    on untouched.
+
+    Why any caller needs to ask: this refusal is issued by this process about its own budget, so it
+    says NOTHING about the service on the other end. The config doctor's failure classifier had no
+    arm for it and fell through to its catch-all, reporting a running service as ``unreachable``
+    with a remedy naming the operator's host and port (measured).
+
+    Both the exception and its cause are checked, the shape :func:`is_ca_bundle_error` uses. Today
+    the refusal always arrives RAW, because the throttle is consulted before any client wrapping
+    exists, but a future caller that chains it must not drop silently out of this answer.
+    Null-safe.
+    """
+    cause = getattr(exc, "__cause__", None)
+    return any(
+        isinstance(candidate, ReadRateLimitError)
+        for candidate in (exc, cause)
+        if candidate is not None
+    )
+
+
 #: What :func:`shown_url` prints when the address cannot be shown without its credentials. The same
 #: token :func:`url_without_credentials` already returns, deliberately, rather than a fifth dialect:
 #: a reader who meets it in a doctor line and in an error message meets one word, not two.

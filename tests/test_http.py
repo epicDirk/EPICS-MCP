@@ -34,6 +34,7 @@ from epics_mcp.services._http import (
     is_http_404,
     is_https_url,
     is_loopback_url,
+    is_read_throttle_error,
     is_retry_error,
     is_ssl_error,
     reset_read_throttle,
@@ -819,6 +820,78 @@ def test_rest_get_bytes_shares_the_read_throttle(monkeypatch: pytest.MonkeyPatch
             resp_exc=RestResponseError,
         )
     session.get.assert_not_called()  # throttle fired before any network call
+
+
+def test_is_read_throttle_error_recognises_the_shape_the_throttle_actually_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BG-DTHR: the predicate is held against a refusal the CHOKEPOINT produced, not a fixture.
+
+    That matters more than it looks. The whole reason a predicate exists instead of a translating
+    ``except`` clause is that ``ReadRateLimitError`` is not a ``RequestException``, so it leaves
+    ``rest_get_json`` UNWRAPPED, and a fixture-built exception would prove nothing about that
+    claim. The first assertion pins the claim itself; a day when the throttle starts wrapping its
+    refusal turns the second one red rather than leaving a caller quietly unable to recognise it.
+
+    Red-proof: make ``ReadRateLimitError`` a ``RequestException`` subclass -> assertion 1;
+    invert the predicate -> assertion 2.
+    """
+    assert not issubclass(ReadRateLimitError, requests.exceptions.RequestException)
+
+    monkeypatch.setattr(
+        "epics_mcp.services._http.get_config",
+        lambda: EpicsConfig(read_rate_limit=1),
+    )
+    reset_read_throttle()
+    get_read_throttle().check()  # spend the one token, the next read is refused
+    session = Mock()
+    with pytest.raises(ReadRateLimitError) as excinfo:
+        rest_get_json(
+            session,
+            "http://svc",
+            None,
+            5.0,
+            conn_exc=RestConnectionError,
+            resp_exc=RestResponseError,
+        )
+    assert is_read_throttle_error(excinfo.value)
+
+
+def test_is_read_throttle_error_also_reads_a_chained_refusal() -> None:
+    """The cause direction, the shape ``is_ca_bundle_error`` uses. No caller chains this refusal
+    today, and that is exactly why the direction is pinned: a future one that does must not drop
+    out of the answer silently, which is the failure mode this whole ticket is about."""
+    throttled = ReadRateLimitError("Read rate limit exceeded (1 reads per 60s). Try again later.")
+    try:
+        raise RestResponseError("Request failed") from throttled
+    except RestResponseError as chained:
+        assert is_read_throttle_error(chained)
+
+
+@pytest.mark.parametrize(
+    ("label", "exc"),
+    [
+        ("a write gate's rate-limit denial", RateLimitError("Rate limit exceeded")),
+        ("a transport failure", requests.exceptions.ConnectionError("refused")),
+        ("a TLS failure", requests.exceptions.SSLError("bad certificate")),
+        ("an unreadable CA bundle", OSError("Could not find a suitable TLS CA certificate bundle")),
+        ("an unreadable body", ValueError("Expecting value")),
+    ],
+)
+def test_is_read_throttle_error_is_false_for_every_other_failure(
+    label: str, exc: Exception
+) -> None:
+    """The negative half, and the FIRST row is the one that pays for the rest.
+
+    ``ReadRateLimitError`` SUBCLASSES ``RateLimitError`` (so an existing ``except RateLimitError``
+    keeps working), which makes the write gates' own denial the one exception that could be read as
+    this one by an ``isinstance`` written in the wrong direction. Reading it that way would report
+    an audited write-gate DENY as a throttled read, precisely the conflation the two separate error
+    codes exist to prevent.
+
+    Red-proof: swap the ``isinstance`` arguments, or widen it to ``RateLimitError`` -> row 1.
+    """
+    assert not is_read_throttle_error(exc), label
 
 
 def test_read_throttle_window_slides() -> None:
