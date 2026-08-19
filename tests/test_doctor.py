@@ -2795,6 +2795,7 @@ def test_render_and_exit_agree() -> None:
         identified: list[str],
         degraded: list[str] | None = None,
         throttled: list[str] | None = None,
+        reads_denied: int | None = None,
     ) -> DoctorReport:
         return DoctorReport(
             planes=[],
@@ -2805,7 +2806,7 @@ def test_render_and_exit_agree() -> None:
             verification_complete=complete,
             degraded_planes=degraded or [],
             throttled_planes=throttled or [],
-            reads_denied=len(throttled or []),
+            reads_denied=len(throttled or []) if reads_denied is None else reads_denied,
             unverified_planes=[],
             inconclusive_identity_planes=inconclusive,
             identified_planes=identified,
@@ -2827,8 +2828,12 @@ def test_render_and_exit_agree() -> None:
 
     # BG-DTHR: the SECOND driver of exit 3, and it reaches it with the identity list EMPTY. It
     # stands here rather than in the mapping above because that dict is keyed BY the category, so
-    # two rows cannot share "inconclusive". Without it the throttled half of _exit_category could
-    # be deleted and every row above would stay green, since each carries an identity plane.
+    # two rows cannot share "inconclusive".
+    # ⚠️ This comment used to claim it was what kept the throttled half of _exit_category honest,
+    # and a post-build review measured that it had stopped being true: the helper sets
+    # reads_denied=len(throttled), so the THIRD term rescued the assertion and the throttled term
+    # could be deleted with the whole suite staying green. The case below with reads_denied=0 is
+    # what actually holds it, and it is why the helper takes the two independently.
     throttled_only = _mk(
         ok=True, inconclusive=[], complete=False, identified=[], throttled=["archiver"]
     )
@@ -2839,6 +2844,21 @@ def test_render_and_exit_agree() -> None:
     # And it must not borrow the sentence written for a probe that ran: nothing was measured here.
     assert "identity probe(s) FAILED" not in rendered
     assert "NOT PROBED" in rendered and "archiver" in rendered
+
+    # A throttled plane with NO refusal left over. Measured by a post-build review: every other
+    # fixture ties reads_denied to len(throttled_planes), so the reads_denied term rescued every
+    # assertion and BOTH the throttled term in _exit_category and the one in verification_complete
+    # could be deleted with the whole suite green. This is the shape that separates them.
+    throttled_without_a_spare_refusal = _mk(
+        ok=True,
+        inconclusive=[],
+        complete=False,
+        identified=[],
+        throttled=["archiver"],
+        reads_denied=0,
+    )
+    assert cli_doctor._exit_category(throttled_without_a_spare_refusal) == "inconclusive"
+    assert "NOT PROBED" in cli_doctor._render(throttled_without_a_spare_refusal)
 
     # A degraded plane is "clean" for the exit code AND must not wear the strongest confirmation
     # sentence. Both halves matter: the verdict line changes, the category (and so the exit code)

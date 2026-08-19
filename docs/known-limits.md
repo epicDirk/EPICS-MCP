@@ -26,6 +26,7 @@ retired, and where it went, is listed at the end.
 [19 the repository posture is unguarded](#19--the-repository-side-release-protections-are-unguarded-and-a-guard-over-them-was-rejected) ·
 [20 the commit-message guard](#20--the-commit-message-guard-is-per-clone-state-and-its-site-pattern-half-needs-a-git-ignored-file) ·
 [21 error codes outside errors.py](#21--the-documented-error-code-population-is-errorspy-and-ten-more-codes-are-raised-elsewhere) ·
+[22 the cross-plane block](#22--the-cross-plane-block-sees-three-patterns-and-each-is-blind-in-a-stated-way) ·
 [23 the archiver-pair sentence](#23--the-archiver-pair-finding-says-both-webapps-answered-for-two-statuses-where-nothing-answered) ·
 [retired](#retired-entries-and-where-they-went)
 

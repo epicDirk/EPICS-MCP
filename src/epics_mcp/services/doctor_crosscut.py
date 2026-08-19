@@ -233,7 +233,7 @@ def _host_down(
     cfg: EpicsConfig,
     failing: dict[str, PlaneStatus],
     configured: dict[str, str],
-    answered: frozenset[str] = frozenset(),
+    answered: frozenset[str],
 ) -> list[InstallationFinding]:
     """Every plane on ONE host failing: one host gone, not N broken services.
 
@@ -288,9 +288,14 @@ def _host_down(
             planes_by_host[host].append(plane)
         elif plane in answered:
             healthy_hosts.add(host)
-        # A plane that failed in some OTHER way answered, so it neither supports the finding nor
-        # counts as a healthy neighbour: it is evidence about a service, not about a host. A plane
-        # nobody ASKED is not here at all, see the filter above and :func:`_answered`.
+        # ⚠️ This comment used to say a plane that failed in some OTHER way "neither supports the
+        # finding nor counts as a healthy neighbour", and switching to :func:`_answered` made that
+        # false without anybody noticing. It is now decided by what each plane MEASURED, which
+        # widens the neighbour bucket to ``api_error`` and ``identity_probe_failed``: both carry
+        # ``reachable=True`` because the host DID answer, a served 502 and a completed transport
+        # probe respectively, so "none on it answered" would be false with one of them on the host.
+        # ``ca_error`` stays out, since it carries ``reachable=False``. Measured both ways, and
+        # pinned by ``test_a_host_that_answered_with_an_error_still_refutes_the_finding``.
     findings: list[InstallationFinding] = []
     for host, authorities in sorted(by_host.items()):
         if len(authorities) < 2 or host in healthy_hosts:

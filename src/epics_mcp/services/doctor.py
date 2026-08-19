@@ -46,7 +46,7 @@ import os
 import stat
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from epics_mcp.config import EpicsConfig, get_config
 from epics_mcp.epics_address import (
@@ -464,7 +464,10 @@ class DoctorReport(_Model):
     #: ``verification_complete`` and drives the inconclusive exit 3.
     #: ⚠️ It is >= the length of ``throttled_planes`` and never a second spelling of it: a plane
     #: there accounts for one refusal, and a refusal counted here may belong to no plane at all.
-    reads_denied: int
+    #: ``ge=0`` because a negative value is not a state ``run_doctor`` can build AND it renders a
+    #: headline with no clause at all ("INCONCLUSIVE, ."), the subtraction in ``_render`` having
+    #: nothing left to say. The house style for a count is the same, see ``read_rate_limit``.
+    reads_denied: int = Field(ge=0)
     #: The planes that ANSWERED 2xx but could not prove their identity, anonymous, an unreadable
     #: body, or a foreign name (empty when none). Honest, not a failure → exit 0.
     unverified_planes: list[str]
@@ -1893,6 +1896,14 @@ async def run_doctor(*, probe_pv: str | None = None, timeout: float | None = Non
         ok=ok,
         # A plane nobody asked is not a plane that was verified, so it closes this flag exactly
         # like the two states that DID get an answer and could not be named by it.
+        # ⚠️ ``not throttled`` is REDUNDANT here and is kept deliberately. A throttled plane exists
+        # only because a read was refused inside this same bracket, and the throttle counts every
+        # refusal it raises, so ``reads_denied >= len(throttled)`` is an invariant of this function
+        # and ``not reads_denied`` already implies ``not throttled``. A post-build review measured
+        # that removing the term leaves the suite green, and it is an EQUIVALENT mutant rather than
+        # a gap: no state this function can build distinguishes the two spellings. It stays because
+        # the flag is fail-closed and the redundancy costs nothing, and this note is here so the
+        # next reader does not spend an afternoon writing the test that cannot exist.
         verification_complete=(
             not unverified and not inconclusive and not throttled and not reads_denied
         ),

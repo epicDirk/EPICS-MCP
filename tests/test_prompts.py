@@ -6,6 +6,10 @@ import pytest
 
 from epics_mcp.presets import PRESETS, Preset
 from epics_mcp.prompts import compare_machine_state, diagnose_pv, setup_epics_mcp
+from epics_mcp.services.doctor import (
+    _DEGRADED_STATUSES,
+    _INCONCLUSIVE_STATUSES,
+)
 
 
 def test_diagnose_pv_contains_pv_name() -> None:
@@ -239,11 +243,21 @@ class TestSetupEpicsMcp:
             f"a taught epics-init line omits --probe-pv: {taught}"
         )
 
-    def test_it_names_the_three_states_that_look_healthy_and_are_not(self) -> None:
-        """``?``, ``!`` and ``~`` are exit-code 0 or 3 states that a reader skims past as fine.
-        They are the whole reason the doctor has more than two outcomes."""
+    def test_it_names_every_state_that_looks_healthy_and_is_not(self) -> None:
+        """The states a reader skims past as fine. They are the whole reason the doctor has more
+        than two outcomes, and the prompt has to name ALL of them or it teaches a closed set that
+        is not closed.
+
+        DERIVED from the status sets rather than listed, and that is the repair for a measured
+        drift: this test asserted three literals while production had grown a fourth, and neither
+        the test name nor its docstring noticed. A status added to either set now reddens this
+        instead of quietly leaving the onboarding advice short.
+        """
         result = setup_epics_mcp(presets=PRESETS)
 
-        assert "unverified" in result
-        assert "identity probe failed" in result
-        assert "no ingest" in result
+        expected = (_INCONCLUSIVE_STATUSES | _DEGRADED_STATUSES | {"unverified"}) - {"ok"}
+        assert expected, "the status sets yielded nothing, so this guard would prove nothing"
+        missing = sorted(s for s in expected if s.replace("_", " ") not in result)
+        assert not missing, (
+            f"the onboarding prompt teaches a closed set of states and omits {missing}"
+        )

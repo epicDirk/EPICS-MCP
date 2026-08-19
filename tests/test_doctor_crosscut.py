@@ -13,12 +13,16 @@ QA-96 says in as many words that a pattern only its own fixture produces does no
 
 from __future__ import annotations
 
+import ast
+import pathlib
 import typing
+from collections import defaultdict
 from types import EllipsisType
 
 import pytest
 
 from epics_mcp.config import EpicsConfig
+from epics_mcp.services import doctor
 from epics_mcp.services.doctor import PlaneCheck, PlaneStatus
 from epics_mcp.services.doctor_crosscut import (
     _NEVER_TRIGGERS,
@@ -282,11 +286,13 @@ def test_a_tls_failure_that_never_opened_a_socket_is_not_evidence_about_a_host()
 
 
 def test_a_service_error_beside_a_silent_one_does_not_prop_up_the_finding() -> None:
-    """A plane that answered with an error is evidence about a SERVICE, not about the host.
+    """A plane that answered with an error does not count towards "none answered".
 
-    So it neither counts towards "none answered" nor rescues the host as a healthy neighbour. With
-    one genuinely silent plane and one erroring plane on the same host there is exactly one silent
-    authority, which is below the threshold, and nothing is claimed.
+    ⚠️ This docstring used to add "nor rescues the host as a healthy neighbour", and that half went
+    FALSE when the neighbour rule moved from "did not fail" to "answered": an ``api_error`` plane
+    carries ``reachable=True``, so it does rescue the host now, and rightly, since something on it
+    answered. The test did not notice, because with one silent authority it is below the threshold
+    either way. What it still holds is the first half.
     """
     cfg = _cfg(**_TWO_ON_ONE_HOST, naming_url="http://elsewhere.example.org:8099")
     planes = [
@@ -542,7 +548,8 @@ def test_a_plane_that_did_answer_is_still_a_healthy_neighbour() -> None:
     ``unverified`` answered 2xx, ``no_ingest`` and ``backend_down`` answered and identified. For
     them "this host answered" is a measurement, so they must go on refuting the one-host finding.
 
-    Red-proof: widen ``_UNMEASURED`` to any of these four and this goes red while the test above
+    Red-proof: narrow ``_answered`` to exclude any of these four and this goes red while the one
+    above
     stays green.
     """
     cfg = _cfg(**_DEAD_PAIR, olog_url="http://olog.example.org:8080/Olog")
@@ -556,6 +563,125 @@ def test_a_plane_that_did_answer_is_still_a_healthy_neighbour() -> None:
             ],
         )
         assert detail is not None and "olog.example.org" in detail, status
+
+
+def _production_reachable_by_status() -> dict[str, set[str]]:
+    """``status -> {the reachable expressions production pairs it with}``, read from the AST.
+
+    DERIVED, never listed, which is the whole point: the mirror below it exists because the helper
+    it feeds was silently wrong about this before, and a second hand-typed copy would reinstate the
+    same exposure one edit away. Both shapes are walked, the ``PlaneCheck(...)`` constructions and
+    ``_classify_failure``'s tuple returns, because the transport arm of ``throttled`` lives only in
+    the second one. An absent ``reachable`` is recorded as ``None``, which is what pydantic
+    gives it.
+    """
+    tree = ast.parse(pathlib.Path(doctor.__file__).read_text(encoding="utf-8"))
+    found: dict[str, set[str]] = defaultdict(set)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "PlaneCheck":
+            keywords = {k.arg: k.value for k in node.keywords}
+            status = keywords.get("status")
+            if isinstance(status, ast.Constant) and isinstance(status.value, str):
+                reachable = keywords.get("reachable")
+                found[status.value].add(ast.unparse(reachable) if reachable else "None")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Return) and isinstance(node.value, ast.Tuple):
+            parts = node.value.elts
+            if len(parts) == 4 and isinstance(parts[2], ast.Constant):
+                status_value = parts[2].value
+                if isinstance(status_value, str):
+                    found[status_value].add(ast.unparse(parts[0]))
+    return dict(found)
+
+
+def test_the_fixture_mirror_still_describes_what_production_builds() -> None:
+    """The mirror in ``_REACHABLE_BY_STATUS`` is held against the code it mirrors.
+
+    Without this it is a hand-typed dict, and the defect it was introduced to repair was exactly
+    that: the helper left ``reachable`` unset for every plane, so three tests passed against a
+    report shape ``run_doctor`` cannot build, and nothing said so until a new comparison started
+    reading the field. A mirror with no guard is that defect waiting for its second turn.
+
+    Asserted as MEMBERSHIP rather than equality, because ``throttled`` genuinely has two production
+    values and the fixture default can only be one of them: the transport arm's ``None``. The test
+    that wants the identity arm passes ``reachable=True`` explicitly, and
+    ``test_the_two_throttled_shapes_are_told_apart_by_what_they_measured`` is where that lives.
+
+    Red-proof: flip any entry in the mirror, or add a status to ``PlaneStatus`` and leave the mirror
+    alone (the first assertion), or delete a mirror row (the second).
+    """
+    production = _production_reachable_by_status()
+    assert production, "the AST walk collected nothing, so this guard would prove nothing"
+
+    missing = sorted(set(typing.get_args(PlaneStatus)) - set(_REACHABLE_BY_STATUS))
+    assert not missing, f"the fixture mirror does not know these statuses: {missing}"
+
+    wrong: list[str] = []
+    for status, expected in sorted(_REACHABLE_BY_STATUS.items()):
+        seen = production.get(status)
+        if seen is None:
+            continue  # a status production builds nowhere is not this guard's business
+        if repr(expected) not in seen:
+            wrong.append(
+                f"{status}: the fixture says {expected!r}, production builds {sorted(seen)}"
+            )
+    assert not wrong, "the fixture mirror drifted from doctor.py:\n  " + "\n  ".join(wrong)
+
+
+def test_a_host_that_answered_with_an_error_still_refutes_the_finding() -> None:
+    """The BOUNDARY of ``_answered``, in the direction the previous repair moved by accident.
+
+    Moving the neighbour rule from "did not fail" to "answered" widened it: ``api_error`` and
+    ``identity_probe_failed`` both carry ``reachable=True``, because the host served a 502 in the
+    first case and completed a transport probe in the second, so a host carrying one of them has
+    ANSWERED and the sentence "none on it answered" would be false. That widening was not intended,
+    not recorded, and measured afterwards to be the more truthful behaviour; it is pinned here so
+    it cannot drift back silently, which it could until this test existed.
+
+    Red-proof: restore ``elif plane not in failing:``, or exclude these two statuses from
+    ``_answered``. Both were measured GREEN against the whole suite before this test.
+    """
+    cfg = _cfg(
+        **_DEAD_PAIR,
+        alarm_url="http://dead.example.org:8081",
+        olog_url="http://olog.example.org:8080/Olog",
+    )
+    dead_pair = [_plane("archiver", "unreachable"), _plane("archiver_retrieval", "unreachable")]
+    for status in ("api_error", "identity_probe_failed"):
+        assert (
+            _host_down_detail(
+                cfg,
+                [*dead_pair, _plane("alarm", status), _plane("olog", "ok")],
+            )
+            is None
+        ), f"{status} on that host means something on it ANSWERED"
+
+
+def test_a_tls_failure_on_the_host_does_not_refute_the_finding() -> None:
+    """The OTHER side of the same boundary, and the one that costs an outage if it moves.
+
+    ``ca_error`` carries ``reachable=False``: from an unreadable bundle it is raised before a socket
+    exists, and from a failed handshake nothing usable came back. So it must NOT certify its host.
+    Measured: widening ``_answered`` to ``reachable is not None`` admits it and silences a real
+    ``host_down`` finding, and the whole suite stayed green under that mutation until this test.
+
+    Red-proof: ``_answered`` -> ``plane.reachable is not None``.
+    """
+    cfg = _cfg(
+        **_DEAD_PAIR,
+        alarm_url="http://dead.example.org:8081",
+        olog_url="http://olog.example.org:8080/Olog",
+    )
+    detail = _host_down_detail(
+        cfg,
+        [
+            _plane("archiver", "unreachable"),
+            _plane("archiver_retrieval", "unreachable"),
+            _plane("alarm", "ca_error"),
+            _plane("olog", "ok"),
+        ],
+    )
+    assert detail is not None, "a TLS failure answered nothing, so the outage must still be named"
 
 
 def test_the_two_throttled_shapes_are_told_apart_by_what_they_measured() -> None:
