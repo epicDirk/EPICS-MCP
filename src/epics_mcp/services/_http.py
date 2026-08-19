@@ -540,6 +540,31 @@ class ReadThrottle:
         # maxlen only when enabled; a disabled throttle never appends, so unbounded is fine.
         self._timestamps: deque[float] = deque(maxlen=limit) if limit > 0 else deque()
         self._lock = threading.Lock()
+        # How many reads this throttle has REFUSED. Monotonic and never reset, so a caller reads a
+        # DELTA around the work it wants to judge rather than an absolute (see :meth:`denials`).
+        self._denials = 0
+
+    @property
+    def denials(self) -> int:
+        """How many reads this throttle has refused since it was built.
+
+        Monotonic on purpose: a resettable counter would be a second piece of shared state that two
+        callers could clear from under each other, while a delta around one caller's own work needs
+        no coordination at all. Read it before and after that work and subtract.
+
+        Why it exists, measured: a refusal is not always visible in the ANSWER the refused read
+        belongs to. ``epics-doctor``'s archiver plane spends a third token on an ingest sub-probe
+        whose failure is mapped to "ingest not measured" while the plane itself stays ``ok``, so at
+        a limit one below what a full run needs the report came back with every plane healthy, no
+        list non-empty, and exit 0, while a read had been denied. No per-plane status can carry
+        that, because nothing about that plane is wrong. Whether a run got everything it asked for
+        is a property of the RUN, and this counter is what makes it answerable without every
+        current and future probe site having to remember to report it.
+
+        Read under the lock, so a caller on another thread cannot observe a torn value.
+        """
+        with self._lock:
+            return self._denials
 
     def check(self) -> None:
         """Admit one read, or raise :class:`ReadRateLimitError` if the sliding window is full.
@@ -562,6 +587,11 @@ class ReadThrottle:
             over_limit = len(self._timestamps) >= self._limit
             if not over_limit:
                 self._timestamps.append(now)  # record this read (admit path only)
+            else:
+                # Counted INSIDE the lock, beside the decision that earns it, rather than beside
+                # the raise below: the raise is deliberately outside the lock, and a counter
+                # incremented there could be reordered against a concurrent reader of `denials`.
+                self._denials += 1
         if over_limit:
             raise ReadRateLimitError(
                 f"Read rate limit exceeded ({self._limit} reads per "

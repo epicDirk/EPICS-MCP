@@ -905,6 +905,68 @@ def test_read_throttle_window_slides() -> None:
         throttle.check()  # window is full again
 
 
+def test_a_disabled_throttle_refuses_nothing_and_counts_nothing() -> None:
+    """BG-DTHR: the opt-in posture reaches the counter too.
+
+    ``denials`` exists so a caller can ask "did this run get everything it asked for?", and the
+    answer on the shipping default (``read_rate_limit=0``) has to be a flat no-refusals, or every
+    such caller would have to special-case the disabled throttle itself.
+
+    Red-proof: count before the ``limit <= 0`` early return.
+    """
+    throttle = ReadThrottle(0)
+    for _ in range(50):
+        throttle.check()
+    assert throttle.denials == 0
+
+
+def test_the_throttle_counts_a_refusal_and_only_a_refusal() -> None:
+    """BG-DTHR: ``denials`` moves on the deny path and stands still on the admit path.
+
+    Both halves in one test on purpose: a counter that moved on every check would satisfy any
+    assertion that only ever looks at the denied case, and it would then report a healthy run as
+    incomplete, which is the false alarm the doctor's own status sets are shaped to avoid.
+
+    Red-proof: increment on the admit path -> the first assertion; drop the increment -> the
+    second and third.
+    """
+    throttle = ReadThrottle(2)
+    throttle.check()
+    throttle.check()
+    assert throttle.denials == 0, "an admitted read must not count as a refusal"
+
+    with pytest.raises(ReadRateLimitError):
+        throttle.check()
+    assert throttle.denials == 1
+
+    with pytest.raises(ReadRateLimitError):
+        throttle.check()
+    assert throttle.denials == 2, "each refusal counts once"
+
+
+def test_the_denial_count_is_monotonic_so_a_caller_reads_a_delta() -> None:
+    """BG-DTHR: the counter is never reset, so a caller brackets its own work and subtracts.
+
+    This is the contract ``run_doctor`` depends on. A resettable counter would be shared mutable
+    state two callers could clear from under each other; a delta needs no coordination. The window
+    sliding is what makes the second half measurable without a clock: the stale token is purged, so
+    the read AFTER it is admitted while the count from before stays put.
+
+    Red-proof: reset the counter in ``check``, or in ``_purge_old``.
+    """
+    throttle = ReadThrottle(1)
+    throttle.check()
+    with pytest.raises(ReadRateLimitError):
+        throttle.check()
+    before = throttle.denials
+    assert before == 1
+
+    throttle._timestamps.clear()
+    throttle._timestamps.append(time.monotonic() - throttle._WINDOW_SECONDS - 1.0)
+    throttle.check()  # stale token purged → admitted, and the count must not move
+    assert throttle.denials - before == 0
+
+
 # ----------------------------------------------------------------------------------------------
 # url_without_userinfo, the redaction epics-pv://config prints its three service URLs through
 #
