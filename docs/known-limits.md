@@ -26,6 +26,7 @@ retired, and where it went, is listed at the end.
 [19 the repository posture is unguarded](#19--the-repository-side-release-protections-are-unguarded-and-a-guard-over-them-was-rejected) ·
 [20 the commit-message guard](#20--the-commit-message-guard-is-per-clone-state-and-its-site-pattern-half-needs-a-git-ignored-file) ·
 [21 error codes outside errors.py](#21--the-documented-error-code-population-is-errorspy-and-ten-more-codes-are-raised-elsewhere) ·
+[23 the archiver-pair sentence](#23--the-archiver-pair-finding-says-both-webapps-answered-for-two-statuses-where-nothing-answered) ·
 [retired](#retired-entries-and-where-they-went)
 
 ---
@@ -584,6 +585,30 @@ the host and the bundle are indistinguishable) and when no HTTPS plane completed
 all, because "the others are fine" would then be a claim about handshakes that never ran.
 It names an observation and never a cause: `ca_error` is raised for any SSL failure, so an expired
 certificate, a hostname mismatch and an interception proxy all look the same from here.
+
+## 23 · The archiver-pair finding says "both webapps answered" for two statuses where nothing answered
+
+`_archiver_pair` (`src/epics_mcp/services/doctor_crosscut.py:183`) triggers on membership in
+`failing` alone, and `failing` is built from all four `_TRIGGERS` (same file, line 60). Its text
+(line 195) opens **"Both archiver webapps answered with an error while pointing at different
+URLs"**, and for two of those four triggers nothing answered: on `unreachable`, which
+`_classify_failure` defines as "a transport failure, no chained HTTP response", and on the
+`is_ca_bundle_error` half of `ca_error`, which is raised before a socket is opened. Measured
+2026-08-19 by driving `installation_findings` with each trigger in turn: all four produce that
+sentence. With two genuinely unreachable webapps on one host, the same report prints it directly
+beside `host_down`'s "none on it answered", so the block contradicts itself in two adjacent lines.
+
+⚠️ **It exists WITHOUT any read throttle and is untouched by BG-DTHR.** It was found while that
+ticket was measured, and it is recorded here rather than fixed there because the two are
+independent: BG-DTHR put `throttled` into `_NEVER_TRIGGERS`, so a plane this command never asked
+cannot reach `_archiver_pair` at all, which removes one WAY to reach the wrong sentence and not
+the sentence. The four other paths to it are unchanged.
+
+**Nothing pins today's width.** `tests/test_doctor_crosscut.py` drives this finding with
+`api_error` only, so the two statuses that make the sentence false are exercised by no test. The
+repair is the one `_host_down` already carries at line 235, filtering on the statuses that mean the
+host ANSWERED, and it is three lines; it is written down rather than made here because it belongs
+to a different ticket and a change nobody asked for is how a review loses its boundary.
 
 ## Retired entries, and where they went
 

@@ -81,6 +81,16 @@ carry breaking changes).
 
 ### Changed
 
+- **A deployment whose configuration did not change can now exit `3` where it exited `0`.**
+  `epics-doctor` sells itself as a scriptable pass/fail, so this is the half of the entry below
+  that reaches a CI job rather than a reader. Until now a run whose own reads
+  `EPICS_MCP_READ_RATE_LIMIT` refused could still exit `0`; it cannot any more, because a refused
+  read means part of the run was never measured. **Only deployments that SET that limit are
+  affected: it is off by default, and a run that is denied nothing is unchanged in every field.**
+  A job that asserts exit `0` under a tight limit goes red until the limit is raised, and that red
+  is the finding rather than the regression: the `0` it replaces was printed for a run that had not
+  looked.
+
 - **`epics-doctor` no longer blames your services for a limit you set on it.** With
   `EPICS_MCP_READ_RATE_LIMIT` set tight enough to refuse the doctor's own reads, the report said
   four different untrue things about a stack that was up. A refused TRANSPORT probe was
