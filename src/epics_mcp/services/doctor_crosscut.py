@@ -87,6 +87,29 @@ _NEVER_TRIGGERS: frozenset[PlaneStatus] = frozenset(
 )
 
 
+#: Statuses that mean NO REQUEST went out for that plane, so it is evidence about neither a host
+#: nor a service and must not be counted as a neighbour that ANSWERED. A strict subset of
+#: :data:`_NEVER_TRIGGERS`, and the two answer DIFFERENT questions: not triggering is about whether
+#: a plane may SUPPORT a finding, this is about whether it may REFUTE one.
+#:
+#: Measured 2026-08-19, and the distinction is not theoretical. ``_host_down`` classified every
+#: plane that was not failing as a healthy neighbour, so an unasked plane produced "Other
+#: configured hosts answered (X)" about a host nothing had contacted; worse, an unasked plane on
+#: the DEAD host itself put that host into ``healthy_hosts`` and SUPPRESSED the finding entirely,
+#: silencing a real outage. Worst, an unasked plane also inflates the denominator of the
+#: caller-side suppression, so it can turn a correctly suppressed "nothing you asked survived"
+#: into a printed one-host claim.
+#:
+#: ⚠️ The other four non-triggers are deliberately NOT here, because they DID answer:
+#: ``ok`` named itself, ``unverified`` answered 2xx, and ``no_ingest`` and ``backend_down`` both
+#: answered AND identified. For them "this host answered" is a measurement.
+#: ⚠️ ``config_error`` is here and it PREDATES the throttle status: its own remedy says "nothing
+#: was probed here, the configuration itself is the finding". It is folded in rather than left
+#: alone because a set that names the statuses where nothing was measured, and knowingly omits one
+#: of them, is worse than no set at all.
+_UNMEASURED: frozenset[PlaneStatus] = frozenset({"throttled", "config_error"})
+
+
 class InstallationFinding(_Model):
     """One pattern that matched, with what to change and how strongly it is known."""
 
@@ -210,7 +233,10 @@ def _archiver_pair(cfg: EpicsConfig, failing: dict[str, PlaneStatus]) -> Install
 
 
 def _host_down(
-    cfg: EpicsConfig, failing: dict[str, PlaneStatus], configured: dict[str, str]
+    cfg: EpicsConfig,
+    failing: dict[str, PlaneStatus],
+    configured: dict[str, str],
+    unmeasured: frozenset[str] = frozenset(),
 ) -> list[InstallationFinding]:
     """Every plane on ONE host failing: one host gone, not N broken services.
 
@@ -239,6 +265,11 @@ def _host_down(
     # "None on it answered" is only earned by planes that did not answer. See the docstring: the
     # other three triggers all describe a host that DID answer, or a failure raised before any
     # socket existed.
+    # A plane nobody asked leaves the population ENTIRELY rather than being sorted into one of the
+    # buckets below: it cannot support the finding (it is not silent, nothing was sent) and it must
+    # not refute it (it did not answer). Filtering here rather than at the two use sites also
+    # corrects the caller-side denominator, which is the third way it distorted the answer.
+    configured = {plane: url for plane, url in configured.items() if plane not in unmeasured}
     silent = {plane for plane, status in failing.items() if status == "unreachable"}
     if not silent:
         return []
@@ -259,7 +290,8 @@ def _host_down(
         elif plane not in failing:
             healthy_hosts.add(host)
         # A plane that failed in some OTHER way answered, so it neither supports the finding nor
-        # counts as a healthy neighbour: it is evidence about a service, not about a host.
+        # counts as a healthy neighbour: it is evidence about a service, not about a host. A plane
+        # nobody ASKED is not here at all, see the filter above and :data:`_UNMEASURED`.
     findings: list[InstallationFinding] = []
     for host, authorities in sorted(by_host.items()):
         if len(authorities) < 2 or host in healthy_hosts:
@@ -375,7 +407,10 @@ def installation_findings(cfg: EpicsConfig, planes: list[PlaneCheck]) -> Install
     pair = _archiver_pair(cfg, failing)
     if pair:
         findings.append(pair)
-    findings.extend(_host_down(cfg, failing, configured))
+    unmeasured = frozenset(
+        plane.plane for plane in planes if plane.status in _UNMEASURED and plane.plane in configured
+    )
+    findings.extend(_host_down(cfg, failing, configured, unmeasured))
     tls = _trust_root(cfg, planes, configured)
     if tls:
         findings.append(tls)

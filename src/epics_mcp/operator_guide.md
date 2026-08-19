@@ -777,8 +777,10 @@ definitive-negative gate (a 204/404 is trusted only after this beacon confirms t
 difference.** `identified_planes` is the POSITIVE signal, the planes that proved what they are;
 `verification_complete` is true vacuously on an empty configuration, so it cannot stand alone. A
 script that wants "this deployment is proven" reads `identified_planes` together with
-`unverified_planes`, `inconclusive_identity_planes` and `degraded_planes`, and the last of those is
-the only one covering an appliance that is reachable, proven and simply not ingesting.
+`unverified_planes`, `inconclusive_identity_planes`, `throttled_planes`, `reads_denied` and
+`degraded_planes`. Each covers something no other does: the last one an appliance that is
+reachable, proven and simply not ingesting, and the middle two a run this command's own read
+throttle cut short, where the plane lines can all read `✓` and the identity list is empty.
 
 Below the plane lines the report prints a glyph-free **`Write gates`** block, `write_safety` in
 `--json`, with one line per gate. ⛔ **It is informative only and it describes the environment of

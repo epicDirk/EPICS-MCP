@@ -22,6 +22,7 @@ from epics_mcp.services.doctor import PlaneCheck, PlaneStatus
 from epics_mcp.services.doctor_crosscut import (
     _NEVER_TRIGGERS,
     _TRIGGERS,
+    _UNMEASURED,
     installation_findings,
 )
 
@@ -415,6 +416,122 @@ def test_a_throttled_plane_does_not_complete_a_pair_with_a_real_failure() -> Non
     cfg = _cfg(**_SPLIT)
     planes = [_plane("archiver", "api_error"), _plane("archiver_retrieval", "throttled")]
     assert "archiver_url_pair" not in _patterns(cfg, planes)
+
+
+_DEAD_PAIR = {
+    "archiver_url": "http://dead.example.org:17665",
+    "archiver_retrieval_url": "http://dead.example.org:17668",
+}
+
+
+def _host_down_detail(cfg: EpicsConfig, planes: list[PlaneCheck]) -> str | None:
+    finding = next(
+        (f for f in installation_findings(cfg, planes).findings if f.pattern == "host_down"), None
+    )
+    return finding.detail if finding else None
+
+
+def test_a_plane_nobody_asked_is_not_a_host_that_answered() -> None:
+    """BG-DTHR post-build review: the first fix put ``throttled`` outside every TRIGGER and left it
+    inside the healthy-NEIGHBOUR bucket, which is a different question and was answered wrong.
+
+    ``_host_down`` sorted every non-failing plane into ``healthy_hosts``, so a plane this command
+    never contacted was counted as a host that ANSWERED. Measured on the intermediate state, all
+    three consequences, which is why three assertions stand here rather than one:
+
+    * the finding names a host nothing had asked as proof that the deployment is otherwise fine;
+    * an unasked plane on the DEAD host puts that host into ``healthy_hosts`` and SUPPRESSES the
+      finding, silencing a real outage;
+    * an unasked plane inflates the denominator of the caller-side suppression, turning a correctly
+      suppressed "nothing you asked survived" into a printed one-host claim.
+
+    Red-proof: drop the ``unmeasured`` filter from ``_host_down`` and each assertion fails on its
+    own shape.
+    """
+    # 1. it must not be named as a host that answered
+    cfg = _cfg(
+        **_DEAD_PAIR,
+        channelfinder_url="http://cf.example.org:8080/ChannelFinder",
+        olog_url="http://olog.example.org:8080/Olog",
+    )
+    detail = _host_down_detail(
+        cfg,
+        [
+            _plane("archiver", "unreachable"),
+            _plane("archiver_retrieval", "unreachable"),
+            _plane("channelfinder", "throttled"),
+            _plane("olog", "ok"),
+        ],
+    )
+    assert detail is not None
+    assert "olog.example.org" in detail
+    assert "cf.example.org" not in detail, "a host nothing contacted cannot prove the rest is fine"
+
+    # 2. and it must not SUPPRESS the finding by sitting on the dead host itself
+    cfg_same_host = _cfg(
+        **_DEAD_PAIR,
+        alarm_url="http://dead.example.org:8081",
+        olog_url="http://olog.example.org:8080/Olog",
+    )
+    assert (
+        _host_down_detail(
+            cfg_same_host,
+            [
+                _plane("archiver", "unreachable"),
+                _plane("archiver_retrieval", "unreachable"),
+                _plane("alarm", "throttled"),
+                _plane("olog", "ok"),
+            ],
+        )
+        is not None
+    ), "a real outage must not be silenced by a plane nobody asked on the same host"
+
+    # 3. and with it removed, everything that WAS asked failed, which is the caller-side shape
+    cfg_only = _cfg(**_DEAD_PAIR, channelfinder_url="http://cf.example.org:8080/ChannelFinder")
+    assert (
+        _host_down_detail(
+            cfg_only,
+            [
+                _plane("archiver", "unreachable"),
+                _plane("archiver_retrieval", "unreachable"),
+                _plane("channelfinder", "throttled"),
+            ],
+        )
+        is None
+    )
+
+
+def test_a_plane_that_did_answer_is_still_a_healthy_neighbour() -> None:
+    """The control, and it is what keeps the fix above from over-reaching.
+
+    Four statuses are outside every trigger AND genuinely answered: ``ok`` named itself,
+    ``unverified`` answered 2xx, ``no_ingest`` and ``backend_down`` answered and identified. For
+    them "this host answered" is a measurement, so they must go on refuting the one-host finding.
+
+    Red-proof: widen ``_UNMEASURED`` to any of these four and this goes red while the test above
+    stays green.
+    """
+    cfg = _cfg(**_DEAD_PAIR, olog_url="http://olog.example.org:8080/Olog")
+    for status in ("ok", "unverified", "no_ingest", "backend_down"):
+        detail = _host_down_detail(
+            cfg,
+            [
+                _plane("archiver", "unreachable"),
+                _plane("archiver_retrieval", "unreachable"),
+                _plane("olog", status),
+            ],
+        )
+        assert detail is not None and "olog.example.org" in detail, status
+
+
+def test_unmeasured_is_a_subset_of_the_statuses_that_never_trigger() -> None:
+    """A plane that may not REFUTE a finding must not be able to SUPPORT one either.
+
+    The reverse would be incoherent: a status counted as evidence for a host being down while being
+    declared as having produced no request at all.
+    """
+    assert _UNMEASURED <= _NEVER_TRIGGERS
+    assert _UNMEASURED, "an empty set would satisfy the line above and guard nothing"
 
 
 def test_the_crosscut_sorts_every_plane_status() -> None:

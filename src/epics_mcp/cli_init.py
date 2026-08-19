@@ -36,7 +36,9 @@ Exit code:
   cannot be carried out (``--out`` onto an existing file without ``--force``, a missing parent
   directory, ``--absolute-command`` with nothing to resolve). Both are the same answer, "you asked
   for something impossible", so they share the code;
-* ``3``: the check ran and a plane is reachable but its identity probe FAILED.
+* ``3``: the check ran and could not confirm it. Either a plane is reachable but its identity
+  probe FAILED, or a probe was never sent at all because ``EPICS_MCP_READ_RATE_LIMIT`` refused it
+  inside the doctor, which includes a refusal hitting a sub-probe and leaving every plane clean.
 
 Codes 0/1/3 are the doctor's own, passed through unchanged, because "did my setup work?" is the
 scriptable question and answering it twice with different numbers would help nobody. Code ``2``

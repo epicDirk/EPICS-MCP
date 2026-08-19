@@ -418,9 +418,13 @@ class DoctorReport(_Model):
     #: ``degraded_planes`` (proven, reachable, not doing its job) and ``verification_complete``
     #: before treating this as "everything is confirmed".
     ok: bool
-    #: True iff no configured plane was left ``unverified`` AND none had its identity probe fail
-    #: (``inconclusive_identity_planes`` empty). ⚠️ This is NOT "every configured plane's identity
-    #: was established": a HARD-failed plane (``unreachable`` / ``api_error`` / ``ca_error``) is
+    #: True iff nothing about this run was left unestablished: no configured plane was left
+    #: ``unverified``, none had its identity probe fail (``inconclusive_identity_planes`` empty),
+    #: none was left unprobed by this command's own read throttle (``throttled_planes`` empty), and
+    #: no read was refused at all (``reads_denied`` zero). The last term is not implied by the
+    #: third: a refusal can hit a SUB-probe whose plane stays healthy.
+    #: ⚠️ This is NOT "every configured plane's identity was established": a HARD-failed plane
+    #: (``unreachable`` / ``api_error`` / ``ca_error``) is
     #: never identity-probed, so it lands in ``ok`` (which goes False), NOT here, this flag can be
     #: True while a plane hard-failed (read ``ok`` / ``identified_planes`` for that). ``ok`` alone
     #: is not enough for a machine reader either: an unverified/inconclusive plane is honest, not

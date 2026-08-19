@@ -29,10 +29,13 @@ a scriptable pass/fail):
   and neither is a silent all-clear.
 
 The exit code relates to ``--json`` as: ``0`` = ``ok`` ∧ no ``inconclusive_identity_planes`` ∧ no
-``throttled_planes``; ``3`` = ``ok`` ∧ some of either; ``1`` = not ``ok``, or an internal error and
-no report at all; ``2`` = usage. So ``ok`` alone is True for BOTH exit 0 and exit 3, do NOT derive
-the exit code from ``ok`` alone, and do NOT read the identity list alone either: a run this command
-throttled leaves it empty.
+``throttled_planes`` ∧ ``reads_denied`` == 0; ``3`` = ``ok`` ∧ any of those three; ``1`` = not
+``ok``, or an internal error and no report at all; ``2`` = usage. So ``ok`` alone is True for BOTH
+exit 0 and exit 3, do NOT derive the exit code from ``ok`` alone, and do NOT read the identity
+list alone either: a run this command throttled leaves it empty. ⚠️ ``reads_denied`` is a term
+of its own rather than a summary of the
+other two: a refusal can hit a SUB-probe whose plane stays healthy, and it is then the only
+non-zero signal in the whole report.
 
 ⚠️ Exit ``0`` means "nothing failed", NOT "everything was confirmed": a plane can be reachable with
 its identity unverified and still exit 0 (that is honest, not healthy, see ``doctor.py``). A
@@ -444,7 +447,10 @@ _OTHER_STATES: tuple[tuple[str, str], ...] = (
 #: The fields a branch may declare as already named. Pinned so a typo in a ``named=`` argument is
 #: loud: without it the branch keeps its own category in the tail as well, and the verdict names the
 #: same planes twice while every test stays green (measured).
-_NAMEABLE_STATES: frozenset[str] = frozenset(field for field, _ in _OTHER_STATES)
+#: ``reads_denied`` rides here although it is not in ``_OTHER_STATES``: it is a COUNT, not a plane
+#: list, so the loop cannot carry it, and it is the ONLY signal for a refusal that belongs to no
+#: plane at all.
+_NAMEABLE_STATES: frozenset[str] = frozenset(field for field, _ in _OTHER_STATES) | {"reads_denied"}
 
 
 def _other_states_clause(report: DoctorReport, *, named: frozenset[str]) -> str:
@@ -481,6 +487,18 @@ def _other_states_clause(report: DoctorReport, *, named: frozenset[str]) -> str:
         planes: list[str] = getattr(report, field)
         if planes:
             parts.append(f"{len(planes)} {word} ({', '.join(planes)})")
+    # By SUBTRACTION, because each throttled plane already accounts for exactly one refusal: a plane
+    # whose transport probe was refused never reaches its identity beacon, and one whose beacon was
+    # refused never reaches the ingest question. What is left over belongs to no plane, the
+    # archiver's ingest sub-probe being the measured case. Disclosed HERE and not only in the
+    # inconclusive branch, because the `failed` branch hid it too: a run that hard-failed a plane
+    # AND was denied a read printed PROBLEM with no hint that part of it went unmeasured.
+    unexplained = report.reads_denied - len(report.throttled_planes)
+    if unexplained > 0 and "reads_denied" not in named:
+        parts.append(
+            f"{unexplained} further read(s) refused by this command's own read throttle, belonging "
+            "to no plane"
+        )
     return f" Also NOT healthy: {'; '.join(parts)}." if parts else ""
 
 
@@ -560,17 +578,6 @@ def _render(report: DoctorReport) -> str:
                 f"but the identity endpoint did not return a usable response): {failed_probes} "
                 "('!' lines)"
             )
-        if report.reads_denied and not report.throttled_planes:
-            # Only when NO plane carries the status, which is exactly the state nothing else in
-            # this report shows: a refused SUB-probe (the archiver's ingest question) leaves its
-            # plane ok and every list empty. When a plane IS throttled the refusal is already
-            # named by the clause below, and saying it twice is how a reader learns to skip a
-            # sentence.
-            clauses.append(
-                f"{report.reads_denied} read(s) were refused by this command's own read throttle "
-                "without any plane failing, so part of this run was not measured (raise "
-                "EPICS_MCP_READ_RATE_LIMIT and run again)"
-            )
         if report.throttled_planes:
             named.add("throttled_planes")
             not_probed = ", ".join(report.throttled_planes)
@@ -578,6 +585,19 @@ def _render(report: DoctorReport) -> str:
                 f"{len(report.throttled_planes)} plane(s) were NOT PROBED, because this command's "
                 f"own read throttle refused the request before it left: {not_probed} "
                 "('»' lines, raise EPICS_MCP_READ_RATE_LIMIT and run again)"
+            )
+        # By SUBTRACTION rather than on an empty list. The first version fired only when NO
+        # plane was throttled, and measured that hid a refusal on every PARTIAL limit: at a
+        # limit of 7 against a six-plane deployment TWO reads are refused, one taking a
+        # plane's beacon and one the archiver's ingest question, and the verdict named the
+        # plane and swallowed the other.
+        unexplained_reads = report.reads_denied - len(report.throttled_planes)
+        if unexplained_reads > 0:
+            named.add("reads_denied")
+            clauses.append(
+                f"{unexplained_reads} read(s) were refused by this command's own read throttle "
+                "without belonging to any plane, so part of this run was not measured (raise "
+                "EPICS_MCP_READ_RATE_LIMIT and run again)"
             )
         # This branch used to carry its own tail, "(N other plane(s) also unverified)", which named
         # ONE of the two categories it outranks and named it as a COUNT. _other_states_clause covers
@@ -646,8 +666,9 @@ def _render(report: DoctorReport) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     """Run the self-check, print the report. Returns 0 (clean) / 1 (a plane hard-failed, OR an
-    internal error, see the ``except`` below) / 2 (a usage error) / 3 (reachable, but an identity
-    probe failed, inconclusive)."""
+    internal error, see the ``except`` below) / 2 (a usage error) / 3 (inconclusive: an identity
+    probe FAILED, or a probe was never sent because this command's own read throttle refused it,
+    which includes a refusal hitting a sub-probe that leaves every plane line clean)."""
     # Before the parser (QA-8): argparse prints ``--help`` inside ``parse_args``, so a non-ASCII
     # character in any help text would die on a cp1252 console if the reconfigure came later.
     configure_stdout()

@@ -1105,6 +1105,79 @@ async def test_run_doctor_closes_verification_complete_on_a_denied_sub_probe(
     assert cli_doctor._exit_category(report) == "inconclusive"
 
 
+def _verdict_line(report: DoctorReport) -> str:
+    rendered = cli_doctor._render(report).splitlines()
+    return next(line for line in rendered if line.startswith("Overall:"))
+
+
+def _report(**kw: object) -> DoctorReport:
+    """A report as clean as run_doctor can make one, overridden by *kw*."""
+    base: dict[str, object] = {
+        "planes": [],
+        "privacy": PrivacyReport(cf_safe_owner_accounts=[], cf_safe_property_names=[]),
+        "write_safety": _disarmed_write_safety(),
+        "installation": InstallationReport(findings=[]),
+        "ok": True,
+        "verification_complete": False,
+        "degraded_planes": [],
+        "throttled_planes": [],
+        "reads_denied": 0,
+        "unverified_planes": [],
+        "inconclusive_identity_planes": [],
+        "identified_planes": [],
+    }
+    base.update(kw)
+    return DoctorReport(**base)  # type: ignore[arg-type]
+
+
+def test_a_refusal_that_belongs_to_no_plane_is_named_beside_one_that_does() -> None:
+    """BG-DTHR post-build review: the first version of this clause fired only when NO plane was
+    throttled, and that hid a refusal on every PARTIAL limit.
+
+    Measured against a six-plane deployment at a limit of 7: TWO reads are refused, one taking a
+    plane's identity beacon and one the archiver's ingest question. The verdict named the plane and
+    swallowed the other, so the reader was told about one refusal while the report knew of two. The
+    clause now fires on the SUBTRACTION, since a throttled plane accounts for exactly one refusal.
+
+    Red-proof: restore the ``and not report.throttled_planes`` gate and the second clause vanishes
+    from a verdict that still says two reads were denied.
+    """
+    verdict = _verdict_line(_report(throttled_planes=["olog"], reads_denied=2))
+    assert "NOT PROBED" in verdict and "olog" in verdict
+    assert "1 read(s) were refused" in verdict, verdict
+
+
+def test_a_run_that_hard_failed_still_says_part_of_it_was_not_measured() -> None:
+    """BG-DTHR post-build review: the ``failed`` branch disclosed the refusal to nobody.
+
+    It outranks every other branch, so it is the one that hides the most. A run that hard-fails a
+    plane AND was denied a read printed PROBLEM with no hint that part of it went unmeasured, while
+    ``verification_complete`` was False and ``reads_denied`` non-zero in the same ``--json``. The
+    disclosure lives in ``_other_states_clause`` now, the ONE seam all three branches share.
+
+    Red-proof: drop the ``unexplained`` block from ``_other_states_clause``.
+    """
+    verdict = _verdict_line(
+        _report(
+            planes=[PlaneCheck(plane="alarm", configured=True, status="unreachable")],
+            ok=False,
+            reads_denied=1,
+        )
+    )
+    assert verdict.startswith("Overall: PROBLEM")
+    assert "read throttle" in verdict, verdict
+
+
+def test_a_throttled_plane_alone_does_not_get_a_second_refusal_clause() -> None:
+    """The control for the subtraction: one throttled plane accounts for exactly one refusal, so a
+    run with one of each says it ONCE. Without this, "disclose everything" would be satisfied by a
+    verdict that reports the same refusal twice, which is how a reader learns to skip a sentence.
+    """
+    verdict = _verdict_line(_report(throttled_planes=["olog"], reads_denied=1))
+    assert "NOT PROBED" in verdict
+    assert "read(s) were refused" not in verdict, verdict
+
+
 def test_naming_identifies_via_its_swagger_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     """The Naming Service DOES have an identity beacon, an earlier pass claimed it had none.
 
