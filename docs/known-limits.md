@@ -588,9 +588,8 @@ certificate, a hostname mismatch and an interception proxy all look the same fro
 
 ## 23 · The archiver-pair finding says "both webapps answered" for two statuses where nothing answered
 
-`_archiver_pair` (`src/epics_mcp/services/doctor_crosscut.py:183`) triggers on membership in
-`failing` alone, and `failing` is built from all four `_TRIGGERS` (same file, line 60). Its text
-(line 195) opens **"Both archiver webapps answered with an error while pointing at different
+`_archiver_pair` in `src/epics_mcp/services/doctor_crosscut.py` triggers on membership in
+`failing` alone, and `failing` is built from all four `_TRIGGERS`. Its text opens **"Both archiver webapps answered with an error while pointing at different
 URLs"**, and for two of those four triggers nothing answered: on `unreachable`, which
 `_classify_failure` defines as "a transport failure, no chained HTTP response", and on the
 `is_ca_bundle_error` half of `ca_error`, which is raised before a socket is opened. Measured
@@ -606,9 +605,18 @@ the sentence. The four other paths to it are unchanged.
 
 **Nothing pins today's width.** `tests/test_doctor_crosscut.py` drives this finding with
 `api_error` only, so the two statuses that make the sentence false are exercised by no test. The
-repair is the one `_host_down` already carries at line 235, filtering on the statuses that mean the
-host ANSWERED, and it is three lines; it is written down rather than made here because it belongs
-to a different ticket and a change nobody asked for is how a review loses its boundary.
+repair is the one its neighbour `_host_down` carries: earn the claim from what the plane MEASURED
+rather than from which bucket its status is in, which for this sentence means `reachable is True`.
+It is written down rather than made here because it belongs to a different ticket, and a change
+nobody asked for is how a review loses its boundary.
+
+⚠️ **This entry once cited `_host_down` as a model while that function failed the same test 25
+lines lower**, which a post-build review of BG-DTHR found and which is repaired in the same change
+as this sentence: `_host_down` earned "this host answered" from "did not fail" rather than from an
+answer, so a plane nobody contacted certified a host, and one sitting on the dead host withdrew a
+correct finding. It is a model now; it was not when this was written. No line numbers are cited any
+more either, for the reason at the top of this page: they move, and this entry moved twice while
+being written.
 
 ## Retired entries, and where they went
 

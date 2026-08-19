@@ -87,27 +87,24 @@ _NEVER_TRIGGERS: frozenset[PlaneStatus] = frozenset(
 )
 
 
-#: Statuses that mean NO REQUEST went out for that plane, so it is evidence about neither a host
-#: nor a service and must not be counted as a neighbour that ANSWERED. A strict subset of
-#: :data:`_NEVER_TRIGGERS`, and the two answer DIFFERENT questions: not triggering is about whether
-#: a plane may SUPPORT a finding, this is about whether it may REFUTE one.
+#: How a plane earns the right to REFUTE the one-host finding, and it is a measurement rather than
+#: a status list: ``PlaneCheck.reachable is True`` means the transport probe got an answer from
+#: that host, which is exactly what the printed sentence claims about it.
 #:
-#: Measured 2026-08-19, and the distinction is not theoretical. ``_host_down`` classified every
-#: plane that was not failing as a healthy neighbour, so an unasked plane produced "Other
-#: configured hosts answered (X)" about a host nothing had contacted; worse, an unasked plane on
-#: the DEAD host itself put that host into ``healthy_hosts`` and SUPPRESSED the finding entirely,
-#: silencing a real outage. Worst, an unasked plane also inflates the denominator of the
-#: caller-side suppression, so it can turn a correctly suppressed "nothing you asked survived"
-#: into a printed one-host claim.
+#: Declared as a predicate rather than as a set of statuses because the set was WRONG, measured by
+#: an adversarial review of the first repair. ``throttled`` has TWO shapes: the transport arm
+#: reports ``reachable=None`` (nothing was sent, the archiver pair), while the identity arm reports
+#: ``reachable=True`` because the HEAD went out and succeeded and only the beacon was refused. A
+#: status-keyed set removed both, so a host that really had answered stopped counting as a healthy
+#: neighbour. The predicate splits them for free, and it needs no maintenance when a status is
+#: added: a status that sets ``reachable=True`` is claiming its host answered, which is the claim.
 #:
-#: ⚠️ The other four non-triggers are deliberately NOT here, because they DID answer:
-#: ``ok`` named itself, ``unverified`` answered 2xx, and ``no_ingest`` and ``backend_down`` both
-#: answered AND identified. For them "this host answered" is a measurement.
-#: ⚠️ ``config_error`` is here and it PREDATES the throttle status: its own remedy says "nothing
-#: was probed here, the configuration itself is the finding". It is folded in rather than left
-#: alone because a set that names the statuses where nothing was measured, and knowingly omits one
-#: of them, is worse than no set at all.
-_UNMEASURED: frozenset[PlaneStatus] = frozenset({"throttled", "config_error"})
+#: ⚠️ It also covers ``config_error`` (``reachable`` unset, so ``None``), which PREDATES the
+#: throttle status: its own remedy says "nothing was probed here", and it too used to certify a
+#: host it had never contacted.
+def _answered(plane: PlaneCheck) -> bool:
+    """True iff this plane's host actually answered its transport probe."""
+    return plane.reachable is True
 
 
 class InstallationFinding(_Model):
@@ -236,7 +233,7 @@ def _host_down(
     cfg: EpicsConfig,
     failing: dict[str, PlaneStatus],
     configured: dict[str, str],
-    unmeasured: frozenset[str] = frozenset(),
+    answered: frozenset[str] = frozenset(),
 ) -> list[InstallationFinding]:
     """Every plane on ONE host failing: one host gone, not N broken services.
 
@@ -265,10 +262,12 @@ def _host_down(
     # "None on it answered" is only earned by planes that did not answer. See the docstring: the
     # other three triggers all describe a host that DID answer, or a failure raised before any
     # socket existed.
-    # A plane nobody asked leaves the population ENTIRELY rather than being sorted into one of the
-    # buckets below: it cannot support the finding (it is not silent, nothing was sent) and it must
-    # not refute it (it did not answer). Filtering here rather than at the two use sites also
-    # corrects the caller-side denominator, which is the third way it distorted the answer.
+    # A plane that neither FAILED nor ANSWERED was never measured, so it leaves the population
+    # entirely rather than being sorted into a bucket: it cannot support the finding (it is not
+    # silent, nothing was sent) and it must not refute one (it did not answer). Filtering here
+    # rather than at the use site also corrects the caller-side denominator, which is the third way
+    # such a plane distorted the answer.
+    unmeasured = {plane for plane in configured if plane not in failing and plane not in answered}
     configured = {plane: url for plane, url in configured.items() if plane not in unmeasured}
     silent = {plane for plane, status in failing.items() if status == "unreachable"}
     if not silent:
@@ -287,11 +286,11 @@ def _host_down(
         if plane in silent:
             by_host[host].add(authority)
             planes_by_host[host].append(plane)
-        elif plane not in failing:
+        elif plane in answered:
             healthy_hosts.add(host)
         # A plane that failed in some OTHER way answered, so it neither supports the finding nor
         # counts as a healthy neighbour: it is evidence about a service, not about a host. A plane
-        # nobody ASKED is not here at all, see the filter above and :data:`_UNMEASURED`.
+        # nobody ASKED is not here at all, see the filter above and :func:`_answered`.
     findings: list[InstallationFinding] = []
     for host, authorities in sorted(by_host.items()):
         if len(authorities) < 2 or host in healthy_hosts:
@@ -407,10 +406,8 @@ def installation_findings(cfg: EpicsConfig, planes: list[PlaneCheck]) -> Install
     pair = _archiver_pair(cfg, failing)
     if pair:
         findings.append(pair)
-    unmeasured = frozenset(
-        plane.plane for plane in planes if plane.status in _UNMEASURED and plane.plane in configured
-    )
-    findings.extend(_host_down(cfg, failing, configured, unmeasured))
+    answered = frozenset(plane.plane for plane in planes if _answered(plane))
+    findings.extend(_host_down(cfg, failing, configured, answered))
     tls = _trust_root(cfg, planes, configured)
     if tls:
         findings.append(tls)

@@ -14,6 +14,7 @@ QA-96 says in as many words that a pattern only its own fixture produces does no
 from __future__ import annotations
 
 import typing
+from types import EllipsisType
 
 import pytest
 
@@ -22,7 +23,6 @@ from epics_mcp.services.doctor import PlaneCheck, PlaneStatus
 from epics_mcp.services.doctor_crosscut import (
     _NEVER_TRIGGERS,
     _TRIGGERS,
-    _UNMEASURED,
     installation_findings,
 )
 
@@ -32,8 +32,42 @@ def _cfg(**urls: str) -> EpicsConfig:
     return EpicsConfig(**urls)  # type: ignore[arg-type]
 
 
-def _plane(name: str, status: PlaneStatus, *, ca_ok: bool | None = None) -> PlaneCheck:
-    return PlaneCheck(plane=name, configured=True, status=status, ca_ok=ca_ok)
+#: What ``reachable`` production sets alongside each status. A FIXTURE MIRROR, and it is here
+#: because its absence was a defect: this helper used to leave ``reachable`` unset for every plane,
+#: so every synthetic ``ok`` carried ``None`` while production carries ``True``. Nothing noticed
+#: until ``_host_down`` started reading that field, and then three passing tests were passing on a
+#: report shape the tool cannot produce.
+#:
+#: ⚠️ ``throttled`` maps to ``None``, the TRANSPORT arm, where nothing was sent. Its IDENTITY arm
+#: carries ``reachable=True`` because the HEAD went out and answered, and a test that wants that
+#: shape passes ``reachable=True`` explicitly. The two are genuinely different evidence and the
+#: default is the one that cannot be guessed from the status name.
+_REACHABLE_BY_STATUS: dict[str, bool | None] = {
+    "ok": True,
+    "unverified": True,
+    "no_ingest": True,
+    "backend_down": True,
+    "identity_probe_failed": True,
+    "api_error": True,
+    "unreachable": False,
+    "ca_error": False,
+    "disconnected": False,
+    "config_error": None,
+    "disabled": None,
+    "info": None,
+    "throttled": None,
+}
+
+
+def _plane(
+    name: str,
+    status: PlaneStatus,
+    *,
+    ca_ok: bool | None = None,
+    reachable: bool | None | EllipsisType = ...,
+) -> PlaneCheck:
+    resolved = _REACHABLE_BY_STATUS[status] if reachable is ... else reachable
+    return PlaneCheck(plane=name, configured=True, status=status, ca_ok=ca_ok, reachable=resolved)
 
 
 def _patterns(cfg: EpicsConfig, planes: list[PlaneCheck]) -> list[str]:
@@ -524,14 +558,32 @@ def test_a_plane_that_did_answer_is_still_a_healthy_neighbour() -> None:
         assert detail is not None and "olog.example.org" in detail, status
 
 
-def test_unmeasured_is_a_subset_of_the_statuses_that_never_trigger() -> None:
-    """A plane that may not REFUTE a finding must not be able to SUPPORT one either.
+def test_the_two_throttled_shapes_are_told_apart_by_what_they_measured() -> None:
+    """The correction an adversarial review of the first repair paid for.
 
-    The reverse would be incoherent: a status counted as evidence for a host being down while being
-    declared as having produced no request at all.
+    ``throttled`` is not one state. The TRANSPORT arm reports ``reachable=None``: nothing was sent,
+    so that host proves nothing. The IDENTITY arm reports ``reachable=True``: the HEAD went out and
+    the host answered, and only the beacon was refused. The first repair keyed on the STATUS and
+    removed both, so a host that really had answered stopped counting as a healthy neighbour and a
+    correct one-host finding was withdrawn.
+
+    Red-proof: key the rule on the status again, or on ``reachable is not False``, and the second
+    half goes red.
     """
-    assert _UNMEASURED <= _NEVER_TRIGGERS
-    assert _UNMEASURED, "an empty set would satisfy the line above and guard nothing"
+    cfg = _cfg(**_DEAD_PAIR, olog_url="http://olog.example.org:8080/Olog")
+    dead = [_plane("archiver", "unreachable"), _plane("archiver_retrieval", "unreachable")]
+
+    # the transport arm proves nothing about its host, so it neither refutes nor supports
+    nothing_sent = _host_down_detail(cfg, [*dead, _plane("olog", "throttled")])
+    assert nothing_sent is None, (
+        "with the only other plane unasked, nothing that WAS asked survived"
+    )
+
+    # the identity arm DID get an answer from its host, so it refutes exactly like an ok plane
+    answered = _host_down_detail(
+        cfg, [*dead, _plane("olog", "throttled", reachable=True, ca_ok=True)]
+    )
+    assert answered is not None and "olog.example.org" in answered
 
 
 def test_the_crosscut_sorts_every_plane_status() -> None:
