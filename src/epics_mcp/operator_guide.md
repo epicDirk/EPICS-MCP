@@ -242,6 +242,7 @@ explanation. Ask `get_guide` for the topic named beside the field.
 | `total_matches` · `default_level` | `olog-filters` |
 | `config_msg` · `capped` (alarm history) | `alarm-tree` |
 | `archive_fields` · `host_name` · `creation_time` · `identity` | `err-archiver` |
+| `secs` · `nanos` · `val` · `severity` (one archived sample) | `err-archiver` |
 | `found` (a REST lookup, not a PV connection) | `err-rest` |
 | `identified_planes` · `verification_complete` · `write_safety` | `doctor` |
 
@@ -1012,6 +1013,17 @@ the read throttle, and a server that will not start) · `err-guide`.
 - **Archived? how? history?** `is_archived` / `get_archive_info` / `get_pv_history`. History `status` is
   `ok` / `empty` / `withheld`, a bare `[]` means only a truly empty history, not "could not read";
   a single unreadable sample withholds the whole result rather than being silently skipped.
+  ⚠️ **A sample carries `secs`, `nanos`, `val`, `severity` and its own status code, and `secs` is
+  UNIX epoch seconds (UTC), NOT EPICS epoch seconds.** The appliance writes that field from its own
+  `getEpochSeconds()`, which is a Java `Instant` epoch second; its EPICS-to-Java offset (631152000
+  s, exactly 20 years) is applied when a CA timestamp is converted INTO that epoch and never on the
+  way out. Read `secs` the other way and every point moves by 20 years, which is far enough to be a
+  different run and close enough to still plot. `nanos` is the sub-second part of the same instant,
+  `val` is the value, and `severity` is the EPICS alarm severity recorded with that sample; the
+  per-sample status code is a third thing again, not the history `status` above. Stated from the
+  appliance's own source (`DBRTimeEvent.toJSONString` and `TimeUtils`) rather than from this
+  server, which passes the field through unconverted and so cannot answer the question from its own
+  code.
   Both status tools harvest fields the appliance already returns in the same call (no extra request):
   `is_archived` adds the getPVStatus connection-history cluster `connection_loss_regain_count` (the
   flapping counter), `connection_first_established` and `connection_last_restablished` (`"Never"` if
