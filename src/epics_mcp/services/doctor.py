@@ -62,6 +62,7 @@ from epics_mcp.services._http import (
     build_retrying_session,
     http_status,
     is_ca_bundle_error,
+    is_read_throttle_error,
     is_retry_error,
     is_ssl_error,
     rest_get_json,
@@ -467,10 +468,19 @@ def _classify_failure(
 ) -> tuple[bool | None, bool | None, PlaneStatus, str]:
     """Map a failed connectivity probe to ``(reachable, ca_ok, status, detail)``.
 
-    FOUR buckets, keyed off the chained cause (this said "three" for as long as the retry bucket
-    existed, and a remedy guard parametrized over statuses rather than over these returns would have
-    inherited that miscount: two of them are ``api_error``):
+    FIVE buckets (this said "three" for as long as the retry bucket existed, and "four" until the
+    throttle bucket was added; a remedy guard parametrized over statuses rather than over these
+    returns would have inherited either miscount, since two of them are ``api_error``). The first
+    is keyed off the exception ITSELF, the rest off the chained cause:
 
+    * THIS command's own read throttle refusing the probe (:func:`is_read_throttle_error`) →
+      ``throttled`` (reachable None, ca_ok None). It is tested FIRST because nothing else here can
+      recognise it: the refusal is raised before a socket exists, chains nothing, and is not a
+      ``RequestException``, so every predicate below answers False and it used to fall through to
+      the catch-all. Measured, that reported a running service as ``unreachable`` (exit 1) with a
+      remedy telling the operator to check a host and a port that were never contacted. Both
+      answers are ``None`` rather than False on purpose: ``False`` would be a claim, and nothing
+      was measured. See BG-DTHR;
     * a TLS/CA failure (:func:`is_ssl_error`), or the configured CA bundle being unreadable in the
       first place (:func:`is_ca_bundle_error`) → ``ca_error`` (reachable False, ca_ok False);
     * a *served* non-2xx (:func:`http_status` gives a code) → ``api_error``, the host answered, so
@@ -485,6 +495,20 @@ def _classify_failure(
     ``ca_error`` leaves it out deliberately: its remedy is about the CA bundle, not about this
     URL.
     """
+    if is_read_throttle_error(exc):
+        # Nothing left this process, so nothing here is evidence about the service. The observation
+        # names the VARIABLE to change rather than the plane's URL variable, because the finding is
+        # about this command's own budget; ``_REMEDY["throttled"]`` carries the instruction.
+        return (
+            None,
+            None,
+            "throttled",
+            _with_remedy(
+                "throttled",
+                "not probed: this command's own read throttle refused the request before it left, "
+                "so nothing was measured about this plane.",
+            ),
+        )
     if is_ca_bundle_error(exc):
         # Not a verification failure: the bundle itself could not be READ, so no handshake was ever
         # attempted. Same verdict on purpose, because the remedy is the same variable and this

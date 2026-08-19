@@ -1,7 +1,7 @@
 """Offline tests for the read-only config self-check (services/doctor + cli_doctor), no network.
 
 Every test is hermetic: the config is patched to a fresh EpicsConfig and each client class is
-replaced by a fake, so the 'not live' suite makes no network call. Covers the 3-bucket classifier
+replaced by a fake, so the 'not live' suite makes no network call. Covers the 5-bucket classifier
 (Plan-QA #1: a served non-2xx is api_error/reachable, not unreachable), the disabled/ok/failing
 planes, the single-source privacy report, the live plane's no-default-egress posture (Plan-QA #4),
 and the CLI exit-code convention (0 clean / 1 a plane hard-failed / 2 usage / 3 inconclusive: an
@@ -34,6 +34,7 @@ from epics_mcp.errors import (
     EpicsError,
     OlogWriteDeniedError,
     PVWriteDeniedError,
+    ReadRateLimitError,
     SafetyConfigError,
 )
 from epics_mcp.olog_safety import OlogWriteGate, write_target_allowed
@@ -178,13 +179,62 @@ def _disarmed_write_safety() -> WriteSafetyReport:
 _LOOPBACK_ENV = {"EPICS_PVA_AUTO_ADDR_LIST": "NO", "EPICS_CA_AUTO_ADDR_LIST": "NO"}
 
 
-# --- _classify_failure (the 3-bucket core) ---
+# --- _classify_failure (the 5-bucket core) ---
 
 
 #: The variable a probed plane reads its URL from, as ``_run_probe`` threads it in. Passed
 #: explicitly by the four tests below so the observation half of each detail is checked with a
 #: KNOWN name in it.
 _PROBE_VAR = "EPICS_MCP_CHANNELFINDER_URL"
+
+
+def test_classify_a_throttled_probe_is_throttled_not_unreachable() -> None:
+    """BG-DTHR: the arm that has to come FIRST, and the one nothing else in this classifier can see.
+
+    The refusal is raised by this command's own read throttle before a socket exists. It chains
+    nothing and is not a ``RequestException``, so ``is_ca_bundle_error``, ``is_ssl_error``,
+    ``http_status`` and ``is_retry_error`` all answer False/None for it and it fell through to the
+    catch-all: measured, a RUNNING service was reported ``unreachable`` (exit 1) with a remedy
+    telling the operator to check a host and a port nothing had contacted.
+
+    ``reachable`` and ``ca_ok`` are asserted to be None rather than False, and that is the whole
+    difference between this status and the one it replaces: False is a claim about the service, and
+    no request was sent. ``PlaneCheck.reachable`` already documents None as "not probed".
+
+    Red-proof: delete the arm -> status is ``unreachable`` and both answers become False/None with
+    a host-and-port remedy; move it BELOW ``is_ca_bundle_error`` -> still green, which is why the
+    ordering is pinned separately in
+    ``test_the_throttle_arm_outranks_every_predicate_that_reads_a_cause``.
+    """
+    exc = ReadRateLimitError("Read rate limit exceeded (1 reads per 60s). Try again later.")
+    reachable, ca_ok, status, detail = _classify_failure(exc, _PROBE_VAR)
+    assert (reachable, ca_ok, status) == (None, None, "throttled")
+    assert _REMEDY["throttled"] in detail
+    assert "EPICS_MCP_READ_RATE_LIMIT" in detail
+    # The plane's own URL variable must NOT be named: it is not what the operator has to change,
+    # and naming it is exactly how the unreachable remedy sent them to an innocent service.
+    assert _PROBE_VAR not in detail
+
+
+def test_the_throttle_arm_outranks_every_predicate_that_reads_a_cause() -> None:
+    """BG-DTHR: order, pinned on its own because the arm's value is entirely in coming first.
+
+    A throttle refusal CAN arrive chained (``is_read_throttle_error`` reads ``__cause__`` too, so a
+    future caller that wraps it stays recognised). Chain one under a TLS failure and the two arms
+    genuinely compete: whichever is tested first wins. The throttle has to, because the CA verdict
+    would send the operator to rewrite ``EPICS_MCP_CA_BUNDLE`` over a handshake that never happened.
+
+    Red-proof: move the throttle arm below ``is_ca_bundle_error``/``is_ssl_error`` and this goes
+    red while the test above stays green.
+    """
+    throttled = ReadRateLimitError("Read rate limit exceeded (1 reads per 60s). Try again later.")
+    tls_first = RuntimeError("x")
+    tls_first.__cause__ = throttled
+    assert _classify_failure(tls_first, _PROBE_VAR)[2] == "throttled"
+
+    also_ssl = ReadRateLimitError("Read rate limit exceeded (1 reads per 60s). Try again later.")
+    also_ssl.__cause__ = requests.exceptions.SSLError("bad cert")
+    assert _classify_failure(also_ssl, _PROBE_VAR)[2] == "throttled"
 
 
 def test_classify_ssl_error_is_ca_error() -> None:
