@@ -236,6 +236,8 @@ explanation. Ask `get_guide` for the topic named beside the field.
 | `shown_by_display` · `shown_by_display_capped` · `total` | `err-displays` |
 | `state` · `likely_cause` · `confidence` · `evidence` · `next_steps` | `err-pv` |
 | `registered` · `withheld` | `err-pv` |
+| `new_value` · `old_value` · `readback` · `verified` · `tolerance` · `bounds_note` | `pv-write` |
+| `status` (of a PV write, not of an archived sample or a plane) | `pv-write` |
 | `attachment_count` | `olog-output` |
 | `total_matches` · `default_level` | `olog-filters` |
 | `config_msg` · `capped` (alarm history) | `alarm-tree` |
@@ -363,6 +365,20 @@ accepted and then did not apply reads as `verified=false` with the readback that
 If the put RAISES, there is no readback and no `verified` at all: the tool call fails, the audit
 line is `FAILED`, and the caller gets an error rather than a result. Do not go looking for
 `verified` in that case, and do not read its absence as success.
+
+**The fields a write answers with, and which two of them are the measurement.** Three of them
+describe the REQUEST and are not evidence that anything landed. `status` is `"success"` once the
+put executed and was ALLOW-audited: a statement about the PUT, not about the value, and it stays
+`"success"` on a readback mismatch, because the write DID happen and a wrong value may now sit at
+the IOC. `new_value` is the value that was SENT, echoed back from the request. `old_value` is what
+the pre-read saw before the put, the same value the audit line carries. The fields that are
+MEASURED after the fact are `readback` (what the read-back actually saw, null when it could not be
+obtained), `verified` (true matched within tolerance, false mismatch, null not verifiable) and
+`tolerance` (the absolute tolerance a numeric compare applied; null for an exact compare or when
+not verifiable). `bounds_note` is null when the value was checked against the record's own drive
+limits, and otherwise names the reason it could not be, a deliberate fail-open. So the pair to
+read for "did it land" is `readback` with `verified`; reading `status` with `new_value` answers a
+different question, namely whether this server sent it.
 
 ⚠️ **Which of those two shapes an IOC refusal takes is NOT measured here.** No live test in this
 project has an IOC decline a write; the access-security material that exists is static, over the

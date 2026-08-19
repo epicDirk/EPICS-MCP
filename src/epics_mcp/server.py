@@ -325,7 +325,7 @@ async def get_guide(
     prove. It reads nothing but its own packaged document: no PV, no REST plane, no file of
     yours, so it can neither time out nor depend on how this instance is configured.
 
-    The whole document is around 105 KB, which is why 'topic' exists and why omitting it should be
+    The whole document is around 108 KB, which is why 'topic' exists and why omitting it should be
     the exception. The keys partition the document: each returns exactly its own part, VERBATIM,
     so an excerpt is a real excerpt and never a rendering, and the largest single part is under a
     third of the whole. An unknown topic is refused with [UNKNOWN_TOPIC] naming every valid key.
@@ -467,6 +467,11 @@ async def set_pv_value(
     loud signal is ``verified=false`` plus the audit event, so a wrong or not-landed value is
     surfaced rather than accepted silently. Tolerance is the record's ``control.min_step`` when it
     has one (> 0), else ``EPICS_MCP_READBACK_TOLERANCE``.
+
+    Which fields are evidence: ``new_value`` is the value that was SENT, echoed from the request,
+    and ``old_value`` is what the pre-read saw before the put. Neither shows that anything landed,
+    and ``status`` describes the put rather than the value. The measured pair is ``readback`` with
+    ``verified``.
 
     On an enum PV a written LABEL is compared by index, exact and without a tolerance: it is
     resolved against the record's own choices the way the write path resolves it (case-sensitive,
