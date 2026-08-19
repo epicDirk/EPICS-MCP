@@ -321,8 +321,10 @@ class PlaneCheck(_Model):
     status: PlaneStatus
     detail: str | None = None
     #: True when the service PROVED it is the one we configured (it named itself); False when the
-    #: identity could not be established; ``None`` when no identity probe applies (disabled, the
-    #: live/PVA plane, or a plane the transport probe never got past). ``False`` is NOT a failure:
+    #: identity could not be established, which includes the case where the probe was never SENT
+    #: because this command's own read throttle refused it (``throttled``); ``None`` when no
+    #: identity probe APPLIES at all (disabled, the live/PVA plane, or a plane the transport probe
+    #: never got past). ``False`` is NOT a failure:
     #: it is an honest "reachable, identity unverified" (see :data:`_NON_FAILING_STATUSES`).
     identified: bool | None = None
 
@@ -633,14 +635,16 @@ def _fetch_beacon(
 def _identify(plane: str, base_url: str, auth_header: str | None, timeout: float) -> PlaneCheck:
     """Ask a Phoebus-family service to name itself; map the answer to a verdict. TOTAL.
 
-    Three outcomes: ``ok`` (it named itself correctly); ``unverified``, it ANSWERED 2xx but we
+    FOUR outcomes: ``ok`` (it named itself correctly); ``unverified``, it ANSWERED 2xx but we
     could not name it: an unreadable/HTML body, a body without a usable ``name``, or a body naming a
-    DIFFERENT known service (with that name in the detail); or ``identity_probe_failed``, the probe
+    DIFFERENT known service (with that name in the detail); ``identity_probe_failed``, the probe
     itself FAILED (a served non-2xx like a 401 auth wall or a 404, a transport error, a refused
-    redirect), routed via :func:`_identity_fetch_failure`. A foreign name is deliberately NOT a
-    failure (S14): the earlier ``wrong_service``+exit-1 verdict rested on "unambiguous at any site",
-    refuted by measurement (2026-07-16), a path-based reverse proxy served the REAL ChannelFinder
-    API while the base GET answered as Olog, so the hard failure flagged a WORKING configuration.
+    redirect); or ``throttled``, the probe was never SENT because this command's own read throttle
+    refused it. The last two are routed via :func:`_identity_fetch_failure`. A foreign name is
+    deliberately NOT a failure (S14): the earlier ``wrong_service``+exit-1 verdict rested on
+    "unambiguous at any site", refuted by measurement (2026-07-16), a path-based reverse proxy
+    served the REAL ChannelFinder API while the base GET answered as Olog, so the hard
+    failure flagged a WORKING configuration.
     ``unverified`` is honest (exit 0); ``identity_probe_failed`` is inconclusive (exit 3, never a
     silent all-clear), see :data:`_NON_FAILING_STATUSES` / :data:`_INCONCLUSIVE_STATUSES`.
     """
@@ -723,6 +727,37 @@ def _identity_probe_failed(plane: str, detail: str) -> PlaneCheck:
     )
 
 
+def _throttled(plane: str, detail: str) -> PlaneCheck:
+    """The probe never went out: THIS command's own read throttle refused it (BG-DTHR).
+
+    The sibling of :func:`_unverified` and :func:`_identity_probe_failed`, and the difference from
+    both is that neither the endpoint nor the network was involved at all. Inconclusive (exit 3),
+    never a hard failure and never a silent all-clear, see :data:`_THROTTLED_STATUSES`.
+
+    ``reachable`` and ``ca_ok`` stay True here, unlike the transport-probe arm in
+    :func:`_classify_failure`, which reports both as ``None``. That is not an inconsistency but the
+    measurement: this function is only ever reached AFTER the transport probe succeeded, so
+    transport and TLS were genuinely proven for this plane and dropping that to ``None`` would
+    discard something the run actually established.
+
+    ``identified`` is ``False``, not ``None``. ``None`` on that field means no identity probe
+    APPLIES (a disabled plane, the live plane, or one the transport probe never got past); here one
+    applies and simply never ran, which is what ``False`` says.
+
+    The remedy is appended inside the constructor, for the reason given at
+    :func:`_identity_probe_failed`.
+    """
+    return PlaneCheck(
+        plane=plane,
+        configured=True,
+        reachable=True,
+        ca_ok=True,
+        status="throttled",
+        identified=False,
+        detail=_with_remedy("throttled", detail),
+    )
+
+
 def _backend_down(plane: str, detail: str) -> PlaneCheck:
     """Transport reachable AND the service named itself, but a backend it depends on is measurably
     DOWN: so the plane's tools will fail even though the endpoint answered. A hard failure
@@ -760,9 +795,23 @@ def _beacon_reached_but_unreadable(exc: BaseException) -> bool:
 
 def _identity_fetch_failure(plane: str, exc: BaseException) -> PlaneCheck:
     """Map a FAILED identity fetch to a verdict, shared by every identity probe so the split cannot
-    drift: a REACHED-but-unreadable 2xx (a body that is not JSON) is honest :func:`_unverified`;
-    anything else, a served non-2xx, a transport error, a refused redirect, is
+    drift. THREE ways out, tested in this order: a refusal by this command's own read throttle is
+    :func:`_throttled`, because no request was made and nothing about the endpoint is in evidence;
+    a REACHED-but-unreadable 2xx (a body that is not JSON) is honest :func:`_unverified`; anything
+    else, a served non-2xx, a transport error, a refused redirect, is
     :func:`_identity_probe_failed`."""
+    if is_read_throttle_error(exc):
+        # FIRST, for the reason spelled out at the same arm in _classify_failure: this refusal is
+        # not a transport event at all, and every other branch here would describe it as one. It is
+        # also the larger half of BG-DTHR by count: the four HEAD-probed planes spend no token on
+        # transport, so under a tight limit it is their identity beacon that is refused, and the
+        # plane line then read "the identity probe FAILED" with a remedy about auth walls and
+        # sub-paths for a request that was never sent.
+        return _throttled(
+            plane,
+            "transport reachable, but the identity probe was NOT SENT: this command's own read "
+            "throttle refused it, so this plane's identity is unmeasured rather than in doubt.",
+        )
     if _beacon_reached_but_unreadable(exc):
         return _unverified(
             plane,

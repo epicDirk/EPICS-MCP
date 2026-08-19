@@ -40,7 +40,12 @@ from epics_mcp.errors import (
 from epics_mcp.olog_safety import OlogWriteGate, write_target_allowed
 from epics_mcp.safety import SafetyLayer
 from epics_mcp.services import doctor, epics_client
-from epics_mcp.services._http import url_without_credentials
+from epics_mcp.services._http import (
+    get_read_throttle,
+    reset_read_throttle,
+    rest_get_json,
+    url_without_credentials,
+)
 from epics_mcp.services.doctor import (
     _DEGRADED_STATUSES,
     _FAILING_STATUSES,
@@ -850,6 +855,91 @@ def test_throttled_is_inconclusive_by_decision_and_a_subset_of_it() -> None:
     assert "throttled" not in _FAILING_STATUSES
     assert _THROTTLED_STATUSES <= _INCONCLUSIVE_STATUSES
     assert _THROTTLED_STATUSES, "an empty subset would satisfy the line above and mean nothing"
+
+
+def test_a_throttled_identity_beacon_is_throttled_not_a_failed_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BG-DTHR, the LARGER half by count: four of the six REST planes probe transport with a bare
+    HEAD and spend no token there, so under a tight limit it is their identity beacon that is
+    refused, not their transport probe.
+
+    What the plane line said before this arm existed: "the identity probe FAILED", followed by the
+    static remedy for that status, which tells the operator to check that the URL is the service
+    root, that it reaches the host they mean rather than a neighbour, and that its info endpoint is
+    not behind authentication. None of those is the cause, and no request had been sent.
+
+    ``reachable`` and ``ca_ok`` stay True on purpose, unlike the transport arm which reports both
+    as None: this path is only reached after the transport probe SUCCEEDED, so both were genuinely
+    established for this plane and discarding them would throw away a real measurement.
+
+    Red-proof: delete the arm in ``_identity_fetch_failure`` -> the status is
+    ``identity_probe_failed`` and the wrong remedy is back.
+    """
+    _raises(monkeypatch, ReadRateLimitError("Read rate limit exceeded (1 reads per 60s)."))
+    check = _identify("channelfinder", "http://cf.example/ChannelFinder", None, 5.0)
+
+    assert check.status == "throttled"
+    assert (check.reachable, check.ca_ok, check.identified) == (True, True, False)
+    assert _REMEDY["throttled"] in (check.detail or "")
+    # The remedy that used to arrive here names an auth wall and a sub-path; it must not any more.
+    assert _REMEDY["identity_probe_failed"] not in (check.detail or "")
+
+
+async def test_a_throttled_run_is_never_reported_as_confirmed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BG-DTHR end to end, through ``run_doctor``, on a plane whose transport probe SUCCEEDS.
+
+    This is the shape an operator meets: the service is up, the HEAD goes through, and only the
+    identity beacon is refused by this command's own budget. Every signal a machine reader is told
+    to consult has to notice.
+
+    Deterministic by construction: the token is spent BEFORE the run rather than raced for, so the
+    refusal lands on the beacon every time. That matters because the real failure mode this ticket
+    documents is a race, and a test that reproduced the race would be flaky for the same reason.
+
+    Red-proof: with the identity arm deleted the plane is ``identity_probe_failed``, which lands in
+    ``inconclusive_identity_planes`` instead, so the two list assertions swap and go red.
+    """
+    _set_config(monkeypatch, channelfinder_url="http://cf.example/ChannelFinder", read_rate_limit=1)
+    monkeypatch.setattr("epics_mcp.services.doctor.ChannelFinderClient", _OkClient)
+    # Restore the REAL identity probe and the REAL rest_get_json over the autouse stubs, so the
+    # chain that meets the throttle actually runs. Without this the stub answers "identified" and
+    # the run never reaches the chokepoint, which is the whole thing under test.
+    monkeypatch.setattr("epics_mcp.services.doctor._identify", _identify)
+    monkeypatch.setattr("epics_mcp.services.doctor.rest_get_json", rest_get_json)
+    # The beacon goes through that real rest_get_json, so the throttle it consults is the real
+    # singleton in _http, built from _http's own config read. Both are pointed at the same limit.
+    monkeypatch.setattr(
+        "epics_mcp.services._http.get_config", lambda: EpicsConfig(read_rate_limit=1)
+    )
+    reset_read_throttle()
+    get_read_throttle().check()  # spend the only token: the beacon below is refused
+    try:
+        report = await run_doctor()
+    finally:
+        reset_read_throttle()
+
+    plane = next(p for p in report.planes if p.plane == "channelfinder")
+    assert plane.status == "throttled"
+    assert report.throttled_planes == ["channelfinder"]
+    # NOT in the identity list, which is the whole point of the split: the sentence built from that
+    # list says an identity probe ran and failed.
+    assert report.inconclusive_identity_planes == []
+    # Nothing failed, and nothing was confirmed either.
+    assert report.ok is True
+    assert report.verification_complete is False
+    assert report.identified_planes == []
+    assert cli_doctor._exit_category(report) == "inconclusive"
+    assert cli_doctor._EXIT_CODE[cli_doctor._exit_category(report)] == 3
+
+    rendered = cli_doctor._render(report)
+    assert "NOT PROBED" in rendered
+    assert "identity probe(s) FAILED" not in rendered
+    # And the cross-plane block must stay silent: a plane nobody contacted is not evidence about
+    # any host (BG-DTHR, doctor_crosscut._NEVER_TRIGGERS).
+    assert report.installation.findings == []
 
 
 def test_naming_identifies_via_its_swagger_contract(monkeypatch: pytest.MonkeyPatch) -> None:

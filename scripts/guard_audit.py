@@ -344,12 +344,12 @@ CLIENT_MODULES = "client modules whose edges this audit covers"
 GUARD_TARGETS = "mutable guard sites the audit can address in them"
 
 PINNED_AST: dict[str, int] = {
-    DOUBLES: 100,
-    EDGE_VOCABULARY: 20,
+    DOUBLES: 101,
+    EDGE_VOCABULARY: 21,
     CLIENT_MODULES: 6,
     GUARD_TARGETS: 96,
 }
-PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 100, SHAM_CANDIDATES: 20}
+PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 101, SHAM_CANDIDATES: 21}
 PINNED: dict[str, int] = {**PINNED_AST, **PINNED_COVERAGE}
 
 # The candidate list, by NAME. A count is not a finding: the verdict "no sham guard found" was
@@ -366,6 +366,15 @@ PINNED_CANDIDATES: tuple[str, ...] = (
     "test_checkers.py::test_query_naming_lookup_404_is_definitive_not_registered",
     "test_checkers.py::test_query_naming_lookup_obsolete_preserves_status",
     "test_checkers.py::test_query_olog_response_error_is_not_a_connection_error",
+    # BG-DTHR, read 2026-08-19 and judged NOT a sham guard, recorded here because the instruction
+    # this list carries is "added names are what has not been read". Its ``_OkClient`` double is
+    # the legitimate use this module's own docstring names, keeping a service-layer test off the
+    # network, and it stands in for the TRANSPORT probe only: the test then restores the REAL
+    # ``_identify`` and the REAL ``rest_get_json`` over the module's autouse stubs, so the chain it
+    # actually judges runs unmocked. It claims nothing about what ChannelFinder answered; its
+    # assertions are about which report list a throttled plane lands in, the exit category, and the
+    # rendered verdict.
+    "test_doctor.py::test_a_throttled_run_is_never_reported_as_confirmed",
     "test_doctor.py::test_unverified_plane_does_not_fail_but_is_reported",
     "test_olog.py::test_empty_page_past_the_end_is_not_annotated",
     "test_olog.py::test_list_log_levels_splits_outage_from_bad_answer",

@@ -13,19 +13,21 @@ map recorded with ``COVERAGE_CORE=ctrace`` and some ten minutes, which is not a 
 
 Findings of the 2026-07-25 run, kept here rather than in a document nobody reads again:
 
-* Sham guards (direction B): **none found, which is not the same as none there.** 100 tests
+* Sham guards (direction B): **none found, which is not the same as none there.** 101 tests
   install a client class double in their own body and NOT ONE of them executes a client-edge guard
   line, which is what a class-level double is FOR: it takes the real client off the path. That is
-  the double used legitimately, to keep a service-layer test off the network. 20 of those also
+  the double used legitimately, to keep a service-layer test off the network. 21 of those also
   carry payload vocabulary, and every one of them was read: they claim SERVICE-layer behaviour (an
   already-constructed exception must not be relabelled "unreachable"; an unknown level is refused
-  before any request is built), not a client-edge check. ⚠️ The vocabulary filter itself decides
-  who gets read, a first, narrower filter surfaced only 2 and a review showed it missed a test
-  whose docstring states the edge claim in words the regex did not know. Treat this as "no sham
-  guard found by this filter", and widen the filter before treating it as a stronger statement.
+  before any request is built; a plane refused by this command's own read throttle is reported as
+  unmeasured rather than as unreachable), not a client-edge check. ⚠️ The vocabulary filter
+  itself decides who gets read, a first, narrower filter surfaced only 2 and a review showed it
+  missed a test whose docstring states the edge claim in words the regex did not know. Treat this
+  as "no sham guard found by this filter", and widen the filter before treating it as a stronger
+  statement.
 
-  S33, and the distinction matters for what can be checked cheaply: 20 of those carry payload
-  vocabulary before any coverage map is consulted, and 20 remain once the tests that DO execute a
+  S33, and the distinction matters for what can be checked cheaply: 21 of those carry payload
+  vocabulary before any coverage map is consulted, and 21 remain once the tests that DO execute a
   guard line are removed. The vocabulary figure follows from this repository's AST alone and is
   therefore pinned by a test in the ordinary gate; the two coverage figures are decided by the
   coverage map and are checked only by ``scripts/guard_audit.py sham --check --coverage-db ...``.
