@@ -1178,6 +1178,73 @@ def test_a_throttled_plane_alone_does_not_get_a_second_refusal_clause() -> None:
     assert "read(s) were refused" not in verdict, verdict
 
 
+def test_an_inconclusive_verdict_without_a_namable_cause_still_says_something() -> None:
+    """The empty-clause fallback, and it is the sibling of the one the ``failed`` branch carries.
+
+    ``_exit_category`` reaches the inconclusive branch only when one of its three inputs is
+    non-zero, so a report ``run_doctor`` builds always has a clause. A hand-built one need not, and
+    neither need ``model_copy``, which pydantic does NOT re-validate, so ``Field(ge=0)`` on
+    ``reads_denied`` closes the constructor and not that door. Measured before the fallback: the
+    headline came out as "INCONCLUSIVE, ." with nothing between the comma and the full stop.
+
+    The repair is the one ``cli_doctor`` already applies at the ``failed`` branch for exactly this
+    class, and its own comment there says why: a state the tool cannot produce is still a state a
+    reader can be handed.
+
+    Red-proof: remove the ``if not clauses`` block.
+    """
+    clean = _report()
+    degenerate = clean.model_copy(update={"reads_denied": -1})
+    assert cli_doctor._exit_category(degenerate) == "inconclusive"
+
+    verdict = _verdict_line(degenerate)
+    assert verdict != "Overall: INCONCLUSIVE, . Not a confirmed failure, but not confirmed healthy."
+    assert "names no cause" in verdict, verdict
+
+
+async def test_reads_denied_counts_only_this_runs_own_refusals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The BRACKET around the fan-out, and a post-build review had to tell me it was observable.
+
+    The counter is monotonic and process-wide, so ``run_doctor`` samples it before and after and
+    subtracts. Every other test resets the throttle first, which makes absolute and delta identical
+    and let the subtraction be deleted with the whole suite green. I had reasoned my way to calling
+    that an equivalent mutant, alongside the genuinely equivalent ``not throttled`` term; the review
+    measured otherwise and it was right.
+
+    The shape it is observable in: refusals spent in this process BEFORE the run, and no REST plane
+    configured, so the run itself spends nothing. With the bracket the answer is 0 and the verdict
+    is clean; without it the run inherits three refusals it never made, closes
+    ``verification_complete`` and exits 3 while having asked nobody anything. That is the same
+    class of untruth this whole ticket removes, pointing the other way.
+
+    Red-proof: ``reads_denied = get_read_throttle().denials`` in run_doctor.
+    """
+    _set_config(monkeypatch, read_rate_limit=1)
+    monkeypatch.setattr(
+        "epics_mcp.services._http.get_config", lambda: EpicsConfig(read_rate_limit=1)
+    )
+    reset_read_throttle()
+    try:
+        throttle = get_read_throttle()
+        throttle.check()  # the only token
+        for _ in range(3):
+            with pytest.raises(ReadRateLimitError):
+                throttle.check()
+        assert throttle.denials == 3, (
+            "the fixture has to leave refusals behind, or it proves nothing"
+        )
+
+        report = await run_doctor()
+    finally:
+        reset_read_throttle()
+
+    assert report.reads_denied == 0, "this run asked nobody anything and refused nothing"
+    assert report.verification_complete is True
+    assert cli_doctor._exit_category(report) == "clean"
+
+
 def test_naming_identifies_via_its_swagger_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     """The Naming Service DOES have an identity beacon, an earlier pass claimed it had none.
 

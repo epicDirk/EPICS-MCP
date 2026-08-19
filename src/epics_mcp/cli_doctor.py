@@ -603,6 +603,15 @@ def _render(report: DoctorReport) -> str:
         # ONE of the two categories it outranks and named it as a COUNT. _other_states_clause covers
         # both and names the planes; the count-only form is gone rather than kept beside it, because
         # one sentence disclosing the same kind of fact two ways is how a reader learns to skip it.
+        # The empty case is not a state run_doctor can build, since _exit_category reaches this
+        # branch only when one of the three is non-zero. A hand-built report can, and so can
+        # ``model_copy``, which does not re-validate: measured, that printed "INCONCLUSIVE, ." with
+        # no clause at all. The `failed` branch carries the same fallback for the same reason.
+        if not clauses:
+            clauses.append(
+                "the run reports itself as not confirmed and names no cause, which is a report "
+                "this command cannot produce: read --json rather than this line"
+            )
         verdict = (
             "INCONCLUSIVE, "
             + "; ".join(clauses)
