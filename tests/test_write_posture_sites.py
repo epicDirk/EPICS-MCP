@@ -81,10 +81,19 @@ _SPEC_CARRIER = "docs/write-gate-contract.md"
 _WIRE_SURFACE = "src/epics_mcp/server.py (built instructions)"
 
 #: The pointer a client can follow. Not a file link: the header reaches a client with no repository
-#: around it, and it is capped at 2048 bytes with 11 to spare in the branch that ships (measured
-#: 2037 with the display tools registered, 1909 without; `_DISPLAY_TOOLS_AVAILABLE` decides, and
+#: around it, and it is capped at 2048 bytes with only a handful to spare in the branch that ships
+#: (`_DISPLAY_TOOLS_AVAILABLE` decides which branch that is, and
 #: `tests/test_server.py::test_build_instructions_under_2048_bytes` holds the cap on both). Bytes
 #: spent on a link nobody can follow would come out of the posture sentence itself.
+#:
+#: ⚠ NO HEAD-ROOM FIGURE IS WRITTEN HERE, and the reason is that one WAS, and it rotted. Until
+#: GQ-117 this line said "11 to spare (measured 2037 ... 1909)". Those three numbers were right
+#: when written on 2026-08-15 (`ba4e682`) and wrong from the next day: `6aa5836` spent +4 bytes on
+#: the header, updated the copy of the figure that lives beside the string in `server.py`, and
+#: left this one behind. Re-measured 2026-08-20: 2041 / 1913, seven to spare. The convention this
+#: now follows is the one `server.py` states beside the string itself: a head-room figure in prose
+#: drifts with every edit and nothing compares it, so measure it when the answer matters, with
+#: `len(build_instructions(True).encode())` against the cap.
 _WIRE_POINTER = "get_guide"
 
 _PROMISE = re.compile(r"read-only by default|gated off by default", re.IGNORECASE)
