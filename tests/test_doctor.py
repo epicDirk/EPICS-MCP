@@ -1,7 +1,11 @@
 """Offline tests for the read-only config self-check (services/doctor + cli_doctor), no network.
 
 Every test is hermetic: the config is patched to a fresh EpicsConfig and each client class is
-replaced by a fake, so the 'not live' suite makes no network call. Covers the 5-bucket classifier
+replaced by a fake, so the 'not live' suite makes no network call. ⚠️ ONE test builds a REAL
+client and replaces only its ``session.head``
+(``test_an_unreachable_verdict_renders_the_message_the_probe_handed_it``, which has to, since the
+message it asserts on is composed by that client). It still makes no network call; the sentence
+above is otherwise exact. Covers the 5-bucket classifier
 (Plan-QA #1: a served non-2xx is api_error/reachable, not unreachable), the disabled/ok/failing
 planes, the single-source privacy report, the live plane's no-default-egress posture (Plan-QA #4),
 and the CLI exit-code convention (0 clean / 1 a plane hard-failed / 2 usage / 3 inconclusive: an
@@ -2043,10 +2047,25 @@ def test_a_verdict_keeps_a_cause_that_carries_no_credential() -> None:
     assert clean in _classify_failure(RestConnectionError(clean), _PROBE_VAR)[3]
 
 
-#: The three transport failures that reach the ``unreachable`` arm, in requests' own wording, each
-#: with the phrase that tells it apart from the other two. A TLS failure is deliberately NOT here:
-#: it is recognised one arm earlier and lands in ``ca_error``, which
+#: The three transport failures that reach the ``unreachable`` arm, each with the phrase that tells
+#: it apart from the other two. A TLS failure is deliberately NOT here: it is recognised one arm
+#: earlier and lands in ``ca_error``, which
 #: ``test_an_unreadable_ca_bundle_is_a_ca_error_on_both_arrival_shapes`` holds.
+#:
+#: ⚠️ These are SHAPED like what requests and urllib3 produce, and the first version of this
+#: comment claimed they were that library's own wording. Measured against the pinned versions
+#: (requests 2.34.2, urllib3 2.7.0), two of the three are not: urllib3 2.x renders a connection as
+#: ``HTTPConnection(host=..., port=...)`` where 1.26 rendered ``<urllib3.connection.HTTPConnection
+#: object>``, and it prefixes ``NameResolutionError`` with that same repr. The ``[Errno 111]`` and
+#: ``[Errno -2]`` spellings are glibc; this machine answers ``[Errno 11001] getaddrinfo failed``.
+#: They stay fixtures on purpose, because the subject here is the CLASSIFIER and not the library,
+#: and a hand-built exception is what keeps the three rows deterministic across platforms. The
+#: cost is named rather than hidden: a reworded upgrade cannot turn this test red, unlike
+#: ``_CA_BUNDLE_MESSAGE``, which is checked against the real library for exactly that reason.
+#: The base URL the rows below are probed against, bound once because the address assertion has to
+#: name the SAME string the client was built with, or it would pin a literal instead of a property.
+_PROBED_URL = "http://cf.example.org:8080/ChannelFinder"
+
 _TRANSPORT_FAILURES: tuple[tuple[str, str, BaseException], ...] = (
     (
         "refused",
@@ -2098,23 +2117,36 @@ def test_an_unreachable_verdict_renders_the_message_the_probe_handed_it(
     repository's own barrier proved showable (``shown_url`` via ``shown_failure``), not one
     requests chose.
 
-    Both halves of the pair are real code rather than a fixture, which is what keeps the containment
-    assertion from being a tautology: the exception is built by
-    ``ChannelFinderClient.check_connectivity`` (the ``except OSError`` re-raise all five service
-    clients share), and the verdict is built by ``_classify_failure``. Asserting the WHOLE handed
-    message rather than a literal prefix is what keeps this test out of that client's wording.
+    Both halves of the pair are real code rather than a fixture: the exception is built by
+    ``ChannelFinderClient.check_connectivity`` and the verdict by ``_classify_failure``, over two
+    independent calls. ⚠️ That makes the containment assertion a real property of the DOCTOR half
+    and of that half only, and the first version of this docstring claimed it for both. Measured:
+    point ``check_connectivity`` at ``shown_cause(exc)`` instead of
+    ``shown_failure(self.base_url, exc)`` and ``handed`` shrinks WITH the verdict, so containment
+    stays green while the address is gone. The third assertion below is what closes that side, and
+    it is why this test names the address literally after all.
 
-    The third assertion pins the promise ``shown_cause``'s docstring makes and nothing else checks:
-    that these three arrive as three DIFFERENT verdicts. A cause replaced by a constant, or
-    withheld wholesale, collapses them to one and is red here while the containment assertion could
-    stay green.
+    ⚠️ Three cross-module facts this test rests on, each corrected after being measured rather
+    than recalled. The ``except OSError`` re-raise is shared by THREE clients, not five
+    (``alarm_client``, ``channelfinder_client``, ``olog_client``); ``naming_client`` catches an
+    explicit tuple and ``archiver_client`` has no re-raise at all, it goes through
+    ``rest_get_json``. The three families being DISTINGUISHABLE is already pinned one layer down,
+    over four families, by ``tests/test_http.py``'s
+    ``test_a_transport_cause_travels_verbatim_and_stays_distinguishable``; what is new here is the
+    LAYER (a rendered doctor verdict), not the promise. And every client
+    here shares ONE session object (``get_shared_session`` is cached and its key does not include
+    the base URL), so the three loop passes patch the same attribute on the same object; that this
+    leaks into no later test is the work of ``conftest.py``'s autouse ``clear_shared_sessions``,
+    which is named here because nothing else declares the dependency.
 
-    Red-proof, both directions, measured: with the mutant applied all three rows fail on the
-    "handed" assertion and NOT on the phrase assertion; reverted, the test passes.
+    Red-proof, both directions, measured, and all three rows checked one by one rather than
+    inferred from the first: with the ``__cause__`` mutant applied every row fails on the "handed"
+    assertion and NONE on the phrase assertion; reverted, the test passes. The address assertion
+    has its own kill, measured separately: rebuild the client's message from ``self.channels_url``
+    or from ``shown_cause`` alone and it is the one that fires.
     """
-    rendered: dict[str, str] = {}
     for label, phrase, raw in _TRANSPORT_FAILURES:
-        client = ChannelFinderClient("http://cf.example.org:8080/ChannelFinder")
+        client = ChannelFinderClient(_PROBED_URL)
         monkeypatch.setattr(client.session, "head", Mock(side_effect=raw))
         with pytest.raises(ChannelFinderConnectionError) as excinfo:
             client.check_connectivity()
@@ -2131,12 +2163,17 @@ def test_an_unreachable_verdict_renders_the_message_the_probe_handed_it(
             f"the {label} verdict no longer names its transport failure; {phrase!r} is the only "
             f"thing that tells it apart from the other two, and the remedy is static: {detail!r}"
         )
-        rendered[label] = detail
-
-    assert len(set(rendered.values())) == len(rendered), (
-        "two of the three transport failures render as the SAME verdict, so the arm no longer "
-        f"tells them apart: {rendered}"
-    )
+        # The half the containment assertion cannot see, because both its sides move together.
+        # Read out of context an unreachable line has to say WHICH service at WHICH address was
+        # not reached; the variable name alone does not, and neither does a library exception.
+        # The trailing separator is load-bearing and was measured, not styled: without it the
+        # assertion is a PREFIX test, and a message rebuilt from a longer URL under the same base
+        # (``self.channels_url`` rather than ``self.base_url``) still contains it and stays green.
+        # With it, the address has to END where the probe's address ends.
+        assert f"ChannelFinder at {_PROBED_URL}: " in detail, (
+            f"the {label} verdict no longer names the service and the exact address the probe "
+            f"could not reach, only the variable and the library's own text: {detail!r}"
+        )
 
 
 async def test_unverified_plane_does_not_fail_but_is_reported(
