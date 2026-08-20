@@ -566,9 +566,16 @@ async def monitor_pv(
     max_events: Annotated[
         int,
         # ge=1: a non-positive cap is meaningless, it would empty a valid response and the client
-        # would then mislabel it. The same reason its four capped siblings carry, and here it is
+        # would then mislabel it. The same reason its five capped siblings carry, and here it is
         # literal: min(0, max_monitor_events) is 0, so the stream is discarded and the answer
         # reads exactly like a PV that had nothing to say.
+        # ⚠ This said FOUR from the day it was written (2026-08-01, `b89e8f7`) and was wrong then
+        # too, not drifted into wrongness: an AST count of int parameters carrying `Field(ge=1)` in
+        # this module returns SIX at that commit and six today, so this one has five siblings, not
+        # four. They are find_channels.max_results, get_pv_history.max_points,
+        # list_archived_pvs.limit, get_alarm_history.max_events and search_logbook.size. Corrected
+        # under GQ-117; the prose-number guard cannot see the claim, because "siblings" is not one
+        # of its collection nouns.
         Field(
             description="Maximum events to collect (clamped to the server's max_monitor_events, "
             "default 1000, EPICS_MCP_MAX_MONITOR_EVENTS)",
