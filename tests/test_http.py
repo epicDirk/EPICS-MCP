@@ -982,8 +982,12 @@ def test_the_denial_count_is_monotonic_so_a_caller_reads_a_delta() -> None:
 #
 # That last sentence was prose and nothing enforced it (BG-DEAD). The two guards below do, and the
 # reason the function is guarded rather than deleted is written where it lives, in its own
-# docstring: five re-runnable red proofs in four test files use it as their measured
-# counter-example.
+# docstring: five red-proof RECIPES in four test files name it as their measured counter-example.
+# ⚠️ Recipes, not assertions. Measured over the whole repository, the only line that CALLS this
+# function is the assertion of its own table test; the five are docstring sentences a reader
+# re-cooks by editing source. That is still a reason to keep it (a recipe that says "point X at
+# this function" needs the function to exist), but it is a weaker one than "five executable
+# instructions", which is what this comment and the commit that added it first claimed.
 # ----------------------------------------------------------------------------------------------
 
 
@@ -997,25 +1001,39 @@ _SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "epics_mcp"
 def _code_references(source: str, name: str) -> list[tuple[int, str]]:
     """Every place *source* refers to *name* AS CODE, as ``(line, form)``.
 
-    Four forms, because each is a way a caller could arrive: a bare ``Name`` (a call, or an alias
-    assignment that defers one), an ``Attribute`` (``_http.url_without_credentials(...)``), and an
-    import ``alias`` in either spelling (plain or ``as``). An import is included deliberately even
-    though importing is not calling: nothing in ``src/`` has a reason to import a function it may
-    not use, so the import is the earliest point at which the question can be asked.
+    Three node kinds, because each is a way a caller could arrive: a bare ``Name`` (a call, or an
+    alias assignment that defers one), an ``Attribute``
+    (``_http.url_without_credentials(...)``), and an import ``alias``, which catches the
+    ``as``-spelling too because that one binds under ``alias.name``. An import is included
+    deliberately even though importing is not calling: outside the defining module nothing has a
+    reason to import a function it may not use, and inside it the ``Name`` arm is what fires.
+
+    ⚠️ ``alias.asname`` is deliberately NOT matched, and it was, until the post-build QA asked for
+    a control that proved it. Measured, matching it is a FALSE-POSITIVE source rather than extra
+    coverage: ``from foo import bar as url_without_credentials`` binds a completely different
+    function under this name and would have been reported as a caller, while the case it was meant
+    to catch is already covered twice over, once by ``alias.name`` at the import and once by the
+    ``Name`` node at the call.
 
     A ``def`` of that name contributes nothing, and that is a property of the grammar rather than
     a special case here: ``FunctionDef`` carries its name as a plain string, so the definition
     site produces no node this walk can see.
 
-    ⚠️ Prose is invisible to it, and the whole no-allowlist design rests on that: the four
-    docstring and comment cross-references in ``src/`` live inside ``ast.Constant`` and ``#``
-    lines, so they are not findings and do not need excusing. ``test_the_no_caller_detector_sees_
-    code_and_not_prose`` pins both halves.
+    ⚠️ Prose is invisible to it, and the whole no-allowlist design rests on that: the FIVE
+    docstring and comment cross-references to the current entry live inside ``ast.Constant`` and
+    ``#`` lines, so they are not findings and do not need excusing. The detector's own test
+    ``test_the_no_caller_detector_sees_code_and_not_prose`` pins both halves. (Five, not four: the
+    commit that wrote this guard added the fifth itself, in that function's own docstring, and
+    left the count from before it.)
 
-    ⚠️ Honest limit: a reference assembled from a STRING is invisible too
-    (``getattr(_http, "url_without_credentials")``, ``globals()[...]``). That is the cost of an
-    exact detector over a grep, it is named here rather than discovered later, and it is not the
-    realistic route: the realistic route is somebody reaching for an obvious-looking helper.
+    ⚠️ Two honest limits, neither of them a reason to prefer a grep. A reference assembled from a
+    STRING is invisible (``getattr(_http, "url_without_credentials")``, ``globals()[...]``); that
+    is simply not covered, and calling it unrealistic would be a prediction rather than a
+    measurement. And the ``Attribute`` arm compares only ``node.attr``, never the object it hangs
+    off, so a SECOND entry whose name is also a common method name would report attribute hits
+    that are not this function at all: measured in ``src/``, ``_get`` has 17, ``_emit`` 10 and
+    ``check_connectivity`` 6, against 0 for every top-level name in this module. Adding such an
+    entry means qualifying the arm, not silencing it.
     """
     found: list[tuple[int, str]] = []
     for node in ast.walk(ast.parse(source)):
@@ -1023,17 +1041,23 @@ def _code_references(source: str, name: str) -> list[tuple[int, str]]:
             found.append((node.lineno, "name"))
         elif isinstance(node, ast.Attribute) and node.attr == name:
             found.append((node.lineno, "attribute"))
-        elif isinstance(node, ast.alias) and name in (node.name, node.asname):
+        elif isinstance(node, ast.alias) and node.name == name:
             found.append((node.lineno, "import"))
     return found
 
 
 def _definition_sites(source: str, name: str) -> list[int]:
-    """The lines of *source* that ``def`` *name*."""
+    """The lines of *source* that ``def`` *name*, ``async def`` included.
+
+    ⚠️ ``AsyncFunctionDef`` is a separate class, not a subclass, and leaving it out was a real
+    defect rather than a hypothetical one: ``src/`` holds 104 async definitions, so a second entry
+    that happens to be one would have made the guard report "defined nowhere" and tell its reader
+    that somebody had deleted a function that is right there. A wrong diagnosis is worse than none.
+    """
     return [
         node.lineno
         for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef) and node.name == name
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == name
     ]
 
 
@@ -1047,31 +1071,44 @@ def test_the_retired_redactor_exists_and_has_no_caller_in_src() -> None:
 
     BOTH assertions are load-bearing and the FIRST is the one that is easy to leave out. A guard
     that only counts references passes trivially once the function is deleted, and would then read
-    as "still safe" while the five red proofs that name it had quietly become unexecutable. So the
-    definition is pinned first, and the count of callers second.
+    as "still safe" while the five red-proof recipes that name it had quietly become
+    un-re-cookable. So the definition is pinned first, and the caller count second.
 
-    Measured 2026-08-20: exactly one definition, zero references. The four cross-references to it
-    in ``src/`` are prose and invisible to this walk, which is why there is no allowlist to keep
-    in step with them.
+    Existence, not a count of one: the first assertion asks for AT LEAST one definition, because
+    what it defends against is deletion, and a second entry sharing a name with some method
+    elsewhere in the tree would fail an ``== 1`` while nothing was wrong. Measured in ``src/``,
+    39 function names are already defined more than once (``_run`` 26 times, ``check_connectivity``
+    5).
 
-    Red proof, run in both directions: insert ``url_without_credentials(url)`` into any ``src/``
-    module and the second assertion names the file and line; delete the ``def`` and the first one
-    fires instead of the guard silently passing.
+    Measured 2026-08-20: one definition, zero references. The five cross-references to it in
+    ``src/`` are prose and invisible to this walk, which is why there is no allowlist to keep in
+    step with them.
+
+    ⚠️ Scope is ``src/epics_mcp``, and that is the whole delivered surface rather than a shortcut:
+    ``src/`` holds exactly this one package, and none of the nine modules under ``scripts/``
+    imports ``epics_mcp`` (measured), nor is ``scripts/`` packaged.
+
+    Red proof, run in both directions: insert ``url_without_credentials(url)`` into any module
+    under ``src/epics_mcp`` and the second assertion names the file and line; rename the ``def``
+    away and the first one fires instead of the guard silently passing.
     """
     modules = sorted(_SRC_DIR.rglob("*.py"))
     assert modules, f"no modules found under {_SRC_DIR}, check the path"
     sources = {path: path.read_text(encoding="utf-8") for path in modules}
 
     for name in _RETIRED_WITHOUT_CALLER:
+        # Relative keys on BOTH dicts. An absolute path here would print the operator's account
+        # name into a failure log, which is the disclosure class ``_CA_BUNDLE_CAUSE`` refuses to
+        # echo four hundred lines further down.
         definitions = {
-            path: lines
+            path.relative_to(_SRC_DIR).as_posix(): lines
             for path, source in sources.items()
             if (lines := _definition_sites(source, name))
         }
-        assert sum(len(lines) for lines in definitions.values()) == 1, (
-            f"{name} is defined at {definitions or 'nowhere'}; this guard asserts that NOTHING "
+        assert definitions, (
+            f"{name} is defined nowhere under {_SRC_DIR.name}; this guard asserts that NOTHING "
             "calls it, which is vacuously true once it is gone, so its existence is pinned here "
-            "and whoever removes it removes this entry and the red proofs that name it"
+            "and whoever removes it removes this entry and the red-proof recipes that name it"
         )
         callers = {
             path.relative_to(_SRC_DIR).as_posix(): references
@@ -1090,9 +1127,16 @@ def test_the_no_caller_detector_sees_code_and_not_prose() -> None:
     """Positive and negative control in one probe, because a detector that finds nothing is only
     good news once it has been shown to find something.
 
-    The negative half carries the design: the four cross-references in ``src/`` are a docstring
-    sentence and comment lines, so if this walk saw prose the guard above would need an allowlist,
+    The negative half carries the design: the five cross-references in ``src/`` are docstring
+    sentences and comment lines, so if this walk saw prose the guard above would need an allowlist,
     and an allowlist is a second list free to drift from the first.
+
+    ⚠️ The two rows at the end were added by the post-build QA, and each closes a hole the first
+    version left. The ``as``-import row proved nothing about ``alias.asname``, because it matches
+    on ``alias.name`` first; the mutation ``name in (node.name, node.asname)`` to
+    ``node.name == name`` survived both guards. Measured, that mutation is a FIX rather than a
+    hole, so what is pinned now is the false positive it removes. And ``async def`` was invisible
+    to ``_definition_sites`` entirely.
     """
     name = "url_without_credentials"
 
@@ -1103,13 +1147,21 @@ def test_the_no_caller_detector_sees_code_and_not_prose() -> None:
     assert _code_references(f"shown = _http.{name}(url)\n", name)
     assert _code_references(f"handler = {name}\n", name)
 
-    # Negative: the shapes the four src cross-references actually take.
+    # Negative: the shapes the five src cross-references actually take.
     assert not _code_references(f'"""Prefer shown_url over {name} for a message."""\n', name)
     assert not _code_references(f"# {name}(url) is what this used to do\n", name)
     assert not _code_references(f"def {name}(url):\n    return url\n", name)
 
-    # And the definition detector is the mirror image of that last row.
+    # Negative, and this row is the one the QA asked for: a DIFFERENT function bound under this
+    # name is not a caller of this one. Matching ``alias.asname`` reported it as one, and dropping
+    # that half loses nothing, because the call it enables carries a ``Name`` node of its own.
+    assert not _code_references(f"from foo import bar as {name}\n", name)
+    assert _code_references(f"from foo import bar as {name}\n{name}(url)\n", name)
+
+    # And the definition detector is the mirror image of the third negative row, for BOTH spellings
+    # of a definition.
     assert _definition_sites(f"def {name}(url):\n    return url\n", name) == [1]
+    assert _definition_sites(f"async def {name}(url):\n    return url\n", name) == [1]
     assert not _definition_sites(f"shown = {name}(url)\n", name)
 
 

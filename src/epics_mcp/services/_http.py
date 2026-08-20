@@ -99,14 +99,26 @@ def url_without_credentials(url: str) -> str:
     ``tests/test_doctor.py::test_the_olog_target_rebuild_keeps_the_address_and_drops_a_plain_credential``.
 
     ⚠️ It is KEPT rather than deleted, and that is a decision with a guard rather than a leftover
-    (BG-DEAD). Five re-runnable red proofs in four test files name this function as their measured
+    (BG-DEAD). Five red-proof RECIPES in four test files name this function as their measured
     counter-example, of the form "point X at ``url_without_credentials`` and row N fails"
     (``test_doctor``, ``test_http`` twice, ``test_resources``, ``test_write_gate_contract``): it is
-    the negative control four redaction surfaces are calibrated against, so deleting it would turn
-    five executable instructions into archaeology. What deleting it WOULD have bought, a guarantee
-    that nothing calls a function that leaks on one spelling, is bought instead by
-    ``tests/test_http.py::test_the_retired_redactor_exists_and_has_no_caller_in_src``, which turns
-    a new caller anywhere in ``src/`` red.
+    the negative control the redaction surfaces are calibrated against, and a recipe that says
+    "point X at this function" needs the function to exist to be re-cooked.
+
+    ⚠️ Recipes, not assertions, and the post-build QA had to say so because the first version of
+    this paragraph called them "five executable instructions". Measured over the whole repository,
+    exactly ONE line calls this function, the assertion of its own table test in ``test_doctor``;
+    the five are docstring sentences a reader follows by editing source. The argument survives the
+    correction and is weaker than it was written.
+
+    What deleting it WOULD have bought, a guarantee that nothing calls a function that leaks on one
+    spelling, is bought instead by
+    ``tests/test_http.py::test_the_retired_redactor_exists_and_has_no_caller_in_src``, which turns a
+    new caller anywhere under ``src/epics_mcp`` red. A third option, moving it into ``tests/``,
+    keeps the recipes and removes the leaking function from the shipped package; it was raised by
+    the QA and NOT taken, because four ``:func:`` cross-references in ``src/`` would then point out
+    of the package and the recipes ask for it beside the functions they calibrate. That is a
+    preference, not a measurement, and it is recorded as one.
 
     Query and fragment go too, because a base URL does not need them and a token is a normal thing
     to find in a query string. Returns ``"(unparseable)"`` when the parser refuses the URL: such a
