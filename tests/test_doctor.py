@@ -356,6 +356,40 @@ def _identity_never_touches_the_network(monkeypatch: pytest.MonkeyPatch) -> None
         lambda *_a, **_k: _identified("archiver_retrieval"),
     )
 
+    # The TRANSPORT half of the same promise, and it was the half still open. ``_check_olog`` runs
+    # two probes: the identity one, stubbed above, and ``OlogClient(...).check_connectivity()``,
+    # which is a real socket. The plane-wiring tests below never noticed, because each installs its
+    # own client double; the RENDER tests further down do not, because they configure ``olog_url``
+    # only to make a line appear, and they got the real client.
+    #
+    # Measured on this tree before this line existed, with `pytest --durations`: eight tests paid
+    # for it, five at 11.15 s and three at 3.02 s, together about 65 s of this module's 71.7 s. The
+    # 11.15 s is the retrying session (`_fetch_beacon` docstring: the timeout is PER ATTEMPT) times
+    # a loopback connect that this Windows host refuses in 2.04 s; the 3.02 s is urllib3 backoff
+    # after an instant DNS failure for `olog.example.org`, i.e. a real name lookup leaving the host.
+    # None of the eight asserts anything about the probe's verdict, they assert rendered TEXT.
+    #
+    # This is the same defect the module has already had once, from the other side:
+    # ``test_the_write_gate_defaults_cover_every_field_the_block_reads`` records that ``olog_url``
+    # was missing from the defaults, "so three tests in this file read it from the developer's
+    # environment and the suite dialled that URL for real". Pinning the default closed the tests
+    # that set no URL; this closes the ones that set one on purpose.
+    #
+    # The other four client classes are deliberately NOT stubbed here: measured, no test in this
+    # module configures their URL without installing its own double, so there is nothing to close
+    # and a stub would be a guess. A future test that does will show up the same way, as seconds in
+    # `--durations`, and belongs in this fixture beside this one.
+    class _ReachableOlog:
+        """Answers the transport probe without a socket. Overridden by any test with its own."""
+
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def check_connectivity(self) -> None:
+            return None
+
+    monkeypatch.setattr("epics_mcp.services.doctor.OlogClient", _ReachableOlog)
+
 
 async def test_all_disabled_is_ok_and_makes_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """Empty config → every REST plane disabled, live=info, ok=True, and NO client is ever built."""
