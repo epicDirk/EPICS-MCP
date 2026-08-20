@@ -17,8 +17,17 @@ REST clients. It carries two kinds of edge:
 
 Both kinds used to sit in the *tool* layer and were imported cross-layer (CLI → tools, tool →
 tool, service → tool). They live here now, in the services layer, with public names, so tools,
-CLIs and services import downward from one expected place (and the 5th REST plane has an obvious
-home for its adapter, factory and query).
+CLIs and services import downward from one expected place.
+
+⚠️ That sentence used to end "(and the 5th REST plane has an obvious home for its adapter,
+factory and query)", a prediction the file itself has outlived. The fifth plane is Olog, it
+arrived with the MA-1 split, and its home is NOT here: its query functions live in
+``checkers_olog.py`` and are re-exported by the ``from epics_mcp.services.checkers_olog import``
+block below, which is the evidence and does not move when this paragraph does. The four in the
+first line therefore stays right, and for a reason worth knowing: the fifth got its own module
+rather than a seat in this one. Corrected under GQ-117, and found by an audit rather than by a
+guard. The prose-number guard reads this file, but ``5th`` is not a number token to it, so an
+ordinal can go stale here without anything going red.
 """
 
 from __future__ import annotations
