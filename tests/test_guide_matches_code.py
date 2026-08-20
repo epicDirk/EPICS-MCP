@@ -12,8 +12,10 @@ claiming otherwise stood here twice. What each guard reads is stated per guard, 
 
 * the tool inventory, against the registrations. Anchored on markers;
 * every ``EPICS_MCP_*`` mention, against ``EpicsConfig``. Whole file: measured, the guide mentions
-  those variables on 35 lines and NONE of them falls inside the inventory markers, so an anchored
-  scan would read no mention at all;
+  those variables on 46 lines and NONE of them falls inside the inventory markers, so an anchored
+  scan would read no mention at all (⚠️ this said 35 until GQ-117, right when written on
+  2026-07-30 and grown with the guide since; re-derive with ``_ENV_RE`` over ``get_guide()``
+  rather than trusting the figure);
 * the status legend and the statuses named in the prose above it, against ``PlaneStatus`` and
   ``cli_doctor._STATUS_MARK`` (QA-47, widened by QA-49). Its six guards read six different things:
   the tiling guard and the totality guard read no guide text at all (the second one holds the
@@ -948,8 +950,9 @@ def test_the_guide_status_buckets_tile_plane_status() -> None:
 
     The union is compared as a SET, and the double-listing count stands BESIDE it rather than in
     place of it. Three equal cardinalities are blind to a RENAME, because a rename is
-    cardinality-neutral: measured on this tree, renaming a status in ``PlaneStatus`` and
-    ``_STATUS_MARK`` while leaving the buckets alone was green here for all twelve statuses, so the
+    cardinality-neutral: measured 2026-07-30, renaming a status in ``PlaneStatus`` and
+    ``_STATUS_MARK`` while leaving the buckets alone was green here for all twelve statuses of that
+    day, thirteen since ``throttled`` joined them on 2026-08-19, so the
     buckets would go on naming a status that no longer exists. Set equality alone is in turn blind
     to a DOUBLE listing, which is why both halves are asserted. The message below already printed
     both set differences, and that was the tell: a message that prints a set difference states a
@@ -1244,7 +1247,8 @@ def test_a_blank_line_inside_the_legend_is_rejected() -> None:
     Constructed input, same reason. Measured with a renderer on the legend as it stood then (six
     rows): one blank line before the last row rendered six ``<tr>`` instead of seven and dropped
     the last row into a paragraph of literal pipes, while this parser still returned every row and
-    every guard stayed green. The legend has twelve rows since QA-49; the property is the same and
+    every guard stayed green. Since QA-49 the legend has one row per ``PlaneStatus`` member, so its
+    size is derived and no figure is written here; the property is the same and
     the measurement is dated rather than re-run, because it is about the RENDERER, not the count.
     The filter that hid it is the ``line.strip()`` this function uses to find the
     header, which is right for the marker padding around the table and wrong inside it.
@@ -1477,9 +1481,10 @@ def test_the_span_pass_reads_a_span_of_exactly_two_tokens_and_no_longer_one() ->
 def test_a_renamed_status_is_reported_though_the_three_counts_still_agree() -> None:
     """The property QA-50's first step bought: the buckets are compared as SETS.
 
-    A rename is cardinality-neutral, so three equal sizes cannot see it. Measured on the tree,
-    renaming any of the twelve statuses while leaving the buckets alone was green under the old
-    count-only assertion, all twelve times, and for the three then named in neither region it was
+    A rename is cardinality-neutral, so three equal sizes cannot see it. Measured 2026-07-30,
+    renaming any of the twelve statuses that existed then while leaving the buckets alone was green
+    under the old count-only assertion, all twelve times, and for the three then named in neither
+    region it was
     green in every other guard in this file too. (That second clause is dated 2026-07-30: QA-49
     has since put every status in the legend, so no status is named in neither region any more.
     The property this pin holds is unaffected, a rename stays cardinality-neutral.)
@@ -1567,8 +1572,14 @@ def test_a_prose_token_that_is_not_a_status_is_reported() -> None:
     likely one rather than an exotic one. Measured on the tree afterwards (2026-07-30), the
     direction caught three of the six statuses then named outside the legend; the other three were
     named in neither region and were held by the set comparison alone. Since QA-49 the legend names
-    every status, so the reverse direction and the legend guard both reach all twelve, and this
+    every status, so the reverse direction and the legend guard both reach ALL of them, whatever
+    ``PlaneStatus`` holds at the time, and this
     direction is what still makes the marked region's own promise true for the prose.
+
+    ⚠️ This sentence said "both reach all twelve" until GQ-117 and had been wrong since
+    ``throttled`` was added on 2026-08-19 (``ab7bf05``): thirteen, measured
+    ``len(get_args(PlaneStatus))``. It is de-numbered rather than re-numbered, because the figure
+    moves with every new status and nothing here compares it.
 
     The second assertion is the control: a token that IS a status must pass, or the direction would
     just be a ban on writing anything.
