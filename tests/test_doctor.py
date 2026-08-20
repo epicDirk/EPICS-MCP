@@ -377,9 +377,16 @@ def _identity_never_touches_the_network(monkeypatch: pytest.MonkeyPatch) -> None
     #
     # WHAT STILL COVERS THE STUBBED PATH, named per thing rather than in general, because a stub is
     # a reach reduction unless the reach lives somewhere else:
-    #   * that ``_check_olog`` calls the probe at all:
-    #     ``test_every_rest_plane_is_actually_identity_probed[olog]``, which installs its own
-    #     ``OlogClient`` double and therefore overrides this one;
+    #   * that ``_check_olog`` calls the TRANSPORT probe at all:
+    #     ``test_every_rest_plane_actually_runs_its_transport_probe[olog]``, which installs a
+    #     RECORDING double and therefore overrides this one. ⚠️ That guard was written for this
+    #     stub and did not exist before it: the sibling
+    #     ``test_every_rest_plane_is_actually_identity_probed`` uses ``_OkClient``, whose
+    #     ``check_connectivity`` returns True and records nothing, so it proves the IDENTITY probe
+    #     runs and says nothing about the transport one. Measured: ``_cause_client``, the double
+    #     that would have noticed, is installed for channelfinder, archiver and alarm and never for
+    #     olog. Before this stub the call was EXECUTED by eight render tests and asserted by none;
+    #     now it is asserted, for all five planes rather than the one that prompted the question;
     #   * the real ``OlogClient.check_connectivity`` itself, both outcomes:
     #     ``tests/test_olog.py::test_check_connectivity_reachable`` and
     #     ``::test_check_connectivity_raises_on_transport_failure``, which fake the TRANSPORT and so
@@ -1664,6 +1671,60 @@ async def test_every_rest_plane_is_actually_identity_probed(
     assert checked.identified is True, (
         f"{plane}: reachable but never identity-probed, a transport probe alone is what let a "
         "dead container report ok"
+    )
+
+
+@pytest.mark.parametrize(
+    ("plane", "url_field", "client_name"),
+    [
+        ("channelfinder", "channelfinder_url", "ChannelFinderClient"),
+        ("olog", "olog_url", "OlogClient"),
+        ("alarm", "alarm_url", "AlarmClient"),
+        ("archiver", "archiver_url", "ArchiverClient"),
+        ("naming", "naming_url", "NamingServiceClient"),
+    ],
+)
+async def test_every_rest_plane_actually_runs_its_transport_probe(
+    monkeypatch: pytest.MonkeyPatch, plane: str, url_field: str, client_name: str
+) -> None:
+    """The OTHER half of the wiring, and it was assumed rather than asserted (GB-34).
+
+    The sibling above proves the IDENTITY probe is called. Nothing proved the TRANSPORT probe is:
+    ``_OkClient.check_connectivity`` returns True and records nothing, so a gatherer that dropped
+    the ``_run`` call entirely would keep every plane ``identified`` and stay green there.
+
+    Found while stubbing the Olog transport in this module's autouse fixture. Before that stub the
+    call was EXECUTED by eight render tests, over a real socket, and asserted by none; measured with
+    ``grep``, ``_cause_client`` is installed for channelfinder, archiver and alarm and never for
+    olog, so the olog transport probe had no assertion at all in either state. Rather than leave a
+    reach reduction behind, the incidental execution is replaced by an explicit and cheap guard, and
+    the same question is asked of all five planes instead of the one that prompted it.
+
+    Why it matters beyond wiring: the transport probe is what turns an unreachable service into
+    ``unreachable`` rather than into a silent verdict about a service nobody contacted. Dropping it
+    while keeping the identity probe would report a dead host as identity-probe-failed, which sends
+    a reader to the wrong remedy.
+
+    Red proof: delete the ``_run`` call from ``_check_olog`` (or from any sibling gatherer) and its
+    row fails here while the identity row above stays green.
+    """
+    called: list[str] = []
+
+    class _RecordingClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def check_connectivity(self) -> bool:
+            called.append(plane)
+            return True
+
+    _set_config(monkeypatch, **{url_field: "http://service.example/x"})
+    monkeypatch.setattr(f"epics_mcp.services.doctor.{client_name}", _RecordingClient)
+    await run_doctor()
+
+    assert called == [plane], (
+        f"{plane}: the transport probe was never run, so an unreachable service cannot be "
+        f"classified as unreachable. Calls recorded: {called}"
     )
 
 
@@ -4369,9 +4430,14 @@ def test_a_denied_target_does_not_read_as_the_string_the_gate_compared() -> None
     seventh, a plain-http allowlisted target, the comparison ran and SUCCEEDED while the https rule
     denied. Whoever rewords these two lines owes that enumeration again.
 
-    ⚠️ This one test contacts the network, and it is the only reason it takes seconds: setting
-    olog_url configures the Olog REST plane, so ``run_doctor`` probes it and the synthetic host
-    fails to resolve three times. It renders through the full report rather than calling
+    ⚠️ **This paragraph used to say "this one test contacts the network, and it is the only reason
+    it takes seconds", and it stopped being true in GB-34.** Setting ``olog_url`` still configures
+    the Olog REST plane and ``run_doctor`` still probes it, but the module's autouse fixture now
+    stubs the transport probe as well as the identity one, so nothing leaves the host and the test
+    costs milliseconds. The measurement behind the old sentence was real: it and seven siblings paid
+    about 65 s of this module's 71.7 s waiting for a synthetic host to fail to resolve and for a
+    refused loopback connect, three attempts plus backoff each.
+    It renders through the full report rather than calling
     ``_olog_write_lines`` because the block's PLACE in the report is part of what is held here; the
     branch-by-branch checks below need no report and take none.
 
