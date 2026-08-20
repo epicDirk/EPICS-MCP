@@ -243,9 +243,14 @@ work.
    a sweep WOULD have caught it. The sham list comes from the coverage map read BACKWARDS (which
    tests execute the guard, versus which claim it), and costs no run at all.
 
-   ⚠️ Record the map with `COVERAGE_CORE=ctrace`. On Python 3.12+ coverage defaults to the
-   `sys.monitoring` core, which disables a location after its FIRST observation, so every later
-   test covering the same line leaves no context row. Measured here, both maps on the same
+   ⚠️ Record the map with `COVERAGE_CORE=ctrace`. Where coverage defaults to the
+   `sys.monitoring` core, that core disables a location after its FIRST observation, so every later
+   test covering the same line leaves no context row. ⚠️ **"On Python 3.12+" is what this sentence
+   said until GB-34, and the version floor was wrong** against the coverage `uv.lock` pins today:
+   read at `coverage/env.py`, `SYSMON_DEFAULT = CPYTHON and PYVERSION >= (3, 14)`, so on 3.12 and
+   3.13 the map is a C-tracer map with or without the variable. The behaviour claim below is
+   unaffected and the variable is still set everywhere, because which interpreter records a map is
+   a configuration choice that changes under the recipe. Measured here, both maps on the same
    1472-test tree (2026-07-26): 72 tests touch a guard line under the default core versus 292 under
    ctrace (median 2 versus 13, and the default map is poorer on 58 of the 61 covered lines). An
    audit driven by the default map runs a quarter of the relevant tests and reports false

@@ -14,9 +14,13 @@ Two directions, and they answer different questions:
 * ``sweep`` (direction A): which guards no test observes, by mutating each one and seeing
   whether anything goes red.
 
-⚠️ The map MUST be recorded with ``COVERAGE_CORE=ctrace``. On Python 3.12+ coverage defaults to
-the ``sys.monitoring`` core, which disables a location after its FIRST observation, so later
-tests covering the same line leave no context row. Measured on this repository, both maps recorded
+⚠️ The map MUST be recorded with ``COVERAGE_CORE=ctrace``. Where coverage defaults to the
+``sys.monitoring`` core, that core disables a location after its FIRST observation, so later
+tests covering the same line leave no context row. ⚠️ This said "on Python 3.12+" until GB-34 and
+the floor was wrong against the pinned coverage: ``coverage/env.py`` reads
+``SYSMON_DEFAULT = CPYTHON and PYVERSION >= (3, 14)``, so 3.12 and 3.13 record a C-tracer map
+either way. Set the variable regardless; the interpreter is a configuration choice that moves under
+this recipe. Measured on this repository, both maps recorded
 on the same 1472-test tree (2026-07-26): 72 tests touch a guard line under the default core versus
 292 under ctrace, median 2 versus 13 per covered line, and the default map reports fewer covering
 tests on 58 of the 61 covered guard lines. A sweep driven by the default map would run a quarter of

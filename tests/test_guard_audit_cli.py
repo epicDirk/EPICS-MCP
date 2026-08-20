@@ -157,6 +157,42 @@ def test_check_with_a_database_compares_the_coverage_pins_too(
         )
 
 
+def test_a_run_with_a_map_says_it_checked_all_six_pins(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The AGREEING with-database run, and the number in its verdict line is the load-bearing part.
+
+    Why this exists: since GB-34 the coverage-dependent half runs in CI, in the ``sham-audit`` job
+    of ``.github/workflows/ci.yml``. That job's whole value is that it reaches the two pins the
+    ordinary gate cannot, and its most likely way of rotting is silent: a database that is not
+    found, not readable, or recorded without ``--cov-context=test`` leaves the tool comparing four
+    pins and printing "all agree", which is a green job that verified nothing new. The token that
+    tells the two apart is the COUNT in the verdict line, so it is asserted here rather than
+    grepped for in YAML, where nothing versions it.
+
+    The map is non-empty (an empty one is exit 2, see the blind-map test above) but names a test
+    that is NOT in the claiming population, so no claiming test executes a guard line: both
+    coverage figures then equal their AST twins, which is what the recorded pins say, so the run
+    agrees and exits 0.
+
+    Red proof: drop ``--cov-context=test`` from the CI recipe and the job's map carries no per-test
+    contexts, which is the real-world form of this; in-process, delete the coverage branch of
+    ``cmd_sham`` and the count falls to four.
+    """
+    outside_the_population = "tests/test_not_a_real_module.py::test_not_in_the_population"
+    monkeypatch.setattr(
+        guard_audit,
+        "load_coverage_map",
+        lambda _path: {("olog_client.py", 181): {outside_the_population}},
+    )
+
+    assert guard_audit.main([*_ARGV, "--coverage-db", "synthetic"]) == 0
+    reported = capsys.readouterr().err
+    assert f"checked {len(guard_audit.PINNED)} pin(s)" in reported, reported
+    assert len(guard_audit.PINNED) == 6, "six is the figure the CI job's value rests on"
+    assert "NOT checked here" not in reported, "with a map nothing may be deferred"
+
+
 def test_a_coverage_context_is_matched_by_file_and_function(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

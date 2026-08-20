@@ -63,3 +63,66 @@ jobs:
         run: uv sync --extra dev --locked
       - name: pre-commit (ruff check + format + mypy)
         run: uv run pre-commit run --all-files --show-diff-on-failure
+
+  # The coverage-dependent half of the sham-guard audit (scripts/guard_audit.py). Two of its six
+  # pins are decided by WHICH TESTS EXECUTED a client-edge guard line, which the ordinary `test`
+  # job cannot answer because it records no per-test contexts. Until this job they were re-recorded
+  # by hand and verified by nobody: `sham --check` without a database names them as unreachable and
+  # says so on every run, which is honest and is not a check.
+  #
+  # A JOB rather than a step, and no schedule. A step would add a full ctrace suite run, minutes,
+  # to each of the three matrix legs; a parallel job adds almost no wall clock. A schedule would
+  # report on a DAY instead of on a CHANGE, so the commit that moved a figure would already have
+  # shipped, and the run could not be reproduced at that SHA by re-running the workflow.
+  #
+  # It REPORTS rather than blocks: main's ruleset holds non_fast_forward and deletion only, so no
+  # required status check stands in front of a commit (tests/test_release_workflow.py records the
+  # same fact and why it is deliberate). Read it, do not assume it gates.
+  #
+  # 3.12 because that is the declared floor and the cheapest leg; the audit reads the source tree
+  # and the coverage map, neither of which is interpreter-specific.
+  #
+  # Like `test`, this job syncs WITHOUT `--group displays`, so the eight engine-coupled test modules
+  # of tests/conftest.py never run here (docs/known-limits.md, entry 16). That is deliberate and it
+  # is also what the recorded pins were checked against: measured locally in the same shape on
+  # 2026-08-20, the run reproduces all six.
+  sham-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install dependencies (exactly as uv.lock pins them)
+        run: uv sync --extra dev --locked
+      # Three flags are load-bearing and none is decoration.
+      #   COVERAGE_CORE=ctrace: where sys.monitoring is the default core it disables a location
+      #     after its FIRST observation, so a map recorded without it sees a fraction of the
+      #     covering tests and the audit reports false survivors. Measured on 2026-08-20 on this
+      #     tree, both maps in this job's shape: 246 test functions execute a client-edge guard
+      #     line under ctrace, 75 under the default core, and the audit exits 1 on the second.
+      #     On THIS runner it is belt and braces rather than load-bearing: coverage 7.14.1 sets
+      #     SYSMON_DEFAULT = CPYTHON and PYVERSION >= (3, 14), so 3.12 records a C-tracer map
+      #     either way. It is set because the interpreter above is a choice that can change, and
+      #     because this job is also the executable form of the recipe CONTRIBUTING.md hands a
+      #     developer, whose own machine may well be 3.14. The 75-versus-246 figure was measured
+      #     there.
+      #   --cov-branch: guard_audit reads the `arc` table. Without branch coverage that table is
+      #     empty while the data sits in `line_bits`, which yields a silently EMPTY map.
+      #   --cov-context=test: without it there are no per-test contexts, which is the whole input.
+      # COVERAGE_FILE points outside the checkout, the same rule the local recipe in
+      # scripts/guard_audit.py states, so a run never overwrites a working .coverage.
+      - name: Record a C-tracer map with per-test contexts
+        env:
+          COVERAGE_CORE: ctrace
+          COVERAGE_FILE: ${{ runner.temp }}/sham-cov
+        run: uv run pytest tests/ -q --cov=src --cov-branch --cov-context=test --cov-report=
+      # Exit codes are already contracted, so no wrapper: 0 agreement, 1 a pin deviates or the
+      # candidate list changed, 2 a blind map or a broken services anchor, 9 a crash. Every non-zero
+      # should fail this step. A green run prints "checked 6 pin(s)"; "checked 4 pin(s)" would mean
+      # the database was never read, and that is asserted in tests/test_guard_audit_cli.py rather
+      # than grepped for here, because nothing versions a shell pipeline.
+      - name: The sham audit's coverage-dependent pins and its candidate list
+        run: uv run python scripts/guard_audit.py sham --check --coverage-db "${{ runner.temp }}/sham-cov"

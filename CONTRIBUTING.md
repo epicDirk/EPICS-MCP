@@ -170,16 +170,27 @@ instead since 2026-08-04: `docs/known-limits.md`, entry 16.
     figure being measured that nothing pins. Re-measure with
     `uv run python scripts/guard_audit.py sham --check`. That verdict was reached
     by a person reading a list, so a longer list has not been read: re-read it, then re-record.
-- **Periodically, and after any change to a client module or a client-double test:** re-record the
-  coverage-dependent half of the sham audit. It is not in the gate because it costs a full
-  `COVERAGE_CORE=ctrace` suite run, so it only happens if someone does it deliberately:
+- **After any change to a client module or a client-double test:** the coverage-dependent half of
+  the sham audit is re-checked for you. Since GB-34 the `sham-audit` job of
+  `.github/workflows/ci.yml` records a `COVERAGE_CORE=ctrace` map on every push and runs
+  `guard_audit.py sham --check --coverage-db`, so all six figures are verified rather than four.
+  It still costs a full extra suite run, which is why it is a parallel JOB and not a step in the
+  gate, and why the local chain does not run it.
+  ⚠️ **It reports, it does not block:** main's ruleset holds `non_fast_forward` and `deletion` only,
+  so no required status check stands in front of a commit. Read the run.
+  Locally, when you want the same answer before pushing:
   `uv run python scripts/guard_audit.py sham --check --coverage-db <db>`, recipe in
-  `scripts/guard_audit.py`. Without it, two of that audit's six figures are recorded and unverified
-  (run it without a database and it says so itself: four pins checked, two named as needing one).
+  `scripts/guard_audit.py`. Run it without a database and it says so itself: four pins checked, two
+  named as needing one.
   ⚠️ Point `COVERAGE_FILE` at a path **outside the repository** while recording, or the run
-  overwrites the working `.coverage`. And record with `COVERAGE_CORE=ctrace`: on Python 3.12+ the
-  default core disables a location after its first observation, so a map recorded without it makes
-  the audit report false survivors; the reasoning is in `CLAUDE.md`'s evidence section.
+  overwrites the working `.coverage`. And record with `COVERAGE_CORE=ctrace`: where the default core
+  is `sys.monitoring` it disables a location after its first observation, so a map recorded without
+  it makes the audit report false survivors; the reasoning is in `CLAUDE.md`'s evidence section.
+  ⚠️ **"On Python 3.12+" is what this line used to say, and it is wrong by two minor versions.**
+  Measured against the locked coverage 7.14.1: `coverage.env.SYSMON_DEFAULT` is true only from 3.14,
+  so on 3.12 and 3.13 the map is a C-tracer map with or without the variable. Setting it is still
+  right, and the CI job sets it, because the job's interpreter is a configuration choice that can
+  change under the recipe.
 
 - **What this repository deliberately does NOT guard** is written down and dated in
   [docs/known-limits.md](docs/known-limits.md), which carries the limits a reader of this project

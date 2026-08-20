@@ -208,7 +208,8 @@ def test_the_tests_run_in_the_same_workflow_that_publishes() -> None:
 def test_the_lint_chain_runs_in_the_same_workflow_that_publishes() -> None:
     """The other half of the argument above, and it was missing until this guard existed.
 
-    ``ci.yml`` has two jobs, ``test`` and ``lint``; this workflow replicated the first and left the
+    ``ci.yml`` runs ``test`` and ``lint`` (and, since GB-34, ``sham-audit``); this workflow
+    replicated the first and left the
     second behind, so a release was built and uploaded without ruff, without ruff-format, without
     mypy --strict and without the two prose guards. The consequence is not symmetric with a failing
     test, which is why this is not merely tidiness: ``pre-commit`` is the only place
