@@ -6,7 +6,8 @@ jobs:
   # Tests on ubuntu-latest: the p4p Linux wheels are the battle-tested ones, and Linux was the OS
   # of the previous EPICS CI too. The `live` tests (IOC sandbox) self-skip because their
   # EPICS_MCP_* URL and EPICS_MCP_LIVE_* variables are unset here, so CI runs the offline suite.
-  # Coverage is report-only (no --cov-fail-under gate), matching phoebus-display-mcp.
+  # Coverage carries a FLOOR since GB-34, and the value is the CI number rather than the local
+  # one. See the step at the bottom of this job for how it was derived and how to raise it.
   #
   # The matrix exists to test the claim rather than decorate it: pyproject declares
   # requires-python = ">=3.12", so every version from 3.12 up is a version this package PERMITS,
@@ -45,8 +46,35 @@ jobs:
       # dependency tree that no longer exists in the file it claims to follow (GB-33 c).
       - name: Install dependencies (exactly as uv.lock pins them)
         run: uv sync --extra dev --locked
-      - name: Run tests with coverage (report only)
-        run: uv run pytest tests/ --tb=short --cov=src --cov-branch --cov-report=term
+      # A FLOOR, not a target, and it closes a gap CONTRIBUTING.md's Definition of Done had
+      # been asserting without a mechanism ("coverage not reduced") since before this file
+      # existed.
+      #
+      # THE VALUE IS THE CI NUMBER, AND IT IS NOT THE LOCAL ONE. This job syncs without
+      # `--group displays`, so the eight engine-coupled test modules of tests/conftest.py never
+      # run here and their lines count as missed (docs/known-limits.md, entry 16). Measured
+      # 2026-08-20 on run 32382275776: all three legs report 87%, while the same tree measured
+      # locally with the displays group installed reports 94%. A floor taken from a local run
+      # would therefore be red here on the day it was written, which is why the derivation names
+      # the run it came from.
+      #
+      # HOW TO MOVE IT: read the TOTAL line of each of the three legs of a green run
+      # (`gh run view <id> --log | grep '^TOTAL'`), take the LOWEST, round down, subtract one,
+      # and record the run id and the date here. Raise it when it is comfortably cleared; never
+      # lower it to make a red run green. One point is roughly 81 measurable items at this
+      # repository's size, so the single point of margin is deliberate rather than timid.
+      #
+      # --cov-precision=2 exists so the next person to move the floor reads an exact number
+      # instead of a rounded one. It does NOT change what fail-under compares.
+      #
+      # DELIBERATELY ON THE COMMAND LINE, never in [tool.coverage.report]. pytest-cov reads
+      # fail_under out of the coverage config when the flag is absent (pytest_cov/plugin.py),
+      # so putting it there would fail a PARTIAL local run, e.g.
+      # `uv run pytest tests/test_olog.py --cov=src`, for a reason that is not a regression. The
+      # predictable adaptation to that is to stop passing --cov locally, which is strictly worse
+      # than having no floor.
+      - name: Run tests with coverage (a floor, not a target)
+        run: uv run pytest tests/ --tb=short --cov=src --cov-branch --cov-report=term --cov-precision=2 --cov-fail-under=86
 
   # Lint, format and types through the pre-commit chain: the same uv-pinned tools and the same
   # configuration as locally, so there is a single source of truth. Deliberately one version,

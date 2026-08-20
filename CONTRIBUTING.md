@@ -105,7 +105,15 @@ instead since 2026-08-04: `docs/known-limits.md`, entry 16.
 
 ## Definition of done
 
-- `uv run pytest` green and coverage not reduced.
+- `uv run pytest` green. **"Coverage not reduced" is enforced since GB-34, not remembered:** CI
+  fails below a floor, `--cov-fail-under` in `.github/workflows/ci.yml`, on each of the three matrix
+  legs. Until then this line asked for something no mechanism checked.
+  ⚠️ **That floor is the CI number and is therefore LOWER than a local one.** CI syncs without
+  `--group displays`, so the eight engine-coupled test modules never run there and their lines count
+  as missed (`docs/known-limits.md`, entry 16). Measured 2026-08-20 on the same tree: 87% in CI
+  against 94% locally with the displays group installed. Do not derive the floor from your own run.
+  Locally: `uv run pytest --cov=src --cov-branch` and read the TOTAL line. The floor is a floor, not
+  a target, and it moves up only.
 - `uv run pre-commit run --all-files` green (ruff, ruff-format, **mypy --strict**, the no-secrets
   guard, and the two prose guards below). ⚠️ That command drives the pre-commit stage only, so it
   never exercises the **commit-message** guard; that one runs when you commit, and only in a clone
