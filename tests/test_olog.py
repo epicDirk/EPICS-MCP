@@ -357,8 +357,17 @@ async def test_search_logbook_tool_enabled(monkeypatch: pytest.MonkeyPatch) -> N
 
 # --- search_logbook: the ERROR CLASS at the tool boundary ---
 #
-# Three outcomes, three classes. Reporting a bad argument or a served rejection as
-# EPICS_CONNECTION_FAILED ("cannot reach Olog") sends the reader after the wrong problem.
+# Three outcomes, and the three tests below pin three of the FOUR classes the function catches.
+# Reporting a bad argument or a served rejection as EPICS_CONNECTION_FAILED ("cannot reach Olog")
+# sends the reader after the wrong problem.
+#
+# ⚠ This said "three outcomes, three classes" until GQ-117, the third copy of a sentence that was
+# written for three except branches on 2026-07-15 (`41803b9`) and never re-counted after
+# `OlogFilterValueError` became a fourth. Outcomes are still three: the two nothing-was-sent
+# branches share one, with separate codes. The fourth class IS pinned, just not here:
+# test_blank_filter_surfaces_as_invalid_input asserts the INVALID_INPUT that OlogFilterValueError
+# maps to. Naming that is the point of this correction; the count alone said nothing about where
+# the missing quarter of the coverage lives.
 
 
 def _search_client_raising(exc: BaseException) -> type:
