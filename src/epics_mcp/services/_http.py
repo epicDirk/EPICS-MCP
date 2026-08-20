@@ -98,6 +98,16 @@ def url_without_credentials(url: str) -> str:
     character for character. The row that breaks this one is pinned in
     ``tests/test_doctor.py::test_the_olog_target_rebuild_keeps_the_address_and_drops_a_plain_credential``.
 
+    ⚠️ It is KEPT rather than deleted, and that is a decision with a guard rather than a leftover
+    (BG-DEAD). Five re-runnable red proofs in four test files name this function as their measured
+    counter-example, of the form "point X at ``url_without_credentials`` and row N fails"
+    (``test_doctor``, ``test_http`` twice, ``test_resources``, ``test_write_gate_contract``): it is
+    the negative control four redaction surfaces are calibrated against, so deleting it would turn
+    five executable instructions into archaeology. What deleting it WOULD have bought, a guarantee
+    that nothing calls a function that leaks on one spelling, is bought instead by
+    ``tests/test_http.py::test_the_retired_redactor_exists_and_has_no_caller_in_src``, which turns
+    a new caller anywhere in ``src/`` red.
+
     Query and fragment go too, because a base URL does not need them and a token is a normal thing
     to find in a query string. Returns ``"(unparseable)"`` when the parser refuses the URL: such a
     value is already a hard veto at every boundary that reads it, and echoing the raw string would

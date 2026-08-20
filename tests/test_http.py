@@ -6,10 +6,12 @@ exception hierarchy, and the single debug line that wakes the previously-dead RE
 
 from __future__ import annotations
 
+import ast
 import logging
 import random
 import time
 from http.cookiejar import DefaultCookiePolicy
+from pathlib import Path
 from unittest.mock import MagicMock, Mock
 from urllib.parse import urlparse
 
@@ -977,7 +979,138 @@ def test_the_denial_count_is_monotonic_so_a_caller_reads_a_delta() -> None:
 # password fragment into the PATH on the spelling ``https://svc:p@ss/w0rd@host/x`` (host parses as
 # ``ss``), so its last caller, the Olog write-gate block, moved to ``shown_url``. Its test keeps
 # that row pinned; do not give it a new caller without reading it.
+#
+# That last sentence was prose and nothing enforced it (BG-DEAD). The two guards below do, and the
+# reason the function is guarded rather than deleted is written where it lives, in its own
+# docstring: five re-runnable red proofs in four test files use it as their measured
+# counter-example.
 # ----------------------------------------------------------------------------------------------
+
+
+#: What ``src/`` may name but must not CALL. A tuple with one entry today, so that a second retired
+#: function costs a line here rather than a second guard.
+_RETIRED_WITHOUT_CALLER: tuple[str, ...] = ("url_without_credentials",)
+
+_SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "epics_mcp"
+
+
+def _code_references(source: str, name: str) -> list[tuple[int, str]]:
+    """Every place *source* refers to *name* AS CODE, as ``(line, form)``.
+
+    Four forms, because each is a way a caller could arrive: a bare ``Name`` (a call, or an alias
+    assignment that defers one), an ``Attribute`` (``_http.url_without_credentials(...)``), and an
+    import ``alias`` in either spelling (plain or ``as``). An import is included deliberately even
+    though importing is not calling: nothing in ``src/`` has a reason to import a function it may
+    not use, so the import is the earliest point at which the question can be asked.
+
+    A ``def`` of that name contributes nothing, and that is a property of the grammar rather than
+    a special case here: ``FunctionDef`` carries its name as a plain string, so the definition
+    site produces no node this walk can see.
+
+    ⚠️ Prose is invisible to it, and the whole no-allowlist design rests on that: the four
+    docstring and comment cross-references in ``src/`` live inside ``ast.Constant`` and ``#``
+    lines, so they are not findings and do not need excusing. ``test_the_no_caller_detector_sees_
+    code_and_not_prose`` pins both halves.
+
+    ⚠️ Honest limit: a reference assembled from a STRING is invisible too
+    (``getattr(_http, "url_without_credentials")``, ``globals()[...]``). That is the cost of an
+    exact detector over a grep, it is named here rather than discovered later, and it is not the
+    realistic route: the realistic route is somebody reaching for an obvious-looking helper.
+    """
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Name) and node.id == name:
+            found.append((node.lineno, "name"))
+        elif isinstance(node, ast.Attribute) and node.attr == name:
+            found.append((node.lineno, "attribute"))
+        elif isinstance(node, ast.alias) and name in (node.name, node.asname):
+            found.append((node.lineno, "import"))
+    return found
+
+
+def _definition_sites(source: str, name: str) -> list[int]:
+    """The lines of *source* that ``def`` *name*."""
+    return [
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef) and node.name == name
+    ]
+
+
+def test_the_retired_redactor_exists_and_has_no_caller_in_src() -> None:
+    """BG-DEAD: ``url_without_credentials`` stays callable and stays uncalled, and both are checked.
+
+    It leaks on one spelling (``https://svc:p@ss/w0rd@host/x``, where urllib3 reads host ``ss`` and
+    the rebuild carries a fragment of the password into the PATH), which is why its last caller
+    moved to ``shown_url``. Nothing noticed that it had none: there is no dead-code detector among
+    the pre-commit hooks, so a new caller would have shipped green.
+
+    BOTH assertions are load-bearing and the FIRST is the one that is easy to leave out. A guard
+    that only counts references passes trivially once the function is deleted, and would then read
+    as "still safe" while the five red proofs that name it had quietly become unexecutable. So the
+    definition is pinned first, and the count of callers second.
+
+    Measured 2026-08-20: exactly one definition, zero references. The four cross-references to it
+    in ``src/`` are prose and invisible to this walk, which is why there is no allowlist to keep
+    in step with them.
+
+    Red proof, run in both directions: insert ``url_without_credentials(url)`` into any ``src/``
+    module and the second assertion names the file and line; delete the ``def`` and the first one
+    fires instead of the guard silently passing.
+    """
+    modules = sorted(_SRC_DIR.rglob("*.py"))
+    assert modules, f"no modules found under {_SRC_DIR}, check the path"
+    sources = {path: path.read_text(encoding="utf-8") for path in modules}
+
+    for name in _RETIRED_WITHOUT_CALLER:
+        definitions = {
+            path: lines
+            for path, source in sources.items()
+            if (lines := _definition_sites(source, name))
+        }
+        assert sum(len(lines) for lines in definitions.values()) == 1, (
+            f"{name} is defined at {definitions or 'nowhere'}; this guard asserts that NOTHING "
+            "calls it, which is vacuously true once it is gone, so its existence is pinned here "
+            "and whoever removes it removes this entry and the red proofs that name it"
+        )
+        callers = {
+            path.relative_to(_SRC_DIR).as_posix(): references
+            for path, source in sources.items()
+            if (references := _code_references(source, name))
+        }
+        assert not callers, (
+            f"{name} has acquired a caller in src/: {callers}. It is kept as a measured "
+            "counter-example, not as a helper, and it prints a fragment of the password for "
+            "https://svc:p@ss/w0rd@host/x; read its docstring, then reach for shown_url (for a "
+            "message) or url_without_userinfo (for a value a client compares)"
+        )
+
+
+def test_the_no_caller_detector_sees_code_and_not_prose() -> None:
+    """Positive and negative control in one probe, because a detector that finds nothing is only
+    good news once it has been shown to find something.
+
+    The negative half carries the design: the four cross-references in ``src/`` are a docstring
+    sentence and comment lines, so if this walk saw prose the guard above would need an allowlist,
+    and an allowlist is a second list free to drift from the first.
+    """
+    name = "url_without_credentials"
+
+    # Positive: every form a caller could arrive in.
+    assert _code_references(f"from epics_mcp.services._http import {name}\n", name)
+    assert _code_references(f"from epics_mcp.services._http import {name} as redact\n", name)
+    assert _code_references(f"shown = {name}(url)\n", name)
+    assert _code_references(f"shown = _http.{name}(url)\n", name)
+    assert _code_references(f"handler = {name}\n", name)
+
+    # Negative: the shapes the four src cross-references actually take.
+    assert not _code_references(f'"""Prefer shown_url over {name} for a message."""\n', name)
+    assert not _code_references(f"# {name}(url) is what this used to do\n", name)
+    assert not _code_references(f"def {name}(url):\n    return url\n", name)
+
+    # And the definition detector is the mirror image of that last row.
+    assert _definition_sites(f"def {name}(url):\n    return url\n", name) == [1]
+    assert not _definition_sites(f"shown = {name}(url)\n", name)
 
 
 #: Every spelling this redaction has been measured against, with the exact answer it must give.
