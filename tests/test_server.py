@@ -3171,7 +3171,7 @@ async def test_every_required_arg_exists_in_properties() -> None:
 
 @pytest.mark.asyncio
 async def test_output_schema_typed_only_for_typed_tools() -> None:
-    """MA-Q1 A2 (RELATIONAL, not a count, so core-only [28] and full [32] both pass): a tool
+    """MA-Q1 A2 (RELATIONAL, not a count, so core-only [29] and full [33] both pass): a tool
     advertises an outputSchema WITH properties iff it is in ``_TYPED_OUTPUT_TOOLS``; every other
     present tool advertises NONE. (The membership list is that set, not this docstring, see its
     comment for why enumerating it here is a rotting hazard.) Proves the accept-all schemas stay
@@ -3607,7 +3607,7 @@ def _annotation_drift(
       * ``unexpected_missing`` = golden tools absent live that are NOT display-extra: a removed or
         renamed core tool. A golden tool missing in the core-only lane is fine ONLY when it is a
         display-extra tool; deriving the tolerance from ``display_extra`` (not a hard set-equality)
-        is what makes Guard C pass in BOTH the 28-tool core-only and the 32-tool full lane.
+        is what makes Guard C pass in BOTH the 29-tool core-only and the 33-tool full lane.
 
     Load-bearing twice: this backward check also anchors Guard C against an empty ``live_names``.
     On a registration break unexpected_missing becomes all non-display golden tools (non-empty =
@@ -3622,10 +3622,10 @@ def _annotation_drift(
 def test_annotation_drift_set_logic_is_lane_robust() -> None:
     """Guard C's pure set logic, proven for BOTH lanes without a core-only environment.
 
-    The local gate runs the full lane (32==32), so Guard C's tolerance branch (golden - live) is
+    The local gate runs the full lane (33==33), so Guard C's tolerance branch (golden - live) is
     never exercised locally: a mistaken ``set(live) == golden_keys`` would pass here yet break the
-    28-tool core-only CI, and would ship under the autonomous "green gates only" push policy. This
-    exercises the logic on synthetic 28- and 32-tool live sets so both lanes are red-provable.
+    29-tool core-only CI, and would ship under the autonomous "green gates only" push policy. This
+    exercises the logic on synthetic core-only and full live sets so both lanes are red-provable.
     """
     golden = set(_ANNOTATION_GOLDEN)
     display_extra = _display_tool_names()
@@ -3668,7 +3668,7 @@ async def test_every_tool_carries_complete_annotations() -> None:
     from epics_mcp.server import mcp
 
     tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
-    assert len(tools) >= 28, "list_tools() returned < core-lane count, tool registration broke"
+    assert len(tools) >= 29, "list_tools() returned < core-lane count, tool registration broke"
     offenders = [
         t.name
         for t in tools
@@ -3699,7 +3699,7 @@ async def test_destructive_tools_are_not_marked_read_only() -> None:
     from epics_mcp.server import mcp
 
     tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
-    assert len(tools) >= 28, "list_tools() returned < core-lane count, tool registration broke"
+    assert len(tools) >= 29, "list_tools() returned < core-lane count, tool registration broke"
     offenders = [
         t.name
         for t in tools
@@ -3732,7 +3732,7 @@ async def test_tool_annotations_match_golden_map() -> None:
     from epics_mcp.server import mcp
 
     tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
-    assert len(tools) >= 28, "list_tools() returned < core-lane count, tool registration broke"
+    assert len(tools) >= 29, "list_tools() returned < core-lane count, tool registration broke"
 
     golden_names = set(_ANNOTATION_GOLDEN)
     unclassified, unexpected_missing = _annotation_drift(
