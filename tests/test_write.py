@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Iterator, Sequence
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,6 +18,7 @@ from epics_mcp.errors import (
     PVWriteBoundsError,
     PVWriteDeniedError,
     RateLimitError,
+    SafetyConfigError,
 )
 from epics_mcp.safety import SafetyLayer
 from epics_mcp.services.epics_client import _format_value
@@ -105,6 +107,68 @@ class TestSetPvValueDenied:
 
         with pytest.raises(PVWriteDeniedError):
             await _set_pv_value("TEST:PV", "20.0")
+
+
+class TestSetPvValueAuditPathRefusal:
+    """BG-DPATH, the route half: this tool builds the PV gate, so its refusal is a tool answer."""
+
+    async def test_a_write_tool_refusal_does_not_disclose_the_audit_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The measurement that reopened BG-DPATH, pinned so it cannot be re-argued from the code.
+
+        ``safety.py``'s refusal for an unopenable ``EPICS_MCP_AUDIT_LOG_FILE`` carried the full
+        path, deliberately, on the argument that this layer is built EAGERLY in ``server.main`` and
+        so is only ever read by the operator on the host's stderr. Measured in-process on
+        2026-08-20, that argument does not hold at the DEFAULT posture, and this test is the route
+        it does not hold on. Four facts, each read off the code rather than recalled:
+        ``get_safety`` is a LAZY singleton; ``server.main`` pre-builds it only under
+        ``if config.allow_pv_write``; ``set_pv_value`` is registered on the server
+        UNCONDITIONALLY; and ``_set_pv_value`` calls ``get_safety()`` BEFORE
+        ``check_write_allowed``, so a config error preempts the write refusal.
+
+        The posture that makes it reachable is not exotic, it is the sanctioned one: an Olog-write
+        deployment MUST configure a durable audit path (``server.py`` refuses to start otherwise),
+        and PV writes stay off. Let that path stop being openable, a permission change or a moved
+        directory, and the next ``set_pv_value`` call from any caller answered with the path,
+        account name included, twice over.
+
+        ``get_safety`` is deliberately NOT patched here, unlike every other test in this file: the
+        subject IS the singleton being built lazily on this route, so mocking it would test nothing.
+        The module global is cleared through ``monkeypatch`` rather than left to this file's autouse
+        ``_reset_singletons``, which also clears it: the dependency is stated locally so the test
+        keeps meaning what it says if that fixture is ever narrowed.
+
+        Red-proof: restore ``safety.py``'s old message and the path assertion fails while the
+        variable assertion stays green; make ``_set_pv_value`` check ``allow_pv_write`` before it
+        calls ``get_safety`` and this test goes green for the OTHER reason, which is why the message
+        is asserted here and not merely the absence of a refusal.
+        """
+        secret_dir = tmp_path / "operator-account-name"
+        cfg = EpicsConfig(allow_pv_write=False, audit_log_file=str(secret_dir / "audit.log"))
+        monkeypatch.setattr(safety_module, "_safety", None)
+        monkeypatch.setattr(safety_module, "get_config", lambda: cfg)
+        audit = logging.getLogger("epics_mcp.audit")
+        saved = audit.handlers[:]
+        audit.handlers.clear()
+        try:
+            with pytest.raises(SafetyConfigError) as excinfo:
+                await _set_pv_value("TEST:PV", "20.0")
+        finally:
+            audit.handlers.clear()
+            audit.handlers.extend(saved)
+
+        message = str(excinfo.value)
+        assert "EPICS_MCP_AUDIT_LOG_FILE" in message, (
+            "the caller must still learn WHICH variable is broken, or withholding its value leaves "
+            f"them nothing to act on: {message!r}"
+        )
+        assert "operator-account-name" not in message, (
+            f"a PV write tool disclosed the server's audit path to its caller: {message!r}"
+        )
+        assert excinfo.value.details["audit_log_file"] == str(secret_dir / "audit.log"), (
+            "the in-process detail keeps the path; tool_errors sends only the code and str(exc)"
+        )
 
 
 class TestSetPvValueRateLimited:

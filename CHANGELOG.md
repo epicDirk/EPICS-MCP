@@ -105,16 +105,16 @@ carry breaking changes).
   and exits `3`, which is the only signal for the sub-probe case. **Scripts reading the exit code
   alone see a `0` become a `3` on a deployment whose configuration did not change.**
 
-- **An unwritable audit path no longer hands its full local path to a tool caller.** The Olog write
-  gate is built lazily, on the first write, so its `SAFETY_CONFIG_INVALID` refusal is a tool ANSWER
-  rather than a start-up failure: measured through `create_log_entry`, the caller received
-  `Invalid EPICS_MCP_AUDIT_LOG_FILE` followed by the full path, account name included. The
-  message now names the variable and withholds its value, the posture the URL boundary already
-  took. Both halves had to go, the `!r` and the chained `OSError` text, since an `OSError`
-  stringifies with the filename in it and dropping only the first would have looked repaired. The
-  PV gate's identical refusal KEEPS the path on purpose: it is built eagerly, so its only reader is
-  the operator on stderr, for whom the path is the actionable half. The path also stays in the
-  exception's `details`, which nothing in `src/` reads and the tool boundary does not send.
+- **An unwritable audit path no longer hands its full local path to a tool caller, at EITHER write
+  gate.** Both refuse with `SAFETY_CONFIG_INVALID` naming `EPICS_MCP_AUDIT_LOG_FILE` and withholding
+  its value; the path stays in the exception's `details`, which the tool boundary does not send.
+  Each gate is built on first use unless its own write flag is on, so the refusal is a tool ANSWER
+  rather than a start-up failure: on the Olog side from the four write tools, and on the PV side
+  from `set_pv_value`, which builds its gate BEFORE it checks whether writes are allowed, so this
+  reached callers even with PV writes off. **Operators reading a start-up failure on stderr now see
+  the variable name instead of its value** and read the value back from the environment of the
+  process they started. Which case arrives how: `operator_guide.md` under `SAFETY_CONFIG_INVALID`,
+  and `docs/safety.md` for the posture and the measurement behind it.
 
 - **The server now names itself `epics-pv`, the key a client registers it under, in both places it
   answers "which server am I".** `serverInfo` on the handshake and the `server` field of

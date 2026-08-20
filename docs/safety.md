@@ -187,14 +187,23 @@ This is a controls tool, so the trust questions come first.
   stood here too until 2026-08-14, on the strength of a local pattern-based redaction that cut at
   the first `@`; that redaction is gone, its cause texts cross the same barrier as everything else,
   and no unredacted exception was found that could reach the old one in the first place.
-  ⚠️ **A local FILE PATH is withheld on the same rule, in the one place it could reach a caller.**
-  An unwritable `EPICS_MCP_AUDIT_LOG_FILE` is refused with `SAFETY_CONFIG_INVALID`, and the Olog
-  gate is built lazily, so on an Olog-only deployment that refusal is a tool ANSWER rather than a
-  start-up failure: measured through `create_log_entry` it handed the caller the full path, local
-  account name included. It now names the variable and not its value. The PV gate's identical
-  refusal KEEPS the path deliberately, because it is eager and its reader is the operator on
-  stderr. The path stays in the exception's `details` either way, which nothing in `src/` reads and
-  which the tool boundary does not send.
+  ⚠️ **A local FILE PATH is withheld on the same rule, at BOTH write gates.**
+  An unwritable `EPICS_MCP_AUDIT_LOG_FILE` is refused with `SAFETY_CONFIG_INVALID`, and neither
+  gate names its value: both name the variable and tell the reader to check it and the directory's
+  permissions on the server host. The path stays in the exception's `details`, which nothing in
+  `src/` reads and which the tool boundary does not send.
+  ⚠️ **This said "in the one place it could reach a caller" until 2026-08-20, and the PV gate was
+  that sentence's exception on the argument that it is built eagerly at start-up, so that only the
+  operator on stderr reads it. Measured in-process, the argument is false at the DEFAULT posture.**
+  `get_safety` is a lazy singleton; the eager construction in `server.main` runs only under
+  `if config.allow_pv_write`; `set_pv_value` is registered unconditionally; and the write tool
+  calls `get_safety()` before it checks whether writes are allowed at all. So with PV writes off
+  and a set-but-unopenable audit path, which an Olog-write deployment is required to configure, the
+  first `set_pv_value` call from any caller answered with the full path, account name included,
+  twice over (once from the `!r`, once inside the chained `OSError`, which stringifies with the
+  filename in it). Both gates now give the same answer, and the operator loses an echo rather than
+  the actionable half: the variable is named and its value is theirs to read back from the
+  environment of the process they started.
 - **Olog reads return the whole entry, a deliberate prototype decision (2026-08-01).** Every ENTRY
   read (`search_logbook`, `get_log_entry`, the create/reply/update echoes) returns the full server
   record: `title`, `description`, `owner` (the author's

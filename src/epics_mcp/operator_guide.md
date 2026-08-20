@@ -1350,13 +1350,15 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   are a malformed `EPICS_MCP_PV_WRITE_PATTERN`, PV writes enabled with an empty pattern, PV writes
   enabled while the EPICS search reach extends beyond loopback, and either gate armed without a
   durable `EPICS_MCP_AUDIT_LOG_FILE`. A server that starts with the gates off never meets it.
-  ⚠️ **One case arrives as a tool answer instead, and the asymmetry is deliberate.** The PV gate is
-  built eagerly at start-up, the Olog gate lazily on the first write, so an Olog-only deployment
-  whose audit path exists in the environment but cannot be OPENED meets this code at that first
-  write, from `create_log_entry` / `reply_to_log` / `add_log_attachment` / `update_log_entry`,
-  still before any write I/O. The refusal names `EPICS_MCP_AUDIT_LOG_FILE` and withholds its value,
-  the same posture the URL boundary takes: check the variable and the directory's permissions on
-  the server host.
+  ⚠️ **An unopenable audit path arrives as a tool answer instead, at EITHER gate.** Both are built
+  on first use rather than at start-up unless their own write flag is on, so a deployment whose
+  audit path exists in the environment but cannot be OPENED meets this code at the first call that
+  builds a gate: `create_log_entry` / `reply_to_log` / `add_log_attachment` / `update_log_entry` on
+  the Olog side, and `set_pv_value` on the PV side, which builds its gate before it checks whether
+  writes are allowed at all, so this refusal reaches you even with PV writes off. Both are still
+  before any write I/O. The refusal names `EPICS_MCP_AUDIT_LOG_FILE` and withholds its value, the
+  same posture the URL boundary takes: check the variable and the directory's permissions on the
+  server host.
 
 ### The guide tool itself: your key, or the shipped document
 

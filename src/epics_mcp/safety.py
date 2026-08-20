@@ -398,16 +398,32 @@ class SafetyLayer:
             # os.fspath, and neither is an OSError, so the process died on a bare traceback instead
             # of the named refusal (measured on both gates). Symmetric with OlogWriteGate.
             except (OSError, ValueError, TypeError) as exc:
-                # KEEPS THE PATH, and that is a decision rather than the twin of OlogWriteGate's
-                # (BG-DPATH). This layer is built EAGERLY in server.main, so this refusal is a
-                # start-up failure printed to stderr: its only reader is the operator on the host,
-                # for whom the path is the actionable half. The Olog gate is built lazily on the
-                # first write, so the identical message there reaches a TOOL CALLER, which is why
-                # that one names the variable and withholds its value. Same rule, opposite answer,
-                # because the audience differs; keeping them "symmetric" would either blind the
-                # operator or leak to the caller.
+                # NAMES THE VARIABLE, NOT ITS VALUE, exactly as OlogWriteGate does, and the
+                # symmetry is the repair rather than the design (BG-DPATH).
+                #
+                # ⛔ This message KEPT the path until 2026-08-20, on the argument that this layer
+                # is built EAGERLY in server.main, so that its only reader is the operator on the
+                # host's stderr, for whom the path is the actionable half. Measured in-process
+                # against the real tool body, that argument is false at the DEFAULT posture, which
+                # is the posture this repository promises to run in. ``get_safety`` is a LAZY
+                # singleton; ``server.main`` builds it ahead of time only under
+                # ``if config.allow_pv_write``; ``set_pv_value`` is registered unconditionally; and
+                # ``tools/write.py`` calls ``get_safety()`` BEFORE ``check_write_allowed``. So with
+                # PV writes off and a set-but-unopenable audit path (which an Olog-write deployment
+                # is REQUIRED to configure), the first ``set_pv_value`` call built this layer and
+                # handed the caller the full path, twice: once from the ``!r`` and once inside the
+                # chained OSError, which stringifies with the filename in it. That is the same leak
+                # class, in the same shape, that the Olog side had closed a day earlier.
+                #
+                # The operator does not lose the actionable half, they lose an echo of it: the
+                # variable is named, and its value is theirs to read back from the environment of
+                # the process they started. ``details`` keeps the path, and nothing in ``src/``
+                # reads ``EpicsError.details`` while ``tool_errors.translate_epics_errors`` sends
+                # only the error code and ``str(exc)``, so it stays in-process for whoever can act.
                 raise SafetyConfigError(
-                    f"Invalid EPICS_MCP_AUDIT_LOG_FILE {self._config.audit_log_file!r}: {exc}",
+                    "Invalid EPICS_MCP_AUDIT_LOG_FILE: the configured audit path could not be "
+                    f"opened for writing ({type(exc).__name__}). Check the variable's value and "
+                    "the directory's permissions on the server host; it is not disclosed here.",
                     details={"audit_log_file": self._config.audit_log_file},
                 ) from exc
         else:

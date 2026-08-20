@@ -472,6 +472,60 @@ class TestSafetyConfig:
             audit.handlers.clear()
             audit.handlers.extend(saved)
 
+    def test_the_bad_audit_path_refusal_names_the_variable_and_not_the_path(
+        self, tmp_path: Path
+    ) -> None:
+        """BG-DPATH, PV half: this refusal reaches a TOOL CALLER, so it must not carry the path.
+
+        The twin of ``test_olog_write.py::test_the_bad_audit_path_refusal_names_the_variable_and_
+        not_the_path``, and it exists because the argument for NOT being that twin was measured
+        false. That argument was: this layer is built eagerly in ``server.main``, so its refusal is
+        a start-up failure whose only reader is the operator on stderr. Measured in-process against
+        the real tool body on 2026-08-20, at the DEFAULT posture it is not. ``get_safety`` is a lazy
+        singleton, ``server.main`` pre-builds it only under ``if config.allow_pv_write``,
+        ``set_pv_value`` is registered unconditionally, and ``tools/write.py`` calls
+        ``get_safety()`` before ``check_write_allowed``. With PV writes off and a set-but-unopenable
+        audit path, which an Olog-write deployment is REQUIRED to configure, the caller received
+        ``Invalid EPICS_MCP_AUDIT_LOG_FILE '<full path>': [Errno 2] ... '<full path>'``.
+
+        BOTH assertions are load-bearing and the second is the one that pays, for the same reason
+        it does on the Olog side: the path stood TWICE in one f-string, once from the ``!r`` and
+        once inside ``{exc}``, because an ``OSError`` stringifies as
+        ``[Errno 2] No such file or directory: '<the path>'``. Dropping only the ``!r`` would have
+        looked repaired and leaked exactly as before, so the private segment is asserted against
+        the WHOLE message.
+
+        Red-proof (each verified by mutating ``safety.py``): put the ``!r`` back and the directory
+        assertion fails; append ``{exc}`` and the same one fails; drop the variable NAME and the
+        first assertion fails.
+
+        The route itself is pinned separately by
+        ``test_a_write_tool_refusal_does_not_disclose_the_audit_path`` below, because a message that
+        is safe and a message that never reaches a caller are two different claims.
+        """
+        audit = logging.getLogger("epics_mcp.audit")
+        saved = audit.handlers[:]
+        audit.handlers.clear()
+        secret_dir = tmp_path / "operator-account-name"
+        try:
+            with pytest.raises(SafetyConfigError) as excinfo:
+                SafetyLayer(EpicsConfig(audit_log_file=str(secret_dir / "audit.log")))
+        finally:
+            audit.handlers.clear()
+            audit.handlers.extend(saved)
+
+        message = str(excinfo.value)
+        assert "EPICS_MCP_AUDIT_LOG_FILE" in message, (
+            "the refusal must still NAME the variable, otherwise withholding the value leaves the "
+            "reader with nothing to act on"
+        )
+        assert "operator-account-name" not in message, (
+            f"the audit path leaked to the caller: {message!r}"
+        )
+        assert excinfo.value.details["audit_log_file"] == str(secret_dir / "audit.log"), (
+            "the in-process detail must keep the path; it never crosses the tool boundary"
+        )
+
     def test_an_audit_path_that_is_not_a_path_fails_closed_too(self) -> None:
         """The promise at the ``except`` is "a broken audit path fails HERE as a
         SafetyConfigError", and two broken paths used to escape it.
