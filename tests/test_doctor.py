@@ -375,6 +375,24 @@ def _identity_never_touches_the_network(monkeypatch: pytest.MonkeyPatch) -> None
     # environment and the suite dialled that URL for real". Pinning the default closed the tests
     # that set no URL; this closes the ones that set one on purpose.
     #
+    # WHAT STILL COVERS THE STUBBED PATH, named per thing rather than in general, because a stub is
+    # a reach reduction unless the reach lives somewhere else:
+    #   * that ``_check_olog`` calls the probe at all:
+    #     ``test_every_rest_plane_is_actually_identity_probed[olog]``, which installs its own
+    #     ``OlogClient`` double and therefore overrides this one;
+    #   * the real ``OlogClient.check_connectivity`` itself, both outcomes:
+    #     ``tests/test_olog.py::test_check_connectivity_reachable`` and
+    #     ``::test_check_connectivity_raises_on_transport_failure``, which fake the TRANSPORT and so
+    #     run the actual method;
+    #   * a transport failure becoming "unreachable":
+    #     ``test_classify_transport_failure_is_unreachable`` plus the ``_cause_client`` plane
+    #     tests in this file.
+    # ⚠️ ``tests/test_doctor_crosscut_e2e.py`` does NOT belong on that list, and the commit that
+    # added this fixture said it did. Measured: that module names no Olog plane at all; it runs the
+    # whole stack over real sockets for the ARCHIVER pair and a dead host. So nothing anywhere
+    # drives ``_check_olog``'s transport probe over a real socket, and none did before this stub,
+    # since the eight tests that reached it were rendering text and asserted nothing about it.
+    #
     # The other four client classes are deliberately NOT stubbed here: measured, no test in this
     # module configures their URL without installing its own double, so there is nothing to close
     # and a stub would be a guess. A future test that does will show up the same way, as seconds in
