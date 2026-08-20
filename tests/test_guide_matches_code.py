@@ -604,10 +604,16 @@ def _code_spans(text: str) -> list[str]:
     from a closing one. What that cost is measured in ``_LOWERCASE_TOKEN_RE``.
 
     A line with an ODD number of backticks is skipped, because markdown pairing cannot be read from
-    it and these surfaces carry code spans that run across a line break. Measured, twenty such lines
-    across the eight scanned surfaces, none carrying a pairing, and NONE inside either marked region
-    of the guide, so the filter changes no result today and makes the assumption loud instead of
-    lucky.
+    it and these surfaces carry code spans that run across a line break. Measured 2026-08-20, forty
+    such lines across the nine scanned surfaces, none carrying a pairing, and NONE inside either
+    marked region of the guide, so the filter changes no result today and makes the assumption loud
+    instead of lucky.
+
+    ⚠️ This said "twenty ... across the eight" until GQ-117 and had doubled since 2026-07-30: the
+    lines grew with the pages, and ``docs/quick-start.md`` made the eight a nine on 2026-08-18. The
+    "none carrying a pairing" half was re-measured with the same reader this function feeds
+    (``_glyph_status_pairings`` over the odd lines, zero hits against a live ``_STATUS_MARK``) and
+    still holds; only the counts had moved.
     """
     spans: list[str] = []
     for line in text.splitlines():
@@ -1075,14 +1081,22 @@ def test_every_glyph_status_pairing_in_the_docs_agrees_with_the_render_marks() -
     The floor is per surface rather than a total, because a file the scan reads as empty is a
     different failure from a file that has drifted, and a total hides the first inside the second.
     It applies to the three surfaces a pairing is EXPECTED on, not to all of them: measured, the
-    other five tracked pages carry no pairing today, so a floor over every page would be red on the
+    other six tracked pages carry no pairing today, so a floor over every page would be red on the
     first day.
 
-    Reach, stated rather than implied: the floor covers 3 of the 8 surfaces that are read. On the
-    guide it is satisfied by the twelve legend rows that
+    Reach, stated rather than implied: the floor covers 3 of the 9 surfaces that are read. On the
+    guide it is satisfied by the legend rows that
     ``test_the_shipped_glyph_legend_carries_the_marks_the_cli_prints`` compares anyway, so it adds
-    nothing there beyond what that guard already holds. The five unfloored pages are read without
+    nothing there beyond what that guard already holds. The six unfloored pages are read without
     one, which catches a GLOBAL extraction break and not a page-specific one.
+
+    ⚠️ These three figures read five, 3 of 8 and five until GQ-117, and all three were right when
+    written on 2026-07-30. ``docs/quick-start.md`` was added on 2026-08-18 (``bf4fbf8``) and moved
+    every one of them by one, which nothing noticed: the count is derived from ``git ls-files`` at
+    run time, so the guard kept passing while the prose describing it went stale. Re-derive rather
+    than trust: ``len(_tracked_doc_pages())`` pages, plus the guide, against
+    ``len(_PAIRING_EXPECTED)``. The legend-row figure was dropped instead of corrected, for the
+    reason the same repair records at ``_STATUS_MARK``: that number moves with every new status.
 
     Red-proof: change a mark next to a status name on any tracked page; rename ``docs/tools.md``.
     """

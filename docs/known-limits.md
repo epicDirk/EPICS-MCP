@@ -207,7 +207,10 @@ What is NOT held, named rather than implied:
   not read. ⚠️ This page is itself a scanned surface, so an illustration here must not put a
   single-character code span within three characters of a backticked status name.
 - **The per-surface floor detects an EMPTY read, not an almost-empty one, and it covers three of the
-  eight surfaces read.** A page that stops documenting all but one of its pairings passes. The
+  nine surfaces read.** (Nine since `docs/quick-start.md` was tracked on 2026-08-18; the sentence
+  said eight until GQ-117, correct when written on 2026-07-30. The population is derived from
+  `git ls-files` at run time, so it grows without this line noticing.)
+  A page that stops documenting all but one of its pairings passes. The
   tempting repair, a floor of "at least one pairing outside the legend region", is green today and
   was rejected because a legitimate prose rewrite reddens it and the obvious repair for that red is
   to delete the floor, which is green and retires it.
