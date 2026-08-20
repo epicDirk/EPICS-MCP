@@ -425,12 +425,18 @@ def _engine_tainted_modules() -> set[str]:
 @functools.cache
 def _engine_tainted_frozen() -> frozenset[str]:
     """The cached half. Zero arguments is SAFE here, and that is a measured claim rather than a
-    convention: this module's only ``monkeypatch.setattr`` is on ``importlib.util.find_spec``
-    (line 61), nothing replaces ``_REPO``, and the answer is a pure function of the tracked source
-    tree, which no test in this file rewrites.
+    convention: the only ``monkeypatch.setattr`` in this module is the one on
+    ``importlib.util.find_spec`` inside ``_collect_without_the_engine``, nothing replaces ``_REPO``,
+    and the answer is a pure function of the tracked source tree, which no test here rewrites.
+    Named rather than given a line number: the first version of this sentence said "line 61" and
+    was off by one before it was committed, because the same diff added an import above it.
 
-    Why: the walk re-``ast.parse``s all 77 files under ``src/`` and is called 15 times per run, 13
-    of them from the parametrised walker at the bottom of this file. Measured, about 4.8 s.
+    Why: the walk re-``ast.parse``s every file under ``src/`` and is called 15 times per run, 13 of
+    them from the parametrised walker at the bottom of this file. What that costs is derived from
+    the module's own before and after rather than from a stopwatch on the function: 42.27 s -> 26.83
+    s with nothing else changed, so 14 eliminated walks are worth 15.44 s, about 1.1 s each and
+    roughly 16.5 s for all fifteen. Re-derive it the same way, by reverting this decorator and
+    running the module alone.
 
     A ``frozenset`` rather than a ``set``, and the wrapper above rebuilds a mutable copy: one caller
     hands the result to ``_engine_imports_below_module_level``, and a cached mutable would let a

@@ -229,11 +229,18 @@ work.
    Auditing this is `scripts/guard_audit.py`, and its findings are pinned in code rather than
    written up somewhere, split by what checking them costs. The figures that follow from the
    test suite's own AST live in `guard_audit.PINNED_AST` and are checked by the ordinary gate
-   (`tests/test_client_edge_guards.py`), together with the population and every recorded finding's
-   line. The figures that depend on which tests EXECUTED a guard line live in
-   `guard_audit.PINNED_COVERAGE` and are checked only by `guard_audit.py sham --check
-   --coverage-db <db>`, deliberately: reaching them costs a full ctrace run, and a check that
-   claimed to have verified them without one would be the sham guard this audit exists to find.
+   through the CLI, in `tests/test_guard_audit_cli.py`, which also holds that no figure is MEASURED
+   that nothing pins; `tests/test_client_edge_guards.py` keeps the population and every recorded
+   finding's line. (Until GB-34 that file held a second, direct `population() == PINNED_AST`; it was
+   a duplicate for the value direction and the sole cover for the key-set direction, so it went and
+   the surviving CLI test took the half worth keeping.) The figures that depend on which tests
+   EXECUTED a guard line live in `guard_audit.PINNED_COVERAGE`, and **since GB-34 the `sham-audit`
+   job of `.github/workflows/ci.yml` checks them on every push**, so all six are verified rather
+   than four. It stays out of the local gate because it costs a full ctrace suite run.
+   ⚠️ **Those two pins sit at their arithmetic maximum and are therefore blind to a bad map**: they
+   can only fall, i.e. detect a claiming test that STARTS executing a guard line. Measured, a map
+   recorded from one test module agreed with all six pins. What covers map quality is the separate
+   `--min-covering-tests` floor the job passes, not the pins.
    Run without a database it verifies the four cheap pins and NAMES the two it could not reach, on
    the clean run as well as the failing one. Two directions, because
    a mutation sweep alone answers the wrong question: it asks whether ANY test notices a guard

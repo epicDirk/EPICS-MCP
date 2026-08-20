@@ -64,8 +64,13 @@ jobs:
       # lower it to make a red run green. One point is roughly 81 measurable items at this
       # repository's size, so the single point of margin is deliberate rather than timid.
       #
-      # --cov-precision=2 exists so the next person to move the floor reads an exact number
-      # instead of a rounded one. It does NOT change what fail-under compares.
+      # --cov-precision=2 is LOAD-BEARING, not cosmetic, and the first version of this comment
+      # said the opposite. coverage compares `round(total, precision) < fail_under`
+      # (coverage/results.py), and pytest-cov defaults the precision to 0 when the flag is
+      # absent. Measured: at a total of 85.6 against this floor of 86, precision 0 rounds to 86
+      # and PASSES while precision 2 FAILS. So the flag tightens the gate across a half-point
+      # band, on top of giving the next person to move the floor an exact number to move it
+      # from. Removing it silently loosens the floor by up to half a point.
       #
       # DELIBERATELY ON THE COMMAND LINE, never in [tool.coverage.report]. pytest-cov reads
       # fail_under out of the coverage config when the flag is absent (pytest_cov/plugin.py),
@@ -107,8 +112,10 @@ jobs:
   # required status check stands in front of a commit (tests/test_release_workflow.py records the
   # same fact and why it is deliberate). Read it, do not assume it gates.
   #
-  # 3.12 because that is the declared floor and the cheapest leg; the audit reads the source tree
-  # and the coverage map, neither of which is interpreter-specific.
+  # 3.12 because that is the declared floor; the audit reads the source tree and the coverage map,
+  # neither of which is interpreter-specific. ⚠️ NOT because it is the cheapest: measured on the
+  # two runs this file cites, 3.12 is the SLOWEST leg (69.9 s and 68.4 s, against 47.1 s and
+  # 41.5 s on 3.14). An earlier version of this line said cheapest, which was never measured.
   #
   # Like `test`, this job syncs WITHOUT `--group displays`, so the eight engine-coupled test modules
   # of tests/conftest.py never run here (docs/known-limits.md, entry 16). That is deliberate and it
@@ -153,8 +160,16 @@ jobs:
       # Exit codes are already contracted, so no wrapper: 0 agreement, 1 a pin deviates or the
       # candidate list changed, 2 a blind map or a broken services anchor, 9 a crash. Every non-zero
       # should fail this step. A green run prints "checked 6 pin(s)"; "checked 4 pin(s)" would mean
-      # the database was never read, and that is asserted in tests/test_guard_audit_cli.py rather
-      # than grepped for here, because nothing versions a shell pipeline.
+      # the database was never read.
+      #
+      # ⛔ THE ONE SILENT ROT IS RIGHT HERE, IN THIS COMMAND, and no test can see it. Every other
+      # way of losing the map is loud: a missing or unreadable database exits 9, a map without
+      # per-test contexts is empty and exits 2, a small map is refused by the floor below.
+      # Deleting --coverage-db from THIS LINE is the exception: the tool then takes its
+      # no-database branch, prints "checked 4 pin(s): all agree" and exits 0, and the job goes
+      # green having checked only the half the ordinary gate already checks. The count in the
+      # verdict line is pinned in tests/test_guard_audit_cli.py so the symptom is recognisable
+      # in this log; keeping the flag here is the part only a reader of this file can do.
       #
       # ⛔ --min-covering-tests IS NOT OPTIONAL FOR AN UNATTENDED CALLER, and the first version of
       # this job did not have it. The two pinned coverage figures sit at their arithmetic maximum,

@@ -89,8 +89,13 @@ class Target:
 
 
 # ⛔ THE THREE CACHES BELOW ARE KEYED ON A DIRECTORY, AND A BARE ``functools.cache`` IS THE
-# FORBIDDEN SIMPLIFICATION. Three tests replace a module constant to audit a STAND-IN tree:
-# tests/test_guard_audit_cli.py:316, :353 and :375 monkeypatch ``_SERVICES``. A zero-argument cache
+# FORBIDDEN SIMPLIFICATION. Three tests in tests/test_guard_audit_cli.py replace a module constant
+# to audit a STAND-IN tree, by NAME rather than by line because a line moves and a name does not,
+# and these three references went stale twice inside the push that wrote them:
+# ``test_check_notices_a_services_side_that_shrank``,
+# ``test_check_refuses_an_empty_services_side_rather_than_agreeing`` and
+# ``test_sweep_refuses_an_empty_services_side_before_it_opens_the_map`` monkeypatch ``_SERVICES``.
+# A zero-argument cache
 # is filled by the first real call, so the stand-in is never read and the tool answers about the
 # PREVIOUS tree while reporting on the new one.
 #
@@ -110,7 +115,9 @@ class Target:
 # no caller changes.
 #
 # Why at all: ``claiming_tests`` re-globs and re-``ast.parse``s the whole tests/ tree on every call,
-# measured 1.79 s, and one run of tests/test_guard_audit_cli.py calls it 21 times.
+# measured 1.79 s, and one run of tests/test_guard_audit_cli.py drives it more than twenty times
+# (25 on 2026-08-20; the exact figure moves with every test added to that module, so re-derive it
+# by wrapping ``_claiming_at`` with a counter rather than trusting this one).
 # The cached helpers return IMMUTABLE containers and the wrappers rebuild a fresh mutable one, so a
 # caller that mutates the result cannot poison the next call.
 
@@ -494,7 +501,8 @@ def _claiming_at(root: Path) -> tuple[tuple[str, tuple[tuple[str, bool], ...]], 
     """``claiming_tests`` for one test directory. Keyed, see the note above the caches.
 
     This is the expensive one: it re-``ast.parse``s every tracked test module, measured 1.79 s over
-    98 files, and the CLI test module drives it 21 times in a single run.
+    98 files, and the CLI test module drives it more than twenty times in a single run, 25 when
+    last counted. That figure moves with the module, so the point is the ORDER, not the number.
     """
     found: dict[str, list[tuple[str, bool]]] = {}
     # pytest's own default is ``test_*.py *_test.py``, and pyproject sets no ``python_files``. A

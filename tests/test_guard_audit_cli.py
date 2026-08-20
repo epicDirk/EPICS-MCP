@@ -163,12 +163,22 @@ def test_a_run_with_a_map_says_it_checked_all_six_pins(
     """The AGREEING with-database run, and the number in its verdict line is the load-bearing part.
 
     Why this exists: since GB-34 the coverage-dependent half runs in CI, in the ``sham-audit`` job
-    of ``.github/workflows/ci.yml``. That job's whole value is that it reaches the two pins the
-    ordinary gate cannot, and its most likely way of rotting is silent: a database that is not
-    found, not readable, or recorded without ``--cov-context=test`` leaves the tool comparing four
-    pins and printing "all agree", which is a green job that verified nothing new. The token that
-    tells the two apart is the COUNT in the verdict line, so it is asserted here rather than
-    grepped for in YAML, where nothing versions it.
+    of ``.github/workflows/ci.yml``, and that job's whole value is that it reaches the two pins the
+    ordinary gate cannot. This pins the IN-PROCESS contract: given a map, six pins are compared and
+    the verdict line says six.
+
+    ⚠️ **Its scope is narrower than the first version of this docstring claimed, and the difference
+    matters.** That version named three ways the job could rot silently; measured against the code,
+    all three are LOUD. A missing or unreadable database makes ``load_coverage_map`` raise and
+    ``main`` return 9. A map recorded without ``--cov-context=test`` carries no contexts, so the map
+    is empty and ``cmd_sham`` exits 2. "checked 4 pin(s)" is reachable only on the
+    ``args.coverage_db is None`` branch, which the job never takes.
+
+    So the genuinely silent edit is a different one: **dropping ``--coverage-db`` from the YAML**.
+    The command would then print "checked 4 pin(s): all agree", exit 0, and be green having checked
+    the cheap half only. Nothing in this file can see the YAML, which is why the job's own step
+    carries that reasoning in a comment as well. The count asserted here is what makes the symptom
+    recognisable to whoever reads the log.
 
     The map is non-empty (an empty one is exit 2, see the blind-map test above) but names a test
     that is NOT in the claiming population, so no claiming test executes a guard line: both
