@@ -193,6 +193,45 @@ def test_a_run_with_a_map_says_it_checked_all_six_pins(
     assert "NOT checked here" not in reported, "with a map nothing may be deferred"
 
 
+def test_a_map_that_measured_almost_nothing_is_refused_rather_than_agreed_with(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The floor the PINS cannot provide, and the reason it had to be built (GB-34).
+
+    ``PINNED_COVERAGE[NOT_EXECUTING]`` equals ``PINNED_AST[DOUBLES]`` and
+    ``PINNED_COVERAGE[SHAM_CANDIDATES]`` equals ``PINNED_AST[EDGE_VOCABULARY]``, i.e. no claiming
+    test executes a guard line today, so both coverage figures sit at their arithmetic MAXIMUM.
+    ``|claiming \\ executing|`` cannot exceed ``|claiming|``, so a map that sees FEWER executions
+    leaves them exactly where they are and ``--check`` agrees. The empty-map refusal above does not
+    help either: a nearly worthless map is not an empty one.
+
+    Measured before this refusal existed, all in the CI shape: the full ctrace run covers 246 test
+    functions; a map recorded from ONE module covers 30 and still printed "checked 6 pin(s): all
+    agree with the recorded audit" and exited 0. The CI job was green over it.
+
+    The assertion is on the exit CODE and on the sentence, because a refusal a caller cannot
+    distinguish from agreement is not a refusal.
+
+    Red proof: drop the ``--min-covering-tests`` comparison in ``cmd_sham`` and this exits 0 with
+    "all agree"; drop the flag from the CI job and nothing here notices, which is why the job's own
+    line carries the reasoning too.
+    """
+    one_real_covering_test = "tests/test_olog.py::test_search_bad_time_is_not_a_connection_error"
+    monkeypatch.setattr(
+        guard_audit,
+        "load_coverage_map",
+        lambda _path: {("olog_client.py", 181): {one_real_covering_test}},
+    )
+
+    argv = [*_ARGV, "--coverage-db", "synthetic", "--min-covering-tests", "200"]
+    assert guard_audit.main(argv) == 2
+    reported = capsys.readouterr().err
+    assert "MAP TOO SMALL" in reported, reported
+    assert "floor is 200" in reported
+    assert guard_audit.RERUN_COVERAGE in reported, "and it must say how to record a real one"
+    assert "all agree" not in reported, "a refusal must not also read as agreement"
+
+
 def test_a_coverage_context_is_matched_by_file_and_function(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

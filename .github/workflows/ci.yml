@@ -130,7 +130,10 @@ jobs:
       #     after its FIRST observation, so a map recorded without it sees a fraction of the
       #     covering tests and the audit reports false survivors. Measured on 2026-08-20 on this
       #     tree, both maps in this job's shape: 246 test functions execute a client-edge guard
-      #     line under ctrace, 75 under the default core, and the audit exits 1 on the second.
+      #     line under ctrace, 75 under the default core. ⚠️ The audit DID exit 1 on the second,
+      #     and that was luck rather than the mechanism: the two cores attribute differently, so
+      #     the poorer map happened to show one execution the good one did not. A map that merely
+      #     sees LESS cannot move the pins at all, which is why --min-covering-tests exists below.
       #     On THIS runner it is belt and braces rather than load-bearing: coverage 7.14.1 sets
       #     SYSMON_DEFAULT = CPYTHON and PYVERSION >= (3, 14), so 3.12 records a C-tracer map
       #     either way. It is set because the interpreter above is a choice that can change, and
@@ -152,5 +155,17 @@ jobs:
       # should fail this step. A green run prints "checked 6 pin(s)"; "checked 4 pin(s)" would mean
       # the database was never read, and that is asserted in tests/test_guard_audit_cli.py rather
       # than grepped for here, because nothing versions a shell pipeline.
+      #
+      # ⛔ --min-covering-tests IS NOT OPTIONAL FOR AN UNATTENDED CALLER, and the first version of
+      # this job did not have it. The two pinned coverage figures sit at their arithmetic maximum,
+      # so a map that measured almost nothing still AGREES with them. Measured on this tree: a map
+      # recorded from one test module covers 30 test functions and printed "checked 6 pin(s): all
+      # agree", exit 0. The floor is what turns a worthless map into a refusal; the pins cannot.
+      # 200 against a measured 246, which leaves room for the suite to shrink a little and none for
+      # a map recorded wrongly (75 without ctrace on 3.14, 30 from a single module). Raise it as the
+      # suite grows; the reasoning is at the check itself in scripts/guard_audit.py.
       - name: The sham audit's coverage-dependent pins and its candidate list
-        run: uv run python scripts/guard_audit.py sham --check --coverage-db "${{ runner.temp }}/sham-cov"
+        run: >-
+          uv run python scripts/guard_audit.py sham --check
+          --coverage-db "${{ runner.temp }}/sham-cov"
+          --min-covering-tests 200

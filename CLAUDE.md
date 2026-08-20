@@ -339,9 +339,17 @@ operator guide, or this file.
 
 ## Gates
 
-`uv run pytest` green (coverage not reduced) + `uv run pre-commit run --all-files` green (ruff,
+`uv run pytest` green + `uv run pre-commit run --all-files` green (ruff,
 ruff-format, mypy --strict, the no-secrets / no-site-internal guards, and the two prose guards
 below). Conventional commit prefixes, one logical change per commit.
+
+**Coverage is not reduced, and since GB-34 that is a mechanism rather than a habit:** CI fails below
+`--cov-fail-under` in `.github/workflows/ci.yml`, on each of the three matrix legs. ⚠️ **The floor is
+the CI number and is LOWER than a local one**, because CI syncs without `--group displays` and the
+engine-coupled modules therefore do not run there (`docs/known-limits.md`, entry 16). Measured
+2026-08-20 on one tree: 87% in CI, 94% locally. Do not derive the floor from a local run, and do not
+move it into `[tool.coverage.report]`, where pytest-cov would apply it to a partial local run as
+well. `CONTRIBUTING.md` carries the operating detail.
 
 **The commit MESSAGE is guarded too, and it is the one guard a clone can be missing.** The tracked
 files are covered by `test_guide.py`; commit metadata is outside that population by construction,

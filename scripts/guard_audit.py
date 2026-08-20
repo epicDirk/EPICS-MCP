@@ -665,6 +665,36 @@ def cmd_sham(args: argparse.Namespace) -> int:
     sys.stderr.write(
         f"map: {len(executing)} test functions execute at least one client-edge GUARD line\n"
     )
+    # ⛔ THE SIZE OF THE MAP IS A FLOOR, NOT A REPORT LINE, AND THE PINS CANNOT SUBSTITUTE FOR IT.
+    # Found by an adversarial pass after the CI job was already green, and it is the exact trap this
+    # audit exists to name, one level up.
+    #
+    # ``PINNED_COVERAGE[NOT_EXECUTING]`` equals ``PINNED_AST[DOUBLES]`` and
+    # ``PINNED_COVERAGE[SHAM_CANDIDATES]`` equals ``PINNED_AST[EDGE_VOCABULARY]``: today NO claiming
+    # test executes a guard line, so both coverage figures sit at their arithmetic MAXIMUM.
+    # ``measured[NOT_EXECUTING]`` is ``|claiming \\ executing|``, bounded above by ``|claiming|``,
+    # so a map seeing FEWER executions cannot push it any higher and the comparison stays green. The
+    # pins can only fall, i.e. they detect a claiming test that STARTS executing a guard line, which
+    # is the sham signal and is worth having; they are structurally blind to a bad map.
+    #
+    # Measured 2026-08-20, all three in the CI shape: a full ctrace run covers 246 test functions; a
+    # map recorded from ONE module (tests/test_olog.py) covers 30 and still printed
+    # "checked 6 pin(s): all agree with the recorded audit", exit 0; a map recorded without
+    # COVERAGE_CORE=ctrace on Python 3.14 covers 75. The middle case is the one that matters: a
+    # non-empty but nearly worthless map is invisible to the empty-map refusal above AND to the
+    # pins, so the job would report success having verified nothing.
+    #
+    # The floor is opt-in rather than a constant here, because the right value depends on the
+    # SELECTION the caller ran, and a caller who deliberately audits a subset is not making a
+    # mistake. CI passes it; a developer probing one module does not.
+    if args.min_covering_tests is not None and len(executing) < args.min_covering_tests:
+        sys.stderr.write(
+            f"MAP TOO SMALL: {len(executing)} covering test functions, floor is "
+            f"{args.min_covering_tests}. The pins CANNOT see this: they sit at their maximum, so a "
+            "map that measured almost nothing still agrees with them. Re-record over the WHOLE "
+            f"suite with per-test contexts.\n{RERUN_COVERAGE}\n"
+        )
+        return 2
     sham_edge: list[str] = []
     sham_other = 0
     for filename, entries in sorted(claiming_tests().items()):
@@ -867,6 +897,14 @@ def main(argv: list[str]) -> int:
         action="store_true",
         help="print the payload-vocabulary candidate list from the AST alone, no database needed: "
         "the list RERUN_AST asks a developer to re-read",
+    )
+    sham_parser.add_argument(
+        "--min-covering-tests",
+        type=int,
+        default=None,
+        help="refuse (exit 2) a --coverage-db whose map covers fewer than N test functions. The "
+        "pins cannot detect a small map, see the note at the check itself; an unattended caller "
+        "should pass this, a developer auditing one module should not",
     )
     sham_parser.set_defaults(func=cmd_sham)
 
