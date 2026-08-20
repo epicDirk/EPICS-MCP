@@ -84,9 +84,7 @@ sys.path.insert(0, str(_REPO / "scripts"))
 from guard_audit import (  # noqa: E402 - needs sys.path above
     DOUBLES,
     EDGE_VOCABULARY,
-    PINNED_AST,
     PINNED_COVERAGE,
-    RERUN_AST,
     SHAM_CANDIDATES,
     client_modules,
     enumerate_targets,
@@ -332,26 +330,6 @@ def test_recorded_audit_findings_still_point_at_a_guard() -> None:
     assert recorded <= live, (
         f"recorded audit findings no longer sit on a guard line: {sorted(recorded - live)}. "
         f"They were measured on an older revision, {_RERUN}"
-    )
-
-
-def test_the_ast_derivable_audit_figures_are_pinned() -> None:
-    """S33: the half of direction B that costs no coverage run is watched by the ordinary gate.
-
-    This closes the trigger the roadmap names: a NEW test that installs a client class double and
-    carries payload vocabulary in its name or docstring moves both figures, and until now moved
-    them silently. Going red here is the signal to re-read the audit's verdict, not to edit the
-    number, the verdict "no sham guard found" was reached by a human reading a specific list, and
-    a longer list has not been read.
-
-    The other two figures are decided by which tests EXECUTED a guard line. That needs a coverage
-    map, so they are pinned in ``guard_audit.PINNED_COVERAGE`` and checked deliberately, not here:
-    and they are referred to rather than repeated, because this sentence named them as "102, 20"
-    for a whole day after ``9253fc9`` moved them.
-    """
-    assert population() == PINNED_AST, (
-        f"the client-double population changed: measured {population()}, recorded {PINNED_AST}. "
-        f"A test was added or its wording changed. {RERUN_AST}"
     )
 
 

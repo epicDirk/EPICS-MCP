@@ -164,8 +164,11 @@ instead since 2026-08-04: `docs/known-limits.md`, entry 16.
     what it READS (`_Claim.reads`, keyword-only and required); that declaration is traced, so it
     has to be true rather than plausible.
   - *A new test that installs a client class double in its own body* moves the audited population
-    and reddens `tests/test_client_edge_guards.py::test_the_ast_derivable_audit_figures_are_pinned`.
-    Re-measure with `uv run python scripts/guard_audit.py sham --check`. That verdict was reached
+    and reddens
+    `tests/test_guard_audit_cli.py::test_check_without_a_database_agrees_and_names_what_it_could_not_reach`,
+    which drives the real CLI and therefore fails on any `PINNED_AST` figure moving, and on any
+    figure being measured that nothing pins. Re-measure with
+    `uv run python scripts/guard_audit.py sham --check`. That verdict was reached
     by a person reading a list, so a longer list has not been read: re-read it, then re-record.
 - **Periodically, and after any change to a client module or a client-double test:** re-record the
   coverage-dependent half of the sham audit. It is not in the gate because it costs a full

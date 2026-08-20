@@ -45,6 +45,23 @@ def test_check_without_a_database_agrees_and_names_what_it_could_not_reach(
     # Without this a checker that compared NOTHING would satisfy every line above.
     assert f"checked {len(guard_audit.PINNED_AST)} pin(s)" in reported
     assert guard_audit.UNPINNED_VERDICT in reported, "the unpinnable verdict must be named too"
+    # THE OTHER DIRECTION, and the count above cannot reach it. ``compared`` is the SIZE OF THE
+    # INTERSECTION (guard_audit.py, ``len(measured.keys() & PINNED.keys())``), so a figure added to
+    # ``population()`` that nothing pins leaves compared at 4 and this test green, while
+    # ``_compare`` merely PRINTS "measured but not pinned" and still returns 0. The audit would then
+    # report "all agree" about five measured figures having compared four: the sham ``_compare``'s
+    # own docstring says it exists to make impossible, one level up.
+    #
+    # Measured, in that order and on this tree: adding a fifth key to ``population()`` left every
+    # assertion above GREEN and reddened only ``test_the_ast_derivable_audit_figures_are_pinned``,
+    # whose ``population() == PINNED_AST`` was a dict equality and therefore the only key-set
+    # comparison in the suite. That test was a duplicate of this one for the VALUE direction and
+    # the sole cover for this one, so it was removed and this line took the half worth keeping.
+    assert set(guard_audit.population()) == set(guard_audit.PINNED_AST), (
+        "population() and PINNED_AST name different figures, so the audit compared a subset and "
+        f"reported agreement: measured {sorted(guard_audit.population())}, "
+        f"pinned {sorted(guard_audit.PINNED_AST)}"
+    )
 
 
 def test_check_reports_a_deviating_pin_by_name_and_exits_one(
