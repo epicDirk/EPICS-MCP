@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import ast
 import atexit
+import functools
 import hashlib
 import os
 import re
@@ -83,9 +84,41 @@ class Target:
         return f"{self.module}:{self.lineno}:{self.col}-{self.end_lineno}:{self.end_col}"
 
 
+# ⛔ THE THREE CACHES BELOW ARE KEYED ON A DIRECTORY, AND A BARE ``functools.cache`` IS THE
+# FORBIDDEN SIMPLIFICATION. Three tests replace a module constant to audit a STAND-IN tree:
+# tests/test_guard_audit_cli.py:316, :353 and :375 monkeypatch ``_SERVICES``. A zero-argument cache
+# is filled by the first real call, so the stand-in is never read and the tool answers about the
+# PREVIOUS tree while reporting on the new one.
+#
+# Measured rather than reasoned, because the obvious prediction is wrong. Warming a zero-argument
+# cache on the real tree and then pointing ``_SERVICES`` at an empty directory does NOT go green: it
+# still exits 2, and it prints "6 client module(s) under <the empty directory>, but not one guard
+# site in them". Six modules in a directory that holds none. It refused for a reason that is not
+# true, which is worse than refusing for the right one and better only by luck: whether the answer
+# lands on 0 or on 2 depends on which of the three functions is cached and in what order a caller
+# touches them, and no reading of this file makes that predictable. That is the argument for the
+# key, not the exit code.
+#
+# ``cache_clear()`` is not the remedy either. There is no single place to put it (three separate
+# tests swap the constant) and a forgotten call fails GREEN. Keying on the directory READ AT CALL
+# TIME needs no discipline: the monkeypatch changes the key, so the stand-in tree is recomputed and
+# the refusal still fires with its own true diagnosis. The public functions stay zero-argument, so
+# no caller changes.
+#
+# Why at all: ``claiming_tests`` re-globs and re-``ast.parse``s the whole tests/ tree on every call,
+# measured 1.79 s, and one run of tests/test_guard_audit_cli.py calls it 21 times.
+# The cached helpers return IMMUTABLE containers and the wrappers rebuild a fresh mutable one, so a
+# caller that mutates the result cannot poison the next call.
+
+
+@functools.cache
+def _client_modules_at(root: Path) -> tuple[Path, ...]:
+    return tuple(sorted(root.glob("*_client.py")))
+
+
 def client_modules() -> list[Path]:
     """The six client modules whose edges this audit covers, in a stable order."""
-    return sorted(_SERVICES.glob("*_client.py"))
+    return list(_client_modules_at(_SERVICES))
 
 
 def _form_of(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> str:
@@ -117,20 +150,11 @@ def _isinstance_calls(tree: ast.AST) -> Iterator[ast.Call]:
             yield node
 
 
-def enumerate_targets() -> list[Target]:
-    """Every mutable guard site across the client modules, derived from the AST, never from grep.
-
-    Offsets, not line numbers: 11 lines carry two calls each and one ``if`` spans seven lines with
-    three, so a line-wise replacement cannot address a single call and would break the ``or``
-    scaffolding into a SyntaxError.
-
-    Composite conditions get an extra WHOLE-CONDITION target. Splicing one conjunct of
-    ``not isinstance(x, dict) or "secs" not in x`` leaves the rest of the condition standing, so the
-    guard does not disappear and a green result would mean "this conjunct is unobserved", not
-    "this guard is unguarded".
-    """
+@functools.cache
+def _targets_at(root: Path) -> tuple[Target, ...]:
+    """``enumerate_targets`` for one services directory. Keyed, see the note above the caches."""
     targets: list[Target] = []
-    for path in client_modules():
+    for path in _client_modules_at(root):
         tree = ast.parse(path.read_bytes())
         parents = _walk_with_parents(tree)
         whole: set[tuple[int, int]] = set()
@@ -170,7 +194,22 @@ def enumerate_targets() -> list[Target]:
                                 composite=True,
                             )
                         )
-    return sorted(targets, key=lambda t: (t.module, t.lineno, t.col))
+    return tuple(sorted(targets, key=lambda t: (t.module, t.lineno, t.col)))
+
+
+def enumerate_targets() -> list[Target]:
+    """Every mutable guard site across the client modules, derived from the AST, never from grep.
+
+    Offsets, not line numbers: 11 lines carry two calls each and one ``if`` spans seven lines with
+    three, so a line-wise replacement cannot address a single call and would break the ``or``
+    scaffolding into a SyntaxError.
+
+    Composite conditions get an extra WHOLE-CONDITION target. Splicing one conjunct of
+    ``not isinstance(x, dict) or "secs" not in x`` leaves the rest of the condition standing, so the
+    guard does not disappear and a green result would mean "this conjunct is unobserved", not
+    "this guard is unguarded".
+    """
+    return list(_targets_at(_SERVICES))
 
 
 def splice(data: bytes, target: Target, replacement: bytes) -> bytes:
@@ -443,12 +482,22 @@ def claiming_tests() -> dict[str, list[tuple[str, bool]]]:
     carry. What must never come from prose is whether a double was INSTALLED: see
     ``class_double_calls``.
     """
+    return {file: list(entries) for file, entries in _claiming_at(_TESTS)}
+
+
+@functools.cache
+def _claiming_at(root: Path) -> tuple[tuple[str, tuple[tuple[str, bool], ...]], ...]:
+    """``claiming_tests`` for one test directory. Keyed, see the note above the caches.
+
+    This is the expensive one: it re-``ast.parse``s every tracked test module, measured 1.79 s over
+    98 files, and the CLI test module drives it 21 times in a single run.
+    """
     found: dict[str, list[tuple[str, bool]]] = {}
     # pytest's own default is ``test_*.py *_test.py``, and pyproject sets no ``python_files``. A
     # narrower glob here would let a contributor add doubles under a name pytest RUNS and the
     # audited population does not see. Latent today: no such file exists, so this closes a hole
     # rather than fixing a wrong figure.
-    for path in sorted(set(_TESTS.glob("test_*.py")) | set(_TESTS.glob("*_test.py"))):
+    for path in sorted(set(root.glob("test_*.py")) | set(root.glob("*_test.py"))):
         for node in ast.walk(ast.parse(path.read_bytes())):
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue
@@ -458,7 +507,7 @@ def claiming_tests() -> dict[str, list[tuple[str, bool]]]:
                 continue
             claim = bool(_EDGE_CLAIM.search(node.name + (ast.get_docstring(node) or "")))
             found.setdefault(path.name, []).append((node.name, claim))
-    return found
+    return tuple((file, tuple(entries)) for file, entries in found.items())
 
 
 def cmd_targets(_args: argparse.Namespace) -> int:
