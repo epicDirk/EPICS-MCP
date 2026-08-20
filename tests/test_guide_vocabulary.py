@@ -19,6 +19,15 @@ paragraph is moved between topics, and a reader following a wrong route has no w
 a real section, in full, without the word they came for. Measured while this index was first
 written, 19 of its rows failed this check on the first run.
 
+**The third claim, which the table makes as a WHOLE rather than per row.** It is a SET of routes:
+each field name occurs once, and every topic it reaches stays reached. Both halves guard the same
+failure, a row that goes away, and that failure was guarded until 2026-08-20 by a floor under the
+ROW COUNT, which nothing falls through as long as something takes the row's place. Measured that
+day against the shipped guide: overwriting one row with a copy of another deletes a route, holds the
+count at 20, and left the WHOLE suite green, 2721 passed and 63 skipped at exit 0. A count was the
+wrong quantity in both directions, because it would equally have gone red on a harmless merge of two
+rows that share a topic, where no route is lost at all.
+
 **Why the population is derived rather than listed.** A list would be a second copy of the response
 models and would rot with them. It is read out of the AST instead, from three places a response key
 can be born in this package: an annotated field in a class body (the pydantic models, the
@@ -38,7 +47,11 @@ Provably red (each verified by mutating the shipped guide, never a fixture):
 * point a row at a topic that does not exist -> ``test_every_indexed_topic_exists``;
 * point a row at a real topic that does not mention the field ->
   ``test_every_indexed_field_appears_in_the_topic_it_names``;
-* break the AST walk so it collects nothing -> ``test_the_derived_population_is_not_empty``.
+* break the AST walk so it collects nothing -> ``test_the_derived_population_is_not_empty``;
+* replace a row with a copy of another one, leaving the row count untouched ->
+  ``test_the_index_is_a_set_of_distinct_routes``, and the field floor in
+  ``test_the_derived_population_is_not_empty``;
+* delete the last row that points at a topic -> ``test_every_indexed_topic_keeps_its_route``.
 """
 
 from __future__ import annotations
@@ -98,21 +111,62 @@ _KEY_SHAPE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 #: Floors under the two derived quantities, both RATCHETS rather than round numbers.
 #:
-#: ⚠️ ``_MIN_INDEX_ROWS`` sat at 8 against 16 measured rows, which reads as "a floor against empty"
-#: and works as "half the index may vanish silently": measured, deleting 8 rows left the suite
-#: green. A ratchet just under the real count is the honest shape, so raise it in the same commit
-#: that adds rows. ``_MIN_RESPONSE_KEYS`` stays a round floor because its only job is to catch a
-#: broken AST walk; the real check on that side is the field-existence assertion.
-#: Re-measured 2026-08-19 with ``len(_response_keys())`` and ``len(_index_rows())``: 477 and 20
+#: ⛔ ``_MIN_INDEXED_FIELDS`` replaced a floor under the number of TABLE ROWS on 2026-08-20, and
+#: the reason is that a row count is a PRESENTATION quantity while the content of an index is the
+#: set of NAMES it routes. The gap was measured rather than argued: overwriting the
+#: ``attachment_count`` row of the shipped guide with a second copy of the ``reach`` row deletes a
+#: route, holds the count at 20, and left the whole suite green. The floor now sits under the
+#: DISTINCT FIELD NAMES, so a row that is replaced rather than removed still falls through it.
+#:
+#: ⚠️ The predecessor of that predecessor sat at 8 against 16 measured rows, which reads as "a
+#: floor against empty" and works as "half the index may vanish silently": measured, deleting 8
+#: rows left the suite green. A ratchet at the real count is the honest shape, so raise it in the
+#: same commit that adds fields. ``_MIN_RESPONSE_KEYS`` stays a round floor because its only job is
+#: to catch a broken AST walk; the real check on that side is the field-existence assertion.
+#: Re-measured 2026-08-20 with ``len(_response_keys())`` and
+#: ``len({f for fs, _ in _index_rows() for f in fs})``: 480 and 66, across 20 rows
 #: (16 rows on 2026-08-16; GQ-33 added four, two for the write-answer fields and two for an
 #: archived sample, the second of those because ``severity`` has a live-read meaning as well and a
-#: bare row would have routed one name to two subjects).
+#: bare row would have routed one name to two subjects). The key population read 477 on
+#: 2026-08-19 and moves with ordinary code changes, which is why its floor is round and far below,
+#: while the index floor sits exactly on the measured count.
 #: ⚠️ An earlier version of this comment claimed 444, a draft figure taken before the third birth
 #: was added and never re-measured, and a second draft claimed 597, written before the shape filter
 #: above cut the population down. Both are named because the same slip happened twice in one hour:
 #: a figure copied forward while the thing it counts kept moving.
 _MIN_RESPONSE_KEYS = 100
-_MIN_INDEX_ROWS = 20
+_MIN_INDEXED_FIELDS = 66
+
+#: The topics the index routes to, frozen as a SET so that losing the LAST route to one is loud.
+#:
+#: Measured 2026-08-20 with ``sorted({t for _, ts in _index_rows() for t in ts})``: 11 of the 34
+#: keys in ``TOPICS``. Growing this set is ordinary and needs no ceremony; shrinking it means a
+#: section became unreachable for the one reader this index was written for, someone holding a
+#: field name on a surface with no free-text search.
+#:
+#: ⚠️ HONEST LIMIT, stated rather than implied, because this is a ratchet with NAMES and not a
+#: derivation. A derivation was measured first and rejected on the measurement: the best candidate,
+#: "a response key that exactly one topic besides ``answer-fields`` names as code", selects 126
+#: keys of which the index carries 48, so binding to it would have reddened the HEALTHY index on 78
+#: counts. No mechanical criterion separates the fields that need a route from the 480 keys that do
+#: not, so the codomain is pinned instead of derived. What that leaves open is said plainly:
+#: deleting a row AND its topic here in one edit stays green. The difference to a bare count is
+#: that such a deletion then carries a name and stands in the diff.
+_INDEXED_TOPICS = frozenset(
+    {
+        "alarm-tree",
+        "doctor",
+        "err-archiver",
+        "err-crossplane",
+        "err-displays",
+        "err-pv",
+        "err-rest",
+        "olog-filters",
+        "olog-output",
+        "posture",
+        "pv-write",
+    }
+)
 
 
 def _response_keys() -> set[str]:
@@ -201,12 +255,66 @@ def test_the_derived_population_is_not_empty() -> None:
         f"{_MIN_RESPONSE_KEYS}. The AST walk is broken or the layout moved; fix the walk rather "
         "than lowering the floor, because every other assertion here is vacuous without it."
     )
-    rows = _index_rows()
-    assert len(rows) >= _MIN_INDEX_ROWS, (
-        f"the answer-field index has {len(rows)} rows, below the floor of "
-        f"{_MIN_INDEX_ROWS}. Either "
-        f"the table under the '{_INDEX_TOPIC}' topic was emptied, or its shape changed and the row "
-        "pattern no longer matches it."
+    fields = {field for row_fields, _ in _index_rows() for field in row_fields}
+    assert len(fields) >= _MIN_INDEXED_FIELDS, (
+        f"the answer-field index routes {len(fields)} distinct field name(s), below the floor of "
+        f"{_MIN_INDEXED_FIELDS}. Either rows were removed from the table under the "
+        f"'{_INDEX_TOPIC}' topic, or its shape changed and the row pattern no longer matches it. "
+        "The floor holds NAMES rather than rows on purpose: a row count cannot see a row that was "
+        "replaced by a copy of another one, and that is how a route disappears unnoticed."
+    )
+
+
+def test_the_index_is_a_set_of_distinct_routes() -> None:
+    """The index is a SET: no field name may be routed twice, so no row may repeat another.
+
+    ⛔ This is the assertion that catches a row being REPLACED rather than removed, and the gap
+    it closes was measured rather than reasoned about. On 2026-08-20 the ``attachment_count`` row of
+    the shipped guide was overwritten with a second copy of the ``reach`` row, which deletes a route
+    while leaving the row count at 20, and the entire suite stayed green: 2721 passed, 63 skipped,
+    exit 0. A count cannot see that edit. Set-ness can, because the substitute is a repetition of
+    something already in the table.
+
+    The property is real rather than merely convenient: an index names each field once and points it
+    at the one topic that explains it, so a name occurring twice is either a contradiction between
+    two routes or dead weight. The shipped table has neither, measured the same day at 66 cells and
+    66 distinct names, which is what makes this safe to assert rather than aspirational.
+
+    A duplicated ROW needs no assertion of its own: its fields repeat, so it fails here first.
+    """
+    fields = [field for row_fields, _ in _index_rows() for field in row_fields]
+    repeated = sorted({field for field in fields if fields.count(field) > 1})
+    assert not repeated, (
+        f"the answer-field index routes {len(repeated)} field name(s) more than once: "
+        f"{', '.join(repeated)}. Either two rows contradict each other about which topic explains "
+        "the field, or a row was overwritten with a copy of another one. The second is how a route "
+        "disappears while the row count stays put, which is the failure this assertion exists for."
+    )
+
+
+def test_every_indexed_topic_keeps_its_route() -> None:
+    """Every topic the index reaches has to stay reachable through it.
+
+    The companion to the field floor, one level out: the floor holds the index's DOMAIN, this holds
+    its CODOMAIN. Losing the last row that points at a topic makes that section unreachable for a
+    caller who holds a field name and nothing else, and nothing else in this repository would
+    notice: the guide still serves the section, ``resolve_topics`` still claims it, and every other
+    assertion in this module is about the rows that ARE there.
+    """
+    routed = {topic for _, topics in _index_rows() for topic in topics}
+    stale = sorted(_INDEXED_TOPICS - set(TOPICS))
+    assert not stale, (
+        f"{len(stale)} pinned topic(s) are no longer keys of TOPICS: {', '.join(stale)}. The pin "
+        "went stale rather than the index. Re-measure it against the renamed key instead of "
+        "dropping the entry, or the ratchet quietly stops holding that route."
+    )
+    lost = sorted(_INDEXED_TOPICS - routed)
+    assert not lost, (
+        f"the answer-field index no longer routes to {len(lost)} topic(s) it used to explain: "
+        f"{', '.join(lost)}. A caller holding a field name explained there now has no route to it, "
+        "and this surface has no free-text search to fall back on. Restore the row, or, if that "
+        "section genuinely stopped carrying answer fields, remove the name from _INDEXED_TOPICS in "
+        "the same commit and say why."
     )
 
 
