@@ -352,9 +352,16 @@ async def query_olog_search(
                 result["note"] = note
         return result
 
-    # Three outcomes, three classes. Collapsing them all into EpicsConnectionError (as this did)
-    # tells the caller the service is unreachable when in truth the ARGUMENT was bad or the server
-    # ANSWERED and said no: three different next actions reported as one.
+    # Three outcomes, FOUR caught classes. Collapsing them all into EpicsConnectionError (as this
+    # did) tells the caller the service is unreachable when in truth the ARGUMENT was bad or the
+    # server ANSWERED and said no: three different next actions reported as one.
+    # ⚠ This read "three outcomes, three classes" until GQ-117, and the class half had been wrong
+    # since the OlogFilterValueError branch was added: the two nothing-was-sent branches share ONE
+    # outcome but are separate classes with separate codes (INVALID_TIME_WINDOW, INVALID_INPUT).
+    # The count was correct when written on 2026-07-15 (`41803b9`, three except branches) and was
+    # never re-counted. The twin comment at tools/archiver.py:123 still says three/three and is
+    # still RIGHT there, three except branches, which is why the pair could diverge unnoticed.
+    # The prose-number guard sees neither: "outcomes" and "classes" are not collection nouns.
     try:
         return await asyncio.to_thread(_run)
     except TimeWindowFormatError as exc:
