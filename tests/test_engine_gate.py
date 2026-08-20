@@ -17,6 +17,7 @@ Three guards, because none of them catches the others' case:
 from __future__ import annotations
 
 import ast
+import functools
 import importlib.util
 import os
 import subprocess
@@ -418,6 +419,23 @@ def _reaches(name: str, tainted: frozenset[str] | set[str]) -> bool:
 
 def _engine_tainted_modules() -> set[str]:
     """Every ``epics_mcp`` module that reaches ``opi_navigation`` at module level, transitively."""
+    return set(_engine_tainted_frozen())
+
+
+@functools.cache
+def _engine_tainted_frozen() -> frozenset[str]:
+    """The cached half. Zero arguments is SAFE here, and that is a measured claim rather than a
+    convention: this module's only ``monkeypatch.setattr`` is on ``importlib.util.find_spec``
+    (line 61), nothing replaces ``_REPO``, and the answer is a pure function of the tracked source
+    tree, which no test in this file rewrites.
+
+    Why: the walk re-``ast.parse``s all 77 files under ``src/`` and is called 15 times per run, 13
+    of them from the parametrised walker at the bottom of this file. Measured, about 4.8 s.
+
+    A ``frozenset`` rather than a ``set``, and the wrapper above rebuilds a mutable copy: one caller
+    hands the result to ``_engine_imports_below_module_level``, and a cached mutable would let a
+    future callee poison every later call.
+    """
     src = _REPO / "src"
     graph: dict[str, set[str]] = {}
     for path in sorted(src.rglob("*.py")):
@@ -440,7 +458,7 @@ def _engine_tainted_modules() -> set[str]:
             if any(_reaches(name, tainted) for name in imports):
                 tainted.add(module)
                 changed = True
-    return tainted
+    return frozenset(tainted)
 
 
 #: The optional display engine, by package name. One spelling, because three functions ask.
