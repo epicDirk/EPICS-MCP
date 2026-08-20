@@ -46,6 +46,8 @@ from epics_mcp.services._http import (
     rest_get_json,
     url_without_credentials,
 )
+from epics_mcp.services.channelfinder_client import ChannelFinderClient
+from epics_mcp.services.channelfinder_exceptions import ChannelFinderConnectionError
 from epics_mcp.services.doctor import (
     _DEGRADED_STATUSES,
     _FAILING_STATUSES,
@@ -2030,9 +2032,111 @@ def test_a_verdict_keeps_a_cause_that_carries_no_credential() -> None:
     The barrier upstream has already redacted the address by the time this text is built, so
     discarding it here would delete the only place "refused" is distinguishable from "timed out"
     from a TLS failure, and the remedy line is static per status and supplies none of that.
+
+    ⚠️ Its exception carries NO ``__cause__``, and that is the half this test cannot see: a
+    classifier that renders the CHAINED exception instead of the one it was handed passes here
+    unchanged. That half is held by
+    ``test_an_unreachable_verdict_renders_the_message_the_probe_handed_it`` below, which was
+    written because exactly that mutant survived the whole suite (BG-DFID).
     """
     clean = "Failed to connect to http://cf.example.org/CF: timed out"
     assert clean in _classify_failure(RestConnectionError(clean), _PROBE_VAR)[3]
+
+
+#: The three transport failures that reach the ``unreachable`` arm, in requests' own wording, each
+#: with the phrase that tells it apart from the other two. A TLS failure is deliberately NOT here:
+#: it is recognised one arm earlier and lands in ``ca_error``, which
+#: ``test_an_unreadable_ca_bundle_is_a_ca_error_on_both_arrival_shapes`` holds.
+_TRANSPORT_FAILURES: tuple[tuple[str, str, BaseException], ...] = (
+    (
+        "refused",
+        "Connection refused",
+        requests.exceptions.ConnectionError(
+            "HTTPConnectionPool(host='cf.example.org', port=8080): Max retries exceeded with url: "
+            "/ChannelFinder (Caused by NewConnectionError('<urllib3.connection.HTTPConnection "
+            "object>: Failed to establish a new connection: [Errno 111] Connection refused'))"
+        ),
+    ),
+    (
+        "not-resolved",
+        "Name or service not known",
+        requests.exceptions.ConnectionError(
+            "HTTPConnectionPool(host='cf.example.org', port=8080): Max retries exceeded with url: "
+            "/ChannelFinder (Caused by NameResolutionError(\"Failed to resolve 'cf.example.org' "
+            '([Errno -2] Name or service not known)"))'
+        ),
+    ),
+    (
+        "timed-out",
+        "Read timed out",
+        requests.exceptions.ReadTimeout(
+            "HTTPConnectionPool(host='cf.example.org', port=8080): Read timed out. "
+            "(read timeout=5.0)"
+        ),
+    ),
+)
+
+
+def test_an_unreachable_verdict_renders_the_message_the_probe_handed_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BG-DFID: the classifier renders the exception it was HANDED, never the one that chains.
+
+    The mutant this closes is ``shown_cause(exc)`` to ``shown_cause(exc.__cause__ or exc)`` at the
+    ``unreachable`` arm. Measured 2026-08-20 it survived the WHOLE suite unchanged (2716 passed,
+    63 skipped, both before and after), because nothing asserted that arm's rendered text on an
+    exception that HAS a cause: the neighbour above hand-builds one without a ``__cause__``, so
+    the mutant cannot reach it, and every other route into this arm goes through a fake client
+    whose verdict text no test reads.
+
+    ⚠️ What the mutant destroys is NOT what the ticket said it was, and the correction is the
+    finding. The three families stay distinguishable under it, because urllib3's pool text carries
+    "Connection refused", "Name or service not known" and "Read timed out" either way. What it
+    drops is the half the SERVICE layer composed: "Failed to connect to ChannelFinder at
+    <address>". An ``unreachable`` line then names a variable and a library exception and no longer
+    says WHICH service at WHICH address was not reached, and the address it drops is the one this
+    repository's own barrier proved showable (``shown_url`` via ``shown_failure``), not one
+    requests chose.
+
+    Both halves of the pair are real code rather than a fixture, which is what keeps the containment
+    assertion from being a tautology: the exception is built by
+    ``ChannelFinderClient.check_connectivity`` (the ``except OSError`` re-raise all five service
+    clients share), and the verdict is built by ``_classify_failure``. Asserting the WHOLE handed
+    message rather than a literal prefix is what keeps this test out of that client's wording.
+
+    The third assertion pins the promise ``shown_cause``'s docstring makes and nothing else checks:
+    that these three arrive as three DIFFERENT verdicts. A cause replaced by a constant, or
+    withheld wholesale, collapses them to one and is red here while the containment assertion could
+    stay green.
+
+    Red-proof, both directions, measured: with the mutant applied all three rows fail on the
+    "handed" assertion and NOT on the phrase assertion; reverted, the test passes.
+    """
+    rendered: dict[str, str] = {}
+    for label, phrase, raw in _TRANSPORT_FAILURES:
+        client = ChannelFinderClient("http://cf.example.org:8080/ChannelFinder")
+        monkeypatch.setattr(client.session, "head", Mock(side_effect=raw))
+        with pytest.raises(ChannelFinderConnectionError) as excinfo:
+            client.check_connectivity()
+        handed = str(excinfo.value)
+
+        reachable, ca_ok, status, detail = _classify_failure(excinfo.value, _PROBE_VAR)
+
+        assert (reachable, ca_ok, status) == (False, None, "unreachable"), label
+        assert handed in detail, (
+            f"the {label} verdict dropped the message the probe handed it and rendered the chained "
+            f"library exception instead: {detail!r}"
+        )
+        assert phrase in detail, (
+            f"the {label} verdict no longer names its transport failure; {phrase!r} is the only "
+            f"thing that tells it apart from the other two, and the remedy is static: {detail!r}"
+        )
+        rendered[label] = detail
+
+    assert len(set(rendered.values())) == len(rendered), (
+        "two of the three transport failures render as the SAME verdict, so the arm no longer "
+        f"tells them apart: {rendered}"
+    )
 
 
 async def test_unverified_plane_does_not_fail_but_is_reported(
