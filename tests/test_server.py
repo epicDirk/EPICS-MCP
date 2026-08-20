@@ -2499,11 +2499,17 @@ async def test_every_typed_tool_conforms_to_its_schema_over_the_wire(
     remove.
 
     HONEST SCOPE: this is a coverage guard, not a bug hunt. The same population was measured
-    once over a real client with 0 violations (CHANGELOG, S29/LO), and mypy --strict already
+    once over a real client with 0 violations, and mypy --strict already
     rejects almost every mis-typed return literal at commit time. What is bought here is that
     the measurement keeps holding, for every future tool, without anyone remembering to re-run
     it. Payload-carrying paths are a different and sharper question; they are driven per-tool,
     and only where a guard actually depends on one.
+    ⚠ That number's evidence pointer read "(CHANGELOG, S29/LO)" until GQ-117 and was DEAD: `S29`
+    occurs zero times in today's CHANGELOG.md, the entries having been removed by `bf35019`, which
+    re-cut the file as a release history. The record survives in git, in the wire-validation entry
+    of `git show bf35019^:CHANGELOG.md`, and it names both the population and the zero, so the
+    number holds; only the way to check it had been cut. A number whose source has been deleted
+    is unfalsifiable, which is the same defect as a wrong number wearing a citation.
 
     Red-proof (both measured): drop a row from _DISABLED_WIRE_ARGS without dropping the tool from
     _TYPED_OUTPUT_TOOLS -> the completeness half goes red; emit a mis-typed value from any disabled
@@ -3431,9 +3437,18 @@ async def test_tools_list_within_budget() -> None:
     ``@mcp.tool(output_schema=None)`` opt-out. Dropping it on a ``dict[str, object]`` tool restores
     an information-empty accept-all schema (``{additionalProperties: true, type: object}``), not a
     typed one, and doing that to all untyped tools grows the wire by 671 chars, measured over the
-    ELEVEN that existed on 2026-07-25 (ten today, the figure deliberately not re-scaled by hand):
-    0.3 % of this ceiling. The guard for that is
+    ELEVEN that existed on 2026-07-25: 0.3 % of this ceiling. The guard for that is
     :func:`test_output_schema_typed_only_for_typed_tools`, which asserts the iff in both directions.
+    ⚠ The parenthetical here said "(ten today)" from 2026-07-25 (`429f2ce`) until GQ-117, and by
+    then it had drifted: re-measured 2026-08-20 the full lane carries eleven untyped ones again,
+    because ``get_guide`` joined them, and the core-only lane carries seven, because every
+    display-gated tool is untyped. Both the 671 and the eleven reproduce exactly at `429f2ce^`;
+    at `429f2ce` itself, with find_channels typed, the delta was 610 over ten. The lane was never
+    named either, which is the second half of why the figure could not be checked by reading it.
+    ⚠ Neither the old figure nor this correction is visible to ``tests/test_prose_counters.py``:
+    its detector pairs a number with a closed list of collection nouns, and an elided noun
+    ("ten today") is outside it by construction. Registering these as DERIVED claims is recorded
+    as follow-up work, not done here.
 
     RELATIONAL (a ``<=`` ceiling, not an exact count) so both the core-only lane (29 tools) and the
     full lane (33) pass, a count-pinned assert would break core-only CI. Provably red: lower the
