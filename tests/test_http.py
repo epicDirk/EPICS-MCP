@@ -1147,6 +1147,16 @@ def test_the_no_caller_detector_sees_code_and_not_prose() -> None:
     assert _code_references(f"shown = _http.{name}(url)\n", name)
     assert _code_references(f"handler = {name}\n", name)
 
+    # The WHOLE answer on two rows, not just its truthiness, and both halves were mutants that
+    # came through the first version: swapping a form label and returning ``found[:1]`` both
+    # survived, because every assertion above reads the result as a boolean. The label is what a
+    # failure message tells its reader to look for, and the completeness is what says a second
+    # caller in the same file will be named rather than hidden behind the first.
+    assert _code_references(f"shown = _http.{name}({name}(url))\n", name) == [
+        (1, "attribute"),
+        (1, "name"),
+    ]
+
     # Negative: the shapes the five src cross-references actually take.
     assert not _code_references(f'"""Prefer shown_url over {name} for a message."""\n', name)
     assert not _code_references(f"# {name}(url) is what this used to do\n", name)
