@@ -3440,15 +3440,16 @@ async def test_tools_list_within_budget() -> None:
     ELEVEN that existed on 2026-07-25: 0.3 % of this ceiling. The guard for that is
     :func:`test_output_schema_typed_only_for_typed_tools`, which asserts the iff in both directions.
     ⚠ The parenthetical here said "(ten today)" from 2026-07-25 (`429f2ce`) until GQ-117, and by
-    then it had drifted: re-measured 2026-08-20 the full lane carries eleven untyped ones again,
-    because ``get_guide`` joined them, and the core-only lane carries seven, because every
-    display-gated tool is untyped. Both the 671 and the eleven reproduce exactly at `429f2ce^`;
-    at `429f2ce` itself, with find_channels typed, the delta was 610 over ten. The lane was never
-    named either, which is the second half of why the figure could not be checked by reading it.
-    ⚠ Neither the old figure nor this correction is visible to ``tests/test_prose_counters.py``:
-    its detector pairs a number with a closed list of collection nouns, and an elided noun
-    ("ten today") is outside it by construction. Registering these as DERIVED claims is recorded
-    as follow-up work, not done here.
+    then it had drifted, because ``get_guide`` had joined the untyped set. Both the 671 and the
+    ELEVEN reproduce exactly at `429f2ce^`; at `429f2ce` itself, with find_channels typed, the
+    delta was 610 over ten. The lane was never named either, which is the second half of why the
+    figure could not be checked by reading it. Named now, and DERIVED rather than re-typed: the
+    full lane carries eleven untyped tools and the core-only lane seven untyped tools, both
+    compared to the registrations by ``tests/test_prose_counters.py``.
+    ⚠ That registration is what GQ-123 closed, and the reason it was open is worth keeping: the
+    old wording elided the noun ("ten today"), and the detector pairs a number with a closed list
+    of collection nouns, so no wording of it could ever have been seen. A figure escaped the guard
+    by the shape of the sentence carrying it, not by living in an unreachable file.
 
     RELATIONAL (a ``<=`` ceiling, not an exact count) so both the core-only lane (29 tools) and the
     full lane (33) pass, a count-pinned assert would break core-only CI. Provably red: lower the

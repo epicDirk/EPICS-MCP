@@ -1,12 +1,12 @@
 """S32: the numbers this repository's prose NAMES are compared to the sets they describe.
 
-Comments and docstrings here state sizes: "all 22 schemas", "7 (resp. 9) rows", "TEN of the
-twelve", and until now nothing checked a single one of them. The cost was measured, not feared:
-the S29 11th typing target pulled 18 counters over by hand, two adversarial QA rounds found 8 of
-them still wrong, and one had already been wrong before that build began. The reading half of this
-guard is ``tests/prose_numbers.py``; this module is the comparing half.
+Comments, docstrings and the SHIPPED operator guide state sizes: "all 22 schemas", "7 (resp. 9)
+rows", "TEN of the twelve", and until now nothing checked a single one of them. The cost was
+measured, not feared: the S29 11th typing target pulled 18 counters over by hand, two adversarial
+QA rounds found 8 of them still wrong, and one had already been wrong before that build began.
+The reading half of this guard is ``tests/prose_numbers.py``; this module is the comparing half.
 
-WHAT IS PROMISED, in three parts, because a vaguer promise would be the same defect one layer up:
+WHAT IS PROMISED, in four parts, because a vaguer promise would be the same defect one layer up:
 
 * **Derived**: every claim in ``_CLAIMS`` is compared to a set that is computed here and now. A
   wrong number goes red with its file, line and enclosing scope. Nothing in ``_CLAIMS`` may carry a
@@ -19,6 +19,12 @@ WHAT IS PROMISED, in three parts, because a vaguer promise would be the same def
   reads the ``N of the M`` shape. It does not see every statement about a size, and it does not see
   numbers inside f-string assertion messages at all. The closed list lives in
   ``prose_numbers.COLLECTION_NOUNS`` and is the whole of the coverage claim.
+* **Out of REACH, which is a different thing and was the larger one**: a file this module does not
+  name in ``_WATCHED`` is invisible however well the patterns fit it. Measured for [GQ-123]: of the
+  seventeen wrong numbers [GQ-117] repaired in one day, NOT ONE sat where this guard was looking,
+  and three sat at a place its patterns match exactly, in a file nobody had listed. The criterion
+  that decides the list, and the arithmetic that keeps two large test modules OUT of it, is written
+  out above ``_WATCHED``.
 
 Which claims are DERIVED and which are merely inventoried was decided by measurement, not taste: a
 ``git`` pickaxe over the real S29 commits shows the drift lives in five families, the typed-tool
@@ -61,9 +67,49 @@ from tests.prose_numbers import ProseBlock, ProseSite, iter_blocks, iter_sites, 
 _TESTS = Path(__file__).resolve().parent
 _SRC = _TESTS.parent / "src" / "epics_mcp"
 
-# The files whose prose is watched. `checkers_olog.py` is named by the roadmap entry; the next
-# three carry sentences that DUPLICATE a number watched in test_server.py, and a duplicate nobody
-# compares is how the canonical side drifts while the test side is dutifully corrected.
+# The files whose prose is watched.
+#
+# THE CRITERION, written down with [GQ-123] because until then it was implicit and read as grown.
+# A file is watched when all three hold:
+#
+#   1. it carries at least one sentence whose number names a set THIS repository computes, so a
+#      derivation can be written at all. Reach without derivation buys nothing: an _FROZEN row
+#      guards the EXISTENCE of a phrase, never its value, and every drift measured on this guard so
+#      far happened while the phrase stood still and the world moved underneath it;
+#   2. somebody reads it who cannot check it, a model, an operator, or the next author of the code,
+#      as opposed to the release history, whose figures MUST stay as they were written;
+#   3. its site set moves rarely enough that the bookkeeping does not eat the check. Measured per
+#      file as the share of its commits that add or remove a size-naming phrase, because that share
+#      is what turns test_inventory_is_partitioned red for a reason that is not a wrong number.
+#
+# Applied rather than asserted. Every share below was MEASURED on 2026-08-21 over that file's
+# commits since 2026-07-01, and is written in the past tense on purpose: a churn share is a
+# reading of a history, not a property of the file, and a figure in the present tense here would
+# be the very defect this module exists to catch. Re-derive them, do not trust them:
+# `analysis/gq123-waechter-population-2026-08-21/skripte/kandidaten.py` in the workspace.
+#
+#   * `checkers_olog.py` came in from a roadmap entry, and `checkers.py`, `archiver.py` and
+#     `server.py` because they carry sentences that DUPLICATE a number watched in test_server.py.
+#     A duplicate nobody compares is how the canonical side drifts while the test side is dutifully
+#     corrected. That reason still holds and is condition 1 in its earliest form.
+#   * `operator_guide.md` joins with [GQ-123]. It meets the SAME duplicate rule three times over,
+#     "four display-aware tools" is the figure `_display_tools` already checks in three other
+#     places, and it is the text a model reads. 17 sites, and its site set moved on 13 of 82
+#     commits. The only thing that had ever kept it out was that `iter_blocks` called `ast.parse`
+#     and could therefore open nothing but `.py`.
+#   * `tests/test_guide_matches_code.py` is REFUSED, and arithmetic is the reason rather than
+#     taste: 47 sites to sort by hand, and its site set moved on 15 of 40 commits, against a
+#     forward yield of about ONE derivable number. The three wrong numbers it carried on
+#     2026-08-20 are the whole case for widening the population, and [GQ-117] repaired two of them
+#     by DE-NUMBERING, so those sites are gone. Widening a check means taking on its false-alarm
+#     rate. `tests/test_doctor.py` (44 sites, 27 of 65 commits) fails the same way.
+#   * `CHANGELOG.md` is refused on condition 2: a release entry that said "22 schemas" must keep
+#     saying it. It is also the one file in the tree whose section titles repeat, which the
+#     markdown key rests on not doing (`prose_numbers.ambiguous_headings`).
+#   * `docs/known-limits.md` is refused on condition 3: 24 sites, and its site set moved on 28 of
+#     52 commits, better than one commit in two. Entry 1 of that same page argues the point at
+#     length and its own figures are the evidence for it. (No superlative is claimed here, and the
+#     first draft did claim one and was wrong: this module's own file moved on 10 of 17.)
 #
 # This guard's own two files are NOT watched, and the honest reason is a trade-off, not a triumph.
 # Watching them surfaces dozens of phrases, the overwhelming majority QUOTATIONS of the estate's
@@ -82,6 +128,7 @@ _WATCHED: tuple[tuple[str, Path], ...] = (
     ("services/checkers.py", _SRC / "services" / "checkers.py"),
     ("tools/archiver.py", _SRC / "tools" / "archiver.py"),
     ("server.py", _SRC / "server.py"),
+    ("operator_guide.md", _SRC / "operator_guide.md"),
 )
 
 
@@ -866,6 +913,162 @@ def _return_path_rows() -> int:
     return sizes.pop()
 
 
+# --- the measurements the SHIPPED GUIDE needs -----------------------------------------------------
+#
+# Added with [GQ-123], when the reader learned to open markdown. Every one of them reads the CODE
+# the guide's sentence is about, never a table in a test that would have to be remembered: the
+# guide is the text a model and an operator read, and a derivation that rests on somebody keeping a
+# list up to date puts the same maintenance obligation one file further away.
+
+
+@cache
+def _write_result_fields() -> int:
+    """Fields ``WriteResult`` answers a PV write with, from its class body.
+
+    AST rather than ``model_fields`` on the imported class, for the reason the whole module reads
+    sources instead of importing them: a claim is about what the file DECLARES, and an import also
+    answers for whatever a base class contributes.
+    """
+    return sum(
+        1
+        for node in ast.walk(_parsed(_SRC / "readback.py"))
+        if isinstance(node, ast.ClassDef) and node.name == "WriteResult"
+        for statement in node.body
+        if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+    )
+
+
+#: The modules a write request travels through, in order. A tool in ``server.py`` delegates to a
+#: private helper in ``tools/olog.py``, which calls the gated coroutine in
+#: ``services/checkers_olog.py``. Three hops, so a two-hop reader answers zero, measured.
+_OLOG_WRITE_PATH = (
+    Path("server.py"),
+    Path("tools") / "olog.py",
+    Path("services") / "checkers_olog.py",
+)
+
+
+def _called_names(node: ast.AST) -> set[str]:
+    """Every name called inside *node*, taken at the call site, attribute or bare name alike."""
+    return {
+        call.func.attr if isinstance(call.func, ast.Attribute) else call.func.id
+        for call in ast.walk(node)
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute | ast.Name)
+    }
+
+
+def _reaches(marker: str) -> frozenset[str]:
+    """Every function along the Olog write path that reaches a call to *marker*, transitively.
+
+    A call GRAPH rather than a single hop, and that is a measured requirement rather than
+    thoroughness for its own sake: the tool a caller sees is three modules away from the gate it is
+    gated by, so a reader that looks one hop deep answers zero and a reader that looks two answers
+    zero as well. Both were measured before this was written.
+
+    The closure is the honest shape of the question the guide's sentences ask, "which tools are
+    behind this gate", and it keeps answering it when somebody inserts another delegation layer,
+    which is exactly what happened between the gate and the tools already.
+    """
+    calls: dict[str, set[str]] = {}
+    for relative in _OLOG_WRITE_PATH:
+        for node in ast.walk(_parsed(_SRC / relative)):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                calls.setdefault(node.name, set()).update(_called_names(node))
+    reaching = {name for name, callees in calls.items() if marker in callees}
+    while True:
+        grown = reaching | {name for name, callees in calls.items() if callees & reaching}
+        if grown == reaching:
+            return frozenset(reaching)
+        reaching = grown
+
+
+@cache
+def _olog_write_tools() -> int:
+    """Registered tools that reach the Olog write gate.
+
+    The marker is the gate itself (``get_olog_safety``), never a name prefix and never a hand-kept
+    tuple: "which tools are behind the write gate" is the question the guide's heading asks, and
+    asking it of the CALL rather than of a spelling means a fifth write tool is counted the day it
+    is written rather than the day somebody remembers a list.
+    """
+    return len(_reaches("get_olog_safety") & frozenset(_registered_tool_functions()))
+
+
+@cache
+def _olog_round_trip_tools() -> int:
+    """Gated write tools whose gate is SPLIT around a pre-write read.
+
+    The guide's sentence names the mechanism, not the tools: the env gate and the URL boundary run
+    BEFORE the target entry is read, the logbook allowlist after it. ``check_write_env_and_url`` is
+    that early half, and only a path that has to read before it writes calls it. So the criterion
+    here is the sentence's own, rather than a pair of names that happen to be right today.
+    """
+    return len(_reaches("check_write_env_and_url") & frozenset(_registered_tool_functions()))
+
+
+@cache
+def _blank_refused_filters() -> int:
+    """Olog search filters refused client-side when blank, counted at the refusal itself.
+
+    ``_reject_blank_filter`` is called once per guarded filter, so the call sites ARE the set. The
+    alternative, a list of field names, is the construction this module rejects everywhere else:
+    it answers correctly until somebody guards a third filter.
+    """
+    return sum(
+        1
+        for node in ast.walk(_parsed(_SRC / "services" / "olog_client.py"))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_reject_blank_filter"
+    )
+
+
+@cache
+def _display_tools_taking_a_context_cap() -> int:
+    """Display tools that expose ``context_cap``; the guide's "the other three".
+
+    Deliberately the INTERSECTION and not just the parameter scan: the sentence says "the other
+    three DISPLAY tools", so a core tool growing a ``context_cap`` must not move it. Measured
+    today the two answers agree, which is exactly when the difference is cheapest to write down.
+    """
+    return len(_tools_declaring_parameter("context_cap") & frozenset(_display_tool_names()))
+
+
+@cache
+def _untyped_tools_full_lane() -> int:
+    """Registered tools with no typed output schema, in the lane that has the display tools.
+
+    The figure ``[GQ-117]`` re-measured by hand and could not register, because the sentence around
+    it elided its noun ("ten today") and the detector is blind to that shape by construction. It is
+    a claim in the PRESENT about a set this repository computes, so the honest treatment is a
+    derivation and not a better adjective.
+    """
+    return _full_lane_tools() - len(ts._TYPED_OUTPUT_TOOLS)
+
+
+@cache
+def _untyped_tools_core_lane() -> int:
+    """The same, in the lane CI runs, i.e. without the display tools.
+
+    Subtracting the typed tools that are NOT display tools, rather than subtracting all of them: on
+    today's tree every display tool is untyped and the two arithmetics agree, which is exactly when
+    the difference is cheap to write down. The day one display tool grows an output schema the lazy
+    form answers one too low, and nothing would say so.
+    """
+    return _core_lane_tools() - len(ts._TYPED_OUTPUT_TOOLS - _display_tool_names())
+
+
+@cache
+def _display_tool_names() -> frozenset[str]:
+    """The registered tools that ``display_tools.py`` defines, by name."""
+    defined = {
+        node.name
+        for node in ast.walk(_parsed(_SRC / "display_tools.py"))
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    return frozenset(defined & set(_registered_tool_functions()))
+
+
 # --- the claims -------------------------------------------------------------------------------
 
 _TYPED = "_TYPED_OUTPUT_TOOLS"
@@ -1366,6 +1569,20 @@ _CLAIMS: tuple[_Claim, ...] = (
         _display_tools,
         reads=("display_tools.py",),
     ),
+    # The two figures [GQ-117] measured by hand and left unregistered, because the sentence around
+    # them elided its noun. The sentence names its noun now, so they are derived like the rest.
+    _claim(
+        "untyped tools (full lane)",
+        r"the full lane carries (\w+) untyped tools",
+        _untyped_tools_full_lane,
+        reads=("_TYPED_OUTPUT_TOOLS", "server.py", "display_tools.py"),
+    ),
+    _claim(
+        "untyped tools (core lane)",
+        r"the core-only lane (\w+) untyped tools",
+        _untyped_tools_core_lane,
+        reads=("_TYPED_OUTPUT_TOOLS", "server.py", "display_tools.py"),
+    ),
     # --- the canonical Olog block ----------------------------------------------------------------
     _claim(
         "olog query functions",
@@ -1380,6 +1597,59 @@ _CLAIMS: tuple[_Claim, ...] = (
         r"re-exports the (\w+) functions",
         _olog_reexport_lines,
         reads=("services/checkers.py",),
+    ),
+    # --- the SHIPPED guide -----------------------------------------------------------------------
+    #
+    # Every row here compares a sentence a MODEL and an OPERATOR read against the code it is about.
+    # Until [GQ-123] not one number in this file was compared to anything, for a reason that turns
+    # out to be embarrassingly small: the reader called ``ast.parse``.
+    #
+    # ``scope`` is not optional decoration on this side. A markdown block is keyed by its nearest
+    # heading, and the guide says "two fields" in two different sections about two different pairs;
+    # an unscoped pattern would hold one section's claim against the other's set.
+    _claim(
+        "guide: display-aware tools (palette)",
+        r"The (\w+) \*\*display-aware\*\* tools register",
+        _display_tools,
+        reads=("display_tools.py",),
+        scope="Tool palette",
+    ),
+    _claim(
+        "guide: display tools (glob cap)",
+        r"All \*\*(\w+)\*\* display tools report it",
+        _display_tools,
+        reads=("display_tools.py",),
+    ),
+    _claim(
+        "guide: display tools taking a context cap",
+        r"the other (\w+) display tools take a `context_cap`",
+        _display_tools_taking_a_context_cap,
+        reads=("display_tools.py", "server.py"),
+    ),
+    _claim(
+        "guide: fields of a write answer",
+        r"All (\w+) fields a write answers with",
+        _write_result_fields,
+        reads=("readback.py",),
+    ),
+    _claim(
+        "guide: olog write tools",
+        r"Olog write posture \(all (\w+) write tools\)",
+        _olog_write_tools,
+        reads=("server.py", "tools/olog.py", "services/checkers_olog.py"),
+    ),
+    _claim(
+        "guide: olog round-tripping tools",
+        r"On the (\w+) round-tripping tools",
+        _olog_round_trip_tools,
+        reads=("server.py", "tools/olog.py", "services/checkers_olog.py"),
+    ),
+    _claim(
+        "guide: olog filters refused when blank",
+        r"the (\w+) fields disagree about what it means",
+        _blank_refused_filters,
+        reads=("services/olog_client.py",),
+        scope="Olog search filters: what the server does with a value it does not like",
     ),
 )
 
@@ -1471,6 +1741,77 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
     ("tests/test_server.py", _FIND_CHANNELS_CONFORMANCE, "two of the four", 2): (
         "how few paths satisfy the union, a coverage property, measured, not declared"
     ),
+    # --- the shipped guide: what it says about a REMOTE service, which no local set decides -------
+    #
+    # Seven of these ten are statements about somebody else's server. That is the honest shape of a
+    # guide whose job is to describe what the estate TALKS TO, and it is the reason the guide's
+    # coverage stops where it does rather than a gap somebody could close by trying harder.
+    ("operator_guide.md", "The planes", "two** context paths", 2): (
+        "context paths of the Archiver Appliance's retrieval root, a fact about that service's URL "
+        "layout; nothing in this repository enumerates them"
+    ),
+    (
+        "operator_guide.md",
+        "List archived PVs: `list_archived_pvs` (or the MGMT API directly)",
+        "one of those two",
+        1,
+    ): "the article in 'works on ONE of those two endpoints', not a count",
+    (
+        "operator_guide.md",
+        "List archived PVs: `list_archived_pvs` (or the MGMT API directly)",
+        "one of those two",
+        2,
+    ): "MGMT endpoints of the Archiver Appliance, a remote API's surface, not a local collection",
+    (
+        "operator_guide.md",
+        "Olog search filters: what the server does with a value it does not like",
+        'two "blank" rows',
+        2,
+    ): "rows of the table above it, describing how a remote Olog reads two spellings of blank",
+    (
+        "operator_guide.md",
+        "Discover the alarm config-tree names",
+        "one of the three",
+        1,
+    ): "the article in 'blind to one of the three kinds', not a count",
+    (
+        "operator_guide.md",
+        "Discover the alarm config-tree names",
+        "one of the three",
+        3,
+    ): "document kinds the Phoebus alarm logger ORs over, a property of that server",
+    # --- the shipped guide: a set that IS local but that no single declaration spans --------------
+    ("operator_guide.md", "Discover the alarm config-tree names", "two tools", 2): (
+        "tools that spend a config-tree name, and they spell the parameter differently "
+        "(`config_name` on is_alarm_configured, `alarm_config` on coverage_audit), so the only "
+        "derivation available is a hand-typed pair of names, which is the construction this module "
+        "rejects everywhere else"
+    ),
+    ("operator_guide.md", "Posture (read this first)", "two multi-get tools", 2): (
+        "tools whose REST cost scales with the input, a property measured against a live service "
+        "on 2026-07-31 and stated as of that date; no declaration carries it"
+    ),
+    (
+        "operator_guide.md",
+        "The display tools: which files they read, and the three ways to get `total: 0`",
+        "three fields",
+        3,
+    ): (
+        "the file-mode fields of a display answer. They are produced by the `opi_navigation` "
+        "engine, an optional dependency CI does not install, so any derivation would be lane-"
+        "dependent by construction, the trap tests/test_server.py warns about at its own "
+        "_TYPED_OUTPUT_TOOLS"
+    ),
+    (
+        "operator_guide.md",
+        "The cross-plane reports: what each bucket means, and which verdicts are withheld",
+        "two fields",
+        2,
+    ): (
+        "the two coverage fields that say how far an answer can be trusted. `CoverageReport` "
+        "declares many more and marks none of them as the trust pair, so the set exists only in "
+        "the sentence"
+    ),
 }
 
 # Per FILE, not one total. A single number lets an addition cancel a deletion out: measured, a real
@@ -1478,13 +1819,18 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
 # appeared elsewhere. Per file narrows that to "added and removed in the SAME file in the same
 # commit". These are the only hand-kept numbers outside ``_FROZEN``'s keys.
 _INVENTORY_SIZES: dict[str, int] = {
-    "tests/test_server.py": 79,
+    # 79 -> 81 with [GQ-123]: the untyped-tool figures [GQ-117] had to leave unregistered now name
+    # their noun, so the detector sees them and both are compared to the registrations.
+    "tests/test_server.py": 81,
     "services/checkers_olog.py": 4,
     "services/checkers.py": 5,
     "tools/archiver.py": 5,
     # 2 -> 3 as the repair of the same defect the "display-gated tools" claim above records: the
     # third phrase has been in build_instructions' docstring since c5d4ad7 with no pin to match it.
     "server.py": 3,
+    # The shipped guide, in from [GQ-123]. Seven of the seventeen are compared to a set, ten are
+    # inventoried, and seven of those ten are statements about a remote service.
+    "operator_guide.md": 17,
 }
 
 
@@ -1657,6 +2003,30 @@ def test_no_claim_leaves_its_sources_undeclared() -> None:
     undeclared = [claim.label for claim in _CLAIMS if not claim.reads]
     assert not undeclared, (
         f"these claims declare no source at all, so nothing about them is traced: {undeclared}"
+    )
+
+
+def test_no_watched_markdown_file_repeats_a_section_title() -> None:
+    """The PRECONDITION the markdown key rests on, asserted rather than assumed.
+
+    A markdown block is addressed by its nearest heading instead of the whole chain, which is a
+    readability decision (the shipped guide's longest chain is 169 characters against 70 for its
+    deepest heading, and these keys are typed into a table a human has to read) with a soundness
+    condition attached: two sections may not share a title, or one section's frozen row could be
+    satisfied by the other section's phrase and a real drift would pass unseen.
+
+    Same shape as ``test_the_tracer_can_see_every_source``: the property a mechanism depends on is
+    a test, not a comment, because a mechanism that silently stops working is the defect this
+    module exists to find. ``tests/test_prose_numbers.py`` carries the positive control, proving
+    the check can see a repeated title at all, so an empty answer here is evidence and not a shrug.
+    """
+    repeated = {
+        label: pn.ambiguous_headings(path) for label, path in _WATCHED if path.suffix == ".md"
+    }
+    offenders = {label: found for label, found in repeated.items() if found}
+    assert not offenders, (
+        "a watched markdown file repeats a section title, so its blocks no longer have distinct "
+        f"keys: {offenders}. Rename one of the sections, or key on the full chain."
     )
 
 
