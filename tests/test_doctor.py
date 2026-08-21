@@ -4339,7 +4339,11 @@ def test_a_pattern_outside_the_declared_spellings_is_not_called_narrow(wide: str
 
 
 def test_a_pattern_that_does_not_compile_is_named_rather_than_shown_as_an_allowlist() -> None:
-    """A FOURTH start condition of the PV gate, and the one the block used to hide.
+    """A start condition of the PV gate in its own right, and the one the block used to hide.
+
+    The fourth anybody had counted, which is what this docstring used to lead with. [GQ-130] pinned
+    the gate's total at five, so an ordinal standing alone here now reads as that total; the five
+    are listed in ``docs/write-gate-contract.md``.
 
     Measured: with a broken pattern the block printed it exactly like a working narrow one, under a
     line saying the whole name has to match it, while ``SafetyLayer`` refuses to construct at all.

@@ -98,8 +98,12 @@ class PvWriteGateReport(_Model):
     #: regex matches every name is not reliably doable, and a wrong guess would be a silent
     #: all-clear on the widest possible allowlist.
     pattern_allows_every_name: bool
-    #: True iff the pattern COMPILES. False is a FOURTH start condition of this gate, and the one
-    #: the report used to hide: ``SafetyLayer`` compiles the pattern at construction and raises
+    #: True iff the pattern COMPILES. False is a start condition of this gate in its own right, the
+    #: FOURTH anybody had counted and the one the report used to hide. ⚠️ It said "a FOURTH start
+    #: condition" without that qualifier until [GQ-130], which pinned the total at five and turned
+    #: the ordinal into an implied total: the gate has FIVE, listed in
+    #: ``docs/write-gate-contract.md``, of which this is one.
+    #: ``SafetyLayer`` compiles the pattern at construction and raises
     #: ``SafetyConfigError`` when it cannot, so a typo in the allowlist is a refuse-to-start. Until
     #: this field existed the block printed the broken pattern exactly like a working narrow one,
     #: under a line saying the whole name has to match it. Compiling is safe here where EXECUTING
