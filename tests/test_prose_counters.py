@@ -79,8 +79,10 @@ _SRC = _TESTS.parent / "src" / "epics_mcp"
 #   2. somebody reads it who cannot check it, a model, an operator, or the next author of the code,
 #      as opposed to the release history, whose figures MUST stay as they were written;
 #   3. its site set moves rarely enough that the bookkeeping does not eat the check. Measured per
-#      file as the share of its commits that add or remove a size-naming phrase, because that share
-#      is what turns test_inventory_is_partitioned red for a reason that is not a wrong number.
+#      file as the share of its commits that add or remove a size-naming phrase, because that is
+#      what turns test_inventory_is_partitioned red at all. ⚠️ That share is an UPPER bound on the
+#      false-alarm rate and not the rate itself: some of those commits move the set BECAUSE a
+#      number was wrong, and there the red is the guard working. Nothing here measures the split.
 #
 # Applied rather than asserted. Every share below was MEASURED on 2026-08-21 over that file's
 # commits since 2026-07-01, and is written in the past tense on purpose: a churn share is a
@@ -95,14 +97,24 @@ _SRC = _TESTS.parent / "src" / "epics_mcp"
 #   * `operator_guide.md` joins with [GQ-123]. It meets the SAME duplicate rule three times over,
 #     "four display-aware tools" is the figure `_display_tools` already checks in three other
 #     places, and it is the text a model reads. 17 sites, and its site set moved on 13 of 82
-#     commits. The only thing that had ever kept it out was that `iter_blocks` called `ast.parse`
-#     and could therefore open nothing but `.py`.
-#   * `tests/test_guide_matches_code.py` is REFUSED, and arithmetic is the reason rather than
-#     taste: 47 sites to sort by hand, and its site set moved on 15 of 40 commits, against a
-#     forward yield of about ONE derivable number. The three wrong numbers it carried on
-#     2026-08-20 are the whole case for widening the population, and [GQ-117] repaired two of them
-#     by DE-NUMBERING, so those sites are gone. Widening a check means taking on its false-alarm
-#     rate. `tests/test_doctor.py` (44 sites, 27 of 65 commits) fails the same way.
+#     commits. What had kept it out was that `iter_blocks` called `ast.parse` and could open
+#     nothing but `.py`.
+#   * `display_tools.py` joins in the same package, and it is here because [GQ-123]'s own QA
+#     refuted the sentence that used to stand above: "the only thing that had ever kept the guide
+#     out was the reader". This file is `.py`, the reader could always open it, it names the
+#     display-tool count THREE times, and its site set moved on 0 of 18 commits. It was simply
+#     never listed. For the Python half of the tree the criterion had not been applied at all, and
+#     that is the honest answer to "was this list grown": the markdown half was blocked by the
+#     reader, the Python half by nobody having looked.
+#   * `tests/test_guide_matches_code.py` is REFUSED: 47 table rows to sort by hand, its site set
+#     moved on 15 of 40 commits, and the forward yield is about ONE derivable number, because
+#     [GQ-117] repaired two of its three wrong numbers by DE-NUMBERING and those sites are gone.
+#     ⚠️ Two honest weaknesses in that trade, both named rather than smoothed over. The yield is
+#     extrapolated from a sample of THREE, observed on one day, and nobody has read the other 44
+#     rows to see how many are derivable. And "moved on 15 of 40" is a bookkeeping rate, not a
+#     false-alarm rate: at least two of those 15 were [GQ-117]'s own repair commits, where going
+#     red would have been the guard working. So this is a judgement on weak evidence, not
+#     arithmetic. `tests/test_doctor.py` (44 rows, 27 of 65 commits) is refused the same way.
 #   * `CHANGELOG.md` is refused on condition 2: a release entry that said "22 schemas" must keep
 #     saying it. It is also the one file in the tree whose section titles repeat, which the
 #     markdown key rests on not doing (`prose_numbers.ambiguous_headings`).
@@ -129,6 +141,7 @@ _WATCHED: tuple[tuple[str, Path], ...] = (
     ("tools/archiver.py", _SRC / "tools" / "archiver.py"),
     ("server.py", _SRC / "server.py"),
     ("operator_guide.md", _SRC / "operator_guide.md"),
+    ("display_tools.py", _SRC / "display_tools.py"),
 )
 
 
@@ -938,14 +951,20 @@ def _write_result_fields() -> int:
     )
 
 
-#: The modules a write request travels through, in order. A tool in ``server.py`` delegates to a
-#: private helper in ``tools/olog.py``, which calls the gated coroutine in
-#: ``services/checkers_olog.py``. Three hops, so a two-hop reader answers zero, measured.
-_OLOG_WRITE_PATH = (
-    Path("server.py"),
-    Path("tools") / "olog.py",
-    Path("services") / "checkers_olog.py",
-)
+@cache
+def _package_modules() -> tuple[Path, ...]:
+    """Every module of the shipped package, discovered rather than listed.
+
+    ⛔ A LISTED SET OF MODULES WAS THE FIRST VERSION AND IT WAS SILENTLY BLIND. It named the three
+    modules a write request travels through today (``server.py`` -> ``tools/olog.py`` ->
+    ``services/checkers_olog.py``), which answered correctly and would have gone on answering 4
+    while a FIFTH write tool took the gate through a fourth module. An adversarial coverage pass
+    proved it with exactly that mutant: the count did not move and no test went red.
+
+    Discovery costs a parse of the package, which ``_typed_dict_fields`` already pays for its own
+    question, and it removes the failure mode entirely rather than documenting it.
+    """
+    return tuple(sorted(path for path in _SRC.rglob("*.py") if "__pycache__" not in path.parts))
 
 
 def _called_names(node: ast.AST) -> set[str]:
@@ -955,6 +974,21 @@ def _called_names(node: ast.AST) -> set[str]:
         for call in ast.walk(node)
         if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute | ast.Name)
     }
+
+
+def _reaches_any(seed: frozenset[str]) -> frozenset[str]:
+    """*seed* plus every function that reaches one of them, transitively, across the package."""
+    calls: dict[str, set[str]] = {}
+    for path in _package_modules():
+        for node in ast.walk(_parsed(path)):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                calls.setdefault(node.name, set()).update(_called_names(node))
+    reaching = set(seed)
+    while True:
+        grown = reaching | {name for name, callees in calls.items() if callees & reaching}
+        if grown == reaching:
+            return frozenset(reaching)
+        reaching = grown
 
 
 def _reaches(marker: str) -> frozenset[str]:
@@ -970,8 +1004,8 @@ def _reaches(marker: str) -> frozenset[str]:
     which is exactly what happened between the gate and the tools already.
     """
     calls: dict[str, set[str]] = {}
-    for relative in _OLOG_WRITE_PATH:
-        for node in ast.walk(_parsed(_SRC / relative)):
+    for path in _package_modules():
+        for node in ast.walk(_parsed(path)):
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 calls.setdefault(node.name, set()).update(_called_names(node))
     reaching = {name for name, callees in calls.items() if marker in callees}
@@ -998,12 +1032,29 @@ def _olog_write_tools() -> int:
 def _olog_round_trip_tools() -> int:
     """Gated write tools whose gate is SPLIT around a pre-write read.
 
-    The guide's sentence names the mechanism, not the tools: the env gate and the URL boundary run
-    BEFORE the target entry is read, the logbook allowlist after it. ``check_write_env_and_url`` is
-    that early half, and only a path that has to read before it writes calls it. So the criterion
-    here is the sentence's own, rather than a pair of names that happen to be right today.
+    The guide's sentence names a MECHANISM, not two tools: the env gate and the URL boundary run
+    BEFORE the target entry is read, the logbook allowlist after it. A path that is split calls
+    BOTH halves itself; a path that is not calls only ``check_write_preconditions``, which runs the
+    early half internally.
+
+    ⛔ "ONLY A PATH THAT READS BEFORE IT WRITES CALLS check_write_env_and_url" IS FALSE, and this
+    docstring asserted it for one commit. Measured at ``olog_safety.py``: ``check_write_-
+    preconditions`` calls it too, on EVERY write path, and says so in its own docstring. The first
+    version answered 2 only because its call graph stopped one module short of the gate; widening
+    the graph, which is an obvious tidy-up, turned it into 5 and would have made a CORRECT sentence
+    red. A derivation that depends on where the reader stops looking is not a derivation.
+
+    Requiring both calls in the same function is the sentence's own criterion and survives the
+    wider graph.
     """
-    return len(_reaches("check_write_env_and_url") & frozenset(_registered_tool_functions()))
+    split = frozenset(
+        node.name
+        for path in _package_modules()
+        for node in ast.walk(_parsed(path))
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and {"check_write_env_and_url", "check_write_preconditions"} <= _called_names(node)
+    )
+    return len(_reaches_any(split) & frozenset(_registered_tool_functions()))
 
 
 @cache
@@ -1028,10 +1079,25 @@ def _display_tools_taking_a_context_cap() -> int:
     """Display tools that expose ``context_cap``; the guide's "the other three".
 
     Deliberately the INTERSECTION and not just the parameter scan: the sentence says "the other
-    three DISPLAY tools", so a core tool growing a ``context_cap`` must not move it. Measured
-    today the two answers agree, which is exactly when the difference is cheapest to write down.
+    three DISPLAY tools", so a core tool growing a ``context_cap`` must not move it.
+
+    ⛔ LOUD RATHER THAN LENIENT ON THE COMPLEMENT, and that is a repair rather than a flourish.
+    The sentence means "all display tools except the one that exposes neither cap", and this
+    measures "the display tools that have one". The two coincide only while the complement is
+    exactly one. An adversarial pass proved the gap with a fifth display tool that takes no cap:
+    ``_display_tools`` reddened LOUDLY at the larger count, an author would dutifully re-number
+    that sentence, and the "other display tools" sentence beside it would then be wrong by one
+    with nothing left to say so. Raising here means the loud alarm cannot lead past the silent one.
     """
-    return len(_tools_declaring_parameter("context_cap") & frozenset(_display_tool_names()))
+    with_cap = _tools_declaring_parameter("context_cap") & frozenset(_display_tool_names())
+    without_cap = frozenset(_display_tool_names()) - with_cap
+    if len(without_cap) != 1:
+        raise AssertionError(
+            "the guide's sentence rests on exactly ONE display tool exposing neither cap, with "
+            f"the rest taking a context_cap; measured, {sorted(without_cap)} take none. Re-read "
+            "the sentence about the other display tools before touching this number."
+        )
+    return len(with_cap)
 
 
 @cache
@@ -1056,6 +1122,32 @@ def _untyped_tools_core_lane() -> int:
     form answers one too low, and nothing would say so.
     """
     return _core_lane_tools() - len(ts._TYPED_OUTPUT_TOOLS - _display_tool_names())
+
+
+@cache
+def _file_mode_fields() -> int:
+    """The fields a file-mode display answer travels with, from the dict literal that builds them.
+
+    ⛔ THIS WAS AN _FROZEN ROW WITH A REASON THAT WAS SIMPLY WRONG. It said the fields "are
+    produced by the ``opi_navigation`` engine, an optional dependency CI does not install, so any
+    derivation would be lane-dependent by construction". Measured, they are three string keys of a
+    dict literal in ``tools/validate.py``, and an AST count over that literal imports nothing, so
+    it is exactly as lane-independent as ``_display_tools``, which this module already AST-scans
+    for that very reason. An adversarial pass read the file and said so.
+    """
+    return max(
+        (
+            len(node.value.keys)
+            for node in ast.walk(_parsed(_SRC / "tools" / "validate.py"))
+            if isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Dict)
+            and any(
+                isinstance(target, ast.Name) and target.id == "file_mode_fields"
+                for target in node.targets
+            )
+        ),
+        default=0,
+    )
 
 
 @cache
@@ -1645,6 +1737,38 @@ _CLAIMS: tuple[_Claim, ...] = (
         reads=("server.py", "tools/olog.py", "services/checkers_olog.py"),
     ),
     _claim(
+        "guide: file-mode fields",
+        r"Those (\w+) fields are the FILE-MODE fields",
+        _file_mode_fields,
+        reads=("tools/validate.py",),
+    ),
+    # ⚠️ The SAME three fields are named a second time, in `tools/validate.py`, and that duplicate
+    # stays unwatched on the criterion's third condition rather than on an oversight: measured
+    # 2026-08-21, that file carries 9 sites, of which six are live measurements against a real
+    # display tree ("1 of the 11", "41 of the 42", "257 entries"), and its site set moved on 6 of
+    # 16 commits. Six frozen rows and a 38 % bookkeeping rate to compare ONE number is the trade
+    # this list exists to refuse. Written down because the first draft of [GQ-123] added the file
+    # without costing it, which is precisely what its own report criticises elsewhere.
+    # --- display_tools.py: three sentences, one number, and the reader could always open it -----
+    _claim(
+        "display tools (module head)",
+        r"These (\w+) tools",
+        _display_tools,
+        reads=("display_tools.py",),
+    ),
+    _claim(
+        "display tools (posture note)",
+        r"All (\w+) display tools share",
+        _display_tools,
+        reads=("display_tools.py",),
+    ),
+    _claim(
+        "display tools (registrar docstring)",
+        r"Register the (\w+) display-aware tools",
+        _display_tools,
+        reads=("display_tools.py",),
+    ),
+    _claim(
         "guide: olog filters refused when blank",
         r"the (\w+) fields disagree about what it means",
         _blank_refused_filters,
@@ -1793,17 +1917,6 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
     ),
     (
         "operator_guide.md",
-        "The display tools: which files they read, and the three ways to get `total: 0`",
-        "three fields",
-        3,
-    ): (
-        "the file-mode fields of a display answer. They are produced by the `opi_navigation` "
-        "engine, an optional dependency CI does not install, so any derivation would be lane-"
-        "dependent by construction, the trap tests/test_server.py warns about at its own "
-        "_TYPED_OUTPUT_TOOLS"
-    ),
-    (
-        "operator_guide.md",
         "The cross-plane reports: what each bucket means, and which verdicts are withheld",
         "two fields",
         2,
@@ -1828,9 +1941,14 @@ _INVENTORY_SIZES: dict[str, int] = {
     # 2 -> 3 as the repair of the same defect the "display-gated tools" claim above records: the
     # third phrase has been in build_instructions' docstring since c5d4ad7 with no pin to match it.
     "server.py": 3,
-    # The shipped guide, in from [GQ-123]. Seven of the seventeen are compared to a set, ten are
-    # inventoried, and seven of those ten are statements about a remote service.
+    # The shipped guide, in from [GQ-123]. Eight of its seventeen are compared to a set, nine are
+    # inventoried, and seven of those nine are statements about a remote service.
     "operator_guide.md": 17,
+    # display_tools.py, in from [GQ-123]'s own QA. Three sentences, one number, all three derived
+    # from `_display_tools`. It is the cheapest entry in the list (its site set moved on 0 of 18
+    # commits since 2026-07-01) and it was missed by the first draft, which is the reason the
+    # paragraph above no longer claims the reader was the only thing keeping files out.
+    "display_tools.py": 3,
 }
 
 

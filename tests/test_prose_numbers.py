@@ -376,6 +376,23 @@ def test_ambiguous_headings_reports_a_repeated_section_title(tmp_path: Path) -> 
     assert pn.ambiguous_headings("# Guide\n\n## A\n\n## B\n") == {}
 
 
+def test_two_sibling_sections_sharing_a_title_are_reported_too() -> None:
+    """The case the first version of this check could NOT see, and it is the worst one.
+
+    Grouping the chains into a set collapsed two siblings under one parent into a single chain, so
+    nothing was reported while their blocks carried identical keys. The check then promised "no two
+    sections share a title" and delivered "unless they also share a parent", which is exactly the
+    case it exists to catch. An adversarial coverage pass found it by construction; counting
+    OCCURRENCES answers the question the key actually asks.
+    """
+    source = "# Guide\n\n## Parent\n\n### Gate\n\nfirst\n\n### Gate\n\nsecond\n"
+    assert pn.ambiguous_headings(source) == {
+        "Gate": ["Guide > Parent > Gate", "Guide > Parent > Gate"]
+    }
+    keys = [block.qualname for block in pn._markdown_blocks("probe.md", source)]
+    assert keys.count("Gate") > 1, "the premise: both sections really do key to the same name"
+
+
 def test_the_markdown_reader_leaves_the_python_reader_alone(tmp_path: Path) -> None:
     """The suffix dispatch may not change what a ``.py`` file reads, which is the regression."""
     source = '"""Module with all 22 schemas."""\n\n# and 13 rows here\n'

@@ -34,10 +34,15 @@ Five decisions are load-bearing, and each was forced by a measurement rather tha
 * **The reader is chosen by SUFFIX, and markdown is read by the same patterns.** Measured for
   ``[GQ-123]``: of the seventeen wrong numbers ``[GQ-117]`` repaired in one day, not one sat at a
   place this detector had in view, and three sat at a place it matches EXACTLY in a file nobody had
-  put in the watch list. The binding limit was never the pattern and never the vocabulary, it was
-  that ``iter_blocks`` called ``ast.parse`` and could therefore open nothing but ``.py``. The
-  markdown half keys a block by its nearest heading instead of a qualname, on a soundness condition
-  a consumer asserts rather than assumes, see :func:`ambiguous_headings`.
+  put in the watch list. So the limit was neither the pattern nor the vocabulary but the
+  POPULATION, and for the markdown half of it the reason was this reader: ``iter_blocks`` called
+  ``ast.parse`` and could open nothing else.
+  ⚠️ **It was NOT the only reason, and the first version of this paragraph said it was.** An
+  adversarial pass answered with ``src/epics_mcp/display_tools.py``: a ``.py`` file this reader
+  could always open, naming the display-tool count three times, and absent from the watch list all
+  the same. For the Python half the criterion had simply never been applied. The markdown half keys
+  a block by its nearest heading instead of a qualname, on a soundness condition a consumer asserts
+  rather than assumes, see :func:`ambiguous_headings`.
 
 Honest scope, in full, because the numbers invite over-reading. This finds a number that is either
 PAIRED with one of the closed ``COLLECTION_NOUNS`` across at most **two** intervening words, or in
@@ -393,7 +398,7 @@ def _markdown_headings(source: str) -> list[tuple[int, str, str]]:
 
 
 def ambiguous_headings(source: str | Path) -> dict[str, list[str]]:
-    """Heading titles that occur under MORE THAN ONE chain, with the chains that share them.
+    """Heading titles that occur MORE THAN ONCE, with the chain of each occurrence.
 
     Takes text OR a path, and the path half is not a convenience. The consumer's own precondition
     test asserts that ``_parsed`` is the only place ``tests/test_prose_counters.py`` reads a file,
@@ -412,15 +417,23 @@ def ambiguous_headings(source: str | Path) -> dict[str, list[str]]:
 
     The condition is NOT assumed to hold. This function is what a consumer asserts it with, the way
     the provenance tracer asserts its own precondition instead of commenting on it. Measured over
-    this repository's tracked markdown, the only file with ambiguous headings is ``CHANGELOG.md``,
+    this repository's tracked markdown, the only file with a repeated heading is ``CHANGELOG.md``,
     whose release sections legitimately repeat, and which is out of the watch list for its own
     reasons anyway.
+
+    ⛔ IT COUNTS OCCURRENCES, NOT DISTINCT CHAINS, and the difference is a real defect this
+    function had for one commit. Grouping by chain made the WORST case invisible: two sibling
+    sections with the same title under the same parent produce the SAME chain, so the set held one
+    element and nothing was reported, while their blocks were keyed identically. The check then
+    promised "no two sections share a title" and delivered "no two sections share a title unless
+    they also share a parent", which is the case it exists to catch. Occurrences answer the
+    question the key actually asks.
     """
     text = source.read_text(encoding="utf-8-sig") if isinstance(source, Path) else source
-    chains: dict[str, set[str]] = {}
+    chains: dict[str, list[str]] = {}
     for _lineno, title, chain in _markdown_headings(text):
-        chains.setdefault(title, set()).add(chain)
-    return {title: sorted(seen) for title, seen in chains.items() if len(seen) > 1}
+        chains.setdefault(title, []).append(chain)
+    return {title: seen for title, seen in chains.items() if len(seen) > 1}
 
 
 def _markdown_blocks(path: str, source: str) -> list[ProseBlock]:

@@ -66,8 +66,10 @@ come in while the others stayed out.**
   which the markdown key rests on them not doing
   (`prose_numbers.ambiguous_headings`). `CLAUDE.md` is the same argument at a smaller size.
 - **`docs/known-limits.md`, this page, is kept out on COST.** Its size-naming phrases move on
-  better than one commit in two, measured over its commits since 2026-07-01, which is the highest
-  churn of any page that would be worth watching. Every one of those commits would demand a table
+  better than one commit in two, measured over its commits since 2026-07-01, and the highest of any
+  tracked markdown page (`CHANGELOG.md` 29%, `CLAUDE.md` 26%, the shipped guide 16%). The first
+  wording said "of any page that would be worth watching", which cannot be falsified because
+  nothing defines that set. Every one of those commits would demand a table
   edit whether or not a figure was wrong, and a guard that cries wolf on half of its subject's
   commits stops being read.
 
