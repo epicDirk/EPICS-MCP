@@ -62,6 +62,7 @@ import pytest
 
 from tests import prose_numbers as pn
 from tests import test_server as ts
+from tests import test_write_gate_contract as write_gate
 from tests.prose_numbers import ProseBlock, ProseSite, iter_blocks, iter_sites, parse_count
 
 _TESTS = Path(__file__).resolve().parent
@@ -96,9 +97,9 @@ _SRC = _TESTS.parent / "src" / "epics_mcp"
 #     corrected. That reason still holds and is condition 1 in its earliest form.
 #   * `operator_guide.md` joins with [GQ-123]. It meets the SAME duplicate rule three times over,
 #     "four display-aware tools" is the figure `_display_tools` already checks in three other
-#     places, and it is the text a model reads. 17 sites, and its site set moved on 13 of 82
-#     commits. What had kept it out was that `iter_blocks` called `ast.parse` and could open
-#     nothing but `.py`.
+#     places, and it is the text a model reads. 17 sites when it joined, and its site set moved on
+#     13 of 82 commits. What had kept it out was that `iter_blocks` called `ast.parse` and could
+#     open nothing but `.py`. ([GQ-126] took it to 21, see `_INVENTORY_SIZES`.)
 #   * `display_tools.py` joins in the same package, and it is here because [GQ-123]'s own QA
 #     refuted the sentence that used to stand above: "the only thing that had ever kept the guide
 #     out was the reader". This file is `.py`, the reader could always open it, it names the
@@ -170,6 +171,15 @@ class _Claim:
     human reading, and it does not establish that the answer DEPENDS on what was touched: a measure
     could read a constant and ignore it. Both limits are stated here because no construct closes
     them.
+
+    ``path`` narrows a claim to ONE watched file, and it closes an asymmetry rather than adding a
+    convenience: ``_FROZEN`` identifies a phrase by (file, scope, phrase, value) while a claim
+    identified itself by scope alone. For a scope that exists once that is the same thing; for
+    ``<module>`` it is not, that scope exists in six of the seven watched files, so a claim about
+    the PV gate's size would also judge a sentence about the LOGBOOK gate in another file's module
+    header. Measured with [GQ-126]: no such collision exists today, which is why the field is
+    optional and every older claim keeps matching across files, several of them deliberately (the
+    duplicate rule that put ``checkers.py`` and ``archiver.py`` in ``_WATCHED`` depends on it).
     """
 
     label: str
@@ -177,9 +187,12 @@ class _Claim:
     measure: Callable[[], int]
     reads: tuple[str, ...]
     scope: str = ""
+    path: str = ""
 
     def applies_to(self, block: ProseBlock) -> bool:
-        return not self.scope or block.qualname == self.scope
+        return (not self.scope or block.qualname == self.scope) and (
+            not self.path or block.path == self.path
+        )
 
 
 def _claim(
@@ -189,9 +202,10 @@ def _claim(
     *,
     reads: tuple[str, ...],
     scope: str = "",
+    path: str = "",
 ) -> _Claim:
     """*reads* is keyword-only and REQUIRED, so a new claim cannot be added without declaring it."""
-    return _Claim(label, re.compile(pattern, re.IGNORECASE), measure, reads, scope)
+    return _Claim(label, re.compile(pattern, re.IGNORECASE), measure, reads, scope, path)
 
 
 def _derivation_source(measure: Callable[[], int]) -> str:
@@ -1161,6 +1175,96 @@ def _display_tool_names() -> frozenset[str]:
     return frozenset(defined & set(_registered_tool_functions()))
 
 
+# --- the write gates: how many checks each one really has ---------------------------------------
+
+# In from [GQ-126], the commit that put ``checks`` into ``prose_numbers.COLLECTION_NOUNS``. Seven
+# sentences across ``server.py`` and the shipped guide state a gate's width, five of them the same
+# number, and until that commit the detector could not see one of them. The class is the expensive
+# one: a figure repeated five times and compared nowhere is five times as likely to be wrong and
+# still never noticed. ``CHANGELOG.md`` records it happening, the guide listed four of the Olog
+# gate's six checks, twice in a row.
+#
+# THE WIDTH IS NOT RE-DERIVED HERE. ``tests/test_write_gate_contract.py`` already counts it off the
+# audited deny call sites, resolving the ``error_code`` parameter position from each module's own
+# ``_audit_deny`` signature because the two gates disagree about it, and failing LOUDLY on a call
+# site it cannot read. A second AST reader for the same question is a second thing to keep right.
+#
+# ⚠️ WHAT THAT MEANS FOR ``reads``, because an import is invisible to the tracer and would otherwise
+# be the undeclared stand-in that field exists to stop: the borrowed helper is a PURE FUNCTION OF A
+# TREE and opens nothing. The SOURCE is the gate module; this measure parses it ITSELF through
+# ``_parsed``, which is what ``reads`` declares and what the tracer confirms.
+
+
+def _gate_check_count(module: str) -> int:
+    """How wide a write gate is, from the audited deny call sites its module really has."""
+    return sum(write_gate._audit_deny_error_codes(module, _parsed(_SRC / module)).values())
+
+
+def _gate_size_of(module: str) -> Callable[[], int]:
+    """A closure per row, a loop variable captured directly would measure the LAST module."""
+
+    def measure() -> int:
+        return _gate_check_count(module)
+
+    return measure
+
+
+#: Which write gate a size-naming SCOPE speaks about. File AND scope, because ``server.py`` and the
+#: shipped guide each talk about BOTH gates. That is exactly why ``test_write_gate_contract.py``
+#: keeps them out of its own sweep: it reads a FILE at a time and says at ``_SINGLE_GATE_FILES``
+#: that a mixed file "would need sentence-level attribution". This guard reads a BLOCK at a time, so
+#: that attribution is the one thing it has, and these seven rows are it.
+_GATE_SIZE_SCOPES: tuple[tuple[str, str, str], ...] = (
+    ("server.py", "<module>", "safety.py"),
+    ("operator_guide.md", "Posture (read this first)", "safety.py"),
+    ("operator_guide.md", "Olog write posture (all four write tools)", "olog_safety.py"),
+    (
+        "operator_guide.md",
+        "The write gates, the read throttle, and a server that declines to start",
+        "olog_safety.py",
+    ),
+    ("server.py", "create_log_entry", "olog_safety.py"),
+    ("server.py", "add_log_attachment", "olog_safety.py"),
+    ("server.py", "update_log_entry", "olog_safety.py"),
+)
+
+#: A gate-size sentence, in both shapes this estate writes it: "three gate checks" and the bare
+#: "six checks", the guide bolding either word.
+#:
+#: ⚠️ ``gate`` is OPTIONAL here and REQUIRED in ``test_write_gate_contract._GATE_SIZE_RE``, which
+#: excludes the bare form on purpose because "the two checks split out of this one" is a real
+#: sentence in ``olog_safety.py``. Four of the seven rows above use the bare form, so the word
+#: cannot be required; what replaces it is the row itself, file plus scope. Measured over the
+#: tracked tree the loose shape also pairs with nine phrases that name no gate, and NOT ONE of them
+#: sits in a watched file: the narrowness is carried entirely by ``_GATE_SIZE_SCOPES``, which is
+#: also why ``path`` had to exist before this family could.
+#:
+#: ⛔ THE CAPTURE IS THE DETECTOR'S OWN NUMBER GRAMMAR, never ``(\w+)`` and never a second list of
+#: number words. Both were tried and both are wrong. ``(\w+)`` reads the ``s`` of "that one test's
+#: checks", ``parse_count`` answers ``None`` and the comparison reports "prose says None". A
+#: hand-typed list of number words has no lookbehind, so "twenty-three gate checks", "SEC-3 checks"
+#: and "forty-three checks" all read as 3 and pass GREEN, while ``_PAIRED`` refuses all three and
+#: leaves no site for ``test_inventory_is_partitioned`` to catch them either. Borrowing ``_NUMBER``
+#: makes "a phrase this claim can cover" and "a phrase the detector can see" the same set by
+#: construction.
+_GATE_CHECKS = rf"({pn._NUMBER})\*{{0,2}}\s+\*{{0,2}}(?:gate\*{{0,2}}\s+)?checks\b"
+
+
+def _gate_size_claims() -> tuple[_Claim, ...]:
+    """One claim per sentence family, generated so the seven rows are authored exactly once."""
+    return tuple(
+        _claim(
+            f"{module} width in {path} [{scope}]",
+            _GATE_CHECKS,
+            _gate_size_of(module),
+            reads=(module,),
+            scope=scope,
+            path=path,
+        )
+        for path, scope, module in _GATE_SIZE_SCOPES
+    )
+
+
 # --- the claims -------------------------------------------------------------------------------
 
 _TYPED = "_TYPED_OUTPUT_TOOLS"
@@ -1775,6 +1879,8 @@ _CLAIMS: tuple[_Claim, ...] = (
         reads=("services/olog_client.py",),
         scope="Olog search filters: what the server does with a value it does not like",
     ),
+    # --- family 8: the two write-gate widths, seven sentences, see _GATE_SIZE_SCOPES ------------
+    *_gate_size_claims(),
 )
 
 
@@ -1790,6 +1896,16 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
     ),
     ("tests/test_server.py", _FIND_CHANNELS_CONFORMANCE, "one mode's fields", 1): (
         "the article in 'one mode's fields', not a count of modes"
+    ),
+    (
+        "tests/test_server.py",
+        "test_every_typed_tool_conforms_to_its_schema_over_the_wire",
+        "one test's checks",
+        1,
+    ): (
+        "the possessive in 'that one test's checks', not a count of checks. In from [GQ-126] "
+        "together with the noun: of the eight phrases it opened, seven are gate widths and "
+        "derived, this is the eighth and the only one no set can settle"
     ),
     (
         "tests/test_server.py",
@@ -1934,16 +2050,27 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
 _INVENTORY_SIZES: dict[str, int] = {
     # 79 -> 81 with [GQ-123]: the untyped-tool figures [GQ-117] had to leave unregistered now name
     # their noun, so the detector sees them and both are compared to the registrations.
-    "tests/test_server.py": 81,
+    # 81 -> 82 with [GQ-126]: the noun ``checks`` opened exactly one phrase here, and it is a
+    # possessive rather than a size, so it is inventoried rather than derived.
+    "tests/test_server.py": 82,
     "services/checkers_olog.py": 4,
     "services/checkers.py": 5,
     "tools/archiver.py": 5,
     # 2 -> 3 as the repair of the same defect the "display-gated tools" claim above records: the
     # third phrase has been in build_instructions' docstring since c5d4ad7 with no pin to match it.
-    "server.py": 3,
-    # The shipped guide, in from [GQ-123]. Eight of its seventeen are compared to a set, nine are
+    # 3 -> 7 with [GQ-126]: four gate-width sentences became visible at once, the PV gate's in the
+    # set_pv_value registration comment and the Olog gate's in three tool docstrings. All four are
+    # derived, none of them was wrong, and none of them had ever been compared to anything.
+    "server.py": 7,
+    # The shipped guide, in from [GQ-123]. Eight of its seventeen were compared to a set, nine were
     # inventoried, and seven of those nine are statements about a remote service.
-    "operator_guide.md": 17,
+    # 17 -> 21 with [GQ-126]: three gate-width sentences the noun ``checks`` opened, plus a fourth
+    # that had to be given its noun to become visible at all. "all six are below" restated the Olog
+    # gate's width in the SAME paragraph as the sentence now derived, with no noun and therefore no
+    # site; a half-repair would have corrected the guarded half and left it standing, which is the
+    # failure the surrounding paragraph itself records having happened once. As of this commit,
+    # twelve of the twenty-one were compared to a set and nine were inventoried.
+    "operator_guide.md": 21,
     # display_tools.py, in from [GQ-123]'s own QA. Three sentences, one number, all three derived
     # from `_display_tools`. It is the cheapest entry in the list (its site set moved on 0 of 18
     # commits since 2026-07-01) and it was missed by the first draft, which is the reason the
@@ -2351,6 +2478,14 @@ def test_no_claim_hard_codes_its_expectation() -> None:
     different mechanism, not a wider regex, a claim declaring what it READS, which is separate
     work recorded as such.
 
+    A FOURTH limit joined with [GQ-126], and it is the first one this check imposes on its subject
+    rather than suffers: it reads the pattern as TEXT, so it cannot tell "spells the answer" from
+    "spells every number there is". Both look like the string "six". The gate-width claims capture
+    with ``prose_numbers._NUMBER``, the detector's own grammar, for reasons measured at
+    ``_GATE_CHECKS``, and that grammar carries the whole number vocabulary. It is therefore removed
+    from the pattern before the search, once, by exact string, with the argument for that written
+    at the line that does it.
+
     ⚠️ No SHARE is printed here, deliberately, and the previous wording is why: it said 41 and had
     drifted to 51 unnoticed, because nothing in this repository re-runs a figure written in prose.
     Re-derive it by walking ``_CLAIMS``, parsing each ``measure``'s source and asking whether it
@@ -2371,7 +2506,16 @@ def test_no_claim_hard_codes_its_expectation() -> None:
         forms = {str(expected)} | {
             word for word, value in pn._WORD_VALUES.items() if value == expected
         }
-        skeleton = re.sub(r"\\[dwsSWbAZ]|\{\d+(?:,\d+)?\}", "", claim.phrase.pattern)
+        # The BORROWED number grammar is removed before the search, and that is not an escape
+        # hatch: a claim capturing with ``prose_numbers._NUMBER`` spells EVERY number the detector
+        # can read, so it matches a wrong figure exactly as willingly as the right one, which is
+        # the property this check is really asking about. Only that one shared string is removed,
+        # so a pattern that borrows the grammar AND separately names its own answer is still
+        # caught. Added with [GQ-126], whose gate-width claims are the first to borrow it, and
+        # they borrow it because the alternatives were measured worse: see ``_GATE_CHECKS``.
+        skeleton = re.sub(
+            r"\\[dwsSWbAZ]|\{\d+(?:,\d+)?\}", "", claim.phrase.pattern.replace(pn._NUMBER, "")
+        )
         derivation = _derivation_source(claim.measure)
         for form in forms:
             if re.search(rf"(?<!\w){re.escape(form)}(?!\w)", skeleton, re.IGNORECASE):

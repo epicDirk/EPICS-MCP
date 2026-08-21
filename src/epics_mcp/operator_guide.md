@@ -469,9 +469,9 @@ The two pre-dispatch refusals (`DENY`, `BOUNDS_DENY`) are outside that correlati
 Posting to the logbook is the server's first mutating operation against a REST service, so it has its
 own gate, distinct from `set_pv_value`, and it never touches `ALLOW_PV_WRITE`. SIX **gate** checks
 must line up before a write proceeds, each fail-closed and audited as `DENY` before the raise, and
-all six are below, in the order the gate applies them. The first and the fifth are the ones that go
-missing: an earlier version of this list said "four" and named four, then said "six" and still
-named four, so the sentence announcing the correction was itself the incomplete list.
+all six checks are below, in the order the gate applies them. The first and the fifth are the ones
+that go missing: an earlier version of this list said "four" and named four, then said "six" and
+still named four, so the sentence announcing the correction was itself the incomplete list.
 
 - **Non-empty target logbooks.** A write that names NO logbook is refused before the allowlist is
   consulted, because `set() <= frozenset()` is true and an empty request would otherwise pass the

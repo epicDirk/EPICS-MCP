@@ -47,8 +47,14 @@ Five decisions are load-bearing, and each was forced by a measurement rather tha
 Honest scope, in full, because the numbers invite over-reading. This finds a number that is either
 PAIRED with one of the closed ``COLLECTION_NOUNS`` across at most **two** intervening words, or in
 the ``N of the M`` shape where the noun is elided. It therefore does NOT see: a size named with any
-other noun ("modes", "halves", "planes", measured, about 60 such pairings exist in the watched
-prose); a number above twenty spelled as a word; a hyphenated compound ("twenty-two" reads as 20);
+other noun ("modes", "halves", "planes"), of which the watched prose holds a great many, and this
+sentence deliberately names NO figure for how many. It named "about 60" until ``[GQ-126]``, a
+second measurement of the same set had already answered 195, and a third reading on 2026-08-21
+reproduced neither. Three readings, three answers, because "a noun the list does not know" has no
+agreed denominator, and no test between them: THIS FILE IS UNWATCHED, so the figure rotted exactly
+where nothing could see it. Which reading is the right one stays an open question, recorded as such
+and not settled by putting a fourth number here. Also unseen:
+a number above twenty spelled as a word; a hyphenated compound ("twenty-two" reads as 20);
 a gap of three or more words; and numbers inside f-string assertion messages, which are neither
 comments nor docstrings. "Three independent red directions" names a size and is invisible here by
 design, those are claims about test bodies, which no constant can settle. The consumer states the
@@ -106,7 +112,14 @@ COLLECTION_NOUNS: frozenset[str] = frozenset(
     {
         "arrays",
         "assertions",
+        # ``checks`` joined with [GQ-126]. It was never weighed and rejected, it was simply not
+        # thought of: the list arrived whole in the S32 build and was never touched again, while
+        # ``checkers`` next to it earns its place with a single inventoried false pairing. The
+        # eight sites it opens carry BOTH of the server's write-gate sizes, and CHANGELOG.md
+        # records that family already drifting once, the shipped guide naming four of the Olog
+        # gate's six checks.
         "checkers",
+        "checks",
         "entries",
         "fields",
         "functions",

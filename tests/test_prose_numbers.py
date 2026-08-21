@@ -156,8 +156,35 @@ def test_the_documented_blind_spots_stay_blind(text: str) -> None:
 
     These are not defects. Widening any of them is a decision with its own cost, and it should
     turn this test red rather than pass unnoticed.
+
+    ⚠️ IT ONLY DELIVERS THAT PER EXAMPLE, and the promise above used to read as more. [GQ-126]
+    added ``checks`` to ``COLLECTION_NOUNS`` and every case here stayed green, because a widening
+    only reddens this test if somebody happened to write the newly-seen noun into the list above.
+    :func:`test_the_vocabulary_is_pinned_where_it_was_widened` is what pins the vocabulary itself.
     """
     assert _values(text) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("three gate checks", [3]),  # the PV write gate, server.py and the shipped guide
+        ("SIX **gate** checks", [6]),  # the Olog write gate, as the guide bolds it
+        ("all six checks", [6]),  # the bare form, four of the seven sentences use it
+        ("passes **three** gate checks", [3]),  # the guide bolds the NUMBER here, not the noun
+    ],
+)
+def test_the_vocabulary_is_pinned_where_it_was_widened(text: str, expected: list[int]) -> None:
+    """``checks`` is IN the closed list, and taking it back out has to go red here.
+
+    Written with [GQ-126], which widened the vocabulary for the first time since the module was
+    built. Until then nothing in this file mentioned ``COLLECTION_NOUNS`` at all: the whole reading
+    half was pinned except the one list that decides what it can see, so both directions of a
+    change to it were silent. The four spellings are the ones the estate really writes, taken from
+    ``server.py`` and ``src/epics_mcp/operator_guide.md`` rather than invented, because a widening
+    justified by real sentences should be pinned by their shapes.
+    """
+    assert _values(text) == expected
 
 
 @pytest.mark.parametrize(
