@@ -155,9 +155,9 @@ instead since 2026-08-04: `docs/known-limits.md`, entry 16.
   satisfied by editing the number they report.**
   - *A number written next to a collection noun* ("the 26 projection fields", "all 22 schemas",
     "four paths") in `tests/test_server.py`, `server.py`, `services/checkers.py`,
-    `services/checkers_olog.py`, `tools/archiver.py` or, since GQ-123, the SHIPPED
-    `src/epics_mcp/operator_guide.md`. The criterion that decides that list, and the arithmetic
-    that keeps two large test modules out of it, is written above `_WATCHED`.
+    `services/checkers_olog.py`, `tools/archiver.py` or, since GQ-123, `display_tools.py` and the
+    SHIPPED `src/epics_mcp/operator_guide.md`. The criterion that decides that list, and the
+    arithmetic that keeps two large test modules out of it, is written above `_WATCHED`.
     **Which nouns count is a closed list,
     `prose_numbers.COLLECTION_NOUNS`**. Read it, do not guess, and note that this obligation is
     NOT the same on both sides of it:

@@ -1257,6 +1257,14 @@ def test_canonical_map_covers_every_audited_deny_call_site() -> None:
 # Prose cannot be kept honest by re-reading it, so the two number-bearing FORMS are pinned to the
 # AST truth above. Everything else stays prose on purpose: a guard that tried to parse every
 # sentence about a gate would be the kind of over-fitted checker this repository keeps deleting.
+#
+# ⚠️ [GQ-126] NARROWED THAT "everything else", and deliberately rather than by accident. The bare
+# `<word> checks` form, excluded below for lacking `gate`, carries four of the seven gate-width
+# sentences in `server.py` and the shipped guide. Those seven are now derived by
+# `tests/test_prose_counters.py`, off the same `_audit_deny_error_codes` count this module uses, and
+# what makes that not over-fitting is that it never parses a sentence: it pairs a number with a noun
+# and is told by file plus enclosing scope which gate the block speaks about. The rule here is
+# unchanged for THIS module, which still reads whole files and still may not.
 
 #: The single spelling a GATE-SIZE claim uses, so one regex can find every one of them. A count of
 #: something else ("the two checks split out of this one") deliberately does not match: it lacks
@@ -1282,8 +1290,17 @@ _GATED_WORDS: dict[int, str] = {
 
 #: Which gate each number-bearing file speaks about. A file that talks about BOTH gates is not in
 #: here: this guard reads whole files, so a mixed one would need sentence-level attribution, which
-#: is exactly the over-fitting the header rejects. Their numbers are covered by the executable
-#: DENY_PATHS rows instead.
+#: is exactly the over-fitting the header rejects.
+#:
+#: ⛔ THIS COMMENT USED TO END "Their numbers are covered by the executable DENY_PATHS rows
+#: instead", AND THAT WAS FALSE. ``DENY_PATHS`` pins the call sites in the CODE; nothing read the
+#: SENTENCES in ``server.py`` or the shipped guide, and ``test_the_numeric_gated_phrase...`` sweeps
+#: the whole tree only for the ``triple-gated`` shape, which neither file uses. Measured for
+#: [GQ-126]: seven such sentences stood there, five of them stating the same number, none of them
+#: compared to anything. They are now derived in ``tests/test_prose_counters.py`` at
+#: ``_GATE_SIZE_SCOPES``, which reads a BLOCK at a time and can therefore do the attribution this
+#: comment calls impossible for a whole-file sweep. Both guards read the same width off
+#: :func:`_audit_deny_error_codes`, so they cannot drift apart.
 _SINGLE_GATE_FILES: dict[str, str] = {
     "src/epics_mcp/safety.py": "safety.py",
     "src/epics_mcp/olog_safety.py": "olog_safety.py",
