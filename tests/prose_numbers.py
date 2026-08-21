@@ -115,9 +115,12 @@ COLLECTION_NOUNS: frozenset[str] = frozenset(
         # ``checks`` joined with [GQ-126]. It was never weighed and rejected, it was simply not
         # thought of: the list arrived whole in the S32 build and was never touched again, while
         # ``checkers`` next to it earns its place with a single inventoried false pairing. The
-        # eight sites it opens carry BOTH of the server's write-gate sizes, and CHANGELOG.md
-        # records that family already drifting once, the shipped guide naming four of the Olog
-        # gate's six checks.
+        # sites it opens carry BOTH of the server's write-gate sizes, and CHANGELOG.md records that
+        # family already drifting once, the shipped guide naming four of the Olog gate's six
+        # checks. How many sites that is stands in ``test_prose_counters._INVENTORY_SIZES``, where
+        # a test compares it; this sentence deliberately does not repeat it. The first version did,
+        # said "eight", and was wrong by the time it was committed, because the SAME commit gave a
+        # noun to a ninth sentence that had restated a gate size without one.
         "checkers",
         "checks",
         "entries",

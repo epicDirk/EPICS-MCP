@@ -170,7 +170,7 @@ def test_the_documented_blind_spots_stay_blind(text: str) -> None:
     [
         ("three gate checks", [3]),  # the PV write gate, server.py and the shipped guide
         ("SIX **gate** checks", [6]),  # the Olog write gate, as the guide bolds it
-        ("all six checks", [6]),  # the bare form, four of the seven sentences use it
+        ("all six checks", [6]),  # the bare form, which several of the watched sentences use
         ("passes **three** gate checks", [3]),  # the guide bolds the NUMBER here, not the noun
     ],
 )

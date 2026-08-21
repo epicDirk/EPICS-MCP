@@ -1299,8 +1299,17 @@ _GATED_WORDS: dict[int, str] = {
 #: [GQ-126]: seven such sentences stood there, five of them stating the same number, none of them
 #: compared to anything. They are now derived in ``tests/test_prose_counters.py`` at
 #: ``_GATE_SIZE_SCOPES``, which reads a BLOCK at a time and can therefore do the attribution this
-#: comment calls impossible for a whole-file sweep. Both guards read the same width off
-#: :func:`_audit_deny_error_codes`, so they cannot drift apart.
+#: comment calls impossible for a whole-file sweep.
+#:
+#: ⚠️ THE TWO GUARDS DO NOT READ THE SAME THING, and the first version of this note said they did.
+#: :func:`_gate_check_count` below reads ``EXPECTED_DENY_CALL_SITES``, the hand-kept map; the prose
+#: guard calls :func:`_audit_deny_error_codes` on the parsed module. What holds them together is
+#: :func:`test_deny_call_sites_match_the_canonical_map`, which pins the map to that same counter.
+#: Drift is therefore impossible THROUGH THE MAP, not through a shared call, and the difference is
+#: observable: widen a gate in the code alone and the prose guard goes red at once while this
+#: module's size check stays GREEN until the map is corrected. Measured on exactly that mutant by
+#: an adversarial pass. A wrong sentence about a guard is what the note above exists to record, so
+#: this one records its own.
 _SINGLE_GATE_FILES: dict[str, str] = {
     "src/epics_mcp/safety.py": "safety.py",
     "src/epics_mcp/olog_safety.py": "olog_safety.py",

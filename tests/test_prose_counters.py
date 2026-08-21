@@ -219,9 +219,14 @@ def _derivation_source(measure: Callable[[], int]) -> str:
     THE ORDER OF THOSE TWO IS LOAD-BEARING and it used to be the other way round. The lambda walk
     ran first over the WHOLE parsed statement, so a named measure containing a lambda anywhere:
     a ``key=lambda ...`` in a sort, say, had its entire body discarded and only that lambda's body
-    inspected. Latent on the delivered table (measured: 0 of 79 named measures contain one) and a
-    trap the moment one does, because the discarded body is exactly where a typed-in answer would
-    sit. A named function is now matched before anything is walked.
+    inspected. Latent on the delivered table, measured: NONE of the named measures contains one,
+    and a trap the moment one does, because the discarded body is exactly where a typed-in answer
+    would sit. A named function is now matched before anything is walked.
+    ⚠️ That sentence used to read "0 of 79 named measures", and the 79 had rotted: it was never the
+    number of NAMED measures in the first place, and the table has grown twice since. Only the zero
+    was ever load-bearing, and it is the half nothing can rot silently, because a lambda appearing
+    in a named measure is what the reordering above exists to survive. [GQ-126] removed the
+    denominator rather than refreshing it; re-derive it by walking ``_CLAIMS`` if you need it.
 
     An unreadable source is an ERROR, not an empty string. ``functools.partial``, a callable
     object and a dynamically compiled function all raise here, and returning "" for them made the
@@ -1214,6 +1219,25 @@ def _gate_size_of(module: str) -> Callable[[], int]:
 #: keeps them out of its own sweep: it reads a FILE at a time and says at ``_SINGLE_GATE_FILES``
 #: that a mixed file "would need sentence-level attribution". This guard reads a BLOCK at a time, so
 #: that attribution is the one thing it has, and these seven rows are it.
+#:
+#: ⛔ HONEST SCOPE, and it has to be read before this family is taken for coverage of the gate
+#: sizes, because the thing it does NOT do is the thing that historically went wrong. It compares a
+#: NUMBER to the code. It never compares a LIST to the code. Measured on the delivered tree: delete
+#: one bullet from the shipped guide's six-item Olog list and leave the word "six" standing, and
+#: every test in this repository stays green. That is verbatim the defect ``CHANGELOG.md`` records,
+#: "the shipped operator guide listed four of the Olog gate's six checks", and this family would
+#: have reported the number as correct while it happened. The same hole covers the ``AND`` chain in
+#: ``server.py``'s three Olog docstrings, the sub-counts ("the first four are refused before any
+#: I/O"), and the ordinals ("the first and the fifth"), none of which name a size at all. Closing
+#: it needs a list-counting guard, which is a different mechanism and its own piece of work.
+#:
+#: ⚠️ Two further limits, both measured rather than feared. A sentence about the write-gate
+#: CONTRACT's six requirements landing in an Olog scope would be permanently green, because only
+#: the value is compared and never which of the four questions the sentence asks; the contract page
+#: says itself that "the two sixes are unrelated and land on the same value by accident". And
+#: ``path`` separates the two gates ACROSS files, not WITHIN one: a correct Olog sentence written
+#: into ``server.py``'s module scope would be accused against the PV gate's three, with a message
+#: telling the reader to break a true sentence.
 _GATE_SIZE_SCOPES: tuple[tuple[str, str, str], ...] = (
     ("server.py", "<module>", "safety.py"),
     ("operator_guide.md", "Posture (read this first)", "safety.py"),
@@ -1233,11 +1257,23 @@ _GATE_SIZE_SCOPES: tuple[tuple[str, str, str], ...] = (
 #:
 #: ⚠️ ``gate`` is OPTIONAL here and REQUIRED in ``test_write_gate_contract._GATE_SIZE_RE``, which
 #: excludes the bare form on purpose because "the two checks split out of this one" is a real
-#: sentence in ``olog_safety.py``. Four of the seven rows above use the bare form, so the word
-#: cannot be required; what replaces it is the row itself, file plus scope. Measured over the
-#: tracked tree the loose shape also pairs with nine phrases that name no gate, and NOT ONE of them
-#: sits in a watched file: the narrowness is carried entirely by ``_GATE_SIZE_SCOPES``, which is
-#: also why ``path`` had to exist before this family could.
+#: sentence in ``olog_safety.py``. Several of the sentences the rows above cover carry ONLY the
+#: bare form, so the word cannot be required; what replaces it is the row itself, file plus scope.
+#: Measured over the tracked tree the loose shape also pairs with phrases that name no gate at all,
+#: and NOT ONE of them sits in a watched file: the narrowness is carried entirely by
+#: ``_GATE_SIZE_SCOPES``, which is also why ``path`` had to exist before this family could.
+#:
+#: ⛔ NO FIGURE IS GIVEN for how many such phrases there are, and the reason is worth the space
+#: because it is this package's own subject turned on itself. This comment named one, "nine", and
+#: an adversarial pass called it wrong. It was not miscounted: nine was EXACT against the tree it
+#: was measured on. It became ten when the comment was committed, because the sentence you are
+#: reading quotes "the two checks split out of this one" as its counter-example, and the sweep
+#: counts that quotation. ⚠️ A figure that counts a population its own sentence then joins cannot
+#: be written down here at all, and THIS FILE IS UNWATCHED, so nothing would have gone red either
+#: way. The rule matters too and nobody had stated it: "the value is neither gate size" and "the
+#: sentence is not about a gate" give different answers, because one file states a release-gate
+#: size that coincidentally equals the PV gate's. Re-derive with the rule you mean: run this
+#: pattern over ``git ls-files "*.py" "*.md"`` and read every hit.
 #:
 #: ⛔ THE CAPTURE IS THE DETECTOR'S OWN NUMBER GRAMMAR, never ``(\w+)`` and never a second list of
 #: number words. Both were tried and both are wrong. ``(\w+)`` reads the ``s`` of "that one test's
@@ -1904,8 +1940,8 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
         1,
     ): (
         "the possessive in 'that one test's checks', not a count of checks. In from [GQ-126] "
-        "together with the noun: of the eight phrases it opened, seven are gate widths and "
-        "derived, this is the eighth and the only one no set can settle"
+        "together with the noun: every other phrase that noun opened is a write-gate width and is "
+        "derived, this is the only one no set can settle"
     ),
     (
         "tests/test_server.py",
@@ -2281,7 +2317,17 @@ def test_the_tracer_can_see_every_source() -> None:
     The tracer watches two seams. If a measure ever reads a file some other way, that read becomes
     invisible and every claim resting on it silently stops being traced, a guard that cannot go red
     is the defect it was built to remove. So the property the tracer depends on is a test, and it
-    names no count: the reader has to sit inside ``_parsed``, however many there are."""
+    names no count: the reader has to sit inside ``_parsed``, however many there are.
+
+    ⚠️ HOW FAR THIS REACHES, stated because an adversarial pass over [GQ-126] showed it reaches
+    less far than the sentence above suggests. The scan is SYNTACTIC and covers THIS FILE. A
+    measure that calls into an IMPORTED module can read files the scan never sees: constructed, a
+    measure delegating to ``write_gate._discover_gate_modules`` parsed both gate modules, answered
+    9, and ``_provenance_faults`` reported nothing at all. Closing that in general needs a third
+    recorder over imports and is not built. What IS closed is the one such dependency that exists:
+    :func:`test_the_borrowed_gate_counter_opens_nothing` asserts the borrowed counter opens
+    nothing, so it stays the pure function of a tree that ``_gate_check_count``'s ``reads``
+    declaration rests on."""
     tree = _parsed(Path(__file__))
     spans = pn._scope_spans(tree)
     elsewhere = [
@@ -2297,6 +2343,33 @@ def test_the_tracer_can_see_every_source() -> None:
     assert not elsewhere, (
         "a file is read outside ``_parsed``, so the provenance tracer cannot see it and every "
         f"claim that declares that file is untraced: {elsewhere}"
+    )
+
+
+def test_the_borrowed_gate_counter_opens_nothing() -> None:
+    """The other half of that precondition: the one function this module BORROWS may not read.
+
+    ``_gate_check_count`` declares the gate module as its source and parses it here, through
+    ``_parsed``, so the tracer sees it. That declaration is only true while
+    ``write_gate._audit_deny_error_codes`` stays a pure function of the tree it is handed. Nothing
+    else in this file could notice if it started opening the file itself, because the scan above
+    reads THIS module and not that one.
+
+    RED-PROOF: put a ``path.read_text(...)`` into that function and this fails naming the line.
+    """
+    source = textwrap.dedent(inspect.getsource(write_gate._audit_deny_error_codes))
+    reads = [
+        f"line {node.lineno}: {ast.unparse(node)}"
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Attribute) and node.func.attr in {"read_text", "read_bytes"})
+            or (isinstance(node.func, ast.Name) and node.func.id == "open")
+        )
+    ]
+    assert not reads, (
+        "write_gate._audit_deny_error_codes now opens a file, so the source it reads is invisible "
+        f"to the tracer and _gate_check_count's reads declaration is no longer true: {reads}"
     )
 
 
