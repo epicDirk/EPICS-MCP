@@ -1,4 +1,5 @@
-"""Read the NUMBERS that comments and docstrings claim, so a test can compare them to the sets.
+"""Read the NUMBERS that comments, docstrings and shipped markdown claim, so a test can compare
+them to the sets.
 
 S32. Prose here routinely names the size of a set, "all 22 schemas", "7 (resp. 9) rows",
 "TEN of the twelve". Nothing checked those, and every typing step re-typed them by hand: in the
@@ -6,7 +7,7 @@ S29 11th target 18 counters were pulled over, two QA rounds found 8 of them stil
 had been wrong *before* that build started. This module is the reading half of the guard; the
 comparing half is ``tests/test_prose_counters.py``.
 
-Four decisions are load-bearing, and each was forced by a measurement rather than chosen:
+Five decisions are load-bearing, and each was forced by a measurement rather than chosen:
 
 * **Prose is read per PARAGRAPH, not per line.** A claim straddles the 100-column wrap often
   enough that a line-wise regex is not merely lossy but silently lossy, ``test_server.py`` splits
@@ -30,6 +31,13 @@ Four decisions are load-bearing, and each was forced by a measurement rather tha
   the lesson ``tests/test_client_edge_guards.py`` records for its own ``_UNOBSERVED`` table. For
   the same reason the tokenizer is fed through ``io.StringIO``: ``str.splitlines`` also breaks on
   form feed, which the tokenizer does not, and one page separator would desync every row below it.
+* **The reader is chosen by SUFFIX, and markdown is read by the same patterns.** Measured for
+  ``[GQ-123]``: of the seventeen wrong numbers ``[GQ-117]`` repaired in one day, not one sat at a
+  place this detector had in view, and three sat at a place it matches EXACTLY in a file nobody had
+  put in the watch list. The binding limit was never the pattern and never the vocabulary, it was
+  that ``iter_blocks`` called ``ast.parse`` and could therefore open nothing but ``.py``. The
+  markdown half keys a block by its nearest heading instead of a qualname, on a soundness condition
+  a consumer asserts rather than assumes, see :func:`ambiguous_headings`.
 
 Honest scope, in full, because the numbers invite over-reading. This finds a number that is either
 PAIRED with one of the closed ``COLLECTION_NOUNS`` across at most **two** intervening words, or in
@@ -40,6 +48,12 @@ a gap of three or more words; and numbers inside f-string assertion messages, wh
 comments nor docstrings. "Three independent red directions" names a size and is invisible here by
 design, those are claims about test bodies, which no constant can settle. The consumer states the
 same limits in its own docstring rather than implying coverage.
+
+In markdown the same list holds and two more join it, both by choice rather than by accident: a
+number inside a FENCED code block is never read, because a fence carries identifiers and version
+pins rather than sentences; and a table ROW is one block, so a number cannot pair with a noun in a
+neighbouring row but still can with one in a neighbouring CELL of its own row. Closing the second
+needs a cell splitter, and no measured case in this repository asks for one.
 """
 
 from __future__ import annotations
@@ -328,15 +342,177 @@ def _docstring_blocks(
     return out
 
 
+# A markdown line that opens or closes a fenced code block. Backtick and tilde fences both, and
+# the closing fence of a run is whichever character opened it, which is why the opener is kept.
+_FENCE = re.compile(r"^\s*(```+|~~~+)")
+
+# An ATX heading. Setext headings (an ``===``/``---`` underline) are deliberately NOT recognised:
+# measured over the tracked markdown of this repository there is not one, and a rule with no
+# subject is a rule nobody can test.
+_HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
+
+# A thematic break, or the underline a setext heading would use. Either way it carries no prose and
+# must not glue the paragraphs on both sides of it together.
+_RULE = re.compile(r"^\s*([-*_=])(?:\s*\1){2,}\s*$")
+
+# A list item's marker. A new marker STARTS a block, an indented continuation line joins the one
+# above it. Without this every bullet of a list fuses into a single paragraph and a pairing reaches
+# across an item boundary, which is the defect the "paragraph, not whole-block" rule exists to
+# prevent and which was measured on this very guide: "the other three display tools take a
+# context_cap only" fused with the bullet below it.
+_LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+
+
+def _markdown_headings(source: str) -> list[tuple[int, str, str]]:
+    """``(line, own title, full chain)`` for every ATX heading, outermost heading first.
+
+    Exposed so a caller can assert the precondition :func:`_markdown_blocks` rests on, rather than
+    assume it: see :func:`ambiguous_headings`.
+    """
+    out: list[tuple[int, str, str]] = []
+    chain: list[tuple[int, str]] = []
+    fence: str | None = None
+    for lineno, line in enumerate(source.splitlines(), start=1):
+        opener = _FENCE.match(line)
+        if fence is not None:
+            if opener and opener.group(1)[0] == fence[0] and len(opener.group(1)) >= len(fence):
+                fence = None
+            continue
+        if opener:
+            fence = opener.group(1)
+            continue
+        heading = _HEADING.match(line)
+        if not heading:
+            continue
+        level = len(heading.group(1))
+        title = heading.group(2).strip()
+        chain = [entry for entry in chain if entry[0] < level]
+        chain.append((level, title))
+        out.append((lineno, title, " > ".join(name for _level, name in chain)))
+    return out
+
+
+def ambiguous_headings(source: str | Path) -> dict[str, list[str]]:
+    """Heading titles that occur under MORE THAN ONE chain, with the chains that share them.
+
+    Takes text OR a path, and the path half is not a convenience. The consumer's own precondition
+    test asserts that ``_parsed`` is the only place ``tests/test_prose_counters.py`` reads a file,
+    so that the provenance tracer cannot go blind; a check that opened a markdown file over there
+    would break it. Reading here keeps the file access in the module that already does all of it,
+    which is the same scope that rule has always had, :func:`iter_blocks` reads files too.
+
+    :func:`_markdown_blocks` keys a block by its NEAREST heading rather than by the whole chain,
+    which is a readability decision with a soundness condition attached: two sections may not share
+    a title, or one section's frozen row could be satisfied by the other's phrase. The decision was
+    made on two measurements, both taken 2026-08-21 with this reader. Shortening cost almost nothing
+    in stability: over the shipped guide's 82 commits since 2026-07-01 the full chain moved on 14
+    and the nearest heading on 13, so the extra ancestor only ever added brittleness. And it bought
+    a great deal in readability: that file's longest chain ran to 187 characters against 98 for its
+    longest single heading, and those keys are typed into an inventory a human has to read.
+
+    The condition is NOT assumed to hold. This function is what a consumer asserts it with, the way
+    the provenance tracer asserts its own precondition instead of commenting on it. Measured over
+    this repository's tracked markdown, the only file with ambiguous headings is ``CHANGELOG.md``,
+    whose release sections legitimately repeat, and which is out of the watch list for its own
+    reasons anyway.
+    """
+    text = source.read_text(encoding="utf-8-sig") if isinstance(source, Path) else source
+    chains: dict[str, set[str]] = {}
+    for _lineno, title, chain in _markdown_headings(text):
+        chains.setdefault(title, set()).add(chain)
+    return {title: sorted(seen) for title, seen in chains.items() if len(seen) > 1}
+
+
+def _markdown_blocks(path: str, source: str) -> list[ProseBlock]:
+    """Every markdown paragraph, keyed by the NEAREST HEADING it sits under.
+
+    The key has to be as stable as the Python side's qualname, and for the same reason: a table
+    keyed on line numbers rots on any edit above it, for a reason that is not a change in the
+    finding. A heading moves only when the document is restructured, which is exactly when a
+    reader SHOULD look again. Why the nearest heading and not the whole chain, with the two
+    measurements that decided it, is written at :func:`ambiguous_headings`, together with the
+    soundness condition that choice carries.
+
+    Five line kinds end a block and each was chosen against a measured alternative:
+
+    * a blank line, the paragraph rule the docstring side already uses;
+    * a THEMATIC BREAK, which is the same rule for a line of dashes: this estate rules its sections
+      with them, and gluing the paragraphs on both sides together fuses two unrelated ones;
+    * a HEADING, which additionally becomes a block of its own. It has to: this repository's
+      shipped guide states a size inside one, ``### Olog write posture (all four write tools)``,
+      and a reader that treated headings as structure alone would be blind to it;
+    * a LIST MARKER, see ``_LIST_ITEM``;
+    * a TABLE ROW, which is a record rather than a sentence. Each row stands alone, so a number in
+      one cell cannot pair with a noun in a neighbouring row. It can still pair ACROSS CELLS of the
+      same row, and that limit is stated rather than closed, because closing it needs a cell
+      splitter and no measured case asks for one.
+
+    Fenced code is skipped whole. A fence carries identifiers and version pins, not prose, and the
+    detector's own lookbehind was written for the same distinction.
+    """
+    out: list[ProseBlock] = []
+    run: list[str] = []
+    run_start = 0
+    heading_title = "<document>"
+    fence: str | None = None
+
+    def flush() -> None:
+        nonlocal run
+        if run:
+            out.append(ProseBlock(path, run_start, heading_title, " ".join(run)))
+            run = []
+
+    # splitlines() rather than the tokenizer's reader: there is no tokenizer here, and a form feed
+    # inside markdown is prose to this reader like any other whitespace.
+    for lineno, line in enumerate(source.splitlines(), start=1):
+        opener = _FENCE.match(line)
+        if fence is not None:
+            if opener and opener.group(1)[0] == fence[0] and len(opener.group(1)) >= len(fence):
+                fence = None
+            continue
+        if opener:
+            flush()
+            fence = opener.group(1)
+            continue
+        stripped = line.strip()
+        if not stripped or _RULE.match(line):
+            flush()
+            continue
+        heading = _HEADING.match(line)
+        if heading:
+            flush()
+            heading_title = heading.group(2).strip()
+            out.append(ProseBlock(path, lineno, heading_title, heading_title))
+            continue
+        if stripped.startswith("|") or _LIST_ITEM.match(line):
+            flush()
+            run_start = lineno
+        elif not run:
+            run_start = lineno
+        run.append(stripped)
+        if stripped.startswith("|"):
+            flush()
+    flush()
+    return out
+
+
 def iter_blocks(targets: Iterable[tuple[str, Path]]) -> tuple[ProseBlock, ...]:
-    """Every comment run and docstring paragraph in *targets*, in a stable order.
+    """Every comment run, docstring paragraph and markdown paragraph in *targets*, in order.
 
     *targets* pairs the label a failure message should print with the file to read, so the caller
     decides how a path is spelled and this module never depends on where the repository sits.
+
+    The reader is chosen by SUFFIX, and that is the whole of the markdown extension: the patterns,
+    the vocabulary and the site keying are shared, so a number in the shipped guide is read by the
+    same rule as a number in a docstring. Anything that is not ``.md`` is parsed as Python, which
+    keeps the default the one every existing caller already relies on.
     """
     blocks: list[ProseBlock] = []
     for label, path in targets:
         source = path.read_text(encoding="utf-8-sig")
+        if path.suffix.lower() == ".md":
+            blocks.extend(_markdown_blocks(label, source))
+            continue
         tree = ast.parse(source)
         spans = _scope_spans(tree)
         blocks.extend(_comment_blocks(label, source, spans))

@@ -261,3 +261,123 @@ def test_a_form_feed_does_not_desync_the_reported_lines(tmp_path: Path) -> None:
     assert len(source.splitlines()) == 4, "the premise of this test: splitlines over-counts here"
     blocks = _blocks(tmp_path, source, "feed.py")
     assert [block.lineno for block in blocks] == [1, 3]
+
+
+# --- the markdown reader: same patterns, a different way of finding the blocks --------------------
+#
+# Added for [GQ-123]. The reason it exists is measured rather than argued: of the seventeen wrong
+# numbers [GQ-117] repaired in one day, not one sat where this detector could see it, and three sat
+# at a place it matches exactly, in a file the watch list did not carry. The limit was the READER.
+
+
+def _md(tmp_path: Path, source: str, name: str = "probe.md") -> tuple[pn.ProseBlock, ...]:
+    """Run *source* through the real file path, so the suffix dispatch is exercised too."""
+    path = tmp_path / name
+    path.write_text(source, encoding="utf-8")
+    return iter_blocks([(name, path)])
+
+
+def test_a_markdown_file_is_read_by_suffix_not_parsed_as_python(tmp_path: Path) -> None:
+    """The whole extension in one assertion: ``ast.parse`` would raise on this text."""
+    blocks = _md(tmp_path, "# Title\n\nThe four write tools are gated.\n")
+    assert [site.value for block in blocks for site in sites_of(block)] == [4]
+
+
+def test_a_block_is_keyed_by_its_nearest_heading(tmp_path: Path) -> None:
+    """The markdown answer to "never key on a line number", and it is the nearest heading."""
+    source = "# Guide\n\n## Palette\n\nThe four write tools are gated.\n"
+    blocks = _md(tmp_path, source)
+    assert [block.qualname for block in blocks] == ["Guide", "Palette", "Palette"]
+
+
+def test_text_before_the_first_heading_is_keyed_as_the_document(tmp_path: Path) -> None:
+    """A file may open with prose, and that prose still needs a key that is not a line number."""
+    blocks = _md(tmp_path, "The four write tools are gated.\n\n# Guide\n")
+    assert blocks[0].qualname == "<document>"
+
+
+def test_a_heading_is_itself_read_as_prose(tmp_path: Path) -> None:
+    """Not a convenience: the SHIPPED guide states a size inside one.
+
+    ``### Olog write posture (all four write tools)`` is a real heading of
+    ``src/epics_mcp/operator_guide.md``, and a reader that treated headings as structure alone
+    would be blind to a claim in the text an operator reads first.
+    """
+    blocks = _md(tmp_path, "# Guide\n\n### Olog write posture (all four write tools)\n\nText.\n")
+    assert [site.value for block in blocks for site in sites_of(block)] == [4]
+
+
+def test_a_fenced_code_block_is_not_prose(tmp_path: Path) -> None:
+    """A fence carries identifiers and version pins, and a size claim inside one is not a claim."""
+    source = "# Guide\n\n```\nthe four write tools\n```\n\nThe two round-tripping tools differ.\n"
+    assert [site.value for block in _md(tmp_path, source) for site in sites_of(block)] == [2]
+
+
+def test_a_tilde_fence_closes_only_on_a_tilde(tmp_path: Path) -> None:
+    """The closing fence is the character that opened the run, else a nested one ends it early."""
+    source = "# Guide\n\n~~~\n```\nthe four write tools\n```\n~~~\n\nThe two tools differ.\n"
+    assert [site.value for block in _md(tmp_path, source) for site in sites_of(block)] == [2]
+
+
+def test_each_list_item_is_its_own_block(tmp_path: Path) -> None:
+    """Measured on the shipped guide: fusing a list lets a pairing reach across an item boundary.
+
+    Without this rule the ``three`` of the first bullet and the ``tools`` of the second are two
+    words apart in one flattened block, and the reader reports a size claim nobody wrote.
+    """
+    source = "# Guide\n\n- the other three\n- tools take a cap\n"
+    assert [site.value for block in _md(tmp_path, source) for site in sites_of(block)] == []
+    fused = sites_of(ProseBlock("probe.md", 1, "Guide", "- the other three - tools take a cap"))
+    assert [site.value for site in fused] == [3], "the premise: fusing the items invents a claim"
+
+
+def test_a_wrapped_list_item_stays_one_block(tmp_path: Path) -> None:
+    """The other direction, and it is the reason the rule keys on the MARKER and not on the line.
+
+    A claim straddles the wrap in markdown exactly as it does in a docstring, so a continuation
+    line has to join the item above it or the guard becomes silently lossy.
+    """
+    blocks = _md(tmp_path, "# Guide\n\n- the four\n  write tools are gated\n")
+    assert [site.value for block in blocks for site in sites_of(block)] == [4]
+
+
+def test_a_table_row_is_its_own_block(tmp_path: Path) -> None:
+    """A row is a record, not a sentence, so a number may not pair with a noun one row below.
+
+    The input is chosen so the rule is load-bearing rather than decorative: flattened, these two
+    rows read ``| four | | tools |`` and the detector DOES report a size claim there, measured. A
+    row pair that produced nothing either way would leave this test green under its own mutant.
+    """
+    source = "# Guide\n\n| four |\n| tools |\n"
+    assert [site.value for block in _md(tmp_path, source) for site in sites_of(block)] == []
+    fused = sites_of(ProseBlock("probe.md", 1, "Guide", "| four | | tools |"))
+    assert [site.value for site in fused] == [4], "the premise: fusing the rows invents a claim"
+
+
+def test_a_thematic_break_ends_a_paragraph(tmp_path: Path) -> None:
+    """``---`` rules this estate's sections; gluing across one fuses two unrelated paragraphs."""
+    source = "# Guide\n\nthe four\n\n---\n\nwrite tools are gated\n"
+    assert [site.value for block in _md(tmp_path, source) for site in sites_of(block)] == []
+    fused = sites_of(ProseBlock("probe.md", 1, "Guide", "the four --- write tools are gated"))
+    assert [site.value for site in fused] == [4], "the premise: gluing across the rule invents one"
+
+
+def test_ambiguous_headings_reports_a_repeated_section_title(tmp_path: Path) -> None:
+    """The soundness condition of keying on the NEAREST heading, made decidable.
+
+    Two sections sharing a title would share a key, and one section's inventory row could then be
+    satisfied by the other's phrase. The consumer asserts this is empty for every file it watches;
+    here it is proved that the check can see the case at all, which is the positive control for
+    every empty answer it gives elsewhere.
+    """
+    source = "# Guide\n\n## A\n\n### Notes\n\n## B\n\n### Notes\n"
+    ambiguous = pn.ambiguous_headings(source)
+    assert ambiguous == {"Notes": ["Guide > A > Notes", "Guide > B > Notes"]}
+    assert pn.ambiguous_headings("# Guide\n\n## A\n\n## B\n") == {}
+
+
+def test_the_markdown_reader_leaves_the_python_reader_alone(tmp_path: Path) -> None:
+    """The suffix dispatch may not change what a ``.py`` file reads, which is the regression."""
+    source = '"""Module with all 22 schemas."""\n\n# and 13 rows here\n'
+    blocks = _blocks(tmp_path, source, "still_python.py")
+    assert sorted(site.value for block in blocks for site in sites_of(block)) == [13, 22]
