@@ -5,15 +5,15 @@ that was probed and REJECTED rather than merely postponed. **What it is NOT:** a
 QA history. Each entry names the measurement that produced it, so a reader can re-run it instead of
 trusting it.
 
-**Treat every figure as "was true when written."** Markdown is unguarded here, which is the first
-entry, so nothing re-runs a number on this page. Where a figure exists to establish a SHARE, the
+**Treat every figure as "was true when written."** This page is not one of the markdown files the
+prose-counter guard reads (entry 1), so nothing re-runs a number on it. Where a figure exists to establish a SHARE, the
 share is what this page states, together with the rule to re-derive it.
 
 **Numbers are permanent identifiers, not positions.** A retired entry's number is never reused, so
 a citation elsewhere in this repository still means what it meant when it was written. What was
 retired, and where it went, is listed at the end.
 
-**On this page:** [1 markdown figures](#1--markdown-figures-are-unguarded-and-a-guard-over-them-was-rejected) ·
+**On this page:** [1 markdown figures](#1--markdown-figures-are-unguarded-on-every-page-but-one) ·
 [9 the language guard](#9--the-language-guard-finds-german-by-vocabulary-not-by-understanding) ·
 [10 the typography guard](#10--the-typography-guard-forbids-a-named-set-not-typography-in-general) ·
 [11 Naming-client provenance](#11--the-naming-service-clients-provenance-is-a-measurement-not-an-opinion) ·
@@ -32,10 +32,19 @@ retired, and where it went, is listed at the end.
 
 ---
 
-## 1 · Markdown FIGURES are unguarded, and a guard over them was rejected
+## 1 · Markdown FIGURES are unguarded on every page but one
 
-The prose-counter guard reads Python comments and docstrings. It does not read markdown files, so
-no figure written on any page in this repository is re-run by **it**.
+The prose-counter guard reads Python comments and docstrings, and since GQ-123 it reads markdown
+too. It is pointed at exactly ONE page: `src/epics_mcp/operator_guide.md`, the guide `get_guide`
+ships to a model. Seven of its seventeen size-naming figures are compared to the code they are
+about, ten are inventoried with the reason they cannot be. Every OTHER page in this repository is
+still unguarded for figures.
+
+⚠️ **The heading and the entry below said "and a guard over them was rejected" until GQ-123, which
+had become half true.** What was rejected, and stays rejected, is a guard over the WHOLE tracked
+markdown. The reader could not open a `.md` file at all when this entry was written, so the
+rejection was arguing a cost that had a prerequisite nobody had built. It is built now, the cost
+argument is re-measured below, and it still holds for the rest of the tree.
 
 ⚠️ **The heading used to say "markdown prose is unguarded", and that was already too wide before
 this entry was written.** Markdown IS read by several guards, they just do not read figures:
@@ -45,13 +54,26 @@ checks tool names, `EPICS_MCP_*` variables and status glyphs across the tracked 
 `test_changelog_discipline` caps the size of a new `[Unreleased]` entry. The claim below is about
 SIZE-NAMING FIGURES in markdown, and only about those.
 
-Why no guard: size-naming phrases are spread across the tracked markdown, and the largest share of
-them sits in `CHANGELOG.md` and `CLAUDE.md`, where the exemptions would have to live. A release
-entry that said "22 schemas" must keep saying it. That would need roughly twenty "historical, not
-derivable" rows, precisely the construction `tests/test_prose_counters.py` already rejected in
-writing for its own two files, as "a blanket exemption wearing a table's clothes". Re-derive the
-share with the detector's own vocabulary (a number paired with a `prose_numbers.COLLECTION_NOUNS`
-member, or the `N of the M` shape) over `git ls-files "*.md"`.
+Why not the rest of the tree, re-measured 2026-08-21 with the detector's own reader over
+`git ls-files "*.md"`. **Two reasons, and they are different reasons, which is why one page could
+come in while the others stayed out.**
+
+- **`CHANGELOG.md` cannot come in at all**, and not for cost: a release entry that said
+  "22 schemas" MUST keep saying it, so every one of its figures would need a "historical, not
+  derivable" row, precisely the construction `tests/test_prose_counters.py` rejects in writing as
+  "a blanket exemption wearing a table's clothes". It carries the largest share of the tree's
+  markdown figures on its own, and it is also the only tracked page whose section titles repeat,
+  which the markdown key rests on them not doing
+  (`prose_numbers.ambiguous_headings`). `CLAUDE.md` is the same argument at a smaller size.
+- **`docs/known-limits.md`, this page, is kept out on COST.** Its size-naming phrases move on
+  better than one commit in two, measured over its commits since 2026-07-01, which is the highest
+  churn of any page that would be worth watching. Every one of those commits would demand a table
+  edit whether or not a figure was wrong, and a guard that cries wolf on half of its subject's
+  commits stops being read.
+
+Re-derive both with the detector's own vocabulary (a number paired with a
+`prose_numbers.COLLECTION_NOUNS` member, or the `N of the M` shape); the workspace keeps the
+script that produced the churn shares next to the GQ-123 report.
 
 ⚠️ The one inventory worth knowing about: `docs/tools.md` lists every tool, and **nothing compares
 that list to the registrations.** Only the operator guide's inventory block is checked
