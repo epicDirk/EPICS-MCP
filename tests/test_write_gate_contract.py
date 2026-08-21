@@ -1394,3 +1394,106 @@ def test_the_numeric_gated_phrase_matches_the_measured_pv_gate() -> None:
         "a counted -gated claim disagrees with the PV gate's audited deny paths:\n  "
         + "\n  ".join(findings)
     )
+
+
+# ======================================================================================
+# Half 4: how many conditions make a gate REFUSE TO START
+# ======================================================================================
+#
+# A fourth number circulates about the gates, and the page that keeps the other three apart
+# (`docs/write-gate-contract.md`) names it as a fourth category without pinning it. Measured for
+# [GQ-130]: three places stated it, two said FOUR and one said FIVE, and nothing compared them.
+#
+# ⭐ THEY WERE NOT COUNTING THE SAME POPULATION, which is why "which number is right" was the wrong
+# question. The five are every `SafetyConfigError` the gate raises; the four are the ones an
+# OPERATOR CAN REACH THROUGH A CONFIGURATION, which is also exactly the set the `epics-doctor`
+# block has lines for. The fifth guards `write_rate_limit`, and `EpicsConfig` constrains that field
+# to `ge=1`, so no environment can trigger it, only a caller that bypassed validation with
+# `model_construct`.
+#
+# THE SPELLING RULE, and it is what makes ONE regex safe over the whole tree. The PLURAL phrase
+# `<word> start conditions` always names the TOTAL; a subset is written "N of the five start
+# conditions". The SINGULAR ("the third start condition", "a FOURTH start condition") says WHICH
+# one a passage is about, and stays out of this guard deliberately. Measured over the tracked tree
+# when the rule was written: 2 plural hits carried a count word (both under repair), 10 carried
+# none and are skipped, and 7 singular ones are out of scope. Mixing the two would have put every
+# ordinal in front of a total and made the guard useless on its first run.
+
+#: A claim about HOW MANY conditions make a gate refuse to start. Plural only, see the rule above.
+_START_CONDITIONS_RE = re.compile(r"\b([a-z]+)\s+start conditions\b", re.IGNORECASE)
+
+#: Which module the counted claims speak about. One entry, and the list rather than a bare constant
+#: because a second gate stating its own total is the case this should not silently mis-judge:
+#: `OlogWriteGate` is built LAZILY, so its equivalents surface at the first write rather than at
+#: boot, and no tracked text states them as a total today.
+_START_CONDITION_MODULE = "safety.py"
+
+
+def _start_conditions(module_name: str, tree: ast.Module) -> int:
+    """Count the ``SafetyConfigError`` raises of the gate class in *tree*: its refusals to start.
+
+    Read off the code for the same reason the deny paths are: a total written into prose is
+    re-typed by hand at every place that repeats it, and this one had already drifted into two
+    values before anything compared it.
+
+    A raise that cannot be attributed to the gate class fails LOUDLY rather than being skipped, the
+    same policy :func:`_audit_deny_error_codes` follows: an unreadable site miscounted as absent
+    reads exactly like "this refusal was removed".
+    """
+    classes = [node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+    gates = [node for node in classes if any(_raises_safety_config_error(node))]
+    assert len(gates) == 1, (
+        f"{module_name}: expected exactly one class raising SafetyConfigError, found "
+        f"{[node.name for node in gates]}. The anchor for the start-condition count broke."
+    )
+    return len(list(_raises_safety_config_error(gates[0])))
+
+
+def _raises_safety_config_error(node: ast.AST) -> Iterator[ast.Raise]:
+    """Every ``raise SafetyConfigError(...)`` inside *node*, however deeply nested."""
+    for child in ast.walk(node):
+        if (
+            isinstance(child, ast.Raise)
+            and isinstance(child.exc, ast.Call)
+            and isinstance(child.exc.func, ast.Name)
+            and child.exc.func.id == "SafetyConfigError"
+        ):
+            yield child
+
+
+def test_every_start_condition_count_matches_the_gate() -> None:
+    """Every `<word> start conditions` claim in the tracked tree names the gate's measured total.
+
+    ⛔ HONEST SCOPE, because this is a NUMBER guard and the thing that historically went wrong with
+    this estate's gate prose was a LIST. It compares the figure to the code. It never counts the
+    enumeration that figure summarises, so removing one item from the five listed in
+    `docs/write-gate-contract.md` while leaving the word "five" standing keeps every test green.
+    That is the same limit `tests/test_prose_counters.py` records at `_GATE_SIZE_SCOPES`, it is
+    stated in both places rather than closed in neither, and closing it needs a list-counting
+    mechanism over BOTH estates' lists rather than one fitted to this one.
+
+    What this guard does instead is make a half-repair visible: the failure message names the list,
+    so whoever corrects the figure is told where the words that go with it live.
+
+    RED-PROOF: add a sixth ``SafetyConfigError`` raise to ``SafetyLayer`` and every counted claim
+    is reported against 'six'.
+    """
+    tree = ast.parse((_GATE_PACKAGE_DIR / _START_CONDITION_MODULE).read_text(encoding="utf-8"))
+    expected = _COUNT_WORDS[_start_conditions(_START_CONDITION_MODULE, tree)]
+    findings: list[str] = []
+    for path in _tracked_files_for_gate_numbers():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for match in _START_CONDITIONS_RE.finditer(text):
+            found = match.group(1).lower()
+            if found in _COUNT_WORDS.values() and found != expected:
+                line = text[: match.start()].count("\n") + 1
+                rel = path.relative_to(_REPO_ROOT).as_posix()
+                findings.append(f"{rel}:{line}: says {found!r}, measured {expected!r}")
+    assert not findings, (
+        "a counted start-condition claim disagrees with the PV gate's refuse-to-start raises:\n  "
+        + "\n  ".join(findings)
+        + "\n  The plural phrase names the TOTAL; write a subset as 'N of the <total> start "
+        "conditions'. And the figure is only half of it: the five are LISTED in "
+        "docs/write-gate-contract.md, and nothing checks that list against the code, so correct "
+        "the words there in the same change."
+    )

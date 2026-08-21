@@ -26,15 +26,38 @@ name its own:
 
 The two sixes are unrelated and land on the same value by accident: the requirements map onto the
 logbook gate's checks neither one-to-one nor in order, and two of that gate's checks (the empty-target
-guard and the size cap) answer no requirement at all, while requirement 4 (audit) is no check. A gate's
-**start conditions** are a fourth category again and belong to neither count: the PV gate has five of
-its own, all of them refuse-to-start. The logbook gate is built lazily, so its equivalents (a bad
-rate-limit value, an unwritable audit sink) surface at the FIRST WRITE rather than at boot, and the
-only condition that stops the process itself is the durable audit path both gates share.
+guard and the size cap) answer no requirement at all, while requirement 4 (audit) is no check.
+
+A gate's **start conditions** are a fourth category again and belong to neither count. The PV gate has
+**five start conditions** of its own, every one of them a refuse-to-start, and they are given here as a
+list rather than as a figure somewhere else, which is this page's own rule three paragraphs down:
+
+1. the PV-name allowlist pattern must COMPILE;
+2. writes enabled with an EMPTY pattern is refused, never read as an allow-all;
+3. writes enabled while the EPICS client search reach extends beyond loopback is refused;
+4. `write_rate_limit` must be a usable window size;
+5. a configured `EPICS_MCP_AUDIT_LOG_FILE` must be openable for writing.
+
+⚠️ **Four of them, and only four, can be reached from a configuration**, which is why a text about what
+an operator has to get right says four where this page says five. Number 4 is the exception: `EpicsConfig`
+constrains that field to `ge=1`, so no environment produces a bad value and only a caller that bypassed
+validation with `model_construct` ever meets it. This was measured for [GQ-130] after two texts said four
+and this one said five; they were not counting the same population, and neither said which it counted.
+The order above is the order `SafetyLayer` applies them TODAY, which is what makes "the third start
+condition" elsewhere refer to the reach; nothing compares that ordinal to the code.
+
+The logbook gate is built lazily, so its equivalents (a bad rate-limit value, an unwritable audit
+sink) surface at the FIRST WRITE rather than at boot, and the only condition that stops the process
+itself is the durable audit path both gates share.
 
 So: a text that says "triple-gated" about `set_pv_value` is correct, and one that lists five things
 after it is not a contradiction but a different category. Say which of the four you mean, or give the
 list rather than a number.
+
+⚠️ **And say it in ONE spelling.** The PLURAL `<word> start conditions` always names the TOTAL; a
+subset is written "N of the five start conditions"; the SINGULAR says which one. `test_write_gate_contract.py`
+compares every counted plural claim in the tracked tree to the code. It does **not** compare the list
+above to the code: remove an item from it and leave the figure standing, and nothing goes red.
 
 **1. An environment on/off gate, default OFF.** Writes for the surface are disabled unless an explicit
 `EPICS_MCP_ALLOW_<SURFACE>_WRITE=true` is set. Off is the shipping default and the safe state; a fresh

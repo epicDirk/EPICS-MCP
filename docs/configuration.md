@@ -27,7 +27,7 @@ Every setting is an environment variable with the `EPICS_MCP_` prefix. [`.env.ex
 | `EPICS_MCP_WRITE_RATE_LIMIT` | `10` | Max writes per minute (≥ 1) |
 | `EPICS_MCP_READ_RATE_LIMIT` | `0` | Max REST reads per 60 s (0 = disabled, opt-in); over the limit the shared GET chokepoint raises rather than blocks |
 | `EPICS_MCP_AUDIT_LOG_FILE` | _(empty)_ | Audit log path; empty = stderr (ephemeral). **Required** when a write gate is on: a write-enabled server refuses to start without a durable path |
-| _(no variable of ours)_ | | **A loopback-only EPICS search reach is the third start condition for PV writes.** Enabling `EPICS_MCP_ALLOW_PV_WRITE` while the EPICS search path can reach beyond loopback refuses the start, so the network posture and the write gate are not independent settings. The variables are in the EPICS network table at the end of this page; the Olog write gate has its own conditions and is not affected |
+| _(no variable of ours)_ | | **A loopback-only EPICS search reach is the third start condition for PV writes**, third in the order `SafetyLayer` applies its five. Enabling `EPICS_MCP_ALLOW_PV_WRITE` while the EPICS search path can reach beyond loopback refuses the start, so the network posture and the write gate are not independent settings. The variables are in the EPICS network table at the end of this page; the Olog write gate has its own conditions and is not affected |
 | `EPICS_MCP_READBACK_TOLERANCE` | `1e-06` | Fallback tolerance for the always-on post-write readback verification (feeds both `math.isclose` axes); used only when the record has no usable `control.min_step` (≥ 0) |
 
 ## Path boundary
@@ -123,8 +123,10 @@ p4p ships PVAccess only, so `EPICS_MCP_PROVIDER=ca` builds a PVA context and eve
 search variable is inert in that process. Such a list is still printed, marked `[inert]`, never
 dropped. The `Write gates` block judges BOTH providers, because the PV write gate does, so its
 reach line is the one to read when you are asking about a write. It answers ONE of the PV gate's
-four start conditions, not the question of whether the server would start: nothing in that block
-evaluates the four together.
+five start conditions, not the question of whether the server would start: the block has lines for
+four of the five and never evaluates them together, and the fifth has no line because no
+configuration can reach it. The five are listed in
+[the write-gate contract](write-gate-contract.md).
 
 | Variable | Default | Description |
 |----------|---------|-------------|

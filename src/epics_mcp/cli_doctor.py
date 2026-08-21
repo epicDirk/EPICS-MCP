@@ -189,11 +189,18 @@ def _pv_write_lines(pv: PvWriteGateReport) -> list[str]:
     conclude that this assert guards something dead. This line is computed with the gate's own
     function, so it is the gate's answer rather than a second opinion about it.
 
-    ⚠️ It predicts ONE of the PV gate's FOUR start conditions. The pattern lines above it cover two
-    (a pattern must be set, and it must compile) and the audit line below covers the fourth, and
-    none of the four is evaluated together, which is why nothing here says the server would start.
-    The figure said three until an independent round measured the fourth: a pattern that does not
-    compile makes ``SafetyLayer`` raise, and the block used to print it exactly like a working one.
+    ⚠️ It predicts ONE of the PV gate's five start conditions. The pattern lines above it cover two
+    (a pattern must be set, and it must compile) and the audit line below covers a fourth, so this
+    block has lines for FOUR of the five and evaluates none of them together, which is why nothing
+    here says the server would start. The fifth has no line and cannot usefully get one: it guards
+    ``write_rate_limit``, which ``EpicsConfig`` constrains to ``ge=1``, so no configuration reaches
+    it and only a caller that bypassed validation would.
+
+    The figure here said three until an independent round measured the compile check, and then four
+    until [GQ-130] measured that four is the size of THIS BLOCK's coverage and not of the gate.
+    Both times the number was right about something and wrong about what it named. The five are
+    listed in ``docs/write-gate-contract.md`` and the plural phrase is pinned to the code by
+    ``tests/test_write_gate_contract.py``.
     """
     if not pv.armed:
         return ["  PV write:   OFF (no PV write can leave this server)"]
