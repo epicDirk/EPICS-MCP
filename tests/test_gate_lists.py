@@ -155,7 +155,7 @@ def test_every_gate_size_scope_has_a_list_row() -> None:
     RED-PROOF: delete any row from ``gate_lists.SITES`` whose scope appears in
     ``_GATE_SIZE_SCOPES`` and this reports that file and scope.
     """
-    watched = {(path, scope) for path, scope, _module in pc._GATE_SIZE_SCOPES}
+    watched = {(row.path, row.scope) for row in pc._GATE_SIZE_SCOPES}
     listed = {(Path(site.path).name, site.scope) for site in gl.read_all()}
     missing = sorted(f"{path} [{scope}]" for path, scope in watched - listed)
     assert not missing, (
@@ -170,8 +170,17 @@ def test_every_uncounted_row_still_has_the_length_it_claims() -> None:
     """A row exempt from the GATE comparison is not exempt from being counted at all.
 
     ``source=None`` says "no gate count is the right comparison here", never "this enumeration may
-    change silently". Both of today's uncounted rows describe a PAIR and say so in the prose
-    ("two of them", "its extra two are"), so the pair is what ``expect_items`` holds.
+    change silently". An uncounted row describes a PAIR and says so in the prose ("two of them"),
+    so the pair is what ``expect_items`` holds.
+
+    ⛔ THIS PARAGRAPH SAID "BOTH of today's uncounted rows" AND HAD BEEN WRONG SINCE 461ec66, the
+    commit that ended the ticket it was written for. That commit gave the ``SECURITY.md`` row a
+    source, so it stopped being uncounted; the sentence kept describing two rows and kept quoting a
+    wording ("its extra two are") that the page no longer carries. ⚠️ [GQ-139] first repaired it to
+    the SINGULAR, and a post-build review pointed out that a singular is a count too, held by
+    nothing and free to rot the same way one row later. The wording is therefore number-free: it
+    says what such a row must satisfy, for however many there are. This file is not watched, so a
+    figure typed into it rots exactly the way the ones it guards do.
 
     ⚠️ This test did not exist for one commit while the reader's docstring already promised
     it, and the post-build review found the gap. The concrete hole it closes: widening
@@ -207,9 +216,13 @@ def test_every_uncounted_row_says_why() -> None:
     """A row that is registered but not counted carries a reason, and it is a real one.
 
     ``source=None`` is the only way a site escapes the comparison, so it has to cost a sentence.
-    Both of today's rows earn it: ``update_log_entry`` enumerates a subset and SAYS it does ("two
-    of them"), and ``SECURITY.md`` names the arithmetic difference between the two gates, which no
-    gate count is the right comparison for.
+    ``update_log_entry`` earns it: it enumerates a subset and SAYS it does ("two of them"), so
+    counting it against the whole gate would report a true sentence as wrong.
+
+    ⛔ ``SECURITY.md`` WAS NAMED HERE AS THE SECOND SUCH ROW AND HAS NOT BEEN ONE SINCE 461ec66.
+    Its argument, that no gate count is the right comparison for a DIFFERENCE, was half right: no
+    single gate count is, but the difference between the two gates is derivable, so the row now
+    carries ``_GATE_DIFFERENCE`` and is counted. [GQ-139] found the sentence still standing.
     """
     thin = [row.path for row in gl.SITES if row.source is None and len(row.reason.split()) < 12]
     assert not thin, (

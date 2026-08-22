@@ -59,7 +59,7 @@ fraction of it:
   the middle of "a test-server URL boundary". The runtime value is also what a model receives,
   so it is the honest subject.
 
-A SUBSET IS NOT A LIST, and two rows exist to say so. ``update_log_entry`` says "all six checks
+A SUBSET IS NOT A LIST, and a row may exist to say so. ``update_log_entry`` says "all six checks
 (two of them, the env gate and the test-server URL boundary, checked BEFORE the round-trip read)":
 the parenthesis enumerates a deliberate subset and is marked as one in the prose. Counting it
 against the gate would report a true sentence as wrong. Such rows carry ``source=None``, a reason,
@@ -67,6 +67,14 @@ and an ``expect_items`` of their own, so ``test_gate_lists`` holds both their an
 length: a subset that grew into the whole list goes red instead of passing unexamined. ⚠️ That
 second half was missing for one commit, and this paragraph promised it anyway; the post-build
 review measured the gap.
+
+⛔ THIS SENTENCE COUNTED THOSE ROWS ("two rows exist to say so") AND THE COUNT DIED IN THE COMMIT
+AFTER THE ONE THAT WROTE IT: ``461ec66`` gave the ``SECURITY.md`` row a source, leaving one. Two
+further copies of the same claim stood in ``tests/test_gate_lists.py`` and are repaired with
+[GQ-139], which at first missed this one, the copy in the module that DEFINES the rows. Nothing
+counts them, here or there, so the wording no longer does either: ``len([r for r in SITES if
+r.source is None])`` answers it, and a figure in prose beside a table it does not read is the
+defect this whole module exists to catch.
 """
 
 from __future__ import annotations
@@ -227,8 +235,11 @@ def qualname_lineno(text: str, qualname: str) -> int:
     """The line a class or function is defined on, for a row read from a runtime string.
 
     A chain read from ``__doc__`` or from ``build_instructions`` has no line of its own: the
-    source wraps it across string literals. The definition's line is the stable address, and it is
-    the same address ``_GATE_SIZE_SCOPES`` keys its rows on.
+    source wraps it across string literals, so the definition's line is the stable address to
+    report. What ``test_every_gate_size_scope_has_a_list_row`` matches on is the QUALNAME, not this
+    line, and that is what the two tables share. ⚠️ They share it and no more: since [GQ-139] the
+    number family also keys on a row's ``lead``, so a scope can carry two of its rows and one of
+    ours. The comparison is deliberately one-directional and stays correct under that.
     """
     wanted = qualname.split(".")[-1]
     for node in ast.walk(ast.parse(text)):

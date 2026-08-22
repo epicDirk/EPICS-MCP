@@ -107,6 +107,31 @@ _SRC = _TESTS.parent / "src" / "epics_mcp"
 #     never listed. For the Python half of the tree the criterion had not been applied at all, and
 #     that is the honest answer to "was this list grown": the markdown half was blocked by the
 #     reader, the Python half by nobody having looked.
+#   * `SECURITY.md` joins with [GQ-139], the cheaper of the two MARKDOWN files the criterion has
+#     admitted (`display_tools.py` above is cheaper than either). Measured on the tree as it stood
+#     BEFORE the joining commit: 4 sites, and a site set that had moved on 2 of the 17 commits then
+#     in range. Both figures are moved BY that commit, to 5 and 3 of 18, because it gave the Olog
+#     width its noun; the viewpoint is named here because the first draft of this entry mixed the
+#     two and read as if the file were cheaper than it is. ⚠️ Two of the three figures above are
+#     also not measured the way `display_tools.py`'s are: its denominator excludes the commit that
+#     created it, these include it. Re-derive rather than compare across the entries.
+#     Condition 2 is why it matters more than the arithmetic suggests: it is the page a security
+#     reviewer reads before approving a deployment, and it states BOTH write-gate widths.
+#     ⚠️ Condition 1 has NOT held all along, and the first draft of this entry said it had: the
+#     file was created on 2026-07-25 with no size-naming phrase at all, and its first DERIVABLE one
+#     arrived on 2026-08-15. What is true is the second half, that nobody applied the criterion
+#     once it did hold, through three tickets that each looked at this family.
+#     ⚠️ What kept it out was not only that: both gate widths sit in ONE
+#     markdown section, and until this ticket the gate-size family could key only one module per
+#     (file, scope), so a row for this file would have accused the true Olog sentence against the
+#     PV gate's three. The `lead` field at `_GATE_SIZE_SCOPES` is what made the file admissible.
+#     ⚠️ AND IT CONCENTRATES THE MARKDOWN KEY'S WEAKNESS: all five sites hang off the single
+#     heading "Security posture", so inserting one `###` inside that section, with no word of prose
+#     changed, re-keys all five at once and turns three tests red with about ten messages. They do
+#     print the NEW heading, but none of them says that a heading moved, and the claim message
+#     advises rewording the prose, which would be the wrong repair. That is a property of the
+#     markdown key rather than of this file, and it is written here because this is where it bites
+#     hardest.
 #   * `tests/test_guide_matches_code.py` is REFUSED: 47 table rows to sort by hand, its site set
 #     moved on 15 of 40 commits, and the forward yield is about ONE derivable number, because
 #     [GQ-117] repaired two of its three wrong numbers by DE-NUMBERING and those sites are gone.
@@ -143,6 +168,7 @@ _WATCHED: tuple[tuple[str, Path], ...] = (
     ("server.py", _SRC / "server.py"),
     ("operator_guide.md", _SRC / "operator_guide.md"),
     ("display_tools.py", _SRC / "display_tools.py"),
+    ("SECURITY.md", _TESTS.parent / "SECURITY.md"),
 )
 
 
@@ -175,11 +201,14 @@ class _Claim:
     ``path`` narrows a claim to ONE watched file, and it closes an asymmetry rather than adding a
     convenience: ``_FROZEN`` identifies a phrase by (file, scope, phrase, value) while a claim
     identified itself by scope alone. For a scope that exists once that is the same thing; for
-    ``<module>`` it is not, that scope exists in six of the seven watched files, so a claim about
-    the PV gate's size would also judge a sentence about the LOGBOOK gate in another file's module
+    ``<module>`` it is not, it is the scope of every watched PYTHON file, so a claim about the PV
+    gate's size would also judge a sentence about the LOGBOOK gate in another file's module
     header. Measured with [GQ-126]: no such collision exists today, which is why the field is
     optional and every older claim keeps matching across files, several of them deliberately (the
     duplicate rule that put ``checkers.py`` and ``archiver.py`` in ``_WATCHED`` depends on it).
+    ⚠️ ``path`` is not the finest key there is, and [GQ-139] is where that stopped being an
+    academic point: a scope may state TWO gate widths, which (file, scope) cannot express at all.
+    The gate-size family answers that with its own ``lead``; nothing here does.
     """
 
     label: str
@@ -1218,7 +1247,9 @@ def _gate_size_of(module: str) -> Callable[[], int]:
 #: shipped guide each talk about BOTH gates. That is exactly why ``test_write_gate_contract.py``
 #: keeps them out of its own sweep: it reads a FILE at a time and says at ``_SINGLE_GATE_FILES``
 #: that a mixed file "would need sentence-level attribution". This guard reads a BLOCK at a time, so
-#: that attribution is the one thing it has, and these seven rows are it.
+#: that attribution is the one thing it has, and the rows below are it. ⚠️ A BLOCK is not always
+#: fine enough either: ``SECURITY.md`` states both widths in one sentence, which is what ``lead``
+#: answers, and the paragraph on it further down is the one to read before adding a row.
 #:
 #: ⛔ HONEST SCOPE, and it has to be read before this family is taken for coverage of the gate
 #: sizes, because the thing it does NOT do is the thing that historically went wrong. It compares a
@@ -1244,22 +1275,101 @@ def _gate_size_of(module: str) -> Callable[[], int]:
 #: ⚠️ Two further limits, both measured rather than feared. A sentence about the write-gate
 #: CONTRACT's six requirements landing in an Olog scope would be permanently green, because only
 #: the value is compared and never which of the four questions the sentence asks; the contract page
-#: says itself that "the two sixes are unrelated and land on the same value by accident". And
-#: ``path`` separates the two gates ACROSS files, not WITHIN one: a correct Olog sentence written
-#: into ``server.py``'s module scope would be accused against the PV gate's three, with a message
-#: telling the reader to break a true sentence.
-_GATE_SIZE_SCOPES: tuple[tuple[str, str, str], ...] = (
-    ("server.py", "<module>", "safety.py"),
-    ("operator_guide.md", "Posture (read this first)", "safety.py"),
-    ("operator_guide.md", "Olog write posture (all four write tools)", "olog_safety.py"),
-    (
+#: says itself that "the two sixes are unrelated and land on the same value by accident". And a
+#: row that carries NO ``lead`` separates the two gates ACROSS files, not WITHIN one: a correct
+#: Olog sentence written into ``server.py``'s module scope would be accused against the PV gate's
+#: three, with a message telling the reader to break a true sentence.
+#: ⭐ THAT SECOND LIMIT IS WHY ``lead`` EXISTS, and it stopped being hypothetical with [GQ-139]:
+#: ``SECURITY.md`` states BOTH widths inside one markdown section, so the two rows that judge it
+#: cannot be told apart by (file, scope) at all. What tells them apart is a required PREFIX, and
+#: what keeps a leadless row from silently swallowing a second gate's sentence is
+#: ``test_no_gate_size_row_judges_two_different_sizes``, which reports the collision as a keying
+#: problem IN ADDITION TO the value comparison reporting it as a prose problem. ⚠️ Not "instead
+#: of": measured on the mutant, both reds appear, and the test's own docstring says so.
+#:
+#: ⛔ WHAT THIS FAMILY STILL DOES NOT REACH, named here because reach is what it failed at three
+#: times running and because a guard that does not say where it stops reads as if it stopped
+#: nowhere. FOUR further documents a human reads state a write-gate width that no NUMBER guard
+#: holds. The price of admitting each was measured on 2026-08-22, as sites in that file and as the
+#: share of ITS commits since 2026-07-01 that moved its site set: ``docs/safety.md`` (5 sites,
+#: 3 of 28) and ``README.md`` (2 sites, 16 of 108) and ``ARCHITECTURE.md`` (4 sites, 3 of 13) and
+#: ``docs/deployment.md`` (7 sites, 6 of 48).
+#: ⚠️ WHICH READING, because condition 3 above admits two and they disagree here. These count a
+#: commit as moving the set when the KEY SET changes, value included, which is what a ``_FROZEN``
+#: row is keyed by and therefore the closer measure of the bookkeeping. Counting only a change in
+#: the NUMBER of sites, which is what ``test_inventory_size_is_pinned`` compares, gives 4, 10, 3
+#: and 6 for the same four files: neither reading dominates the other, because a file can hold the
+#: same phrase twice under one heading. Both readings agree on ``SECURITY.md``.
+#: Only ``docs/safety.md`` already has the gate LIST row
+#: that ``test_every_gate_size_scope_has_a_list_row`` would demand; the other three need one
+#: written first. ``CHANGELOG.md`` states the width too and stays out on condition 2, a release
+#: entry must keep saying what it said. The two gate MODULES are covered elsewhere, by
+#: ``test_write_gate_contract._SINGLE_GATE_FILES``.
+#:
+#: ⛔ NO TREE-WIDE TOTAL IS GIVEN HERE, for the reason the ``_GATE_CHECKS`` paragraph below gives
+#: at length and for a second one measured on this very comment. [GQ-139] wrote such a total into
+#: this spot and re-measured after the edit: it had already moved, because the SAME commit added one
+#: matching phrase to ``SECURITY.md`` and another to the docstring of
+#: ``test_no_gate_size_row_judges_two_different_sizes``, which quotes the shape as its example.
+#: ⚠️ WHAT JOINED THE COUNT WAS THE QUOTATION, NOT THE FIGURE, and a first draft of this very
+#: paragraph got that wrong: measured, neither "43 occurrences" nor "the tree holds 45 occurrences"
+#: matches ``_GATE_CHECKS``, because the pattern wants the counted NOUN behind the number. A total
+#: is therefore not unwritable, it is merely unmaintainable, and it stays out on the second ground:
+#: nothing here would ever compare it. The four per-file prices above survive precisely because
+#: they are properties of OTHER files, which a later edit of THIS file cannot move.
+#: Re-derive a total by running ``_GATE_CHECKS`` over ``git ls-files "*.py" "*.md"`` and
+#: reading every hit; the run behind the four figures is in
+#: ``analysis/gq139-torgroessen-2026-08-22/`` in the workspace. Most of what such a sweep finds
+#: outside a watched file is this estate's own guards QUOTING the sentences they watch, which is
+#: also why no tree-wide sweep is proposed: those files are deliberately unwatched, and a sweep
+#: would report their explanations as findings.
+@dataclass(frozen=True)
+class _GateScope:
+    """One passage that names a write gate's width, and which gate it is about.
+
+    ``path`` AND ``scope``, because ``server.py`` and the shipped guide each talk about BOTH gates.
+
+    ``lead`` is a LITERAL prefix that narrows a row WITHIN its scope, for the case (file, scope)
+    cannot express: a section that states both widths. It is empty for every row that is alone in
+    its scope, so those rows keep exactly the pattern they had.
+
+    ⛔ LITERAL, NOT A PATTERN, and it is escaped where the pattern is built. The first version took
+    it as a raw regular expression and guarded only that it opened no capturing group, which an
+    adversarial pass answered with ``r"the .* gate "``: no group, so the guard let it through, and
+    the greedy gap then binds the row to the LAST matching phrase in the block instead of the
+    meant one. Where value and module then disagree the comparison still catches it; where they
+    happen to agree it is silent. Escaping removes the class instead of testing for it, and it
+    gives ``lead`` the semantics ``gate_lists`` already gives its anchors: when the passage is
+    reworded the anchor stops matching, the claim goes orphaned, and a human reads the passage
+    again. That is the right failure, not a limitation.
+
+    The second rule has no such structural answer and keeps its test: a row may not end up owning
+    phrases that name different sizes, which is what happens when a leadless row is left standing
+    in a scope that grew a second gate's sentence.
+    """
+
+    path: str
+    scope: str
+    module: str
+    lead: str = ""
+
+
+_GATE_SIZE_SCOPES: tuple[_GateScope, ...] = (
+    _GateScope("server.py", "<module>", "safety.py"),
+    _GateScope("operator_guide.md", "Posture (read this first)", "safety.py"),
+    _GateScope("operator_guide.md", "Olog write posture (all four write tools)", "olog_safety.py"),
+    _GateScope(
         "operator_guide.md",
         "The write gates, the read throttle, and a server that declines to start",
         "olog_safety.py",
     ),
-    ("server.py", "create_log_entry", "olog_safety.py"),
-    ("server.py", "add_log_attachment", "olog_safety.py"),
-    ("server.py", "update_log_entry", "olog_safety.py"),
+    _GateScope("server.py", "create_log_entry", "olog_safety.py"),
+    _GateScope("server.py", "add_log_attachment", "olog_safety.py"),
+    _GateScope("server.py", "update_log_entry", "olog_safety.py"),
+    # The security page, in from [GQ-139]. Both widths in ONE section, so both rows need a lead;
+    # the LIST half of the same passage has been held since [GQ-132] on the very same key.
+    _GateScope("SECURITY.md", "Security posture", "safety.py", lead=r"the PV gate is "),
+    _GateScope("SECURITY.md", "Security posture", "olog_safety.py", lead=r"the Olog gate "),
 )
 
 #: A gate-size sentence, in both shapes this estate writes it: "three gate checks" and the bare
@@ -1268,7 +1378,8 @@ _GATE_SIZE_SCOPES: tuple[tuple[str, str, str], ...] = (
 #: ⚠️ ``gate`` is OPTIONAL here and REQUIRED in ``test_write_gate_contract._GATE_SIZE_RE``, which
 #: excludes the bare form on purpose because "the two checks split out of this one" is a real
 #: sentence in ``olog_safety.py``. Several of the sentences the rows above cover carry ONLY the
-#: bare form, so the word cannot be required; what replaces it is the row itself, file plus scope.
+#: bare form, so the word cannot be required; what replaces it is the row itself, file plus scope
+#: plus, where one section states both widths, the row's ``lead``.
 #: Measured over the tracked tree the loose shape also pairs with phrases that name no gate at all,
 #: and NOT ONE of them sits in a watched file: the narrowness is carried entirely by
 #: ``_GATE_SIZE_SCOPES``, which is also why ``path`` had to exist before this family could.
@@ -1296,18 +1407,33 @@ _GATE_SIZE_SCOPES: tuple[tuple[str, str, str], ...] = (
 _GATE_CHECKS = rf"({pn._NUMBER})\*{{0,2}}\s+\*{{0,2}}(?:gate\*{{0,2}}\s+)?checks\b"
 
 
+def _gate_scope_pattern(row: _GateScope) -> str:
+    """A row's phrase pattern: the shared shape, optionally behind the row's own literal prefix.
+
+    ``_GATE_CHECKS`` stays the TAIL of every pattern, so the capture group is the detector's own
+    number grammar for a leadless and a led row alike. A lead only decides WHICH of a scope's
+    phrases the row owns; it never decides what counts as a number, and ``re.escape`` is what makes
+    that structural rather than a rule somebody has to keep. See ``_GateScope``.
+    """
+    return f"{re.escape(row.lead)}{_GATE_CHECKS}" if row.lead else _GATE_CHECKS
+
+
 def _gate_size_claims() -> tuple[_Claim, ...]:
-    """One claim per sentence family, generated so the seven rows are authored exactly once."""
+    """One claim per sentence family, generated so each row is authored exactly once.
+
+    No figure for how many rows that is: this module is deliberately unwatched, so a count written
+    here rots exactly the way the counts it guards do. ``len(_GATE_SIZE_SCOPES)`` answers it.
+    """
     return tuple(
         _claim(
-            f"{module} width in {path} [{scope}]",
-            _GATE_CHECKS,
-            _gate_size_of(module),
-            reads=(module,),
-            scope=scope,
-            path=path,
+            f"{row.module} width in {row.path} [{row.scope}]",
+            _gate_scope_pattern(row),
+            _gate_size_of(row.module),
+            reads=(row.module,),
+            scope=row.scope,
+            path=row.path,
         )
-        for path, scope, module in _GATE_SIZE_SCOPES
+        for row in _GATE_SIZE_SCOPES
     )
 
 
@@ -1925,7 +2051,7 @@ _CLAIMS: tuple[_Claim, ...] = (
         reads=("services/olog_client.py",),
         scope="Olog search filters: what the server does with a value it does not like",
     ),
-    # --- family 8: the two write-gate widths, seven sentences, see _GATE_SIZE_SCOPES ------------
+    # --- family 8: the two write-gate widths, one claim per row, see _GATE_SIZE_SCOPES ----------
     *_gate_size_claims(),
 )
 
@@ -2087,6 +2213,35 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
         "declares many more and marks none of them as the trust pair, so the set exists only in "
         "the sentence"
     ),
+    # --- the security page: one historical measurement, stated three times ------------------------
+    # In with [GQ-139]. All three sit in the same bullet, the one about the ANSWER channel. TWO of
+    # them describe a state of the tree on two named days in August 2026 rather than a set that
+    # exists now, which is what makes them inventory rather than claims: the sentence is a record of
+    # a repair, and a derivation from today's code would compare it to the wrong world. The THIRD
+    # is not a size at all, it is the article in "one of the two ways"; a post-build review caught
+    # this comment describing all three the same way.
+    #
+    # ⚠️ A bullet that RECORDS A CLOSED DISCLOSURE is watched here while `CHANGELOG.md` is refused
+    # on condition 2 for looking like the same thing, and the distinction is worth stating because
+    # it is not obvious. A release entry is immutable by convention: correcting it would falsify
+    # the record. This bullet is current prose about the current posture that happens to narrate
+    # history, and it is edited normally. The cost of that is real and was measured rather than
+    # waved away: rewording "in one of the two ways" to "in either way" turns two rows stale and
+    # moves the pin, for an edit that changes no claim about the world. It is inside the file's
+    # measured bookkeeping share, not outside it.
+    ("SECURITY.md", "Security posture", "two tools", 2): (
+        "tools that once put a REST failure message into a `note` of a payload they returned "
+        "successfully, named in the same sentence (`diagnose_connection`, `lookup_device_name`). "
+        "The behaviour is GONE, which is the point of the sentence, so no live set can count it"
+    ),
+    ("SECURITY.md", "Security posture", "one of the two", 1): (
+        "the article in 'in one of the two ways', not a count of anything"
+    ),
+    ("SECURITY.md", "Security posture", "one of the two", 2): (
+        "the two ways a configured credential used to leave through the ANSWER channel, a failure "
+        "message and a successful note. Both were closed on 2026-08-14; the pair exists in the "
+        "record of that repair and in no declaration"
+    ),
 }
 
 # Per FILE, not one total. A single number lets an addition cancel a deletion out: measured, a real
@@ -2122,6 +2277,12 @@ _INVENTORY_SIZES: dict[str, int] = {
     # commits since 2026-07-01) and it was missed by the first draft, which is the reason the
     # paragraph above no longer claims the reader was the only thing keeping files out.
     "display_tools.py": 3,
+    # The security page, in from [GQ-139]. Two of the five are the write-gate widths and are
+    # derived; the other three sit in one bullet, the record of a closed disclosure, and are
+    # inventoried. It joined at 5 rather than 4 because the Olog width carried no noun and was
+    # therefore invisible to the detector, the same half-repair the operator_guide entry above
+    # records, found again in the file a security reviewer reads first.
+    "SECURITY.md": 5,
 }
 
 
@@ -2294,6 +2455,110 @@ def test_no_claim_leaves_its_sources_undeclared() -> None:
     undeclared = [claim.label for claim in _CLAIMS if not claim.reads]
     assert not undeclared, (
         f"these claims declare no source at all, so nothing about them is traced: {undeclared}"
+    )
+
+
+def test_a_gate_scope_lead_is_taken_literally() -> None:
+    """``_gate_scope_pattern`` escapes the lead, on constructed input rather than on today's rows.
+
+    Both of today's leads are plain words, so this decision is INERT on the real table and would
+    survive its own removal unnoticed: exactly the shape of decision that has to be held on
+    constructed input, the way ``tests/test_gate_lists.py`` holds its readers. Two properties, both
+    load-bearing and each with its own failure:
+
+    * a metacharacter in a lead must not act as one. ``r"the .* gate "`` compiles fine and opens no
+      capturing group, so the earlier guard passed it, and the greedy gap then bound the row to the
+      LAST phrase in the block instead of the meant one.
+    * a group in a lead must not shift ``match.group(1)`` off the number. That was a separate test
+      until the escape made it unreachable; a guard that can no longer go red is the thing this
+      module exists to remove, so it is folded in here as a property of the BUILDER instead.
+
+    RED-PROOF: drop the ``re.escape`` in ``_gate_scope_pattern`` and BOTH halves report. They are
+    collected rather than asserted one by one for exactly that reason: a bare ``assert`` on the
+    first would abort before the second was ever tried, and a red-proof that can only ever show one
+    of two properties is half a proof.
+    """
+    both_widths = "the PV gate is three checks and the Olog gate six checks"
+    findings: list[str] = []
+
+    greedy = _gate_scope_pattern(_GateScope("f", "s", "m", lead="the .* gate "))
+    if re.search(greedy, both_widths):
+        findings.append(
+            "a lead's metacharacter still acts as a pattern, so a loose lead binds a row to the "
+            f"wrong phrase in its own scope: {greedy!r}"
+        )
+
+    grouped = _gate_scope_pattern(_GateScope("f", "s", "m", lead="the (PV|Olog) gate is "))
+    if re.compile(grouped).groups != 1:
+        findings.append(
+            "a lead opened a capturing group, so group(1) is no longer the number the comparison "
+            f"reads and every claim on that row would report 'prose says None': {grouped!r}"
+        )
+
+    plain = _gate_scope_pattern(_GateScope("f", "s", "m", lead="the Olog gate "))
+    match = re.search(plain, "the Olog gate six checks", re.IGNORECASE)
+    if match is None or match.group(1) != "six":
+        findings.append(f"escaping broke an ordinary lead, which must still match: {plain!r}")
+
+    assert not findings, (
+        "_gate_scope_pattern no longer takes a lead literally:\n  "
+        + "\n  ".join(findings)
+        + "\n  A lead is a literal prefix; the builder must re.escape it."
+    )
+
+
+def test_no_gate_size_row_judges_two_different_sizes() -> None:
+    """One row, one gate. A row that owns phrases naming DIFFERENT sizes is keyed too coarsely.
+
+    This is the failure ``lead`` exists to prevent, stated as a property so that the NEXT scope to
+    grow a second gate's sentence reports a keying problem rather than a prose problem. Without it
+    the symptom arrives through ``test_every_claimed_counter_matches_its_set`` as
+    ``prose says 6, the set has 3``, which tells the reader to break a true sentence; the family's
+    own comment records that trap and this is the answer to it.
+
+    ⛔ IT NEVER FIRES ALONE, and saying so is the point rather than an apology. A row owning two
+    different sizes means one of them disagrees with the row's module, so
+    ``test_every_claimed_counter_matches_its_set`` goes red in the same run, every time. What this
+    test adds is not detection, it is the DIAGNOSIS: the other message names a block and a value
+    and reads as an instruction to correct the prose, which in this exact case would mean breaking
+    a true sentence. Measured on the mutant below, both reds appear together and only this one
+    names the row and the cause. It is also the only place the rule "one row, one gate" exists as
+    something that can go red; it lived in a comment before, and this family's comments are the
+    ones that rotted.
+
+    ⚠️ WHAT IT IS NOT: a partition check. "No row owns this phrase" is already
+    ``test_inventory_is_partitioned``'s job, and a second guard for the same question would be the
+    second thing to keep right that this module argues against everywhere else.
+
+    ⚠️ AND IT IS BLIND TO THE ACCIDENTAL AGREEMENT, which is the case the comment at
+    ``_GATE_SIZE_SCOPES`` records: two sentences about DIFFERENT sets that name the SAME number,
+    the contract's six requirements and the Olog gate's six checks, would be one value here and
+    pass. Nothing in this family closes that; only a human reading the sentence does.
+
+    RED-PROOF: drop the ``lead`` from either ``SECURITY.md`` row and this reports that row owning
+    the values ``[3, 6]``.
+    """
+    blocks = _watched_blocks()
+    findings: list[str] = []
+    for row in _GATE_SIZE_SCOPES:
+        phrase = re.compile(_gate_scope_pattern(row), re.IGNORECASE)
+        owned = {
+            value
+            for block in blocks
+            if block.path == row.path and block.qualname == row.scope
+            for match in phrase.finditer(block.text)
+            if (value := parse_count(match.group(1))) is not None
+        }
+        if len(owned) > 1:
+            findings.append(
+                f"{row.path} [{row.scope}] -> {row.module}: owns phrases naming {sorted(owned)}"
+            )
+    assert not findings, (
+        "a gate-size row judges phrases that name different sizes, so its key cannot be the right "
+        "one:\n  "
+        + "\n  ".join(findings)
+        + "\n  This scope states more than one gate width. Give each row a `lead` that selects "
+        "its own sentence; do NOT change the prose to agree with one module."
     )
 
 

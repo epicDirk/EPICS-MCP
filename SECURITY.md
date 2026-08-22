@@ -30,7 +30,7 @@ setting.
 - **Two independent write gates.** The Olog logbook gate (`EPICS_MCP_ALLOW_OLOG_WRITE`) is separate
   from the PV gate, with its own allowlist, its own rate limit and its own URL boundary. Enabling
   one never enables the other. The two are not the same SIZE either: the PV gate is three checks,
-  the Olog gate six. What the Olog gate has on top is a non-empty target-logbook list and a
+  the Olog gate six checks. What the Olog gate has on top is a non-empty target-logbook list and a
   test-server URL boundary and an attachment size cap. That group carried a figure until [GQ-132]
   and the figure was wrong, it named fewer items than the two gates differ by, so it is spelled as
   a list and `tests/test_gate_lists.py` counts it against the difference the gate modules have.
