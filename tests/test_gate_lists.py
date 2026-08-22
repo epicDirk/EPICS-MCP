@@ -63,6 +63,19 @@ _CONTRACT_POINTS = "contract-points"
 #: saying WHICH of its two counts it means. ``safety.py`` alone is the gate's per-write width.
 _START_CONDITIONS = "safety.py:start-conditions"
 
+#: How much WIDER the logbook gate is than the PV gate. A difference, not a size, and it earns a
+#: source of its own because the security page states it and stated it wrongly: it said the Olog
+#: gate had "extra two" while the two gates differ by three, and nothing compared that arithmetic
+#: to the gates it is arithmetic about.
+#:
+#: ⚠️ IT ENCODES THE MAPPING THE SENTENCE ASSUMES, that every PV-gate check has an Olog
+#: counterpart, which is true today: env gate to env gate, name allowlist to logbook allowlist,
+#: rate limit to rate limit. Should the PV gate ever gain a check the logbook gate has no answer
+#: to, this subtraction stops meaning "what the Olog gate has on top" and goes red. That is the
+#: right failure: the sentence would have stopped being true at the same moment, and somebody has
+#: to read it again rather than watch a figure quietly re-derive itself into agreement.
+_GATE_DIFFERENCE = "olog_safety.py-over-safety.py"
+
 
 def _canonical_contract_points() -> int:
     """How many requirements the write-gate contract actually spells out."""
@@ -84,6 +97,8 @@ def _expected(source: str) -> int:
     if source == _START_CONDITIONS:
         tree = ast.parse((_SRC / "safety.py").read_text(encoding="utf-8"))
         return write_gate._start_conditions("safety.py", tree)
+    if source == _GATE_DIFFERENCE:
+        return pc._gate_check_count("olog_safety.py") - pc._gate_check_count("safety.py")
     return pc._gate_check_count(source)
 
 

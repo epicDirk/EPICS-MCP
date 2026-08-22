@@ -213,7 +213,10 @@ def _annotate_empty(
 ) -> None:
     """Add :func:`empty_note` when *answer*'s payload list is empty and the plane WAS asked.
 
-    Four conditions, and each one is a case that would otherwise produce a wrong sentence:
+    Every condition below is a case that would otherwise produce a wrong sentence. The count that
+    used to open this line is gone rather than corrected: it announced a fourth condition the list
+    never carried, while the paragraph underneath argues that no fourth is needed. The sentence
+    announces a list, it does not count one, and nothing here reads the list to check it.
 
     * ``empty_key`` is opt-in per tool, because only the tool knows which of its keys carries
       the payload. A decorator guessing "the first list" would annotate the wrong field the day

@@ -446,16 +446,17 @@ SITES: tuple[_Row, ...] = (
     _Row(
         path="SECURITY.md",
         shape="chain",
-        source=None,
+        source="olog_safety.py-over-safety.py",
         reason=(
-            "'its extra two are ...' names an ARITHMETIC DIFFERENCE between the two gates, not a "
-            "gate's size, so no gate count is the right comparison. Its own figure is under "
-            "review: the gates differ by three, and the URL boundary is the unnamed one. Left "
-            "for an author to decide, recorded rather than repaired here. ``expect_items`` holds "
-            "what the sentence SAYS, two, so a silent third would still go red."
+            "the security page's statement of what the Olog gate has that the PV gate does not. "
+            "This row was source=None until the ticket's own follow-up, on the argument that no "
+            "gate count is the right comparison for a DIFFERENCE. That was half right: no single "
+            "gate count is, but the difference between the two IS derivable, and the sentence "
+            "here said 'extra two' while the gates differ by three. A difference nobody holds "
+            "against its source is the class this module exists for, so it is held. "
+            "⚠️ Separator ' and ', see chain_items"
         ),
-        parts=(("its extra two are ", ")", " and "),),
-        expect_items=2,
+        parts=(("What the Olog gate has on top is ", ".", " and "),),
     ),
 )
 
