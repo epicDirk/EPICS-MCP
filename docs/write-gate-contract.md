@@ -56,8 +56,16 @@ list rather than a number.
 
 ⚠️ **And say it in ONE spelling.** The PLURAL `<word> start conditions` always names the TOTAL; a
 subset is written "N of the five start conditions"; the SINGULAR says which one. `test_write_gate_contract.py`
-compares every counted plural claim in the tracked tree to the code. It does **not** compare the list
-above to the code: remove an item from it and leave the figure standing, and nothing goes red.
+compares every counted plural claim in the tracked tree to the code. ⭐ **And since [GQ-132] the LIST
+is compared too**, by `test_gate_lists.py`, against that same measurement: remove an item from the
+five above and leave the figure standing, and it reports `the list has 4 items`. That sentence used
+to say the opposite, and it was true when it was written. The same guard counts the six requirements
+below, the shipped guide's six Olog checks, both gate docstrings and the chains in `server.py`.
+⚠️ It reads a registered TABLE of enumerations rather than sweeping for lists, so a NEW list here is
+covered the day somebody anchors it, not the day it lands. That is the opposite trade from the
+figure sweep beside it, and it is deliberate: a repository-wide list counter was measured for
+[GQ-132] against hand-read sites and refused on its false-alarm rate. The figures are in that
+guard's own docstring, beside the assertion they qualify, rather than restated here.
 
 **1. An environment on/off gate, default OFF.** Writes for the surface are disabled unless an explicit
 `EPICS_MCP_ALLOW_<SURFACE>_WRITE=true` is set. Off is the shipping default and the safe state; a fresh

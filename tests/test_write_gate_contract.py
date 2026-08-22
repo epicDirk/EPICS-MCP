@@ -1465,15 +1465,25 @@ def test_every_start_condition_count_matches_the_gate() -> None:
     """Every `<word> start conditions` claim in the tracked tree names the gate's measured total.
 
     ⛔ HONEST SCOPE, because this is a NUMBER guard and the thing that historically went wrong with
-    this estate's gate prose was a LIST. It compares the figure to the code. It never counts the
-    enumeration that figure summarises, so removing one item from the five listed in
-    `docs/write-gate-contract.md` while leaving the word "five" standing keeps every test green.
-    That is the same limit `tests/test_prose_counters.py` records at `_GATE_SIZE_SCOPES`, it is
-    stated in both places rather than closed in neither, and closing it needs a list-counting
-    mechanism over BOTH estates' lists rather than one fitted to this one.
+    this estate's gate prose was a LIST. It compares the figure to the code and never counts the
+    enumeration that figure summarises.
 
-    What this guard does instead is make a half-repair visible: the failure message names the list,
-    so whoever corrects the figure is told where the words that go with it live.
+    ⭐ THE LIST IS NO LONGER UNCOUNTED, and the sentence that stood here said it was. Until
+    [GQ-132] this docstring stated that removing one item from the five listed in
+    `docs/write-gate-contract.md` while leaving the word "five" standing kept every test green.
+    That was measured and true when it was written, and it is now false:
+    `tests/test_gate_lists.py` reads that list and compares it to `_start_conditions` below, the
+    same measurement this guard uses, so the two halves cannot disagree about how wide the gate is.
+    Proven the same way the claim was: cut a start condition and it reports
+    `the list has 4 items, safety.py:start-conditions measures 5`.
+
+    ⚠️ WHAT IS STILL THIS GUARD'S ALONE. The list guard reads a TABLE of registered enumerations,
+    not a sweep, so it sees a passage only once somebody anchors it; this guard sweeps every
+    tracked file and therefore covers a counted claim the day it lands. The two populations are
+    different on purpose and neither contains the other.
+
+    The failure message still names the list, so whoever corrects the figure is told where the
+    words that go with it live.
 
     RED-PROOF: add a sixth ``SafetyConfigError`` raise to ``SafetyLayer`` and every counted claim
     is reported against 'six'.

@@ -1222,14 +1222,20 @@ def _gate_size_of(module: str) -> Callable[[], int]:
 #:
 #: ⛔ HONEST SCOPE, and it has to be read before this family is taken for coverage of the gate
 #: sizes, because the thing it does NOT do is the thing that historically went wrong. It compares a
-#: NUMBER to the code. It never compares a LIST to the code. Measured on the delivered tree: delete
-#: one bullet from the shipped guide's six-item Olog list and leave the word "six" standing, and
-#: every test in this repository stays green. That is verbatim the defect ``CHANGELOG.md`` records,
-#: "the shipped operator guide listed four of the Olog gate's six checks", and this family would
-#: have reported the number as correct while it happened. The same hole covers the ``AND`` chain in
-#: ``server.py``'s three Olog docstrings, the sub-counts ("the first four are refused before any
-#: I/O"), and the ordinals ("the first and the fifth"), none of which name a size at all. Closing
-#: it needs a list-counting guard, which is a different mechanism and its own piece of work.
+#: NUMBER to the code. It never compares a LIST to the code. That is verbatim the defect
+#: ``CHANGELOG.md`` records, "the shipped operator guide listed four of the Olog gate's six
+#: checks", and this family would have reported the number as correct while it happened.
+#:
+#: ⭐ SINCE [GQ-132] THE LIST HALF IS SOMEBODY'S JOB: ``tests/test_gate_lists.py`` counts the
+#: enumerations of the write-gate estate and compares each to the same measurement this family
+#: borrows, so the guide's six bullets, the contract's five start conditions, the two gate
+#: docstrings and the ``AND``/``+``/comma chains in ``server.py`` are covered. ⚠️ This family is
+#: still a NUMBER guard and gains nothing from that: the two halves are separate tests over
+#: separately keyed populations, and a passage can be in one and not the other. What remains
+#: uncovered by BOTH is stated where it can be acted on rather than here: the sub-counts ("the
+#: first four are refused before any I/O") and the ordinals ("the first and the fifth"), which
+#: name no size at all, and every counted list outside the gate estate, which
+#: ``tests/test_gate_lists.py`` refuses on a measured false-alarm rate rather than on taste.
 #:
 #: ⚠️ Two further limits, both measured rather than feared. A sentence about the write-gate
 #: CONTRACT's six requirements landing in an Olog scope would be permanently green, because only
