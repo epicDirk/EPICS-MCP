@@ -455,8 +455,10 @@ RERUN_COVERAGE = (
 # What the audit CANNOT pin, said here rather than left to be noticed: the verdict "no sham guard
 # found" was reached by a human READING the candidate list, and only its SIZE is recorded. A list
 # of the same length with different members satisfies every pin below. Widening _EDGE_CLAIM,
-# which this file's own docstring invites, reddens EDGE_VOCABULARY but leaves the verdict, and
-# the coverage-dependent 20, to be re-judged by a person.
+# which this file's own docstring invites, reddens EDGE_VOCABULARY but leaves the verdict, and the
+# coverage-dependent ``PINNED_COVERAGE[SHAM_CANDIDATES]``, to be re-judged by a person. That figure
+# was spelled as a VALUE here until [GQ-132], and the value said 20 while the pin twenty lines up
+# said 21: naming the key instead cannot go stale, because the key is what moves with it.
 UNPINNED_VERDICT = "no sham guard found BY THIS FILTER: a judgement about a list, not a count"
 
 

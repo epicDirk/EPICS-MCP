@@ -339,8 +339,11 @@ def test_the_recorded_figures_match_the_prose_that_states_them() -> None:
     An audit is a measurement and a measurement rots; a WRITE-UP of a measurement rots faster,
     because nothing runs it. Each figure in ``_PROSE_FIGURES`` is re-derived from what produces it.
 
-    NOT everything in that docstring, and the difference is the honest part, stated in three tiers
-    because merging them is how this docstring came to claim coverage it did not have:
+    NOT everything in that docstring, and the difference is the honest part, stated in tiers
+    because merging them is how this docstring came to claim coverage it did not have. It said
+    "three tiers" above four of them from the commit that introduced it, so the figure was wrong at
+    birth rather than by drift; the count is gone rather than corrected, because nothing here reads
+    the list it summarised:
 
     * RE-MEASURED from the code: the population, the target count, the row count, the eight, the
       RAISE guards, the live modules, and each of their restatements, one row per wording.

@@ -446,8 +446,12 @@ a virtual environment, or `uv tool install`.
 
 ### It is running, and now what
 
-Everything above is bring-up. These five are about an instance that already started, which is a
-different set of questions and used to have no answers here at all.
+Everything above is bring-up. What follows is about an instance that already started, which is a
+different set of questions and used to have no answers here at all. It carried a count until
+[GQ-132], and the count was wrong: the section was created with four questions, the figure was
+pulled to five, and six stand here today. It is not repaired to six, it is gone, the same repair
+CONTRIBUTING.md records for the display-coupled module count, and for the same reason: a number
+beside a list nothing reads is how this sentence drifted twice in nine days.
 
 **It runs, and I think it is reading the wrong facility.** Two things decide that and they are not
 in the same place. The REST planes follow their `*_URL` variables; the live plane follows the EPICS
