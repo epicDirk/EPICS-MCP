@@ -457,8 +457,10 @@ RERUN_COVERAGE = (
 # of the same length with different members satisfies every pin below. Widening _EDGE_CLAIM,
 # which this file's own docstring invites, reddens EDGE_VOCABULARY but leaves the verdict, and the
 # coverage-dependent ``PINNED_COVERAGE[SHAM_CANDIDATES]``, to be re-judged by a person. That figure
-# was spelled as a VALUE here until [GQ-132], and the value said 20 while the pin twenty lines up
-# said 21: naming the key instead cannot go stale, because the key is what moves with it.
+# was spelled as a VALUE here until [GQ-132], and the value said 20 while the pin above said 21:
+# naming the key instead cannot go stale, because the key is what moves with it. ⚠️ The first
+# version of that repair wrote 'the pin twenty lines up', a fresh hand-typed figure inside a
+# sentence about hand-typed figures, and it was wrong by 38.
 UNPINNED_VERDICT = "no sham guard found BY THIS FILTER: a judgement about a list, not a count"
 
 

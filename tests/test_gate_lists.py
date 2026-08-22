@@ -34,11 +34,11 @@ reading the originals, and their accuracy is unverified. The decision does not r
 exact, only on the false-alarm share being large, which two examples settle on their own and
 neither can be tuned away. ``olog_safety.py`` numbers six checks
 ``0. 1. 2. 3. 3b. 4.``, where a counter reads four and the prose is right; and
-``operator_guide.md`` names two tools above a three-item list whose third item opens "A THIRD tool
-... keeps it off that list", where both halves are right. How many counted lists this leaves
-unguarded is deliberately NOT written here as a figure: this file would then carry exactly the kind
-of hand-typed count it exists to catch, and a figure whose own sentence joins the counted set
-cannot be written down at all. Re-derive it with the scripts recorded in
+``operator_guide.md`` names two tools above a three-item list whose third item opens "A THIRD
+tool ... only its defaults keep it off that list", where both halves are right. How many counted
+lists this leaves unguarded is deliberately NOT written here as a figure: this file would then
+carry exactly the kind of hand-typed count it exists to catch, and a figure whose own sentence
+joins the counted set cannot be written down at all. Re-derive it with the scripts recorded in
 ``analysis/gq132-listenzaehler-2026-08-21/`` in the workspace.
 """
 
@@ -119,30 +119,72 @@ def test_every_registered_gate_list_matches_its_gate() -> None:
 
 
 def test_every_gate_size_scope_has_a_list_row() -> None:
-    """Every passage the NUMBER guard watches for a gate size also has a LIST row here.
+    """Every PASSAGE the NUMBER guard watches for a gate size also has a LIST row here.
 
     Without this, the two halves drift apart in the one direction nothing else notices: a new
     gate-size sentence gets a number row, ships, and its enumeration is unwatched. That is exactly
     how ``_WATCHED`` grew a hole once, a file whose patterns matched perfectly and that nobody had
     listed.
 
-    The comparison is by FILE, not by scope, and the reason is that the two guards address a
-    passage differently on purpose: the number guard keys markdown by its nearest heading and
-    Python by qualname, while a list is anchored on the literal its first item starts with. Both
-    are stable, neither is convertible into the other, and demanding they match would be demanding
-    one of them change its keying for the other's convenience.
+    ⛔ THE COMPARISON IS BY (FILE, SCOPE), AND BY FILE ALONE IT WAS USELESS ON ITS FIRST RUN.
+    That is not hypothetical, the post-build review measured it: ``_GATE_SIZE_SCOPES`` carries
+    THREE ``operator_guide.md`` scopes and this table carried ONE row for that file, so a filename
+    comparison was satisfied by the row that already existed and reported nothing, while two
+    passages in the SHIPPED guide had no list row at all. One of them was a second enumeration of
+    the very Olog list ``CHANGELOG.md`` records losing items from. Both have a row now.
 
-    RED-PROOF: add a row to ``_GATE_SIZE_SCOPES`` naming a file with no list row, and this reports
-    that file.
+    The two keyings agree because both name a markdown section by its heading and a Python site by
+    its qualname; ``gate_lists`` derives the scope from the same reader the number guard uses, so
+    matching them is not a coincidence somebody has to maintain.
+
+    RED-PROOF: delete any row from ``gate_lists.SITES`` whose scope appears in
+    ``_GATE_SIZE_SCOPES`` and this reports that file and scope.
     """
-    watched = {path for path, _scope, _module in pc._GATE_SIZE_SCOPES}
-    listed = {Path(row.path).name for row in gl.SITES}
-    missing = sorted(name for name in watched if name not in listed)
+    watched = {(path, scope) for path, scope, _module in pc._GATE_SIZE_SCOPES}
+    listed = {(Path(site.path).name, site.scope) for site in gl.read_all()}
+    missing = sorted(f"{path} [{scope}]" for path, scope in watched - listed)
     assert not missing, (
-        "a file whose gate SIZE is watched has no gate LIST row:\n  "
+        "a passage whose gate SIZE is watched has no gate LIST row:\n  "
         + "\n  ".join(missing)
-        + "\n  A number without its enumeration is the half that shipped wrong once. Add a row to "
-        "tests/gate_lists.SITES, or one with source=None and the reason it cannot be counted."
+        + "\n  A number without its enumeration is the half that shipped wrong once. Add a row "
+        "to tests/gate_lists.SITES, or one with source=None and the reason it cannot be counted."
+    )
+
+
+def test_every_uncounted_row_still_has_the_length_it_claims() -> None:
+    """A row exempt from the GATE comparison is not exempt from being counted at all.
+
+    ``source=None`` says "no gate count is the right comparison here", never "this enumeration may
+    change silently". Both of today's uncounted rows describe a PAIR and say so in the prose
+    ("two of them", "its extra two are"), so the pair is what ``expect_items`` holds.
+
+    ⚠️ This test did not exist for one commit while the reader's docstring already promised
+    it, and the post-build review found the gap. The concrete hole it closes: widening
+    ``update_log_entry``'s parenthesis to three checks left the word "two" standing and nothing
+    compared anything.
+
+    RED-PROOF: change either ``expect_items`` and this reports that row.
+    """
+    findings = [
+        f"{site.where()}: the list has {len(site.items)} items, the row expects {row.expect_items}"
+        for row, site in zip(gl.SITES, gl.read_all(), strict=True)
+        if row.expect_items is not None and len(site.items) != row.expect_items
+    ]
+    assert not findings, (
+        "an uncounted gate-list row changed length:\n  "
+        + "\n  ".join(findings)
+        + "\n  It is exempt from the gate comparison, not from this one. If the enumeration "
+        "really grew, say so in the prose and move expect_items in the same change."
+    )
+
+
+def test_every_uncounted_row_declares_a_length() -> None:
+    """``source=None`` without ``expect_items`` would be an exemption from both checks at once."""
+    naked = [row.path for row in gl.SITES if row.source is None and row.expect_items is None]
+    assert not naked, (
+        "an uncounted row declares no expected length:\n  "
+        + "\n  ".join(naked)
+        + "\n  Set expect_items, so the row is still counted against something."
     )
 
 

@@ -12,14 +12,18 @@ happened. This module is the reading half of the missing check; the comparing ha
 WHAT IT IS NOT, first, because the obvious generalisation is the wrong one and was measured
 before it was rejected. It does NOT sweep the tree for lists. Over the tracked ``.py`` and
 ``.md`` files a sweep finds enumerations by the hundred, and a rule pairing each with the nearest
-number was measured on 321 hand-read sites: 92 correct fires against 42 false alarms, i.e. a
-precision under seventy percent, on a tree where every number is currently right. Two of those
-false alarms are worth naming because they are not fixable by tuning: ``olog_safety.py`` numbers
-six checks ``0. 1. 2. 3. 3b. 4.``, so a counter reads four where the prose says six and the prose
-is RIGHT; and ``operator_guide.md`` names two tools above a three-item list whose third item
-begins "A THIRD tool ... keeps it off that list", where again both halves are right. So the
-population here is a TABLE, ``SITES``, not a sweep. The measurement is written up in
-``analysis/gq132-listenzaehler-2026-08-21/`` in the workspace.
+number was classified over 321 hand-read sites: 92 correct fires against 42 false alarms, i.e. a
+precision under seventy percent. ⚠️ Those figures are a DERIVATION, not a measurement, and the
+qualifier belongs beside them: agents read the originals and their accuracy is unverified. Nor was
+that tree free of wrong numbers, and an earlier version of this sentence claimed it was: this
+package's own post-build review answered with two, and ``SITES`` names one of them 300 lines below.
+Two of the false alarms are worth naming because they are not fixable by tuning:
+``olog_safety.py`` numbers six checks ``0. 1. 2. 3. 3b. 4.``, so a counter reads four where the
+prose says six and the prose is RIGHT; and ``operator_guide.md`` names two tools above a
+three-item list whose third item begins "A THIRD tool ... only its defaults keep it off that
+list", where again both halves are right. So the population here is a TABLE, ``SITES``, not a
+sweep. The measurement is written up in ``analysis/gq132-listenzaehler-2026-08-21/`` in the
+workspace.
 
 THE ROWS ARE ANCHORED ON A LITERAL, and a missing anchor is a LOUD failure rather than a skipped
 row. An anchor stops matching exactly when the passage was restructured, which is when a human
@@ -27,8 +31,11 @@ should read it again; silently finding nothing would read identically to "this l
 which is the event the whole module exists to catch. Same policy
 ``test_write_gate_contract._start_conditions`` states for a raise it cannot attribute.
 
-THREE SHAPES, because the gate estate writes its lists three ways and a reader that knew only the
-first would cover a third of it:
+SHAPES, plural and deliberately uncounted: this module exists to catch a hand-typed figure beside
+a list, and the figure that stood here was one, and it was wrong, it said three while ``SITES``
+carried five shape values and four readers. ``len({row.shape for row in SITES})`` answers it. The
+gate estate writes its lists these ways, and a reader that knew only the first would cover a
+fraction of it:
 
 * **adjacent** - a run of sibling markers, each on its own line: the guide's six bullets, the
   contract's five numbered start conditions, the two gate docstrings. The marker accepts a LETTER
@@ -36,11 +43,14 @@ first would cover a third of it:
   because both are real spellings here and a reader that demanded ``1., 2., 3.`` would miscount
   the very list the CHANGELOG entry is about.
 * **ordinal sections** - markers of the form ``**N.`` separated by paragraphs of body text: the
-  contract's six requirements are more than a hundred lines apart end to end, with whole
-  paragraphs between neighbours. An adjacency rule cannot see this list at all. ⚠️ The two line
-  numbers that stood here were wrong within the hour, moved by an edit higher up the same file
-  that this ticket itself made, which is the argument for anchoring a row on a LITERAL rather
-  than on a position, one paragraph later.
+  contract's six requirements sit whole paragraphs apart, first head to last. An adjacency rule
+  cannot see this list at all. ⚠️ The two line numbers that stood here were wrong within the hour,
+  moved by an edit higher up the same file that this ticket itself made, and the SPAN that
+  replaced them was a second hand-typed figure with the same fault. Both are gone, which is the
+  argument for anchoring a row on a LITERAL rather than on a position, one paragraph later.
+* **marker chain** - an enumeration inside one sentence whose items carry ``(1)``, ``(2)`` markers
+  rather than a separator. It has its own reader for a measured reason, see
+  :func:`numbered_chain`.
 * **chain** - the enumeration inside one sentence, which is the MAJORITY shape in ``server.py``:
   "SIX checks in fixed order: A AND B AND ... AND F", "six checks (a + b + c + d + e + f)",
   "three gate checks (env gate, regex allowlist, rate-limit)". Read from the RUNTIME string, not
@@ -49,12 +59,14 @@ first would cover a third of it:
   the middle of "a test-server URL boundary". The runtime value is also what a model receives,
   so it is the honest subject.
 
-A SUBSET IS NOT A LIST, and one row exists to say so. ``update_log_entry`` says "all six checks
+A SUBSET IS NOT A LIST, and two rows exist to say so. ``update_log_entry`` says "all six checks
 (two of them, the env gate and the test-server URL boundary, checked BEFORE the round-trip read)":
 the parenthesis enumerates a deliberate subset and is marked as one in the prose. Counting it
-against the gate would report a true sentence as wrong. Such rows carry ``source=None`` and a
-reason, they are still anchored, and ``test_gate_lists`` asserts they still match, so a subset
-cannot quietly become the whole list or disappear.
+against the gate would report a true sentence as wrong. Such rows carry ``source=None``, a reason,
+and an ``expect_items`` of their own, so ``test_gate_lists`` holds both their anchor AND their
+length: a subset that grew into the whole list goes red instead of passing unexamined. ⚠️ That
+second half was missing for one commit, and this paragraph promised it anyway; the post-build
+review measured the gap.
 """
 
 from __future__ import annotations
@@ -174,8 +186,16 @@ def chain_items(text: str, anchor: str, terminator: str, separator: str) -> tupl
     *anchor* ends immediately before the first part and *terminator* begins immediately after the
     last one; both are literals and both must be present, so a rewording fails loudly instead of
     silently returning a shorter chain. The separator is a literal too rather than a pattern: the
-    three chains here use " AND ", " + " and ", ", and a pattern loose enough to cover all three
-    would also split the commas INSIDE a part.
+    chains here are separated as differently as " AND ", " + ", ", ", " **and** " and ", and ",
+    and a pattern loose enough to cover them all would also split the commas INSIDE a part.
+
+    ⛔ A LITERAL SEPARATOR HAS THE SAME BLINDNESS ONE LAYER DOWN, and this is the honest limit of
+    the shape. A row whose separator is ", " counts a comma INSIDE an item as a boundary, so an
+    edit that both drops a check and adds a comma to a surviving item holds the length and passes.
+    Named rather than closed: closing it means registering a fragment per item and comparing
+    membership, which is a bigger contract than counting and is not what this ticket bought.
+    :func:`numbered_chain` is the shape where the problem does not arise, and the two ", " rows in
+    ``SITES`` say at their own site that they carry it.
     """
     flat = " ".join(text.split())
     begin = flat.find(anchor)
@@ -278,6 +298,11 @@ class _Row:
     #: Reading only the first part would report six as four, i.e. exactly the CHANGELOG defect,
     #: with the accusation pointing at the correct half.
     parts: tuple[tuple[str, str, str], ...] = ()
+    #: For a ``source=None`` row: how many items its enumeration must still have. An uncounted
+    #: row is exempt from the GATE comparison, never from being counted at all. Without this the
+    #: subset row could grow into the whole list and pass, which the module docstring promised it
+    #: could not, one commit before it was true.
+    expect_items: int | None = None
     #: True for the ONE row that DEFINES a count no code holds. The write-gate contract's six
     #: requirements are a specification, so nothing derives them; the spec's own ordinal run is
     #: the definition, and the other contract-point sites are compared to it. Deleting a
@@ -302,6 +327,22 @@ SITES: tuple[_Row, ...] = (
         reason="the shipped guide's Olog list, the one CHANGELOG.md records losing two items",
         scope="Olog write posture (all four write tools)",
         anchor="- **Non-empty target logbooks.**",
+    ),
+    _Row(
+        path="src/epics_mcp/operator_guide.md",
+        shape="chain",
+        source="safety.py",
+        reason="the guide's posture section, the PV gate's three checks as a comma chain",
+        parts=(("passes **three** gate checks (", ") and needs an audit log", ", "),),
+    ),
+    _Row(
+        path="src/epics_mcp/operator_guide.md",
+        shape="chain",
+        source="olog_safety.py",
+        reason="the guide's error-signature section, the Olog gate's six checks as a comma chain",
+        parts=(
+            ("One code for all six checks of that gate (", "), because they are one gate", ", "),
+        ),
     ),
     _Row(
         path="src/epics_mcp/olog_safety.py",
@@ -361,14 +402,21 @@ SITES: tuple[_Row, ...] = (
         path="src/epics_mcp/server.py",
         shape="chain",
         source="safety.py",
-        reason="the consent-hint comment beside set_pv_value's annotations",
+        reason=(
+            "the consent-hint comment beside set_pv_value's annotations. ⚠️ Separator ', ': a "
+            "comma added INSIDE one item while another is dropped holds the length, see "
+            "chain_items"
+        ),
         parts=(("three gate checks (", ") plus the mandatory audit", ", "),),
     ),
     _Row(
         path="src/epics_mcp/server.py",
         shape="instructions",
         source="olog_safety.py",
-        reason="the server instructions, the chain a model reads before it picks a tool",
+        reason=(
+            "the server instructions, the chain a model reads before it picks a tool. ⚠️ Separator "
+            "', ', same blindness as the row above, see chain_items"
+        ),
         scope="build_instructions",
         parts=(("behind its OWN gate (", "; the author is", ", "),),
     ),
@@ -389,9 +437,11 @@ SITES: tuple[_Row, ...] = (
         reason=(
             "update_log_entry names six and enumerates a SUBSET of two, and says so: 'two of "
             "them, ... checked BEFORE the round-trip read'. Counting it would report a true "
-            "sentence as wrong. Registered so the subset cannot silently become the whole list."
+            "sentence as wrong. Its LENGTH is still held, by ``expect_items``, so the subset "
+            "cannot grow into the whole list unexamined."
         ),
         parts=(("all six checks (two of them, ", ", checked BEFORE", " and "),),
+        expect_items=2,
     ),
     _Row(
         path="SECURITY.md",
@@ -401,9 +451,11 @@ SITES: tuple[_Row, ...] = (
             "'its extra two are ...' names an ARITHMETIC DIFFERENCE between the two gates, not a "
             "gate's size, so no gate count is the right comparison. Its own figure is under "
             "review: the gates differ by three, and the URL boundary is the unnamed one. Left "
-            "for an author to decide, recorded rather than repaired here."
+            "for an author to decide, recorded rather than repaired here. ``expect_items`` holds "
+            "what the sentence SAYS, two, so a silent third would still go red."
         ),
         parts=(("its extra two are ", ")", " and "),),
+        expect_items=2,
     ),
 )
 

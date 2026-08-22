@@ -448,10 +448,11 @@ a virtual environment, or `uv tool install`.
 
 Everything above is bring-up. What follows is about an instance that already started, which is a
 different set of questions and used to have no answers here at all. It carried a count until
-[GQ-132], and the count was wrong: the section was created with four questions, the figure was
-pulled to five, and six stand here today. It is not repaired to six, it is gone, the same repair
+[GQ-132], and the count was wrong. Measured: the section was born with four questions and said
+four, grew to five and said five, then grew to six the same day and the figure stayed at five,
+where it sat for nine days. It is not repaired to six, it is gone, the same repair
 CONTRIBUTING.md records for the display-coupled module count, and for the same reason: a number
-beside a list nothing reads is how this sentence drifted twice in nine days.
+beside a list nothing reads survives exactly as long as nobody edits the list.
 
 **It runs, and I think it is reading the wrong facility.** Two things decide that and they are not
 in the same place. The REST planes follow their `*_URL` variables; the live plane follows the EPICS

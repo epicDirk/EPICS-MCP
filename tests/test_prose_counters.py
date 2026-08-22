@@ -1227,9 +1227,13 @@ def _gate_size_of(module: str) -> Callable[[], int]:
 #: checks", and this family would have reported the number as correct while it happened.
 #:
 #: ⭐ SINCE [GQ-132] THE LIST HALF IS SOMEBODY'S JOB: ``tests/test_gate_lists.py`` counts the
-#: enumerations of the write-gate estate and compares each to the same measurement this family
-#: borrows, so the guide's six bullets, the contract's five start conditions, the two gate
-#: docstrings and the ``AND``/``+``/comma chains in ``server.py`` are covered. ⚠️ This family is
+#: enumerations of the write-gate estate and compares each to the measurement that OWNS it,
+#: this family's ``_gate_check_count`` among them, so the guide's Olog bullets, the two gate
+#: docstrings and the ``AND``/``+``/comma chains in ``server.py`` are covered. ⚠️ Not every
+#: row borrows from HERE: the refuse-to-start conditions of the contract page go to
+#: ``test_write_gate_contract._start_conditions``, which this family never uses, and
+#: ``update_log_entry``'s parenthesis is registered as a deliberate SUBSET and compared to no
+#: gate at all. ⚠️ This family is
 #: still a NUMBER guard and gains nothing from that: the two halves are separate tests over
 #: separately keyed populations, and a passage can be in one and not the other. What remains
 #: uncovered by BOTH is stated where it can be acted on rather than here: the sub-counts ("the

@@ -1472,7 +1472,7 @@ def test_every_start_condition_count_matches_the_gate() -> None:
     [GQ-132] this docstring stated that removing one item from the five listed in
     `docs/write-gate-contract.md` while leaving the word "five" standing kept every test green.
     That was measured and true when it was written, and it is now false:
-    `tests/test_gate_lists.py` reads that list and compares it to `_start_conditions` below, the
+    `tests/test_gate_lists.py` reads that list and compares it to `_start_conditions` above, the
     same measurement this guard uses, so the two halves cannot disagree about how wide the gate is.
     Proven the same way the claim was: cut a start condition and it reports
     `the list has 4 items, safety.py:start-conditions measures 5`.
@@ -1504,6 +1504,7 @@ def test_every_start_condition_count_matches_the_gate() -> None:
         + "\n  ".join(findings)
         + "\n  The plural phrase names the TOTAL; write a subset as 'N of the <total> start "
         "conditions'. And the figure is only half of it: the five are LISTED in "
-        "docs/write-gate-contract.md, and nothing checks that list against the code, so correct "
-        "the words there in the same change."
+        "docs/write-gate-contract.md, where tests/test_gate_lists.py counts them against this "
+        "same measurement, so correct the words there in the same change or that guard goes "
+        "red next."
     )

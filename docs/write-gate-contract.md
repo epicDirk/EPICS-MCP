@@ -57,10 +57,14 @@ list rather than a number.
 ⚠️ **And say it in ONE spelling.** The PLURAL `<word> start conditions` always names the TOTAL; a
 subset is written "N of the five start conditions"; the SINGULAR says which one. `test_write_gate_contract.py`
 compares every counted plural claim in the tracked tree to the code. ⭐ **And since [GQ-132] the LIST
-is compared too**, by `test_gate_lists.py`, against that same measurement: remove an item from the
-five above and leave the figure standing, and it reports `the list has 4 items`. That sentence used
-to say the opposite, and it was true when it was written. The same guard counts the six requirements
-below, the shipped guide's six Olog checks, both gate docstrings and the chains in `server.py`.
+is compared too**, by `test_gate_lists.py`, against that same measurement: remove one of the last
+four above and leave the figure standing, and it reports `the list has 4 items`. Remove the FIRST
+and its anchor goes with it, which a second check reports instead. That sentence used to say the
+opposite, and it was true when it was written. The same guard counts the shipped guide's Olog
+checks in both places they are listed, both gate docstrings and the chains in `server.py`. The six
+requirements below are held INDIRECTLY: their own run defines the count, and the restatement in
+`test_write_gate_contract.py` is what goes red when the run gets shorter.
+
 ⚠️ It reads a registered TABLE of enumerations rather than sweeping for lists, so a NEW list here is
 covered the day somebody anchors it, not the day it lands. That is the opposite trade from the
 figure sweep beside it, and it is deliberate: a repository-wide list counter was measured for
