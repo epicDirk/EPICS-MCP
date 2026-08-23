@@ -7,92 +7,32 @@ carry breaking changes).
 
 ## [Unreleased]
 
-### Added
-
-- **A Data Browser trend no longer counts as an operator screen in `coverage_audit`, and `crossplane_check` no longer promises it never did.** A `.plt` trend opened by a button is an operator-facing top level, so a PV that appears on no `.bob` at all used to come back with `has_display: yes` and drop out of `cf_only`, the blind-spot count that tool exists to produce. `has_display` now answers about screens alone, the new `on_trend` answers beside it, and such a PV is named in the new `trend_only` (reported with or without a registry) and, when registered, in `cf_only` and the new `cf_trend_only`. ⚠️ `cf_only` therefore GREW, and that is the repair: measured, 25 PVs of one 87 388-channel dataset sit on a trend and on no screen, and every one of them used to count as visible. `critical_uncovered` grows with it only where the walk was NOT cut short by a cap; a capped walk withholds `has_display` rather than proving a gap, as it always did. `display_only` is unchanged and still measured against every operator-facing file. Each coverage row gains `screens`/`trends` beside `displays`, and `crossplane_check` gains `screens_linked`/`trends_linked` beside `displays_linked`, whose contents and name are unchanged. `tools/list` grows 760 chars on the full lane and none on the core one.
-
-- **A write answer and an archived sample now say what their fields mean, and one of them says
-  which epoch it is in.** Both rode on the wire with nothing explaining them. For a write, the
-  costly confusion is that `status` stays `"success"` on a readback mismatch (it describes the PUT,
-  which really did happen) and `new_value` is the value that was SENT, so the two together can read
-  as "it landed" when it did not; the measured pair is `readback` with `verified`, and `note`
-  carries the reason. Nothing about that behaviour changed, only its delivery. For an archived
-  sample, `secs` is UNIX epoch seconds and NOT EPICS epoch seconds: read the other way, every point
-  in a plot shifts by exactly 20 years and still looks plausible. The answer-field index grows from
-  16 rows to 20, routing 66 field names in total. ⚠️ `tolerance` is now documented as NOT
-  sufficient to re-derive the verdict: on the epsilon fallback the same value also feeds a relative
-  axis that is not reported, so a large value can match while differing by far more than
-  `tolerance`. `tools/list` grows 642 chars on both lanes (two description edits, each measured on
-  its own); the guide grows about 3.6 KB and none of that reaches the wire.
-
-- **The guide now explains the words an answer uses, and a new `answer-fields` topic maps a field
-  name to the topic that explains it.** A caller meets a field name in a RESULT, not in a question,
-  and this surface has no free-text search, so a name such as `cf_capped`, `config_msg`,
-  `default_level`, `next_steps` or `archive_fields` was unreachable: it rode on the wire and nothing
-  said what it meant. That change explained fifteen such fields where their subject already lives
-  and had the new index route to them (the entry below has since added more). The cross-plane report vocabulary moved into its own signature group
-  `err-crossplane` (buckets, the `_write` twins, the withheld ChannelFinder and `.db` verdicts, the
-  coverage cells), so reading one bucket no longer costs the whole display-inventory section.
-  `tools/list` grows 165 chars on both lanes; the guide itself grows about 12 KB and none of that
-  reaches the wire, since it is served on request.
-
-- **Every read answer now carries a `reach` field: which plane served it and how far that plane
-  reaches.** Values are `loopback-only` (provably confined to this machine), `beyond-loopback` (it
-  can leave this machine) or `not-configured` (no request was made). `probed: false` rides along
-  and means what it says: this is the configuration, read with no network call, so a reachable
-  plane may still be down. The field names no host and no port, so the two planes whose URL is
-  deliberately withheld (naming, olog) disclose nothing new. Until now the reach was only
-  obtainable from `epics-doctor`, a console script an MCP client cannot run, or from the
-  `epics-pv://health` resource, which an application must fetch on the client's behalf: an answer
-  could be given without anything having established which world it came from. `discover_pvs`
-  reports per branch, since a concrete name is a live PV read and a wildcard is a ChannelFinder
-  query. `tools/list` grows 5 427 chars on both lanes.
-
-- **An empty read answer now says WHY it is empty.** The `note` pattern here fired on one
-  cause only, a plane with no URL, at every site that used it. So a plane that was never
-  asked and a plane that was asked and matched nothing arrived identically, as an empty
-  list: a misconfiguration was indistinguishable from a real zero. A configured plane that
-  matched nothing now says so, and names its reach, because a zero from a plane confined to
-  this machine and a zero from one that reaches a facility mean different things. A tool
-  that already knows a more specific cause keeps its own note; the general sentence never
-  replaces one. Covers `find_channels`, `search_logbook`, `list_logbooks`, `list_tags`,
-  `list_log_attachments`, `get_alarm_history`, `list_archived_pvs` and `get_pv_history`.
-
-- **`get_guide`: the operator guide is now a TOOL, not only the `epics-pv://guide` resource.** A
-  resource is application-controlled, so a model never fetches one by itself, which left the guide
-  correct and unread. The resource stays; the tool is the channel a model pulls from, and the
-  server header now points at it. `topic` serves one named part of the guide verbatim instead of
-  the whole document. The keys PARTITION it, so a section key (`posture`, `planes`, `tools`,
-  `recipes`, `errors`) serves that section's own text and the subsections under it are keys of
-  their own: `tools` is the drift-guarded tool inventory at 1 521 B, not the 27 KB palette that
-  opens with it. All keys are listed in the argument description and in every refusal. An unknown
-  topic is refused by name, never guessed and never quietly answered with everything. The tool contacts no PV, no REST plane and no file of yours, so it is safe as the
-  first call of a session. New error codes on the wire: `UNKNOWN_TOPIC` for a bad key,
-  `GUIDE_DRIFT` if the shipped document and the topic table disagree.
-
-- **The operator guide explains every error code this server names.** Eight codes could reach a
-  caller with no entry in the guide's "Error signatures" section, five of them absent from the
-  guide entirely: `PV_WRITE_DENIED`, `PV_WRITE_OUT_OF_BOUNDS`, `OLOG_WRITE_DENIED`,
-  `RATE_LIMIT_EXCEEDED`, `READ_RATE_LIMIT_EXCEEDED`, `SAFETY_CONFIG_INVALID`, `UNKNOWN_TOPIC` and
-  `GUIDE_DRIFT`. They are grouped by the distinction a caller has to make rather than listed: a
-  write refused by the gate against a value refused by the record's own drive limits (only the
-  second has already spent a rate token), and an audited write-gate rate limit against the
-  unaudited read throttle, which can fire on the reads a write tool performs before its gate is
-  consulted. Nothing changed on the wire; what changed is that the codes are explained where the
-  server sends you to look.
+## [0.7.0] - 2026-08-24
 
 ### Changed
 
 - **BREAKING: the three MCP resources moved from `epics-pv://` to `epics://`.**
   `epics-pv://health`, `epics-pv://config` and `epics-pv://guide` are now `epics://health`,
-  `epics://config` and `epics://guide`. The old URIs are no longer served and there is no alias
-  period. A client that DISCOVERS resources through `resources/list` picks the new ones up and
-  needs no change; only a client with a URI written into it breaks, and it breaks loudly with an
-  unknown resource rather than answering something stale. Pre-1.0 minor versions may carry
-  breaking changes, as the head of this file says. The `get_guide` TOOL, the channel a model
-  reads the cookbook through, is untouched, and none of the three payloads changed. Released
-  entries below keep writing `epics-pv://`: they record what those versions actually served,
-  and rewriting them would be the drift, not the fix.
+  `epics://config` and `epics://guide`. **Are you affected?** Search your client config, your
+  scripts and your prompts for `epics-pv://`. No hit: nothing to do, because a client that
+  discovers resources through `resources/list` picks the new names up by itself. A hit: change
+  the scheme there. There is no alias period, and an old URI fails loudly rather than answering
+  something stale. The rename itself changed no payload, but two of the three changed elsewhere
+  in this release: `epics://health` now reports `server` as `epics-pv` instead of `epics-mcp`,
+  and the guide grew. `epics://config` is unchanged. Released entries below keep writing
+  `epics-pv://`: they record what those versions actually served.
+
+- **BREAKING, but only if you set `EPICS_MCP_READ_RATE_LIMIT`: `epics-doctor` now exits `3`
+  where it exited `0`.** The limit is off by default, and a run that is denied nothing is
+  unchanged in every field. **Are you affected?** Check whether that variable is set, above `0`,
+  in the environment your `epics-doctor` job runs in. That is the whole condition, and no 0.6.0
+  output warns you in advance. Until now a run whose own reads that limit refused could still
+  exit `0`; it cannot any more, because a refused read means part of the run was never measured.
+  After upgrading, the new `»` lines name each plane whose probe the throttle refused.
+  **What to do:** if a CI job asserts exit `0` and goes red, raise the limit, or set it to `0` to
+  switch the throttle off, rather than lowering the assertion. The red is the finding: the `0` it
+  replaces was printed for a run that had not looked. Exit codes are `0` clean, `1` failed, `2`
+  usage, `3` inconclusive; `3` is not new, it already covered a failed identity probe in 0.6.0.
 
 - **`find_device` no longer calls a Data Browser trend an operator screen.** A `.plt` opened by a
   button is operator-facing, so the reverse-lookup returns it, and until now it arrived
@@ -107,16 +47,6 @@ carry breaking changes).
   what its members now say themselves. The three cap `notes` follow: they qualified "a screen" and
   "the screen list" where a trend can be affected too, and now say "a screen or trend" and "the
   match list". `tools/list` grows 304 chars on the display-gated lane and none on the core one.
-
-- **A deployment whose configuration did not change can now exit `3` where it exited `0`.**
-  `epics-doctor` sells itself as a scriptable pass/fail, so this is the half of the entry below
-  that reaches a CI job rather than a reader. Until now a run whose own reads
-  `EPICS_MCP_READ_RATE_LIMIT` refused could still exit `0`; it cannot any more, because a refused
-  read means part of the run was never measured. **Only deployments that SET that limit are
-  affected: it is off by default, and a run that is denied nothing is unchanged in every field.**
-  A job that asserts exit `0` under a tight limit goes red until the limit is raised, and that red
-  is the finding rather than the regression: the `0` it replaces was printed for a run that had not
-  looked.
 
 - **`epics-doctor` no longer blames your services for a limit you set on it.** With
   `EPICS_MCP_READ_RATE_LIMIT` set tight enough to refuse the doctor's own reads, the report said
@@ -225,11 +155,9 @@ carry breaking changes).
   terminal, and all of it is in [the deployment guide](docs/deployment.md) section 1, in
   [docs/tools.md](docs/tools.md), or beside the code it describes. Nothing was dropped without a
   home: what the guide keeps is the half no tool description carries, the plane beacons, the
-  archiver ingest question, and what "reachable but not identified" means. `epics-pv://guide` and
+  archiver ingest question, and what "reachable but not identified" means. `epics://guide` and
   `get_guide` therefore serve 79 535 B where they served 87 415 B before, and the recipes section
   in particular went from 29 194 B to 21 411 B.
-
-### Changed
 
 - **`coverage_audit`'s cap warning reports a SHARE, not just a count.** The header said "N
   display(s) hit the per-display context cap" and left the only question that matters
@@ -255,6 +183,102 @@ carry breaking changes).
   displays are no longer pushed out of the entry-point list by guessed edges; and the engine now
   exports the file universe a capped run walked, which is the honest denominator the
   `coverage_audit` header needs.
+
+- **An unreadable `EPICS_MCP_CA_BUNDLE` is now reported as `ca_error` naming that variable,
+  instead of as `unreachable` on every https plane at once.** `requests` refuses such a bundle with
+  a bare `OSError` before any handshake, which carries no status and no chained SSL error, so the
+  classifier had nothing to recognise it by and fell through to the transport verdict. An operator
+  was then told to check the host and port of six services that were fine. The verdict names the
+  variable and deliberately NOT the bundle path, because such a path routinely carries an account
+  name; read the value back from the environment of the process that reported it. This also
+  restores a diagnosis that the credential redaction had been suppressing: the original message
+  put the path in its text, and a path containing an `@` is withheld whole by the output barrier.
+
+- **Releasing now takes an approval, and the tag is no longer the point of no return.** Two
+  repository settings arrived in front of the upload: only an administrator can create a `v*` tag,
+  and the `publish` job waits for an approval on the `pypi` environment, whose deployment policy
+  admits tag refs matching `v*` only. Nothing about the published artifact changes; what changes is
+  the procedure in `CONTRIBUTING.md`, so anyone cutting a release from a checkout of this repository
+  needs to know that a pushed tag now stops and waits. `SECURITY.md` states the posture, including
+  the two things it is not: self-approval is permitted, and administrators may bypass it.
+
+- The CI and release workflows check out with `actions/checkout@v7` (was `@v5`), which blocks
+  checking out fork pull request code under `pull_request_target` and `workflow_run`. Neither
+  trigger is used here, so this is hardening with no behaviour change.
+
+### Added
+
+- **A Data Browser trend no longer counts as an operator screen in `coverage_audit`, and `crossplane_check` no longer promises it never did.** A `.plt` trend opened by a button is an operator-facing top level, so a PV that appears on no `.bob` at all used to come back with `has_display: yes` and drop out of `cf_only`, the blind-spot count that tool exists to produce. `has_display` now answers about screens alone, the new `on_trend` answers beside it, and such a PV is named in the new `trend_only` (reported with or without a registry) and, when registered, in `cf_only` and the new `cf_trend_only`. ⚠️ `cf_only` therefore GREW, and that is the repair: measured, 25 PVs of one 87 388-channel dataset sit on a trend and on no screen, and every one of them used to count as visible. `critical_uncovered` grows with it only where the walk was NOT cut short by a cap; a capped walk withholds `has_display` rather than proving a gap, as it always did. `display_only` is unchanged and still measured against every operator-facing file. Each coverage row gains `screens`/`trends` beside `displays`, and `crossplane_check` gains `screens_linked`/`trends_linked` beside `displays_linked`, whose contents and name are unchanged. `tools/list` grows 760 chars on the full lane and none on the core one.
+
+- **A write answer and an archived sample now say what their fields mean, and one of them says
+  which epoch it is in.** Both rode on the wire with nothing explaining them. For a write, the
+  costly confusion is that `status` stays `"success"` on a readback mismatch (it describes the PUT,
+  which really did happen) and `new_value` is the value that was SENT, so the two together can read
+  as "it landed" when it did not; the measured pair is `readback` with `verified`, and `note`
+  carries the reason. Nothing about that behaviour changed, only its delivery. For an archived
+  sample, `secs` is UNIX epoch seconds and NOT EPICS epoch seconds: read the other way, every point
+  in a plot shifts by exactly 20 years and still looks plausible. The answer-field index grows from
+  16 rows to 20, routing 66 field names in total. ⚠️ `tolerance` is now documented as NOT
+  sufficient to re-derive the verdict: on the epsilon fallback the same value also feeds a relative
+  axis that is not reported, so a large value can match while differing by far more than
+  `tolerance`. `tools/list` grows 642 chars on both lanes (two description edits, each measured on
+  its own); the guide grows about 3.6 KB and none of that reaches the wire.
+
+- **The guide now explains the words an answer uses, and a new `answer-fields` topic maps a field
+  name to the topic that explains it.** A caller meets a field name in a RESULT, not in a question,
+  and this surface has no free-text search, so a name such as `cf_capped`, `config_msg`,
+  `default_level`, `next_steps` or `archive_fields` was unreachable: it rode on the wire and nothing
+  said what it meant. That change explained fifteen such fields where their subject already lives
+  and had the new index route to them (the entry below has since added more). The cross-plane report vocabulary moved into its own signature group
+  `err-crossplane` (buckets, the `_write` twins, the withheld ChannelFinder and `.db` verdicts, the
+  coverage cells), so reading one bucket no longer costs the whole display-inventory section.
+  `tools/list` grows 165 chars on both lanes; the guide itself grows about 12 KB and none of that
+  reaches the wire, since it is served on request.
+
+- **Every read answer now carries a `reach` field: which plane served it and how far that plane
+  reaches.** Values are `loopback-only` (provably confined to this machine), `beyond-loopback` (it
+  can leave this machine) or `not-configured` (no request was made). `probed: false` rides along
+  and means what it says: this is the configuration, read with no network call, so a reachable
+  plane may still be down. The field names no host and no port, so the two planes whose URL is
+  deliberately withheld (naming, olog) disclose nothing new. Until now the reach was only
+  obtainable from `epics-doctor`, a console script an MCP client cannot run, or from the
+  `epics-pv://health` resource, which an application must fetch on the client's behalf: an answer
+  could be given without anything having established which world it came from. `discover_pvs`
+  reports per branch, since a concrete name is a live PV read and a wildcard is a ChannelFinder
+  query. `tools/list` grows 5 427 chars on both lanes.
+
+- **An empty read answer now says WHY it is empty.** The `note` pattern here fired on one
+  cause only, a plane with no URL, at every site that used it. So a plane that was never
+  asked and a plane that was asked and matched nothing arrived identically, as an empty
+  list: a misconfiguration was indistinguishable from a real zero. A configured plane that
+  matched nothing now says so, and names its reach, because a zero from a plane confined to
+  this machine and a zero from one that reaches a facility mean different things. A tool
+  that already knows a more specific cause keeps its own note; the general sentence never
+  replaces one. Covers `find_channels`, `search_logbook`, `list_logbooks`, `list_tags`,
+  `list_log_attachments`, `get_alarm_history`, `list_archived_pvs` and `get_pv_history`.
+
+- **`get_guide`: the operator guide is now a TOOL, not only the `epics://guide` resource.** A
+  resource is application-controlled, so a model never fetches one by itself, which left the guide
+  correct and unread. The resource stays; the tool is the channel a model pulls from, and the
+  server header now points at it. `topic` serves one named part of the guide verbatim instead of
+  the whole document. The keys PARTITION it, so a section key (`posture`, `planes`, `tools`,
+  `recipes`, `errors`) serves that section's own text and the subsections under it are keys of
+  their own: `tools` is the drift-guarded tool inventory at 1 521 B, not the 27 KB palette that
+  opens with it. All keys are listed in the argument description and in every refusal. An unknown
+  topic is refused by name, never guessed and never quietly answered with everything. The tool contacts no PV, no REST plane and no file of yours, so it is safe as the
+  first call of a session. New error codes on the wire: `UNKNOWN_TOPIC` for a bad key,
+  `GUIDE_DRIFT` if the shipped document and the topic table disagree.
+
+- **The operator guide explains every error code this server names.** Eight codes could reach a
+  caller with no entry in the guide's "Error signatures" section, five of them absent from the
+  guide entirely: `PV_WRITE_DENIED`, `PV_WRITE_OUT_OF_BOUNDS`, `OLOG_WRITE_DENIED`,
+  `RATE_LIMIT_EXCEEDED`, `READ_RATE_LIMIT_EXCEEDED`, `SAFETY_CONFIG_INVALID`, `UNKNOWN_TOPIC` and
+  `GUIDE_DRIFT`. They are grouped by the distinction a caller has to make rather than listed: a
+  write refused by the gate against a value refused by the record's own drive limits (only the
+  second has already spent a rate token), and an audited write-gate rate limit against the
+  unaudited read throttle, which can fire on the reads a write tool performs before its gate is
+  consulted. Nothing changed on the wire; what changed is that the codes are explained where the
+  server sends you to look.
 
 ### Fixed
 
@@ -333,31 +357,8 @@ carry breaking changes).
   exposure on that route which measurement does not support, and they now say what was measured.
   The cause texts go through the same barrier as every other client-facing message: a proven-clean
   text is passed verbatim, a text carrying an `@` is withheld rather than rewritten. That withheld
-  form is a shape you can meet in ordinary use, so `epics-pv://guide` says what to do about it.
+  form is a shape you can meet in ordinary use, so `epics://guide` says what to do about it.
   The one real credential leak on this command was elsewhere and is listed above.
-
-### Changed
-
-- **An unreadable `EPICS_MCP_CA_BUNDLE` is now reported as `ca_error` naming that variable,
-  instead of as `unreachable` on every https plane at once.** `requests` refuses such a bundle with
-  a bare `OSError` before any handshake, which carries no status and no chained SSL error, so the
-  classifier had nothing to recognise it by and fell through to the transport verdict. An operator
-  was then told to check the host and port of six services that were fine. The verdict names the
-  variable and deliberately NOT the bundle path, because such a path routinely carries an account
-  name; read the value back from the environment of the process that reported it. This also
-  restores a diagnosis that the credential redaction had been suppressing: the original message
-  put the path in its text, and a path containing an `@` is withheld whole by the output barrier.
-
-- **Releasing now takes an approval, and the tag is no longer the point of no return.** Two
-  repository settings arrived in front of the upload: only an administrator can create a `v*` tag,
-  and the `publish` job waits for an approval on the `pypi` environment, whose deployment policy
-  admits tag refs matching `v*` only. Nothing about the published artifact changes; what changes is
-  the procedure in `CONTRIBUTING.md`, so anyone cutting a release from a checkout of this repository
-  needs to know that a pushed tag now stops and waits. `SECURITY.md` states the posture, including
-  the two things it is not: self-approval is permitted, and administrators may bypass it.
-- The CI and release workflows check out with `actions/checkout@v7` (was `@v5`), which blocks
-  checking out fork pull request code under `pull_request_target` and `workflow_run`. Neither
-  trigger is used here, so this is hardening with no behaviour change.
 
 ## [0.6.0] - 2026-08-14
 
