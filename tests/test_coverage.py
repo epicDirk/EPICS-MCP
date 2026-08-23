@@ -541,3 +541,29 @@ def test_a_file_of_an_unknown_kind_is_named_rather_than_counted_as_a_screen() ->
     )
     # And it is not a trend either: trend_only is built positively, so it stays out of both.
     assert report.trend_only == ()
+
+
+def test_the_field_suffix_merge_unions_the_kinds_and_not_just_the_files() -> None:
+    """The merge branch, crossing the kinds: ``X:A`` on a screen and ``X:A.EGU`` on a trend.
+
+    Field-suffix normalization collapses the two rows into one record, and until the kinds were
+    carried separately there was nothing here that could go wrong. Now there is: merging only
+    ``displays`` and letting the projections keep the first-seen row would make this PV read as
+    trend-only when the trend row happens to arrive first, which is a blind spot invented by an
+    ordering. Asserted in BOTH orders for that reason, the way ``audit_coverage``'s other
+    order-independence guard is.
+    """
+    screen_row = _row("X:A", displays=("s.bob",))
+    trend_row = _row("X:A.EGU", displays=("t.plt",), trends=("t.plt",))
+    for rows, order in (
+        ([screen_row, trend_row], "screen first"),
+        ([trend_row, screen_row], "trend first"),
+    ):
+        report = audit_coverage(rows, scope="X:")
+        merged = report.rows[0]
+        assert merged.pv == "X:A", order
+        assert merged.has_display == "yes", f"{order}: it IS on a screen"
+        assert merged.on_trend == "yes", f"{order}: and it IS on a trend"
+        assert merged.screens == ("s.bob",), order
+        assert merged.trends == ("t.plt",), order
+        assert report.trend_only == (), f"{order}: a PV on a screen is never trend-only"
