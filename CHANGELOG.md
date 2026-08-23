@@ -83,6 +83,15 @@ carry breaking changes).
 
 ### Changed
 
+- **BREAKING: the three MCP resources moved from `epics-pv://` to `epics://`.**
+  `epics-pv://health`, `epics-pv://config` and `epics-pv://guide` are now `epics://health`,
+  `epics://config` and `epics://guide`. The old URIs are no longer served and there is no alias
+  period. A client that DISCOVERS resources through `resources/list` picks the new ones up and
+  needs no change; only a client with a URI written into it breaks, and it breaks loudly with an
+  unknown resource rather than answering something stale. Pre-1.0 minor versions may carry
+  breaking changes, as the head of this file says. The `get_guide` TOOL, the channel a model
+  reads the cookbook through, is untouched, and none of the three payloads changed.
+
 - **`find_device` no longer calls a Data Browser trend an operator screen.** A `.plt` opened by a
   button is operator-facing, so the reverse-lookup returns it, and until now it arrived
   indistinguishable from a `.bob`: counted among the screens, described as one by the tool, and on

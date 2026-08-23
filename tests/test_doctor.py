@@ -4766,7 +4766,7 @@ def test_a_credential_in_the_olog_url_never_reaches_the_report() -> None:
     is faithful: on this spelling urllib3 puts a fragment of the password into the PATH, so the
     printed value is neither the address nor redacted. ``shown_url`` deletes instead, hands the
     result back to the parser, and withholds where it cannot prove the same address. It is the
-    same family as ``epics-pv://config``'s ``url_without_userinfo``, and still not interchangeable
+    same family as ``epics://config``'s ``url_without_userinfo``, and still not interchangeable
     with it: that surface exists to be compared character for character and therefore keeps the
     query, this one names an address and drops it.
     """

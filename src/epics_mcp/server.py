@@ -163,7 +163,7 @@ def build_instructions(display_tools_available: bool) -> str:
         # The guide pointer leads so the header never truncates its own escape hatch; the detail
         # this used to inline (per-tool write clause, full network-reach prose) lives in the guide.
         #
-        # It names the get_guide TOOL, not the epics-pv://guide resource it used to name, and that
+        # It names the get_guide TOOL, not the epics://guide resource it used to name, and that
         # is the whole point of this sentence rather than a rewording: a resource is
         # application-controlled and a model does not pull from one, so the old pointer sent the
         # reader to a channel they could not use. The resource still exists for a human or an
@@ -198,7 +198,7 @@ def build_instructions(display_tools_available: bool) -> str:
         # 2048 bytes, and what is left of that budget is measured by the guard named
         # test_build_instructions_under_2048_bytes rather than named here, because a head-room
         # figure written into prose drifts with every edit to this string and nothing compares it.
-        # So the qualifier is one word and the detail lives in epics-pv://guide.
+        # So the qualifier is one word and the detail lives in epics://guide.
         # GB-64 (e): this clause used to end in "run epics-doctor to see what this instance
         # actually reaches", which is an instruction the reader of THIS text cannot follow.
         # epics-doctor is a console script; a client with no shell has no way to run it, and the
@@ -260,7 +260,7 @@ mcp = FastMCP(
     # client configuration ("epics-pv"), not the distribution name ("epics-mcp"): a serverInfo
     # that disagrees with the registered key costs a reader seconds at every log line and once a
     # wrong trail. The distribution name stays where it belongs, on the console scripts and in
-    # pyproject. Its twin is the "server" field of epics-pv://health, which must say the same.
+    # pyproject. Its twin is the "server" field of epics://health, which must say the same.
     "epics-pv",
     version=__version__,
     instructions=build_instructions(_DISPLAY_TOOLS_AVAILABLE),
@@ -330,7 +330,7 @@ async def get_guide(
     so an excerpt is a real excerpt and never a rendering, and the largest single part is under a
     third of the whole. An unknown topic is refused with [UNKNOWN_TOPIC] naming every valid key.
 
-    The same text is also served as the resource epics-pv://guide, for a human or an application.
+    The same text is also served as the resource epics://guide, for a human or an application.
     An application has to ask for it, though, which is why this tool exists beside it.
     """
     # ⛔ ToolResult with ONE text block and no structuredContent, deliberately. The guide is a
@@ -451,7 +451,7 @@ async def set_pv_value(
     LANDS is the IOC's own access security, which this server does not model: an allowlisted name
     is our policy, not a promise about the record. This tool writes a channel directly, with no
     screen involved: a value written from an operator DISPLAY is put by the widget there, not by
-    this tool. See the epics-pv://guide resource.
+    this tool. See the epics://guide resource.
 
     Value bounds (always-on, pre-put): the written value is checked against the record's OWN drive
     limits (control DRVL/DRVH, read on the pre-read). An out-of-range value is denied with
@@ -872,7 +872,7 @@ async def is_archived(
     archived", measured), so that record is the only definitive negative.
 
     is_archived answers only for a NAMED PV. To ENUMERATE the archived PVs use list_archived_pvs.
-    See the epics-pv://guide resource.
+    See the epics://guide resource.
     """
     return await _is_archived(pv_name, timeout)
 
@@ -919,7 +919,7 @@ async def get_pv_history(
     Each sample is {secs, nanos, val, severity, status}. ``secs`` is UNIX epoch seconds (UTC), NOT
     EPICS epoch seconds: reading it as the latter shifts every point by exactly 20 years and still
     plots. Only ``secs`` and ``val`` are required; an omitted ``nanos``/``severity``/``status``
-    reads as 0. See epics-pv://guide, topic err-archiver.
+    reads as 0. See epics://guide, topic err-archiver.
     """
     return await _get_pv_history(pv_name, start, end, max_points, timeout)
 
@@ -955,7 +955,7 @@ async def get_archive_info(
     body, a fabricated found=true).
 
     get_archive_info answers only for a NAMED PV; list_archived_pvs enumerates them.
-    See epics-pv://guide.
+    See epics://guide.
     """
     return await _get_archive_info(pv_name, timeout)
 
@@ -984,7 +984,7 @@ async def get_appliance_info(
     is served where (the mgmt- vs retrieval-webapp question)?". No pv arg and no found key: the
     appliance answers or the call errors. version is OMITTED when the appliance lacks it (not
     "always present"); a 404 here means the WRONG endpoint (retrieval serves /retrieval/bpl, not
-    /mgmt/bpl), not "no appliance". See epics-pv://guide.
+    /mgmt/bpl), not "no appliance". See epics://guide.
     """
     return await _get_appliance_info(timeout)
 
@@ -1926,7 +1926,7 @@ if _display_registrar is not None:
 # === Resources ===
 
 
-@mcp.resource("epics-pv://health")
+@mcp.resource("epics://health")
 def health() -> dict[str, object]:
     """What this process is and what it may write: status, p4p version, planes, both write gates.
 
@@ -1947,12 +1947,12 @@ def health() -> dict[str, object]:
     return get_health()
 
 
-@mcp.resource("epics-pv://config")
+@mcp.resource("epics://config")
 def epics_config() -> dict[str, object]:
     """Non-secret configuration values this process was started with.
 
     The service URLs here are the ones whose host may be disclosed. Three are withheld: the naming
-    and logbook ones, which appear as booleans in epics-pv://health instead, and the archiver
+    and logbook ones, which appear as booleans in epics://health instead, and the archiver
     retrieval one, whose plane is reported there through the mgmt URL it falls back to. An unset PV
     write pattern is null, never a placeholder string.
 
@@ -1964,7 +1964,7 @@ def epics_config() -> dict[str, object]:
     return get_epics_config()
 
 
-@mcp.resource("epics-pv://guide")
+@mcp.resource("epics://guide")
 def guide() -> str:
     """Agent-readable operational cookbook: service planes, recipes, error signatures.
 

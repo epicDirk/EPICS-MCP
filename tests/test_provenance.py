@@ -97,7 +97,7 @@ def test_the_archiver_plane_is_classified_from_the_mgmt_url() -> None:
 
     Every archiver tool gates on the mgmt URL and the retrieval URL falls back to it when
     unset, so classifying from the retrieval value would report a reach for a plane that is
-    never used. ``epics-pv://health`` resolves the same pair the same way.
+    never used. ``epics://health`` resolves the same pair the same way.
 
     Provably red: point the ``archiver`` row of ``scope_of`` at ``archiver_retrieval_url``.
     """
@@ -147,7 +147,7 @@ def test_the_field_never_carries_an_address() -> None:
     the posture field by field and leaves that one out. This field ships to a client, so no
     host, no port and no environment VALUE may appear in it. Two planes make the rule
     load-bearing rather than tidy: the naming and logbook URLs are deliberately withheld even
-    from ``epics-pv://config``, on the ground that they identify a facility.
+    from ``epics://config``, on the ground that they identify a facility.
 
     Every distinctive token of the configuration is searched for in the serialised field, so
     the guard does not depend on remembering which key might carry one.

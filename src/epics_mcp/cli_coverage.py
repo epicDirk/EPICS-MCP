@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="alarm config-tree name; REQUIRED with --alarm (URL set), no default (site-specific "
         "trees), so --alarm without it is a loud INVALID_INPUT, not a silent scan. Names unknown? "
-        "Read the first path segment of an alarm event's config field (epics-pv://guide, recipe "
+        "Read the first path segment of an alarm event's config field (epics://guide, recipe "
         "'Discover the alarm config-tree names')",
     )
     parser.add_argument(

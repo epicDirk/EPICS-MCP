@@ -1,4 +1,4 @@
-"""Tests for the ``epics-pv://guide`` operational cookbook resource.
+"""Tests for the ``epics://guide`` operational cookbook resource.
 
 Covers three things E1 promises: the guide loads as package data (works in an editable AND an
 installed layout), it actually answers the four operational questions a live smoke had to

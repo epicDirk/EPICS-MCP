@@ -8,7 +8,7 @@ here, and it is even on the wire, but only on two channels a model cannot use:
   tells every client to "run epics-doctor to see what this instance actually reaches", and a
   client with no shell cannot follow that instruction at all. None of the registered tools
   reports the reach either, ``diagnose_connection`` included.
-* ``epics-pv://health`` carries the address-free ``pv_search`` block, but a resource is
+* ``epics://health`` carries the address-free ``pv_search`` block, but a resource is
   application-controlled. This repository already drew that conclusion once, for the operator
   guide, and turned it into the ``get_guide`` TOOL for exactly this reason.
 
@@ -35,7 +35,7 @@ shipping to a client projects the posture field by field and leaves this one out
 host-naming rendering stays with ``epics-doctor``; what ships is the CLASSIFICATION, which is
 the distinction an operator actually needs (a local test rig against a real facility) and
 costs a fraction of the bytes. The same rule settles the two planes whose URL is deliberately
-withheld from ``epics-pv://config`` (naming and olog, "never the URL, an ESS host"): they are
+withheld from ``epics://config`` (naming and olog, "never the URL, an ESS host"): they are
 classified like every other plane, so nothing is disclosed that was not disclosed before, and
 nothing is hidden that the caller needs.
 

@@ -179,7 +179,7 @@ class ArchiverClient:
         # defaults to base_url. In a split deployment mgmt (:17665) and retrieval (:17668) are
         # SEPARATE Tomcats, so the caller passes a distinct retrieval_url. (A retrieval-cluster-
         # aware appliance cluster proxies internally, so one URL covers all members, see the
-        # epics-pv://guide resource.)
+        # epics://guide resource.)
         self.base_url = base_url.rstrip("/")
         self.retrieval_url = (retrieval_url or base_url).rstrip("/")
         self.timeout = timeout

@@ -114,7 +114,7 @@ class EpicsConfig(BaseSettings):
     # session factory in ``services/_http.py`` (three of them, all resolving the same expression;
     # the VALUE is one, the place is not). When planes present DIFFERENT trust roots (one
     # internal CA, another public), a single-root bundle fails one: combine the internal CA
-    # PEM WITH the public roots (certifi's cacert.pem) into ONE PEM, see epics-pv://guide.
+    # PEM WITH the public roots (certifi's cacert.pem) into ONE PEM, see epics://guide.
     # ``tls_verify=False`` disables verification entirely:
     # an escape hatch for an internal network only, NOT the default. Precedence: ``ca_bundle``
     # (path) > ``tls_verify=False`` > default (certifi). When either is set explicitly the session
@@ -145,7 +145,7 @@ class EpicsConfig(BaseSettings):
     # empty and get_pv_history falls back to archiver_url. In a split deployment mgmt (:17665) and
     # retrieval (:17668) are SEPARATE Tomcats, so this must point at the retrieval one. (A
     # retrieval-cluster-aware appliance cluster proxies internally, one URL covers all members;
-    # see the epics-pv://guide resource.)
+    # see the epics://guide resource.)
     archiver_retrieval_url: str = ""
     archiver_auth: str = ""  # optional Authorization header value for secured deployments
     # Phoebus Alarm Logger REST root, e.g. "http://localhost:8081". Activates is_alarm_configured.

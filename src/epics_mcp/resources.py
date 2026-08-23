@@ -25,7 +25,7 @@ _start_time = time.monotonic()
 
 @lru_cache(maxsize=1)
 def get_guide() -> str:
-    """The operational cookbook served as ``epics-pv://guide``.
+    """The operational cookbook served as ``epics://guide``.
 
     Reads the package-data file ``operator_guide.md`` (a sibling of ``py.typed`` inside the
     package, so hatchling ships it in the wheel and ``importlib.resources`` finds it in both an

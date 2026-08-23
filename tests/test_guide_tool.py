@@ -1,6 +1,6 @@
 """Guards over ``get_guide``, the channel a MODEL pulls the operator guide from.
 
-**Why the tool exists although the same text has been ``epics-pv://guide`` since E1.** The
+**Why the tool exists although the same text has been ``epics://guide`` since E1.** The
 protocol has three server elements with three controllers: tools are MODEL-controlled, resources
 APPLICATION-controlled, prompts USER-controlled. Whatever the model is meant to fetch by itself
 has to be a tool; a resource is not a channel it pulls from. The resource was therefore correct,
@@ -489,7 +489,7 @@ def test_the_unguarded_pages_do_not_restate_the_size_promise() -> None:
             lowered = line.lower()
             if not any(
                 token in lowered
-                for token in ("get_guide", "operator guide", "epics-pv://guide", "operator_guide")
+                for token in ("get_guide", "operator guide", "epics://guide", "operator_guide")
             ):
                 continue
             hits = [match for needle in needles if (match := needle.search(line))]

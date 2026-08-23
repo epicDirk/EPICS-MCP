@@ -1,6 +1,6 @@
 """Serve the operator guide by section: the reading half of the ``get_guide`` tool.
 
-**Why a tool, when the same text has been the resource ``epics-pv://guide`` since E1.** The
+**Why a tool, when the same text has been the resource ``epics://guide`` since E1.** The
 protocol has three server elements and three different parties control them: tools are
 MODEL-controlled, resources are APPLICATION-controlled, prompts are USER-controlled. Whatever the
 model is meant to FETCH BY ITSELF therefore has to be a tool. A resource is not a channel a model

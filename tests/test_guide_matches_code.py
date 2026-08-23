@@ -946,7 +946,7 @@ def test_the_guide_status_buckets_tile_plane_status() -> None:
     """Every plane status is declared as documented in one marked region of the shipped guide, or
     as documented in neither. A NEW status belongs to no bucket, so it goes red here until somebody
     decides where it is written down, and that is the whole of QA-47: the legend ships inside the
-    wheel as ``epics-pv://guide``, and a status missing from it used to be invisible.
+    wheel as ``epics://guide``, and a status missing from it used to be invisible.
 
     The union is compared as a SET, and the double-listing count stands BESIDE it rather than in
     place of it. Three equal cardinalities are blind to a RENAME, because a rename is
@@ -1023,7 +1023,7 @@ def test_the_shipped_glyph_legend_carries_the_marks_the_cli_prints() -> None:
     status that no longer exists, no declared status without a row, and every Mark cell equal to
     the glyph the CLI actually renders.
 
-    Nothing read this table before. It is package data served as ``epics-pv://guide``, so a wrong
+    Nothing read this table before. It is package data served as ``epics://guide``, so a wrong
     glyph reaches a reader who has no repository around it to check against, and the only thing
     between the two was a hand comparison somebody had to remember to make.
 

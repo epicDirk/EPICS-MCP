@@ -215,7 +215,7 @@ def url_without_userinfo(url: str) -> str | None:
     reach for :func:`shown_url`, which builds on this function. This one DELETES a span out of the
     string, and is right where a reader has to
     COMPARE the answer against a configured value character for character, which is what
-    ``epics-pv://config`` exists for (``docs/deployment.md``): a normalised address makes that
+    ``epics://config`` exists for (``docs/deployment.md``): a normalised address makes that
     comparison false-negative, showing a difference where there is none.
 
     The rule in one sentence: an address the parser accepts and that carries no ``@`` is passed
@@ -1133,7 +1133,7 @@ def shown_url(url: str) -> str:
     first literal ``?`` or ``#`` is the real delimiter. A token in a query string is a normal thing
     to configure, and a message has no use for one: every caller in this module passes its query as
     ``params`` to requests, so a query in the printed string can only have come from the configured
-    base URL. ``epics-pv://config`` deliberately KEEPS the query, because that surface exists to be
+    base URL. ``epics://config`` deliberately KEEPS the query, because that surface exists to be
     compared character for character; this one exists to name an address.
 
     A cut that leaves nothing is not an address either, so it also yields the marker.

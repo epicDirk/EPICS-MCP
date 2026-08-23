@@ -109,7 +109,7 @@ This is a controls tool, so the trust questions come first.
   refusal fires on the gate's ordinary state ("remote and not allowlisted", nothing has to be
   broken), and its text reaches the caller verbatim. Measured 2026-08-14, before it was closed, all
   four write tools answered with the configured password in clear text. What a caller gets instead
-  is the gate's own verdict, `olog_write.target_allowed` in `epics-pv://health`, out of the process
+  is the gate's own verdict, `olog_write.target_allowed` in `epics://health`, out of the process
   that answered. The address stays operator-side: `epics-doctor`'s `Write gates` block deletes the
   userinfo and drops the query and fragment, but it prints that line only when the environment of
   THAT command arms the gate, and a URL it cannot prove it has redacted prints as `(unparseable)`.
@@ -155,7 +155,7 @@ This is a controls tool, so the trust questions come first.
   different one; and it reports what the gates are SET to without evaluating whether such a server
   would start, which for an armed gate is a separate question with the conditions given per gate
   in the bullets above.
-  ⚠️ **The first limit does not apply to the resource route.** `epics-pv://health` carries the same
+  ⚠️ **The first limit does not apply to the resource route.** `epics://health` carries the same
   posture out of the process that is actually answering: `any_write_gate_armed` for the one-field
   question, the `olog_write` block for that gate's allowlist, rate limit and target predicates,
   `pv_search` for the live plane's reach, and a posture group for REST TLS verification, the REST
@@ -170,7 +170,7 @@ This is a controls tool, so the trust questions come first.
   block above remains the fuller answer; for TLS verification, the read throttle and the file
   boundary the resource is the ONLY answer, and in both cases it is the trustworthy one about
   **this** process.
-  The sibling resource `epics-pv://config` does print three service URLs, and the same premise
+  The sibling resource `epics://config` does print three service URLs, and the same premise
   lands differently there rather than identically: those three hosts were a deliberate disclosure
   from the start, so the decision was not whether to print an address but what may travel with it.
   A userinfo may not: `https://user:password@host/path` is a spelling those unvalidated fields

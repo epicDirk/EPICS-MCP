@@ -970,7 +970,7 @@ def test_the_denial_count_is_monotonic_so_a_caller_reads_a_delta() -> None:
 
 
 # ----------------------------------------------------------------------------------------------
-# url_without_userinfo, the redaction epics-pv://config prints its three service URLs through
+# url_without_userinfo, the redaction epics://config prints its three service URLs through
 #
 # The sibling url_without_credentials is tested in test_doctor.py, under "the printed Olog target".
 # It has NO caller any more, and the difference between the two is why: that one rebuilds (and

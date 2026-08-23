@@ -10,7 +10,7 @@ Both halves had already failed once, and this module is the guard for each:
 * The suite pinned only 5 of the 8 renamed tools. Measured by mutation: reverting ``get_pvs``,
   ``monitor_pv`` or ``validate_pvs`` to its old argument name left the whole suite GREEN.
 * Two SHIPPED surfaces kept teaching a retired name, the ``compare_machine_state`` prompt
-  (``get_pvs(names=[...])``) and the operator guide served as ``epics-pv://guide``
+  (``get_pvs(names=[...])``) and the operator guide served as ``epics://guide``
   (``get_alarm_history`` ... ``pv``). A client that follows either builds a call the server rejects.
 
 Four guards. The first three are in the order the failure happened; the fourth arrived later, with
@@ -125,7 +125,7 @@ def _prose_surfaces() -> dict[str, str]:
     capability, so a stale example could otherwise hide in the branch this install does not take.
     """
     return {
-        "operator_guide.md (epics-pv://guide)": get_guide(),
+        "operator_guide.md (epics://guide)": get_guide(),
         "README.md": _README.read_text(encoding="utf-8"),
         "prompt diagnose_pv": diagnose_pv("SIM:PS-01:Cur-RB"),
         "prompt compare_machine_state (displays, file)": compare_machine_state(

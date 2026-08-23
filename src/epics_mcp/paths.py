@@ -40,7 +40,7 @@ def path_boundary_configured(raw: str) -> bool:
     spellings that look equivalent are not: ``bool(raw)`` is true for ``";"`` and for ``"   "``,
     both of which :func:`_resolve_roots` drops to nothing. A caller built on the naive spelling
     would report a boundary that no file argument is actually held to, which is the direction that
-    matters. :func:`_allowed_roots` asks it below, and so does ``epics-pv://health``.
+    matters. :func:`_allowed_roots` asks it below, and so does ``epics://health``.
 
     It answers WITHOUT touching the filesystem, unlike ``_allowed_roots``: ``Path.resolve()`` is a
     stat, and the health resource is a synchronous handler where a stat on a dead network root

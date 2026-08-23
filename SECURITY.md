@@ -112,7 +112,7 @@ plainly because the word "gate" invites a category error:
   a write this server permits still has to satisfy the IOC's own access security, which decides
   whether the value lands. The gate here is policy and audit over whether the server ATTEMPTS the
   write; nothing in it reads or models what an IOC allows, so an allowlisted PV name is a statement
-  about our configuration, never a claim about the record. The `epics-pv://guide` resource states
+  about our configuration, never a claim about the record. The `epics://guide` resource states
   what is and is not measured about how such a refusal arrives.
 - The audit's promise is therefore *every gate verdict, and every write through this server that
   reaches the I/O*. It is not *every write*.

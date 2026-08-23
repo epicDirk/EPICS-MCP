@@ -15,7 +15,7 @@ away. (What an INSTALL contains is a different question, answered by the layout 
          + src/epics_mcp/         the package. Layering is server -> tools -> services -> clients,
          |    |                   described in ARCHITECTURE.md rather than repeated here
          |    - operator_guide.md NOT documentation about the code: it is package DATA, shipped in
-         |                        the wheel and served to an assistant as epics-pv://guide, with
+         |                        the wheel and served to an assistant as epics://guide, with
          |                        OPERATING.md as its human mirror. One file, three consumers
          + tests/                 the suite, including the drift guards that hold prose against
          |                        code. Most of what surprises a newcomer is enforced from here

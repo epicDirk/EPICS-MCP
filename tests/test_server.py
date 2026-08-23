@@ -611,7 +611,7 @@ def test_mcp_instructions_wired_to_capability_flag() -> None:
 
 def test_build_instructions_under_2048_bytes() -> None:
     """MA-1 Commit B: the initialize-handshake instructions must stay a tight header, under 2048
-    bytes in BOTH capability branches, so the operator guide (epics-pv://guide) carries the detail
+    bytes in BOTH capability branches, so the operator guide (epics://guide) carries the detail
     and MA-2/2b keep head-room for new tool lines. Red at the pre-MA-1 size (3108 / 3003 bytes).
 
     Two things this assertion is NOT, both measured rather than assumed, and both of which invite

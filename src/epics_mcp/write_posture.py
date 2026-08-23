@@ -280,7 +280,7 @@ def olog_write_gate_report(cfg: EpicsConfig) -> OlogWriteGateReport:
         # returns ``(unparseable)`` rather than a best effort. A fallback that can leak is not a
         # fallback. The block's own text already tells a reader this value is shown for reading
         # and need not match the configured string character for character, which is what makes
-        # withholding admissible here and not on ``epics-pv://config``.
+        # withholding admissible here and not on ``epics://config``.
         target_url=shown_url(cfg.olog_url) if cfg.olog_url else "",
         target_allowed=write_target_allowed(cfg),
         target_is_loopback=is_loopback_url(cfg.olog_url),

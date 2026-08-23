@@ -363,7 +363,7 @@ EPICS_MCP_REQUIRE_DISPLAYS=1 uv run pytest tests/
 
 Measured 2026-08-13, when the redaction was built (BG-DURL).
 
-`epics-pv://config` reports `channelfinder_url`, `archiver_url` and `alarm_url`, and those fields
+`epics://config` reports `channelfinder_url`, `archiver_url` and `alarm_url`, and those fields
 are unvalidated strings, so `https://user:password@host/path` is a spelling an operator can and
 does use. `url_without_userinfo` removes the userinfo from them and leaves every other character
 alone, because the documented use of that resource is to compare the running server's configuration

@@ -213,7 +213,7 @@ class TestUrlBoundary:
         # Secret-agnostic first (see the WY note above), the wire contract second: written the
         # other way round the first would be unreachable behind the equality. The two service
         # schemes rather than a bare "://", because the message deliberately names the MCP resource
-        # ``epics-pv://health`` and a rule rejecting every scheme would forbid its own remedy.
+        # ``epics://health`` and a rule rejecting every scheme would forbid its own remedy.
         assert "http://" not in str(denial.value)
         assert "https://" not in str(denial.value)
         assert "@" not in str(denial.value)

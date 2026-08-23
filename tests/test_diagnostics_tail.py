@@ -721,7 +721,7 @@ def test_no_served_surface_uses_a_retired_name_for_the_cap() -> None:
     ``hit the ... context cap`` is how a NOTE reports the cap; a description or a guide names it in
     running prose ("Per-display macro-context cap", "resolved under the macro-context cap"), and
     those are exactly where the last two wordings survived the first pass of GB-72. The guide is
-    the worse of the two, because it ships as the ``epics-pv://guide`` resource: an assistant reads
+    the worse of the two, because it ships as the ``epics://guide`` resource: an assistant reads
     a name there and then greps the notes for it.
 
     Provably red: put "macro-context cap" back into either the ``find_device`` field description or

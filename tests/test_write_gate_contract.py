@@ -458,7 +458,7 @@ def test_deny_path_satisfies_the_contract(path: DenyPath, caplog: pytest.LogCapt
     details = str(excinfo.value.details)
     for carrier, text in (("message", refusal), ("details", details)):
         # The two service schemes rather than a bare "://", which would also reject an MCP resource
-        # URI: the refusal is allowed, and expected, to point a caller at ``epics-pv://health``.
+        # URI: the refusal is allowed, and expected, to point a caller at ``epics://health``.
         # What may not appear is a transport address, and those are the two schemes a service URL
         # can have here.
         assert "http://" not in text and "https://" not in text, (
@@ -693,7 +693,7 @@ _BOUNDARY_DENY_ANSWER = (
     "[OLOG_WRITE_DENIED] Olog write refused: the configured EPICS_MCP_OLOG_URL is not a permitted "
     "write target. Only a loopback host, or an https URL that is in "
     "EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true, may be "
-    "written to. This gate's own verdict is olog_write.target_allowed in epics-pv://health; the "
+    "written to. This gate's own verdict is olog_write.target_allowed in epics://health; the "
     "target address is never disclosed to a caller. Do NOT work around this by repointing the "
     "server or by writing to another logbook. Report the refusal to the operator on duty."
 )
@@ -762,7 +762,7 @@ async def test_url_boundary_refusal_never_discloses_the_target(
 
     answer = str(excinfo.value)
     # The two service schemes, not a bare "://": the answer deliberately names the MCP resource
-    # ``epics-pv://health``, and a rule that rejected every scheme would forbid its own remedy.
+    # ``epics://health``, and a rule that rejected every scheme would forbid its own remedy.
     assert "http://" not in answer and "https://" not in answer, (
         f"{tool_name}: the answer still carries a service address"
     )

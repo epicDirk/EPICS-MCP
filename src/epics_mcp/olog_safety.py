@@ -217,7 +217,7 @@ class OlogWriteGate:
         # false. The reason is
         # the VALUE: this server does not disclose the Olog target address to a CALLER on any
         # surface, deliberately and in writing. ``resources.py`` carries "olog as an
-        # enabled-boolean only (never the URL...)" in the health payload, and ``epics-pv://config``
+        # enabled-boolean only (never the URL...)" in the health payload, and ``epics://config``
         # prints the three other planes' URLs and not this one. A refusal is the same kind of
         # surface kept by the same client, so it follows the same posture.
         #
@@ -231,7 +231,7 @@ class OlogWriteGate:
         # it is the one named above.
         #
         # What the caller gets instead is the gate's OWN verdict, in band and out of the process
-        # that is actually answering: ``olog_write.target_allowed`` in ``epics-pv://health``. The
+        # that is actually answering: ``olog_write.target_allowed`` in ``epics://health``. The
         # address stays with the operator, whose route is ``epics-doctor``'s write-gate block. The
         # message does NOT send a caller there, and that is measured rather than tidy: that command
         # reads the environment it is RUN in, so from an ordinary shell it prints
@@ -252,7 +252,7 @@ class OlogWriteGate:
                 "target. Only a loopback host, or an https URL that is in "
                 "EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST with EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true, "
                 "may be written to. This gate's own verdict is olog_write.target_allowed in "
-                "epics-pv://health; the target address is never disclosed to a caller. Do NOT work "
+                "epics://health; the target address is never disclosed to a caller. Do NOT work "
                 "around this by repointing the server or by writing to another logbook. Report the "
                 "refusal to the operator on duty.",
                 # The in-process copy follows the message. Nothing in ``src/`` reads

@@ -58,7 +58,7 @@ that for uv).
               + services/           one client per service, and the doctor's probes
               + tools/              the MCP tools, grouped by plane
               - operator_guide.md   the operational cookbook. It SHIPS: the same file is served
-              |                     to an assistant as the epics-pv://guide resource, so the
+              |                     to an assistant as the epics://guide resource, so the
               |                     knowledge travels with the install rather than with the repo
               - py.typed            the marker that says the type hints are real
 ```
@@ -461,7 +461,7 @@ so an environment that names nothing still broadcasts into the local subnets). R
 `epics-doctor`, and mind what it is telling you: it reports the environment of the command YOU just
 ran. A server started by an MCP client was given that client's environment, which is the block in
 its configuration file, so compare the two rather than assuming they match. To see it from the
-running server instead, read its `epics-pv://config` and `epics-pv://health` resources through the
+running server instead, read its `epics://config` and `epics://health` resources through the
 client; those describe the process that is actually answering. `config` prints THREE of the service
 URLs, ChannelFinder, Archiver (mgmt) and Alarm, character for character, so those comparisons are
 comparisons. Two things happen even to those three: a userinfo (`user:password@`) is removed, and an
@@ -475,7 +475,7 @@ there. The seventh, `live`, has no such key because it is always configured; `pv
 it instead, saying whether it broadcasts (the default above) without naming an address. Which
 address it broadcasts to is the half that stays here with `epics-doctor`.
 
-**And may it write anything?** `epics-pv://health` again, in one field: `any_write_gate_armed`.
+**And may it write anything?** `epics://health` again, in one field: `any_write_gate_armed`.
 ⚠️ Do not read `write_enabled` for this. That field is the PV gate ALONE, so a server whose logbook
 gate is armed reports it as `false` while it can create entries, which is exactly the misreading
 the one field exists to prevent. `olog_write` beside it carries that gate's allowlist, rate limit
@@ -528,7 +528,7 @@ rate limit. Both `PVWriteDeniedError` messages also tell the caller not to route
 refusal by writing a different PV or through another route, and to report it to the operator on
 duty; if an assistant relays that to you, that instruction is ours and it is deliberate. The gate
 conditions themselves are start conditions and are covered above. A refusal at the IOC rather than
-at our gate is a different case, described in the `epics-pv://guide` resource.
+at our gate is a different case, described in the `epics://guide` resource.
 
 ## 7. Removing it again, and going back a version
 
@@ -572,7 +572,7 @@ want a fixed point.
 - [Configuration](configuration.md): every variable with its default. This is the page to use instead
   of `.env.example` when you installed from a package rather than a checkout; in a checkout,
   `.env.example` is the same set with commentary.
-- The `epics-pv://guide` MCP resource (and `OPERATING.md`) is the operational cookbook: service
+- The `epics://guide` MCP resource (and `OPERATING.md`) is the operational cookbook: service
   landscape, recipes, typical error signatures.
 - The `setup_epics_mcp` prompt, available once the server is connected, covers the same ground as
   this page one question at a time, for whoever would rather be asked than read.

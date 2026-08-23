@@ -144,7 +144,7 @@ _TITLES: tuple[tuple[str, str, Callable[[str], str], str], ...] = (
         "src/epics_mcp/operator_guide.md",
         "the first line of the guide that ships in the wheel and is served to every session",
         _first_line,
-        f"# {PRODUCT}: Operator Guide (`epics-pv://guide`)",
+        f"# {PRODUCT}: Operator Guide (`epics://guide`)",
     ),
 )
 

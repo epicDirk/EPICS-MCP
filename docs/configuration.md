@@ -58,7 +58,7 @@ single-JVM appliance legitimately leaves it empty.
 
 ⚠️ **Put credentials in the `*_AUTH` header variables, not into a `*_URL`.** A URL accepts
 `https://user:password@host/path` and nothing here rejects it, and for `CHANNELFINDER_URL`,
-`ARCHIVER_URL` and `ALARM_URL` that string is also what `epics-pv://config` reports to a client,
+`ARCHIVER_URL` and `ALARM_URL` that string is also what `epics://config` reports to a client,
 which keeps it. That resource removes a userinfo before printing and withholds the address entirely
 when it cannot do so provably, and a token in a QUERY string is not removed at all. The Naming, Olog
 and archiver-retrieval URLs are not in that payload at all, which is a decision about the payload
@@ -85,7 +85,7 @@ address; it deletes the userinfo now (`SECURITY.md`).
 
 Four planes have a header variable to use instead (`CHANNELFINDER`, `ARCHIVER`, `ALARM`, `OLOG`).
 The Naming plane has none, so there is nothing to move a credential into there; its URL is never
-part of the `epics-pv://config` payload either.
+part of the `epics://config` payload either.
 
 | Variable | Default | Enables |
 |----------|---------|---------|

@@ -1,10 +1,10 @@
-# EPICS MCP: Operator Guide (`epics-pv://guide`)
+# EPICS MCP: Operator Guide (`epics://guide`)
 
 The operational cookbook for this MCP server: the service landscape, the tricks that are not
 obvious from the tool signatures, and the error signatures that tell you which tool to reach for.
 A fresh session should read this once instead of re-deriving it.
 
-It is served verbatim as the `epics-pv://guide` MCP resource and shipped inside the package, so it
+It is served verbatim as the `epics://guide` MCP resource and shipped inside the package, so it
 travels with the server: no external skill or project folder required.
 
 **Every example uses a synthetic placeholder name, never a real one, and a new example draws from
@@ -42,7 +42,7 @@ measured 2026-08-15, only the first of the four appears anywhere else in this do
   `localhost-isolated` only when every search list is unset AND the auto search is explicitly
   disabled.
   ⭐ **You do not have to ask: every read answer carries its own reach, in band.** `epics-doctor`
-  is a COMMAND, so a client with no shell cannot run it, and `epics-pv://health` is a resource,
+  is a COMMAND, so a client with no shell cannot run it, and `epics://health` is a resource,
   which an application has to fetch for you. Both are the wrong shape for an assistant, which is
   why the answer comes to you instead: every read tool returns a `reach` field alongside its
   payload, saying which plane answered and how far that plane reaches, `loopback-only` (a local
@@ -105,7 +105,7 @@ measured 2026-08-15, only the first of the four appears anywhere else in this do
   blocked, a blocking wait there would hold a worker thread and reintroduce the monitor starvation
   above. Turn it on to protect a production facility from an unthrottled read burst. It bounds only
   the REST planes (ChannelFinder/Archiver/Alarm/Naming/Olog), not live p4p PV reads. Whether it
-is on in the process you are talking to is `rest_read_rate_limit` in `epics-pv://health`, whose
+is on in the process you are talking to is `rest_read_rate_limit` in `epics://health`, whose
 name carries that REST-only reach, so the field cannot be read as an all-clear for PV reads.
 Two caveats:
   the ChannelFinder/Alarm/Olog/Naming reachability self-checks are HTTP HEADs and bypass the
@@ -496,7 +496,7 @@ still named four, so the sentence announcing the correction was itself the incom
   value, so do not expect the address back from it and do not treat its absence as the tool having
   no target. The reason is that the value is an unvalidated string operators do spell as
   `https://user:password@host/Olog`, and the message reaches the caller verbatim. The gate's own
-  verdict IS available in band, as `olog_write.target_allowed` in `epics-pv://health`, out of the
+  verdict IS available in band, as `olog_write.target_allowed` in `epics://health`, out of the
   process that answered. The address itself is operator-side only: `epics-doctor`'s `Write gates`
   block deletes the userinfo and drops the query and fragment, and prints it **only when that
   command's own environment arms the gate**, which a shell beside an MCP-launched server usually
@@ -619,7 +619,7 @@ the raw bytes back; `list_log_attachments` lists each attachment's id, filename 
 fileMetadataDescription. Worth knowing: the by-id endpoint has NO server-side per-log authorization
 (any valid GridFS id grants content). Bytes cross the MCP
 boundary as a workspace file `output_path` (a NEW file, `EPICS_MCP_ALLOWED_ROOTS`-checked, and
-whether that boundary exists at all is `allowed_roots_set` in `epics-pv://health`, true only for a
+whether that boundary exists at all is `allowed_roots_set` in `epics://health`, true only for a
 value holding a non-blank root and never a claim that the roots are NARROW; it refuses
 to overwrite an existing file or follow a symlink, so a download never loses data or escapes the
 boundary) or, for a small inline image, base64 in the result. The download body is size-capped by
@@ -792,7 +792,7 @@ Below the plane lines the report prints a glyph-free **`Write gates`** block, `w
 THAT command, not of the server answering your client.** It never moves the verdict or the exit
 code, and a shell without the client's variables prints `PV write: OFF` while the MCP-launched
 server has the gate armed, which is the natural confusion here. For the posture of the process that
-actually answered, read `epics-pv://health` instead; a disarmed gate gets one line, an armed one
+actually answered, read `epics://health` instead; a disarmed gate gets one line, an armed one
 names its allowlist, its rate and where a write would go.
 
 ### Retrieval-cluster-aware appliances
@@ -815,7 +815,7 @@ concatenate the internal CA PEM **with** the public roots (certifi's `cacert.pem
 PEM and point `EPICS_MCP_CA_BUNDLE` at it. The session pins `trust_env=False` whenever a CA path is set,
 so a stray `REQUESTS_CA_BUNDLE` cannot silently override it. (`EPICS_MCP_TLS_VERIFY=false` disables
 verification entirely, internal-network escape hatch only, never the default.)
-What is in force in a RUNNING server is `rest_tls` in `epics-pv://health`:
+What is in force in a RUNNING server is `rest_tls` in `epics://health`:
 `verification_enabled` resolves the precedence, so a bundle beats a disabled switch and such a
 server is not reported as unverified; `ca_bundle_configured` says whether a bundle is set at all
 (false does NOT mean certifi, since at the plain default `trust_env` stays on for the read
@@ -1141,7 +1141,7 @@ the read throttle, and a server that will not start) · `err-guide`.
   not extend it: a comma-list becomes the whole allowlist, so naming one extra property silently
   drops the built-in ones, and the same allowlist also decides which properties the RESULTS carry.
   To keep the defaults, list them alongside the new name. How many names the effective allowlists
-disclose is `channelfinder_redaction` in `epics-pv://health`, counted through these same
+disclose is `channelfinder_redaction` in `epics://health`, counted through these same
 resolvers; the counters say DISCLOSED, so zero is every owner and property redacted rather than
 a broken configuration, and the entries themselves stay with `epics-doctor`. Two honesty rules:
   the TAG filter semantics (`has_tags`/`lacks_tags`) are **UNVERIFIED** until a differential live
@@ -1406,7 +1406,7 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   size cap, the rate limit), because they are one gate; the message says which fired. It is
   independent of the PV gate: `EPICS_MCP_ALLOW_PV_WRITE` neither enables nor explains it. ⚠️ The
   URL-boundary refusal names the VARIABLE and not its value, deliberately, because that value can
-  carry a credential; read the gate's own verdict from `epics-pv://health` (`olog_write`) instead
+  carry a credential; read the gate's own verdict from `epics://health` (`olog_write`) instead
   of trying to get the address out of the error.
 - **The server refuses to START with `SAFETY_CONFIG_INVALID`.** Usually not a tool error: the
   process declined to come up, which is fail-closed by design rather than a fault. The conditions

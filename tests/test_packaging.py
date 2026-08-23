@@ -230,7 +230,7 @@ def test_package_data_ships_in_the_wheel(tmp_path: Path) -> None:
     """Both package-data files have to be INSIDE the wheel, and neither is checkable from the
     source tree.
 
-    ``operator_guide.md`` is read by the ``epics-pv://guide`` resource through
+    ``operator_guide.md`` is read by the ``epics://guide`` resource through
     ``importlib.resources``, which in an editable install passes off the *source tree*, so that
     load test cannot catch a wheel-exclusion regression (a stray ``[tool.hatch.build]`` include
     that forgets ``*.md``, a move/rename). ``py.typed`` is worse off: it has no load test at all,

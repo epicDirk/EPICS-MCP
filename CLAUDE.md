@@ -49,7 +49,7 @@ EPICS service landscape behaves. This file is the standing policy that keeps tha
   The `test.db` beside them is the ALTERNATIVE rather than the starting point, since running it needs
   EPICS Base, which this package does not install; `epics-testpv` is what needs nothing.
 - **`src/epics_mcp/operator_guide.md`**: the operational cookbook (service planes, recipes, error
-  signatures). Shipped as package data, served as the `epics-pv://guide` MCP resource, mirrored for
+  signatures). Shipped as package data, served as the `epics://guide` MCP resource, mirrored for
   humans by `OPERATING.md`. **One source file, three consumers: never copy it, link it.**
 - `sandbox/`: a LOCAL EPICS test stack (IOC + REST services) for the opt-in live tests. It is
   git-ignored, so it is **absent from every clone**; the live tests are pointed at it through
@@ -64,7 +64,7 @@ transcript or a commit body, which future sessions won't find. Three tiers, by t
    docstring / tool-description (the always-on surface an assistant sees without pulling a resource),
    and a regression test. This is the most reliable tier: it runs in CI and cannot be forgotten.
 2. **Operational cookbook**: when the insight is a service/operational/IOC recipe, an endpoint, or an
-   error signature. Its home is **`src/epics_mcp/operator_guide.md`** (→ `epics-pv://guide`). This is
+   error signature. Its home is **`src/epics_mcp/operator_guide.md`** (→ `epics://guide`). This is
    the default tier for the kind of facts learned by actually operating against a live facility.
 3. **Convention**: when the insight is a standing rule for how we work here. It goes in **this file**.
 

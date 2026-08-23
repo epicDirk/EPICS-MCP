@@ -3,7 +3,7 @@
 Minimal, self-contained examples. The core ones need nothing but this server: no EPICS Base, no
 Phoebus, no display layer.
 
-> New here? Point the assistant at the `epics-pv://guide` resource (also
+> New here? Point the assistant at the `epics://guide` resource (also
 > [`OPERATING.md`](../OPERATING.md)) for the service landscape, the operational recipes and the
 > error signatures. It ships inside the server, so nothing extra to install.
 
