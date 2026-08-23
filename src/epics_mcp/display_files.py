@@ -41,6 +41,15 @@ TREND_SUFFIX = ".plt"
 INVENTORY_SUFFIXES: tuple[str, ...] = (DISPLAY_SUFFIX, TREND_SUFFIX)
 
 
+#: How a rendered report NAMES a node kind that is not an operator screen, appended to the file
+#: name in a Markdown line. One dict rather than one literal per renderer: ``find_device`` and
+#: ``crossplane_check`` both mark a trend in their file lists, and two copies of a human-facing
+#: phrase drift the way the cap wording drifted across four tools before GB-72 pinned it. A kind
+#: with NO entry here renders nothing extra, which is the right default for ``"display"`` and the
+#: honest one for a kind this server has not been taught: the renderers fall back to naming it.
+KIND_MARKERS: dict[str, str] = {"trend": ", Data Browser trend (not a screen)"}
+
+
 def is_inventory_file(name: str) -> bool:
     """True iff *name* carries a suffix the display-PV inventory reads, case-folded.
 

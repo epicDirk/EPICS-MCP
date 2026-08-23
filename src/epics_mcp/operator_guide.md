@@ -203,13 +203,14 @@ are simply absent, that is an unmet optional dependency group, not a bug.
 `create_log_entry` · `reply_to_log` · `update_log_entry` · `add_log_attachment` ·
 `list_log_attachments` · `download_log_attachment`
 
-**Optional `displays` dependency group, cross-plane with the operator-screen PV inventory:**
+**Optional `displays` dependency group, cross-plane with the operator-facing PV inventory (`.bob`
+screens AND `.plt` Data Browser trends):**
 `validate_pvs` · `crossplane_check` · `coverage_audit` · `find_device`
 <!-- END:tool-inventory -->
 
 Composing the display tools: `find_device` (where device X is shown, an operator screen or a Data
 Browser trend + live value + serving IOC), `coverage_audit` (which delivered PV has no
-screen/archive/alarm, the blind spots).
+screen/archive/alarm, the blind spots; a trend is not a screen there either).
 
 ### Answer shapes, and which topic explains the field in front of you
 
@@ -241,7 +242,10 @@ explanation. Ask `get_guide` for the topic named beside the field.
 | `broken` · `broken_write` · `ioc_db_resolved` · `ioc_db_needs_msi` | `err-crossplane` |
 | `cf_unregistered` · `cf_unregistered_write` · `cf_registered` · `cf_capped` | `err-crossplane` |
 | `cf_and_display` · `cf_only` · `display_only` · `critical_uncovered` · `blind_spots` · `unarchived` · `unalarmed` | `err-crossplane` |
-| `has_display` · `registered_cf` · `archived` · `alarmed` (the per-PV cells) | `err-crossplane` |
+| `trend_only` · `cf_trend_only` · `screens` · `trends` (of a coverage row) | `err-crossplane` |
+| `displays_linked` · `screens_linked` · `trends_linked` | `err-crossplane` |
+| `node_kind` · `display_count` · `trend_count` (of a device lookup) | `err-displays` |
+| `has_display` · `on_trend` · `registered_cf` · `archived` · `alarmed` (the per-PV cells) | `err-crossplane` |
 | `displays_incomplete` · `files_walked` | `err-crossplane` |
 | `shown_by_display` · `shown_by_display_capped` · `total` | `err-displays` |
 | `state` · `likely_cause` · `confidence` · `evidence` · `next_steps` | `err-pv` |
@@ -1181,8 +1185,12 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
 ### The display tools: which files they read, and the three ways to get `total: 0`
 
 - **`validate_pvs` reads TWO kinds of file: a `.bob` display and a `.plt` Data Browser trend.**
-  A trend is not a screen and the inventory does not pretend it is, it reports the kind on its own
-  field; but its trace PVs are real channels and the tool checks them like any other. How a trend
+  A trend is not a screen and the inventory does not pretend it is, it carries the kind on a field
+  of its own; but its trace PVs are real channels and the tool checks them like any other. ⚠ That
+  field is the INVENTORY's, and `validate_pvs` is the one display tool whose answer does not pass
+  it on: the other three do (`find_device` on `screens[].node_kind`, `coverage_audit` on a row's
+  `screens`/`trends`, `crossplane_check` on `screens_linked`/`trends_linked`). Here the file kind
+  is what you passed in, so the answer does not restate it. How a trend
   is REACHED decides which view finds it, and this is the one thing worth knowing before calling:
   embedded in a screen through a `databrowser` widget its traces are attributed to that SCREEN and
   only the file view of the trend finds them here, while a trend opened by an `open_file` button is
@@ -1323,8 +1331,36 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   counts the FILES a cap left half-expanded (a `.plt` trend can be one of them, which is why the
   report says files rather than displays), and `files_walked` is the universe that count is a share
   of, since 104 capped files mean something else against 284 walked than against 3000.
+- **`crossplane_check` links FILES, not screens, and `displays_linked` always held both.** Its
+  description promised "operator-facing displays only" while a `.plt` trend opened by a button was
+  in the list, unmarked. The list keeps its name and its contents, `screens_linked` and
+  `trends_linked` split it by kind, and the rendered half marks a trend on its own line with the
+  same words `find_device` uses. Nothing was filtered out: a trend that shows this IOC's channels
+  is a real provenance link, it was simply arriving as something it is not.
+- **A Data Browser trend does not count as a screen here, and until GQ-153 it did.** The display
+  index names every operator-facing top level, and a `.plt` trend opened by a button is one, so a
+  PV that appears on no `.bob` at all used to arrive with `has_display=yes` and drop out of
+  `cf_only`: out of the one count this tool exists to produce. Now `has_display` answers about
+  SCREENS alone, `on_trend` answers beside it with the same three values, and such a PV is named in
+  `trend_only` (reported whether or not the registry answered) and, when it is also registered, in
+  `cf_only` and in `cf_trend_only`. ⚠ So `cf_only` GREW, and the growth is the repair rather than a
+  regression: these entries were missing from a blind-spot list. Read `cf_trend_only` as the milder
+  half of `cf_only`, somebody can still reach those by opening a trend. ⚠ `critical_uncovered`
+  grows with it only on an UNCAPPED walk, and that is worth knowing before reading a big dataset:
+  `cf_only` is a set difference and holds these regardless, while `blind_spots` needs a PROVEN
+  `has_display: no`, and any capped file withholds that cell instead. Measured on a 5273-file
+  dataset with 118 capped: all 25 trend-only PVs came back `withheld`, named in `trend_only` and
+  counted in neither `blind_spots` nor `critical_uncovered`. Raise the context cap to turn them
+  into a proven finding. ⚠ `display_only` deliberately stays measured against ALL
+  operator-facing files rather than
+  screens alone: "is a delivered PV on a screen" and "do we show something the registry does not
+  know" are different questions, and narrowing it would silently drop unregistered trend PVs from
+  every report. Per row, `displays` is still the whole list and `screens` / `trends` split it
+  positively, so a later third file kind falls out of both instead of landing in the screen figure,
+  and a `notes` entry names it.
 - **`coverage_audit` answers each plane per PV with `yes`, `no` or `withheld`, and `withheld` is
-  never `no`.** The four cells are `has_display`, `registered_cf`, `archived` and `alarmed`;
+  never `no`.** The five cells are `has_display`, `on_trend`, `registered_cf`, `archived` and
+  `alarmed`;
   `withheld` means that plane could not answer (disabled, capped, a per-PV timeout, or a capped
   display walk) and never counts as a gap, which is why `critical_uncovered` lists only PVs with a
   PROVEN `no`. So the headline is a lower bound by construction: enable or fix the withheld plane

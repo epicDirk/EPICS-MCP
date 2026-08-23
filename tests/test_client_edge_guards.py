@@ -13,10 +13,15 @@ map recorded with ``COVERAGE_CORE=ctrace`` and some ten minutes, which is not a 
 
 Findings of the 2026-07-25 run, kept here rather than in a document nobody reads again:
 
-* Sham guards (direction B): **none found, which is not the same as none there.** 101 tests
+* Sham guards (direction B): **none found, which is not the same as none there.** 102 tests
   install a client class double in their own body and NOT ONE of them executes a client-edge guard
   line, which is what a class-level double is FOR: it takes the real client off the path. That is
-  the double used legitimately, to keep a service-layer test off the network. 21 of those also
+  the double used legitimately, to keep a service-layer test off the network. ⚠️ The 102nd arrived
+  with GQ-153 on 2026-08-23, AFTER that sweep, and was held against the same criterion by hand
+  rather than by the sweep: it replaces the whole ``ChannelFinderClient`` class so a coverage
+  audit can be joined against a known registry offline, and reaches no client-edge line. Every
+  further one is in the same position until the sweep is re-run, which is what the guard below
+  exists to keep visible. 21 of those also
   carry payload vocabulary, and every one of them was read: they claim SERVICE-layer behaviour (an
   already-constructed exception must not be relabelled "unreachable"; an unknown level is refused
   before any request is built; a plane refused by this command's own read throttle is reported as

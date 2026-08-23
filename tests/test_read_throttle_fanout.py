@@ -186,7 +186,10 @@ def _fake_sockets(
 
 
 def _run_coverage(count: int) -> None:
-    rows = [IndexRow(pv=_pv(i), displays=("d.bob",), roles=("read",)) for i in range(1, count + 1)]
+    rows = [
+        IndexRow(pv=_pv(i), displays=("d.bob",), screens=("d.bob",), trends=(), roles=("read",))
+        for i in range(1, count + 1)
+    ]
     audit_coverage(
         rows,
         scope="SIM:",
@@ -207,6 +210,7 @@ def _run_crossplane(count: int) -> None:
             resolution="resolved",
             role="read",
             protocol="ca",
+            node_kind="display",
         )
         for i in range(1, count + 1)
     ]

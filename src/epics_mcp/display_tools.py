@@ -200,7 +200,9 @@ async def crossplane_check(
     """Cross-plane PV provenance: join macro-expanded display PVs ↔ e3 IOC (st.cmd) ↔ ESS Naming.
 
     Read-only. Returns a structured report plus a Markdown rendering. The display PVs come from the
-    macro-expanded, per-instance PV-inventory (operator-facing displays only); concrete PVs sharing
+    macro-expanded, per-instance PV-inventory over the operator-facing files, which are NOT screens
+    only: a .plt Data Browser trend opened by a button is one, so displays_linked holds both kinds
+    and screens_linked / trends_linked split it by kind. Concrete PVs sharing
     the IOC prefix are 'linked' (writable subset surfaced), others 'other_prefix'. PVs the inventory
     cannot resolve to a concrete channel are 'indeterminate' (dynamic/unresolved) and never judged
     'broken'; non-channel protocols (loc/sim/sys/other) are excluded from the join and reported
@@ -235,7 +237,8 @@ async def coverage_audit(
         str,
         Field(
             description="project/dataset ROOT of .bob displays (.plt Data Browser trends found "
-            "there contribute their trace PVs too)"
+            "there contribute their trace PVs too, but a trend is not a screen: a PV that appears "
+            "on no .bob at all is reported in trend_only and stays a cf_only blind-spot)"
         ),
     ],
     scope: Annotated[
@@ -286,11 +289,15 @@ async def coverage_audit(
 ) -> dict[str, object]:
     """Cross-plane coverage audit: which delivered PV has no display/archive/alarm, and back.
 
-    Read-only. Joins the Wedge-0 display-PV index (PV→[screens]) with ChannelFinder (delivered PVs,
+    Read-only. Joins the Wedge-0 display-PV index (PV to the operator-facing files showing it) with
+    ChannelFinder (delivered PVs,
     the anchor), the Archiver and the Phoebus Alarm config. Each runtime plane is queried only when
     requested AND its *_URL is set; a missing URL withholds that plane (never a false 'no'). Returns
     the cross-coverage matrix (cf_and_display / cf_only=blind-spots / display_only) + verdicts
     + critical_uncovered (delivered AND a proven gap), with honest lower-bound notes.
+    A .plt Data Browser trend is NOT a screen: has_display answers about screens alone, on_trend
+    answers beside it, and a PV reachable only by opening a trend is named in trend_only and counts
+    as a cf_only blind-spot (cf_trend_only is that milder subset of it).
     """
     answer = await _coverage_audit(
         displays_dir,

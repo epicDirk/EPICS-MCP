@@ -1,9 +1,14 @@
 """Tool function for the cross-plane coverage audit (Display ↔ ChannelFinder ↔ Archiver ↔ Alarm).
 
-Read-only join of the Wedge-0 display-PV index (``PV → [screens]``, via the SHA-pinned
-``opi_navigation`` inventory) with the runtime planes: ChannelFinder (delivered PVs), the Archiver
-Appliance, and the Phoebus Alarm config. Pure file I/O + optional read-only HTTP GETs; no running
-IOC and no PV writes.
+Read-only join of the Wedge-0 display-PV index (``PV → [operator-facing files]``, via the
+SHA-pinned ``opi_navigation`` inventory) with the runtime planes: ChannelFinder (delivered PVs), the
+Archiver Appliance, and the Phoebus Alarm config. Pure file I/O + optional read-only HTTP GETs; no
+running IOC and no PV writes.
+
+⚠ ``[screens]`` is what this line said until GQ-153, and the index never held screens only: a
+``.plt`` Data Browser trend opened by a button is an operator-facing top level of its own. The
+audit splits the two now, so ``has_display`` and therefore ``cf_only`` are about SCREENS, and a PV
+reachable only by opening a trend is named in ``trend_only`` instead of counting as visible.
 
 Thin MCP adapter: the audit orchestration lives in
 :func:`epics_mcp.services.orchestration.build_coverage_report` (shared verbatim with the

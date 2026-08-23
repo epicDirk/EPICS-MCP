@@ -6,8 +6,27 @@ from epics_mcp.services.coverage import IndexRow, audit_coverage, render_markdow
 from epics_mcp.services.crossplane import CFRegistryCapped
 
 
-def _row(pv: str, *, displays: tuple[str, ...] = ("d.bob",), role: str = "read") -> IndexRow:
-    return IndexRow(pv=pv, displays=displays, roles=(role,))
+def _row(
+    pv: str,
+    *,
+    displays: tuple[str, ...] = ("d.bob",),
+    role: str = "read",
+    trends: tuple[str, ...] = (),
+) -> IndexRow:
+    """Build an IndexRow (default: shown on one operator screen, read).
+
+    ``displays`` is the whole; whatever is not named in *trends* is a screen. Defaulted here, in
+    one test helper, rather than on the fields themselves: a row whose kinds nobody stated must be
+    impossible in ``src``, while a test that is not about kinds should not have to say so at every
+    call. GQ-153.
+    """
+    return IndexRow(
+        pv=pv,
+        displays=displays,
+        screens=tuple(d for d in displays if d not in trends),
+        trends=tuple(d for d in displays if d in trends),
+        roles=(role,),
+    )
 
 
 class _FakeCF:
@@ -474,3 +493,51 @@ def test_the_cap_line_reports_the_share_of_the_walked_universe() -> None:
     # same unanswerable question as the bare count it replaces.
     assert "8 files this walk visited" in head_line
     assert report.files_walked == 8
+
+
+# --- GQ-153: the three file tuples, and what happens to a kind nobody taught this report --------
+
+
+def test_a_rows_two_kind_tuples_never_exceed_its_whole_file_list() -> None:
+    """The invariant the split rests on: ``screens | trends`` is a SUBSET of ``displays``.
+
+    Stated in ``IndexRow``'s docstring and worth a guard rather than a promise, because the three
+    are carried separately on purpose (a derived union would drop a file of an unknown kind
+    entirely, name and all). Separate carriers can disagree, and this is the direction that would
+    matter: a name appearing in a kind tuple and not in the whole would be an invented file.
+    """
+    rows = [
+        _row("SIM:A", displays=("s.bob", "t.plt"), trends=("t.plt",)),
+        _row("SIM:B", displays=("s.bob",)),
+    ]
+    report = audit_coverage(rows, scope="SIM:")
+
+    for row in report.rows:
+        assert set(row.screens) | set(row.trends) <= set(row.displays), (
+            f"{row.pv} names a file in a kind tuple that is not in its own displays list"
+        )
+
+
+def test_a_file_of_an_unknown_kind_is_named_rather_than_counted_as_a_screen() -> None:
+    """A third ``NodeKind`` must fall out of BOTH tuples and be reported, never absorbed.
+
+    ``NodeKind`` has exactly two members today, so this is the branch that has no natural fixture
+    and would otherwise ship unexercised: the row below carries a file in ``displays`` and in
+    neither projection, which is exactly what the adapter produces the day the engine grows a kind
+    this server has not been taught. The wrong behaviour is silent: counting it as a screen would
+    make ``has_display`` say yes about a file nobody here can name.
+    """
+    unknown = IndexRow(
+        pv="SIM:A", displays=("mystery.xyz",), screens=(), trends=(), roles=("read",)
+    )
+    report = audit_coverage([unknown], scope="SIM:")
+
+    row = next(r for r in report.rows if r.pv == "SIM:A")
+    assert row.has_display == "no", "an unnameable file must not answer for a screen"
+    assert row.on_trend == "no"
+    assert row.displays == ("mystery.xyz",), "the file must not be dropped from the answer"
+    assert any("mystery.xyz" in note for note in report.notes), (
+        "a file kind this report cannot name has to be SAID, not silently ignored"
+    )
+    # And it is not a trend either: trend_only is built positively, so it stays out of both.
+    assert report.trend_only == ()

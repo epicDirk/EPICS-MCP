@@ -10,6 +10,7 @@ import pytest
 from opi_navigation.pv_analysis.lookup import DisplayMatch, PvLookupResult
 
 from epics_mcp.services.device_lookup import (
+    _KIND_MARKERS,
     _VALUE_CAP,
     DeviceLookupReport,
     _format_channel_value,
@@ -685,3 +686,19 @@ def test_a_report_of_screens_only_counts_no_trends() -> None:
 
     assert (report.display_count, report.trend_count) == (2, 0)
     assert all(screen.node_kind == "display" for screen in report.screens)
+
+
+def test_all_three_trend_markers_are_the_same_one_table_entry() -> None:
+    """The three-way identity GQ-153 created, held where the engine is available.
+
+    ``find_device`` and ``crossplane_check`` both mark a Data Browser trend in a file list. The
+    phrase lives once, in ``display_files.KIND_MARKERS``, and each renderer aliases it; a reworded
+    phrase therefore moves both surfaces at once or reddens here. It sits in THIS module because
+    ``device_lookup`` imports the engine, so the assertion cannot live in ``test_crossplane.py``,
+    which runs on an engine-less install too.
+    """
+    from epics_mcp.display_files import KIND_MARKERS
+    from epics_mcp.services.crossplane import _TREND_MARKER
+
+    assert _KIND_MARKERS is KIND_MARKERS, "device_lookup must alias the table, not copy it"
+    assert KIND_MARKERS["trend"] == _TREND_MARKER

@@ -515,3 +515,87 @@ async def test_crossplane_cap_override_changes_withhold_behaviour(
     assert isinstance(capped, dict)
     assert capped["cf_capped"] is True
     assert capped["cf_unregistered"] == []
+
+
+# --- GQ-153: the join carries screens AND trends, and says which is which --------------------
+
+# Same shape as the coverage fixture: a screen, a menu whose button OPENS a trend, and that trend.
+# Every channel shares the IOC prefix, so all of them land in `linked` and the only question this
+# fixture asks is which KIND of file each linked one was found on.
+_TREND_PANEL_BOB = (
+    '<display version="2.0.0"><name>Panel</name>'
+    '<widget type="textupdate"><name>s</name>'
+    "<pv_name>DEV-TEST01:Ctrl-EVR-01:status</pv_name></widget>"
+    "</display>"
+)
+_TREND_MENU_BOB = (
+    '<display version="2.0.0"><name>Menu</name>'
+    '<widget type="action_button" version="3.0.0"><name>b</name><actions>'
+    '<action type="open_file"><file>beam.plt</file><description>Trend</description></action>'
+    "</actions></widget></display>"
+)
+_TREND_PLT = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    "<databrowser><title>Beam</title><pvlist>"
+    "<pv><name>DEV-TEST01:Ctrl-EVR-01:trendonly</name><visible>true</visible><axis>0</axis></pv>"
+    "</pvlist></databrowser>"
+)
+
+
+def _setup_with_trend(tmp_path: Path) -> tuple[Path, Path]:
+    """Write a root holding a screen, a menu that opens a trend, that trend, and an st.cmd."""
+    displays = tmp_path / "displays"
+    displays.mkdir()
+    (displays / "panel.bob").write_text(_TREND_PANEL_BOB, encoding="utf-8")
+    (displays / "menu.bob").write_text(_TREND_MENU_BOB, encoding="utf-8")
+    (displays / "beam.plt").write_text(_TREND_PLT, encoding="utf-8")
+    st_cmd = tmp_path / "st.cmd"
+    st_cmd.write_text(_ST_CMD, encoding="utf-8")
+    return displays, st_cmd
+
+
+@pytest.mark.asyncio
+async def test_the_trend_fixture_really_links_both_kinds_of_file(tmp_path: Path) -> None:
+    """Guard on the FIXTURE first (the GQ-21 lesson): both files must actually reach the join.
+
+    Without this, a report whose ``displays_linked`` held only the screen would satisfy a
+    "the trend is not counted as a screen" assertion for the wrong reason.
+    """
+    displays, st_cmd = _setup_with_trend(tmp_path)
+    result = await _crossplane_check(str(displays), str(st_cmd), query_naming=False)
+    report = result["report"]
+    assert isinstance(report, dict)
+    assert set(report["displays_linked"]) == {"beam.plt", "panel.bob"}
+    assert "DEV-TEST01:Ctrl-EVR-01:trendonly" in report["pvs_linked"]
+    assert "DEV-TEST01:Ctrl-EVR-01:status" in report["pvs_linked"]
+
+
+@pytest.mark.asyncio
+async def test_a_linked_trend_is_reported_as_a_trend_and_a_screen_as_a_screen(
+    tmp_path: Path,
+) -> None:
+    """GQ-153: ``crossplane_check`` promised "operator-facing displays only" and shipped trends.
+
+    Both directions in one test, because an implementation that calls every linked file a trend
+    would satisfy half of it. Counted POSITIVELY into two tuples rather than one tuple minus the
+    other, the same choice GQ-21 made for ``find_device``: a third ``NodeKind`` would then fall out
+    of both and be visible, instead of landing silently in the screen count.
+    """
+    displays, st_cmd = _setup_with_trend(tmp_path)
+    result = await _crossplane_check(str(displays), str(st_cmd), query_naming=False)
+    report = result["report"]
+    assert isinstance(report, dict)
+
+    assert report["screens_linked"] == ["panel.bob"]
+    assert report["trends_linked"] == ["beam.plt"]
+    # The union stays the wire-compatible whole; nothing may fall out of both unnoticed.
+    assert set(report["screens_linked"]) | set(report["trends_linked"]) == set(
+        report["displays_linked"]
+    )
+
+    markdown = result["markdown"]
+    assert isinstance(markdown, str)
+    trend_line = next(line for line in markdown.splitlines() if "beam.plt" in line)
+    screen_line = next(line for line in markdown.splitlines() if "panel.bob" in line)
+    assert "Data Browser trend (not a screen)" in trend_line
+    assert "Data Browser trend" not in screen_line

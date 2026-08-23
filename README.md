@@ -6,7 +6,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 
 Ask an AI assistant about your EPICS control system. What is this PV reading right now? Why is
-it disconnected? Which operator screens show this device, and is it archived and
+it disconnected? Which operator screens and trends show this device, and is it archived and
 alarm-configured? The server exposes your EPICS layer as **Model Context Protocol (MCP)** tools
 over [p4p](https://mdavidsaver.github.io/p4p/), so an assistant can answer those the way an
 operator would, instead of you clicking through CS-Studio, the Archiver Appliance UI and

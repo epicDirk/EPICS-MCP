@@ -63,6 +63,11 @@ def inventory_join_pvs(inventory: PvInventory) -> list[JoinPv]:
             resolution=expanded.resolution,
             role=expanded.role,
             protocol=expanded.protocol,
+            # GQ-153: the kind of the TOP LEVEL, taken from the engine's own field and never from
+            # the suffix. It is already in hand here, one attribute away from the path this loop
+            # was already reading, and the join used to throw it away and then promise
+            # "operator-facing displays only" downstream.
+            node_kind=display.node_kind,
         )
         for display in inventory.displays
         if display.operator_facing
@@ -143,15 +148,49 @@ def _index_rows(inventory: PvInventory) -> list[IndexRow]:
     """Project the inventory's global ``PV → [displays]`` index into :class:`IndexRow` rows.
 
     The index is real-protocol only, so each ``pv`` is normalized to its protocol-free channel name.
+
+    ⭐ **GQ-153: the KIND of each listed top level is joined on here, and this is the whole of the
+    repair.** ``PvIndexEntry`` carries ``pv``, ``protocol``, ``displays`` and ``roles`` and no kind,
+    measured against the pinned engine, so the coverage audit had no way to tell a ``.plt`` Data
+    Browser trend from a screen and counted a trend-only PV as screen-visible. The kind was never
+    missing from the WALK, only from that one projection: ``inventory.displays`` carries
+    ``node_kind`` per top level, out of the same run, and the two are joined by the display path.
+
+    The join is TOTAL over the index, structurally rather than by luck: the index is built from
+    ``real_resolved``, a subset of the expanded PVs, while the per-display inventories are grouped
+    over exactly those expanded PVs (``opi_navigation.pv_analysis.inventory``). Every path the
+    index names therefore has its own ``DisplayPvInventory``. Measured on the pinned engine over a
+    fixture and over ``mcr-operations`` (87 388 index entries): zero paths without a kind.
+
+    ⚠ The ENGINE'S FIELD, never the ``.plt`` suffix, and the reason is a layering one rather than a
+    disagreement between the two. Measured on the pinned engine, they agree by CONSTRUCTION: the
+    walk routes a candidate into the trend parser by suffix and stamps ``node_kind="trend"`` on
+    every ``.plt`` it collects, so a Perl ``.plt`` (there are 17 under a checkout of ``epics-base``)
+    would arrive as a trend that simply fails to parse, ``parse_ok`` being the value the root
+    element decides. Which is the engine's business. Reading the suffix HERE would freeze today's
+    rule into a promise this server cannot keep, and the engine is free to change it without
+    telling us. ``device_lookup.ScreenMatch`` states exactly this, and GQ-21 followed it one file
+    over. ⚠ An earlier draft of this paragraph said the root element decides the KIND. It does not;
+    it decides whether the file parses. The correction came from this item's own post-build review.
+
+    An unknown future kind lands in neither projection while staying in ``displays``, where
+    :func:`~epics_mcp.services.coverage.audit_coverage` reports it rather than folding it into the
+    screens.
     """
-    return [
-        IndexRow(
-            pv=channel_name(entry.pv),
-            displays=tuple(str(display) for display in entry.displays),
-            roles=tuple(str(role) for role in entry.roles),
+    kinds = {display.display_path: display.node_kind for display in inventory.displays}
+    rows: list[IndexRow] = []
+    for entry in inventory.index:
+        displays = tuple(str(display) for display in entry.displays)
+        rows.append(
+            IndexRow(
+                pv=channel_name(entry.pv),
+                displays=displays,
+                screens=tuple(d for d in displays if kinds.get(d) == "display"),
+                trends=tuple(d for d in displays if kinds.get(d) == "trend"),
+                roles=tuple(str(role) for role in entry.roles),
+            )
         )
-        for entry in inventory.index
-    ]
+    return rows
 
 
 def analyze_display_pvs(
@@ -186,8 +225,10 @@ def analyze_display_index(
     """Run the Wedge-0 inventory over *repo_root*; return the ``PV → [displays]`` index as rows.
 
     Symmetric to :func:`analyze_display_pvs`, but reads the inventory's ``index`` field (the global
-    operator-facing, resolved, real-protocol PV→[screens] index) instead of the per-display PV
-    lists, the input the coverage audit's display set ``D`` needs. *repo_root* must be the dataset
+    operator-facing, resolved, real-protocol PV to the FILES showing it, screens and Data Browser
+    trends alike, which is why :func:`_index_rows` joins each file's kind on) instead of the
+    per-display PV lists, the input the coverage audit's display set ``D`` needs. *repo_root* must
+    be the dataset
     ROOT (the operator top-levels there bind the display macros). Returns ``(index_rows,
     context_capped, glob_capped_count, files_walked)``; the last three carry the inventory's
     lower-bound signals, and ``files_walked`` is the denominator that turns the cap COUNT into a

@@ -23,6 +23,8 @@ from opi_navigation.pv_analysis import channel_name
 from opi_navigation.pv_analysis.lookup import PvLookupResult
 from pydantic import BaseModel, ConfigDict
 
+from epics_mcp.display_files import KIND_MARKERS
+
 PvRole = Literal["read", "write"]
 
 #: Longest RENDERED scalar value in the report, the trailing ellipsis included. Named rather than
@@ -36,7 +38,11 @@ _VALUE_CAP = 80
 #: which is precisely the branch a third kind would need. The lookup keeps that branch alive
 #: without a type-level lie, and a third kind then renders as itself instead of silently borrowing
 #: the look of a display row (the row half of the same trap the positive counters close).
-_KIND_MARKERS: dict[str, str] = {"trend": ", Data Browser trend (not a screen)"}
+#:
+#: ⚠ The PHRASE moved to ``display_files`` with GQ-153 and is only aliased here.
+#: ``crossplane_check`` marks a trend in its own file list now, and a human-facing phrase kept in
+#: two renderers is the drift GB-72 had to unpick across four tools once already.
+_KIND_MARKERS = KIND_MARKERS
 
 
 class _Model(BaseModel):

@@ -30,7 +30,7 @@ of 27 KB and more, each larger than a sibling surface's ENTIRE guide. So the key
 document instead: a ``## `` key serves that section's own text and a ``### `` key serves one
 subsection, in one flat namespace, with no overlap and no gap. The practical effect is the point:
 a caller asking which tool answers a question gets the tool inventory, roughly 1.5 KB, not the
-31 KB section that opens with it.
+34 KB section that opens with it.
 
 ⚠️ **The error signatures were the second section this argument applies to, and for a while they
 were the counter-example to it.** They are what a caller reaches this surface for most often, and

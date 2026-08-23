@@ -195,3 +195,171 @@ def test_cli_coverage_rejects_displays_dir_outside_allowed_roots(
         assert rc == 2
     finally:
         config_module._config = None
+
+
+# --- GQ-153: a PV that lives only on a Data Browser trend is not screen-visible ---------------
+
+# The trend fixture: `panel.bob` is a real operator screen, `beam.plt` is a Data Browser trend that
+# a button OPENS (an open_file target is a top level of its own, which is what makes it reachable
+# by the operator and therefore part of the index). One channel sits on the screen alone, one on
+# the trend alone, one on BOTH. Three cases in one fixture on purpose: an implementation that
+# calls every top level a trend satisfies the first assertion and fails the third.
+_TREND_PANEL_BOB = (
+    '<display version="2.0.0"><name>Panel</name>'
+    '<widget type="textupdate"><name>s</name>'
+    "<pv_name>DEV-TEST01:Ctrl-EVR-01:status</pv_name></widget>"
+    '<widget type="textupdate"><name>b</name>'
+    "<pv_name>DEV-TEST01:Ctrl-EVR-01:both</pv_name></widget>"
+    "</display>"
+)
+_TREND_MENU_BOB = (
+    '<display version="2.0.0"><name>Menu</name>'
+    '<widget type="action_button" version="3.0.0"><name>b</name><actions>'
+    '<action type="open_file"><file>beam.plt</file><description>Trend</description></action>'
+    "</actions></widget></display>"
+)
+_TREND_PLT = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    "<databrowser><title>Beam</title><pvlist>"
+    "<pv><name>DEV-TEST01:Ctrl-EVR-01:trendonly</name><visible>true</visible><axis>0</axis></pv>"
+    "<pv><name>DEV-TEST01:Ctrl-EVR-01:both</name><visible>true</visible><axis>0</axis></pv>"
+    "</pvlist></databrowser>"
+)
+
+
+def _setup_with_trend(tmp_path: Path) -> Path:
+    """Write a project root holding a screen, a menu that opens a trend, and that trend."""
+    displays = tmp_path / "displays"
+    displays.mkdir()
+    (displays / "panel.bob").write_text(_TREND_PANEL_BOB, encoding="utf-8")
+    (displays / "menu.bob").write_text(_TREND_MENU_BOB, encoding="utf-8")
+    (displays / "beam.plt").write_text(_TREND_PLT, encoding="utf-8")
+    return displays
+
+
+class _StubCFClientWithTrend:
+    """Registers the screen PV, the trend-only PV, the shared one, and one shown nowhere."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        pass
+
+    def find_channels(self, pattern: str, max_results: int = 500) -> list[dict[str, str]]:
+        return [
+            {"name": "DEV-TEST01:Ctrl-EVR-01:status"},
+            {"name": "DEV-TEST01:Ctrl-EVR-01:both"},
+            {"name": "DEV-TEST01:Ctrl-EVR-01:trendonly"},
+            {"name": "DEV-TEST01:Ctrl-EVR-01:extra"},
+        ]
+
+
+@pytest.mark.asyncio
+async def test_the_fixture_really_carries_a_screen_a_trend_and_a_shared_channel(
+    tmp_path: Path,
+) -> None:
+    """Guard on the FIXTURE, before anything is asserted about the verdicts.
+
+    A red proof over a fixture that produces no trend at all is vacuum-red: it goes green the
+    moment the field exists and says nothing about the defect. So this asserts the raw material
+    first, that all three channels reach the index and that the trend's own channel arrives
+    attributed to the ``.plt`` rather than to the menu that opens it.
+
+    ⚠ GQ-21 did not pay for this, it AVOIDED it, and the difference is worth the correction: an
+    earlier draft here claimed the scar. What that item actually carries is a non-vacuity assertion
+    of its own (``tests/test_find_device_tool.py``, "Not a vacuous agreement: this fixture really
+    does hold one of each"), which is the same guard shaped for a different report. Borrowing an
+    incident nobody had is the class of claim this repository's evidence discipline rejects.
+    """
+    from epics_mcp.services.inventory_adapter import analyze_display_index
+
+    rows, _capped, _glob, walked = analyze_display_index(_setup_with_trend(tmp_path))
+    by_pv = {row.pv: row for row in rows}
+    assert walked >= 3, "the walk must have visited the two screens and the trend"
+    assert by_pv["DEV-TEST01:Ctrl-EVR-01:status"].displays == ("panel.bob",)
+    assert by_pv["DEV-TEST01:Ctrl-EVR-01:trendonly"].displays == ("beam.plt",)
+    assert set(by_pv["DEV-TEST01:Ctrl-EVR-01:both"].displays) == {"beam.plt", "panel.bob"}
+
+
+@pytest.mark.asyncio
+async def test_a_trend_only_pv_is_not_reported_as_screen_visible(tmp_path: Path) -> None:
+    """GQ-153, both directions: the trend-only channel is NOT on a screen, the screen one IS.
+
+    Driven through the TOOL rather than through the engine underneath, and that is the whole
+    point: the engine has carried ``node_kind`` since GB-12, so a test one layer down stays green
+    through exactly the defect it is meant to pin. What was broken is this server's projection.
+
+    The shared channel is the second direction. It sits on a screen AND on a trend, so it must
+    keep ``has_display=yes`` and must not appear in ``trend_only``; an implementation that treats
+    "appears on any trend" as "trend-only" passes the first assertion and fails here.
+    """
+    result = await _coverage_audit(
+        str(_setup_with_trend(tmp_path)), scope="DEV-TEST01:Ctrl-EVR-01:"
+    )
+    report = result["report"]
+    assert isinstance(report, dict)
+    cells = {row["pv"]: row for row in report["rows"]}
+
+    assert cells["DEV-TEST01:Ctrl-EVR-01:status"]["has_display"] == "yes"
+    assert cells["DEV-TEST01:Ctrl-EVR-01:both"]["has_display"] == "yes"
+    assert cells["DEV-TEST01:Ctrl-EVR-01:trendonly"]["has_display"] == "no"
+
+    assert cells["DEV-TEST01:Ctrl-EVR-01:status"]["on_trend"] == "no"
+    assert cells["DEV-TEST01:Ctrl-EVR-01:both"]["on_trend"] == "yes"
+    assert cells["DEV-TEST01:Ctrl-EVR-01:trendonly"]["on_trend"] == "yes"
+
+    assert report["trend_only"] == ["DEV-TEST01:Ctrl-EVR-01:trendonly"]
+
+
+@pytest.mark.asyncio
+async def test_a_trend_only_pv_lands_in_the_cf_only_blind_spot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The headline: ``cf_only`` is "registered but on NO screen", and it used to lose these.
+
+    A channel delivered by the IOC that an operator can only reach by opening a trend is a blind
+    spot, which is the count this tool exists to produce. ``cf_trend_only`` names the subset of
+    that blind-spot list that is at least trended, so the two are told apart without the caller
+    intersecting two tuples by hand.
+    """
+    import epics_mcp.config as config_module
+
+    displays = _setup_with_trend(tmp_path)
+    monkeypatch.setenv("EPICS_MCP_CHANNELFINDER_URL", "http://cf")
+    monkeypatch.setattr("epics_mcp.services.checkers.ChannelFinderClient", _StubCFClientWithTrend)
+    config_module._config = None
+    try:
+        result = await _coverage_audit(
+            str(displays), scope="DEV-TEST01:Ctrl-EVR-01:", query_channelfinder=True
+        )
+    finally:
+        config_module._config = None
+    report = result["report"]
+    assert isinstance(report, dict)
+
+    assert report["cf_and_display"] == [
+        "DEV-TEST01:Ctrl-EVR-01:both",
+        "DEV-TEST01:Ctrl-EVR-01:status",
+    ]
+    assert report["cf_only"] == [
+        "DEV-TEST01:Ctrl-EVR-01:extra",
+        "DEV-TEST01:Ctrl-EVR-01:trendonly",
+    ]
+    assert report["cf_trend_only"] == ["DEV-TEST01:Ctrl-EVR-01:trendonly"]
+    # The delivered, screen-less channel is a proven gap now, so it reaches the red headline.
+    assert "DEV-TEST01:Ctrl-EVR-01:trendonly" in report["blind_spots"]
+    assert "DEV-TEST01:Ctrl-EVR-01:trendonly" in report["critical_uncovered"]
+
+
+@pytest.mark.asyncio
+async def test_the_rendered_report_names_the_trend_split(tmp_path: Path) -> None:
+    """The Markdown half is what a person reads, so the split has to be visible there too.
+
+    GQ-21 made the same call for ``find_device``: a header a reader draws a conclusion from may
+    not silently fold a trend into a screen count.
+    """
+    result = await _coverage_audit(
+        str(_setup_with_trend(tmp_path)), scope="DEV-TEST01:Ctrl-EVR-01:"
+    )
+    markdown = result["markdown"]
+    assert isinstance(markdown, str)
+    assert "Data Browser trend" in markdown
+    assert "DEV-TEST01:Ctrl-EVR-01:trendonly" in markdown

@@ -7,6 +7,8 @@ operator-facing/fragment-seed filter, is covered in ``test_inventory_adapter.py`
 end-to-end path (real .bob → resolved → linked) in ``test_crossplane_tool.py``.
 """
 
+from typing import Literal
+
 from epics_mcp.services.crossplane import (
     CFRegistryCapped,
     JoinPv,
@@ -72,12 +74,31 @@ def _jp(
     display: str,
     pv: str,
     *,
-    resolution: str = "resolved",
-    role: str = "read",
-    protocol: str = "ca",
+    resolution: Literal["resolved", "dynamic", "unresolved"] = "resolved",
+    role: Literal["read", "write"] = "read",
+    protocol: Literal["ca", "pva", "loc", "sim", "sys", "other"] = "ca",
+    node_kind: Literal["display", "trend"] = "display",
 ) -> JoinPv:
-    """Build a JoinPv row (defaults: resolved, read, ca)."""
-    return JoinPv(display=display, pv=pv, resolution=resolution, role=role, protocol=protocol)  # type: ignore[arg-type]
+    """Build a JoinPv row (defaults: resolved, read, ca, on an operator screen).
+
+    ``node_kind`` is defaulted HERE, in one test helper, and not on the field itself: a row whose
+    kind nobody stated must be impossible in ``src``, while a test that is not about kinds should
+    not have to say so at every call. GQ-153.
+
+    ⚠ The four keyword parameters carry the Literals rather than ``str`` plus a blanket
+    ``type: ignore[arg-type]`` on the call, which is what stood here. That ignore silenced FOUR
+    arguments at once, so a typo in any of them was unreachable for mypy; every call site passes a
+    string literal, which a Literal parameter accepts, so the looseness bought nothing. A test that
+    means to pass an invalid value now says so at ITS OWN call, which is where the intent is.
+    """
+    return JoinPv(
+        display=display,
+        pv=pv,
+        resolution=resolution,
+        role=role,
+        protocol=protocol,
+        node_kind=node_kind,
+    )
 
 
 def test_linked_indeterminate_and_other_prefix() -> None:
@@ -693,3 +714,71 @@ def test_the_too_narrow_note_stays_away_once_something_concrete_resolves() -> No
 
     assert report.pvs_linked == ("DEV-TEST01:Ctrl-EVR-01:x",)
     assert not any("too narrow" in n for n in report.notes), report.notes
+
+
+# --- GQ-153: the linked files split by kind, and the one phrase both renderers use --------------
+
+
+def test_the_linked_files_split_by_kind_and_the_union_is_the_whole_list() -> None:
+    """``screens_linked`` and ``trends_linked`` partition ``displays_linked``, both counted up.
+
+    Stated in ``CrossPlaneReport``'s field comments, and the union is the half worth a guard: the
+    two are projected positively rather than one taken as the other's remainder, so nothing may
+    fall out of both while the whole still holds it.
+    """
+    join = [
+        _jp("panel.bob", "DEV-TEST01:Ctrl-EVR-01:status"),
+        _jp("beam.plt", "DEV-TEST01:Ctrl-EVR-01:trendonly", node_kind="trend"),
+    ]
+    report = crossplane_check(join, _st())
+
+    assert report.displays_linked == ("beam.plt", "panel.bob")
+    assert report.screens_linked == ("panel.bob",)
+    assert report.trends_linked == ("beam.plt",)
+    assert set(report.screens_linked) | set(report.trends_linked) == set(report.displays_linked)
+
+
+def test_a_linked_file_of_an_unknown_kind_is_named_rather_than_counted_as_a_screen() -> None:
+    """A third ``NodeKind`` must fall out of both projections and be SAID, never absorbed.
+
+    ``NodeKind`` has exactly two members today, so this branch has no natural fixture and would
+    otherwise ship unexercised. The wrong behaviour is the silent one: folding the unknown file
+    into ``screens_linked`` would report a screen that nobody here can name as such.
+    """
+    join = [
+        _jp("panel.bob", "DEV-TEST01:Ctrl-EVR-01:status"),
+        _jp(
+            "mystery.xyz",
+            "DEV-TEST01:Ctrl-EVR-01:other",
+            node_kind="hologram",  # type: ignore[arg-type]  # a kind the Literal does not know, on purpose
+        ),
+    ]
+    report = crossplane_check(join, _st())
+
+    assert "mystery.xyz" in report.displays_linked, "the file must not vanish from the answer"
+    assert "mystery.xyz" not in report.screens_linked
+    assert "mystery.xyz" not in report.trends_linked
+    assert any("hologram" in note for note in report.notes), (
+        "a linked file kind this report cannot name has to be said, not silently ignored"
+    )
+
+
+def test_this_renderer_marks_a_trend_with_the_shared_phrase() -> None:
+    """One phrase, one table. Two renderers spelling it differently is the GB-72 defect class.
+
+    ``crossplane_check`` marks a Data Browser trend in its file list, and reads the marker from
+    ``display_files.KIND_MARKERS`` rather than carrying a literal of its own. ``find_device``'s
+    renderer reads the same table, and the THREE-way identity is asserted in
+    ``tests/test_device_lookup.py``: that surface reaches ``opi_navigation``, and this module runs
+    on an engine-less install (``tests/test_engine_gate.py`` catches exactly that import).
+    """
+    from epics_mcp.display_files import KIND_MARKERS
+    from epics_mcp.services.crossplane import _TREND_MARKER
+
+    assert KIND_MARKERS["trend"] == _TREND_MARKER
+
+    report = crossplane_check(
+        [_jp("beam.plt", "DEV-TEST01:Ctrl-EVR-01:x", node_kind="trend")], _st()
+    )
+    trend_line = next(line for line in render_markdown(report).splitlines() if "beam.plt" in line)
+    assert _TREND_MARKER in trend_line

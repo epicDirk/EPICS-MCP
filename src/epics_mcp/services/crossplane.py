@@ -40,11 +40,19 @@ from typing import Literal, NamedTuple, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
+from epics_mcp.display_files import KIND_MARKERS
 from epics_mcp.services.e3_db import StCmdInfo
 from epics_mcp.services.naming_client import NameStatus
 from epics_mcp.services.naming_exceptions import NamingServiceResponseError
 
 logger = logging.getLogger(__name__)
+
+#: What a Data Browser trend is called in this report's file list. Read from the shared table
+#: rather than spelled here, so this renderer and ``find_device``'s cannot say it differently.
+#: ``tests/test_crossplane.py`` holds THIS renderer against the table; the three-way identity with
+#: ``device_lookup`` lives in ``tests/test_device_lookup.py``, because that module reaches
+#: ``opi_navigation`` and this one runs on an engine-less install too.
+_TREND_MARKER = KIND_MARKERS["trend"]
 
 #: Protocols that are real plant channels (the only ones joined against an IOC). Mirrors
 #: ``opi_navigation.pv_analysis.models.REAL_PROTOCOLS`` (kept local, no foreign import).
@@ -126,7 +134,20 @@ class JoinPv(NamedTuple):
     The narrow seam the join needs from the ``opi_navigation`` PV-inventory: the tool/CLI edge
     translates each ``ExpandedPv`` of an **operator-facing** display into one of these (embed-only
     fragment standalone seeds are filtered out at the edge, so they never reach the join). The
-    field literals match ``ExpandedPv.{resolution,role,protocol}`` verbatim.
+    field literals match ``ExpandedPv.{resolution,role,protocol}`` and
+    ``DisplayPvInventory.node_kind`` verbatim, which is how this module stays free of
+    ``opi_navigation`` imports while still speaking its vocabulary.
+
+    ⚠ ``display`` is not necessarily a screen, and GQ-153 is the record of that reading a caller
+    astray one level up. The edge cuts on ``operator_facing`` and never on the kind of file, so a
+    ``.plt`` Data Browser trend opened by a button is a top level in its own right and arrives
+    here. ``node_kind`` is what says which it is.
+
+    ``node_kind`` carries NO default on purpose, unlike the wire models' additive kind fields. A
+    default would make "kind not stated" indistinguishable from "kind is screen", and every row
+    built without thinking about it would silently enlarge the screen count, which is the exact
+    defect this field was added to remove. There are four construction sites, one in ``src`` and
+    three in the tests; naming the kind at each of them costs one line and cannot go quietly wrong.
     """
 
     display: str
@@ -134,6 +155,7 @@ class JoinPv(NamedTuple):
     resolution: Literal["resolved", "dynamic", "unresolved"]
     role: Literal["read", "write"]
     protocol: Literal["ca", "pva", "loc", "sim", "sys", "other"]
+    node_kind: Literal["display", "trend"]
 
 
 class NamingChecker(Protocol):
@@ -188,8 +210,19 @@ class CrossPlaneReport(BaseModel):
     ioc_prefix: str | None
     ioc_device_name: str | None
     naming: NamingResult | None = None
-    #: Operator-facing displays with ≥1 concrete PV sharing the IOC prefix.
+    #: Operator-facing FILES with ≥1 concrete PV sharing the IOC prefix. ⚠ Not screens only: a
+    #: ``.plt`` Data Browser trend opened by a button is operator-facing and belongs here, which
+    #: is why ``screens_linked`` and ``trends_linked`` split it below. The field keeps its name and
+    #: stays the whole union, so no caller breaks to be told what the two new tuples now say
+    #: (the same choice GQ-21 made for ``find_device.screens``).
     displays_linked: tuple[str, ...] = ()
+    #: The operator SCREENS among ``displays_linked``. Counted positively, never as
+    #: ``displays_linked`` minus the trends: a third ``NodeKind`` would then land in the screen
+    #: list unannounced, while positive projection makes it fall out of both and show up in the
+    #: union check ``tests/test_crossplane.py`` holds over these three.
+    screens_linked: tuple[str, ...] = ()
+    #: The Data Browser TRENDS among ``displays_linked``, positively counted for the same reason.
+    trends_linked: tuple[str, ...] = ()
     #: Distinct concrete display PVs sharing the IOC prefix.
     pvs_linked: tuple[str, ...] = ()
     #: Writable subset of ``pvs_linked`` (≥1 operator display writes the channel), owner triage.
@@ -271,6 +304,11 @@ def crossplane_check(
     """
     prefix = st_cmd.prefix
     linked_displays: set[str] = set()
+    # The same files kept per kind, filled in the SAME pass (``jp.node_kind`` is a field of the row
+    # being bucketed), so the split can never describe a different population than the union above
+    # it. A file of an unknown kind lands in NEITHER and surfaces in the note below rather than
+    # being folded into the screens.
+    linked_by_kind: dict[str, set[str]] = {}
     linked_pvs: set[str] = set()
     linked_write: set[str] = set()
     other_prefix_pvs: set[str] = set()
@@ -295,6 +333,7 @@ def crossplane_check(
             if prefix and jp.pv.startswith(prefix):
                 linked_pvs.add(jp.pv)
                 linked_displays.add(jp.display)
+                linked_by_kind.setdefault(jp.node_kind, set()).add(jp.display)
                 if jp.role == "write":
                     linked_write.add(jp.pv)
             else:
@@ -372,7 +411,21 @@ def crossplane_check(
         except RuntimeError:
             cf_withheld = True
 
+    # GQ-153: the kind split, positively projected. A kind this server does not know about (a
+    # future third ``NodeKind``) is deliberately left out of BOTH tuples and named in a note, so a
+    # reader sees a file missing from the split instead of finding it quietly counted as a screen.
+    screens_linked = linked_by_kind.get("display", set())
+    trends_linked = linked_by_kind.get("trend", set())
+    unknown_kinds = sorted(kind for kind in linked_by_kind if kind not in ("display", "trend"))
+
     notes: list[str] = []
+    if unknown_kinds:
+        notes.append(
+            f"{len(unknown_kinds)} linked file kind(s) this server does not know "
+            f"({', '.join(unknown_kinds)}) are counted in displays_linked but in NEITHER "
+            "screens_linked nor trends_linked; the display engine has grown a node kind this "
+            "report has not been taught to name."
+        )
     if not prefix:  # None or "", both mean "no usable IOC prefix" (join sends all to other-prefix)
         notes.append(
             "No IOC device prefix parsed from st.cmd, every concrete PV is reported as "
@@ -477,6 +530,8 @@ def crossplane_check(
         ioc_device_name=st_cmd.device_name,
         naming=naming_result,
         displays_linked=tuple(sorted(linked_displays)),
+        screens_linked=tuple(sorted(screens_linked)),
+        trends_linked=tuple(sorted(trends_linked)),
         pvs_linked=tuple(sorted(linked_pvs)),
         pvs_linked_write=tuple(sorted(linked_write)),
         pvs_other_prefix=tuple(sorted(other_prefix_pvs)),
@@ -511,8 +566,21 @@ def render_markdown(report: CrossPlaneReport) -> str:
         flag = "✅ ACTIVE" if report.naming.registered else f"⚠️ {status}"
         lines.append(f"- **Naming Service:** {flag}, {report.naming.message}")
     lines.append("")
-    lines.append(f"- **Displays linked to this IOC:** {len(report.displays_linked)}")
-    lines.extend(f"  - {display}" for display in report.displays_linked)
+    # GQ-153: the split belongs in the HEADER, not only in the JSON fields, for the reason
+    # find_device's renderer states one file over: this is the half a person reads and the line
+    # they draw a conclusion from. It said "Displays linked to this IOC" and counted a Data
+    # Browser trend among them. The per-file marker below uses the wording find_device already
+    # ships, so the two tools name the same thing the same way.
+    lines.append(
+        f"- **Operator-facing files linked to this IOC:** {len(report.displays_linked)} "
+        f"({len(report.screens_linked)} screen(s), "
+        f"{len(report.trends_linked)} Data Browser trend(s))"
+    )
+    trends = set(report.trends_linked)
+    lines.extend(
+        f"  - {display}{_TREND_MARKER if display in trends else ''}"
+        for display in report.displays_linked
+    )
     lines.append(f"- **Concrete PVs sharing the prefix:** {len(report.pvs_linked)}")
     if report.pvs_linked:
         lines.append(f"  - of which writable: {len(report.pvs_linked_write)}")

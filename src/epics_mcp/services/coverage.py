@@ -1,7 +1,8 @@
 r"""Coverage audit: which delivered PV has no display / no archive / no alarm, and the reverse.
 
 The second System-Owner thread (Wedge 3, part 2). A **cross-plane coverage matrix** joining the
-Wedge-0 display-PV index (PV → [operator screens]) with the runtime planes opi-foundry can read:
+Wedge-0 display-PV index (PV → [the operator-facing FILES showing it], screens and Data Browser
+trends alike, which is why the matrix below splits them) with the runtime planes opi-foundry reads:
 the **ChannelFinder** registry (what the IOCs actually serve), the **Archiver Appliance**, and the
 **Phoebus Alarm** config. It answers the owner's question: *which PV do my IOCs deliver (CF) that
 nobody put on a screen / that isn't archived / that has no alarm, and which shown PV isn't even
@@ -12,15 +13,30 @@ offline-testable (mirrors :mod:`~.crossplane`). Stays **free of ``opi_navigation
 ``PvIndexEntry`` → :class:`IndexRow` translation happens at the tool/CLI edge.
 
 **The matrix (both universes, normalized to the bare record name):**
-- Display set ``D`` = the operator-facing, resolved, real-protocol PVs from the Wedge-0 index.
+- Display set ``D`` = the operator-facing, resolved, real-protocol PVs from the Wedge-0 index. It
+  spans BOTH kinds of operator-facing file, ``.bob`` screens and ``.plt`` Data Browser trends.
+- Screen set ``S`` ⊆ ``D`` = the PVs on at least one real screen, trend set ``T`` ⊆ ``D`` = the PVs
+  on at least one Data Browser trend, and ``T_only = T \ S`` = the PVs
+  reachable only by opening a trend. Both subsets are built POSITIVELY rather than as each other's
+  complement, so a file of a kind this server cannot name falls out of both instead of being handed
+  to whichever side was written as the remainder. Split since GQ-153: they used to share one set,
+  so a PV that
+  existed only on a trend counted as screen-visible and fell out of ``cf_only``, out of the very
+  headline this module produces.
 - ChannelFinder set ``C`` = the channels registered under *scope* (the delivered PVs). CF is the
   **anchor**: if it cannot answer (disabled / capped / failed), no cf-relative verdict is possible
   and ``D`` is reported alone.
-- ``cf_and_display = C ∩ D`` (healthy core) · ``cf_only = C \ D`` = **registered but on no screen =
-  operator blind-spot** (the headline signal) · ``display_only = D \ C`` = shown but not registered.
+- ``cf_and_display = C ∩ S`` (healthy core) · ``cf_only = C \ S`` = **registered but on no screen =
+  operator blind-spot** (the headline signal) · ``cf_trend_only = C ∩ T_only`` = the part of that
+  blind-spot list that is at least trended · ``trend_only = T_only``, reported whether or not CF
+  answered · ``display_only = D \ C`` = shown but not registered. ⚠ ``display_only`` is against the
+  WHOLE of ``D`` while the two cf-relative sets are against ``S``: "is a delivered PV on a screen"
+  and "do we show something the registry does not know" are different questions, and a trend is a
+  no to the first and a yes to the second.
 
 **Per-PV verdict** over the audited universe ``A`` (``C | D`` when CF is live, else ``D``):
-``{has_display, registered_cf, archived, alarmed} ∈ {yes, no, withheld}``. ``withheld`` is NEVER
+``{has_display, on_trend, registered_cf, archived, alarmed} ∈ {yes, no, withheld}``. ``withheld`` is
+NEVER
 ``no``: a plane that could not answer (disabled, capped, per-PV timeout, or an incomplete display
 inventory) withholds rather than false-flag a gap. ``critical_uncovered`` = CF-registered (provably
 delivered) AND ≥1 **proven** gap (``no``); a PV with a ``withheld`` gap is excluded (the gap is not
@@ -43,12 +59,17 @@ from pydantic import BaseModel, ConfigDict
 # duplicated): bare-record-name normalization (strip a trailing ``.FIELD``) and the
 # ">= this fraction unregistered ⇒ likely-incomplete-CF" caveat constant. The CF Protocol +
 # capped-query signal are reused too (a coverage CF checker IS a crossplane ChannelFinderChecker).
+from epics_mcp.display_files import KIND_MARKERS
 from epics_mcp.services.crossplane import (
     _CF_RATIO_CAVEAT_THRESHOLD,
     CFRegistryCapped,
     ChannelFinderChecker,
     _record_name,
 )
+
+#: What a Data Browser trend is called in this report. Read from the shared table so this renderer,
+#: ``crossplane_check``'s and ``find_device``'s cannot say it three ways (GQ-153).
+_TREND_MARKER = KIND_MARKERS["trend"]
 
 #: A coverage cell. ``withheld`` NEVER means ``no``: the plane could not answer.
 Coverage3 = Literal["yes", "no", "withheld"]
@@ -61,10 +82,36 @@ class IndexRow(NamedTuple):
     translates each :class:`opi_navigation.pv_analysis.models.PvIndexEntry` into one of these (the
     ``pv`` already normalized to its protocol-free channel name). Modelled on
     ``crossplane.JoinPv``.
+
+    ⚠ THE KIND IS STORED, NOT THE UNION, and that inversion is the whole of GQ-153 at this seam.
+    The index entry names the operator-facing TOP LEVELS a PV appears on, and until GQ-153 this row
+    kept them in one ``displays`` tuple, which made a ``.plt`` Data Browser trend opened by a
+    button indistinguishable from a screen: a PV that exists only on a trend counted as
+    screen-visible and dropped out of ``cf_only``, the one number this whole module produces.
+
+    So the row now carries the WHOLE and both positive projections of it, the same shape
+    ``CrossPlaneReport`` uses one file over. All three are REQUIRED: a default would make "kind not
+    stated" read as "screen", so every row built without thinking about it would enlarge the screen
+    set, which is exactly the defect being removed. There are three construction sites in ``src``
+    and three more in the tests, and naming the kinds at each costs one line. (The count names its
+    base because the sibling note on ``JoinPv`` counts the same way and the two read as a
+    contradiction otherwise: one ``src`` site there, three in the tests.)
+
+    ⚠ ``displays`` is STORED rather than derived from the two projections, and that is the more
+    careful of the two shapes rather than the lazier one. A future third ``NodeKind`` belongs to
+    neither projection, and a derived union would DROP such a file from the answer entirely, name
+    and all. Stored, it stays visible, falls out of both projections, and
+    :func:`audit_coverage` says so in a note. ``tests/test_coverage.py`` holds
+    ``screens | trends <= displays`` so the three cannot drift apart the other way.
     """
 
     pv: str
+    #: Every operator-facing file this PV appears on, whatever kind.
     displays: tuple[str, ...]
+    #: The operator SCREENS among ``displays``.
+    screens: tuple[str, ...]
+    #: The Data Browser TRENDS among ``displays``.
+    trends: tuple[str, ...]
     roles: tuple[str, ...]
 
 
@@ -95,11 +142,27 @@ class PvCoverageRow(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     pv: str
+    #: Is this PV on an operator SCREEN. A Data Browser trend does not satisfy it (GQ-153); read
+    #: ``on_trend`` beside it before concluding the PV is nowhere to be seen.
     has_display: Coverage3
     registered_cf: Coverage3
     archived: Coverage3
     alarmed: Coverage3
+    #: Is this PV on a Data Browser TREND. Its own cell rather than a flag folded into
+    #: ``has_display``, because "only reachable by opening a trend" is a different operational
+    #: situation from both "on a screen" and "nowhere". Withheld under the same rule as every
+    #: other cell here: a capped walk cannot prove an absence. Additive with a default, so an
+    #: older caller and a hand-built row still parse, and the default is the honest unknown.
+    on_trend: Coverage3 = "withheld"
+    #: Every operator-facing file showing this PV, screens and trends. Keeps its name and its
+    #: contents: renaming it would break every caller to tell them what the two tuples below now
+    #: say (the choice GQ-21 made for ``find_device.screens``).
     displays: tuple[str, ...] = ()
+    #: The operator screens among ``displays``, counted positively rather than as the remainder.
+    screens: tuple[str, ...] = ()
+    #: The Data Browser trends among ``displays``, likewise positive: a third ``NodeKind`` then
+    #: falls out of both and is visible, instead of inheriting the screen bucket by subtraction.
+    trends: tuple[str, ...] = ()
     roles: tuple[str, ...] = ()
 
 
@@ -113,11 +176,31 @@ class CoverageReport(BaseModel):
     #: only when wired). A plane absent here contributes only ``withheld`` cells.
     planes_live: tuple[str, ...] = ()
     rows: tuple[PvCoverageRow, ...] = ()
-    #: C ∩ D, registered AND on a screen (the healthy core).
+    #: C ∩ S, registered AND on an operator SCREEN (the healthy core). Against ``S``, not ``D``,
+    #: since GQ-153: a PV reachable only by opening a Data Browser trend is not on a screen.
     cf_and_display: tuple[str, ...] = ()
-    #: C \ D, registered but on NO screen (operator blind-spot). Lower bound when displays capped.
+    #: C \ S, registered but on NO screen (operator blind-spot).
+    #: ⚠ It GREW with GQ-153 and the growth is the fix: trend-only PVs used to fall out of here,
+    #: out of the very count this tool exists to produce.
+    #: ⚠ This line said "lower bound when displays capped" and had the sign backwards, measured:
+    #: this is a plain set difference against ``S``, and a cap can only make ``S`` smaller, so a
+    #: capped walk makes ``cf_only`` too LONG, never too short. It is ``blind_spots`` that
+    #: undercounts, because that one needs a PROVEN ``has_display: no`` and a cap withholds it.
     cf_only: tuple[str, ...] = ()
+    #: D \ S, shown ONLY on a Data Browser trend and on no screen at all. Reported independently
+    #: of ChannelFinder, so the finding survives a run with no registry anchor.
+    trend_only: tuple[str, ...] = ()
+    #: C ∩ trend_only, the part of ``cf_only`` that at least appears on a trend. An OVERLAPPING
+    #: list, not a split: read it as the milder half of the blind-spot list, someone can still
+    #: reach these by opening a trend. Shipped rather than left to the caller to intersect,
+    #: because a set intersection over two JSON tuples is arithmetic no reader re-does.
+    cf_trend_only: tuple[str, ...] = ()
     #: D \ C, shown but NOT registered in ChannelFinder.
+    #: ⚠ Against ``D`` (screens AND trends) while ``cf_only`` is against ``S`` (screens only), and
+    #: the asymmetry is deliberate rather than an oversight: the two answer different questions.
+    #: ``cf_only`` asks "is a delivered PV on a screen", where a trend is not one; ``display_only``
+    #: asks "do we show something the registry does not know", where showing it on a trend counts.
+    #: Narrowing this one to ``S`` too would DROP unregistered trend PVs from every report.
     display_only: tuple[str, ...] = ()
     #: Headline: CF-registered AND ≥1 PROVEN gap (``no``; withheld gaps excluded).
     critical_uncovered: tuple[str, ...] = ()
@@ -196,15 +279,44 @@ def audit_coverage(
             # Field-suffix normalization can collapse record + record.EGU into one record: merge.
             # (S5-6: IndexRow no longer carries an unused ``protocol``, the channel is already
             # protocol-free via _record_name, so the merge has no arbitrary first-seen choice.)
+            # The two kind tuples merge SEPARATELY, each by union: merging the derived whole and
+            # re-splitting it would need the kind back from a string, which is the guess this
+            # server refuses to make (``display_files.is_inventory_file``).
             prev = display_rows[rec]
             display_rows[rec] = IndexRow(
                 pv=rec,
                 displays=tuple(sorted(set(prev.displays) | set(row.displays))),
+                screens=tuple(sorted(set(prev.screens) | set(row.screens))),
+                trends=tuple(sorted(set(prev.trends) | set(row.trends))),
                 roles=tuple(sorted(set(prev.roles) | set(row.roles))),
             )
         else:
-            display_rows[rec] = IndexRow(pv=rec, displays=row.displays, roles=row.roles)
+            display_rows[rec] = IndexRow(
+                pv=rec,
+                displays=row.displays,
+                screens=row.screens,
+                trends=row.trends,
+                roles=row.roles,
+            )
+    # D is every PV shown ANYWHERE operator-facing; S is the subset on at least one real SCREEN,
+    # T the subset on at least one Data Browser trend. Before GQ-153 there was only D and it
+    # answered both questions, which is what made a trend-only PV count as screen-visible.
+    # Both subsets are built POSITIVELY, never as the other's complement: a file of a kind this
+    # server does not know belongs to neither, and subtraction would hand it to whichever side
+    # happened to be written as the remainder.
     display_set = set(display_rows)
+    screen_set = {rec for rec, row in display_rows.items() if row.screens}
+    trend_set = {rec for rec, row in display_rows.items() if row.trends}
+    trend_only_set = trend_set - screen_set
+    # Files that are in the whole but in neither projection: the engine grew a node kind this
+    # report has not been taught to name. Surfaced in a note, never folded into the screens.
+    unclassified_files = sorted(
+        {
+            display
+            for row in display_rows.values()
+            for display in set(row.displays) - set(row.screens) - set(row.trends)
+        }
+    )
 
     # --- ChannelFinder set C (the delivered-PV anchor). Withhold on cap/failure/disabled. ---
     cf_set: set[str] = set()
@@ -226,8 +338,11 @@ def audit_coverage(
 
     # --- Audited universe A and the cf set-diffs (only when CF is live). ---
     universe = (cf_set | display_set) if cf_live else set(display_set)
-    cf_and_display = sorted(cf_set & display_set) if cf_live else []
-    cf_only = sorted(cf_set - display_set) if cf_live else []
+    # Against the SCREEN set: "registered and visible" and "registered and invisible" are questions
+    # about screens. display_only stays against the whole of D, see its field comment.
+    cf_and_display = sorted(cf_set & screen_set) if cf_live else []
+    cf_only = sorted(cf_set - screen_set) if cf_live else []
+    cf_trend_only = sorted(cf_set & trend_only_set) if cf_live else []
     display_only = sorted(display_set - cf_set) if cf_live else []
 
     incomplete = bool(context_capped)
@@ -242,10 +357,14 @@ def audit_coverage(
     withheld_gap_excluded: list[str] = []
 
     for pv in sorted(universe):
-        in_display = pv in display_set
-        # Display plane is offline-complete UP TO the context cap: a not-in-D PV is a proven absence
-        # only when no display was capped; otherwise it could sit on a capped display → withheld.
-        has_display: Coverage3 = "yes" if in_display else ("withheld" if incomplete else "no")
+        in_screen = pv in screen_set
+        in_trend = pv in trend_set
+        # Display plane is offline-complete UP TO the context cap: a not-on-a-screen PV is a proven
+        # absence only when no file was capped; otherwise it could sit on a capped one → withheld.
+        # GQ-153: the question is now SCREENS, so a PV seen only on a Data Browser trend answers
+        # "no" here (or withheld under a cap) and says where it IS on ``on_trend`` beside it.
+        has_display: Coverage3 = "yes" if in_screen else ("withheld" if incomplete else "no")
+        on_trend: Coverage3 = "yes" if in_trend else ("withheld" if incomplete else "no")
         registered_cf: Coverage3 = "withheld" if cf_withheld else ("yes" if pv in cf_set else "no")
         archived_v = _plane_verdict(archived.is_archived if archived is not None else None, pv)
         alarmed_v = _plane_verdict(alarmed.is_alarm_configured if alarmed is not None else None, pv)
@@ -262,7 +381,10 @@ def audit_coverage(
                 registered_cf=registered_cf,
                 archived=archived_v,
                 alarmed=alarmed_v,
+                on_trend=on_trend,
                 displays=src.displays if src else (),
+                screens=src.screens if src else (),
+                trends=src.trends if src else (),
                 roles=src.roles if src else (),
             )
         )
@@ -316,6 +438,8 @@ def audit_coverage(
         archive_withheld=archive_withheld,
         alarm_withheld=alarm_withheld,
         withheld_gap_excluded=withheld_gap_excluded,
+        trend_only=sorted(trend_only_set),
+        unclassified_files=unclassified_files,
     )
 
     return CoverageReport(
@@ -324,6 +448,8 @@ def audit_coverage(
         rows=tuple(rows),
         cf_and_display=tuple(cf_and_display),
         cf_only=tuple(cf_only),
+        trend_only=tuple(sorted(trend_only_set)),
+        cf_trend_only=tuple(cf_trend_only),
         display_only=tuple(display_only),
         critical_uncovered=tuple(sorted(critical)),
         blind_spots=tuple(sorted(blind_spots)),
@@ -355,9 +481,30 @@ def _coverage_notes(
     archive_withheld: list[str],
     alarm_withheld: list[str],
     withheld_gap_excluded: list[str],
+    trend_only: list[str],
+    unclassified_files: list[str],
 ) -> list[str]:
     """Build the honest caveat notes (no silent ``no``, every lower bound named)."""
     notes: list[str] = []
+    if trend_only:
+        # The note names the SET, never the cell's value, and that distinction was measured rather
+        # than reasoned: this text used to say "their 'has_display' is 'no'", and on the first real
+        # dataset it was run against (5273 files, 118 of them capped) all 25 of these PVs carried
+        # 'withheld' instead, because a capped walk cannot prove there is no screen. A note that
+        # states a value the withhold rule may override is a second truth about the same cell.
+        notes.append(
+            f"{len(trend_only)} PV(s) appear ONLY on a Data Browser trend and on no operator "
+            "screen, and are named in trend_only (and, when the registry answered, in "
+            "cf_trend_only). Read 'has_display' per row for the verdict: 'no' normally, 'withheld' "
+            "while any file was capped. Reachable by opening a trend, not by looking at a screen."
+        )
+    if unclassified_files:
+        notes.append(
+            f"{len(unclassified_files)} operator-facing file(s) are of a kind this report cannot "
+            f"name ({', '.join(unclassified_files)}), so they count in a row's 'displays' but in "
+            "NEITHER 'screens' nor 'trends'; the display engine has grown a node kind this server "
+            "has not been taught. Treat has_display for the PVs on them as unproven."
+        )
     if not scope:
         notes.append(
             "Unscoped audit (scope=''), the ChannelFinder query hits '*' and almost certainly the "
@@ -417,9 +564,11 @@ def _coverage_notes(
         # tests/test_diagnostics_tail.py. The "higher context cap" at the end is the ARGUMENT,
         # a piece of advice rather than a second name for the cap, and stays as it is.
         notes.append(
-            f"{len(context_capped)} display(s) hit the per-display context cap, a not-shown PV "
-            "could sit on a not-fully-expanded display, so 'has_display=no'/blind_spots are "
-            "WITHHELD for those (a lower bound; re-run with a higher context cap)."
+            f"{len(context_capped)} display(s) hit the per-display context cap, a PV not seen on "
+            "a screen could sit on a not-fully-expanded one, so 'has_display=no'/blind_spots are "
+            "WITHHELD for those (a lower bound; re-run with a higher context cap). 'on_trend' is "
+            "withheld under the same rule, and cf_only is NOT shortened by it: that one is a set "
+            "difference and a cap can only lengthen it."
         )
     if glob_capped_count:
         notes.append(
@@ -488,16 +637,28 @@ def render_markdown(report: CoverageReport) -> str:
         # that makes a share meaningful at all.
         lines.append(
             f"- ⚠️ **{len(report.displays_incomplete)} file(s){share} hit the per-display "
-            "context cap, so THIS WHOLE REPORT IS A LOWER BOUND:** a PV that is not in the display "
-            "set may sit on one of them, so its `has_display` is WITHHELD rather than `no`, and "
-            "blind_spots and critical_uncovered undercount accordingly (re-run with a higher "
-            "context cap)."
+            "context cap, so THIS WHOLE REPORT IS A LOWER BOUND:** a PV not seen on a SCREEN may "
+            "sit on one of them, so its `has_display` is WITHHELD rather than `no` (and `on_trend` "
+            "under the same rule), and blind_spots and critical_uncovered undercount accordingly "
+            "(re-run with a higher context cap). cf_only is the exception, it is a set difference "
+            "and a cap can only lengthen it."
         )
         lines.extend(f"  - {display}" for display in report.displays_incomplete)
     lines.append("")
     lines.append(f"- **Registered AND on a screen (cf_and_display):** {len(report.cf_and_display)}")
     lines.append(f"- **Registered but on NO screen (cf_only / blind-spot):** {len(report.cf_only)}")
-    lines.extend(f"  - {pv}" for pv in report.cf_only)
+    # GQ-153: the marker belongs on the ROW a person reads, not only in a JSON field beside it.
+    # These entries used to be missing from this list entirely, counted as screen-visible.
+    trended = set(report.cf_trend_only)
+    lines.extend(f"  - {pv}{_TREND_MARKER if pv in trended else ''}" for pv in report.cf_only)
+    # Independent of ChannelFinder on purpose: with no registry anchor the two cf lists above are
+    # empty by construction, and this finding would vanish with them although the walk proved it.
+    if report.trend_only:
+        lines.append(
+            f"- **Shown ONLY on a Data Browser trend, on no screen (trend_only):** "
+            f"{len(report.trend_only)}"
+        )
+        lines.extend(f"  - {pv}" for pv in report.trend_only)
     lines.append(f"- **Shown but NOT registered (display_only):** {len(report.display_only)}")
     lines.extend(f"  - {pv}" for pv in report.display_only)
     lines.append("")

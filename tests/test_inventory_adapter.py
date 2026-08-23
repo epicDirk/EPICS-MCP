@@ -66,6 +66,7 @@ def test_inventory_join_skips_fragment_seeds() -> None:
             resolution="resolved",
             role="read",
             protocol="ca",
+            node_kind="display",
         )
     ]
 
