@@ -567,3 +567,71 @@ def test_the_field_suffix_merge_unions_the_kinds_and_not_just_the_files() -> Non
         assert merged.screens == ("s.bob",), order
         assert merged.trends == ("t.plt",), order
         assert report.trend_only == (), f"{order}: a PV on a screen is never trend-only"
+
+
+def test_display_only_keeps_a_trend_pv_the_registry_does_not_know() -> None:
+    """``display_only`` is measured against ALL operator-facing files, not against the screens.
+
+    The asymmetry with ``cf_only`` is promised twice in prose, in the field comment here and in the
+    guide, and a mutation probe found it PINNED BY NOTHING: narrowing this one set to the screens
+    too left the whole suite green while silently dropping every unregistered trend PV from every
+    report. The two questions differ. "Is a delivered PV on a screen" says no to a trend; "do we
+    show something the registry does not know" says yes to it.
+    """
+    rows = [
+        _row("X:OnScreen", displays=("s.bob",)),
+        _row("X:OnTrend", displays=("t.plt",), trends=("t.plt",)),
+    ]
+    report = audit_coverage(
+        rows, scope="X:", channelfinder=_FakeCF({"X:OnScreen"}), cf_requested=True
+    )
+
+    assert report.display_only == ("X:OnTrend",), (
+        "a PV shown only on a trend and unknown to the registry must still be display_only; "
+        "narrowing display_only to the screen set drops it from the report entirely"
+    )
+    assert report.cf_only == (), "nothing registered is off-screen here"
+
+
+def test_the_trend_only_note_is_emitted_and_names_the_count() -> None:
+    """The only place that states the finding in PROSE, and a mutation probe found it unpinned.
+
+    Suppressing this note left every other assertion green: the tuples still carried the PVs, so
+    the machine-readable half was intact while the half a person reads had gone silent. That is
+    the same defect class as a header folding a trend into a screen count, one surface over.
+    """
+    report = audit_coverage([_row("X:A", displays=("t.plt",), trends=("t.plt",))], scope="X:")
+
+    assert report.trend_only == ("X:A",)
+    assert any("ONLY on a Data Browser trend" in note for note in report.notes), report.notes
+    assert any("1 PV(s)" in note for note in report.notes), report.notes
+
+
+def test_the_blind_spot_list_marks_which_of_its_entries_are_at_least_trended() -> None:
+    """The rendered ``cf_only`` list marks its trended entries, and nothing pinned that either.
+
+    Dropping the marker left the JSON field ``cf_trend_only`` in place and the rendered list
+    unmarked, so the half a person reads could not tell a channel nobody can see from one an
+    operator reaches by opening a trend. The marker is the shared phrase, read from the same table
+    ``find_device`` uses, so this asserts against that rather than against a copy of the string.
+    """
+    from epics_mcp.display_files import KIND_MARKERS
+
+    rows = [
+        _row("X:OnTrend", displays=("t.plt",), trends=("t.plt",)),
+        _row("X:OnScreen", displays=("s.bob",)),
+    ]
+    report = audit_coverage(
+        rows,
+        scope="X:",
+        channelfinder=_FakeCF({"X:OnTrend", "X:Nowhere"}),
+        cf_requested=True,
+    )
+    assert report.cf_only == ("X:Nowhere", "X:OnTrend")
+    assert report.cf_trend_only == ("X:OnTrend",)
+
+    markdown = render_markdown(report)
+    trend_line = next(line for line in markdown.splitlines() if "X:OnTrend" in line)
+    nowhere_line = next(line for line in markdown.splitlines() if "X:Nowhere" in line)
+    assert KIND_MARKERS["trend"] in trend_line, trend_line
+    assert KIND_MARKERS["trend"] not in nowhere_line, nowhere_line

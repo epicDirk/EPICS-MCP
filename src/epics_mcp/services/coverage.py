@@ -148,11 +148,22 @@ class PvCoverageRow(BaseModel):
     registered_cf: Coverage3
     archived: Coverage3
     alarmed: Coverage3
-    #: Is this PV on a Data Browser TREND. Its own cell rather than a flag folded into
-    #: ``has_display``, because "only reachable by opening a trend" is a different operational
-    #: situation from both "on a screen" and "nowhere". Withheld under the same rule as every
-    #: other cell here: a capped walk cannot prove an absence. Additive with a default, so an
-    #: older caller and a hand-built row still parse, and the default is the honest unknown.
+    #: Is this PV on a Data Browser trend an operator can OPEN, i.e. one that is a top level of its
+    #: own. Its own cell rather than a flag folded into ``has_display``, because "only reachable by
+    #: opening a trend" is a different operational situation from both "on a screen" and "nowhere".
+    #: Withheld under the same rule as every other cell here: a capped walk cannot prove an absence.
+    #: Additive with a default, so an older caller and a hand-built row still parse, and the default
+    #: is the honest unknown.
+    #:
+    #: ⚠ TWO KINDS OF TREND ANSWER ``no`` HERE, and the word "reachable" is what makes that honest
+    #: rather than a false negative. Both were measured on this build. A trend EMBEDDED in a screen
+    #: through a ``databrowser`` widget contributes its traces to that screen, so its PVs answer
+    #: ``has_display: yes`` and ``on_trend: no``: they are on a screen, and there is no separate
+    #: thing to open. A trend that no button opens and no screen embeds is not operator-facing at
+    #: all, so it never enters the index and its PVs answer ``no`` to both, which is the right
+    #: verdict (nobody can reach it) told in a way that does not say WHY. Measured on
+    #: ``mcr-operations``: 201 of 256 ``.plt`` files are unreachable that way. Surfacing them is a
+    #: reachability question, a different tool's job, not a cell this report can widen.
     on_trend: Coverage3 = "withheld"
     #: Every operator-facing file showing this PV, screens and trends. Keeps its name and its
     #: contents: renaming it would break every caller to tell them what the two tuples below now
@@ -489,7 +500,9 @@ def _coverage_notes(
     if trend_only:
         # The note names the SET, never the cell's value, and that distinction was measured rather
         # than reasoned: this text used to say "their 'has_display' is 'no'", and on the first real
-        # dataset it was run against (5273 files, 118 of them capped) all 25 of these PVs carried
+        # dataset it was run against (5273 files, 118 of them capped at a context_cap of 200, which
+        # is BELOW the default of 256 and is why that count is higher than the 77 the same walk
+        # reports on the default) all 25 of these PVs carried
         # 'withheld' instead, because a capped walk cannot prove there is no screen. A note that
         # states a value the withhold rule may override is a second truth about the same cell.
         notes.append(

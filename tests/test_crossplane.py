@@ -782,3 +782,23 @@ def test_this_renderer_marks_a_trend_with_the_shared_phrase() -> None:
     )
     trend_line = next(line for line in render_markdown(report).splitlines() if "beam.plt" in line)
     assert _TREND_MARKER in trend_line
+
+
+def test_the_rendered_header_counts_screens_and_trends_apart() -> None:
+    """The header a person reads names the split, and a mutation probe found it unpinned.
+
+    Stripping the two counts back to a single "Displays linked" total left every field assertion
+    green: the JSON carried ``screens_linked`` and ``trends_linked`` while the rendered line, the
+    one a reader draws a conclusion from, folded a Data Browser trend back into a display count.
+    That is exactly the defect GQ-153 removed, surviving in the other half of the answer.
+    """
+    join = [
+        _jp("panel.bob", "DEV-TEST01:Ctrl-EVR-01:status"),
+        _jp("beam.plt", "DEV-TEST01:Ctrl-EVR-01:trend", node_kind="trend"),
+    ]
+    markdown = render_markdown(crossplane_check(join, _st()))
+    header = next(line for line in markdown.splitlines() if "linked to this IOC" in line)
+
+    assert "1 screen(s)" in header, header
+    assert "1 Data Browser trend(s)" in header, header
+    assert "2" in header, "the whole is still named beside its split"

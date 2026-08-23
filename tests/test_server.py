@@ -3312,7 +3312,7 @@ async def test_stripped_tool_still_returns_structured_content(
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
 # RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-23 after GQ-153: the
-# core lane is 76_835 and the full lane 90_758. The core figure did not move and that is the
+# core lane is 76_835 and the full lane 90_932. The core figure did not move and that is the
 # expected shape rather than a lucky one: every description GQ-153 touched belongs to a DISPLAY
 # tool, and those are exactly the four the core lane does not register. ⚠️ The core figure is
 # measured by dropping those four from the same ``list_tools`` result, not by a core-only install,
@@ -3349,9 +3349,9 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
     FastMCP's native-lean schemas plus the S29 typing keep the core lane 76_835 and the full lane
-    90_758, re-measured 2026-08-23 on both lanes with the display-gated tools excluded for the core
+    90_932, re-measured 2026-08-23 on both lanes with the display-gated tools excluded for the core
     one, since a lane estimated rather than measured is the error the constant's comment records.
-    GQ-153 added +0 / +586 from the pair measured earlier the same day, all of it on
+    GQ-153 added +0 / +760 from the pair measured earlier the same day, all of it on
     ``coverage_audit`` and ``crossplane_check`` description text: the trend-versus-screen
     distinction and the field names it introduced on either tool. The zero on the
     core lane is the informative half again, for the same reason it was under GQ-21: every edit

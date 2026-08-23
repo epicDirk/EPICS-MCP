@@ -1342,14 +1342,16 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   PV that appears on no `.bob` at all used to arrive with `has_display=yes` and drop out of
   `cf_only`: out of the one count this tool exists to produce. Now `has_display` answers about
   SCREENS alone, `on_trend` answers beside it with the same three values, and such a PV is named in
-  `trend_only` (reported whether or not the registry answered) and, when it is also registered, in
+  `trend_only` (reported whether or not the registry answered) as long as an operator can OPEN that
+  trend, and, when it is also registered, in
   `cf_only` and in `cf_trend_only`. ⚠ So `cf_only` GREW, and the growth is the repair rather than a
   regression: these entries were missing from a blind-spot list. Read `cf_trend_only` as the milder
   half of `cf_only`, somebody can still reach those by opening a trend. ⚠ `critical_uncovered`
   grows with it only on an UNCAPPED walk, and that is worth knowing before reading a big dataset:
   `cf_only` is a set difference and holds these regardless, while `blind_spots` needs a PROVEN
   `has_display: no`, and any capped file withholds that cell instead. Measured on a 5273-file
-  dataset with 118 capped: all 25 trend-only PVs came back `withheld`, named in `trend_only` and
+  dataset with 118 of them capped AT `context_cap=200`: all 25 trend-only PVs came back `withheld`,
+  named in `trend_only` and
   counted in neither `blind_spots` nor `critical_uncovered`. Raise the context cap to turn them
   into a proven finding. ⚠ `display_only` deliberately stays measured against ALL
   operator-facing files rather than
@@ -1358,6 +1360,14 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   every report. Per row, `displays` is still the whole list and `screens` / `trends` split it
   positively, so a later third file kind falls out of both instead of landing in the screen figure,
   and a `notes` entry names it.
+  ⚠ **`on_trend: no` covers two situations and only one of them is "not trended".** A trend EMBEDDED
+  in a screen through a `databrowser` widget hands its traces to that screen, so those PVs read
+  `has_display: yes` and `on_trend: no`: correct, they are on a screen and there is nothing separate
+  to open. A trend that no button opens and no screen embeds is not operator-facing at all, never
+  enters the walk, and its PVs are simply ABSENT from the report rather than listed as trend-only.
+  Measured on one 256-trend dataset, 201 of those trends are unreachable that way. So read a missing
+  PV as "no operator-facing file shows it", never as "no trend file mentions it"; which trends are
+  unreachable is a reachability question this tool does not answer.
 - **`coverage_audit` answers each plane per PV with `yes`, `no` or `withheld`, and `withheld` is
   never `no`.** The five cells are `has_display`, `on_trend`, `registered_cf`, `archived` and
   `alarmed`;

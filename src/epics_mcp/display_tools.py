@@ -238,7 +238,9 @@ async def coverage_audit(
         Field(
             description="project/dataset ROOT of .bob displays (.plt Data Browser trends found "
             "there contribute their trace PVs too, but a trend is not a screen: a PV that appears "
-            "on no .bob at all is reported in trend_only and stays a cf_only blind-spot)"
+            "on no .bob and sits on a trend a button OPENS is reported in trend_only and stays a "
+            "cf_only blind-spot. A trend nothing opens and no screen embeds is not operator-facing "
+            "and never enters the walk at all, so its PVs are absent rather than trend_only)"
         ),
     ],
     scope: Annotated[
