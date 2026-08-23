@@ -91,8 +91,9 @@ carry breaking changes).
   display figure. The rendered header splits the same way and a trend's own row says what it is;
   the empty answer denies both kinds. Additive on the wire: nothing was removed or retyped, and
   the field stays called `screens`, because renaming it would break every caller in order to say
-  what its members now say themselves. `tools/list` grows 323 chars on the display-gated lane and
-  none on the core one.
+  what its members now say themselves. The three cap `notes` follow: they qualified "a screen" and
+  "the screen list" where a trend can be affected too, and now say "a screen or trend" and "the
+  match list". `tools/list` grows 304 chars on the display-gated lane and none on the core one.
 
 - **A deployment whose configuration did not change can now exit `3` where it exited `0`.**
   `epics-doctor` sells itself as a scriptable pass/fail, so this is the half of the entry below
@@ -137,7 +138,7 @@ carry breaking changes).
   reader nothing except the wrong trail it used to lay when two of the three servers in one client
   log named themselves after something else.
 
-- **`find_device` now says that every screen comes back with the roles it uses the device in.**
+- **`find_device` now says that every match comes back with the roles it uses the device in.**
   The answer has carried `screens[].roles` all along and nothing on the surface said so, so
   "which screens can WRITE this device?" was answerable and unadvertised. `tools/list` grows 168
   characters. ⚠️ Its two guards need the `displays` group and are therefore invisible to CI, which
@@ -234,7 +235,10 @@ carry breaking changes).
   ⚠️ That one was measured LATENT, and the number belongs with it: over two corpora (5017 and 515
   files, 2619 `open_display` actions) every spelling is already lowercase, so no jump appears or
   disappears today; it protects a hand-edited or generator-written file. A Data Browser `.plt`
-  is no longer counted as an operator screen by `find_screen`, `change_impact` and `find_device`;
+  is no longer counted as an operator screen by `find_screen` and `change_impact`. ⚠️ It named
+  `find_device` too, and for that tool the sentence was wrong: the engine stopped counting a trend
+  as a screen, this server's projection kept doing so, and it took the GQ-21 entry above to reach
+  the wire;
   displays are no longer pushed out of the entry-point list by guessed edges; and the engine now
   exports the file universe a capped run walked, which is the honest denominator the
   `coverage_audit` header needs.

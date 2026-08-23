@@ -465,13 +465,21 @@ async def test_the_kind_counters_agree_with_the_engine_s_own_on_the_same_walk(
 ) -> None:
     """Anti-drift: two independent counts of the same quantity, held against each other.
 
-    This server counts over the ``screens`` tuple IT carries, so a header and its list can never
-    disagree; the engine counts over its own matches. Deriving ours that way is only safe while
-    the two mean the same thing, and this is what keeps that true: it fails the day the projection
-    starts adding, dropping or relabelling a match on its way out.
+    This server counts over the ``screens`` tuple IT carries; the engine counts over its own
+    matches. Deriving ours that way is only safe while the two mean the same thing, and holding
+    them against each other on one real walk is what keeps that true.
 
     Provably red: drop the ``node_kind`` pass-through in ``_screen_matches`` (ours reads 2/0 while
     the engine reads 1/1), or filter trends out of ``screens`` (ours reads 1/0 against 1/1).
+
+    ⚠ HONESTLY SCOPED, because the first version of this docstring claimed to catch "adding,
+    dropping or relabelling a match on its way out" and was measured not to. A mutant that takes
+    the counters FROM the engine and truncates ``screens`` leaves this test green, because both
+    sides then read the same engine figures while the rendered header claims more files than the
+    list holds. Its red-ness rests on the counters being derived from ``screens``, which is the
+    property it cannot observe. That half is covered next door: ``test_device_lookup`` builds a
+    lookup whose engine counters are deliberately left at zero, so the same swap reddens there.
+    Neither guard is the whole invariant; together they are.
     """
     mock_batch.return_value = {"results": [], "errors": []}
     root = _screen_and_trend(tmp_path)

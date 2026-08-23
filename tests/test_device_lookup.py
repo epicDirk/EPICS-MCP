@@ -649,7 +649,11 @@ def test_the_kind_counters_are_positive_and_account_for_every_match() -> None:
     this assertion is what turns the shortfall into a red test rather than a quiet mislabel.
 
     Provably red: drop the ``node_kind=display.node_kind`` line in ``_screen_matches`` and the
-    trend counts as a display (1/0 against the 1/1 asserted here).
+    trend counts as a display, so the report reads 2/0 against the 1/1 asserted here.
+    ⚠ This said 1/0 until the post-build review measured it. The fixture carries TWO matches and
+    the mutant turns BOTH into displays, so the display counter goes UP rather than the trend
+    counter alone going down. The figure had been thought out from the trend row instead of
+    counted over the header, which is the very confusion of a row with a count this file is about.
     """
     report = _report_of(_lookup_with_a_trend())
 

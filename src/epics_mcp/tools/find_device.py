@@ -1,4 +1,4 @@
-"""Tool for the Wedge-2 device lookup: which screens show device X + is it live + which IOC.
+"""Tool for the Wedge-2 device lookup: where device X is shown + is it live + which IOC.
 
 The live-plane counterpart of the offline ``find_screen`` (phoebus-display MCP). It REUSES the
 build-once reverse-lookup ``opi_navigation.pv_analysis.find_displays`` (never rebuilt) and enriches
@@ -9,9 +9,15 @@ split: the offline ``find_screen`` stays EPICS-free, the live enrichment lives h
 The blocking offline part (macro-aware inventory + reverse-lookup) runs off the event loop in a
 thread; the p4p batch read and the ChannelFinder GET are awaited in the wrapper. The live read is
 capped to ``max_batch_size`` channels (a device prefix matches hundreds-to-thousands; one batch
-over that cap raises ``BATCH_TOO_LARGE``), and that cap does not shorten the screen list. The
-screen list has its own two limits, the inventory walk's context and glob caps, and both are
+over that cap raises ``BATCH_TOO_LARGE``), and that cap does not shorten the match list. The
+match list has its own two limits, the inventory walk's context and glob caps, and both are
 reported as ``notes`` since GB-65.
+
+⚠ A MATCH IS NOT NECESSARILY A SCREEN, and this module said it was until GQ-21. The lookup cuts on
+``operator_facing`` and never on the kind of file, so a ``.plt`` Data Browser trend opened by an
+``open_file`` button is a top level of its own and comes back among the matches. That is a correct
+answer and is deliberately not filtered; ``services.device_lookup`` carries the kind out on
+``ScreenMatch.node_kind`` and splits the count into ``display_count``/``trend_count``.
 """
 
 from __future__ import annotations
@@ -86,11 +92,13 @@ async def _find_device(
     context_cap: int = DEFAULT_PV_CONTEXT_CAP,
     windows_paths: bool = False,
 ) -> dict[str, object]:
-    """Find the operator screens for *query*, read its channels live, and join the serving IOC.
+    """Find where *query* is shown, read its channels live, and join the serving IOC.
 
     Read-only. *query* is a device / PV channel (protocol prefix optional); *match* is
     ``exact``/``prefix``/``substring`` (matched against the protocol-stripped channel).
-    *displays_dir* is the project/dataset ROOT. Live values come from p4p; reach follows the
+    *displays_dir* is the project/dataset ROOT. A match is an operator screen or a Data Browser
+    trend opened by a button, said on ``screens[].node_kind``. Live values come from p4p; reach
+    follows the
     launcher's EPICS search env (address lists / name servers / auto-addr search, run
     ``epics-doctor`` for the effective posture); the live read is capped to ``max_batch_size``
     channels with an honest note, and that cap does not shorten the screen list; the walk's own

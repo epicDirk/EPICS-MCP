@@ -30,6 +30,14 @@ PvRole = Literal["read", "write"]
 #: produced 82 (QA-12).
 _VALUE_CAP = 80
 
+#: Rendered marker per node kind, for every kind that is NOT an operator screen. A dict rather than
+#: an ``if`` chain because the fallback below has to stay REACHABLE for mypy: ``NodeKind`` is a
+#: Literal today, so an ``else`` after its two members is dead code under ``warn_unreachable``,
+#: which is precisely the branch a third kind would need. The lookup keeps that branch alive
+#: without a type-level lie, and a third kind then renders as itself instead of silently borrowing
+#: the look of a display row (the row half of the same trap the positive counters close).
+_KIND_MARKERS: dict[str, str] = {"trend": ", Data Browser trend (not a screen)"}
+
 
 class _Model(BaseModel):
     """Frozen, closed value object (deterministic tuples; typos rejected)."""
@@ -60,9 +68,12 @@ class ScreenMatch(_Model):
     roles: tuple[PvRole, ...] = ()
     count: int = 0
     #: What this match IS: an operator screen (``"display"``) or a Data Browser trend
-    #: (``"trend"``). Taken from the engine's own ``DisplayMatch.node_kind``, never derived from
-    #: the file suffix, the same rule ``display_files.is_inventory_file`` states. Additive with a
-    #: default, so an older caller keeps working and a hand-built lookup keeps parsing.
+    #: (``"trend"``). Taken from the engine's own ``DisplayMatch.node_kind`` rather than re-derived
+    #: here, the rule ``display_files.is_inventory_file`` states for this server. ⚠ That is a
+    #: statement about THIS layer, not about the value's origin: measured, the walk routes a
+    #: candidate into the trend parser BY SUFFIX, so the two agree today. Which is the engine's
+    #: business, and reading the suffix here instead would freeze that coincidence into a promise.
+    #: Additive with a default, so an older caller keeps working and a hand-built lookup parses.
     node_kind: NodeKind = "display"
 
 
@@ -103,12 +114,12 @@ class DeviceLookupReport(_Model):
     reads off the inventory and hands over. Before that, a screen dropped by the glob cap was
     missing from ``screens`` with nothing saying so.
 
-    ⚠ That does NOT make an unconditional "the screen list is complete" true, and it stays banned
+    ⚠ That does NOT make an unconditional "the match list is complete" true, and it stays banned
     in this file and in ``tools/find_device.py``. Two reasons, both load-bearing: the absence of a
     note means no cap FIRED on this run, never "complete" (the walk has limits its two caps do not
     measure, the case-sensitivity of path resolution among them), and a note that DID fire is a
     statement about the run, not a verdict on this query, because neither cap records the screen a
-    device lookup returns. Say what is true instead: the LIVE cap does not shorten the screen list.
+    device lookup returns. Say what is true instead: the LIVE cap does not shorten the match list.
 
     ⚠ ``PvDiagnostics`` carries a THIRD field, ``excluded_by_protocol``, and it is deliberately not
     read here: measured, it cannot shorten this list. It counts the ``loc``/``sim``/``sys``/other
@@ -135,10 +146,14 @@ class DeviceLookupReport(_Model):
     #: COUNTED, never one subtracted from the other, the rule the engine's own ``PvLookupResult``
     #: states: a third ``NodeKind`` would land silently in the display figure under a subtraction,
     #: whereas positive counters let their sum fall short and say so. Both are counted over the
-    #: ``screens`` tuple THIS report carries, so a header and its list cannot disagree, the same
-    #: choice ``live_read`` makes above. That is only safe while the two ways of counting mean the
-    #: same thing, so ``test_find_device_tool.py`` holds ours against the engine's own on one real
-    #: walk: a projection that started adding, dropping or relabelling a match goes red there.
+    #: ``screens`` tuple THIS report carries, so a header and its list agree, the same choice
+    #: ``live_read`` makes above. ⚠ That agreement is a property of :func:`build_device_report`,
+    #: the one place in ``src`` that constructs this model, and NOT an invariant of the model: no
+    #: validator enforces it, and none can, because a later third ``NodeKind`` has to be able to
+    #: make the sum fall short. A second construction site would have to keep it by hand.
+    #: Two guards, and they cover different halves: ``test_device_lookup.py`` reddens if the
+    #: counters stop being derived from ``screens``, ``test_find_device_tool.py`` reddens if they
+    #: stop agreeing with the engine's own on a real walk.
     display_count: int = 0
     trend_count: int = 0
     notes: tuple[str, ...] = ()
@@ -283,13 +298,13 @@ def build_device_report(
     if context_capped:
         notes.append(
             f"{len(context_capped)} display(s) hit the per-display context cap, their resolved "
-            "PVs are a LOWER BOUND, so a screen showing this device can be missing (raise "
-            "context_cap)."
+            "PVs are a LOWER BOUND, so a screen or trend showing this device can be missing "
+            "(raise context_cap)."
         )
     if glob_capped_count:
         notes.append(
             f"{glob_capped_count} globbed <file> reference(s) hit the glob cap, so embedded "
-            "screens were left out and the screen list is a lower bound. This cap cannot be "
+            "screens were left out and the match list is a lower bound. This cap cannot be "
             "raised from here."
         )
     if live_capped:
@@ -298,7 +313,7 @@ def build_device_report(
         # undercounts when fewer come back than were attempted (e.g. a degraded live read).
         notes.append(
             f"Live status shown for {live_read} of {total_matched} matched channels "
-            "(read capped), refine the query for full live coverage. The screen list is not "
+            "(read capped), refine the query for full live coverage. The match list is not "
             "shortened by that cap."
         )
     # A degraded live read (best-effort at the find_device edge) carries a "note" on the live
@@ -375,7 +390,11 @@ def render_markdown(report: DeviceLookupReport) -> str:
     )
     for screen in report.screens:
         roles = "/".join(report_roles(screen.roles))
-        kind = ", Data Browser trend (not a screen)" if screen.node_kind == "trend" else ""
+        kind = (
+            ""
+            if screen.node_kind == "display"
+            else _KIND_MARKERS.get(screen.node_kind, f", {screen.node_kind} (not a screen)")
+        )
         lines.append(f"  - `{screen.display_path}`, {screen.count} channel(s) [{roles}]{kind}")
     # Use live_read (channels ATTEMPTED), not len(channels) (channels that returned), so this
     # header agrees with the capped note, which S7-5 anchored to live_read. They diverge only on a

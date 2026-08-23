@@ -342,18 +342,18 @@ async def find_device(
         bool, Field(description="Resolve embedded <file> refs case-insensitively (Windows host)")
     ] = False,
 ) -> dict[str, object]:
-    """Find which operator screens show device X, read its channels live, and join the serving IOC.
+    """Find where device X is shown, read its channels live, and join the serving IOC.
 
+    NOT every match is a screen. A Data Browser trend opened by a button is operator-facing too
+    and is returned, marked by screens[].node_kind ("display" or "trend"), with display_count and
+    trend_count splitting the list; an empty answer denies both kinds rather than screens alone.
     Read-only (Wedge-2 live counterpart of the offline find_screen). The reverse-lookup, which
-    operator screens reference the device, is offline + macro-aware. Each screen comes back with
-    the roles it uses the device in, read and/or write (screens[].roles), so a screen that can
-    WRITE the device is visible without opening one. NOT every match is a screen: a Data Browser
-    trend opened by a button is operator-facing too and is returned, marked as such by
-    screens[].node_kind ("display" or "trend"), with display_count and trend_count splitting the
-    list; an empty answer denies both kinds rather than screens alone. Live values come from p4p;
+    operator-facing files reference the device, is offline + macro-aware. Each match comes back
+    with the roles it uses the device in, read and/or write (screens[].roles), so a screen that can
+    WRITE the device is visible without opening one. Live values come from p4p;
     reach follows the launcher's EPICS search env (address lists / name servers / auto-addr search,
     run epics-doctor for the effective posture); the live read is capped to max_batch_size
-    channels (honest note; the screen list is not shortened by that cap). The screen list has its
+    channels (honest note; the match list is not shortened by that cap). The match list has its
     own two limits, the inventory walk's per-display context cap and its glob cap, and each fires
     its own notes entry naming the count; the absence of such a note means no cap fired on this
     run, never "complete". Source IOC comes from
