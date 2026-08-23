@@ -90,7 +90,9 @@ carry breaking changes).
   needs no change; only a client with a URI written into it breaks, and it breaks loudly with an
   unknown resource rather than answering something stale. Pre-1.0 minor versions may carry
   breaking changes, as the head of this file says. The `get_guide` TOOL, the channel a model
-  reads the cookbook through, is untouched, and none of the three payloads changed.
+  reads the cookbook through, is untouched, and none of the three payloads changed. Released
+  entries below keep writing `epics-pv://`: they record what those versions actually served,
+  and rewriting them would be the drift, not the fix.
 
 - **`find_device` no longer calls a Data Browser trend an operator screen.** A `.plt` opened by a
   button is operator-facing, so the reverse-lookup returns it, and until now it arrived

@@ -32,9 +32,20 @@ is one line when a genuinely new scheme arrives; the benefit is that a retired s
 back quietly and that an INVENTED one, the defect this file was written for, is caught as well. A
 list of retired schemes would have caught only the first of those two.
 
-The honest limit: ``tests/`` is out of scope. Roughly twenty mentions live there and they all moved
-with the rename, but a stale URI in a test is not a contract defect, and pointing the guard at its
-own directory would trade real coverage for noise.
+The honest limits, measured against this helper rather than reasoned about, and every one of them
+INHERITED from the literal pattern this replaces rather than introduced by it:
+
+* ``tests/`` is out of scope. Roughly twenty mentions live there and they all moved with the
+  rename, but a stale URI in a test is not a contract defect, and pointing the guard at its own
+  directory would trade real coverage for noise.
+* A path of more than one segment is not read: ``epics://guide/topic`` matches as the registered
+  ``epics://guide`` and passes. Widening the path characters to include ``/`` would ALSO have to
+  decide what a sentence-ending period is, and five mentions in this tree are ``epics://guide.``,
+  so that trade closes an empty hole and opens five false reports. Measured: no file in this tree
+  carries a multi-segment resource URI.
+* A scheme with no path at all (``epics-pv://`` on its own) and an uppercase one are not matched.
+  Measured: the only pathless mention in the tree is the CHANGELOG line describing this rename,
+  and there is no uppercase one.
 """
 
 import re
@@ -56,9 +67,17 @@ _ANY_URI = re.compile(rf"(?<![a-z0-9+.-])({_SCHEME})://[a-z]+")
 #: Schemes a page or module of this repository may name although the server registers no resource
 #: under them. Each earns its place by being something other than a resource URI:
 #: ``http``/``https`` are ordinary links, ``git+https`` is the dependency-group reference the
-#: README explains, ``sim`` is the Phoebus simulated-PV prefix the guide teaches, and ``scheme``
-#: is the placeholder two comments about URL parsing use to stand for any scheme at all.
-_FOREIGN_SCHEMES = frozenset({"http", "https", "git+https", "sim", "scheme"})
+#: README explains, ``scheme`` is the placeholder two comments about URL parsing use to stand for
+#: any scheme at all, and ``ca``/``pva``/``loc``/``sim`` are the EPICS and Phoebus CHANNEL
+#: prefixes, which are addresses of a completely different kind that happen to share the syntax.
+#:
+#: ⚠ The channel prefixes are not hypothetical and were not here at first. Measured on this tree,
+#: four lines inside the checked surface already write them (``services/device_lookup.py``,
+#: ``services/inventory_adapter.py``, ``tools/validate.py`` twice) and every one of them passes
+#: only because the next character happens to be a backtick, a period or an uppercase letter.
+#: The first author to write ``ca://motor`` in lowercase prose would have reddened this guard for
+#: nothing, which is the failure mode that gets a guard switched off rather than fixed.
+_FOREIGN_SCHEMES = frozenset({"http", "https", "git+https", "scheme", "ca", "pva", "loc", "sim"})
 
 
 def _registered_uris() -> set[str]:
@@ -100,6 +119,10 @@ def _documentation_files() -> list[Path]:
     pages.extend(sorted((_ROOT / "docs").rglob("*.md")))
     pages.append(_ROOT / "examples" / "README.md")
     pages.append(_ROOT / "src" / "epics_mcp" / "operator_guide.md")
+    # Not a page but a shipped one: pyproject lists .env.example in the sdist, and it names a
+    # resource URI in its credentials note. It was the ONE file the work item's own search recipe
+    # missed, because three --include suffixes cannot see a file that has none.
+    pages.append(_ROOT / ".env.example")
     return [p for p in pages if p.is_file()]
 
 
@@ -167,6 +190,27 @@ def test_a_left_behind_scheme_from_a_rename_is_reported() -> None:
     left_behind = "the cookbook is at epics-pv://guide, see also epics://guide"
 
     assert _uris_a_page_may_not_name(left_behind, {"epics://guide"}) == ["epics-pv://guide"]
+
+
+def test_an_invented_path_under_the_registered_scheme_is_reported() -> None:
+    """The direction the two probes beside this one do NOT cover, and an audit found it unpinned.
+
+    Both of those compare a FOREIGN scheme against a registered one, so the whole check could be
+    weakened to a scheme-only comparison and stay green while every invented path under our own
+    scheme walked through. Measured: replacing the URI comparison with
+    ``match.group(1) not in {u.split("://")[0] for u in registered}`` left all five tests passing
+    and silently stopped reporting ``epics://status``, ``epics://helth`` and ``epics://guidebook``.
+    That is the exact defect this module was written for, ``health://status`` one scheme over.
+
+    Two offenders rather than one, and one of them a PREFIX of the registered URI, so a truncating
+    return and a ``startswith`` comparison die here too.
+    """
+    invented = "read epics://status and epics://guidebook, but not epics://guide"
+
+    assert _uris_a_page_may_not_name(invented, {"epics://guide"}) == [
+        "epics://guidebook",
+        "epics://status",
+    ]
 
 
 def test_an_ordinary_link_and_a_registered_uri_are_not_reported() -> None:

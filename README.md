@@ -173,8 +173,8 @@ Appliance (single- or multi-instance), ChannelFinder, the Phoebus Alarm server a
 Phoebus Olog logbook. Archiver topology note: in a single-JVM appliance the MGMT and retrieval
 webapps share a port, so leave `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` empty; in a split deployment
 MGMT (`:17665`) and retrieval (`:17668`) are separate ports. The one service plane absent from
-that stack is the ESS Naming Service, which has no local counterpart to stand up and is
-exercised against the facility instance alone.
+that stack is the ESS Naming Service, for which this package ships no local stand-in, so
+it is exercised against the facility instance alone.
 
 No version of those services is listed here, and that is deliberate. The deployment guide
 explains [why, and what to run to answer the question for your own
