@@ -145,8 +145,9 @@ platform and fell back to building from source, see [Compatibility](#compatibili
 ## Built at a facility, designed to be facility-agnostic
 
 Written and validated against a real installation at ESS: an e3 IOC over PVAccess, an Archiver
-Appliance, ChannelFinder, the Phoebus Alarm server and logger, and an Olog logbook. The quirks it
-compensates for were measured against those services, not read off a specification.
+Appliance, ChannelFinder, the Phoebus Alarm server and logger, an Olog logbook, and the ESS
+Naming Service. The quirks it compensates for were measured against those services, not read
+off a specification.
 
 No site is hard-coded. Every service URL and network setting is an `EPICS_MCP_*` environment
 variable, so deploying elsewhere means setting those variables, not changing code. Two defaults
@@ -168,10 +169,12 @@ to building from source, which needs a compiler and is not something this projec
 | Linux aarch64 | **no**, source build | not tested here |
 
 **Services.** Exercised against a local EPICS stack: an e3 test IOC (PVAccess), an EPICS Archiver
-Appliance (single- or multi-instance), ChannelFinder, and the Phoebus Alarm server and logger.
-Archiver topology note: in a single-JVM appliance the MGMT and retrieval webapps share a port, so
-leave `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` empty; in a split deployment MGMT (`:17665`) and retrieval
-(`:17668`) are separate ports.
+Appliance (single- or multi-instance), ChannelFinder, the Phoebus Alarm server and logger, and a
+Phoebus Olog logbook. Archiver topology note: in a single-JVM appliance the MGMT and retrieval
+webapps share a port, so leave `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` empty; in a split deployment
+MGMT (`:17665`) and retrieval (`:17668`) are separate ports. The one service plane absent from
+that stack is the ESS Naming Service, which has no local counterpart to stand up and is
+exercised against the facility instance alone.
 
 No version of those services is listed here, and that is deliberate. The deployment guide
 explains [why, and what to run to answer the question for your own
@@ -201,16 +204,15 @@ live PVs, registry, history, alarm, naming and logbook, installs and runs withou
 **What is deliberately missing.** Those six are not available in a published install, and cannot
 be made available by any flag. `opi_navigation` lives in a private repository, so it is wired
 into a dependency group rather than advertised as an extra. A group stays out of the published
-metadata, where an unreachable dependency would be a promise nobody could keep, and a direct git
-reference is the one thing a package index refuses outright. The tools refuse with an explanation
-instead of failing obscurely. This page names the gap rather than offering an install command
-that cannot work.
+metadata, where an unreachable dependency would be a promise nobody could keep, and a package
+index rejects a direct git reference outright. The tools refuse with an explanation instead of
+failing obscurely.
 
 **What is intended, with no date attached.** Two neighbouring pieces exist and are in daily use
 here, both in private repositories: `opi-live`, a plugin that exposes a RUNNING CS-Studio, and
 `CS-Studio-MCP`, an offline MCP server for the display files themselves. Opening the engine up is
-tied to how those two hold up in practice. None of the three carries a release commitment, and
-nothing on this page is a schedule. This page will say when one is published.
+tied to how those two hold up in practice. Neither those two nor the engine carries a release
+commitment, and nothing on this page is a schedule. This page will say when one is published.
 
 ## License
 
