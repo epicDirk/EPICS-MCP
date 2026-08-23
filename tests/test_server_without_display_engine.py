@@ -29,14 +29,21 @@ from pathlib import Path
 
 import pytest
 
+from tests.display_tools_source import display_tool_names
 from tests.engine_gate import BLOCKER, engine_available
 
 _REPO = Path(__file__).resolve().parents[1]
 
-#: The four tools ``display_tools.register_display_tools`` adds. Named rather than counted: a count
-#: would be a second, unguarded derivation of the same set, and it is the NAMES the corrected
-#: README sentence is about.
-_DISPLAY_TOOLS = frozenset({"coverage_audit", "crossplane_check", "find_device", "validate_pvs"})
+#: The tools ``display_tools`` gates, READ FROM ITS SOURCE rather than typed out here.
+#:
+#: ⚠ The first version of this module spelled the four names as a literal, and an audit killed it
+#: with the cheapest mutation there is: emptying the set leaves BOTH assertions below green, because
+#: both are set operations and both are trivially true on the empty set. A misspelled name was
+#: nearly as bad, invisible in the core-only lane because only the second assertion sees it and that
+#: one skips there. ``display_tool_names`` reads the definitions out of the AST without importing
+#: the module, so it answers on a core-only install too, and two other test modules already use it.
+#: The literal was the fourth hand-kept copy in this tree; there is no fifth now.
+_DISPLAY_TOOLS = frozenset(display_tool_names())
 
 #: A tool the core server registers unconditionally. The POSITIVE CONTROL, and it is not decoration:
 #: without it the absence assertion below would also pass on a server that never came up, on an
@@ -80,6 +87,10 @@ def test_a_core_only_server_registers_no_display_tool() -> None:
     that would make the OLD sentence true again, a display tool registered unconditionally with a
     refusing body, which is why it is worth its subprocess.
     """
+    assert _DISPLAY_TOOLS, (
+        "the display-tool names could not be read from the source, so both assertions in this "
+        "module would be vacuous set operations on an empty set"
+    )
     names = _tool_names_without_the_engine()
 
     assert _CORE_CONTROL in names, (
@@ -102,11 +113,21 @@ def test_a_core_only_server_registers_no_display_tool() -> None:
 async def test_the_same_server_registers_them_when_the_engine_is_there() -> None:
     """The other direction, so the absence above is not simply a server that registers nothing.
 
-    ⚠ SEPARATE FROM THE TEST ABOVE ON PURPOSE, AND MERGING THE TWO SILENTLY KILLS THE GUARD. The
-    ``skipif`` here is unavoidable: these four names do not exist without the engine. In a single
-    function it would take the FIRST assertion down with it, and precisely in the lane where that
-    one counts, because CI syncs without ``--group displays``. A guard that is skipped where it
-    matters is not a guard. Whoever tidies this file next: leave them apart.
+    ⚠ SEPARATE FROM THE TEST ABOVE ON PURPOSE, AND MERGING THE TWO COSTS THE REPORT ITS MEANING.
+    Whoever tidies this file next: leave them apart. The reason has two halves, and an audit found
+    the first one stated as if it were the whole thing.
+
+    The half that is simply true, measured: a shared ``skipif`` DECORATOR takes the first assertion
+    down with it, in exactly the lane where that one counts, because CI syncs without
+    ``--group displays``. A deliberately reddened first assertion under a merged decorator reports
+    SKIPPED, not FAILED.
+
+    The half that was missing: this repository also recognises the early-skip form
+    (``if not engine_available(): pytest.skip(...)`` AFTER the first assertion), and that one would
+    let the first assertion run. So a single function is not impossible, it is merely worse. It
+    reports the case as SKIPPED although half of it executed, and a report that cannot tell "ran and
+    green" from "never ran at all" is the damage GB-27 worked through for the collection hook. Two
+    functions keep the two answers separable, which is the whole point of having the first one.
 
     In-process rather than in a subprocess, which is a cost decision with a measured price: the
     child in the sibling test needs about seven seconds to import the server, and this half needs
@@ -114,6 +135,7 @@ async def test_the_same_server_registers_them_when_the_engine_is_there() -> None
     """
     from epics_mcp.server import mcp
 
+    assert _DISPLAY_TOOLS, "the display-tool names could not be read, this assertion would be empty"
     names = frozenset(tool.name for tool in await mcp.list_tools())
 
     missing = sorted(_DISPLAY_TOOLS - names)
