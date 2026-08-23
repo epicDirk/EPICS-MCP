@@ -109,8 +109,9 @@ async def validate_pvs(
     ] = None,
     # gt=0 (QA-71): both display-gated tools answered a zero timeout with a plausible-looking
     # result rather than an error. validate_pvs reported the PV as disconnected and find_device
-    # reported "No operator-facing screen references this device", which is the same class of
-    # fabricated answer QA-65 removed from the caps, not the honest failure it was assumed to be.
+    # reported that nothing operator-facing references the device (the note then read "No
+    # operator-facing screen references this device", reworded by GQ-21), which is the same class
+    # of fabricated answer QA-65 removed from the caps, not the honest failure it was assumed to be.
     timeout: Annotated[
         float | None,
         Field(description="Timeout in seconds per PV (default: EPICS_MCP_DEFAULT_TIMEOUT)", gt=0),
@@ -320,8 +321,8 @@ async def find_device(
         str,
         Field(
             description="Project/dataset ROOT holding the .bob displays. A .plt Data Browser "
-            "trend opened by a button is a screen in its own right here, so it can be returned "
-            "among the screens that show the device."
+            "trend opened by a button is a top level in its own right, so it can be returned "
+            "among the matches; it comes back marked as a trend, never as a screen."
         ),
     ],
     match: Annotated[
@@ -346,7 +347,10 @@ async def find_device(
     Read-only (Wedge-2 live counterpart of the offline find_screen). The reverse-lookup, which
     operator screens reference the device, is offline + macro-aware. Each screen comes back with
     the roles it uses the device in, read and/or write (screens[].roles), so a screen that can
-    WRITE the device is visible without opening one. Live values come from p4p;
+    WRITE the device is visible without opening one. NOT every match is a screen: a Data Browser
+    trend opened by a button is operator-facing too and is returned, marked as such by
+    screens[].node_kind ("display" or "trend"), with display_count and trend_count splitting the
+    list; an empty answer denies both kinds rather than screens alone. Live values come from p4p;
     reach follows the launcher's EPICS search env (address lists / name servers / auto-addr search,
     run epics-doctor for the effective posture); the live read is capped to max_batch_size
     channels (honest note; the screen list is not shortened by that cap). The screen list has its

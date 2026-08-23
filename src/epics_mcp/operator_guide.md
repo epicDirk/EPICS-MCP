@@ -207,8 +207,9 @@ are simply absent, that is an unmet optional dependency group, not a bug.
 `validate_pvs` · `crossplane_check` · `coverage_audit` · `find_device`
 <!-- END:tool-inventory -->
 
-Composing the display tools: `find_device` (which screens show device X + live value + serving IOC),
-`coverage_audit` (which delivered PV has no screen/archive/alarm, the blind spots).
+Composing the display tools: `find_device` (where device X is shown, an operator screen or a Data
+Browser trend + live value + serving IOC), `coverage_audit` (which delivered PV has no
+screen/archive/alarm, the blind spots).
 
 ### Answer shapes, and which topic explains the field in front of you
 
@@ -1186,6 +1187,22 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   embedded in a screen through a `databrowser` widget its traces are attributed to that SCREEN and
   only the file view of the trend finds them here, while a trend opened by an `open_file` button is
   a top level of its own and answers under either view. So on a trend, when in doubt, ask for both.
+- **A `find_device` match is not necessarily a screen, and the answer now says which it is.** The
+  reverse-lookup cuts on operator-visibility and never on the kind of file, so a `.plt` trend
+  opened by an `open_file` button is a top level of its own and comes back among the `screens`.
+  That is a correct answer to "where do I see this device" and is deliberately not filtered; what
+  was wrong is that it arrived indistinguishable from an operator screen, counted as one and named
+  as one. Read `screens[].node_kind` (`"display"` or `"trend"`) for what a match IS, and
+  `display_count` / `trend_count` for how the list splits. Those two are counted positively rather
+  than one subtracted from the other, so a later third kind would fall out of their sum instead of
+  landing silently in the display figure. The empty answer denies both kinds now ("Nothing
+  operator-facing references this device/query, neither a screen nor a Data Browser trend"); it
+  used to deny screens alone, having never counted trends apart. ⚠ The field is still called
+  `screens`: renaming it would break every caller in order to say what its members now say
+  themselves. ⚠ And do not read the kind off the path suffix instead. It agrees with `node_kind`
+  today, because the walk routes a candidate by suffix and an unparsable `.plt` yields no channel
+  and therefore never reaches a match at all, but that is a property of the current walk rather
+  than a promise this server makes.
 - **`validate_pvs` refuses a `file_path` with `INVALID_INPUT`.** Two inputs are refused before any
   work: a path whose suffix is neither of the two above, and one that is not under `displays_dir`.
   Both would run the
@@ -1317,7 +1334,7 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
 
 - **Every `timeout` is refused at zero or below, on every tool that takes one.** A validation error
   naming the argument, before any request exists. A `timeout=0` did not fail honestly: measured, it
-  made `find_device` answer "No operator-facing screen references this device", `validate_pvs`
+  made `find_device` answer that nothing operator-facing references the device, `validate_pvs`
   report the PV as disconnected, `diagnose_connection` name a cause, and `discover_pvs`/`get_pvs`
   return empty. So repeat any EARLIER `timeout=0` call before believing its "nothing found".
 

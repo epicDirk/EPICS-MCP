@@ -81,6 +81,19 @@ carry breaking changes).
 
 ### Changed
 
+- **`find_device` no longer calls a Data Browser trend an operator screen.** A `.plt` opened by a
+  button is operator-facing, so the reverse-lookup returns it, and until now it arrived
+  indistinguishable from a `.bob`: counted among the screens, described as one by the tool, and on
+  an empty answer the note read "No operator-facing screen references this device/query" although
+  trends had never been counted apart. Each match now carries `screens[].node_kind` (`"display"`
+  or `"trend"`), and the report carries `display_count` and `trend_count`, counted positively
+  rather than one subtracted from the other, so a later third kind cannot land silently in the
+  display figure. The rendered header splits the same way and a trend's own row says what it is;
+  the empty answer denies both kinds. Additive on the wire: nothing was removed or retyped, and
+  the field stays called `screens`, because renaming it would break every caller in order to say
+  what its members now say themselves. `tools/list` grows 323 chars on the display-gated lane and
+  none on the core one.
+
 - **A deployment whose configuration did not change can now exit `3` where it exited `0`.**
   `epics-doctor` sells itself as a scriptable pass/fail, so this is the half of the entry below
   that reaches a CI job rather than a reader. Until now a run whose own reads

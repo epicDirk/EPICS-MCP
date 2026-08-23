@@ -3311,8 +3311,9 @@ async def test_stripped_tool_still_returns_structured_content(
 # machine-readable (the core value of S29) and cost only ~1% more context per agent turn, so the
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
-# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-19 after GQ-33: the
-# core lane is 76_835 and the full lane 89_868 (the docstring below carries the deltas, and the
+# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-23 after GQ-21: the
+# core lane is 76_835 and the full lane 90_191 (the docstring below carries the deltas, and the
+# pair 76_835 / 89_868 measured 2026-08-19 after GQ-33, the
 # pair 75_883 / 88_746 measured 2026-08-16 after GB-64 (d), the
 # pair 75_718 / 88_581 measured after GB-64's earlier parts on the same day, the
 # pair 74_935 / 87_798 measured mid-way through the same item, before its three entry-tool
@@ -3342,9 +3343,16 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
     FastMCP's native-lean schemas plus the S29 typing keep the core lane 76_835 and the full lane
-    89_868, re-measured 2026-08-19 on both lanes with the display-gated tools excluded for the core
+    90_191, re-measured 2026-08-23 on both lanes with the display-gated tools excluded for the core
     one, since a lane estimated rather than measured is the error the constant's comment records.
-    GQ-33 added the last +952 / +1_122 from the pair measured on 2026-08-16, and only +642 of that
+    GQ-21 added +0 / +323 from the pair measured on 2026-08-19, and the zero on the core lane is
+    the informative half: both its edits sit on ``find_device``, which is display-gated, so the
+    core lane cannot move and is measured rather than assumed not to have. The bytes are the
+    ``displays_dir`` sentence that called a button-opened trend a screen, and the sentence in the
+    tool description that now names ``node_kind`` and the split counters. The ``115 KB`` guide
+    claim edited in ``server.py`` in the same commit rides the wire on ``get_guide``, a core tool,
+    and moved neither lane because it replaced a figure of the same width.
+    GQ-33 added +952 / +1_122 from the pair measured on 2026-08-16, and only +642 of that
     is its own: two description edits (``set_pv_value``, +300 on both lanes, and ``get_pv_history``,
     +342 on both lanes), both isolated by stripping the added text in memory and re-measuring. The
     REST of the gap, +310 core and +480 full, had accumulated unmeasured since 2026-08-16 through

@@ -344,7 +344,12 @@ def test_build_device_report_no_screens_note() -> None:
     )
     assert report.screens == ()
     assert report.channels == ()
-    assert any("No operator-facing screen" in note for note in report.notes)
+    # GQ-21: the empty answer denies BOTH operator-facing kinds. It used to deny only screens,
+    # which named a set the report had never counted separately.
+    note = next(n for n in report.notes if "Nothing operator-facing references" in n)
+    assert "neither a screen nor a Data Browser trend" in note, note
+    assert report.display_count == 0
+    assert report.trend_count == 0
 
 
 def test_render_markdown_deterministic() -> None:
@@ -521,7 +526,7 @@ def test_both_walk_caps_report_side_by_side() -> None:
 def test_walk_cap_notes_sit_between_the_screen_note_and_the_live_note() -> None:
     """The note ORDER is pinned, because the caps explain the line above them.
 
-    A capped walk is what can make "No operator-facing screen references this device" FALSE, so
+    A capped walk is what can make "nothing operator-facing references this device" FALSE, so
     the cap notes must follow it immediately and precede the live-read note, which is about a
     different half of the answer. Nothing pinned any order in this report before GB-65 (measured:
     zero ``notes[...]`` accesses in either device test file), and the sibling report lost exactly
@@ -532,7 +537,7 @@ def test_walk_cap_notes_sit_between_the_screen_note_and_the_live_note() -> None:
         context_capped=("a.bob",), glob_capped_count=1, live_capped=True, lookup=empty
     )
 
-    assert "No operator-facing screen" in report.notes[0]
+    assert "Nothing operator-facing references" in report.notes[0]
     assert "context cap" in report.notes[1]
     assert "glob cap" in report.notes[2]
     assert "read capped" in report.notes[3]
@@ -541,14 +546,14 @@ def test_walk_cap_notes_sit_between_the_screen_note_and_the_live_note() -> None:
 def test_an_empty_screen_list_under_a_cap_is_not_reported_as_a_clean_no() -> None:
     """The combination that matters most: no screens found AND the walk was cut short.
 
-    On its own, "No operator-facing screen references this device" reads as a proven absence. Under
+    On its own, "nothing operator-facing references this device" reads as a proven absence. Under
     a fired cap it is not one, and the reader must be able to see that from the same answer.
     """
     empty = PvLookupResult(query="NOPE", match="prefix", total_pvs_matched=0, displays=())
     report = _report_with_caps(glob_capped_count=4, lookup=empty)
 
     assert report.screens == ()
-    assert any("No operator-facing screen" in note for note in report.notes)
+    assert any("Nothing operator-facing references" in note for note in report.notes)
     assert any("lower bound" in note for note in report.notes), report.notes
 
 
@@ -578,3 +583,101 @@ def test_the_cap_notes_stay_within_this_file_s_own_rendered_line_budget() -> Non
     assert any("context cap" in line for line in lines)  # the long notes ARE in this render
     assert any("glob cap" in line for line in lines)
     assert all(len(line) < 200 for line in lines), max(lines, key=len)
+
+
+def _lookup_with_a_trend() -> PvLookupResult:
+    """One operator screen and one Data Browser trend, both matching the query.
+
+    The engine's own counters are deliberately LEFT AT THEIR DEFAULTS here: this file tests the
+    pure merge, and the point of the assertions below is that the report's figures follow from the
+    matches it carries rather than from a number handed in beside them. The cross-check against
+    the engine's counters is a walk and lives in ``test_find_device_tool.py``.
+    """
+    return PvLookupResult(
+        query="DEV-TEST01:Ctrl-EVR-01",
+        match="prefix",
+        total_pvs_matched=2,
+        displays=(
+            DisplayMatch(
+                display_path="panel.bob",
+                name="Panel",
+                matched_pvs=("DEV-TEST01:Ctrl-EVR-01:status",),
+                roles=("read",),
+                count=1,
+                node_kind="display",
+            ),
+            DisplayMatch(
+                display_path="beam.plt",
+                matched_pvs=("DEV-TEST01:Ctrl-EVR-01:trend",),
+                roles=("read",),
+                count=1,
+                node_kind="trend",
+            ),
+        ),
+    )
+
+
+def _report_of(lookup: PvLookupResult) -> DeviceLookupReport:
+    """The merge with every live/ChannelFinder input neutral, so only the kinds are in play."""
+    return build_device_report(
+        lookup,
+        {"results": [], "errors": []},
+        {"enabled": False, "channels": []},
+        total_matched=2,
+        live_read=0,
+        live_capped=False,
+        channelfinder_enabled=False,
+    )
+
+
+def test_the_kind_of_every_match_reaches_the_report() -> None:
+    """GQ-21: ``node_kind`` is carried through the projection, per match and in both directions."""
+    report = _report_of(_lookup_with_a_trend())
+
+    assert {s.display_path: s.node_kind for s in report.screens} == {
+        "panel.bob": "display",
+        "beam.plt": "trend",
+    }
+
+
+def test_the_kind_counters_are_positive_and_account_for_every_match() -> None:
+    """Counted positively, never subtracted, and their sum has to reach the match count.
+
+    A subtraction (``len(screens) - trend_count``) reads identically today and is a trap: the day
+    ``NodeKind`` gains a third value, that third kind lands silently in the DISPLAY figure and
+    nothing goes red. Positive counters cannot do that; they let their sum fall short instead, and
+    this assertion is what turns the shortfall into a red test rather than a quiet mislabel.
+
+    Provably red: drop the ``node_kind=display.node_kind`` line in ``_screen_matches`` and the
+    trend counts as a display (1/0 against the 1/1 asserted here).
+    """
+    report = _report_of(_lookup_with_a_trend())
+
+    assert (report.display_count, report.trend_count) == (1, 1)
+    assert report.display_count + report.trend_count == len(report.screens), (
+        "a match is in neither counter, so NodeKind has grown a third value: give it its own "
+        "positive counter, never fold it into one of these two"
+    )
+
+
+def test_the_rendered_header_and_rows_name_the_trend_as_a_trend() -> None:
+    """The human-facing half carries the split too: in the header a reader draws a conclusion
+    from, and on the trend's own row. The screen's row stays free of the marker, which is the
+    control: a renderer marking everything would pass the first half alone."""
+    markdown = render_markdown(_report_of(_lookup_with_a_trend()))
+
+    header = next(line for line in markdown.splitlines() if "showing it" in line)
+    assert "1 screen(s)" in header and "1 Data Browser trend(s)" in header, header
+    trend_row = next(line for line in markdown.splitlines() if "beam.plt" in line)
+    assert "Data Browser trend (not a screen)" in trend_row, trend_row
+    screen_row = next(line for line in markdown.splitlines() if "panel.bob" in line)
+    assert "trend" not in screen_row, screen_row
+
+
+def test_a_report_of_screens_only_counts_no_trends() -> None:
+    """The negative control for the counters: the ordinary all-screens answer is unchanged and
+    reports zero trends rather than omitting the figure."""
+    report = _report_of(_lookup())
+
+    assert (report.display_count, report.trend_count) == (2, 0)
+    assert all(screen.node_kind == "display" for screen in report.screens)

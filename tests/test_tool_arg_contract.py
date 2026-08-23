@@ -296,7 +296,7 @@ async def test_every_numeric_argument_has_a_lower_bound() -> None:
     A ``timeout`` of ``0`` was believed to be the honest half, raising ``PVTimeoutError`` instead
     of fabricating a success. Measured over all ten tools that lacked the bound (QA-71), that
     held for five and failed for the other five, which returned a plausible-looking answer:
-    ``find_device`` reported "No operator-facing screen references this device", ``validate_pvs``
+    ``find_device`` reported that nothing operator-facing references the device, ``validate_pvs``
     reported the PV as disconnected, ``diagnose_connection`` invented a cause in the one tool
     whose entire job is naming causes. Two of the five that DID fail were still wrong about the
     reason (``PV_TIMEOUT`` blames the device, ``is_archived`` raised ``[INTERNAL] ValueError``

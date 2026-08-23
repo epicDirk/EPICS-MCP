@@ -12,7 +12,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from opi_navigation.pv_analysis import PvDiagnostics, PvInventory, analyze_pv_inventory
+from opi_navigation.pv_analysis import (
+    PvDiagnostics,
+    PvInventory,
+    analyze_pv_inventory,
+    find_displays,
+)
 
 from epics_mcp.errors import EpicsConnectionError, EpicsError
 from epics_mcp.tools.find_device import _find_device
@@ -352,3 +357,132 @@ async def test_an_uncapped_run_carries_no_cap_note_at_all(
     assert len(report["screens"]) == 1  # the walk DID find the screen, so this is not a null run
     assert not any("context cap" in n for n in notes), notes
     assert not any("glob cap" in n for n in notes), notes
+
+
+# A dataset where the device is shown by BOTH kinds of top level the inventory collects: a real
+# operator screen, and a Data Browser trend reached by an action button. Written as its own set of
+# fixtures rather than extended onto ``_BOB`` above, because every test up there asserts a screen
+# count of one and a second top level would move all of them.
+_PANEL_BOB = (
+    '<display version="2.0.0"><name>Panel</name>'
+    '<widget type="textupdate"><name>s</name>'
+    "<pv_name>DEV-TEST01:Ctrl-EVR-01:status</pv_name></widget>"
+    "</display>"
+)
+# Opened by a button rather than embedded, deliberately, and this is the whole point of the
+# fixture: an ``open_file`` target is a TOP LEVEL of its own and therefore operator-facing, so
+# ``find_displays`` returns it. An EMBEDDED trend would have its traces attributed to the
+# embedding screen and would never appear as a match at all, which would prove nothing.
+_MENU_BOB = (
+    '<display version="2.0.0"><name>Menu</name>'
+    '<widget type="action_button" version="3.0.0"><name>b</name><actions>'
+    '<action type="open_file"><file>beam.plt</file><description>Trend</description></action>'
+    "</actions></widget></display>"
+)
+_TREND_PLT = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    "<databrowser><title>Beam</title><pvlist><pv>"
+    "<name>DEV-TEST01:Ctrl-EVR-01:trend</name><visible>true</visible><axis>0</axis>"
+    "</pv></pvlist></databrowser>"
+)
+_TREND_CHANNEL = "DEV-TEST01:Ctrl-EVR-01:trend"
+
+
+def _screen_and_trend(tmp_path: Path) -> Path:
+    """A dataset root holding an operator screen AND a button-opened Data Browser trend."""
+    root = tmp_path / "ds"
+    root.mkdir()
+    (root / "panel.bob").write_text(_PANEL_BOB, encoding="utf-8")
+    (root / "menu.bob").write_text(_MENU_BOB, encoding="utf-8")
+    (root / "beam.plt").write_text(_TREND_PLT, encoding="utf-8")
+    return root
+
+
+@pytest.mark.asyncio
+@patch("epics_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
+async def test_a_button_opened_trend_is_reported_as_a_trend_and_a_screen_as_a_screen(
+    mock_batch: AsyncMock, tmp_path: Path
+) -> None:
+    """GQ-21: the answer says WHICH KIND each match is, in both directions.
+
+    A ``.plt`` opened by a button is operator-visible and is a legitimate answer to "where do I
+    see this device", so it is not filtered out; what was wrong is that it was COUNTED and NAMED
+    as an operator screen. Both directions are asserted in one test on purpose: an implementation
+    that labelled everything a trend would satisfy the first half alone.
+
+    Driven through the TOOL rather than through ``find_displays`` underneath it, because the kind
+    was present in the engine's result all along and was dropped by this server's projection. A
+    test one layer down stays green through exactly the defect it is meant to pin.
+    """
+    mock_batch.return_value = {"results": [], "errors": []}
+    result = await _find_device("DEV-TEST01:Ctrl-EVR-01", str(_screen_and_trend(tmp_path)))
+
+    report = result["report"]
+    assert isinstance(report, dict)
+    kinds = {screen["display_path"]: screen["node_kind"] for screen in report["screens"]}
+    assert kinds == {"panel.bob": "display", "beam.plt": "trend"}, (
+        "find_device dropped the kind of its matches; the engine reports it on "
+        f"DisplayMatch.node_kind and this projection has to carry it through (got {kinds})"
+    )
+
+    # Counted POSITIVELY and separately, never one subtracted from the other: a third node kind
+    # would land silently in the display figure under a subtraction.
+    assert report["display_count"] == 1
+    assert report["trend_count"] == 1
+
+    # The human-facing half says it too, since that is the half an operator reads.
+    markdown = result["markdown"]
+    assert isinstance(markdown, str)
+    assert "1 screen" in markdown and "1 Data Browser trend" in markdown, markdown
+    trend_line = next(line for line in markdown.splitlines() if "beam.plt" in line)
+    assert "Data Browser trend" in trend_line, trend_line
+    screen_line = next(line for line in markdown.splitlines() if "panel.bob" in line)
+    assert "trend" not in screen_line, screen_line
+
+
+@pytest.mark.asyncio
+@patch("epics_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
+async def test_the_trend_s_trace_channel_is_read_live_like_any_other(
+    mock_batch: AsyncMock, tmp_path: Path
+) -> None:
+    """The kind changes what the answer SAYS, never what it does: a trend's trace is a real
+    channel and stays in the live read set. Guards against a repair that "fixed" the naming by
+    dropping trends from the channel collection."""
+    mock_batch.return_value = {"results": [], "errors": []}
+    await _find_device("DEV-TEST01:Ctrl-EVR-01", str(_screen_and_trend(tmp_path)))
+
+    assert mock_batch.await_args is not None
+    assert set(mock_batch.await_args.args[0]) == {
+        "DEV-TEST01:Ctrl-EVR-01:status",
+        _TREND_CHANNEL,
+    }
+
+
+@pytest.mark.asyncio
+@patch("epics_mcp.tools.find_device.pv_get_batch", new_callable=AsyncMock)
+async def test_the_kind_counters_agree_with_the_engine_s_own_on_the_same_walk(
+    mock_batch: AsyncMock, tmp_path: Path
+) -> None:
+    """Anti-drift: two independent counts of the same quantity, held against each other.
+
+    This server counts over the ``screens`` tuple IT carries, so a header and its list can never
+    disagree; the engine counts over its own matches. Deriving ours that way is only safe while
+    the two mean the same thing, and this is what keeps that true: it fails the day the projection
+    starts adding, dropping or relabelling a match on its way out.
+
+    Provably red: drop the ``node_kind`` pass-through in ``_screen_matches`` (ours reads 2/0 while
+    the engine reads 1/1), or filter trends out of ``screens`` (ours reads 1/0 against 1/1).
+    """
+    mock_batch.return_value = {"results": [], "errors": []}
+    root = _screen_and_trend(tmp_path)
+    result = await _find_device("DEV-TEST01:Ctrl-EVR-01", str(root))
+
+    report = result["report"]
+    assert isinstance(report, dict)
+    engine = find_displays(analyze_pv_inventory(root), "DEV-TEST01:Ctrl-EVR-01", match="prefix")
+    assert (report["display_count"], report["trend_count"]) == (
+        engine.display_count,
+        engine.trend_count,
+    ), "the report's kind counters drifted away from the engine's for the same walk"
+    # Not a vacuous agreement: this fixture really does hold one of each.
+    assert (engine.display_count, engine.trend_count) == (1, 1)

@@ -18,6 +18,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Literal, cast
 
+from opi_navigation.models import NodeKind
 from opi_navigation.pv_analysis import channel_name
 from opi_navigation.pv_analysis.lookup import PvLookupResult
 from pydantic import BaseModel, ConfigDict
@@ -37,7 +38,20 @@ class _Model(BaseModel):
 
 
 class ScreenMatch(_Model):
-    """One operator-facing screen that references the queried device (from ``find_displays``)."""
+    """One operator-facing FILE that references the queried device (from ``find_displays``).
+
+    ⚠ Not necessarily a screen, and the class name is older than that distinction. The lookup
+    underneath cuts on ``operator_facing`` and never on the kind of file, so a ``.plt`` Data
+    Browser trend opened by an ``open_file`` button is a top level in its own right and comes back
+    here. That is the right answer to "where do I see this device" and is deliberately not
+    filtered; what was wrong until GQ-21 is that it arrived NAMED and COUNTED as an operator
+    screen. ``node_kind`` is what says which it is.
+
+    The name stays as it is on purpose. It is a Python class name and never reaches the wire (the
+    tool registers with ``output_schema=None`` and ``model_dump`` emits field names only), while
+    the report field ``screens`` that holds these DOES: renaming either buys a caller nothing that
+    ``node_kind`` does not already tell them, and renaming the field would break every one of them.
+    """
 
     display_path: str
     name: str = ""
@@ -45,6 +59,11 @@ class ScreenMatch(_Model):
     matched_channels: tuple[str, ...] = ()
     roles: tuple[PvRole, ...] = ()
     count: int = 0
+    #: What this match IS: an operator screen (``"display"``) or a Data Browser trend
+    #: (``"trend"``). Taken from the engine's own ``DisplayMatch.node_kind``, never derived from
+    #: the file suffix, the same rule ``display_files.is_inventory_file`` states. Additive with a
+    #: default, so an older caller keeps working and a hand-built lookup keeps parsing.
+    node_kind: NodeKind = "display"
 
 
 class ChannelStatus(_Model):
@@ -64,11 +83,18 @@ class ChannelStatus(_Model):
 
 
 class DeviceLookupReport(_Model):
-    """Device lookup: which screens show the device, is it live, and which IOC serves it.
+    """Device lookup: where the device is shown, is it live, and which IOC serves it.
 
     ``channels`` covers only the LIVE-QUERIED (capped) channel subset; ``screens`` is unaffected by
     that cap (the reverse-lookup is cheap). ``live_capped`` + the matching note flag when the device
     matched more channels than were read live (``total_matched_channels`` is the full count).
+
+    ⚠ ``screens`` does not hold screens only, and GQ-21 is the record of that reading a caller
+    astray. A Data Browser trend opened by a button is operator-facing, so the lookup returns it,
+    and until then it arrived indistinguishable from an operator screen. Each entry now says what
+    it is on ``ScreenMatch.node_kind``, and ``display_count``/``trend_count`` say how the list
+    splits. The field name stays, because renaming it would break every caller to tell them
+    something the entries now tell them themselves.
 
     ⚠ "Unaffected by that cap" is not "complete", and the wording is deliberate. This report is
     built from the same inventory walk as ``validate_pvs``, and that walk has two caps of its own
@@ -105,6 +131,16 @@ class DeviceLookupReport(_Model):
     live_read: int = 0
     live_capped: bool = False
     channelfinder_enabled: bool = False
+    #: How ``screens`` splits by kind: operator screens and Data Browser trends. POSITIVELY
+    #: COUNTED, never one subtracted from the other, the rule the engine's own ``PvLookupResult``
+    #: states: a third ``NodeKind`` would land silently in the display figure under a subtraction,
+    #: whereas positive counters let their sum fall short and say so. Both are counted over the
+    #: ``screens`` tuple THIS report carries, so a header and its list cannot disagree, the same
+    #: choice ``live_read`` makes above. That is only safe while the two ways of counting mean the
+    #: same thing, so ``test_find_device_tool.py`` holds ours against the engine's own on one real
+    #: walk: a projection that started adding, dropping or relabelling a match goes red there.
+    display_count: int = 0
+    trend_count: int = 0
     notes: tuple[str, ...] = ()
 
 
@@ -131,6 +167,7 @@ def _screen_matches(lookup: PvLookupResult) -> tuple[ScreenMatch, ...]:
             matched_channels=tuple(sorted({channel_name(pv) for pv in display.matched_pvs})),
             roles=display.roles,
             count=display.count,
+            node_kind=display.node_kind,
         )
         for display in lookup.displays
     )
@@ -219,9 +256,19 @@ def build_device_report(
                 )
             )
 
+    # Built once, here, because the two kind counters below have to describe the very tuple this
+    # report carries rather than a second walk of the lookup.
+    screens = _screen_matches(lookup)
+
     notes: list[str] = []
-    if not lookup.displays:
-        notes.append("No operator-facing screen references this device/query.")
+    if not screens:
+        # GQ-21: it used to say "No operator-facing screen references this device/query", which
+        # named a set it had never counted on its own. A trend is operator-facing too, so an empty
+        # answer has to deny both kinds or deny neither.
+        notes.append(
+            "Nothing operator-facing references this device/query, neither a screen nor a Data "
+            "Browser trend."
+        )
     # GB-65: the two caps of the inventory WALK, reported right beside the screen count because
     # that is what they shorten. They sit here rather than further down on purpose: the note above
     # ("no screen references this device") is the one a capped walk can make FALSE, so a reader who
@@ -281,12 +328,15 @@ def build_device_report(
     return DeviceLookupReport(
         query=lookup.query,
         match=lookup.match,
-        screens=_screen_matches(lookup),
+        screens=screens,
         channels=tuple(channels),
         total_matched_channels=total_matched,
         live_read=live_read,
         live_capped=live_capped,
         channelfinder_enabled=channelfinder_enabled,
+        # Positively counted, not subtracted; see the field comments on DeviceLookupReport.
+        display_count=sum(1 for screen in screens if screen.node_kind == "display"),
+        trend_count=sum(1 for screen in screens if screen.node_kind == "trend"),
         notes=tuple(notes),
     )
 
@@ -316,10 +366,17 @@ def render_markdown(report: DeviceLookupReport) -> str:
     """Render a :class:`DeviceLookupReport` as deterministic Markdown."""
     lines = ["# Device Lookup", ""]
     lines.append(f"- **Query:** `{report.query}` (match: {report.match})")
-    lines.append(f"- **Operator screens showing it:** {len(report.screens)}")
+    # GQ-21: the split belongs in the HEADER, not only in the JSON fields, because this is the
+    # half a person reads and the line they draw a conclusion from. It used to say "Operator
+    # screens showing it" and counted a Data Browser trend among them.
+    lines.append(
+        f"- **Operator-facing files showing it:** {len(report.screens)} "
+        f"({report.display_count} screen(s), {report.trend_count} Data Browser trend(s))"
+    )
     for screen in report.screens:
         roles = "/".join(report_roles(screen.roles))
-        lines.append(f"  - `{screen.display_path}`, {screen.count} channel(s) [{roles}]")
+        kind = ", Data Browser trend (not a screen)" if screen.node_kind == "trend" else ""
+        lines.append(f"  - `{screen.display_path}`, {screen.count} channel(s) [{roles}]{kind}")
     # Use live_read (channels ATTEMPTED), not len(channels) (channels that returned), so this
     # header agrees with the capped note, which S7-5 anchored to live_read. They diverge only on a
     # degraded live read (an empty envelope); the per-channel rows below still list what returned.
