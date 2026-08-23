@@ -105,7 +105,10 @@ commands (`epics-mcp`, `epics-init`, `epics-testpv`, `epics-doctor`, `epics-diag
 `epics-crossplane`, `epics-coverage`).
 
 The last two are **display-aware** and need the `opi_navigation` engine, which is not part of the
-package: they refuse with an explanation rather than running. Everything else works without it.
+package: they refuse with an explanation rather than running. Four MCP tools need it too and
+behave the other way round: the server does not register them at all, so a client without the
+engine meets a shorter tool list rather than a refusal. The other five commands and every
+non-display MCP tool work without it.
 See [Related and roadmap](#related-and-roadmap).
 
 **Check the commands are on your PATH before anything else**, because the failure otherwise arrives
@@ -205,8 +208,9 @@ live PVs, registry, history, alarm, naming and logbook, installs and runs withou
 be made available by any flag. `opi_navigation` lives in a private repository, so it is wired
 into a dependency group rather than advertised as an extra. A group stays out of the published
 metadata, where an unreachable dependency would be a promise nobody could keep, and a package
-index rejects a direct git reference outright. The tools refuse with an explanation instead of
-failing obscurely.
+index rejects a direct git reference outright. The two commands refuse with an explanation instead
+of failing obscurely; the four tools are never registered, so they are absent from the tool list
+rather than present and refusing, and the server drops its own display claims with them.
 
 **What is intended, with no date attached.** Two neighbouring pieces exist and are in daily use
 here, both in private repositories: `opi-live`, a plugin that exposes a RUNNING CS-Studio, and
