@@ -317,8 +317,10 @@ async def test_the_tool_key_serves_the_inventory_rather_than_the_whole_palette()
 
     "Which tool answers this" is the question this surface is asked first, and the answer is the
     drift-guarded inventory block at the top of the tool palette. If ``tools`` served the whole
-    section instead, that question would cost 27 KB, most of it Olog and write-gate detail the
-    asker did not want. Red-proof: make a section body carry its subsections again.
+    section instead, that question would cost the whole palette, most of it Olog and write-gate
+    detail the asker did not want. (This docstring said 27 KB until 2026-08-24, when the palette
+    measured 34; the figure is claimed once, in ``tools/guide.py``, where a test reads it.)
+    Red-proof: make a section body carry its subsections again.
     """
     async with Client(mcp) as client:
         text, _ = await _answer(client, topic="tools")
@@ -545,7 +547,11 @@ _SERVER_DOC = (Path(__file__).resolve().parents[1] / "src" / "epics_mcp" / "serv
 
 
 def _claimed(source: str, pattern: str, where: str) -> float:
-    """The number a rounded claim in *source* actually states.
+    """The number a claim in *source* actually states.
+
+    Serves two kinds of claim now: a ROUNDED size, where the caller compares within a tolerance,
+    and an exact COUNT, where it compares for equality. The reading half is the same either way,
+    which is why the message below says "claim" rather than "rounded size claim".
 
     ⛔ THE CLAIM IS READ OUT OF THE PROSE, never hard-coded here, and that is the whole design. A
     test carrying its own copy of the figure checks that the DOCUMENT is a certain size; it says
@@ -554,7 +560,7 @@ def _claimed(source: str, pattern: str, where: str) -> float:
     growing past its description is red, and mis-describing the guide is red as well.
     """
     match = re.search(pattern, source)
-    assert match, f"the rounded size claim {pattern!r} is gone from {where}"
+    assert match, f"the claim {pattern!r} is gone from {where}"
     return float(match.group(1))
 
 
@@ -631,6 +637,99 @@ def test_the_rounded_size_claims_still_hold() -> None:
         f"the largest single part is {largest / whole_bytes:.1%} of the document, so the tool "
         "description's 'the largest single part is under a third of the whole' is now false. That "
         "sentence is a promise to a CALLER, in the get_guide docstring in server.py."
+    )
+
+
+#: The one sentence in ``tools/guide.py`` that states how many error-signature groups there are.
+#: ``\s+`` on both sides of the number for the reason the palette claim records: the sentence is
+#: wrapped at 100 columns, and a pattern anchored on a single space breaks on a reflow that changes
+#: nothing about whether the claim is true.
+_GROUP_COUNT_CLAIM = r"cut into\s+(\d+)\s+groups"
+
+
+def test_the_group_count_claim_still_holds() -> None:
+    r"""The error-signature group count is prose in SHIPPED source, and nothing read it.
+
+    ⛔ WHY THIS EXISTS. ``tools/guide.py`` said "eleven groups" while the table beside the sentence
+    defined TWELVE ``err-`` keys and the shipped guide carried twelve ``### `` subheadings under
+    "Error signatures". The figure had been wrong for as long as ``err-crossplane`` existed, in a
+    docstring that ships in the wheel, and no test here looked at it: ``guide.py`` is absent from
+    ``tests/test_prose_counters._WATCHED``, and every guard over ``CHANGELOG.md`` excludes that file
+    by construction, so all three copies of the number were unwatched at once.
+
+    ⚠️ A COUNT IS KEPT WHERE A BYTE SIZE WOULD BE REMOVED, and the difference is not cosmetic. The
+    sizes in this module are rounded because they move whenever anyone edits a sentence; a count of
+    groups moves only when the split itself changes, which is a decision somebody makes on purpose.
+    It also answers the question a caller has here, whether asking for one group instead of the
+    whole section is worth it.
+
+    ⚠️ TWO DENOMINATORS, and the honest reason for the second is NARROWER than "it could be
+    anything". ``resolve_topics`` already forces a bijection between keys and addressable parts in
+    document order, and "Error signatures" is the LAST ``## `` section, so the two counts agree
+    structurally today. What ``keys == headings`` adds on top is naming discipline, which
+    ``resolve_topics`` does not see: an ``err-``-prefixed key sorted before ``errors``, or a
+    subheading down there whose key carries no prefix. That is worth an assertion and it is not a
+    second independent measurement; the docstring said "load-bearing half" until a review measured
+    the overlap.
+
+    ⚠️ THE MULTIPLICITY IS CHECKED, because ``_claimed`` uses ``re.search`` and takes the first
+    match silently. A second sentence of the same shape would be unguarded while this stayed green.
+    ⛔ PRESENCE IS ASSERTED SEPARATELY, and that split is a repair rather than a flourish. With one
+    ``== 1`` check the empty case failed on the multiplicity message, which says "more than once"
+    while the sentence stands ZERO times: red for the right reason with the wrong diagnosis, and
+    the docstring below claimed an empty-set proof the test could not deliver. Measured, that is
+    exactly what the first run of this guard did.
+
+    ⚠️ THE DIGIT SPELLING IS PART OF THE PROMISE. ``_claimed`` returns ``float(group(1))``, so
+    "cut into twelve groups" would redden this even though it is true. The surrounding paragraph
+    spells other numbers out; this one stays a digit deliberately.
+
+    ⚠️ ``_MODULE_DOC`` is the whole SOURCE of ``tools/guide.py``, not just its module docstring, so
+    the sentence could move into a comment and still be read here. That matches the neighbouring
+    size claims, which read the same string.
+
+    Red-proof: change the sentence to "cut into 11 groups", and this fails naming both numbers.
+    Empty-set proof: delete the sentence, and the presence assertion below fails by name.
+    """
+    found = re.findall(_GROUP_COUNT_CLAIM, _MODULE_DOC)
+    assert found, (
+        "the group-count claim is gone from tools/guide.py: nothing states how many "
+        "error-signature groups there are, so this guard would otherwise pass on an empty match"
+    )
+    assert len(found) == 1, (
+        "tools/guide.py states the group count more than once, or the pattern now matches "
+        "something else as well; _claimed reads only the first, so the rest would be unguarded"
+    )
+    claimed = _claimed(_MODULE_DOC, _GROUP_COUNT_CLAIM, "tools/guide.py")
+
+    keys = sum(1 for key in TOPICS if key.startswith("err-"))
+    sections = [
+        section
+        for section in split_sections(guide_text())[1]
+        if section.startswith("## Error signatures")
+    ]
+    assert len(sections) == 1, (
+        "the error-signature section was renamed or split. This test names it, so rename it here "
+        "in the same commit."
+    )
+    headings = len(split_subsections(sections[0])[1])
+
+    # The non-empty anchor, and it is the assertion this guard was missing: with the section
+    # emptied out, keys, headings and a prose "cut into 0 groups" would agree at zero and every
+    # comparison below would pass on nothing at all. Both neighbours in this module carry the same
+    # anchor for the same reason.
+    assert headings, (
+        "'Error signatures' carries no subheadings at all, so the signature section is no longer "
+        "split and the claim in tools/guide.py describes nothing"
+    )
+
+    assert keys == headings, (
+        f"{keys} 'err-' topic keys against {headings} subheadings under 'Error signatures': one of "
+        "them anchors somewhere else, so no single number describes the split"
+    )
+    assert claimed == keys, (
+        f"the error signatures are cut into {keys} groups and tools/guide.py claims "
+        f"{claimed:.0f}. Re-word the sentence there."
     )
 
 

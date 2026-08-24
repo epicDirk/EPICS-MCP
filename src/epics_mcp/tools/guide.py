@@ -35,7 +35,7 @@ a caller asking which tool answers a question gets the tool inventory, roughly 1
 ⚠️ **The error signatures were the second section this argument applies to, and for a while they
 were the counter-example to it.** They are what a caller reaches this surface for most often, and
 the section had grown past 24 KB carrying THIRTY signatures with no ``### `` at all, so asking
-about one of them cost every other one as well. It is now cut into eleven groups, one per plane or
+about one of them cost every other one as well. It is now cut into 12 groups, one per plane or
 per kind: ``errors`` serves the section's own lead and each group is a key of its own, exactly as
 for the palette above. Splitting it was a REARRANGEMENT of a shipped document rather than a
 deduplication, which is why it was its own decision and not a tidy-up: TWO signatures moved so that
@@ -187,10 +187,17 @@ def _addressable_parts(text: str) -> list[tuple[str, str]]:
     :mod:`tests.test_guide_tool` measures.
 
     ⚠️ The consequence is worth stating because it decides what a section key MEANS: ``tools``
-    serves the tool palette's own text, the inventory, and NOT the six subsections below it, which
+    serves the tool palette's own text, the inventory, and NOT the subsections below it, which
     are keys of their own. That is the whole point of having two levels. A section body that
-    carried its children would put 27 KB behind the key a caller reaches for first, which is the
-    payload this argument exists to avoid.
+    carried its children would put the whole palette behind the key a caller reaches for first,
+    which is the payload this argument exists to avoid. ⚠️ Two figures stood in this paragraph and
+    both were wrong when it was measured on 2026-08-24: it said SIX subsections against seven, and
+    27 KB against a palette of 34. Neither has been given a fresh value HERE. The palette's size is
+    claimed once, in the module docstring above, where ``test_the_rounded_size_claims_still_hold``
+    reads the sentence and measures it; the subsection count decides nothing a caller acts on, so it
+    is not a claim at all any more. ⚠️ The unrelated "27 KB" further up that docstring is a LOWER
+    BOUND over the sections generally, not this palette, and it was true when measured on the same
+    day; do not read the two as the same figure.
     """
     parts: list[tuple[str, str]] = []
     _, sections = split_sections(text)
