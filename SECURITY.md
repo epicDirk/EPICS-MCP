@@ -125,8 +125,12 @@ their evidence, is in [docs/write-gate-contract.md](docs/write-gate-contract.md)
 
 The EPICS client is [p4p](https://mdavidsaver.github.io/p4p/), distributed as prebuilt wheels that
 bundle the EPICS Base libraries, so no separate EPICS Base build takes part. REST access uses
-`requests`. Secret scanning and push protection are enabled on this repository; dependency updates
-are watched by Dependabot.
+`requests`. Secret scanning and push protection are enabled on this repository. Dependabot is
+configured, and only half of it works: the GitHub Actions half updates, while the Python half
+fails on every run, because the display engine is pinned as a git dependency on a private
+repository Dependabot cannot reach. **No Python dependency here is watched for a published
+advisory.** The measurement, the repair that was rejected and the manual route that replaces it
+are in [docs/known-limits.md](docs/known-limits.md), under Dependabot.
 
 ## Release path
 

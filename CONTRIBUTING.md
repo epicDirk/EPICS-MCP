@@ -39,7 +39,7 @@ The gate chain is [uv](https://docs.astral.sh/uv/)-based:
 
 ```bash
 uv sync --extra dev --group displays --locked  # full local install (toolchain + display engine)
-uv run pytest                                  # run the test suite
+uv run pytest                                  # run the test suite (exit 1 and NO output? see below)
 uv run pytest --cov=src --cov-branch           # with coverage
 uv run pre-commit run --all-files              # ruff + format + mypy --strict + guards
 uv run pre-commit install --hook-type commit-msg   # ONE-OFF, see below: the message guard
@@ -52,6 +52,13 @@ lives in `.pre-commit-config.yaml` and a test holds that wiring, but `.git/hooks
 per-clone state outside the tree, so **a fresh clone has no message guard until this command is
 run**. Verify with `ls .git/hooks/commit-msg`. What it refuses, and what it deliberately does not
 look at, is documented at `scripts/check_commit_message.py`.
+
+⚠️ **If `uv run pytest` exits 1 with no output at all, put `OPENBLAS_NUM_THREADS=1` in front of
+it.** On a machine with many cores the OpenBLAS thread arena, which arrives through numpy, can
+abort the process before pytest prints a single character, so a crashed BLAS looks exactly like a
+crashed test suite. `OPENBLAS_NUM_THREADS=1 uv run pytest` is the whole fix, and it costs nothing
+on a machine that does not have the problem. `scripts/guard_audit.py` already sets the variable for
+the subprocess it drives; this paragraph is the reason it does.
 
 **Extra vs group.** `dev` is the only published extra and carries the toolchain. The
 `opi_navigation` PV engine, which the display-aware tools need, is a **dependency group**

@@ -7,6 +7,22 @@ carry breaking changes).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING, and it shipped in 0.7.0 filed under `### Added`: `has_display` in `coverage_audit`
+  answers about operator SCREENS alone.** A PV that sits on no `.bob` but is drawn on a Data Browser
+  trend used to answer `has_display: yes` and now answers `has_display: no`, with the trend half
+  moved to the neighbouring `on_trend`, and `cf_only` grew, because a registered PV of that kind no
+  longer drops out of it. A value that moves on the wire is a breaking change wherever its entry is
+  filed. The 0.7.0 entry describes the change correctly, but it carries no **Are you affected?**
+  passage, and the two entries in that release that do carry one read as the complete list of its
+  breaks. They are not.
+  **Are you affected?** Only if something of yours reads `coverage_audit` or `crossplane_check`
+  output. Search it for `has_display` and for `cf_only`. No hit: nothing to do. A hit: a PV that
+  lives only on a trend now counts as uncovered, which is the repair, and `on_trend` is where its
+  trend answer went. This entry changes nothing on the wire; it names a 0.7.0 break that its own
+  entry left implicit.
+
 ## [0.7.0] - 2026-08-24
 
 ### Changed

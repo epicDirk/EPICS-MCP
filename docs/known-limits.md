@@ -28,6 +28,7 @@ retired, and where it went, is listed at the end.
 [21 error codes outside errors.py](#21--the-documented-error-code-population-is-errorspy-and-ten-more-codes-are-raised-elsewhere) ·
 [22 the cross-plane block](#22--the-cross-plane-block-sees-three-patterns-and-each-is-blind-in-a-stated-way) ·
 [23 the archiver-pair sentence](#23--the-archiver-pair-finding-says-both-webapps-answered-for-two-statuses-where-nothing-answered) ·
+[24 Dependabot](#24--dependabot-does-not-update-the-python-dependencies-here-and-never-has) ·
 [retired](#retired-entries-and-where-they-went)
 
 ---
@@ -645,6 +646,49 @@ answer, so a plane nobody contacted certified a host, and one sitting on the dea
 correct finding. It is a model now; it was not when this was written. No line numbers are cited any
 more either, for the reason at the top of this page: they move, and this entry moved twice while
 being written.
+
+## 24 · Dependabot does not update the Python dependencies here, and never has
+
+**Measured 2026-08-24**, at the Actions run logs rather than at a report.
+
+`.github/dependabot.yml` configures two ecosystems and only one of them works. All three
+`github-actions` update runs this repository has recorded succeeded. All NINE `uv` update runs
+failed, from the first one on: the configuration landed on 2026-07-25 with `33855fd`, and the first
+three runs failed the same day. The newest is run `32540700189` of 2026-08-22. Six of the nine were
+read in full and the cause is identical in all six: the git fetch answers `404`, the proxy's scope
+request is refused with a `403` whose detail reads `Either the repo doesn't exist, or Dependabot
+doesn't have access to it`, and the updater then logs `git_dependencies_not_reachable` once per
+dependency, each time naming `https://github.com/epicDirk/opi-foundry.git`. That URL is the display
+engine, pinned in `pyproject.toml` as a git dependency on a PRIVATE repository. The dependency set
+is resolved as a whole, so one unreachable git entry takes all SEVEN of `pytest`, `ruff`, `mypy`,
+`pre-commit`, `pydantic-settings`, `mcp` and `fastmcp` down with it. It is the same unreachability
+`CLAUDE.md` already records for CI, which cannot clone the engine either.
+
+**What it costs.** No Python dependency of this repository is watched for a published advisory.
+The four Dependabot alerts that exist are all in state `fixed`, so nothing open is being ignored
+today, and that is the trap rather than the reassurance: the mechanism that would report the NEXT
+one is off, and it is off silently. No pull request, test run or release says so. The only signal
+is a red run in the Actions tab that nothing asks anyone to open.
+
+**The tempting repair, probed and rejected.** Giving Dependabot access to the private engine
+repository would work, and it is refused: it hands a read credential on a PRIVATE repository to a
+service in order to keep a lock file current on a PUBLIC one. That repository carries more than
+the engine, and the trade is not proportionate to what it buys. Decided 2026-08-24, and this entry
+is the end state until further notice rather than a note pending a fix.
+
+**What is NOT rejected**, so that this entry does not read as a closed door: configuring the `uv`
+ecosystem so it never has to resolve the git entry is untried, and nothing here blocks it. If it
+is ever built, the proof is a green `uv` update run with its number, and this entry is retired
+rather than edited.
+
+**What to do with it instead**, since no guard in this tree can see any of it: re-measure by hand
+when a release is prepared, and upgrade deliberately rather than waiting for a pull request that
+will not arrive.
+
+```bash
+gh api "repos/<owner>/<repo>/actions/runs?event=dynamic&per_page=100" --paginate --jq '.workflow_runs[] | select(.name | contains("- Update")) | .created_at + " " + .conclusion + " " + .name'
+uv lock --upgrade   # then let the gate chain judge the result
+```
 
 ## Retired entries, and where they went
 

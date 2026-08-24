@@ -31,6 +31,21 @@ EPICS service landscape behaves. This file is the standing policy that keeps tha
   work-item ids, or internal refactors with no user-visible effect: those go to the tiers below, and
   the work itself is narrated in the commit body. It drifted into a 763-line work journal once,
   because no rule claimed it.
+  ⚠️ **The kind decides the SECTION as well, and that half was missing.** A change that moves a
+  value on the wire is a breaking change wherever it is filed, so it belongs under `### Changed`,
+  marked BREAKING, and carrying an **Are you affected?** passage that names what a reader should
+  search for. Filing it under `### Added` because new fields arrived with it leaves the entries
+  that DO carry that passage reading as the complete list of the release's breaks, and a reader
+  who is affected concludes they are not. Measured TWICE, and the older case is the reason this is
+  a rule and not an anecdote: `[0.7.0]` filed the `has_display` change that way, and `[0.4.0]` filed
+  a plane status moving from `ok` to the new `no_ingest` that way. Only 0.7.0 sprang the trap in
+  full, because only it has entries carrying the passage for a reader to mistake for the whole
+  list; the filing error itself is older than the passage.
+  ⚠️ **The line through test vocabulary runs the same way**, because "not test methodology" alone
+  never said where it falls: what a USER can OBSERVE belongs in, such as `has_display` now
+  answering about screens alone; how we convinced ourselves does not, such as a pin widened over a
+  corpus. An entry that declares itself to have no user-visible effect fails the kind test outright
+  and belongs in the commit body, whatever hardening it also does.
   ⚠️ **That rule names a KIND, and a kind alone did not hold, so there is a SIZE as well: one entry
   under `## [Unreleased]` is at most 1400 bytes.** Held by `tests/test_changelog_discipline.py`,
   where the number is derived from the measured distribution rather than picked (it clears every
@@ -331,10 +346,11 @@ Two guards exist, and they answer different questions. `tests/test_dependency_pi
 checks that `pyproject.toml` and `uv.lock` name the SAME revision, which is the failure a half-done
 bump produces. It cannot say whether that revision is the RIGHT one. That second question is not
 answerable in this repository at all: the engine lives in a private repository this public CI
-cannot clone, which is also why the Dependabot run fails on it. It is measured on the producing
-side, by a ratchet workflow that turns red when the distance grows, and reported locally by
-`parallel_lint --context`. Neither guard replaces an install check: this CI syncs without
-`--group displays` and therefore never resolves the engine at all.
+cannot clone, which is also why the Dependabot run fails on it; entry 24 of
+`docs/known-limits.md` records that failure, its cause and its newest run number. The right-revision
+question is measured on the producing side instead, by a ratchet workflow that turns red when the
+distance grows, and reported locally by `parallel_lint --context`. Neither guard replaces an install
+check: this CI syncs without `--group displays` and therefore never resolves the engine at all.
 
 ## What is NOT persistence
 

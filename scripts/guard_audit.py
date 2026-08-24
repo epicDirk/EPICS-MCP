@@ -750,6 +750,8 @@ def cmd_sham(args: argparse.Namespace) -> int:
 def _run_selection(node_ids: list[str], timeout: int) -> tuple[int, str]:
     """Run exactly *node_ids* and return ``(exit code, combined output)``."""
     env = dict(os.environ)
+    # OPENBLAS_NUM_THREADS pins the BLAS thread arena: on a many-core machine it can abort
+    # the child before pytest prints anything (see CONTRIBUTING.md, the dev-setup section).
     env.update(
         PYTHONDONTWRITEBYTECODE="1",
         OPENBLAS_NUM_THREADS="1",
