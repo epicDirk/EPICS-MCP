@@ -9,19 +9,19 @@ carry breaking changes).
 
 ### Changed
 
-- **BREAKING, and it shipped in 0.7.0 filed under `### Added`: `has_display` in `coverage_audit`
-  answers about operator SCREENS alone.** A PV that sits on no `.bob` but is drawn on a Data Browser
-  trend used to answer `has_display: yes` and now answers `has_display: no`, with the trend half
-  moved to the neighbouring `on_trend`, and `cf_only` grew, because a registered PV of that kind no
-  longer drops out of it. A value that moves on the wire is a breaking change wherever its entry is
-  filed. The 0.7.0 entry describes the change correctly, but it carries no **Are you affected?**
-  passage, and the two entries in that release that do carry one read as the complete list of its
-  breaks. They are not.
-  **Are you affected?** Only if something of yours reads `coverage_audit` or `crossplane_check`
-  output. Search it for `has_display` and for `cf_only`. No hit: nothing to do. A hit: a PV that
-  lives only on a trend now counts as uncovered, which is the repair, and `on_trend` is where its
-  trend answer went. This entry changes nothing on the wire; it names a 0.7.0 break that its own
-  entry left implicit.
+- **BREAKING, and both shipped filed under `### Added`: two answers moved on the wire with no
+  breaking notice.** In 0.7.0, `has_display` in `coverage_audit` began answering about operator
+  SCREENS alone: a PV drawn on a trend and on no `.bob` answered `has_display: yes` and now answers
+  `no`, its trend half moved to the neighbouring `on_trend`, and `cf_only` grew because a
+  registered PV of that kind no longer drops out of it. In 0.4.0, the `epics-doctor` archiver plane
+  began answering `status: no_ingest` where it answered `ok`, for an appliance reachable and
+  archiving nothing. Neither entry carries an **Are you affected?** passage: in 0.7.0 the two that
+  do then read as the complete list of its breaks, and 0.4.0 carries none at all.
+  **Are you affected?** Only if something of yours reads `coverage_audit`, `crossplane_check` or
+  `epics-doctor --json`. Search it for `has_display`, for `cf_only`, and for a comparison against a
+  plane's `status`. No hit: nothing to do. A hit: a trend-only PV now counts as uncovered and
+  `on_trend` carries its trend answer; an appliance archiving nothing now says `no_ingest` and
+  appears in `degraded_planes`, while the exit code stays `0`. Nothing changes on the wire here.
 
 ## [0.7.0] - 2026-08-24
 
