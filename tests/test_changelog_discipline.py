@@ -29,10 +29,17 @@ because six textbook definitions give six answers and one of them differs by 269
     [0.3.0]             38    411      380    674   1086            0
     [0.2.0]              3    275      308    372    372            0
 
-1400 clears every entry standing in `[Unreleased]` today (167 B of headroom above the largest),
-sits above the p90 of five of the six sections, and would have stopped 13 of the 45 entries in
-`[0.6.0]`, the section whose mean of 1015 against `[0.3.0]`'s 411 is what the ticket calls a
-factor of 2.4.
+⚠️ THE TABLE IS THE MEASUREMENT THAT CHOSE THE NUMBER, taken 2026-08-15, and NOT a running
+inventory. Its `[Unreleased]` row is that day's ten entries, which went into `[0.7.0]` on
+2026-08-24 among many more, leaving `[Unreleased]` empty again. The row therefore says nothing
+about the size of `[0.7.0]`. Re-measuring the table is a decision to move the
+cap, not maintenance, and the paragraph below reads the same way: it records what 1400 cleared when
+it was chosen, not what stands under the heading now.
+
+1400 cleared every entry standing in `[Unreleased]` when it was chosen (167 B of headroom above the
+largest), sits above the p90 of five of the six sections, and would have stopped 13 of the 45
+entries in `[0.6.0]`, the section whose mean of 1015 against `[0.3.0]`'s 411 is what the ticket
+calls a factor of 2.4.
 
 ⚠️ **THOSE 13 ARE NOT ALL "ANALYSIS", AND SAYING SO WOULD BE THE COMFORTABLE READING.** Measured,
 they include one BREAKING change and four credential-disclosure fixes, which is exactly the
@@ -64,8 +71,10 @@ pure measurement artefact.
 
 WHAT THIS DOES NOT CHECK: the KIND of an entry, which stays prose in `CLAUDE.md`, and the shape of
 the section. The sibling Java repository does hold the shape (no release section carrying the same
-category twice) and this section currently carries `### Changed` twice; that is reported rather
-than fixed here, because it is a different question with a different owner.
+category twice) and the `[Unreleased]` block carried `### Changed` twice for as long as it stood;
+it was cut under `[0.7.0]` on 2026-08-24 with the repeated categories merged into one. The shape
+stays reported rather than fixed here, because it is a different question with a different owner,
+and nothing stops the next `[Unreleased]` block from growing a second `### Changed` again.
 """
 
 from __future__ import annotations

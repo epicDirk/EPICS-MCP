@@ -19,14 +19,17 @@ carry breaking changes).
   the scheme there. There is no alias period, and an old URI fails loudly rather than answering
   something stale. The rename itself changed no payload, but two of the three changed elsewhere
   in this release: `epics://health` now reports `server` as `epics-pv` instead of `epics-mcp`,
-  and the guide grew. `epics://config` is unchanged. Released entries below keep writing
-  `epics-pv://`: they record what those versions actually served.
+  and the guide grew. `epics://config` is unchanged. Wherever an entry describes what an EARLIER
+  version served, here or in the released sections below, it keeps writing `epics-pv://`: those
+  sentences record the address of the day, so your search will hit them and they are not work.
 
 - **BREAKING, but only if you set `EPICS_MCP_READ_RATE_LIMIT`: `epics-doctor` now exits `3`
   where it exited `0`.** The limit is off by default, and a run that is denied nothing is
   unchanged in every field. **Are you affected?** Check whether that variable is set, above `0`,
-  in the environment your `epics-doctor` job runs in. That is the whole condition, and no 0.6.0
-  output warns you in advance. Until now a run whose own reads that limit refused could still
+  in the environment your `epics-doctor` job runs in. Setting it is necessary for this change and
+  not sufficient: the exit moves only on a run whose own reads the throttle actually refused, so
+  the variable can stand for months and nothing move. No 0.6.0 output warns you in advance,
+  either way. Until now a run whose own reads that limit refused could still
   exit `0`; it cannot any more, because a refused read means part of the run was never measured.
   After upgrading, the new `»` lines name each plane whose probe the throttle refused.
   **What to do:** if a CI job asserts exit `0` and goes red, raise the limit, or set it to `0` to
@@ -46,7 +49,8 @@ carry breaking changes).
   the field stays called `screens`, because renaming it would break every caller in order to say
   what its members now say themselves. The three cap `notes` follow: they qualified "a screen" and
   "the screen list" where a trend can be affected too, and now say "a screen or trend" and "the
-  match list". `tools/list` grows 304 chars on the display-gated lane and none on the core one.
+  match list". The description growth lands on the display-gated lane only; the core lane's
+  `tools/list` is unchanged.
 
 - **`epics-doctor` no longer blames your services for a limit you set on it.** With
   `EPICS_MCP_READ_RATE_LIMIT` set tight enough to refuse the doctor's own reads, the report said
@@ -83,22 +87,40 @@ carry breaking changes).
 
 - **`find_device` now says that every match comes back with the roles it uses the device in.**
   The answer has carried `screens[].roles` all along and nothing on the surface said so, so
-  "which screens can WRITE this device?" was answerable and unadvertised. `tools/list` grows 168
-  characters. ⚠️ Its two guards need the `displays` group and are therefore invisible to CI, which
-  syncs the core install on purpose; they run under `EPICS_MCP_REQUIRE_DISPLAYS=1`.
+  "which screens can WRITE this device?" was answerable and unadvertised. Nothing changed on the
+  wire beyond the sentence.
 
 - **`get_pvs` now names the field the engineering unit rides in.** Its description referred to
   `get_pv_info` for the metadata, so a caller asking whether channels labelled alike carry the same
   unit had to take a second hop to learn that one batch call answers it. `units` and `precision`
   are now named where they sit, in `display`, per PV. Nothing changed on the wire beyond the
-  sentence; `tools/list` grows 153 characters.
+  sentence.
 
 - **`set_pv_value` now says that an operator screen writes through its widget, and `docs/tools.md`
   that no preset arms a write gate.** Both were facts a caller needed before the call and neither
   was anywhere the server delivers: an assistant asked to change a value visible on a screen
   reached for the gated tool and was refused, and `sandbox`, the one shape with nothing left to
   fill in, reads like the one where writing is on. Nothing changed on the wire beyond the two
-  sentences; `tools/list` grows 149 characters and the `initialize` instructions are untouched.
+  sentences, and this change leaves the `initialize` instructions untouched (a separate entry in
+  this release does edit them).
+
+- **The `diagnose_pv` prompt now establishes WHICH world it read from, and corroborates a negative
+  before concluding.** The chain started at `get_pv_info` and ended at the monitor, which taught a
+  plan that could reach a confident answer without ever saying which plane had answered it. Step 1
+  now says to read the `reach` field of that first answer before interpreting anything else, and a
+  new final step counter-checks with `find_channels`, `get_pv_history` and `search_logbook`,
+  because a PV that does not connect looks the same whether it does not exist, is down, or is
+  simply out of reach from here; a negative from one plane is not a finding until a second plane
+  agrees. Every tool the prompt names is registered in every install, deliberately: an earlier
+  draft named the display-gated `find_device`, which on a core-only install would have been an
+  instruction the client cannot follow. This is `prompts/list`, a surface a client shows without
+  any tool call. `setup_epics_mcp` gains the throttle marker for the read rate limit as a fourth
+  finding to read out of an `epics-doctor` report.
+
+- **The server's `initialize` instructions name all six Olog write-gate conditions.** The
+  enumeration in the handshake header listed five and left out the named target logbook, so a
+  reader counting the gate from the header got a narrower picture than the operator guide, which
+  said six all along. Nothing about the gate itself changed; what changed is that the two agree.
 
 - **`diagnose_connection`'s naming plane runs the same probe as `lookup_device_name`.** Both used
   to carry their own copy of the three-step lookup (config gate, reachability first, then
@@ -106,6 +128,9 @@ carry breaking changes).
   shared query now, like its three sibling planes already did. Semantics are unchanged, including
   that an unreachable service is withheld rather than read as "not registered". On the wire,
   `evidence.naming.note` reads `Naming lookup withheld: ...` where it read `Naming error: ...`.
+  The older wording survives on one path and deliberately so: the gatherer keeps a wide `except`
+  for the failures the shared query does not catch, and a note from there still reads
+  `Naming error: ...`.
 
 - **`epics-init` names the variables from your own shell that reach its check.** It strips what it
   owns (`EPICS_MCP_*` plus the six EPICS search-path variables) and probes the block it just
@@ -118,26 +143,29 @@ carry breaking changes).
   proxy URL routinely carries a password. Setting `EPICS_MCP_CA_BUNDLE` in the block silences the
   HTTP half, because an explicit TLS decision makes the read sessions ignore the environment.
 
-- **`get_guide`: the error signatures are eleven addressable groups now, and `errors` serves the
+- **`get_guide`: the error signatures are twelve addressable groups now, and `errors` serves the
   section's lead.** That section had become the largest single part of the guide, thirty signatures
   with no subheading in it, so a question about one of them cost the other twenty-nine as well. It
   is cut by plane and by kind, each group a topic key of its own: `err-transport`, `err-pv`,
   `err-archiver`, `err-alarm`, `err-olog`, `err-channelfinder`, `err-rest`, `err-displays`,
-  `err-arguments`, `err-gates`, `err-guide`. **The `errors` key therefore serves the section's own
+  `err-crossplane`, `err-arguments`, `err-gates`, `err-guide`. The last of those arrived with the
+  cross-plane entry below, in this same release. **The `errors` key therefore serves the section's own
   lead, not the signatures below it**, exactly as `tools` has always served the inventory rather
   than its subsections; ask for the group you need, and every key is listed in the argument
   description and in every refusal. No signature's text changed; two moved so that each group is
-  contiguous. The largest single part of the whole guide drops from 24 741 B to 8 092 B, and it is
-  in a different section now.
+  contiguous. The largest single part of the whole guide is no longer an error group at all, and
+  the part that is largest now sits in a different section.
 
 - **`coverage_audit` announces a capped display ABOVE the figures it invalidates, not below them.**
-  A display that hit the per-display context cap makes every gap figure in the report a lower bound
-  (a PV missing from the display set is reported `withheld` rather than `no`), but the report said
+  A display that hit the per-display context cap makes the report's gap figures a lower bound
+  (a PV missing from the display set is reported `withheld` rather than `no`), with `cf_only` the
+  one exception, since it is a set difference and a cap can only lengthen it. The report said
   so twice at the bottom: a bare counting line under the numbers, and a note under that. Now one
   warning stands in the head, names the consequence, and lists the capped displays; the counting
-  line below is gone, so the caveat is not split across two places. The report claims no
-  percentage: the capped displays and the inventory's display list are different populations, so a
-  share of the two could exceed 100%.
+  line below is gone, so the caveat is not split across two places. This warning claims no share
+  against the inventory's display list: the capped files and that list are different populations,
+  so a ratio of the two could exceed 100%. The share the header does carry arrived later in this
+  release and divides by the walked file universe instead.
 
 - **`crossplane_check` now says HOW MANY non-channel references there are per protocol, not just
   that four protocols exist.** The note used to read `N distinct non-channel reference(s)
@@ -148,7 +176,7 @@ carry breaking changes).
   `(protocol, count)` tuple whose counts sum to `len(pvs_non_channel)` exactly, so the headline
   number and its breakdown cannot disagree.
 
-- **The operator guide no longer repeats the command-line walkthrough, and is 9 % smaller for it.**
+- **The operator guide no longer repeats the command-line walkthrough.**
   Two things had two homes: `epics-init`'s whole section, and the parts of the `epics-doctor`
   section that teach how to READ its report (the remedy rule, the `unverified` rationale, the write
   gates block, the exit-code and `--json` scripting advice). All of it is written for a human at a
@@ -156,14 +184,21 @@ carry breaking changes).
   [docs/tools.md](docs/tools.md), or beside the code it describes. Nothing was dropped without a
   home: what the guide keeps is the half no tool description carries, the plane beacons, the
   archiver ingest question, and what "reachable but not identified" means. `epics://guide` and
-  `get_guide` therefore serve 79 535 B where they served 87 415 B before, and the recipes section
-  in particular went from 29 194 B to 21 411 B.
+  `get_guide` therefore stopped serving that material twice, and the recipes section carries most
+  of the reduction. No byte figure is quoted for the guide's resulting SIZE on purpose: that number
+  moves with any sentence anyone edits, and other entries in this release add more than this one
+  removed, so the guide 0.7.0 ships is LARGER than the one 0.6.0 shipped, not smaller. Ask
+  `get_guide` for a `topic` rather than for the whole of it.
 
-- **`coverage_audit`'s cap warning reports a SHARE, not just a count.** The header said "N
-  display(s) hit the per-display context cap" and left the only question that matters
-  unanswerable: 104 capped displays mean something quite different against 284 walked files than
-  against 3000. It now reads "104 display(s) (36.6% of the 284 files this walk visited)", and
-  `--json` carries `files_walked`. ⚠️ The denominator is the walked file universe and deliberately
+- **`coverage_audit`'s cap warning reports a SHARE, not just a count.** The cap warning gave a bare
+  count, in 0.6.0 as one line among the report's notes, and left the only question that matters
+  unanswerable: 104 capped files mean something quite different against 284 walked files than
+  against 3000. It now reads "104 file(s) (36.6% of the 284 files this walk visited)", and
+  `--json` carries `files_walked`. The noun moved with the number: the walk enqueues every
+  operator-facing file and a Data Browser `.plt` among them, so "file(s)" is the numerator's honest
+  name and both halves of the ratio range over the same population. ⚠️ The report's own notes still
+  say "display(s)" where they describe which screens were cut short, and that is deliberate.
+  ⚠️ The denominator is the walked file universe and deliberately
   not the display set: a capped file carrying no PV is in the count and not in that set, so that
   share could exceed 100%. When no universe is reported the line falls back to the bare count
   rather than dividing by something else.
@@ -178,8 +213,8 @@ carry breaking changes).
   disappears today; it protects a hand-edited or generator-written file. A Data Browser `.plt`
   is no longer counted as an operator screen by `find_screen` and `change_impact`. ⚠️ It named
   `find_device` too, and for that tool the sentence was wrong: the engine stopped counting a trend
-  as a screen, this server's projection kept doing so, and it took the GQ-21 entry above to reach
-  the wire;
+  as a screen, this server's projection kept doing so, and it took the `find_device` entry above to
+  reach the wire;
   displays are no longer pushed out of the entry-point list by guessed edges; and the engine now
   exports the file universe a capped run walked, which is the honest denominator the
   `coverage_audit` header needs.
@@ -208,7 +243,7 @@ carry breaking changes).
 
 ### Added
 
-- **A Data Browser trend no longer counts as an operator screen in `coverage_audit`, and `crossplane_check` no longer promises it never did.** A `.plt` trend opened by a button is an operator-facing top level, so a PV that appears on no `.bob` at all used to come back with `has_display: yes` and drop out of `cf_only`, the blind-spot count that tool exists to produce. `has_display` now answers about screens alone, the new `on_trend` answers beside it, and such a PV is named in the new `trend_only` (reported with or without a registry) and, when registered, in `cf_only` and the new `cf_trend_only`. ⚠️ `cf_only` therefore GREW, and that is the repair: measured, 25 PVs of one 87 388-channel dataset sit on a trend and on no screen, and every one of them used to count as visible. `critical_uncovered` grows with it only where the walk was NOT cut short by a cap; a capped walk withholds `has_display` rather than proving a gap, as it always did. `display_only` is unchanged and still measured against every operator-facing file. Each coverage row gains `screens`/`trends` beside `displays`, and `crossplane_check` gains `screens_linked`/`trends_linked` beside `displays_linked`, whose contents and name are unchanged. `tools/list` grows 760 chars on the full lane and none on the core one.
+- **A Data Browser trend no longer counts as an operator screen in `coverage_audit`, and `crossplane_check` no longer promises it never did.** A `.plt` trend opened by a button is an operator-facing top level, so a PV that appears on no `.bob` at all used to come back with `has_display: yes` and drop out of `cf_only`, the blind-spot count that tool exists to produce. `has_display` now answers about screens alone, the new `on_trend` answers beside it, and such a PV is named in the new `trend_only` (reported with or without a registry) and, when registered, in `cf_only` and the new `cf_trend_only`. ⚠️ `cf_only` therefore GREW, and that is the repair: measured, 25 PVs of one 87 388-channel dataset sit on a trend and on no screen, and every one of them used to count as visible. `critical_uncovered` grows with it only where the walk was NOT cut short by a cap; a capped walk withholds `has_display` rather than proving a gap, as it always did. `display_only` is unchanged and still measured against every operator-facing file. Each coverage row gains `screens`/`trends` beside `displays`, and `crossplane_check` gains `screens_linked`/`trends_linked` beside `displays_linked`, whose contents and name are unchanged. The description growth lands on the full lane only; the core lane is unchanged.
 
 - **A write answer and an archived sample now say what their fields mean, and one of them says
   which epoch it is in.** Both rode on the wire with nothing explaining them. For a write, the
@@ -217,22 +252,22 @@ carry breaking changes).
   as "it landed" when it did not; the measured pair is `readback` with `verified`, and `note`
   carries the reason. Nothing about that behaviour changed, only its delivery. For an archived
   sample, `secs` is UNIX epoch seconds and NOT EPICS epoch seconds: read the other way, every point
-  in a plot shifts by exactly 20 years and still looks plausible. The answer-field index grows from
-  16 rows to 20, routing 66 field names in total. ⚠️ `tolerance` is now documented as NOT
+  in a plot shifts by exactly 20 years and still looks plausible. The answer-field index, created
+  by the entry below, grows to route the fields of both answers. ⚠️ `tolerance` is now documented as NOT
   sufficient to re-derive the verdict: on the epsilon fallback the same value also feeds a relative
   axis that is not reported, so a large value can match while differing by far more than
-  `tolerance`. `tools/list` grows 642 chars on both lanes (two description edits, each measured on
-  its own); the guide grows about 3.6 KB and none of that reaches the wire.
+  `tolerance`. Two description edits, on both lanes; the guide grows about 3.6 KB and none of that
+  reaches the wire.
 
 - **The guide now explains the words an answer uses, and a new `answer-fields` topic maps a field
   name to the topic that explains it.** A caller meets a field name in a RESULT, not in a question,
   and this surface has no free-text search, so a name such as `cf_capped`, `config_msg`,
   `default_level`, `next_steps` or `archive_fields` was unreachable: it rode on the wire and nothing
   said what it meant. That change explained fifteen such fields where their subject already lives
-  and had the new index route to them (the entry below has since added more). The cross-plane report vocabulary moved into its own signature group
+  and had the new index route to them (the entry above has since added more). The cross-plane report vocabulary moved into its own signature group
   `err-crossplane` (buckets, the `_write` twins, the withheld ChannelFinder and `.db` verdicts, the
   coverage cells), so reading one bucket no longer costs the whole display-inventory section.
-  `tools/list` grows 165 chars on both lanes; the guide itself grows about 12 KB and none of that
+  The two descriptions grow on both lanes; the guide itself grows about 12 KB and none of that
   reaches the wire, since it is served on request.
 
 - **Every read answer now carries a `reach` field: which plane served it and how far that plane
@@ -245,7 +280,7 @@ carry breaking changes).
   `epics-pv://health` resource, which an application must fetch on the client's behalf: an answer
   could be given without anything having established which world it came from. `discover_pvs`
   reports per branch, since a concrete name is a live PV read and a wildcard is a ChannelFinder
-  query. `tools/list` grows 5 427 chars on both lanes.
+  query. Every read tool's description grows for it, on both lanes.
 
 - **An empty read answer now says WHY it is empty.** The `note` pattern here fired on one
   cause only, a plane with no URL, at every site that used it. So a plane that was never
@@ -263,8 +298,7 @@ carry breaking changes).
   server header now points at it. `topic` serves one named part of the guide verbatim instead of
   the whole document. The keys PARTITION it, so a section key (`posture`, `planes`, `tools`,
   `recipes`, `errors`) serves that section's own text and the subsections under it are keys of
-  their own: `tools` is the drift-guarded tool inventory at 1 521 B, not the 27 KB palette that
-  opens with it. All keys are listed in the argument description and in every refusal. An unknown
+  their own: `tools` is the drift-guarded tool inventory, not the whole palette that opens with it. All keys are listed in the argument description and in every refusal. An unknown
   topic is refused by name, never guessed and never quietly answered with everything. The tool contacts no PV, no REST plane and no file of yours, so it is safe as the
   first call of a session. New error codes on the wire: `UNKNOWN_TOPIC` for a bad key,
   `GUIDE_DRIFT` if the shipped document and the topic table disagree.
@@ -282,8 +316,8 @@ carry breaking changes).
 
 ### Fixed
 
-- **The two doctor changes below shipped with six untruths of their own, found by an adversarial
-  post-build review and fixed here.** The reach line printed the value of a port VARIABLE raw,
+- **The two doctor changes below carry six corrections of their own, all made before this release,
+  so no version ever served the wrong answers below.** The reach line printed the value of a port VARIABLE raw,
   so `EPICS_PVA_BROADCAST_PORT=70000` named `:70000` where the client dialled `:4464` and `=abc`
   named a live endpoint on a port that cannot exist; the same arithmetic now covers both sources,
   and an unreadable value earns no number at all. The address parser answered for shapes nobody
