@@ -550,7 +550,7 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
-displays = [{ name = "opi-navigation", git = "https://github.com/epicDirk/opi-foundry.git?rev=2283ad025f6254ca4fdbfaee74c88680fd93e2b5" }]
+displays = [{ name = "opi-navigation", git = "https://github.com/epicDirk/opi-foundry.git?rev=c7b8858a677c5f1701838b5719ef28c77a80bf96" }]
 
 [[package]]
 name = "epicscorelibs"
@@ -1138,7 +1138,7 @@ wheels = [
 [[package]]
 name = "opi-navigation"
 version = "0.1.0"
-source = { git = "https://github.com/epicDirk/opi-foundry.git?rev=2283ad025f6254ca4fdbfaee74c88680fd93e2b5#2283ad025f6254ca4fdbfaee74c88680fd93e2b5" }
+source = { git = "https://github.com/epicDirk/opi-foundry.git?rev=c7b8858a677c5f1701838b5719ef28c77a80bf96#c7b8858a677c5f1701838b5719ef28c77a80bf96" }
 dependencies = [
     { name = "jsonschema" },
     { name = "pydantic" },
