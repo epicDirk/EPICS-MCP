@@ -35,20 +35,18 @@ retired, and where it went, is listed at the end.
 
 ## 1 · Markdown FIGURES are unguarded on every page but one
 
-The prose-counter guard reads Python comments and docstrings, and since GQ-123 it reads markdown
-too. It is pointed at exactly ONE page: `src/epics_mcp/operator_guide.md`, the guide `get_guide`
+The prose-counter guard reads Python comments and docstrings, and markdown too. It is pointed at
+exactly ONE page: `src/epics_mcp/operator_guide.md`, the guide `get_guide`
 ships to a model. Seven of its seventeen size-naming figures are compared to the code they are
 about, ten are inventoried with the reason they cannot be. Every OTHER page in this repository is
 still unguarded for figures.
 
-⚠️ **The heading and the entry below said "and a guard over them was rejected" until GQ-123, which
-had become half true.** What was rejected, and stays rejected, is a guard over the WHOLE tracked
-markdown. The reader could not open a `.md` file at all when this entry was written, so the
-rejection was arguing a cost that had a prerequisite nobody had built. It is built now, the cost
-argument is re-measured below, and it still holds for the rest of the tree.
+⚠️ **What is rejected, and stays rejected, is a guard over the WHOLE tracked markdown**, not the
+reading of markdown at all. The reader exists and is pointed at one page; the cost of widening it
+to the rest of the tree is re-measured below, and that cost still holds.
 
-⚠️ **The heading used to say "markdown prose is unguarded", and that was already too wide before
-this entry was written.** Markdown IS read by several guards, they just do not read figures:
+⚠️ **Markdown is not unguarded, it is unguarded FOR FIGURES.** Several guards read it, they just
+do not read figures:
 `test_doc_links` resolves every relative link against `git ls-files`, `test_guide_matches_code`
 checks tool names, `EPICS_MCP_*` variables and status glyphs across the tracked pages,
 `test_write_posture_sites` holds the write-posture claim and its pointers, and
@@ -91,10 +89,10 @@ uses no retired name for the display context cap (`test_diagnostics_tail`). Six 
 the file, and **not one of them reads the tool table.** It is a second inventory of the same thing
 with one of them guarded.
 
-⚠️ **How that six was counted matters, and the obvious way to count it is wrong in both
-directions.** This entry used to derive it from `grep -rln 'tools\.md' tests/`, which also yields
-six `.py` modules and is a DIFFERENT six: it finds `test_resources`, which names the page in a
-comment and reads `operator_guide.md` instead, and it misses `test_examples_match_entry_points`,
+⚠️ **How that six is counted matters, and the obvious way to count it is wrong in both
+directions.** Deriving it from `grep -rln 'tools\.md' tests/` also yields six `.py` modules and a
+DIFFERENT six: it finds `test_resources`, which names the page in a comment and reads
+`operator_guide.md` instead, and it misses `test_examples_match_entry_points`,
 which really does read the page but reaches it through `(_ROOT / "docs").glob("*.md")` and
 therefore never spells its name. `test_diagnostics_tail` is in both sets for the same reason in
 reverse: it names the page in a comment AND reads it, through a `docs/` directory prefix. So the
@@ -176,9 +174,10 @@ docstring or a comment alike.
 ## 11 · The Naming-Service client's provenance is a measurement, not an opinion
 
 Measured 2026-07-29, and recorded here because it is the first question a public fork asks.
-`services/naming_client.py` and `services/naming_exceptions.py` used to describe themselves as
-"vendored" from pvValidator, an unrelated validation tool that is **GPL-3.0-only** while this
-package is MIT. Read on its own, that self-description states a licence problem. It was wrong.
+`services/naming_client.py` and `services/naming_exceptions.py` name pvValidator in their own
+docstrings, an unrelated validation tool that is **GPL-3.0-only** while this package is MIT.
+Following another project's API shape and error names is not taking its code, and which of the two
+happened here is measurable rather than arguable.
 
 What was measured, on the upstream checkout and on this tree. **No contiguous block of code is
 shared:** longest identical run of lines, `difflib` over the whole files, is four lines in
@@ -232,9 +231,8 @@ What is NOT held, named rather than implied:
   not read. ⚠️ This page is itself a scanned surface, so an illustration here must not put a
   single-character code span within three characters of a backticked status name.
 - **The per-surface floor detects an EMPTY read, not an almost-empty one, and it covers three of the
-  nine surfaces read.** (Nine since `docs/quick-start.md` was tracked on 2026-08-18; the sentence
-  said eight until GQ-117, correct when written on 2026-07-30. The population is derived from
-  `git ls-files` at run time, so it grows without this line noticing.)
+  nine surfaces read.** (The population is derived from `git ls-files` at run time, so the nine is
+  a reading rather than a constant, and it grows without this line noticing.)
   A page that stops documenting all but one of its pairings passes. The
   tempting repair, a floor of "at least one pairing outside the legend region", is green today and
   was rejected because a legitimate prose rewrite reddens it and the obvious repair for that red is
@@ -398,22 +396,18 @@ rather than oversight (`docs/safety.md`, `SECURITY.md`): the shared REST layer l
 at DEBUG and an unexpected internal error logs its cause at ERROR. And the Naming plane, which has
 no `*_AUTH` variable, so a credential it needs has nowhere else to live.
 
-⚠️ **This list named a third entry until 2026-08-14, `epics-doctor`, and the two halves of that
-entry ended differently (measured 2026-08-14, not on this section's heading date).** Its cause
-texts went through a local pattern-based redaction that cut at the FIRST `@` and did not recognise
-a bare user name, which is why it was listed. **No unredacted exception was found that could reach
-that redaction**, so the entry is DELISTED rather than fixed: the redaction was removed instead of
-repaired, and the cause texts cross the same barrier as every other message. Read that as the
-result of a search, not as a proof, and the search has a known hole: of the six probe sites, four
-re-raise through the shared barrier, but the archiver and archiver_retrieval planes go through
+⚠️ **`epics-doctor` is deliberately not a third entry, and that is the result of a search rather
+than a proof.** Its cause texts cross the same barrier as every other message, and **no unredacted
+exception was found that could reach them**. The search has a known hole: of the six probe sites,
+four re-raise through the shared barrier, but the archiver and archiver_retrieval planes go through
 `rest_get_json`, which catches `RequestException` only, so a bare `OSError` reaches the verdict
 unwrapped. The one instance anybody has produced, an unreadable `EPICS_MCP_CA_BUNDLE`, is now
 recognised by name and reported as `ca_error`; the hole it came through is still open for any other
 bare `OSError`. Both catch sites are bare `except Exception`, so the population is whatever those
-call trees can raise. The half that was real sat somewhere this entry did
-not name, the write-gate block, which REBUILT its target address and printed a fragment of the
-password in the path for `https://svc:p@ss/w0rd@host/Olog` on every run with an armed gate. That
-one is FIXED, and it is the only credential disclosure of the two.
+call trees can raise. The one place where a credential really did print is that command's
+write-gate block, which rebuilt its target address and printed a fragment of the password in the
+path for `https://svc:p@ss/w0rd@host/Olog` on every run with an armed gate. That is FIXED, and it
+is the only real credential disclosure this section carries.
 
 Three things follow for an adopter. Put credentials in `EPICS_MCP_*_AUTH`, which four of the
 planes have (ChannelFinder, Archiver, Alarm, Olog; the Naming plane has none, and its URL is not
@@ -561,8 +555,8 @@ same kind of thing.**
   `PATH_OUTSIDE_WORKSPACE`. ⚠️ Measured rather than argued: **three of them already stand in that
   section** (`INVALID_INPUT`, `INVALID_TIME_WINDOW`, `INVALID_ARGUMENT`), and only
   `BATCH_TOO_LARGE` and `PATH_OUTSIDE_WORKSPACE` do not. So the claim here is NOT that a
-  validation code does not belong there; the document already disagrees with that, and an earlier
-  draft of this entry made it anyway. The claim is narrower and is about the guard: these codes
+  validation code does not belong there; the document already disagrees with that. The claim is
+  narrower and is about the guard: these codes
   tell a caller their ARGUMENTS were wrong, before any service was contacted, so the tool's own
   schema and message are the primary channel and a missing entry is not a hole a running operator
   falls into. Requiring all of them would put a wall of argument validation into a section a
@@ -639,13 +633,10 @@ rather than from which bucket its status is in, which for this sentence means `r
 It is written down rather than made here because it belongs to a different ticket, and a change
 nobody asked for is how a review loses its boundary.
 
-⚠️ **This entry once cited `_host_down` as a model while that function failed the same test 25
-lines lower**, which a post-build review of BG-DTHR found and which is repaired in the same change
-as this sentence: `_host_down` earned "this host answered" from "did not fail" rather than from an
-answer, so a plane nobody contacted certified a host, and one sitting on the dead host withdrew a
-correct finding. It is a model now; it was not when this was written. No line numbers are cited any
-more either, for the reason at the top of this page: they move, and this entry moved twice while
-being written.
+⚠️ **What makes `_host_down` the model is that it earns "this host answered" from an answer, not
+from "did not fail".** Earned the other way, a plane nobody contacted certifies a host, and one
+sitting on the dead host withdraws a correct finding. No line numbers are cited on this page
+either, for the reason at the top: they move.
 
 ## 24 · Dependabot does not update the Python dependencies here, and never has
 
