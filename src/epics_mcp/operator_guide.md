@@ -474,9 +474,8 @@ The two pre-dispatch refusals (`DENY`, `BOUNDS_DENY`) are outside that correlati
 Posting to the logbook is the server's first mutating operation against a REST service, so it has its
 own gate, distinct from `set_pv_value`, and it never touches `ALLOW_PV_WRITE`. SIX **gate** checks
 must line up before a write proceeds, each fail-closed and audited as `DENY` before the raise, and
-all six checks are below, in the order the gate applies them. The first and the fifth are the ones
-that go missing whenever this list is restated, so check those two against the six below before
-trusting any count of it.
+all six checks are below, in the order the gate applies them. The first and the fifth are the two
+to verify against that list before trusting any count of it.
 
 - **Non-empty target logbooks.** A write that names NO logbook is refused before the allowlist is
   consulted, because `set() <= frozenset()` is true and an empty request would otherwise pass the
@@ -576,9 +575,9 @@ attachments cannot survive the match, duplicate, missing, or otherwise unreadabl
 writing to it. `add_log_attachment` checks the list it will really SUBMIT, which is the entry's
 attachments plus the new upload(s): a new file whose name collides case-insensitively with one
 already there is refused too, locally, before the destructive round-trip starts. The re-submitted
-list and that refusal are derived in the SAME pass, on purpose: computed separately the two can
-disagree, and an attachment the payload quietly omits then passes the guard as safe, with the file
-lost anyway (probe-measured).
+list and that refusal are derived in the SAME pass, on purpose: computed separately the two
+disagree, probe-measured, and an attachment the payload quietly omits then passes the guard as
+safe, with the file lost anyway.
 
 **Edit an existing entry** (`update_log_entry` → `POST /logs/multipart` with the `logEntry` part and NO
 file parts) changes `title` / body / `level` / `logbooks` / `tags`. Same destructive endpoint, same
@@ -1198,11 +1197,11 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
 - **A `find_device` match is not necessarily a screen, and the answer says which it is.** The
   reverse-lookup cuts on operator-visibility and never on the kind of file, so a `.plt` trend
   opened by an `open_file` button is a top level of its own and comes back among the `screens`.
-  That is a correct answer to "where do I see this device" and is deliberately not filtered, but
-  it must not arrive indistinguishable from an operator screen, counted as one and named as one.
-  Read `screens[].node_kind` (`"display"` or `"trend"`) for what a match IS, and
-  `display_count` / `trend_count` for how the list splits. Those two are counted positively rather
-  than one subtracted from the other, so a later third kind would fall out of their sum instead of
+  That is a correct answer to "where do I see this device" and is deliberately not filtered, so
+  what a match IS comes from `screens[].node_kind` (`"display"` or `"trend"`) rather than from the
+  field it arrived in, and how the list splits comes from `display_count` / `trend_count`. Those
+  two are counted positively rather than one subtracted from the other, so a later third kind would
+  fall out of their sum instead of
   landing silently in the display figure. The empty answer denies both kinds ("Nothing
   operator-facing references this device/query, neither a screen nor a Data Browser trend").
   ⚠ The field is called `screens`: renaming it would break every caller in order to say what its

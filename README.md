@@ -10,11 +10,12 @@ against it. Why is this PV disconnected? Which IOC was supposed to serve it? Whe
 last see a value, and did anybody log a problem with that device this week?
 
 That is one question, and its answer sits in four different services. A facility runs its live
-layer, a channel registry, an archiver, an alarm server, an alarm logger and a logbook side by
-side. Each has its own port, its own query language, its own idea of how a date is written, and
-often its own login. This server puts them all behind **Model Context Protocol (MCP)** tools over
-[p4p](https://mdavidsaver.github.io/p4p/). The question gets asked once, and every service that
-holds part of the answer is read.
+layer, a channel registry, an archiver, an alarm logger and a logbook side by side. Each has its
+own port, its own query language, its own idea of how a date is written, and often its own login.
+This server puts them behind one set of **Model Context Protocol (MCP)** tools, live values over
+[p4p](https://mdavidsaver.github.io/p4p/) and the other planes over their own REST APIs. The
+question is asked once instead of four times, and each service you have configured answers the
+part it holds.
 
 **Read-only by default.** The one tool that can write to your control system is triple-gated, and
 off until you turn it on. Logbook writes sit behind a separate gate of their own. The full
@@ -254,6 +255,6 @@ MIT, see [LICENSE](https://github.com/epicDirk/EPICS-MCP/blob/main/LICENSE).
 
 Independently developed EPICS MCP server, originally seeded from
 [Jacky1-Jiang/EPICS-MCP-Server](https://github.com/Jacky1-Jiang/EPICS-MCP-Server) (MIT) and since
-rewritten on [FastMCP](https://github.com/jlowin/fastmcp) and the p4p library, with a
-write-safety layer, batch operations, PV monitoring, cross-plane provenance, and OPI validation
-by epicDirk.
+rewritten on [FastMCP](https://github.com/jlowin/fastmcp) and the p4p library by epicDirk, with
+a write-safety layer, batch operations, PV monitoring, and, on an install that carries the display
+engine, cross-plane provenance and OPI validation.

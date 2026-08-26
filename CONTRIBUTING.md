@@ -80,14 +80,16 @@ CI runs `uv sync --extra dev --locked` and passes no `--group`, so it tests exac
 standalone core a public user gets. The `opi_navigation`-coupled test modules are dropped at
 collection when the package is absent, so the core suite stays green.
 
-**What CI covers.** The suite runs on every push against Python 3.12, 3.13 and 3.14, which is
-every version `requires-python` permits, on an install with no EPICS infrastructure at all.
-`mypy --strict` covers `src`, `tests` and `scripts`, and the package ships `py.typed`.
+**What CI covers**, which belongs here and not on a landing page. The suite runs on every push
+against Python 3.12, 3.13 and 3.14, which is every version `requires-python` permits, on an install
+with no EPICS infrastructure at all. `mypy --strict` covers `src`, `tests` and `scripts`, and the
+package ships `py.typed`.
 
-⚠️ **No count of the display-coupled test modules stands here, deliberately.** The list itself is
-`ENGINE_COUPLED_MODULES` in `tests/conftest.py`, and a number repeated beside a list it does not
-read is how a paragraph like this drifts. `tests/engine_gate.py` says so at the list, and
-`docs/known-limits.md` entry 16 names the same set without a figure.
+⚠️ **This paragraph names no count of the display-coupled test modules, deliberately.** The
+list itself is `ENGINE_COUPLED_MODULES` in `tests/conftest.py`, and a number repeated beside a
+list it does not read is how a paragraph like this drifts. `tests/engine_gate.py` says so beside the
+gate that consumes the list, and `docs/known-limits.md` entry 16 names the same set without a
+figure.
 
 **`--locked`, not `--frozen`, and the local line above says so too.** Both install from the
 lockfile without re-resolving; only `--locked` also verifies that the lockfile still MATCHES
@@ -245,7 +247,7 @@ the gates.
    rehearsal says nothing about either. What covers them is the real releases, and that coverage is
    measured rather than assumed: run `31765446620` (the `v0.6.0` tag, 2026-08-14) is the most recent
    one whose `publish` job ran `download-artifact` and uploaded, and whose `github-release` job then
-   sliced the changelog successfully. Older tags did the same, back to `v0.3.0`. ⚠️ A superlative
+   sliced the changelog successfully. Older tags ran `download-artifact` too, back to `v0.3.0`. ⚠️ A superlative
    like "the most recent" goes stale on its own, without anyone editing it: the next tag falsifies
    it the hour it ships. Re-read it whenever a release goes out, or measure it with
    `gh run list --workflow Publish --json databaseId,headBranch,event`.
@@ -290,9 +292,9 @@ the gates.
 
 **Three traps, all measured here rather than imagined:**
 
-- `uv build` does **not** clear `dist/`. An artifact left there by an earlier build is uploaded by
-  `dist/*` alongside the new files, carrying whatever dependency reference it was built with. The
-  workflow clears the directory; a manual release must too.
+- `uv build` does **not** clear `dist/`. Measured here: a three-week-old artifact was sitting in
+  it, carrying a dependency reference the build no longer has, and `dist/*` would have uploaded it
+  alongside the new files. The workflow clears the directory; a manual release must too.
 - A published package is not the same thing as a working one. Installing the built wheel into a
   clean environment and running every console script found two that died on their import chain
   with a bare traceback. Do that check by hand whenever an entry point or an optional dependency

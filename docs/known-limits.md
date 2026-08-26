@@ -42,8 +42,8 @@ about, ten are inventoried with the reason they cannot be. Every OTHER page in t
 still unguarded for figures.
 
 ⚠️ **What is rejected, and stays rejected, is a guard over the WHOLE tracked markdown**, not the
-reading of markdown at all. The reader exists and is pointed at one page; the cost of widening it
-to the rest of the tree is re-measured below, and that cost still holds.
+reading of markdown at all. The reader exists and is pointed at a named set of pages; the cost of
+widening it to the rest of the tree is re-measured below, and that cost still holds.
 
 ⚠️ **Markdown is not unguarded, it is unguarded FOR FIGURES.** Several guards read it, they just
 do not read figures:
@@ -635,8 +635,8 @@ nobody asked for is how a review loses its boundary.
 
 ⚠️ **What makes `_host_down` the model is that it earns "this host answered" from an answer, not
 from "did not fail".** Earned the other way, a plane nobody contacted certifies a host, and one
-sitting on the dead host withdraws a correct finding. No line numbers are cited on this page
-either, for the reason at the top: they move.
+sitting on the dead host withdraws a correct finding. No line numbers are cited on this page:
+they move, and a citation that moves is worse than none.
 
 ## 24 · Dependabot does not update the Python dependencies here, and never has
 

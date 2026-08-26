@@ -185,8 +185,8 @@ This is a controls tool, so the trust questions come first.
   names an ADDRESS, so it drops the userinfo AND the query and says `(unparseable)` where it cannot
   prove the result names the same address; this resource keeps the query because being comparable
   is what it is for. What still carries a credential is the log above, by decision. `epics-doctor`
-  is not a third: it has no redaction of its own, its cause texts cross the same barrier as
-  everything else, and no unredacted exception was found that could reach them.
+  does not: it has no redaction of its own, its cause texts cross the same barrier as everything
+  else, and no unredacted exception was found that could reach them.
   ⚠️ **A local FILE PATH is withheld on the same rule, at BOTH write gates.**
   An unwritable `EPICS_MCP_AUDIT_LOG_FILE` is refused with `SAFETY_CONFIG_INVALID`, and neither
   gate names its value: both name the variable and tell the reader to check it and the directory's
@@ -217,9 +217,10 @@ This is a controls tool, so the trust questions come first.
   privacy rule, and none is specified for this server. Built against an *assumed* rule it costs the
   logbook its point, because a search then returns ids whose content you cannot judge and a write
   cannot verify what it wrote. If a real facility privacy specification arrives, a redaction is
-  built against that specification and not before. The Olog client refuses redirects instead of
-  following them. Note this is a *runtime output* decision, unrelated to keeping
-  person data out of committed files (see `CLAUDE.md`).
+  built against that specification and not before; `services/redact.py` holds the projection
+  primitive it would be built on. The Olog client refuses redirects instead of following them.
+  Note this is a *runtime output* decision, unrelated to keeping person data out of committed
+  files (see `CLAUDE.md`).
 - **Network reach is the launcher's decision, not this server's.** PV searches follow the
   standard EPICS env: the address lists (`EPICS_PVA_ADDR_LIST` / `EPICS_CA_ADDR_LIST`), the name
   servers (`EPICS_PVA_NAME_SERVERS`: TCP unicast, **not** subnet-bound), and the auto-address

@@ -89,7 +89,8 @@ setting.
   because it rebuilt the address from the parse; that was a real disclosure and it is FIXED, by
   deleting the userinfo and withholding what cannot be proven. Separately, the command's own
   pattern-based redaction is gone rather than repaired: no unredacted exception was found that
-  could reach it, so there is nothing left here to redact.
+  could reach it. Read that as the result of a search rather than a proof;
+  `docs/known-limits.md` entry 17 names the hole that search has.
 - **Output redaction (ChannelFinder only).** ChannelFinder owners and property values pass a
   site-configurable allowlist. Olog entries come back WHOLE (title, text, author, attachments):
   there is no read redaction on that plane, a deliberate prototype decision, see `docs/safety.md`
