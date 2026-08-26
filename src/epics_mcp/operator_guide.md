@@ -91,9 +91,9 @@ measured 2026-08-15, only the first of the four appears anywhere else in this do
   Raise it only if operators legitimately need more simultaneous long monitors; the ceiling bounds
   monitors alone.
 - **An empty monitor result says WHY it is empty.** `monitor_pv` returns `connection`
-  (`connected` / `disconnected` / `unknown`) alongside the events, so zero events no longer reads
-  the same for a quiet PV and for one that was never reachable, which is what made this tool
-  contradict `get_pv_value` (it raises `PV_TIMEOUT` on the second case). `connected` is claimed
+  (`connected` / `disconnected` / `unknown`) alongside the events, so zero events does not read
+  the same for a quiet PV and for one that was never reachable, which is the distinction
+  `get_pv_value` makes by raising `PV_TIMEOUT` on the second case. `connected` is claimed
   only where a delivered value proves it; a stream the server ended, or one that reported an
   error, is `unknown` rather than a guess, and `connection_detail` then carries one sentence
   saying what was seen. The state is subscribed for, not probed separately, so it describes the
@@ -280,12 +280,12 @@ An entry written by an old client can carry **no `source` at all**. ⚠️ Editi
 the one shape nothing warns about: the legacy warning fires only when you leave the body alone, and
 the read-modify-write warning needs a `source` to compare against.
 
-The former DS-PRIVACY read redaction (author dropped, free text withheld outside a declared local
-sandbox) was removed 2026-08-01: it was written against an *assumed* privacy policy that was never
-specified for this server, and it cost the logbook its point (a search returned ids whose content
-you could not judge, and a write could not verify what it just wrote). If a real facility privacy
-specification ever arrives, it will be rebuilt against that specification; the removed mechanism
-is in the git history. The privacy consequences of whole reads are stated in `docs/safety.md`.
+There is NO read redaction on this plane, and that is a decision rather than an omission. A
+redaction here would have to be built against a privacy policy, and none is specified for this
+server. One built against an *assumed* policy costs the logbook its point: a search then returns
+ids whose content you cannot judge, and a write cannot verify what it just wrote. If a real
+facility privacy specification arrives, a redaction is built against that specification and not
+before. The privacy consequences of whole reads are stated in `docs/safety.md`.
 
 The client still REFUSES redirects rather than follow them: Olog's REST API has no legitimate
 redirect, so a hop is a misconfiguration surfaced loudly. Keeping person data out of COMMITTED
@@ -475,8 +475,8 @@ Posting to the logbook is the server's first mutating operation against a REST s
 own gate, distinct from `set_pv_value`, and it never touches `ALLOW_PV_WRITE`. SIX **gate** checks
 must line up before a write proceeds, each fail-closed and audited as `DENY` before the raise, and
 all six checks are below, in the order the gate applies them. The first and the fifth are the ones
-that go missing: an earlier version of this list said "four" and named four, then said "six" and
-still named four, so the sentence announcing the correction was itself the incomplete list.
+that go missing whenever this list is restated, so check those two against the six below before
+trusting any count of it.
 
 - **Non-empty target logbooks.** A write that names NO logbook is refused before the allowlist is
   consulted, because `set() <= frozenset()` is true and an empty request would otherwise pass the
@@ -575,10 +575,10 @@ fixable client-side. That is why every round-trip re-lists a non-null filename p
 attachments cannot survive the match, duplicate, missing, or otherwise unreadable, instead of
 writing to it. `add_log_attachment` checks the list it will really SUBMIT, which is the entry's
 attachments plus the new upload(s): a new file whose name collides case-insensitively with one
-already there is refused too, locally, before the destructive round-trip starts. The re-submitted list and that refusal are derived in the SAME pass, on purpose: when
-they were computed separately they disagreed, and an attachment the payload quietly omitted passed the
-guard as safe (found by adversarial review, probe-measured, the guard existed and the file was lost
-anyway).
+already there is refused too, locally, before the destructive round-trip starts. The re-submitted
+list and that refusal are derived in the SAME pass, on purpose: computed separately the two can
+disagree, and an attachment the payload quietly omits then passes the guard as safe, with the file
+lost anyway (probe-measured).
 
 **Edit an existing entry** (`update_log_entry` → `POST /logs/multipart` with the `logEntry` part and NO
 file parts) changes `title` / body / `level` / `logbooks` / `tags`. Same destructive endpoint, same
@@ -733,8 +733,8 @@ Each plane has its own beacon, because they do not share one:
 | Naming | `GET /rest/swagger.json` | `info.title` |
 
 ⚠️ Mind the base PATH on the archiver: retrieval serves `/retrieval/bpl`, **not** `/mgmt/bpl`.
-Probing the latter on the retrieval port 404s and tells you nothing, that mistake is exactly how an
-earlier pass concluded retrieval had no beacon at all.
+Probing the latter on the retrieval port 404s and tells you nothing, which reads exactly like
+retrieval having no beacon at all.
 
 **Some faults are only visible when you compare the planes with each other.** Under the plane lines
 the report prints an `Installation` block, and only when a pattern matches, so nothing there means
@@ -981,8 +981,8 @@ the read throttle, and a server that will not start) · `err-guide`.
   half is not abridged for a transport failure, which is the only place refused, not-resolved,
   timed-out and TLS-broken are told apart; a served status reads `HTTP <code> <phrase>` in this
   client's own words. A `note` in a SUCCESSFUL payload follows the same rule, and so does an
-  `epics-doctor` plane verdict, which had a redaction of its own until 2026-08-14. To read a full
-  URL back, look at the server log, not at the answer.
+  `epics-doctor` plane verdict. To read a full URL back, look at the server log, not at the
+  answer.
 - **A cause reads `<ExceptionClass> (message withheld: it would echo a credential)`.** The rule
   above is enforced on the OUTPUT, not on the configured secret, because the transport rewrites a
   userinfo in flight and a search for the configured value would find nothing. What cannot be
@@ -1195,22 +1195,21 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   embedded in a screen through a `databrowser` widget its traces are attributed to that SCREEN and
   only the file view of the trend finds them here, while a trend opened by an `open_file` button is
   a top level of its own and answers under either view. So on a trend, when in doubt, ask for both.
-- **A `find_device` match is not necessarily a screen, and the answer now says which it is.** The
+- **A `find_device` match is not necessarily a screen, and the answer says which it is.** The
   reverse-lookup cuts on operator-visibility and never on the kind of file, so a `.plt` trend
   opened by an `open_file` button is a top level of its own and comes back among the `screens`.
-  That is a correct answer to "where do I see this device" and is deliberately not filtered; what
-  was wrong is that it arrived indistinguishable from an operator screen, counted as one and named
-  as one. Read `screens[].node_kind` (`"display"` or `"trend"`) for what a match IS, and
+  That is a correct answer to "where do I see this device" and is deliberately not filtered, but
+  it must not arrive indistinguishable from an operator screen, counted as one and named as one.
+  Read `screens[].node_kind` (`"display"` or `"trend"`) for what a match IS, and
   `display_count` / `trend_count` for how the list splits. Those two are counted positively rather
   than one subtracted from the other, so a later third kind would fall out of their sum instead of
-  landing silently in the display figure. The empty answer denies both kinds now ("Nothing
-  operator-facing references this device/query, neither a screen nor a Data Browser trend"); it
-  used to deny screens alone, having never counted trends apart. ⚠ The field is still called
-  `screens`: renaming it would break every caller in order to say what its members now say
-  themselves. ⚠ And do not read the kind off the path suffix instead. It agrees with `node_kind`
-  today, because the walk routes a candidate by suffix and an unparsable `.plt` yields no channel
-  and therefore never reaches a match at all, but that is a property of the current walk rather
-  than a promise this server makes.
+  landing silently in the display figure. The empty answer denies both kinds ("Nothing
+  operator-facing references this device/query, neither a screen nor a Data Browser trend").
+  ⚠ The field is called `screens`: renaming it would break every caller in order to say what its
+  members already say themselves. ⚠ And do not read the kind off the path suffix instead. It
+  agrees with `node_kind` today, because the walk routes a candidate by suffix and an unparsable
+  `.plt` yields no channel and therefore never reaches a match at all, but that is a property of
+  the current walk rather than a promise this server makes.
 - **`validate_pvs` refuses a `file_path` with `INVALID_INPUT`.** Two inputs are refused before any
   work: a path whose suffix is neither of the two above, and one that is not under `displays_dir`.
   Both would run the
@@ -1273,10 +1272,8 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   carries a macro is resolved by globbing the known displays, and past the cap the surplus matches
   are left out. That drops whole embedded SCREENS rather than instances, so it can shrink either
   view while both `capped` verdicts above stay `false`. All **four** display tools report it as
-  its own `notes` entry, and none of them turns it into a per-file verdict. ⚠ `find_device` was
-  the exception until GB-65: it ran the same walk and read neither cap, so a screen dropped by the
-  glob cap was simply absent from its answer with nothing saying so. **That restraint is measured,
-  not caution.** The engine records the SOURCE
+  its own `notes` entry, and none of them turns it into a per-file verdict. **That restraint is
+  measured, not caution.** The engine records the SOURCE
   display of a capped glob, and testing membership in that set looks like the obvious per-file
   flag while missing most of the damage: a cap lift from 50 to 200 on a 2878-display dataset grows
   **7** display views and only **3** of them are named as a source, the largest miss gaining 651
@@ -1331,25 +1328,23 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   counts the FILES a cap left half-expanded (a `.plt` trend can be one of them, which is why the
   report says files rather than displays), and `files_walked` is the universe that count is a share
   of, since 104 capped files mean something else against 284 walked than against 3000.
-- **`crossplane_check` links FILES, not screens, and `displays_linked` always held both.** Its
-  description promised "operator-facing displays only" while a `.plt` trend opened by a button was
-  in the list, unmarked. The list keeps its name and its contents, `screens_linked` and
-  `trends_linked` split it by kind, and the rendered half marks a trend on its own line with the
-  same words `find_device` uses. Nothing was filtered out: a trend that shows this IOC's channels
-  is a real provenance link, it was simply arriving as something it is not.
-- **A Data Browser trend does not count as a screen here, and until GQ-153 it did.** The display
-  index names every operator-facing top level, and a `.plt` trend opened by a button is one, so a
-  PV that appears on no `.bob` at all used to arrive with `has_display=yes` and drop out of
-  `cf_only`: out of the one count this tool exists to produce. Now `has_display` answers about
-  SCREENS alone, `on_trend` answers beside it with the same three values, and such a PV is named in
-  `trend_only` (reported whether or not the registry answered) as long as an operator can OPEN that
-  trend, and, when it is also registered, in
-  `cf_only` and in `cf_trend_only`. ⚠ So `cf_only` GREW, and the growth is the repair rather than a
-  regression: these entries were missing from a blind-spot list. Read `cf_trend_only` as the milder
-  half of `cf_only`, somebody can still reach those by opening a trend. ⚠ `critical_uncovered`
-  grows with it only on an UNCAPPED walk, and that is worth knowing before reading a big dataset:
-  `cf_only` is a set difference and holds these regardless, while `blind_spots` needs a PROVEN
-  `has_display: no`, and any capped file withholds that cell instead. Measured on a 5273-file
+- **`crossplane_check` links FILES, not screens, and `displays_linked` holds both.**
+  `screens_linked` and `trends_linked` split it by kind, and the rendered half marks a trend on its
+  own line with the same words `find_device` uses. Nothing is filtered out: a trend that shows this
+  IOC's channels is a real provenance link, and the split is what keeps it from arriving as
+  something it is not.
+- **A Data Browser trend does not count as a screen here.** The display index names every
+  operator-facing top level, and a `.plt` trend opened by a button is one, so counting it as a
+  screen takes a PV that appears on no `.bob` at all out of `cf_only`: out of the one count this
+  tool exists to produce. `has_display` therefore answers about SCREENS alone, `on_trend` answers
+  beside it with the same three values, and such a PV is named in `trend_only` (reported whether or
+  not the registry answered) as long as an operator can OPEN that trend, and, when it is also
+  registered, in `cf_only` and in `cf_trend_only`. ⚠ `cf_only` therefore holds entries that a
+  screens-only count leaves out of the blind-spot list. Read `cf_trend_only` as the milder half of
+  `cf_only`, somebody can still reach those by opening a trend. ⚠ `critical_uncovered` picks
+  these entries up only on an UNCAPPED walk, and that is worth knowing before reading a big
+  dataset: `cf_only` is a set difference and holds them regardless, while `blind_spots` needs a
+  PROVEN `has_display: no`, and any capped file withholds that cell instead. Measured on a 5273-file
   dataset with 118 of them capped AT `context_cap=200`: all 25 trend-only PVs came back `withheld`,
   named in `trend_only` and
   counted in neither `blind_spots` nor `critical_uncovered`. Raise the context cap to turn them
