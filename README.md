@@ -196,7 +196,8 @@ commit style: [CONTRIBUTING.md](https://github.com/epicDirk/EPICS-MCP/blob/main/
 
 ## Related and roadmap
 
-Three things: what exists, what is deliberately missing, and what is only intended.
+Four things: what exists, what is deliberately missing, what is only intended, and the
+answer that none of these pieces gives on its own.
 
 **What exists.** Four tools (`validate_pvs`, `crossplane_check`, `coverage_audit`, `find_device`)
 and two commands (`epics-crossplane`, `epics-coverage`) join live PVs with the *display* plane:
@@ -225,7 +226,7 @@ nothing open anywhere. `opi-live` knows which displays are open in a running CS-
 now. So there is a question none of the three answers alone and all three answer together:
 this PV just stopped updating, is it on a display somebody has in front of them, and where on
 that display. Until the engine and those two neighbours are published, that answer stays
-in-house, and this page says so rather than implying the three are one product.
+in-house.
 
 ## License
 
