@@ -11,11 +11,9 @@ at a time, and as the `epics://guide` resource for an application reading it who
 knowledge therefore travels with the server: no external skill or project folder required. Read it
 there; this file is only the human-facing signpost.
 
-⚠️ **A pointer, deliberately, and it used to be less of one.** This file named five of the guide's
-recipes in a parenthesis. The guide has ten recipe headings, no test held the two together, and
-that gap was the whole reason the list was worth removing rather than correcting: a pointer with no
-enumeration in it cannot drift, and an enumeration nobody checks is a second copy waiting to go
-stale.
+⚠️ **Deliberately a pointer, with no list of recipes in it.** An enumeration here would be a
+second copy of the guide's own headings, and no test holds the two together, so it would go stale
+without anyone noticing.
 
 The deployment and site-adaptation guide (network configuration, CA bundles, per-facility
 settings) is a separate document: **[docs/deployment.md](docs/deployment.md)**. Start there when

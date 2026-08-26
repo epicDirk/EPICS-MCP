@@ -36,14 +36,13 @@ network and deterministic by construction. `diagnose` is the declared exception,
 box for that reason: a connection diagnosis IS a live probe, so it calls `pv_get` directly and
 gathers all five planes in one `asyncio.gather`.
 
-⚠️ **The exception is exactly one call wide, and it used to be two.** `diagnose` also built its own
-`NamingServiceClient`, while `services/checkers.query_naming_lookup` already ran the same three
-steps for the standalone `lookup_device_name` tool, its own comment saying it MIRRORED the
-gatherer. That was two copies of one probe, not a second exception, so the gatherer now calls the
-query like its three siblings do. What remains is `pv_get`, which is the thing the decision behind
-this exception actually justified. The other THREE planes were never client calls: they go through
-the same `checkers` query functions as the MCP tools, which is why widening this box to "it probes
-the planes itself" reads as more of an exception than the code has ever needed.
+⚠️ **The exception is exactly one call wide.** What it covers is `pv_get`, the live probe the
+decision behind this box actually justified. Naming goes through
+`services/checkers.query_naming_lookup`, the same function the standalone `lookup_device_name` tool
+runs, so the gatherer calls it like its three siblings do. The other THREE planes are not client
+calls either: they go through the same `checkers` query functions as the MCP tools, which is why
+widening this box to "it probes the planes itself" reads as more of an exception than the code
+needs.
 
 - **`server.py`** is the MCP entry point. It declares the tool, resource and prompt surface and
   delegates. Nothing here talks to EPICS directly.

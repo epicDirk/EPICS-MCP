@@ -58,8 +58,8 @@ Windows, remember that every backslash in that path has to be doubled.
 ```
 
 Read-only is what this block sets: both write gates stay off, and every REST plane stays disabled
-until its `*_URL` is set. It does **not** confine the server to localhost, and this heading used to
-say it did. EPICS defaults the auto-address search to **ON**, so a configuration that sets no
+until its `*_URL` is set. It does **not** confine the server to localhost. EPICS defaults the
+auto-address search to **ON**, so a configuration that sets no
 search variables broadcasts PV searches into the local subnets. To be reached-nothing rather than
 merely read-only, disable the auto search explicitly:
 
