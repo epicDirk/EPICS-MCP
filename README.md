@@ -218,6 +218,15 @@ here, both in private repositories: `opi-live`, a plugin that exposes a RUNNING 
 tied to how those two hold up in practice. Neither those two nor the engine carries a release
 commitment, and nothing on this page is a schedule. This page will say when one is published.
 
+**What the three answer together.** This server knows that a PV is disconnected, newly in
+alarm, or absent from the archive; it does not know what anyone has on screen at that moment.
+`CS-Studio-MCP` knows which display file carries that PV and where on the file it sits, with
+nothing open anywhere. `opi-live` knows which displays are open in a running CS-Studio right
+now. So there is a question none of the three answers alone and all three answer together:
+this PV just stopped updating, is it on a display somebody has in front of them, and where on
+that display. Until the engine and those two neighbours are published, that answer stays
+in-house, and this page says so rather than implying the three are one product.
+
 ## License
 
 MIT, see [LICENSE](https://github.com/epicDirk/EPICS-MCP/blob/main/LICENSE).
