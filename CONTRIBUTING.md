@@ -80,16 +80,14 @@ CI runs `uv sync --extra dev --locked` and passes no `--group`, so it tests exac
 standalone core a public user gets. The `opi_navigation`-coupled test modules are dropped at
 collection when the package is absent, so the core suite stays green.
 
-**What CI covers, since the README used to say it and a landing page is the wrong place for it.**
-The suite runs on every push against Python 3.12, 3.13 and 3.14, which is every version
-`requires-python` permits, on an install with no EPICS infrastructure at all. `mypy --strict`
-covers `src`, `tests` and `scripts`, and the package ships `py.typed`.
+**What CI covers.** The suite runs on every push against Python 3.12, 3.13 and 3.14, which is
+every version `requires-python` permits, on an install with no EPICS infrastructure at all.
+`mypy --strict` covers `src`, `tests` and `scripts`, and the package ships `py.typed`.
 
-⚠️ **The sentence that moved here carried a number, and the number was wrong**: it said seven
-display-coupled test modules where `ENGINE_COUPLED_MODULES` in `tests/conftest.py` lists eight. It
-is not repaired to eight, it is gone. `tests/engine_gate.py` had already written down why ("a
-number repeated beside a list it does not read is how this paragraph drifted in the first place"),
-and `docs/known-limits.md` entry 16 names the same set deliberately without one.
+⚠️ **No count of the display-coupled test modules stands here, deliberately.** The list itself is
+`ENGINE_COUPLED_MODULES` in `tests/conftest.py`, and a number repeated beside a list it does not
+read is how a paragraph like this drifts. `tests/engine_gate.py` says so at the list, and
+`docs/known-limits.md` entry 16 names the same set without a figure.
 
 **`--locked`, not `--frozen`, and the local line above says so too.** Both install from the
 lockfile without re-resolving; only `--locked` also verifies that the lockfile still MATCHES
@@ -107,14 +105,13 @@ EPICS_MCP_REQUIRE_DISPLAYS=1 uv run pytest        # engine missing -> refusal, n
 ```
 
 Use it whenever a change touches the display-aware tools, so a half-installed checkout cannot hand
-you a green run. Why CI itself still cannot execute them, and where their coverage comes from
-instead since 2026-08-04: `docs/known-limits.md`, entry 16.
+you a green run. Why CI itself cannot execute them, and where their coverage comes from instead:
+`docs/known-limits.md`, entry 16.
 
 ## Definition of done
 
-- `uv run pytest` green. **"Coverage not reduced" is enforced since GB-34, not remembered:** CI
-  fails below a floor, `--cov-fail-under` in `.github/workflows/ci.yml`, on each of the three matrix
-  legs. Until then this line asked for something no mechanism checked.
+- `uv run pytest` green. **"Coverage not reduced" is enforced, not remembered:** CI fails below a
+  floor, `--cov-fail-under` in `.github/workflows/ci.yml`, on each of the three matrix legs.
   ⚠️ **That floor is the CI number and is therefore LOWER than a local one.** CI syncs without
   `--group displays`, so the eight engine-coupled test modules never run there and their lines count
   as missed (`docs/known-limits.md`, entry 16). Measured 2026-08-20 on the same tree: 87% in CI
@@ -147,12 +144,12 @@ instead since 2026-08-04: `docs/known-limits.md`, entry 16.
   `EPICS_MCP_*` var must be mentioned there, and a new `epics-doctor` plane status must be **given a
   row in the shipped legend**, with the glyph the CLI prints, and sorted into the matching
   guide-location bucket. ⚠️ Leaving it undocumented is not an option the buckets offer any more:
-  "named in neither" is empty since QA-49 and putting a status there is a red test, not a decision.
+  "named in neither" is empty, and putting a status there is a red test, not a decision.
   A status the code treats as a hard failure must additionally stay named in the prose paragraph
   above the legend. A new `epics-doctor` **plane** must be named in the guide's `plane-inventory`
   region, in the spelling the report prints, which is a separate obligation from the status one: a
-  status is what a line SAYS, a plane is what it is CALLED, and only the first was guarded until
-  QA-73. All of it is drift-checked by `test_guide_matches_code.py`.
+  status is what a line SAYS, a plane is what it is CALLED. All of it is drift-checked by
+  `test_guide_matches_code.py`.
 - A new **write** surface additionally satisfies all six points of the
   [write-gate contract](docs/write-gate-contract.md)
   and registers every one of its deny paths in `tests/test_write_gate_contract.py::DENY_PATHS`, each
@@ -162,8 +159,8 @@ instead since 2026-08-04: `docs/known-limits.md`, entry 16.
   satisfied by editing the number they report.**
   - *A number written next to a collection noun* ("the 26 projection fields", "all 22 schemas",
     "four paths") in `tests/test_server.py`, `server.py`, `services/checkers.py`,
-    `services/checkers_olog.py`, `tools/archiver.py` or, since GQ-123, `display_tools.py` and the
-    SHIPPED `src/epics_mcp/operator_guide.md`. The criterion that decides that list, and the
+    `services/checkers_olog.py`, `tools/archiver.py`, `display_tools.py` and the SHIPPED
+    `src/epics_mcp/operator_guide.md`. The criterion that decides that list, and the
     arithmetic that keeps two large test modules out of it, is written above `_WATCHED`.
     **Which nouns count is a closed list,
     `prose_numbers.COLLECTION_NOUNS`**. Read it, do not guess, and note that this obligation is
@@ -189,9 +186,10 @@ instead since 2026-08-04: `docs/known-limits.md`, entry 16.
     `uv run python scripts/guard_audit.py sham --check`. That verdict was reached
     by a person reading a list, so a longer list has not been read: re-read it, then re-record.
 - **After any change to a client module or a client-double test:** the coverage-dependent half of
-  the sham audit is re-checked for you. Since GB-34 the `sham-audit` job of
-  `.github/workflows/ci.yml` records a `COVERAGE_CORE=ctrace` map on every push and runs
-  `guard_audit.py sham --check --coverage-db`, so all six figures are verified rather than four.
+  the sham audit is re-checked for you. The `sham-audit` job of `.github/workflows/ci.yml` records
+  a `COVERAGE_CORE=ctrace` map on every push and runs
+  `guard_audit.py sham --check --coverage-db`, so all six figures are verified there, against the
+  four a run without a database can check.
   It still costs a full extra suite run, which is why it is a parallel JOB and not a step in the
   gate, and why the local chain does not run it.
   ⚠️ **It reports, it does not block:** main's ruleset holds `non_fast_forward` and `deletion` only,
@@ -204,9 +202,9 @@ instead since 2026-08-04: `docs/known-limits.md`, entry 16.
   overwrites the working `.coverage`. And record with `COVERAGE_CORE=ctrace`: where the default core
   is `sys.monitoring` it disables a location after its first observation, so a map recorded without
   it makes the audit report false survivors; the reasoning is in `CLAUDE.md`'s evidence section.
-  ⚠️ **"On Python 3.12+" is what this line used to say, and it is wrong by two minor versions.**
-  Measured against the locked coverage 7.14.1: `coverage.env.SYSMON_DEFAULT` is true only from 3.14,
-  so on 3.12 and 3.13 the map is a C-tracer map with or without the variable. Setting it is still
+  ⚠️ **Which Python versions that actually applies to, measured.** Against the locked coverage
+  7.14.1, `coverage.env.SYSMON_DEFAULT` is true only from 3.14, so on 3.12 and 3.13 the map is a
+  C-tracer map with or without the variable. Setting it is still
   right, and the CI job sets it, because the job's interpreter is a configuration choice that can
   change under the recipe.
 
@@ -240,18 +238,16 @@ the gates.
    through it (run 30402266430).
 3. The rehearsal path works too. `workflow_dispatch` with `dry_run` at its default `true` installs,
    tests, clears `dist/`, builds and gates, and stops before uploading; it is the only way to
-   exercise a release workflow without releasing. ⚠️ **What a rehearsal cannot cover, stated
-   precisely because this paragraph used to overstate it.** It stops before the publish job, so
+   exercise a release workflow without releasing. ⚠️ **What a rehearsal cannot cover.** It stops
+   before the publish job, so
    `download-artifact` and the upload never run under it, and it takes the LENIENT gate branch
    (`--allow-prerelease`); the strict `--expect-version` branch runs on a tag alone. So a green
    rehearsal says nothing about either. What covers them is the real releases, and that coverage is
    measured rather than assumed: run `31765446620` (the `v0.6.0` tag, 2026-08-14) is the most recent
    one whose `publish` job ran `download-artifact` and uploaded, and whose `github-release` job then
-   sliced the changelog successfully. Older tags did the same; the earlier claim that
-   `download-artifact` "has still never executed" was already false when it was written, and had
-   been since `v0.3.0`. ⚠️ A superlative like "the most recent" goes stale on its own, without
-   anyone editing it: this line named `v0.5.0` for twelve hours after `v0.6.0` had shipped. Re-read
-   it whenever a release goes out, or measure it with
+   sliced the changelog successfully. Older tags did the same, back to `v0.3.0`. ⚠️ A superlative
+   like "the most recent" goes stale on its own, without anyone editing it: the next tag falsifies
+   it the hour it ships. Re-read it whenever a release goes out, or measure it with
    `gh run list --workflow Publish --json databaseId,headBranch,event`.
 
 **Every release:**
@@ -261,10 +257,9 @@ the gates.
    are not optional bookkeeping: with no installed metadata (a source checkout) the stale literal
    becomes a silent version lie, and
    `tests/test_packaging.py::test_version_fallback_matches_pyproject` goes red if they drift.
-   ⚠️ **The third is newly load-bearing and this step did not name it before.** `uv.lock` carries
-   the project's own version (`[[package]] name = "epics-mcp"`), so a bump leaves it stale, and
-   both workflows now sync with `--locked`, which REFUSES a lockfile that disagrees with
-   `pyproject.toml`. Under the previous `--frozen` this passed unnoticed. The trap is that the
+   ⚠️ **The third is load-bearing.** `uv.lock` carries the project's own version
+   (`[[package]] name = "epics-mcp"`), so a bump leaves it stale, and both workflows sync with
+   `--locked`, which REFUSES a lockfile that disagrees with `pyproject.toml`. The trap is that the
    local gates hide it: `uv run` refreshes `uv.lock` on disk without committing it, so step 3 goes
    green on your machine and the tag build fails, after the tag is already pushed. `git status`
    after `uv lock` is the cheap check.
@@ -273,9 +268,9 @@ the gates.
    scripts/check_release_ready.py dist/*`. The gate reads the BUILT metadata, never
    `pyproject.toml`, because the two can differ; it refuses a direct reference, a pre-release
    version, and a description that would not render.
-4. Tag `vX.Y.Z` and push the tag. That starts the build. ⚠️ **Since 2026-08-14 the tag is no longer
-   the irreversible step, and this line used to say it was.** Two repository settings sit in front
-   of the upload now, both outside this tree, so neither shows up in a diff:
+4. Tag `vX.Y.Z` and push the tag. That starts the build. ⚠️ **The tag is not the irreversible
+   step.** Two repository settings sit in front of the upload, both outside this tree, so neither
+   shows up in a diff:
    - Only a repository **administrator** can create a `v*` tag at all (ruleset `release-tags`).
    - The `publish` job then **waits for an approval** on the `pypi` environment. Approve it under
      the run's own page, "Review deployments". The version is spent from that click onwards, not
@@ -286,8 +281,8 @@ the gates.
    disagrees with the tag. The way back is to re-run the whole workflow from the same tag and
    approve it, not to push a second tag.
 5. Afterwards: check that the index page renders and that a clean install of the new version
-   imports and runs its commands. The README install command and the index badge are already
-   pointing at the published package since 0.3.0, so there is nothing to swap. The **GitHub
+   imports and runs its commands. The README install command and the index badge already
+   point at the published package, so there is nothing to swap. The **GitHub
    release** needs no hand step *after the approval in step 4*: the workflow's third job creates it
    once the upload succeeded, with the body sliced out of `CHANGELOG.md` by
    `scripts/changelog_section.py`. Check it appeared; if the section was missing the job fails
@@ -295,10 +290,9 @@ the gates.
 
 **Three traps, all measured here rather than imagined:**
 
-- `uv build` does **not** clear `dist/`. A three-week-old artifact was still sitting there during
-  this work, carrying a dependency reference the current build no longer has, and `dist/*` would
-  have uploaded it alongside the new files. The workflow clears the directory; a manual release
-  must too.
+- `uv build` does **not** clear `dist/`. An artifact left there by an earlier build is uploaded by
+  `dist/*` alongside the new files, carrying whatever dependency reference it was built with. The
+  workflow clears the directory; a manual release must too.
 - A published package is not the same thing as a working one. Installing the built wheel into a
   clean environment and running every console script found two that died on their import chain
   with a bare traceback. Do that check by hand whenever an entry point or an optional dependency
