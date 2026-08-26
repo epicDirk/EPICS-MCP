@@ -5,19 +5,25 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/epicDirk/EPICS-MCP/blob/main/LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 
-Ask an AI assistant about your EPICS control system. What is this PV reading right now? Why is
-it disconnected? Which operator screens and trends show this device, and is it archived and
-alarm-configured? The server exposes your EPICS layer as **Model Context Protocol (MCP)** tools
-over [p4p](https://mdavidsaver.github.io/p4p/), so an assistant can answer those the way an
-operator would, instead of you clicking through CS-Studio, the Archiver Appliance UI and
-ChannelFinder by hand.
+Ask an AI assistant about your EPICS control system, whether you are on shift or writing code
+against it. Why is this PV disconnected? Which IOC was supposed to serve it? When did the archive
+last see a value, and did anybody log a problem with that device this week?
 
-**Read-only by default.** `set_pv_value` is triple-gated: an env switch, a required regex
-allowlist, and a rate limit. A value outside the record's own drive limits is refused after those
-three have admitted the write, which is a further refusal and not a fourth gate. Logbook writes sit
-behind their own separate gate, of six checks. The fullest statement of the posture, including what
-leaves your machine, is
+That is one question, and its answer sits in four different services. A facility runs its live
+layer, a channel registry, an archiver, an alarm server, an alarm logger and a logbook side by
+side. Each has its own port, its own query language, its own idea of how a date is written, and
+often its own login. This server puts them all behind **Model Context Protocol (MCP)** tools over
+[p4p](https://mdavidsaver.github.io/p4p/). The question gets asked once, and every service that
+holds part of the answer is read.
+
+**Read-only by default.** The one tool that can write to your control system is triple-gated, and
+off until you turn it on. Logbook writes sit behind a separate gate of their own. The full
+posture, including what leaves your machine, is
 [Safety and network posture](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/safety.md).
+
+It also answers what no single service can. Which of the channels this IOC serves is nobody
+archiving? The registry holds one list, the archive holds another, and nobody holds the
+difference. An assistant asks for both and works it out, with no script to write first.
 
 > **Project status.** Pre-1.0 and under active development. Tools and APIs may still change
 > between minor versions, so pin one if you depend on it.
@@ -29,12 +35,18 @@ leaves your machine, is
 for you, so there is nothing else to obtain. No facility, no IOC, no EPICS Base, no ChannelFinder,
 no archiver.
 
+**I want my coding agent to see the machine while I work.** Take one of the ready-to-paste blocks
+from the [MCP client integration guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/mcp-clients.md)
+and leave both write gates alone. Your agent can then read what a record really carries: its units,
+its limits, its enum labels, instead of you guessing them into the code. It still cannot write
+anything back.
+
 **I want to point it at my facility.** The [deployment guide](https://github.com/epicDirk/EPICS-MCP/blob/main/docs/deployment.md) is written for
 that. It starts at `epics-init`, which prints a client-configuration block for one of four
 deployment shapes and checks it in the same step, and it then walks the variables plane by plane,
-the CA-bundle recipe for internal HTTPS, and the documented assumptions. Either way you end at
-`epics-doctor`, which probes every configured plane read-only and tells you what your instance
-actually reaches, and whether either write gate is armed and where it could write.
+the CA-bundle recipe for internal HTTPS, and the documented assumptions. Whichever way in, you
+end at `epics-doctor`, which probes every configured plane read-only and tells you what your
+instance actually reaches, and whether either write gate is armed and where it could write.
 
 ## What is this (for EPICS people)?
 
@@ -61,13 +73,18 @@ in these terms. Full descriptions are in [the tool reference](https://github.com
 | Plane | Source | Tools |
 |-------|--------|-------|
 | **Live** | p4p (PVAccess; p4p 4.x offers no Channel Access) | `get_pv_value`, `get_pvs`, `get_pv_info`, `monitor_pv`, `discover_pvs`, `set_pv_value` |
-| **Registry** | ChannelFinder | `find_channels`, `list_channel_vocabulary`, `diagnose_connection`, `coverage_audit` |
+| **Registry** | ChannelFinder | `find_channels`, `list_channel_vocabulary`, `diagnose_connection`, `coverage_audit`† |
 | **History** | EPICS Archiver Appliance | `is_archived`, `get_pv_history`, `get_archive_info`, `get_appliance_info`, `list_archived_pvs` |
 | **Alarm** | Phoebus Alarm Logger | `is_alarm_configured`, `get_alarm_history` |
-| **Naming** | ESS Naming Service | `lookup_device_name`, `diagnose_connection`, `crossplane_check` |
+| **Naming** | ESS Naming Service | `lookup_device_name`, `diagnose_connection`, `crossplane_check`† |
 | **Logbook** | Phoebus Olog | `search_logbook`, `get_log_entry`, `list_logbooks`, `list_tags`, `list_log_levels`, `create_log_entry`, `reply_to_log`, `update_log_entry`, `add_log_attachment`, `list_log_attachments`, `download_log_attachment` |
-| **Display** | `.bob` operator screens and `.plt` Data Browser trends (CS-Studio / Phoebus) | `validate_pvs`, `crossplane_check`, `coverage_audit`, `find_device` |
-| **IOC** | e3 `st.cmd` (+ optional `.db`) | `crossplane_check` |
+| **Display** | `.bob` operator screens and `.plt` Data Browser trends (CS-Studio / Phoebus) | `validate_pvs`†, `crossplane_check`†, `coverage_audit`†, `find_device`† |
+| **IOC** | e3 `st.cmd` (+ optional `.db`) | `crossplane_check`† |
+
+† Needs the `opi_navigation` engine, which is not part of the published package, so a
+core install does not register these four at all. **Display** and **IOC** are made of them alone
+and have no tool there; **Registry** and **Naming** lose one each and keep the rest. Why the
+engine is missing is in [Related and roadmap](#related-and-roadmap).
 
 The Live plane is the **only** authority for connected or disconnected. Every other plane is
 explanatory, and is *withheld* rather than reported as a false negative when its service is not
@@ -202,8 +219,9 @@ answer that none of these pieces gives on its own.
 **What exists.** Four tools (`validate_pvs`, `crossplane_check`, `coverage_audit`, `find_device`)
 and two commands (`epics-crossplane`, `epics-coverage`) join live PVs with the *display* plane:
 the macro-expanded PV inventory of `.bob` operator screens and of the `.plt` Data Browser trends
-reached from them, read through the `opi_navigation` PV engine. Everything else in this package,
-live PVs, registry, history, alarm, naming and logbook, installs and runs without any of it.
+reached from them, read through the `opi_navigation` PV engine. Everything else in this package
+installs and runs without any of it; the planes table above marks the four and says what each
+plane keeps.
 
 **What is deliberately missing.** Those six are not available in a published install, and cannot
 be made available by any flag. `opi_navigation` lives in a private repository, so it is wired
