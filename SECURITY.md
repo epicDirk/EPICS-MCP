@@ -31,9 +31,9 @@ setting.
   from the PV gate, with its own allowlist, its own rate limit and its own URL boundary. Enabling
   one never enables the other. The two are not the same SIZE either: the PV gate is three checks,
   the Olog gate six checks. What the Olog gate has on top is a non-empty target-logbook list and a
-  test-server URL boundary and an attachment size cap. That group carried a figure until [GQ-132]
-  and the figure was wrong, it named fewer items than the two gates differ by, so it is spelled as
-  a list and `tests/test_gate_lists.py` counts it against the difference the gate modules have.
+  test-server URL boundary and an attachment size cap. That group is spelled as this list rather
+  than as a figure, and `tests/test_gate_lists.py` counts it against the difference the gate
+  modules actually have.
 - **PV writes require a loopback-only search reach.** A server with `EPICS_MCP_ALLOW_PV_WRITE=true`
   whose EPICS client search environment can reach beyond loopback refuses to start. "Read the
   facility and write the facility" is a start-time impossibility here, not a matter of discipline.
@@ -87,14 +87,13 @@ setting.
   the same event.** Its write-gate block printed a fragment of a configured Olog password for one
   spelling of `EPICS_MCP_OLOG_URL`, on every run with an armed gate rather than on a failure,
   because it rebuilt the address from the parse; that was a real disclosure and it is FIXED, by
-  deleting the userinfo and withholding what cannot be proven. Separately, this document tracked
-  the command's own pattern-based redaction as a residual exposure; no unredacted exception was
-  found that could reach it, so that entry is withdrawn and the redaction removed rather than
-  repaired.
+  deleting the userinfo and withholding what cannot be proven. Separately, the command's own
+  pattern-based redaction is gone rather than repaired: no unredacted exception was found that
+  could reach it, so there is nothing left here to redact.
 - **Output redaction (ChannelFinder only).** ChannelFinder owners and property values pass a
   site-configurable allowlist. Olog entries come back WHOLE (title, text, author, attachments):
-  the former Olog read redaction was removed 2026-08-01 as a deliberate prototype decision, see
-  `docs/safety.md` for the stated consequences.
+  there is no read redaction on that plane, a deliberate prototype decision, see `docs/safety.md`
+  for the stated consequences.
 
 ## What this is not
 

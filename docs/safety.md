@@ -113,15 +113,16 @@ This is a controls tool, so the trust questions come first.
   that answered. The address stays operator-side: `epics-doctor`'s `Write gates` block deletes the
   userinfo and drops the query and fragment, but it prints that line only when the environment of
   THAT command arms the gate, and a URL it cannot prove it has redacted prints as `(unparseable)`.
-  ⚠️ That block REBUILT the address from the parse until 2026-08-14, and rebuilding was measured
-  to leak: for `https://svc:p@ss/w0rd@host/Olog` the parser reads the host as `ss`, so the rebuild
-  printed part of the password inside the path, with no `@` left for a structural check to see.
-  Deleting and then asking the parser to confirm the result is the same address is what closed it. The
+  ⚠️ It DELETES the userinfo rather than rebuilding the address from the parse, and the
+  difference is measured: for `https://svc:p@ss/w0rd@host/Olog` the parser reads the host as `ss`,
+  so a rebuild prints part of the password inside the path, with no `@` left for a structural check
+  to see. Deleting and then asking the parser to confirm the result is the same address is what
+  closes it. The
   logbook-allowlist refusal does still name the logbooks it refused: a logbook name cannot carry a
   credential, and which denials may name their target is decided per surface, never copied from a
-  sibling gate. ⚠️ This covers the REFUSAL, and the ordinary HTTP failure of a PERMITTED target
-  used to be a second route out for the same value, including a loopback sandbox spelled with a
-  userinfo. That route is closed as well since 2026-08-14, in the shared REST layer rather than
+  sibling gate. ⚠️ This covers the REFUSAL. The ordinary HTTP failure of a PERMITTED target, a
+  loopback sandbox spelled with a userinfo included, is a second route out for the same value, and
+  it is closed as well, in the shared REST layer rather than
   here: measured at the built artefact over every REST-backed tool and both failure kinds, 16 of 16
   disclosed a configured password before the fix and none does after it. What remains open, by
   decision rather than oversight, is the LOG, which the entry below is about.
@@ -184,24 +185,23 @@ This is a controls tool, so the trust questions come first.
   names an ADDRESS, so it drops the userinfo AND the query and says `(unparseable)` where it cannot
   prove the result names the same address; this resource keeps the query because being comparable
   is what it is for. What still carries a credential is the log above, by decision. `epics-doctor`
-  stood here too until 2026-08-14, on the strength of a local pattern-based redaction that cut at
-  the first `@`; that redaction is gone, its cause texts cross the same barrier as everything else,
-  and no unredacted exception was found that could reach the old one in the first place.
+  is not a third: it has no redaction of its own, its cause texts cross the same barrier as
+  everything else, and no unredacted exception was found that could reach them.
   ⚠️ **A local FILE PATH is withheld on the same rule, at BOTH write gates.**
   An unwritable `EPICS_MCP_AUDIT_LOG_FILE` is refused with `SAFETY_CONFIG_INVALID`, and neither
   gate names its value: both name the variable and tell the reader to check it and the directory's
   permissions on the server host. The path stays in the exception's `details`, which nothing in
   `src/` reads and which the tool boundary does not send.
-  ⚠️ **This said "in the one place it could reach a caller" until 2026-08-20, and the PV gate was
-  that sentence's exception on the argument that it is built eagerly at start-up, so that only the
-  operator on stderr reads it. Measured in-process, the argument is false at the DEFAULT posture.**
+  ⚠️ **BOTH gates, and the PV gate is not the exception it looks like.** The argument for
+  making it one is that it is built eagerly at start-up, so that only the operator on stderr reads
+  it. Measured in-process, that argument is false at the DEFAULT posture.
   `get_safety` is a lazy singleton; the eager construction in `server.main` runs only under
   `if config.allow_pv_write`; `set_pv_value` is registered unconditionally; and the write tool
   calls `get_safety()` before it checks whether writes are allowed at all. So with PV writes off
   and a set-but-unopenable audit path, which an Olog-write deployment is required to configure, the
-  first `set_pv_value` call from any caller answered with the full path, account name included,
-  twice over (once from the `!r`, once inside the chained `OSError`, which stringifies with the
-  filename in it). Both gates now give the same answer, and the operator loses an echo rather than
+  first `set_pv_value` call from any caller would answer with the full path, account name
+  included, twice over (once from the `!r`, once inside the chained `OSError`, which stringifies
+  with the filename in it). Both gates give the same answer, and the operator loses an echo rather than
   the actionable half: the variable is named and its value is theirs to read back from the
   environment of the process they started.
 - **Olog reads return the whole entry, a deliberate prototype decision (2026-08-01).** Every ENTRY
@@ -213,12 +213,11 @@ This is a controls tool, so the trust questions come first.
   or owner, even though the listing has to read the whole entry to find the attachments. **Consequence, stated plainly:** an
   AI assistant reading a production logbook hands its clear text, author names included, onward
   to the MCP client, the model provider, the conversation transcript and any client-side logs.
-  The former DS-PRIVACY read redaction was removed because it was built against an *assumed*
-  privacy rule that was never specified for this server, and it cost the logbook its point (a
-  search returned ids whose content you could not judge, and a write could not verify what it
-  wrote). If a real facility privacy specification ever arrives, it will be rebuilt against that
-  specification; the removed mechanism is in the git history (up to 2026-08-01). The Olog client
-  still refuses redirects instead of
+  There is no read redaction on this plane, by decision: one would have to be built against a
+  privacy rule, and none is specified for this server. Built against an *assumed* rule it costs the
+  logbook its point, because a search then returns ids whose content you cannot judge and a write
+  cannot verify what it wrote. If a real facility privacy specification arrives, a redaction is
+  built against that specification and not before. The Olog client refuses redirects instead of
   following them. Note this is a *runtime output* decision, unrelated to keeping
   person data out of committed files (see `CLAUDE.md`).
 - **Network reach is the launcher's decision, not this server's.** PV searches follow the

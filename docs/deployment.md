@@ -246,7 +246,7 @@ Only set the planes you use. See `.env.example` for the full commented list and 
 | Archiver Appliance | `EPICS_MCP_ARCHIVER_URL` (mgmt `:17665`), `EPICS_MCP_ARCHIVER_RETRIEVAL_URL` (retrieval `:17668`), `_AUTH` | See the cluster/port assumptions in section 5. |
 | Alarm Logger | `EPICS_MCP_ALARM_URL` (+ `_AUTH`) | Phoebus Alarm Logger REST root. |
 | Naming Service | `EPICS_MCP_NAMING_URL` | No built-in host, so no egress unless set. |
-| Olog logbook | `EPICS_MCP_OLOG_URL` (+ `_AUTH`) | REST root incl. context path. Reads return the whole entry (title, text, author, attachments); the former read redaction was removed 2026-08-01, see `docs/safety.md`. |
+| Olog logbook | `EPICS_MCP_OLOG_URL` (+ `_AUTH`) | REST root incl. context path. Reads return the whole entry (title, text, author, attachments) with no read redaction, see `docs/safety.md`. |
 
 The table groups by SERVICE, which is how you configure them. The report and the `plane` field of
 `--json` group by CHECK and print seven names: `live`, `channelfinder`, `archiver`,
@@ -447,12 +447,9 @@ a virtual environment, or `uv tool install`.
 ### It is running, and now what
 
 Everything above is bring-up. What follows is about an instance that already started, which is a
-different set of questions and used to have no answers here at all. It carried a count until
-[GQ-132], and the count was wrong. Measured: the section was born with four questions and said
-four, grew to five and said five, then grew to six the same day and the figure stayed at five,
-where it sat for nine days. It is not repaired to six, it is gone, the same repair
-CONTRIBUTING.md records for the display-coupled module count, and for the same reason: a number
-beside a list nothing reads survives exactly as long as nobody edits the list.
+different set of questions. **This section states no count of them, deliberately**, the same
+choice `CONTRIBUTING.md` records for the display-coupled module count and for the same reason: a
+number beside a list nothing reads survives exactly as long as nobody edits the list.
 
 **It runs, and I think it is reading the wrong facility.** Two things decide that and they are not
 in the same place. The REST planes follow their `*_URL` variables; the live plane follows the EPICS
