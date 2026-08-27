@@ -46,7 +46,12 @@ _ROOT = Path(__file__).resolve().parent.parent  # .../EPICS-MCP-Server
 # making it one would change what the packaging guard reads.
 sys.path.insert(0, str(_ROOT / "scripts"))
 
-from pv_leak_scan import pv_leak_tokens  # noqa: E402 (needs the sys.path splice above)
+from pv_leak_scan import (  # noqa: E402 (needs the sys.path splice above)
+    PV_RE,
+    PV_SCHEME_RE,
+    is_synthetic_pv,
+    pv_leak_tokens,
+)
 
 
 def test_guide_loads_as_package_data() -> None:
@@ -367,6 +372,47 @@ def test_pv_detector_flags_realistic_names_and_passes_synthetic() -> None:
         "NTScalar:Value",  # PVA type name
     ):
         assert not flags(benign), f"detector must pass benign token {benign!r}"
+
+
+def test_the_second_pass_only_appends_to_the_first() -> None:
+    """The union contract that ``pv_leak_tokens`` states, held by a test instead of by prose.
+
+    The safety of the two-pass scan rests on exactly one property: the first pass IS the
+    single-pass behaviour, so nothing that was reported before the second pass existed can stop
+    being reported. That is a claim about DUPLICATES AND ORDER, not merely about the set of names,
+    and the distinction is not academic: a first draft ran one ``seen`` set across both passes,
+    which silently collapsed a name that legitimately occurs twice. The shipped promise was false
+    while every test here stayed green, which is the shape this repository keeps finding.
+
+    The single-pass result is recomputed from the module's OWN ``PV_RE`` rather than from a frozen
+    copy of the pattern. A copy is precisely what the repository rule forbids: it would drift, and
+    a drifted copy would then hold the wrong contract while looking like a guard.
+    """
+
+    def single_pass(text: str) -> list[str]:
+        scanned = PV_SCHEME_RE.sub("  ", text)
+        return [
+            token
+            for match in PV_RE.finditer(scanned)
+            if not is_synthetic_pv(token := match.group(0))
+        ]
+
+    first, second, third = _PV_SHAPES_DECLARED_HERE[0:3]
+    cases = (
+        *_PV_SHAPES_DECLARED_HERE,
+        f"{first} {first} {second}",  # the same name twice: multiplicity must survive
+        f"{first} and {second} and {third}",  # several names: text order must survive
+        "\n".join(_PV_SHAPES_DECLARED_HERE),
+        "",
+        "no device name here at all",
+    )
+    for text in cases:
+        before = single_pass(text)
+        after = pv_leak_tokens(text)
+        assert after[: len(before)] == before, (
+            f"the second pass must only APPEND: the single-pass result {before} is not a prefix "
+            f"of {after}"
+        )
 
 
 def test_site_re_catches_username_paths_and_subdomains() -> None:

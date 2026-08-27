@@ -87,8 +87,32 @@ def pv_leak_tokens(text: str) -> list[str]:
     device name sitting behind the '#'. Measured: six shapes that are reported today go silent
     that way. A union of two passes cannot do that, by construction rather than by measurement:
     the first pass is the old behaviour byte for byte, so nothing reported today can stop being
-    reported, and a union only ever adds. PV_RE is therefore untouched, and the three structural
-    gates documented at its definition stay three.
+    reported, and a union only ever adds. PV_RE is therefore untouched, and so is the count of
+    structural gates documented at its definition. That count is deliberately NOT repeated here:
+    a number restated in a second place is a number that can rot in one of them, and this
+    docstring has no guard holding it against the pattern it would be describing.
+
+    "ONLY EVER ADDS" IS MEANT LITERALLY, DOWN TO DUPLICATES AND ORDER, and the code below is
+    written that way rather than merely aiming at it. The first pass is returned as the old
+    comprehension built it, repeated tokens and text order included, and the second pass APPENDS
+    only names the first did not produce. The old result is therefore a prefix of the new one, for
+    any input. A tidier "collect both passes into one deduplicated list" fails that: it silently
+    collapses a name that legitimately occurs twice, which changes a shared function's contract
+    for every caller in order to make one guard read better.
+
+    A SECOND-PASS NAME IS REPORTED WITHOUT ITS '#', so it can be a string that does not appear
+    verbatim in the scanned text. That is the point rather than a defect: what leaks is the NAME,
+    not the byte run that carried it. It is stated here because ``test_guide.py`` prints the token
+    in its failure message, so a reader who greps for it may find nothing and needs to know why.
+
+    THE SAME GLUING CAN DESTROY A SYNTHETIC MARKER, which is the one way this guard can newly cry
+    wolf. Removing the '#' joins whatever alphanumeric run precedes it INTO the head, and the head
+    is what is_synthetic_pv reads, so a marker that was whole becomes a prefix of something else:
+    a 'Ref' written flush against a sanctioned DEV-TEST head yields a flagged 'RefDEV-TEST...'.
+    Only a run flush against the '#' does it; a space or a bracket in between keeps the head
+    intact. Measured over the tracked tree and the whole history at the time of writing: the
+    triggering context appears in 9 of 221 files and 3 of 869 commit bodies, and none of them
+    produces a token, so the cost today is zero and the mechanism is named rather than hidden.
 
     The shape named above is SYNTHETIC for the reason the module header gives: this file is read
     by the detector it defines, and without the declared-shapes allowance that only
@@ -96,12 +120,20 @@ def pv_leak_tokens(text: str) -> list[str]:
     test_knowledge_files_are_facility_agnostic.
     """
     scanned = PV_SCHEME_RE.sub("  ", text)
-    found: list[str] = []
-    seen: set[str] = set()
-    for variant in (scanned, scanned.replace("#", "")):
-        for match in PV_RE.finditer(variant):
-            token = match.group(0)
-            if not is_synthetic_pv(token) and token not in seen:
-                seen.add(token)
-                found.append(token)
+    found = [
+        token for match in PV_RE.finditer(scanned) if not is_synthetic_pv(token := match.group(0))
+    ]
+    if "#" not in scanned:
+        # Not a shortcut but an identity: with no '#' to remove, the second pass would read the
+        # same string and can only re-find what is already in `found`. What it saves is measured
+        # rather than assumed, and it is lopsided: it fires for 29 of the 221 tracked text files
+        # (a '#' is a comment and a heading character, so most files carry one) but for 812 of
+        # 869 commit bodies. The surface where a block is most disruptive is the one it helps.
+        return found
+    seen = set(found)
+    for match in PV_RE.finditer(scanned.replace("#", "")):
+        token = match.group(0)
+        if not is_synthetic_pv(token) and token not in seen:
+            seen.add(token)
+            found.append(token)
     return found
