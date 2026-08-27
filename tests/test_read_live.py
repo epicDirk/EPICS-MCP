@@ -32,8 +32,9 @@ THE TOOL LAYER, NOT THE SERVICE LAYER
 Every call goes through ``epics_mcp.server``, which is what an MCP client actually reaches: the
 ``@with_reach`` and ``@translate_epics_errors`` decorators are part of the answer under test. So a
 failed read arrives as ``ToolError("[<CODE>] <message> [reach: ...]")``, not as the domain
-exception, and the reach clause on the ERROR path is asserted here for the first time against a
-real plane. The eight sibling modules call the service layer and therefore never see either.
+exception, and the reach clause on the ERROR path is asserted here against a real plane rather
+than against a fake. None of the nine sibling modules sees either decorator: eight call a service
+client directly, and the ninth reaches the tool layer at ``tools/write``, which carries neither.
 
 ONE SEARCH ENVIRONMENT PER PROCESS
 ----------------------------------
@@ -172,7 +173,25 @@ def glob_core() -> str:
         demanded=live_demanded(os.environ),
     )
     assert value is not None  # narrowed by the gate above
+    # ⛔ The case-insensitivity probe compares the fragment against its upper-cased self. An
+    # already-upper-case fragment would make those two calls byte-identical, and the comparison
+    # would hold an answer against itself while looking like a server measurement. Refuse rather
+    # than pass vacuously.
+    assert_live_available(
+        value != value.upper(),
+        "EPICS_MCP_LIVE_READ_GLOB_CORE must contain at least one lower-case letter, otherwise "
+        "the case-insensitivity probe compares the server's answer with itself",
+        demanded=live_demanded(os.environ),
+    )
     return value
+
+
+#: The error codes that mean "the plane did not answer", as opposed to "the server answered
+#: something wrong". Only these turn into a mid-run outage notice; anything else is a real defect
+#: and must stay an assertion. Without this narrowing the helper below would swallow EVERY failed
+#: read into a skip, so a regression that broke reading outright would report green in the default
+#: mode, which is the exact defect this module exists to catch.
+_OUTAGE_CODES = ("PV_TIMEOUT", "EPICS_CONNECTION_FAILED")
 
 
 async def _still_answering(pv_name: str, timeout: float) -> dict[str, object]:
@@ -183,10 +202,23 @@ async def _still_answering(pv_name: str, timeout: float) -> dict[str, object]:
     which it is, and the demand switch decides whether that is a skip or a red. Same in-probe gate
     the write module uses when a record turns out to lack drive limits: a data-dependent outcome
     inside a running live probe is its own class.
+
+    ⚠️ NARROWED TO THE OUTAGE CODES ON PURPOSE. Catching every ``ToolError`` here would make the
+    helper a blanket amnesty: a code change that broke reading altogether raises through the same
+    type, and without ``EPICS_MCP_REQUIRE_LIVE`` the gate below turns that into a silent skip.
+    Anything outside :data:`_OUTAGE_CODES` is re-raised unchanged, so it fails loudly as it should.
+
+    ⚠️ HONEST REACH: only the FIRST read of a probe goes through here. A plane that dies between
+    two reads inside one probe still surfaces as a plain assertion. Widening that would mean
+    routing every call through the helper, which would also route the assertions it is meant to
+    keep sharp.
     """
     try:
         return await get_pv_value(pv_name, timeout)
     except ToolError as exc:
+        message = str(exc)
+        if not any(f"[{code}]" in message for code in _OUTAGE_CODES):
+            raise
         assert_live_available(
             False,
             f"the live read plane stopped answering mid-run: {exc}",
@@ -265,19 +297,59 @@ class TestSingleRead:
 class TestBatchRead:
     """``get_pvs``: the one path where a real plane decides how a partial failure is reported."""
 
+    async def test_the_native_batch_agrees_with_reading_the_same_pvs_one_by_one(
+        self, pv: str, second_pv: str
+    ) -> None:
+        """The NATIVE batch path, and the only probe in this module that reaches it.
+
+        ⛔ Measured, and it corrects what the sibling probe below used to claim: a batch containing
+        an unreadable name can NEVER exercise the native path. ``pv_get_batch`` calls the provider
+        with p4p's default ``throw=True``, so one silent channel makes the whole native call raise
+        and the code falls back to concurrent single reads. The fallback even signs its own work:
+        its error text omits the ``after <t>s`` clause that ``pv_get`` puts in. Only an
+        all-readable batch stays on the native path.
+
+        What that path can get wrong is invisible to a mock, because a mock supplies both sides:
+        the provider returns a positional LIST, and this code pairs it with the requested names by
+        INDEX. A provider reordering its answers, or the pairing drifting, produces values under
+        the wrong names, and every count still adds up. So the probe crosses the batch against the
+        same PVs read INDIVIDUALLY and requires each name to carry its own value. That also
+        exercises the documented promise that units ride inside ``display`` per PV, which is the
+        reason the batch tool exists at all.
+        """
+        batch = await get_pvs([pv, second_pv], _READ_TIMEOUT)
+        results = batch.get("results")
+        assert isinstance(results, list)
+        assert not batch.get("errors"), f"both PVs are readable, so no error is expected: {batch}"
+        assert {entry["pv_name"] for entry in results} == {pv, second_pv}
+
+        by_name = {entry["pv_name"]: entry for entry in results}
+        for name in (pv, second_pv):
+            single = await get_pv_value(name, _READ_TIMEOUT)
+            batched = by_name[name]
+            # NOT the value: it moves between two reads on a live channel. What must agree is the
+            # SHAPE and the identity, which is what a mispaired answer would break.
+            assert batched.get("display") == single.get("display"), (
+                f"the batch and the single read disagree about the display block of {name!r}: "
+                f"{batched.get('display')!r} against {single.get('display')!r}"
+            )
+            assert type(batched.get("value")) is type(single.get("value"))
+
     async def test_a_mixed_batch_keeps_the_readable_and_reports_the_unreadable(
         self, pv: str, second_pv: str
     ) -> None:
-        """Positive and negative control in ONE call, which is what makes it differential.
+        """The FALLBACK path, positive and negative control in ONE call.
 
-        The wire contract says a per-PV read failure lands in ``errors``. Offline, only the
-        FALLBACK path was ever exercised with a missing channel: the native batch is faked whole.
-        On the native path the provider decides what a missing entry looks like, and the formatter
-        underneath never raises, so a mis-shaped entry could arrive as a RESULT carrying a
-        placeholder instead of as an error. That would silently turn an unreadable channel into a
-        readable-looking one. The count assertion is the guard: results plus errors must account
-        for every name submitted, with the readable ones on one side and the absent one on the
-        other.
+        ⚠️ This is the fallback, not the native path, and the sibling probe above says why. That
+        is not a weakness here: the fallback is exactly the code a partially unreachable batch
+        runs in production, and it is the code that decides whether an unreadable channel becomes
+        an error entry or a plausible-looking result.
+
+        The wire contract says a per-PV read failure lands in ``errors``. The formatter underneath
+        never raises and turns an unconvertible object into a placeholder RESULT, so the failure
+        mode worth guarding is an unreadable channel arriving on the wrong side of the answer. The
+        count assertion is that guard: results plus errors must account for every name submitted,
+        with the readable ones on one side and the absent one on the other.
         """
         names = [pv, second_pv, _ABSENT_PV]
         answer = await get_pvs(names, _ABSENT_TIMEOUT)
@@ -304,21 +376,27 @@ class TestInfoRead:
     async def test_info_adds_exactly_one_key_and_the_record_fills_a_metadata_block(
         self, pv: str
     ) -> None:
-        """Both halves are live-only claims, and the second is the one that matters.
+        """Two halves, and they are NOT equally live. Said plainly rather than oversold.
 
-        The two tools share their whole implementation; the only thing info adds is a status key.
-        Pinning that against a REAL answer keeps the pair honest: a future divergence between them
-        shows up here rather than in a reader's expectations. The second half is what a mock cannot
-        say at all: that a real facility populates at least one metadata block. Offline, every
-        block is whatever the fixture author typed.
+        ⚠️ The key-set half is a CODE claim, not a facility one, and it cannot be made otherwise:
+        both tools call the same ``pv_get`` and the second only assigns a status key, so the
+        comparison holds a function against itself and only a code change can break it. It earns
+        its place as a cheap pin on a pair that is easy to let drift apart, not as live coverage,
+        and it is symmetric on purpose: the one-directional form would miss info LOSING a key.
+
+        The second half is the live one, and a mock cannot make the claim at all: that a real
+        facility populates at least one metadata block. Offline every block is whatever the fixture
+        author typed. Which blocks arrive is deliberately not pinned, because that is a property of
+        the record, not of this server.
         """
         value_answer = await _still_answering(pv, _READ_TIMEOUT)
         info_answer = await get_pv_info(pv, _READ_TIMEOUT)
 
-        # Both answers carry a fresh timestamp, so compare the KEY SETS, never the values.
-        extra = set(info_answer) - set(value_answer)
-        assert extra == {"status"}, (
-            f"get_pv_info is expected to add exactly the status key, it added {extra}"
+        # Both answers carry a fresh timestamp, so compare the KEY SETS, never the values. The
+        # symmetric difference catches a LOST key as well as an added one.
+        assert set(info_answer) ^ set(value_answer) == {"status"}, (
+            "get_pv_info and get_pv_value must differ in exactly the status key, they differ in "
+            f"{set(info_answer) ^ set(value_answer)}"
         )
         assert info_answer["status"] == "success"
 
@@ -348,15 +426,23 @@ class TestMonitor:
     """``monitor_pv``: whether a real channel emits the notices the state machine is built on."""
 
     async def test_a_live_channel_reports_connected_with_at_least_one_event(self, pv: str) -> None:
-        """The positive control, stated the way the code can actually satisfy it.
+        """The positive control. Two of its four claims are live, and the split is said openly.
 
-        ``connected`` is set in the same locked block that appends the event, so connected implies
-        at least one event and the two are asserted together. The complementary half is that a
-        healthy run carries NO detail line: the detail key exists to explain an empty or odd
-        result, and its presence on a healthy channel would be noise the reader has to discount.
+        ⚠️ "connected implies at least one event" is CONSTRUCTIVE, not live: the flag is set in the
+        same locked block that appends the event. It is asserted because the pair is the readable
+        statement, not because it can fail on its own.
+
+        The live claims are the other two, and neither has ever been checked against a facility.
+        First, that each collected event carries the SAME metadata blocks the single read carries.
+        That is a documented promise of this tool, and offline every event is a fixture the author
+        wrote, so the two could not disagree. Second, the ``truncated`` coupling: the cap is
+        deliberately over-collected by one so that a stream cut by the cap is distinguishable from
+        one that delivered exactly the cap and went quiet. Only a channel that really keeps
+        producing can exercise that, and this run's channel does.
         """
-        await _still_answering(pv, _READ_TIMEOUT)
-        answer = await monitor_pv(pv, _MONITOR_DURATION, 5)
+        single = await _still_answering(pv, _READ_TIMEOUT)
+        cap = 5
+        answer = await monitor_pv(pv, _MONITOR_DURATION, cap)
 
         assert answer["connection"] == "connected", (
             f"a channel that just answered a read must monitor as connected: {answer}"
@@ -369,23 +455,51 @@ class TestMonitor:
             "a healthy monitor must not carry an explanation line"
         )
 
+        # The documented promise: an event is shaped like a single read, minus the envelope keys.
+        envelope = {"reach", "status"}
+        single_blocks = {key for key in ("alarm", "timestamp", "display") if key in single}
+        for event in events:
+            assert isinstance(event, dict)
+            missing = single_blocks - set(event) - envelope
+            assert not missing, (
+                f"a monitor event must carry the same best-effort metadata as a single read; "
+                f"this one is missing {sorted(missing)}: {event}"
+            )
+
+        # The cap coupling. truncated may be either way (it depends on how fast the channel is),
+        # but a truncated stream must have been cut at exactly the cap.
+        if answer["truncated"]:
+            assert len(events) == cap, (
+                f"a truncated stream is cut at the cap, got {len(events)} events for cap {cap}"
+            )
+        else:
+            assert len(events) <= cap
+
     async def test_an_absent_channel_explains_its_silence(self) -> None:
-        """The negative control, and the pairing is the actual claim.
+        """The negative control, and it pins ``disconnected`` rather than merely not-connected.
 
         Zero events used to mean either "quiet PV" or "no such PV". The connection field separates
         them, and this is the first probe that asks a REAL provider to produce the disconnect
-        notice the separation rests on. The assertion is the COUPLING: not connected, no events,
-        and an explanation present. Which non-connected value arrives is left open, since a
-        provider that sends no notice at all honestly yields unknown.
+        notice the separation rests on.
+
+        ⛔ THE EXACT VALUE IS THE POINT, and the weaker form was a real hole. ``!= "connected"``
+        is also satisfied by ``unknown``, which is what the code answers when NO notice arrives at
+        all; the detail line is non-empty in that case too, with a different sentence. So the
+        weaker assertion survives the removal of ``notify_disconnect``, i.e. of exactly the
+        mechanism this probe claims to exercise. ``== "disconnected"`` is reachable only when the
+        provider really sent the notice and nothing else went wrong, which is the claim.
         """
         answer = await monitor_pv(_ABSENT_PV, _MONITOR_DURATION, 5)
 
-        assert answer["connection"] != "connected", (
-            f"a channel nobody serves must not report as connected: {answer}"
+        assert answer["connection"] == "disconnected", (
+            "a channel nobody serves must report disconnected, which means the provider's "
+            f"disconnect notice actually arrived; 'unknown' would mean it did not: {answer}"
         )
         assert answer["total_events"] == 0
-        assert answer.get("connection_detail"), (
-            "an empty monitor result must say WHY it is empty, otherwise it reads as a quiet PV"
+        detail = answer.get("connection_detail")
+        assert isinstance(detail, str) and "not reachable" in detail, (
+            "an empty monitor result must say WHY it is empty, in the words the disconnected "
+            f"branch uses, otherwise it reads as a quiet PV: {detail!r}"
         )
 
 
@@ -421,10 +535,25 @@ class TestDiscover:
             entry["pv_name"] for entry in matches
         }, "the server glob is documented as case-insensitive and answered differently"
 
+        # Anchoring, and the two halves are needed TOGETHER. "a fragment without a leading star
+        # matches nothing" on its own is also satisfied by a fragment that simply is not a prefix
+        # of anything, which is a property of the chosen value rather than of the server. So the
+        # same query form is run twice: once from a REAL channel name, which must match, and once
+        # from the mid-name fragment, which must not. Only a server that anchors answers that way.
+        real_name = matches[0]["pv_name"]
+        assert isinstance(real_name, str)
+        from_the_start = await discover_pvs(f"{real_name}*", _READ_TIMEOUT)
+        assert from_the_start["total"] >= 1, (
+            "a trailing-star query built from a real channel name must match that channel; if it "
+            "does not, the query form itself is broken and the anchoring claim below proves "
+            f"nothing: {from_the_start}"
+        )
+
         anchored = await discover_pvs(f"{glob_core}*", _READ_TIMEOUT)
         assert anchored["total"] == 0, (
-            "the server glob is anchored at the front, so a fragment without a leading star "
-            f"cannot match, yet it returned {anchored['total']}"
+            "the server glob is anchored at the front: the same trailing-star form that just "
+            "matched from a real name must match nothing from a mid-name fragment, yet it "
+            f"returned {anchored['total']}"
         )
 
     async def test_a_concrete_absent_name_is_classified_not_emptied(self) -> None:
@@ -452,14 +581,19 @@ class TestDiagnose:
     """``diagnose_connection``: whether two real planes tell the same story about one channel."""
 
     async def test_the_diagnosis_and_the_registry_name_the_same_serving_ioc(self, pv: str) -> None:
-        """The cross-plane claim, and the only one of these probes that needs two services.
+        """Two routes into the registry, crossed, plus the live verdict beside them.
 
-        The live connect decides the verdict and the registry only explains it, which means the
-        two can disagree without anything raising. Offline that disagreement is unreachable: the
-        evidence objects are handwritten, so both halves always agree by construction. Here the
-        registry entry is fetched INDEPENDENTLY through the other tool and the serving IOC has to
-        match. A gateway answering for a channel the registry attributes to a different IOC is a
-        real and diagnosable condition, and this is what would surface it.
+        ⛔ SAID PRECISELY, because the obvious reading is wrong and was written here first: this
+        does NOT cross the gateway against the registry. The live connect decides ``state`` and
+        never reports a serving IOC, so no probe can hold the answering server against the
+        registry's opinion of it from here. What IS crossed are two different routes to the same
+        registry: the diagnosis takes the exact-name lookup, the independent call takes the glob
+        search, and the two run through separate mappings of the payload. A drift between those
+        mappings, or a registry that answers differently depending on the query form, shows up as
+        two different IOC names for one channel.
+
+        Beside it stands the live verdict, ``connected`` and ``healthy``, which is offline only
+        ever produced from handwritten evidence objects. Here it comes from a real connect.
         """
         report = await diagnose_connection(pv, _READ_TIMEOUT)
 

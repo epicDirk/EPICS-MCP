@@ -3,8 +3,11 @@
 Why this exists: every live module in this repo gated itself with a ``pytest.mark.skipif``
 on its plane's env vars. CI calls bare ``uv run pytest`` with those vars unset, so the
 live tests skip silently, and ``uv run pytest -m live`` in an empty environment reported
-``51 skipped, exit 0``: a DEMANDED live run was indistinguishable from a fulfilled one.
-A silently skipped gate looks like a passed gate in every report.
+``51 skipped, exit 0`` when S30 was written: a DEMANDED live run was indistinguishable from a
+fulfilled one. A silently skipped gate looks like a passed gate in every report.
+The count is deliberately left at its historical value and dated rather than tracked: it grows
+with every live module (75 as of 2026-08-27) and nothing watches it, so a number stated in the
+present tense here would rot. What the sentence needs is the SHAPE of the report, not its size.
 
 The mechanism is deliberately NOT a CI gate (CI has no live stack, and no CI guard can
 prove a probe RAN, see CLAUDE.md, "Server-decided parameters"). Instead: whoever

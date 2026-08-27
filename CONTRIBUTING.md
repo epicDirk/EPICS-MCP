@@ -318,10 +318,9 @@ DOCUMENTED as certain (see `CLAUDE.md`, "no promise before a differential live p
 **With a stack of your own**, point them at it and they run. Selection is `-m live`, and the
 targets come from `EPICS_MCP_LIVE_*` variables, one per thing a test has to be told rather than
 discover: which PV to read (`..._READ_PV`, `..._READ_PV_2`, `..._ARCHIVER_PV`, `..._ALARM_PV`,
-`..._ALARM_CONFIGURED_PV`), which
-name pattern is safe to search (`..._READ_GLOB_CORE`, `..._CF_GLOB`, `..._ARCHIVER_GLOB`), which
-alarm tree and naming
-device to ask for (`..._ALARM_TREE`, `..._NAMING_DEVICE`), whether the archiver is expected to be
+`..._ALARM_CONFIGURED_PV`), which name pattern is safe to search (`..._READ_GLOB_CORE`,
+`..._CF_GLOB`, `..._ARCHIVER_GLOB`), which alarm tree and naming device to ask for
+(`..._ALARM_TREE`, `..._NAMING_DEVICE`), whether the archiver is expected to be
 ingesting (`..._DOCTOR_INGEST`), and, for the write gate, the PV to write, the value, an
 out-of-range value and a logbook that must be REFUSED (`..._WRITE_PV`, `..._WRITE_VALUE`,
 `..._OUT_OF_RANGE_VALUE`, `..._OLOG_DENY_LOGBOOK`). They are deliberately absent from
