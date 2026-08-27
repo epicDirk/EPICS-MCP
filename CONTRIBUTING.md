@@ -317,14 +317,32 @@ DOCUMENTED as certain (see `CLAUDE.md`, "no promise before a differential live p
 
 **With a stack of your own**, point them at it and they run. Selection is `-m live`, and the
 targets come from `EPICS_MCP_LIVE_*` variables, one per thing a test has to be told rather than
-discover: which PV to read (`..._ARCHIVER_PV`, `..._ALARM_PV`, `..._ALARM_CONFIGURED_PV`), which
-name pattern is safe to search (`..._CF_GLOB`, `..._ARCHIVER_GLOB`), which alarm tree and naming
+discover: which PV to read (`..._READ_PV`, `..._READ_PV_2`, `..._ARCHIVER_PV`, `..._ALARM_PV`,
+`..._ALARM_CONFIGURED_PV`), which
+name pattern is safe to search (`..._READ_GLOB_CORE`, `..._CF_GLOB`, `..._ARCHIVER_GLOB`), which
+alarm tree and naming
 device to ask for (`..._ALARM_TREE`, `..._NAMING_DEVICE`), whether the archiver is expected to be
 ingesting (`..._DOCTOR_INGEST`), and, for the write gate, the PV to write, the value, an
 out-of-range value and a logbook that must be REFUSED (`..._WRITE_PV`, `..._WRITE_VALUE`,
 `..._OUT_OF_RANGE_VALUE`, `..._OLOG_DENY_LOGBOOK`). They are deliberately absent from
 `.env.example`, which documents the SERVER, not the suite; the test module that reads each one is
 the place its meaning is written down.
+
+The PV read probes need one thing the REST planes do not: a **search lane**. `tests/conftest.py`
+strips the six EPICS search variables before every test so posture assertions measure the code
+rather than the machine, which also removes the route to any IOC. `tests/test_read_live.py`
+re-injects a lane from `EPICS_MCP_LIVE_READ_PVA_ADDR_LIST` and its optional siblings
+(`..._READ_PVA_AUTO_ADDR_LIST`, `..._READ_PVA_NAME_SERVERS`, `..._READ_CA_ADDR_LIST`,
+`..._READ_CA_AUTO_ADDR_LIST`), so no address is committed. Only the first is required: p4p builds
+its context once per PROCESS and reads those variables then, so one lane per run and no swapping
+mid-run.
+
+⛔ **Scope a live run to the module you mean, always: `pytest tests/<module>_live.py -m live`.**
+`[tool.pytest.ini_options]` sets `testpaths = ["tests"]` and deliberately declares no `addopts`, so
+a bare `-m live` falls back to the whole directory and selects EVERY live module, including the
+three that write real logbook entries into a service with no delete. Nothing here guards against
+the forgotten path; the path is the guard. The examples in this file and in `pyproject.toml` that
+show a bare `-m live` predate that reading and mean "with the module named".
 
 ⚠️ A live test that writes owns its target and never derives it. The deny logbook above is named
 explicitly for that reason: a test that picked one from the server's own answer once resolved onto
