@@ -224,6 +224,10 @@ _PV_SHAPES_DECLARED_HERE = (
     "SIMD-07:Ctrl-XVR-03",  # head merely STARTS with 'SIM', not a whole-segment marker
     "pva://SEC-SUB:Dev-01",  # the _SITE_RE lookbehind example, stated in the comment above
     "QAB-ZZ:Diag-BPM-09",  # the alpha-only-head example in the detector test's docstring below
+    # GQ-208, appended at the END on purpose: test_commit_message_guard.py takes [0:3] of this
+    # tuple, so inserting at the front would re-key three fixtures that belong to another module.
+    "VLXQ-42:#Ctrl-XVR-03",  # GQ-208 half one: '#' starts the first segment, digit in the head
+    "QAB-ZZ:#Diag-BPM-09",  # GQ-208 half two: same shape, but the digit sits BEHIND the '#'
 )
 
 

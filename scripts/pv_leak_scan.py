@@ -72,8 +72,36 @@ def pv_leak_tokens(text: str) -> list[str]:
     """The device/PV names in ``text`` that are not a declared synthetic placeholder, the
     realistic, specific names that must not appear on the knowledge surface. A ca/pva scheme prefix
     is neutralised first so a pasted 'pvas://<real-pv>' still anchors. (ISO-8601 timestamps need no
-    filter: PV_RE's [A-Z]-led head never anchors on a digit-led token.)"""
+    filter: PV_RE's [A-Z]-led head never anchors on a digit-led token.)
+
+    TWO PASSES, AND THE SECOND IS THE FIX FOR A MEASURED BLIND SPOT (GQ-208). A '#' where the
+    first segment starts hid the whole name: the 'DEV-TEST01:#Ctrl-EVR-01' shape was reported as
+    nothing at all, not merely reported short. TWO gates cause that, not one, so widening either
+    alone leaves the other blind: the segment class ':[A-Za-z]' wants a letter immediately after
+    the colon, AND the digit lookahead's character class stops at the '#', so a digit sitting
+    behind the '#' cannot be reached at all. Both halves were measured before and after.
+
+    WHY A SECOND PASS RATHER THAN A WIDER PATTERN, and this is the load-bearing part. Letting the
+    pattern run THROUGH a '#' lets one match swallow the next, and is_synthetic_pv judges a whole
+    token by the head before its first colon, so a synthetic head would then vouch for a real
+    device name sitting behind the '#'. Measured: six shapes that are reported today go silent
+    that way. A union of two passes cannot do that, by construction rather than by measurement:
+    the first pass is the old behaviour byte for byte, so nothing reported today can stop being
+    reported, and a union only ever adds. PV_RE is therefore untouched, and the three structural
+    gates documented at its definition stay three.
+
+    The shape named above is SYNTHETIC for the reason the module header gives: this file is read
+    by the detector it defines, and without the declared-shapes allowance that only
+    tests/test_guide.py receives. An invented head in this docstring would redden
+    test_knowledge_files_are_facility_agnostic.
+    """
     scanned = PV_SCHEME_RE.sub("  ", text)
-    return [
-        token for match in PV_RE.finditer(scanned) if not is_synthetic_pv(token := match.group(0))
-    ]
+    found: list[str] = []
+    seen: set[str] = set()
+    for variant in (scanned, scanned.replace("#", "")):
+        for match in PV_RE.finditer(variant):
+            token = match.group(0)
+            if not is_synthetic_pv(token) and token not in seen:
+                seen.add(token)
+                found.append(token)
+    return found
