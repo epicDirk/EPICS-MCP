@@ -266,11 +266,30 @@ the gates.
    green on your machine and the tag build fails, after the tag is already pushed. `git status`
    after `uv lock` is the cheap check.
 2. Close the `[Unreleased]` section in `CHANGELOG.md` under the new version.
+   ⚠️ **No volatile figure in an entry.** A byte size, a token count or anything else that
+   moves when somebody edits a sentence is wrong the week after it ships, and a released
+   section is the one place nobody re-measures. `CLAUDE.md` already keeps `tools/list` byte
+   budgets out of this file, and `tools/guide.py` shows the other half: its sizes are ROUNDED,
+   and a test measures the real ones. `[0.7.0]` reintroduced this class anyway, with seven
+   exact byte figures that `d68ef14` had to take back out after the release.
+   ⚠️ **And no guard will tell you:** `tests/test_changelog_discipline.py` caps the SIZE of a
+   new entry and reads `[Unreleased]` and nothing else, deliberately, because a rule reaching
+   a published section would demand a rewrite of something already on the index. The moment
+   you close a section it stops being watched, which is also the moment it starts being
+   patched up.
 3. Run the gates one more time, then rehearse: `rm -rf dist && uv build && uv run python
    scripts/check_release_ready.py dist/*`. The gate reads the BUILT metadata, never
    `pyproject.toml`, because the two can differ; it refuses a direct reference, a pre-release
    version, and a description that would not render.
-4. Tag `vX.Y.Z` and push the tag. That starts the build. ⚠️ **The tag is not the irreversible
+4. **Slice the release note BEFORE the tag:** `uv run python scripts/changelog_section.py
+   vX.Y.Z`. Exit 0 and a body you would publish means step 6 will find its section.
+   ⛔ **Why this is worth a step of its own although step 6 already covers the failure:** the
+   release text is produced only AFTER the upload. `github-release` has `needs: publish`, so
+   by the time the slice fails the version is spent, the tag exists and the index has the
+   package. Step 6 is right that the job fails loudly rather than publishing an empty
+   release; it fails at the one moment when the cheap fix is no longer available. This probe
+   costs a second and is the only one of the two you can still act on.
+5. Tag `vX.Y.Z` and push the tag. That starts the build. ⚠️ **The tag is not the irreversible
    step.** Two repository settings sit in front of the upload, both outside this tree, so neither
    shows up in a diff:
    - Only a repository **administrator** can create a `v*` tag at all (ruleset `release-tags`).
@@ -282,10 +301,10 @@ the gates.
    `github-release` job is skipped: the tag exists, the index has nothing, and the Releases page
    disagrees with the tag. The way back is to re-run the whole workflow from the same tag and
    approve it, not to push a second tag.
-5. Afterwards: check that the index page renders and that a clean install of the new version
+6. Afterwards: check that the index page renders and that a clean install of the new version
    imports and runs its commands. The README install command and the index badge already
    point at the published package, so there is nothing to swap. The **GitHub
-   release** needs no hand step *after the approval in step 4*: the workflow's third job creates it
+   release** needs no hand step *after the approval in step 5*: the workflow's third job creates it
    once the upload succeeded, with the body sliced out of `CHANGELOG.md` by
    `scripts/changelog_section.py`. Check it appeared; if the section was missing the job fails
    loudly rather than publishing an empty release.
