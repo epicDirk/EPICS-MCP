@@ -1077,7 +1077,15 @@ async def test_an_unknown_resource_address_is_refused_loudly() -> None:
     The message is asserted as well as the class, and that is deliberate: a client shows the text,
     and a refusal that no longer names the address it refused sends the reader looking in the
     wrong place. Two things are held, the phrase and the address itself, and neither is the whole
-    sentence: pinning the full wording would go red on an SDK release that only rephrases it.
+    sentence.
+
+    ⚠ THE PHRASE IS A COUPLING TO THE SDK, and it is stated rather than hidden. "Unknown resource"
+    is FastMCP's own wording, ``fastmcp>=3,<4`` may rephrase it in any 3.x release, and this test
+    then goes red on a refusal that is entirely intact. That is the price of what is being
+    guarded, which is the WORDING as well as the class: the shipped promise says an old address
+    fails LOUDLY, and a refusal nobody can read is not loud. A red of that kind is read and
+    re-pinned, never deleted. Holding LESS of the sentence than this would leave the promise to
+    the class alone, which no rephrase can break and no silent softening either.
     """
     from fastmcp.exceptions import NotFoundError
 

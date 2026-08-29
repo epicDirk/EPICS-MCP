@@ -838,7 +838,19 @@ def test_the_function_answers_without_a_server_at_all() -> None:
 #: A group key as both hand-written lists spell it. Deliberately not anchored on a backtick: the
 #: guide writes them in prose as well as in a table, and an anchor on the markup would read one
 #: site and silently skip the other.
-_ERR_GROUP_NAME = re.compile(r"err-[a-z]+")
+#: ⚠ THE TAIL REPEATS, and the first draft did not: ``err-[a-z]+`` stops at the SECOND hyphen, so
+#: a two-part group name would be read as its first half and both tests below would report a
+#: disagreement that does not exist. No group is two-part today; half this file's other keys are
+#: (``archiver-window``, ``olog-write``, ``ca-bundle``), so the next one is one naming decision
+#: away.
+_ERR_GROUP_NAME = re.compile(r"err-[a-z]+(?:-[a-z]+)*")
+
+#: Group names that USED to exist and that a released entry names ON PURPOSE. Empty today, and it
+#: is a DECLARATION rather than an exemption: without it the subset test below would forbid the one
+#: thing this repository does right after a rename, which is to announce it. ``[0.7.0]`` is the
+#: precedent, it spells ``epics-pv://health`` out so a reader can grep for it. A rename therefore
+#: adds ONE line here and keeps the released sentence, instead of editing published history.
+_RETIRED_ERR_GROUP_NAMES: frozenset[str] = frozenset()
 
 
 def _err_group_keys() -> set[str]:
@@ -884,14 +896,23 @@ def test_the_changelog_names_no_error_group_that_stopped_existing() -> None:
     repaired the ``[0.7.0]`` entry after the release. What the subset direction refuses is to
     FORCE such an edit, not to allow one.
 
-    What is NOT free is a name that stops existing: the entry tells a reader which addresses to
-    ask for, and a renamed one makes a published sentence point at a refusal. There is no
-    exception list here and none is wanted; if that day comes, the answer is a decision about the
-    rename, not a row that silences this.
+    ⛔ AND THE SUBSET ALONE WOULD FORBID THE RIGHT ANSWER TO A RENAME, which is why
+    ``_RETIRED_ERR_GROUP_NAMES`` exists. The first draft had no escape and said one was not
+    wanted. Measured against this repository's own practice, that was wrong: ``[0.7.0]`` announces
+    the resource rename by spelling the RETIRED address out, so a reader can grep for it, and a
+    rename of an error group announced the same way would have made this test red with only two
+    green ways out, not documenting it or editing published history. Both are worse than the drift
+    it guards. So a rename adds one declared line and keeps its sentence.
+
+    What is NOT free is a name that stops existing WITHOUT that declaration: the entry tells a
+    reader which addresses to ask for, and a silently renamed one makes a published sentence point
+    at a refusal.
 
     Red-proof: rename a key in ``TOPICS`` and this fails naming the address the changelog still
-    advertises. Empty-set proof: the changelog is asserted to name groups AT ALL before the subset
-    is checked, because a file that named none would satisfy any subset relation.
+    advertises. Escape-proof: declare that same name retired and it goes green again while the
+    guide test above stays red, which is the split this pair is for. Empty-set proof: the changelog
+    is asserted to name groups AT ALL before the subset is checked, because a file that named none
+    would satisfy any subset relation.
     """
     keys = _err_group_keys()
     assert keys, "TOPICS carries no err- group at all, so any subset below would be vacuous"
@@ -901,8 +922,10 @@ def test_the_changelog_names_no_error_group_that_stopped_existing() -> None:
         "CHANGELOG.md names no error group at all: the hand-written list this guards is gone, so "
         "the subset below would hold on an empty set"
     )
-    assert named <= keys, (
-        f"CHANGELOG.md advertises an address get_guide no longer serves: {sorted(named - keys)}. "
-        "A released entry is not rewritten to satisfy this guard, so this is a question about "
-        "the rename."
+    unknown = named - keys - _RETIRED_ERR_GROUP_NAMES
+    assert not unknown, (
+        f"CHANGELOG.md advertises an address get_guide no longer serves: {sorted(unknown)}. If a "
+        "group was renamed, announce it in a NEW entry the way [0.7.0] announced the resource "
+        "rename and add the old name to _RETIRED_ERR_GROUP_NAMES; do not edit the released "
+        "section to satisfy this guard."
     )

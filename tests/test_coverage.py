@@ -687,6 +687,15 @@ def test_the_cap_head_line_and_the_cap_note_keep_their_different_nouns() -> None
     head_line = markdown[
         markdown.rindex(chr(10), 0, warning_at) : markdown.index(chr(10), warning_at)
     ]
+    # The phrase stands TWICE in a rendered report, in this head line and in the note, and
+    # ``index`` takes the first. That is right only while the notes block is rendered last, which
+    # is a property of ``render_markdown`` rather than of this test. So the extraction says what it
+    # caught: without this line a reordering would silently point the noun check at the NOTE and
+    # report the exact opposite of what happened.
+    assert head_line.lstrip().startswith("- ⚠️"), (
+        f"the extracted line is not the cap head line, so the check below would judge the wrong "
+        f"text: {head_line!r}"
+    )
     assert "file(s)" in head_line and "display(s)" not in head_line, (
         f"the head line took the note's noun, so the two no longer differ: {head_line!r}"
     )

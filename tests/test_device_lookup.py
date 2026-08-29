@@ -707,10 +707,19 @@ def test_all_three_trend_markers_are_the_same_one_table_entry() -> None:
 # --- [GQ-170] (a): the three cap notes qualify a TREND as well as a screen ----------------------
 #
 # 0.7.0 shipped the sentence "the three cap notes ... now say 'a screen or trend' and 'the match
-# list'". Measured when this guard was written: those words stood ONCE in the tree, in
-# ``services/device_lookup.py``, and ZERO times under ``tests/``. Whoever put "a screen" back would
-# have stayed green while the released text turned false. The three cap SIGNALS have had tests
-# since GB-65; their WORDING had none.
+# list'". Measured when this guard was written: those words stood TWICE in the tree, in
+# ``services/device_lookup.py`` and in the released ``CHANGELOG.md`` entry that makes the claim,
+# and ZERO times under ``tests/``. Whoever put "a screen" back would have stayed green while the
+# released text turned false. The three cap SIGNALS have had tests since GB-65; their WORDING had
+# none.
+
+#: What identifies each of the three cap notes, one mark per cap. The negation below needs the cap
+#: notes ALONE, because a non-cap note of the same list may legitimately say "the screen list".
+_CAP_NOTE_MARKS = (
+    "hit the per-display context cap",
+    "hit the glob cap",
+    "(read capped)",
+)
 
 
 def test_the_three_cap_notes_qualify_a_trend_as_well_as_a_screen() -> None:
@@ -727,10 +736,21 @@ def test_the_three_cap_notes_qualify_a_trend_as_well_as_a_screen() -> None:
 
     ⚠ THE SECOND HALF IS THE ONE THAT DECAYS QUIETLY: "the screen list" is still the right words
     in the tool's own docstring, where the subject really is the screen half of the answer, so a
-    grep over the package finds it and proves nothing. This assertion is scoped to the NOTES.
+    grep over the package finds it and proves nothing.
 
-    Red-proof: put "a screen showing this device" back into the context-cap note and this fails
-    naming the phrase it could not find.
+    ⛔ THE NEGATION IS SCOPED TO THE THREE CAP NOTES, AND THAT SCOPE IS THE POINT rather than a
+    detail. "the screen list" is live, correct prose in a NON-cap note of the very same list: a
+    degraded live read produces "Only the live half failed; the screen list is unaffected by it."
+    in ``tools/find_device.py``, and ``build_device_report`` appends it beside these three. A
+    negation over every note would therefore go red on a CORRECT answer the day the fixture grows
+    a live failure, and it would blame a cap note for it.
+
+    ⚠ The live-cap phrase is pinned WITHOUT its leading "The": the capital is sentence position,
+    not promise, and the same clause is already written lower-case elsewhere in the package.
+
+    Red-proof, both directions: put "a screen showing this device" back into the context-cap note
+    and the first assertion fails naming the phrase it could not find; write "the screen list"
+    into any of the three cap notes and the negation fails.
     """
     report = _report_with_caps(
         context_capped=("a.bob", "b.plt"), glob_capped_count=3, live_capped=True
@@ -743,9 +763,15 @@ def test_the_three_cap_notes_qualify_a_trend_as_well_as_a_screen() -> None:
     assert any("the match list is a lower bound" in n for n in notes), (
         f"the glob-cap note no longer calls the widened answer a match list: {notes}"
     )
-    assert any("The match list is not shortened by that cap" in n for n in notes), (
+    assert any("match list is not shortened by that cap" in n for n in notes), (
         f"the live-cap note no longer calls the widened answer a match list: {notes}"
     )
-    assert not any("the screen list" in n for n in notes), (
-        f"a cap NOTE went back to the pre-0.7.0 noun, which excludes a trend: {notes}"
+
+    cap_notes = [n for n in notes if any(mark in n for mark in _CAP_NOTE_MARKS)]
+    assert len(cap_notes) == 3, (
+        f"expected exactly the three cap notes to reason about, found {len(cap_notes)}; the "
+        f"negation below needs them and nothing else: {notes}"
+    )
+    assert not any("the screen list" in n for n in cap_notes), (
+        f"a cap NOTE went back to the pre-0.7.0 noun, which excludes a trend: {cap_notes}"
     )
