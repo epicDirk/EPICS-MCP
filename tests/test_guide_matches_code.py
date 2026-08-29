@@ -50,7 +50,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from itertools import pairwise
 from pathlib import Path
-from typing import get_args
+from typing import NamedTuple, get_args
 
 import pytest
 
@@ -58,7 +58,7 @@ from epics_mcp import cli_doctor
 from epics_mcp.config import EpicsConfig
 from epics_mcp.resources import get_guide
 from epics_mcp.services import doctor
-from epics_mcp.services.doctor import PlaneStatus
+from epics_mcp.services.doctor import _FAILING_STATUSES, DoctorReport, PlaneStatus
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SRC = _ROOT / "src" / "epics_mcp"
@@ -267,8 +267,8 @@ def _source_plane_names() -> set[str]:
     return names
 
 
-async def _reported_plane_names() -> set[str]:
-    """The planes ``run_doctor`` actually reports, read off a real run against an empty config.
+async def _blank_config_report() -> DoctorReport:
+    """A real ``run_doctor`` report against an empty config, the base every doctor guard here uses.
 
     Hermetic because the URLs are BLANKED here, not because the machine happens to have none set.
     ⚠️ That distinction was measured, and the first version of this docstring got it wrong: it said
@@ -291,7 +291,12 @@ async def _reported_plane_names() -> set[str]:
         patch.setattr("epics_mcp.services.doctor.get_config", lambda: config)
         patch.setattr("epics_mcp.services.doctor.rest_get_json", lambda *_a, **_k: {})
         report = await doctor.run_doctor()
-    return {plane.plane for plane in report.planes}
+    return report
+
+
+async def _reported_plane_names() -> set[str]:
+    """The plane NAMES of that report, which is what the inventory guard compares."""
+    return {plane.plane for plane in (await _blank_config_report()).planes}
 
 
 async def test_the_guide_names_every_plane_the_report_prints() -> None:
@@ -360,6 +365,230 @@ async def test_every_plane_literal_in_the_source_reaches_the_report() -> None:
         f"only-in-report={unlit_in_report}. This is NOT a documentation finding: a "
         "name spelled in the module that never reaches a report is dead, and a reported plane with "
         "no literal is one this scan cannot see."
+    )
+
+
+# --- the doctor REPORT FRAME: header, privacy block, verdict line (QA-73) -----------------------
+
+_VERDICT_LINE_RE = re.compile(
+    r"<!-- BEGIN:verdict-line.*?-->(.*?)<!-- END:verdict-line -->", re.DOTALL
+)
+
+
+class _VerdictCase(NamedTuple):
+    """One branch of the verdict in ``cli_doctor._render``, and the words that identify it."""
+
+    #: What the branch is FOR, in this file's words. No comparison reads it; it names the row in a
+    #: failure message.
+    label: str
+    #: The report fields that steer ``_exit_category`` and ``_render`` into this branch.
+    fields: Mapping[str, object]
+    #: Whether the branch additionally needs a plane whose status is a hard failure. Only the first
+    #: row does, and it is a flag rather than a field because the failing status is read off
+    #: ``cli_doctor`` at call time rather than spelled here a second time.
+    needs_a_failing_plane: bool
+    #: A run of words this branch prints that carries NO interpolation.
+    fragment: str
+
+
+#: The SECOND declaration the QA-73 entry asks for: one row per verdict branch, so the guide and
+#: the code are held against a third thing rather than against each other.
+#:
+#: ⚠️ A FRAGMENT, not a prefix, and the difference was measured rather than preferred. Five of the
+#: branches interpolate, and one of them interpolates at the FRONT of its variable part, so its
+#: prefix ("OK, nothing failed, but ") is also a proper prefix of the whole literal a SIXTH branch
+#: prints. Prefixes would therefore let one string document two branches and read as covered. Each
+#: branch has a stable interior run of words instead, which is also what a reader recognises.
+#:
+#: ⛔ **What this does NOT hold**, named rather than implied: everything AROUND the fragment. The
+#: plane names a verdict interpolates, the counts, the clause order and the tail sentence all sit
+#: outside it, so a branch can be reworded around its fragment and stay green. That is the
+#: half-guard ``docs/known-limits.md`` section 14 describes, and it is the deliberate half: the
+#: alternative pins prose that has to stay free to improve. What it DOES hold is what the entry
+#: asked for, that no verdict a reader can meet is undocumented.
+#:
+#: Declared rather than derived, for the reason ``_IN_THE_GLYPH_TABLE`` gives one section below: a
+#: derived expectation is satisfied by whatever the code happens to say today.
+_VERDICT_CASES: tuple[_VerdictCase, ...] = (
+    _VerdictCase(
+        "a plane hard-failed",
+        {"ok": False},
+        True,
+        "configured plane(s) FAILED",
+    ),
+    _VerdictCase(
+        "an identity probe failed, or none was sent",
+        {"ok": True, "inconclusive_identity_planes": ["channelfinder"], "reads_denied": 0},
+        False,
+        "Not a confirmed failure, but not confirmed healthy.",
+    ),
+    _VerdictCase(
+        "reachable, confirmed, and not doing its job",
+        {"ok": True, "verification_complete": True, "degraded_planes": ["archiver"]},
+        False,
+        "proved their identity and are NOT doing their job",
+    ),
+    _VerdictCase(
+        "every probed plane named itself",
+        {"ok": True, "verification_complete": True, "identified_planes": ["channelfinder"]},
+        False,
+        "every identity-probed plane answered AS ITSELF",
+    ),
+    _VerdictCase(
+        "nothing failed and nothing was proven",
+        {"ok": True, "verification_complete": True, "identified_planes": []},
+        False,
+        "nothing was identity-verified either",
+    ),
+    _VerdictCase(
+        "answered without naming itself",
+        {"ok": True, "verification_complete": False, "unverified_planes": ["channelfinder"]},
+        False,
+        "could not prove its identity",
+    ),
+)
+
+
+def _with_failing_plane(report: DoctorReport) -> DoctorReport:
+    """*report* with its first plane carrying a hard-failing status.
+
+    ``model_copy`` rather than a constructor: it does not re-validate, which is what lets a test
+    build a state ``run_doctor`` reaches only against a broken deployment. The status is read off
+    ``services.doctor._FAILING_STATUSES``, its home, rather than spelled here a second time,
+    so a rename moves this with it. Read from the HOME and not through ``cli_doctor``, which
+    only imports it: mypy --strict refuses an implicit re-export, and it is right to.
+    """
+    assert report.planes, "the blanked-config report has no planes to fail, the anchor broke"
+    failing = sorted(_FAILING_STATUSES)[0]
+    planes = [report.planes[0].model_copy(update={"status": failing}), *report.planes[1:]]
+    return report.model_copy(update={"planes": planes})
+
+
+async def _rendered_case_reports() -> dict[str, str]:
+    """Every declared case RENDERED WHOLE, label → the report an operator would read.
+
+    Rendered rather than AST-read on purpose: an AST pin over the string literals would agree with
+    a branch that assembles them into a line nobody can reach. This runs the real renderer on a
+    real report.
+    """
+    base = await _blank_config_report()
+    rendered: dict[str, str] = {}
+    for case in _VERDICT_CASES:
+        report = base.model_copy(update=dict(case.fields))
+        if case.needs_a_failing_plane:
+            report = _with_failing_plane(report)
+        rendered[case.label] = cli_doctor._render(report)
+    return rendered
+
+
+def _overall_line(report_text: str, label: str) -> str:
+    """The one ``Overall:`` line of a rendered report."""
+    lines = [line for line in report_text.splitlines() if line.startswith("Overall:")]
+    assert len(lines) == 1, (
+        f"case '{label}' rendered {len(lines)} Overall lines instead of exactly one; the verdict "
+        "anchor broke"
+    )
+    return lines[0]
+
+
+def _verdict_assignments() -> int:
+    """How many branches of ``cli_doctor._render`` assign ``verdict``, read off the AST.
+
+    The drift direction the two comparisons below cannot see: a SEVENTH branch, documented
+    nowhere, prints a sentence no declared case renders and no reader was warned about.
+    """
+    tree = ast.parse(Path(cli_doctor.__file__).read_text(encoding="utf-8"))
+    render = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_render"
+    )
+    return sum(
+        1
+        for node in ast.walk(render)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "verdict" for target in node.targets)
+    )
+
+
+async def test_the_guide_documents_every_verdict_the_report_can_print() -> None:
+    """The contract: every verdict sentence ``epics-doctor`` can print is written in the guide.
+
+    Measured on 2026-08-29, before this guard: the shipped guide contained the word ``Overall``
+    ZERO times, so the LAST line an operator reads, the one carrying the verdict, was explained
+    nowhere. The header line and the privacy block were in the same state.
+
+    Three findings, because three different things can go wrong. A fragment can be missing from the
+    guide (undocumented); it can fail to appear in the line it claims to describe (unprinted, the
+    direction that catches a reworded branch); and it can appear in more than one rendered line
+    (ambiguous, which would let one string stand in for two branches and still read as covered).
+
+    Red-proof, one per direction: delete a row's sentence from the verdict-line region, reword a
+    branch in ``cli_doctor._render`` around its fragment, or shorten a fragment to a prefix two
+    branches share.
+    """
+    region = _guide_region(_VERDICT_LINE_RE, "verdict-line")
+    verdicts = {
+        label: _overall_line(text, label)
+        for label, text in (await _rendered_case_reports()).items()
+    }
+    assert region.strip(), "the guide's verdict-line region is empty, the marker anchor broke"
+    assert verdicts, "no verdict case rendered at all, the report anchor broke"
+    undocumented = sorted(case.fragment for case in _VERDICT_CASES if case.fragment not in region)
+    unprinted = sorted(
+        case.label for case in _VERDICT_CASES if case.fragment not in verdicts[case.label]
+    )
+    ambiguous = sorted(
+        case.fragment
+        for case in _VERDICT_CASES
+        if sum(case.fragment in line for line in verdicts.values()) != 1
+    )
+    assert not (undocumented or unprinted or ambiguous), (
+        f"verdict-line drift: undocumented={undocumented} unprinted={unprinted} "
+        f"ambiguous={ambiguous}. Every verdict the report can print has to be written in the "
+        "verdict-line region, in words that branch prints and that no other branch does."
+    )
+
+
+async def test_the_verdict_region_says_nothing_the_report_does_not() -> None:
+    """The reverse direction: nothing is quoted in the region that no run ever prints.
+
+    Without it the region could keep documenting a sentence the code has since dropped, which is
+    the failure mode the plane-inventory guard above records for its own set. The scan reads CODE
+    SPANS, so the region's prose stays free while everything it quotes as output is held. That is
+    also what carries the header line and the two privacy allowlist labels, which are not verdicts
+    and belong to no plane.
+
+    Red-proof: add a backticked sentence to the region that no branch prints.
+    """
+    quoted = _code_spans(_guide_region(_VERDICT_LINE_RE, "verdict-line"))
+    rendered = list((await _rendered_case_reports()).values())
+    assert quoted, "the verdict-line region quotes nothing at all, the span anchor broke"
+    assert rendered, "no report rendered at all, the report anchor broke"
+    invented = sorted({span for span in quoted if not any(span in text for text in rendered)})
+    assert not invented, (
+        f"the verdict-line region quotes text no run prints: {invented}. A code span there is a "
+        "quotation from the report, so it has to survive a real render."
+    )
+
+
+def test_every_verdict_branch_of_the_renderer_has_a_declared_case() -> None:
+    """The third direction, and the only one that sees a branch nobody wrote down.
+
+    The two comparisons above are driven BY ``_VERDICT_CASES``, so a seventh branch added to
+    ``_render`` is invisible to both: they would go on comparing the ones they know. This holds the
+    declared population against the code's own shape.
+
+    Red-proof: add a ``verdict = "..."`` branch to ``_render`` without a row here.
+    """
+    declared = len(_VERDICT_CASES)
+    in_code = _verdict_assignments()
+    assert declared, "_VERDICT_CASES is empty"
+    assert in_code, "no verdict assignment found in _render at all, the AST anchor broke"
+    assert declared == in_code, (
+        f"_render assigns the verdict in {in_code} branch(es) while _VERDICT_CASES declares "
+        f"{declared}. A branch that prints a sentence no case renders is a sentence the guide was "
+        "never held against."
     )
 
 
@@ -1953,6 +2182,18 @@ _ASSERTED_NAMES: dict[str, frozenset[str]] = {
     ),
     "test_every_plane_literal_in_the_source_reaches_the_report": frozenset(
         {"literals", "reported", "only_in_source", "unlit_in_report"}
+    ),
+    # QA-73 again, the report FRAME rather than its plane lines. Same rule about naming the
+    # FINDING: `region`, `verdicts`, `quoted` and `rendered` are all satisfied by each guard's own
+    # non-empty floors, so a row built from them would declare nothing.
+    "test_the_guide_documents_every_verdict_the_report_can_print": frozenset(
+        {"region", "verdicts", "undocumented", "unprinted", "ambiguous"}
+    ),
+    "test_the_verdict_region_says_nothing_the_report_does_not": frozenset(
+        {"quoted", "rendered", "invented"}
+    ),
+    "test_every_verdict_branch_of_the_renderer_has_a_declared_case": frozenset(
+        {"declared", "in_code"}
     ),
 }
 

@@ -282,17 +282,32 @@ What is NOT held, named rather than implied:
   against a declaration, but it compares declared against found and has no reverse direction, so a
   guard added without a row is unfloored and nothing says so.
 
-⚠️ **"Every status is explained" is not "every LINE is explained", and that is the open gap.** The
-totality guard proves that `PlaneStatus` is a subset of the legend. The report has four other
-parts, and measured 2026-08-02 not one of their fixed strings appears in the shipped guide: the
-header line, the privacy block with its two allowlists, the verdict in all six of its branches, and
-since 2026-08-13 the write-gate block (which the guide describes in prose without quoting a line of
-it, the same trade as the other three).
-The verdict is the last line an operator reads. It was left open deliberately: a mark is a
-CHARACTER and cannot be guessed, which is why it needed a legend, whereas the verdict and the
-privacy block are English sentences that state their own meaning, and the semantics behind them are
-already in the guide in two places. Documenting them would buy a reader the ability to FIND the
-wording, not to understand it.
+⭐ **"Every status is explained" was not "every LINE is explained", and QA-73 closed most of that
+gap on 2026-08-29.** The totality guard proves that `PlaneStatus` is a subset of the legend. The
+report has four other parts, and measured 2026-08-02 not one of their fixed strings appeared in the
+shipped guide. Three of them do now, in the guide's `verdict-line` region: the header line, the
+privacy block with its two allowlists, and every branch of the verdict, which is the last line an
+operator reads. `tests/test_guide_matches_code.py` holds the region in three directions: every
+declared branch is written there, every code span there survives a real render (so a sentence the
+code has dropped cannot go on being documented), and the number of branches `cli_doctor._render`
+assigns equals the number declared, so a NEW branch reddens instead of shipping unexplained. The
+population is `_VERDICT_CASES`; this page deliberately does not restate its size.
+
+⛔ **What that guard does NOT hold is everything AROUND the fragment**, which is the same
+half-guard this section describes throughout. Each branch is pinned by ONE run of words carrying no
+interpolation; the plane names a verdict interpolates, the counts, the clause order and the tail
+sentence all sit outside it, so a branch reworded around its fragment stays green. A fragment was
+chosen over a prefix by measurement rather than by taste: five of the branches interpolate and one
+of them interpolates at the FRONT of its variable part, which makes its prefix a proper prefix of
+another branch's whole literal, so prefixes would have let one string document two branches and
+still read as covered.
+
+⚠️ **The write-gate block is the part that stays open**, and since 2026-08-13 the guide has
+described it in prose without quoting a line of it. That is left as a trade rather than as an
+oversight, and it is the trade the other three carried until today: a mark is a CHARACTER and
+cannot be guessed, which is why it needed a legend, whereas these are English sentences that state
+their own meaning. What documenting them buys a reader is the ability to FIND the wording, not to
+understand it, and for the verdict that was worth it because it is the line an operator stops at.
 
 ⚠️ Further plane orderings exist elsewhere and are held against nothing. No count is given, because
 the first attempt at one was measured too narrowly. Enumerate instead: `git grep` for `plane` over

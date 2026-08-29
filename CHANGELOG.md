@@ -7,6 +7,14 @@ carry breaking changes).
 
 ## [Unreleased]
 
+### Added
+
+- **The shipped operator guide now explains the `epics-doctor` report's own frame.** The header
+  line, the `Privacy (ChannelFinder redaction):` block with its two allowlists, and every branch of
+  the `Overall:` verdict are documented in a new drift-guarded `verdict-line` region. Before this
+  the word `Overall` did not appear in the guide at all, so the LAST line an operator reads was
+  explained nowhere. Nothing changes on the wire; `get_guide` serves more text.
+
 ### Changed
 
 - **BREAKING, and both shipped filed under `### Added`: two answers moved on the wire with no

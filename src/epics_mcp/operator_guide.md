@@ -794,6 +794,32 @@ server has the gate armed, which is the natural confusion here. For the posture 
 actually answered, read `epics://health` instead; a disarmed gate gets one line, an armed one
 names its allowlist, its rate and where a write would go.
 
+<!-- BEGIN:verdict-line (the header, the privacy block and the labelled last line, drift-guarded against cli_doctor._render, see tests/test_guide_matches_code.py) -->
+**The frame around the plane lines, which is not made of plane fields.** The report opens with a
+header, `EPICS-MCP doctor, read-only per-plane config check`, naming the command and, in
+`read-only`, what it will never do to your deployment. Below the plane lines sits
+`Privacy (ChannelFinder redaction):` with `owner allowlist:` and `property allowlist:` under it;
+it belongs to no plane, so look for it there rather than on one of them, and an EMPTY allowlist is
+spelled out in words instead of left blank, because a blank there reads as "nothing is redacted"
+while it means the opposite. The report then closes with a line labelled `Overall:`.
+
+⛔ **Read the last line as a statement about the PLANES.** By layout convention everything above it
+is in its scope, and nothing in this report ever CHECKED a write gate; it only reports what one is
+set to. An armed gate therefore adds its own line underneath saying exactly that.
+
+**Which sentence the verdict carries.** The word repeats the exit code documented above; the
+sentence after it says which state earned that word, and every state has its own:
+
+| The verdict says | What earned it |
+|---|---|
+| `configured plane(s) FAILED` | a configured plane hard-failed, and the failures are named first, ahead of the states nobody has to fix today |
+| `Not a confirmed failure, but not confirmed healthy.` | an identity probe failed, or a probe never left this process; which of the causes applies is named in the same sentence |
+| `proved their identity and are NOT doing their job` | reachable AND confirmed AND measurably idle, so the strongest confirmation would be true and still tell you the opposite of the report above |
+| `every identity-probed plane answered AS ITSELF` | the strongest sentence this command has, earned by actual identifications and never by an empty configuration |
+| `nothing was identity-verified either` | nothing failed and nothing was proven, because no REST plane is configured |
+| `could not prove its identity` | nothing failed, but a plane answered without naming itself |
+<!-- END:verdict-line -->
+
 ### Retrieval-cluster-aware appliances
 An Archiver Appliance may run as an **N-member failover cluster**. Such a cluster is retrieval-aware: a
 MGMT/retrieval query to **one** member transparently returns data physically owned by **another** member;
