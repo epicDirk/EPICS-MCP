@@ -817,3 +817,87 @@ def test_the_function_answers_without_a_server_at_all() -> None:
         assert serve_guide(key), f"topic '{key}' answered with nothing"
     with pytest.raises(UnknownTopicError):
         serve_guide("no-such-topic")
+
+
+# --------------------------------------------------------------------------------------------
+# 6. [GQ-170] (c): the group NAMES, at both places that write them out by hand
+# --------------------------------------------------------------------------------------------
+#
+# ``test_the_group_count_claim_still_holds`` above holds HOW MANY error groups there are. Nothing
+# held WHICH. Measured when this guard was written: the twelve names stand written out by hand in
+# two places, in the ``[0.7.0]`` entry of ``CHANGELOG.md`` and in the SHIPPED guide, and a rename
+# would have left both saying an address ``get_guide`` refuses, with every count still agreeing.
+#
+# ⚠ THE TRAP IS A TEST THAT LOOKS LIKE THIS ONE AND IS NOT.
+# ``test_an_unknown_topic_is_refused_by_name_and_never_guessed`` holds the names against the
+# REFUSAL message, which is generated from ``TOPICS`` itself. That
+# pins the refusal, never a hand-written list, so a grep for "the names are held somewhere"
+# answers yes and means something else. There are three copies of the list; ONE of them was
+# covered.
+
+#: A group key as both hand-written lists spell it. Deliberately not anchored on a backtick: the
+#: guide writes them in prose as well as in a table, and an anchor on the markup would read one
+#: site and silently skip the other.
+_ERR_GROUP_NAME = re.compile(r"err-[a-z]+")
+
+
+def _err_group_keys() -> set[str]:
+    """The live set, read off ``TOPICS`` rather than restated here."""
+    return {key for key in TOPICS if key.startswith("err-")}
+
+
+def test_the_shipped_guide_names_exactly_the_error_groups_that_exist() -> None:
+    """The guide a model reads names every live group and no dead one.
+
+    EQUALITY in this direction, and it is the strict one on purpose: the guide is a LIVING
+    document shipped in the wheel, so a group that exists and is not named there is unreachable
+    for the reader who only has the guide, and a name it keeps after a rename sends that reader to
+    an address ``get_guide`` refuses. Both failures are the reader's, so both are held.
+
+    Red-proof, both directions: rename a key in ``TOPICS`` and the guide's old name is left over;
+    delete a name from the guide sentence and the live key is missing. Empty-set proof: the
+    assertion below the anchor cannot pass on an empty ``TOPICS``, because the anchor demands the
+    live set is non-empty before the comparison is made.
+    """
+    keys = _err_group_keys()
+    assert keys, (
+        "TOPICS carries no err- group at all, so an equality below would compare two empty sets "
+        "and pass on nothing"
+    )
+    named = set(_ERR_GROUP_NAME.findall(guide_text()))
+    assert named == keys, (
+        f"the shipped guide and TOPICS disagree about the error groups. Only in the guide: "
+        f"{sorted(named - keys)}; only in TOPICS: {sorted(keys - named)}"
+    )
+
+
+def test_the_changelog_names_no_error_group_that_stopped_existing() -> None:
+    """A released entry writes the names out, and a rename would turn them into dead addresses.
+
+    ⛔ SUBSET, NOT EQUALITY, and the asymmetry against the guide above is the whole design. A
+    released section is not rewritten here: ``tests/test_changelog_discipline`` reads
+    ``[Unreleased]`` and nothing else, for the stated reason that a rule reaching a published
+    section would be asking for a rewrite of something already on the index. A THIRTEENTH group
+    must therefore be free to arrive without touching ``[0.7.0]``, which equality would forbid.
+
+    What is NOT free is a name that stops existing: the entry tells a reader which addresses to
+    ask for, and a renamed one makes a published sentence point at a refusal. There is no
+    exception list here and none is wanted; if that day comes, the answer is a decision about the
+    rename, not a row that silences this.
+
+    Red-proof: rename a key in ``TOPICS`` and this fails naming the address the changelog still
+    advertises. Empty-set proof: the changelog is asserted to name groups AT ALL before the subset
+    is checked, because a file that named none would satisfy any subset relation.
+    """
+    keys = _err_group_keys()
+    assert keys, "TOPICS carries no err- group at all, so any subset below would be vacuous"
+    changelog = Path(__file__).resolve().parents[1] / "CHANGELOG.md"
+    named = set(_ERR_GROUP_NAME.findall(changelog.read_text(encoding="utf-8")))
+    assert named, (
+        "CHANGELOG.md names no error group at all: the hand-written list this guards is gone, so "
+        "the subset below would hold on an empty set"
+    )
+    assert named <= keys, (
+        f"CHANGELOG.md advertises an address get_guide no longer serves: {sorted(named - keys)}. "
+        "A released entry is not rewritten here, so this is a question about the rename."
+    )

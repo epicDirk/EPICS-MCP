@@ -635,3 +635,58 @@ def test_the_blind_spot_list_marks_which_of_its_entries_are_at_least_trended() -
     nowhere_line = next(line for line in markdown.splitlines() if "X:Nowhere" in line)
     assert KIND_MARKERS["trend"] in trend_line, trend_line
     assert KIND_MARKERS["trend"] not in nowhere_line, nowhere_line
+
+
+# --- [GQ-170] (b): the cap HEAD LINE and the cap NOTE deliberately use different nouns ----------
+#
+# 0.7.0 shipped both halves of this in one entry: the head line's noun moved to "file(s)" because
+# both sides of its ratio range over walked FILES, and "the report's own notes still say
+# 'display(s)' where they describe which screens were cut short, and that is deliberate".
+# ⚠ ONLY THE FIRST HALF WAS PINNED. The head line has had its assertion since the share shipped;
+# the note's word had none, measured when this guard was written. A well-meant sweep unifying the
+# two nouns would therefore have been green here, and the released sentence saying they differ ON
+# PURPOSE would have become the description of a defect.
+# ⚠ THE TRAP IS THAT "display(s)" IS PINNED ELSEWHERE, in tests/test_crossplane.py and
+# tests/test_device_lookup.py. Those are the notes of OTHER tools. A grep finds them and concludes
+# the wrong thing, which is why this assertion is built on THIS tool's own report.
+
+
+def test_the_cap_head_line_and_the_cap_note_keep_their_different_nouns() -> None:
+    """The two nouns differ on purpose, so both are held at once, in one report.
+
+    Holding them separately would not carry the promise: the point is not that either word appears
+    somewhere, it is that the head line's population (walked files) and the note's subject (the
+    screens cut short) are named differently in the SAME output.
+
+    The head line half restates what the test above it already holds, and that repetition is the
+    cheaper half of the trade: without it this test would go green if the head line moved to
+    "display(s)" too, which is exactly the sweep it exists to stop.
+
+    Red-proof, both directions: change the note's "display(s)" to "file(s)" and the note half
+    fails; change the head line's "file(s)" to "display(s)" and the head half fails.
+    """
+    report = audit_coverage(
+        [_row("DEV:A")],
+        scope="DEV:",
+        channelfinder=_FakeCF({"DEV:A", "DEV:B"}),
+        cf_requested=True,
+        context_capped=("capped.bob",),
+    )
+
+    cap_notes = [n for n in report.notes if "hit the per-display context cap" in n]
+    assert len(cap_notes) == 1, (
+        f"expected exactly one cap note to reason about, found {len(cap_notes)}: {report.notes}"
+    )
+    assert "display(s)" in cap_notes[0], (
+        "the cap NOTE lost the noun the release entry calls deliberate; if that was decided on "
+        f"purpose, the CHANGELOG sentence has to move with it. Note: {cap_notes[0]!r}"
+    )
+
+    markdown = render_markdown(report)
+    warning_at = markdown.index("hit the per-display context cap")
+    head_line = markdown[
+        markdown.rindex(chr(10), 0, warning_at) : markdown.index(chr(10), warning_at)
+    ]
+    assert "file(s)" in head_line and "display(s)" not in head_line, (
+        f"the head line took the note's noun, so the two no longer differ: {head_line!r}"
+    )

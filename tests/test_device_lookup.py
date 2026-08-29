@@ -702,3 +702,50 @@ def test_all_three_trend_markers_are_the_same_one_table_entry() -> None:
 
     assert _KIND_MARKERS is KIND_MARKERS, "device_lookup must alias the table, not copy it"
     assert KIND_MARKERS["trend"] == _TREND_MARKER
+
+
+# --- [GQ-170] (a): the three cap notes qualify a TREND as well as a screen ----------------------
+#
+# 0.7.0 shipped the sentence "the three cap notes ... now say 'a screen or trend' and 'the match
+# list'". Measured when this guard was written: those words stood ONCE in the tree, in
+# ``services/device_lookup.py``, and ZERO times under ``tests/``. Whoever put "a screen" back would
+# have stayed green while the released text turned false. The three cap SIGNALS have had tests
+# since GB-65; their WORDING had none.
+
+
+def test_the_three_cap_notes_qualify_a_trend_as_well_as_a_screen() -> None:
+    """Each of the three cap notes carries the widened noun the release entry promised.
+
+    All three caps are fired at once, which is what makes the retired wording checkable at all:
+    the negative assertion at the end passes on an empty note list, so it is only worth anything
+    behind the three positive ones, and those cannot pass on an empty list. That is the empty-set
+    proof for this test, and it is structural rather than a separate case.
+
+    ⚠ Substrings, not whole notes. The three sentences also carry a COUNT and an advice clause,
+    and pinning them whole would go red on a rewrap or on a changed hint while the promise held.
+    What is held is the phrase the release entry quotes, and nothing around it.
+
+    ⚠ THE SECOND HALF IS THE ONE THAT DECAYS QUIETLY: "the screen list" is still the right words
+    in the tool's own docstring, where the subject really is the screen half of the answer, so a
+    grep over the package finds it and proves nothing. This assertion is scoped to the NOTES.
+
+    Red-proof: put "a screen showing this device" back into the context-cap note and this fails
+    naming the phrase it could not find.
+    """
+    report = _report_with_caps(
+        context_capped=("a.bob", "b.plt"), glob_capped_count=3, live_capped=True
+    )
+    notes = report.notes
+
+    assert any("a screen or trend showing this device can be missing" in n for n in notes), (
+        f"the context-cap note no longer qualifies a trend as well as a screen: {notes}"
+    )
+    assert any("the match list is a lower bound" in n for n in notes), (
+        f"the glob-cap note no longer calls the widened answer a match list: {notes}"
+    )
+    assert any("The match list is not shortened by that cap" in n for n in notes), (
+        f"the live-cap note no longer calls the widened answer a match list: {notes}"
+    )
+    assert not any("the screen list" in n for n in notes), (
+        f"a cap NOTE went back to the pre-0.7.0 noun, which excludes a trend: {notes}"
+    )
