@@ -875,10 +875,14 @@ def test_the_changelog_names_no_error_group_that_stopped_existing() -> None:
     """A released entry writes the names out, and a rename would turn them into dead addresses.
 
     ⛔ SUBSET, NOT EQUALITY, and the asymmetry against the guide above is the whole design. A
-    released section is not rewritten here: ``tests/test_changelog_discipline`` reads
-    ``[Unreleased]`` and nothing else, for the stated reason that a rule reaching a published
-    section would be asking for a rewrite of something already on the index. A THIRTEENTH group
-    must therefore be free to arrive without touching ``[0.7.0]``, which equality would forbid.
+    released section is out of a guard's reach on purpose: ``tests/test_changelog_discipline``
+    reads ``[Unreleased]`` and nothing else, for the stated reason that a rule reaching a
+    published section would be asking for a rewrite of something already on the index. A
+    THIRTEENTH group must therefore be free to arrive without touching ``[0.7.0]``, which
+    equality would forbid.
+    ⚠ A released section CAN still be corrected by hand, and this one has been: ``d68ef14``
+    repaired the ``[0.7.0]`` entry after the release. What the subset direction refuses is to
+    FORCE such an edit, not to allow one.
 
     What is NOT free is a name that stops existing: the entry tells a reader which addresses to
     ask for, and a renamed one makes a published sentence point at a refusal. There is no
@@ -899,5 +903,6 @@ def test_the_changelog_names_no_error_group_that_stopped_existing() -> None:
     )
     assert named <= keys, (
         f"CHANGELOG.md advertises an address get_guide no longer serves: {sorted(named - keys)}. "
-        "A released entry is not rewritten here, so this is a question about the rename."
+        "A released entry is not rewritten to satisfy this guard, so this is a question about "
+        "the rename."
     )
