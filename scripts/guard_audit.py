@@ -375,11 +375,18 @@ _EDGE_CLAIM = re.compile(
 # to the code they describe. They are pinned here, in the tool that produces them, so the tool can
 # check itself; ``tests/test_client_edge_guards.py`` imports these rather than restating them.
 #
-# Split by what checking them COSTS. The first two follow from this repository's own AST and are
-# therefore cheap enough for the ordinary test gate. The other two are decided by which tests
-# EXECUTED a guard line, which needs a coverage map recorded with COVERAGE_CORE=ctrace, so minutes,
-# not milliseconds. ``--check`` without a database verifies the cheap pair and says so; it never
-# reports "OK" for a figure it could not reach.
+# Split by what checking them COSTS. The figures in ``PINNED_AST`` follow from this repository's
+# own AST and are therefore cheap enough for the ordinary test gate. Those in ``PINNED_COVERAGE``
+# are decided by which tests EXECUTED a guard line, which needs a coverage map recorded with
+# COVERAGE_CORE=ctrace, so minutes, not milliseconds. ``--check`` without a database verifies the
+# cheap ones and NAMES the ones it could not reach; it never reports "OK" for a figure it could not
+# reach.
+#
+# ⚠️ Two counts stood in this paragraph, "the first two" and "the cheap pair", and both were true
+# when ``DOUBLES`` and ``EDGE_VOCABULARY`` were the whole AST half. QA-19 added the two
+# services-side figures below and neither sentence moved with them. Measured 2026-08-29,
+# ``sham --check`` prints "checked 4 pin(s)". The two dicts are NAMED here instead of counted, so
+# the next addition moves nothing in this comment.
 DOUBLES = "tests installing a client class double in their own body"
 EDGE_VOCABULARY = "of those, carrying payload vocabulary"
 NOT_EXECUTING = "of those, never executing a client-edge line"

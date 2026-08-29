@@ -33,10 +33,17 @@ independent, each catching what the previous one cannot:
      floor rejects them); ``logos`` does not end in ``los`` at all and never was at risk. The
      English words that DO collide are enumerated below.
 
-An ALL-CAPS match is not a hit. Measured: without that rule the guard reports the MIT licence six
-times (the ``mit`` function word) and the site acronym BIS once. German prose does not write its
-function words in capitals, so the rule costs nothing and removes the only false-positive class
-the measurement turned up.
+An ALL-CAPS match is not a hit. Without that rule the guard reports the licence name, which is
+spelled like the German function word ``mit``, on every line that carries it. German prose does not
+write its function words in capitals, so the rule costs nothing and removes the only false-positive
+class the measurement turned up.
+
+⚠️ No COUNT stands here any more, and the site acronym is no longer claimed as a second class.
+Both were re-measured on 2026-08-29 and neither held. The licence figure had drifted, which is what
+a number nothing re-runs does; and the acronym cannot be reported at all, because ``bis`` is not in
+the word list above, so that false positive has no mechanism with or without this rule. Re-derive
+the first rather than trusting a figure here: run ``german_signals`` over the tracked tree with the
+``isupper`` discard removed.
 
 Scope, stated so nobody over-reads it: this finds German by VOCABULARY and MORPHOLOGY, per line.
 It cannot see a German sentence built entirely from words the lists do not know, and it does not

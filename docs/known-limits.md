@@ -146,8 +146,11 @@ What it cannot see, stated because a guard's reach invites over-reading:
   well written". Neither does anything else here.
 - **Any language other than German and English.** The signals are German-specific.
 - **A German word inside an ALL-CAPS run.** Discarded on purpose: the licence name is spelled the
-  same as a German preposition, so without that rule the guard reports the MIT licence six times.
+  same as a German preposition, so without that rule the guard reports every line that carries it.
   German prose does not capitalise its function words, so the trade is cheap, but it is a hole.
+  ⚠️ A count stood here and was measured as drifted on 2026-08-29. It is removed rather than
+  refreshed: this page is deliberately outside the figure guard (see entry 1), so nothing re-runs a
+  number written on it, and the sentence does not need one.
 
 And one class it flags although it should not, known and accepted rather than repaired
 (QA 2026-07-28, measured with `german_signals` on each example): **an English proper noun that is

@@ -103,8 +103,15 @@ def test_each_signal_catches_what_the_others_miss(line: str, expected: list[str]
 )
 def test_english_stays_quiet(line: str) -> None:
     """The counter-direction, without which every row above would pass on a guard that says yes
-    to everything. The ALL-CAPS rows are not hypothetical: before that rule the guard reported the
-    MIT licence six times and the site acronym once, measured over the whole tree.
+    to everything. The licence rows are not hypothetical: without the ALL-CAPS rule the guard
+    reports the licence line, spelled like a German function word, wherever it stands. No count is
+    given, because nothing re-runs one written here; the measurement is ``german_signals`` over the
+    tracked tree with the ``isupper`` discard removed.
+
+    ⚠️ The site-acronym row is a DIFFERENT case, and it used to be claimed as the same one.
+    Measured 2026-08-29: the acronym's lower-case twin is not in the word list at all, so that row
+    is quiet with the discard and without it. It stays as a regression row against the word list
+    growing, not as evidence for the discard.
     """
     assert german_signals(line) == []
 
