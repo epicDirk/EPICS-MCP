@@ -161,8 +161,10 @@ you a green run. Why CI itself cannot execute them, and where their coverage com
   satisfied by editing the number they report.**
   - *A number written next to a collection noun* ("the 26 projection fields", "all 22 schemas",
     "four paths") in `tests/test_server.py`, `server.py`, `services/checkers.py`,
-    `services/checkers_olog.py`, `tools/archiver.py`, `display_tools.py` and the SHIPPED
-    `src/epics_mcp/operator_guide.md`. The criterion that decides that list, and the
+    `services/checkers_olog.py`, `tools/archiver.py`, `display_tools.py`, `SECURITY.md` and
+    the SHIPPED `src/epics_mcp/operator_guide.md`. ⚠️ `SECURITY.md` joined with [GQ-139] and was
+    missing from this list until [GQ-206] measured it; the list is a copy of `_WATCHED` and
+    nothing holds the two together. The criterion that decides that list, and the
     arithmetic that keeps two large test modules out of it, is written above `_WATCHED`.
     **Which nouns count is a closed list,
     `prose_numbers.COLLECTION_NOUNS`**. Read it, do not guess, and note that this obligation is

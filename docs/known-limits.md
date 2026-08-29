@@ -13,7 +13,7 @@ share is what this page states, together with the rule to re-derive it.
 a citation elsewhere in this repository still means what it meant when it was written. What was
 retired, and where it went, is listed at the end.
 
-**On this page:** [1 markdown figures](#1--markdown-figures-are-unguarded-on-every-page-but-one) ·
+**On this page:** [1 markdown figures](#1--markdown-figures-are-unguarded-on-every-page-but-two) ·
 [9 the language guard](#9--the-language-guard-finds-german-by-vocabulary-not-by-understanding) ·
 [10 the typography guard](#10--the-typography-guard-forbids-a-named-set-not-typography-in-general) ·
 [11 Naming-client provenance](#11--the-naming-service-clients-provenance-is-a-measurement-not-an-opinion) ·
@@ -33,13 +33,41 @@ retired, and where it went, is listed at the end.
 
 ---
 
-## 1 · Markdown FIGURES are unguarded on every page but one
+## 1 · Markdown FIGURES are unguarded on every page but two
 
 The prose-counter guard reads Python comments and docstrings, and markdown too. It is pointed at
-exactly ONE page: `src/epics_mcp/operator_guide.md`, the guide `get_guide`
-ships to a model. Seven of its seventeen size-naming figures are compared to the code they are
-about, ten are inventoried with the reason they cannot be. Every OTHER page in this repository is
-still unguarded for figures.
+exactly TWO pages: `src/epics_mcp/operator_guide.md`, the guide `get_guide` ships to a model,
+and `SECURITY.md`, the page a security reviewer opens first. Twelve of the guide's twenty-one
+size-naming figures are compared to the code they are about, nine are inventoried with the
+reason they cannot be; `SECURITY.md` splits two and three the same way. Every OTHER page in
+this repository is still unguarded for figures.
+
+⛔ **THOSE FOUR FIGURES ARE A COPY OF WHAT THE GUARD MEASURES, AND A COPY ROTS.** This one did:
+until 2026-08-29 the paragraph said one page, seventeen, seven and ten, and all four were
+wrong, on the page whose subject is unguarded figures. `SECURITY.md` joined the watched set
+with [GQ-139] and was named nowhere here, not even in the two-reason list below that explains
+which pages stay out. Nothing guards the sentence above, so **do not trust it, reproduce it**:
+
+```sh
+uv run python - <<'PY'
+import sys; sys.path[:0] = [".", "tests"]
+from tests import test_prose_counters as p
+from tests.prose_numbers import iter_sites
+pages = [label for label, path in p._WATCHED if path.suffix == ".md"]
+sites = [s for s in iter_sites(p._watched_blocks()) if s.block.path == "operator_guide.md"]
+print("watched markdown pages:", len(pages), pages)
+print("guide figures:", len(sites),
+      "compared:", sum(p._is_covered(s.block, s) for s in sites),
+      "inventoried:", sum(s.key in p._FROZEN for s in sites))
+PY
+```
+
+⚠️ **One of the four HAS a guard, and it is not the one on this page.** The total per file is
+pinned in `tests/test_prose_counters._INVENTORY_SIZES` and held against the real count by
+`test_inventory_size_is_pinned`, so a figure added to the guide reddens the suite. What has no
+guard is the COPY of that pin standing here, and the split into compared and inventoried has
+none anywhere. That asymmetry is why the command above exists rather than a promise to keep
+this paragraph fresh.
 
 ⚠️ **What is rejected, and stays rejected, is a guard over the WHOLE tracked markdown**, not the
 reading of markdown at all. The reader exists and is pointed at a named set of pages; the cost of
@@ -54,8 +82,8 @@ checks tool names, `EPICS_MCP_*` variables and status glyphs across the tracked 
 SIZE-NAMING FIGURES in markdown, and only about those.
 
 Why not the rest of the tree, re-measured 2026-08-21 with the detector's own reader over
-`git ls-files "*.md"`. **Two reasons, and they are different reasons, which is why one page could
-come in while the others stayed out.**
+`git ls-files "*.md"`. **Two reasons, and they are different reasons, which is why two pages
+could come in while the others stayed out.**
 
 - **`CHANGELOG.md` cannot come in at all**, and not for cost: a release entry that said
   "22 schemas" MUST keep saying it, so every one of its figures would need a "historical, not
