@@ -1038,3 +1038,72 @@ def test_neither_resource_exposes_a_secret_like_key() -> None:
     # Positive control: the walk really descends, so the assertions above are not vacuous on the
     # nested blocks. Without this a broken _every_key would make the whole test pass silently.
     assert "olog_write.armed" in _every_key(get_health())
+
+
+# --- [GQ-166]: what a RETIRED resource address answers is not ours, so it is pinned here --------
+#
+# 0.7.0 renamed the three resources and told the reader that "an old URI fails loudly rather than
+# answering something stale". That refusal is FastMCP's, not this repository's: no line under
+# ``src/`` produces it, so a grep over this tree finds nothing to read and an SDK upgrade could
+# soften it into a None, an empty payload or a different exception class without one test going
+# red. The promise is SHIPPED here, in the released entry a reader searches after a rename, so the
+# behaviour behind it is pinned here rather than assumed.
+
+#: The three addresses [QA-26] retired. They are spelled literally BECAUSE they are retired: this
+#: is the one place in the tree where the old scheme is the subject rather than a leftover.
+#: ⚠ ``tests/`` is out of scope for ``test_readme_resources``, which is what makes that spelling
+#: admissible here and nowhere else.
+_RETIRED_RESOURCE_URIS = ("epics-pv://health", "epics-pv://config", "epics-pv://guide")
+
+#: An address no rename ever used, so the refusal it earns is about the UNKNOWN case rather than
+#: about this repository's own history. Without it the test would only ever have watched three
+#: addresses that a future rename could quietly bring back into use.
+_NEVER_REGISTERED_URI = "epics://not-a-resource"
+
+
+async def test_an_unknown_resource_address_is_refused_loudly() -> None:
+    """A retired or invented resource address raises NotFoundError instead of answering.
+
+    THE NON-EMPTY ANCHOR IS THE FIRST HALF, and it is what keeps this from being trivially true:
+    on a server with NOTHING registered every address below is unknown, every refusal arrives, and
+    the test would pass while proving nothing at all. So the registry has to be populated, the
+    live address that REPLACED the retired ones has to be in it, and reading it has to return
+    content before a single refusal is asserted.
+
+    Red-proof, both directions: put a registered address into ``_RETIRED_RESOURCE_URIS`` and the
+    loop fails at the ``not in registered`` assertion; point the anchor at an empty ``FastMCP``
+    instance and the test fails before reaching the loop.
+
+    The message is asserted as well as the class, and that is deliberate: a client shows the text,
+    and a refusal that no longer names the address it refused sends the reader looking in the
+    wrong place. Two things are held, the phrase and the address itself, and neither is the whole
+    sentence: pinning the full wording would go red on an SDK release that only rephrases it.
+    """
+    from fastmcp.exceptions import NotFoundError
+
+    from epics_mcp.server import mcp
+
+    registered = {str(resource.uri) for resource in await mcp.list_resources()}
+    assert registered, (
+        "no resource is registered at all, so every refusal below would be vacuous: this "
+        "assertion is the non-empty anchor, not a smoke test"
+    )
+    assert "epics://health" in registered, (
+        f"the live address that replaced the retired ones is gone; registered: {sorted(registered)}"
+    )
+    answered = await mcp.read_resource("epics://health")
+    assert answered.contents, "the anchor address is registered but answers nothing"
+
+    for uri in (*_RETIRED_RESOURCE_URIS, _NEVER_REGISTERED_URI):
+        assert uri not in registered, (
+            f"{uri} is registered today, so it cannot stand for the unknown case any more"
+        )
+        with pytest.raises(NotFoundError) as refusal:
+            await mcp.read_resource(uri)
+        message = str(refusal.value)
+        assert "Unknown resource" in message, (
+            f"the refusal for {uri} no longer says what went wrong: {message!r}"
+        )
+        assert uri in message, (
+            f"the refusal for {uri} does not name the address it refused: {message!r}"
+        )
