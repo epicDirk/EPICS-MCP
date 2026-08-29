@@ -318,31 +318,44 @@ the tracked markdown and the package sources. On 2026-08-02 that found orderings
 `ARCHITECTURE.md`, `docs/deployment.md`, `prompts.py` and two more inside `presets.py`. None is
 wrong for its own purpose, and unifying them is a separate cut.
 
-## 15 · The remote-https write path has no live probe any more, only in-memory coverage
+## 15 · The remote-https write path has a live probe again, and it needs an external rig
 
-Measured 2026-08-01. Commit `c05a93f` deleted `tests/test_olog_remote_https_live.py`, and the
-removal plan named it "the live test module of the loopback boundary". That name understated it:
-the module verified the REMOTE-HTTPS write path against a local self-signed TLS proxy, with both
+Measured 2026-08-01, rebuilt 2026-08-29. Commit `c05a93f` deleted `tests/test_olog_remote_https_live.py`,
+and the removal plan named it "the live test module of the loopback boundary". That name understated
+it: the module verified the REMOTE-HTTPS write path against a local self-signed TLS proxy, with both
 directions of one claim. An upload through the full gate over an https URL succeeds because the CA
 comes from `EPICS_MCP_CA_BUNDLE` via the config, and the SAME upload without that bundle fails TLS
 verification. Its bytes were then read back and compared, so "the https upload stored them" was a
 measurement rather than a 2xx.
 
-Why the deletion still stands: the module could only prove the round trip by reading the uploaded
-bytes back through a second client, and that read leaned on a posture that no longer exists.
-Rebuilding it is a rewrite, not a revert.
+What the deletion rested on is gone. The module could only prove the round trip by reading the
+uploaded bytes back through a second client, and that read leaned on a posture that no longer
+exists; reads are whole today, so an ordinary client does it. The rebuild absorbed two further
+drifts of its own: `query_olog_create` moved to `services/checkers_olog.py`, and `OlogClient` no
+longer takes the two posture keyword arguments.
 
-What covers the path today, and what does not. `tests/test_http.py` holds the pieces in memory:
-that a configured CA bundle is applied and `trust_env` pinned off, that an empty bundle falls back
-to certifi with `trust_env` left on, and that the write session is built without env influence.
-Those are the decisions the code makes. **What nobody checks any more is that the assembled session
-then completes a real TLS handshake against a server presenting that CA**, which is the one thing a
-mock cannot fake. A `verify` argument that stops reaching requests, or a session that silently falls
-back to the system store, would pass every test in this repository.
+What covers the path. `tests/test_http.py` holds the pieces in memory: that a configured CA bundle
+is applied and `trust_env` pinned off, that an empty bundle falls back to certifi with `trust_env`
+left on, and that the write session is built without env influence. Those are the DECISIONS the
+code makes. The live module holds the one thing a mock cannot fake, that the assembled session then
+completes a real TLS handshake against a server presenting that CA. A `verify` argument that stops
+reaching requests, or a session that silently falls back to the system store, passes every
+in-memory test in this repository and fails that one.
 
-The honest repair is a rebuilt live module (self-signed proxy, synthetic hostname, throwaway cert,
-opt-in behind `pytest -m live`), reading the bytes back through an ordinary client now that reads
-are whole. It is not scheduled here.
+⚠️ **The rig is EXTERNAL, and that is the limit this entry now carries.** Building the certificate
+in-process would need a cryptography dependency this package does not declare; declaring one moves
+`uv.lock` and pulls the dependency-pin guards into the radius of a test module. So the module reads
+its proxy URL, CA path, credentials and target logbook from `OA1C_*` environment variables and
+refuses to guess: without them it skips, and under `EPICS_MCP_REQUIRE_LIVE=1` it fails loudly. What
+the rig has to BE is stated in the module docstring; standing it up is an `openssl` invocation and a
+reverse proxy of some fifty stdlib lines. **Nothing in this repository checks that such a rig
+exists**, which is the same class of limit as every other live probe here: no CI guard can prove a
+probe ran.
+
+⚠️ **The synthetic hostname resolves through public DNS.** The rig uses a `*.localtest.me` name,
+which resolves to 127.0.0.1 for everyone, so no hosts-file edit and no privilege is needed. On a
+network that intercepts DNS it will not resolve, and then the rig needs a different synthetic name;
+nothing about the module depends on which one.
 
 ## 16 · CI cannot run the display-coupled tests, and no switch inside this repository changes that
 

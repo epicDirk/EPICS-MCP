@@ -66,9 +66,10 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   comprehension filters, where the tool builds no whole-condition target, for those "unobserved"
   means "this CONJUNCT is unobserved", the rest of the condition still stood during the mutant.
 
-Honest scope, because the numbers invite over-reading: measured WITHOUT the live lane (the ten
+Honest scope, because the numbers invite over-reading: measured WITHOUT the live lane (the eleven
 ``*_live`` modules; 66 tests skipped at the time of the sweep, when that lane still had nine
-modules and no read probe), which is exactly where a guard meets a
+modules and no read probe, and the remote-https probe was rebuilt into it on 2026-08-29), which is
+exactly where a guard meets a
 real payload. And a
 surviving mutant is not by itself a defect, it can equally be an equivalent mutant or a guard
 masked by its neighbour. ``channelfinder_client.py:91`` is the measured example of the latter:
