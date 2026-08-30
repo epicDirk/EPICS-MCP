@@ -193,10 +193,13 @@ class TestLiveWriteStep:
 
         baseline = await _read_numeric(pv)
         distance = abs(float(target) - baseline)
+        # The guard is on the ARMED limit, not on the distance: a subnormal distance halves to
+        # exactly 0.0, and 0 means the check is OFF, so the probe would drive its value into the
+        # IOC and then fail for the wrong reason. Asserting what is actually armed closes that.
         assert_live_available(
-            distance > 0,
-            "live step probe: EPICS_MCP_LIVE_WRITE_VALUE equals the current value, so there is no "
-            "distance to refuse",
+            distance / 2 > 0,
+            "live step probe: EPICS_MCP_LIVE_WRITE_VALUE is equal to, or unmeasurably close to, "
+            "the current value, so no positive step limit can be armed below the distance",
             demanded=live_demanded(os.environ),
         )
 

@@ -178,8 +178,13 @@ def check_step_within_limit(
     * **A written value that is not numeric** (an enum label, an arbitrary string), the same
       reasoning :func:`check_value_in_bounds` gives for its own coercion failure.
 
-    Fail-CLOSED on a non-finite written value against a configured limit: the distance is infinite
-    or undefined, which is not a step anybody authorised.
+    Fail-CLOSED on a non-finite written value, but ONLY once the earlier branches have passed:
+    the enum and unusable-current-value checks run first, so ``nan`` written to a record this
+    function cannot measure at all still fails OPEN. That ordering is deliberate (a record whose
+    distance is not measurable is not measurable for garbage either), and it is stated here because
+    "fail-closed on a non-finite value" without the qualifier would promise more than the order
+    delivers. On that branch ``step`` stays None, since there is no distance to report; the caller
+    must build its message from :attr:`StepVerdict.note` rather than interpolating the field.
     """
     if max_step <= 0:
         return StepVerdict(within_limit=None)

@@ -426,7 +426,7 @@ here for the same reason.
 A `set_pv_value` write leaves a `PV_WRITE` audit line at each stage. A write-enabled server
 **refuses to start** unless `EPICS_MCP_AUDIT_LOG_FILE` names a durable path, an ephemeral stderr
 audit would lose this trail on restart. The `op=<id>` token that correlates the lines is issued when
-a write is dispatched, so the two refusals below carry **no** `op=`: they happen before any
+a write is dispatched, so the three refusals below carry **no** `op=`: they happen before any
 operation exists, and each is a single self-contained line. The stages:
 
 - `event=DENY`: the gate refused it (writes off / not in the allowlist / rate limit); nothing was sent.
@@ -437,6 +437,14 @@ operation exists, and each is a single self-contained line. The stages:
   (`limit_low >= limit_high`, which includes the two-equal-limits case), and a non-numeric written
   value such as an enum label. The opposite case is `nan`/`inf`: it IS float-coercible, lies outside
   every finite range, and is refused fail-closed.
+- `event=STEP_DENY`: the step limit refused it, and it is the one that fires on a value the drive
+  limits ALLOW: the target is inside `[DRVL, DRVH]` and the DISTANCE from the current value exceeds
+  `EPICS_MCP_MAX_WRITE_STEP`. Refused **before** the put, so nothing reached the IOC; carries the
+  distance + the limit. **This line cannot appear at all unless that variable is set**, which is not
+  the shipping default. Four cases are not step-checked and the line then does not appear either: no
+  limit configured, an enum record (its `value` is an INDEX, so a distance between choices is not a
+  distance), a current value that is missing or non-finite, and a non-numeric written value. As
+  above, a `nan`/`inf` written value is refused fail-closed instead.
 - `event=ATTEMPT`: emitted **before** the I/O; a durable record that this write was dispatched.
 - `event=ALLOW`: the put returned successfully.
 - `event=FAILED error_code=...`: the put raised (timeout, connection, or a bug tagged `INTERNAL`).
@@ -470,7 +478,8 @@ operation exists, and each is a single self-contained line. The stages:
 
 Every terminal line **of a dispatched write** shares the `op=<id>` of its `ATTEMPT` (the
 `READBACK_*` line too), so an interrupted or misverified write is never a silent gap in the trail.
-The two pre-dispatch refusals (`DENY`, `BOUNDS_DENY`) are outside that correlation, as noted above.
+The three pre-dispatch refusals (`DENY`, `BOUNDS_DENY`, `STEP_DENY`) are outside that correlation,
+as noted above.
 (A direct, non-tool call to the audit helpers logs `op=-`.)
 
 ### Olog write posture (all four write tools)

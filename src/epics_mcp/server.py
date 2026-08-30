@@ -2043,12 +2043,12 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     config = get_config()
     # A write-enabled instance whose audit sink is ephemeral stderr (no EPICS_MCP_AUDIT_LOG_FILE)
-    # loses every ATTEMPT/ALLOW/DENY/READBACK/BOUNDS_DENY record on restart, the one trail meant to
-    # surface a wrong write after the fact. Refuse to start without a DURABLE sink, symmetric with
-    # the empty-pattern / reach (E8) refusals and the unwritable-path refusal below. Covers BOTH the
-    # PV gate and the Olog write gate: they write to the same FILE (config.audit_log_file), each
-    # through its own logger (epics_mcp.audit / epics_mcp.olog_audit), the sink is shared,
-    # the logger is not.
+    # loses every ATTEMPT/ALLOW/DENY/READBACK/BOUNDS_DENY/STEP_DENY record on restart, the one
+    # trail meant to surface a wrong write after the fact. Refuse to start without a DURABLE sink,
+    # symmetric with the empty-pattern / reach (E8) refusals and the unwritable-path refusal below.
+    # Covers BOTH the PV gate and the Olog write gate: they write to the same FILE
+    # (config.audit_log_file), each through its own logger (epics_mcp.audit / epics_mcp.olog_audit),
+    # the sink is shared, the logger is not.
     if (config.allow_pv_write or config.allow_olog_write) and not config.audit_log_file:
         raise SafetyConfigError(
             "A write gate is ENABLED (EPICS_MCP_ALLOW_PV_WRITE / EPICS_MCP_ALLOW_OLOG_WRITE) "

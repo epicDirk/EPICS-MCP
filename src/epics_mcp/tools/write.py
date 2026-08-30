@@ -73,9 +73,14 @@ async def _set_pv_value(
     step = check_step_within_limit(value, old, get_config().max_write_step)
     if step.within_limit is False:
         safety.audit_step_deny(pv_name, value, step.step, step.limit)
+        # The message is built from the verdict's own note, never by interpolating `step.step`.
+        # That field is None on the non-finite branch (a distance from nan is not a number), and a
+        # refusal reading "moves it by None" would report a measurement that was never taken. The
+        # note says the right thing on both branches, the measured distance on one and why there is
+        # none on the other.
         raise PVWriteStepError(
-            f"Writing {value!r} to PV '{pv_name}' moves it by {step.step}, which exceeds the "
-            f"configured step limit {step.limit} (EPICS_MCP_MAX_WRITE_STEP), write refused.",
+            f"Write to PV '{pv_name}' refused: {step.note} "
+            f"(the limit is EPICS_MCP_MAX_WRITE_STEP).",
             details={
                 "pv_name": pv_name,
                 "value": value,

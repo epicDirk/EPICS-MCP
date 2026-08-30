@@ -9,8 +9,10 @@ scope statement plus **every deny path must be red-provable**.
 
 This module is point 6 made executable, and it is the template a THIRD write surface inherits.
 Its parts are described here WITHOUT a count, and that is a repair rather than a preference: this
-docstring said "two halves" while the file carried five section banners, two of which are numbered
-"Half 3". A figure nothing derives is the kind that rots, and this one had. What the parts do:
+docstring said "two halves" while the file carried five NUMBERED section banners, two of which are
+numbered "Half 3". (The word "numbered" is load-bearing: further banners carry a name instead, and a
+bare count of "banners" is ambiguous enough that two readers measured it differently.)
+A figure nothing derives is the kind that rots, and this one had. What the parts do:
 
 * **Executable rows**: :data:`DENY_PATHS` lists every way each gate can refuse. Each row is driven
   for real and checked on four axes: the typed exception, its machine-readable ``error_code``,
@@ -1544,12 +1546,19 @@ def test_every_start_condition_count_matches_the_gate() -> None:
 # A registry stays true whatever lives outside it, and it makes the next call site a deliberate
 # act with a written reason rather than an import nobody reviewed.
 
-#: Every call site of the raw put inside this distribution, keyed by the module's path relative to
-#: the package root, valued with WHY that module may hold one.
-RAW_PUT_CALL_SITES: dict[str, str] = {
+#: Every call site of the raw put inside this distribution: module path relative to the package
+#: root, HOW MANY calls it may hold, and WHY.
+#:
+#: The count is registered rather than only the module, for the reason
+#: :data:`EXPECTED_DENY_CALL_SITES` gives above: a set of module names stays equal when a SECOND
+#: call appears in an already-registered module, and that second call is a new path through the
+#: raw put whether or not its neighbour is gated. Registering the number makes it a deliberate act
+#: with a written reason, which is the whole point of this section.
+RAW_PUT_CALL_SITES: dict[str, tuple[int, str]] = {
     "tools/write.py": (
+        1,
         "the gated write path: check_write_allowed runs first, in the same function, with the "
-        "value-bounds refusal between it and the put"
+        "value-bounds and step refusals between it and the put",
     ),
 }
 
@@ -1617,11 +1626,15 @@ def _raw_put_call_sites() -> dict[str, list[int]]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         label = _module_label(path)
         if label == _RAW_PUT_MODULE:
+            # Note what this does NOT do: it does not skip the module. A ``def`` is not an
+            # ``ast.Call``, so the definition never counts as a call site and needs no exclusion,
+            # while a future CALL inside the defining module (a retry wrapper, a convenience
+            # ``put_now``) would be reachable from anywhere without the gate and must be seen like
+            # any other. An earlier draft returned here and would have been blind to exactly that.
             definition_seen = any(
                 isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == _RAW_PUT
                 for node in ast.walk(tree)
             )
-            continue
         lines = [node.lineno for node in _calls_of(tree, _RAW_PUT)]
         if lines:
             sites[label] = sorted(lines)
@@ -1674,6 +1687,20 @@ def test_every_raw_put_call_site_is_registered() -> None:
         "registered call site of "
         f"{_RAW_PUT} has no call site in the tree: {', '.join(vanished)}. A reason left standing "
         "for code that is gone reads as coverage; drop the entry in the same change."
+    )
+    miscounted = {
+        label: (len(lines), RAW_PUT_CALL_SITES[label][0])
+        for label, lines in found.items()
+        if len(lines) != RAW_PUT_CALL_SITES[label][0]
+    }
+    assert not miscounted, (
+        "a registered module holds a different NUMBER of raw-put calls than it registers: "
+        + ", ".join(
+            f"{label} has {have} call(s), registers {want}"
+            for label, (have, want) in miscounted.items()
+        )
+        + ". A second call is a second path through the raw put even when its neighbour is gated; "
+        "register the number with its reason, or route it through the existing call."
     )
 
 

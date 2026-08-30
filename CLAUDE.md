@@ -297,8 +297,11 @@ connecting library's own parser; **(6)** an honest scope statement, because the 
 **guardrail on the sanctioned path, not a security boundary**.
 
 Read point 6 first: it fixes what a gate is *for*, and the other five only make sense under it.
-Points 1 to 5 are drift-guarded per gate by `tests/test_write_gate_contract.py`; point 6 and the
-empty-semantics *rationale* of point 2 are prose, the category that rots.
+Points 1 to 5 are drift-guarded per gate by `tests/test_write_gate_contract.py`. Point 6 is **mostly**
+prose, the category that rots: its reachability half is enforced there too, by a registry of the raw
+put's call sites, while its scope statement and the empty-semantics *rationale* of point 2 are not.
+⚠️ Even the enforced half resolves STATIC call shapes only, so `getattr`, a star-import and
+`importlib` hide a call site from it; the guard's own docstring carries that beside the assertion.
 
 ## Definition of Done (doc-sync)
 

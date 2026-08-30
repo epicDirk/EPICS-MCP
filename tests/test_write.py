@@ -826,6 +826,44 @@ class TestSetPvValueStep:
     @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
     @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
     @patch("epics_mcp.tools.write.get_safety")
+    async def test_non_finite_refusal_reports_no_distance_it_did_not_measure(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A refusal must not report a measurement that was never taken.
+
+        On the non-finite branch ``StepVerdict.step`` is None, because a distance from ``nan`` is
+        not a number. An earlier draft interpolated the field anyway and the caller was told the
+        write "moves it by None". The path is reachable rather than theoretical: the bounds check
+        upstream only refuses a non-finite value when the record DECLARES drive limits, so a record
+        without a control block falls through to here, which is the ordinary case.
+
+        RED-PROOF: put ``step.step`` back into the message and the assertion below reports "None"
+        on the wire.
+        """
+        monkeypatch.setattr(write_module, "get_config", lambda: self._armed(10.0))
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        # No control block, so the bounds check fails open and the step check is what refuses.
+        mock_pv_get.return_value = {"pv_name": "TEST:PV", "value": 80.0}
+
+        with pytest.raises(PVWriteStepError) as excinfo:
+            await _set_pv_value("TEST:PV", "nan")
+
+        mock_pv_put.assert_not_awaited()
+        message = str(excinfo.value)
+        assert "None" not in message, f"the refusal reports a distance it never measured: {message}"
+        assert "is not finite" in message
+        # The structured detail may carry the honest None; the human-facing message may not.
+        assert excinfo.value.details["step"] is None
+
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
     async def test_unset_limit_checks_nothing_and_says_nothing(
         self,
         mock_get_safety: MagicMock,

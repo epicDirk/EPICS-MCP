@@ -263,9 +263,16 @@ State this plainly where the gate is described, because the word "gate" invites 
   written, while a registry of call sites stays true whatever lives outside it.
 
 **Honest limit:** points 1-5 are enforceable in code and are drift-guarded per gate by
-`tests/test_write_gate_contract.py`; point 6 and the empty-semantics *rationale* of point 2 are **prose**,
-the category that rots. No CI check proves a future gate author re-decided the empty-shape deliberately or
-scoped the audit claim honestly; the guard there is the review plus the red-provable deny tests of point 6.
+`tests/test_write_gate_contract.py`. Point 6 is **mostly** prose, the category that rots, and the word
+earns its place: its reachability half IS enforced, by the raw-put registry in that same file, but its
+scope statement and the empty-semantics *rationale* of point 2 are not. No CI check proves a future gate
+author re-decided the empty-shape deliberately or scoped the audit claim honestly; the guard there is the
+review plus the red-provable deny tests of point 6.
+⚠️ **And the enforced half has a SHAPE limit that this page must not hide**, because a reader of the
+sentence above would otherwise take it for total: the registry resolves STATIC call shapes. A call
+reached through `getattr`, a star-import or `importlib` is invisible to it, inside this distribution as
+much as outside. The guard's own docstring carries that limit beside the assertion it qualifies; it is
+repeated here because this is the page that makes the promise.
 
 Point 6's own *live* preference, stated per surface rather than as one number:
 
