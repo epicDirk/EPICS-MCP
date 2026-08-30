@@ -186,8 +186,8 @@ def build_instructions(display_tools_available: bool) -> str:
         "EPICS_MCP_ALLOW_PV_WRITE=true plus a regex allowlist, a rate limit and an audit log, a "
         "separate gate from the Olog one, and it stays off. "
         "Either gate needs a durable EPICS_MCP_AUDIT_LOG_FILE to start; the loopback-only reach is "
-        "a PV-gate condition only. A sanctioned PV write refuses an out-of-range value before the "
-        "put. "
+        "a PV-gate condition only. A sanctioned PV write may be refused on its value or on its "
+        "step. "
         "After a sanctioned write it reads the value back and returns a structured result "
         "(verified/readback/tolerance) plus a READBACK audit event, so a wrong or not-landed value "
         "is surfaced, not silently accepted. "
@@ -457,7 +457,14 @@ async def set_pv_value(
     limits (control DRVL/DRVH, read on the pre-read). An out-of-range value is denied with
     error_code PV_WRITE_OUT_OF_BOUNDS BEFORE the put, it never reaches the IOC, and emits a
     BOUNDS_DENY audit event. A record that declares no drive limits (or a
-    non-numeric value) is not bounds-checkable; the write proceeds and ``bounds_note`` says so.
+    non-numeric value) is not bounds-checkable; THIS check does not refuse it and ``bounds_note``
+    says so, which is not the same as the write going through, see the step limit next.
+
+    Step limit (opt-in, pre-put): with EPICS_MCP_MAX_WRITE_STEP set, a write that moves the value
+    further than that is denied with error_code PV_WRITE_STEP_TOO_LARGE BEFORE the put, emitting a
+    STEP_DENY audit event. This catches what the drive limits cannot: a value INSIDE them can still
+    be a jump nobody authorised. It is OFF unless the variable is set, and ``step_note`` names the
+    cases it does not check, an enum record above all, whose value is an index and not a quantity.
 
     Readback verification (always-on): after the write the value is read back and compared against
     what was written. The result carries ``verified`` (true = within tolerance / false = mismatch /

@@ -3311,10 +3311,16 @@ async def test_stripped_tool_still_returns_structured_content(
 # machine-readable (the core value of S29) and cost only ~1% more context per agent turn, so the
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
-# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-23 after GQ-153: the
-# core lane is 76_835 and the full lane 90_932. The core figure did not move and that is the
-# expected shape rather than a lucky one: every description GQ-153 touched belongs to a DISPLAY
-# tool, and those are exactly the four the core lane does not register. ⚠️ The core figure is
+# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-30 after QA-34: the
+# core lane is 77_386 and the full lane 91_471. Both moved because every byte of that edit sits on
+# ``set_pv_value``, a CORE tool, which is the shape that makes the two deltas nearly coincide; the
+# 12-byte difference between them is the pre-existing drift below, not part of the edit.
+# ⚠️ The FULL lane had drifted to 90_902 BEFORE that edit, 30 under the 90_932 recorded here on
+# 2026-08-23, so the +539 against the written figure and the +569 against the measured tree are
+# both true and answer different questions. The drift is not attributable to QA-34, whose earlier
+# commits changed only a same-width figure and two Python comments; it is the fourth time this
+# pair has been found stale, which is what the instruction above exists for.
+# ⚠️ The core figure is
 # measured by dropping those four from the same ``list_tools`` result, not by a core-only install,
 # so it is the payload that lane WOULD emit; the full figure comes straight off the run.
 # (the docstring below carries the deltas, and the
@@ -3348,9 +3354,19 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 76_835 and the full lane
-    90_932, re-measured 2026-08-23 on both lanes with the display-gated tools excluded for the core
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 77_386 and the full lane
+    91_471, re-measured 2026-08-30 on both lanes with the display-gated tools excluded for the core
     one, since a lane estimated rather than measured is the error the constant's comment records.
+    QA-34 added +551 / +539 against the WRITTEN pair, all of it description text on
+    ``set_pv_value``: the step limit's own paragraph, plus the repair of a sentence the same ticket
+    had made false ("the write proceeds" for a record with no drive limits, which an armed step
+    limit can still refuse). Both lanes move because that tool is core. ⚠️ Against the tree as it
+    actually stood the full-lane delta is +569, because the written 90_932 had drifted to 90_902
+    before the edit; the constant's comment above carries which figure answers which question, and
+    this sentence is the second copy the instruction below says to move in the same edit.
+    ⚠️ The server ``instructions`` moved in the OPPOSITE direction in the same commit, 2_041 to
+    2_039 bytes, deliberately: they sit under a 2_048 wall with single-digit head-room, so the
+    false sentence there was replaced by a SHORTER true one rather than an expanded one.
     GQ-153 added +0 / +760 from the pair measured earlier the same day, all of it on
     ``coverage_audit`` and ``crossplane_check`` description text: the trend-versus-screen
     distinction and the field names it introduced on either tool. The zero on the
