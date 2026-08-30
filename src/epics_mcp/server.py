@@ -325,7 +325,7 @@ async def get_guide(
     prove. It reads nothing but its own packaged document: no PV, no REST plane, no file of
     yours, so it can neither time out nor depend on how this instance is configured.
 
-    The whole document is around 118 KB, which is why 'topic' exists and why omitting it should be
+    The whole document is around 121 KB, which is why 'topic' exists and why omitting it should be
     the exception. The keys partition the document: each returns exactly its own part, VERBATIM,
     so an excerpt is a real excerpt and never a rendering, and the largest single part is under a
     third of the whole. An unknown topic is refused with [UNKNOWN_TOPIC] naming every valid key.
@@ -428,9 +428,9 @@ async def get_pvs(
     # obtains a human approval before each write; an older / other MCP client ignores it silently.
     # The load-bearing, client-INDEPENDENT guard stays server-side: three gate checks (env gate,
     # regex allowlist, rate-limit) plus the mandatory audit, which records a verdict rather than
-    # reaching one, and the post-admission drive-limit refusal, which is not a gate check either
-    # because it has already spent a rate token (see safety.py). Kept red-provable by the
-    # consent-invariant test.
+    # reaching one, and the two post-admission refusals, the drive-limit one and the opt-in step
+    # limit, neither of which is a gate check because both have already spent a rate token (see
+    # safety.py). Kept red-provable by the consent-invariant test.
     meta={"anthropic/requiresUserInteraction": True},
 )
 @translate_epics_errors

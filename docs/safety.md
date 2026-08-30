@@ -51,10 +51,14 @@ This is a controls tool, so the trust questions come first.
   `EPICS_MCP_ALLOW_PV_WRITE=true` **and** a regex allowlist (`EPICS_MCP_PV_WRITE_PATTERN`,
   **required** when writes are on: an empty pattern makes the server **refuse to start** rather
   than silently allow every PV; use `.*` to deliberately allow all) **and** a per-minute rate
-  limit. **Three is the number of GATE checks, and one more refusal sits behind them:** a value
+  limit. **Three is the number of GATE checks, and two more refusals sit behind them.** A value
   outside the record's own drive limits is rejected once the gate has already admitted the write
-  (`BOUNDS_DENY`, nothing reaches the IOC). It is counted separately on purpose, because it has
-  spent a rate token where a gate denial never does. Every write is audit-logged: a rejected one is `DENY`d at the gate (nothing sent); an
+  (`BOUNDS_DENY`, nothing reaches the IOC). And a value that moves TOO FAR in one write is rejected
+  the same way (`STEP_DENY`, `EPICS_MCP_MAX_WRITE_STEP`), which is the case the drive limits cannot
+  catch: a wrong setpoint inside `[DRVL, DRVH]` is in range and still a jump nobody authorised.
+  That one is OFF unless the variable is set, so a default server has exactly one of the two. Both
+  are counted separately on purpose, because both have spent a rate token where a gate denial never
+  does. Every write is audit-logged: a rejected one is `DENY`d at the gate (nothing sent); an
   accepted one logs `ATTEMPT` before the I/O, then a terminal `ALLOW`/`FAILED`, or `UNKNOWN_PENDING`
   if it was cancelled mid-put (the value may still land at the IOC, so verify by read-back and never
   blindly retry). A write-enabled server **refuses to start** unless `EPICS_MCP_AUDIT_LOG_FILE` names

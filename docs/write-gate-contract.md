@@ -116,9 +116,14 @@ different event, and it says so where it is implemented.
 - **Mandatory core (every gate):** exactly one **terminal** line per **gate verdict**: **ALLOW** (the write
   completed), **DENY** (a gate precondition rejected it, so record the reason code, emitted before the raise),
   or **FAILED** (it passed the gate and failed downstream). A surface may define **further terminal events**
-  where its semantics genuinely differ (the PV gate's post-admission bounds refusal is its own event, not a
-  DENY, precisely because it already consumed a token); enumerate those where the gate is described instead
-  of filing them under one of the three.
+  where its semantics genuinely differ (the PV gate has TWO such refusals, the drive-limit bounds check and
+  the opt-in step limit, each its own event rather than a DENY, precisely because each already consumed a
+  token); enumerate those where the gate is described instead of filing them under one of the three.
+  ⚠️ **"Further terminal events" is a place a count grows, and it grew here**, from one to two while the
+  gate's own width stayed three. That is the whole point of keeping the categories apart: a post-admission
+  refusal must not be routed through the gate's own audit helper, or the census that measures how wide the
+  gate is would count it and every "three checks" sentence in the estate would go red for a change that
+  widened no gate.
 - **Scope this claim honestly.** The promise is *one terminal line per **gate verdict***, **not** "no write
   request is ever un-recorded". A refusal raised **before** the gate is consulted (a precondition in the
   tool or service layer above it) writes **no audit line at all**, and such refusals exist in this server

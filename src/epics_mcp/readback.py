@@ -94,6 +94,11 @@ class WriteResult(BaseModel):
     #: O2 value-bounds note: None when the value was checked in-range, else the honest reason it
     #: was not bounds-checked (the record declares no drive limits, a deliberate fail-open).
     bounds_note: str | None = None
+    #: Step-limit note: None when the distance was checked and allowed AND when no limit is
+    #: configured (the shipping default), else the honest reason the distance was not checked. The
+    #: two Nones are deliberately not distinguished here: a note on every write of a server that
+    #: has the limit switched off would be noise a caller cannot act on.
+    step_note: str | None = None
 
 
 def _control_min_step(readback: Mapping[str, object]) -> float | None:

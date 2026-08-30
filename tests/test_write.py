@@ -12,11 +12,13 @@ from p4p.nt import NTEnum
 
 import epics_mcp.config as config_module
 import epics_mcp.safety as safety_module
+import epics_mcp.tools.write as write_module
 from epics_mcp.config import EpicsConfig
 from epics_mcp.errors import (
     PVTimeoutError,
     PVWriteBoundsError,
     PVWriteDeniedError,
+    PVWriteStepError,
     RateLimitError,
     SafetyConfigError,
 )
@@ -49,6 +51,28 @@ def _reset_singletons() -> Iterator[None]:
     yield
     config_module._config = None
     safety_module._safety = None
+
+
+@pytest.fixture(autouse=True)
+def _pin_write_path_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the two config fields ``_set_pv_value`` reads through ``get_config()``.
+
+    Resetting the singleton above is not enough: the next ``get_config()`` rebuilds ``EpicsConfig``
+    from ``os.environ``, and ``EpicsConfig`` is a ``BaseSettings`` with ``env_prefix="EPICS_MCP_"``,
+    so a developer's shell decides what these tests measure. The autouse strip in ``conftest.py``
+    clears ``EPICS_PVA_*`` and ``EPICS_CA_*`` only.
+
+    MEASURED, not feared, and both directions were run on this tree before this fixture existed:
+    ``EPICS_MCP_MAX_WRITE_STEP=1`` turned FIVE tests in this module red, and
+    ``EPICS_MCP_READBACK_TOLERANCE=1000`` turned ONE red. The second is older than the step limit,
+    so this closes a leak that was already here rather than only the one that arrived with it.
+
+    Patched at ``tools.write``'s own name, the seam the code under test actually reads, rather than
+    at ``config``: the module binds ``get_config`` at import, so patching the source module would
+    leave this call site pointing at the original.
+    """
+    pinned = EpicsConfig(max_write_step=0.0, readback_tolerance=1e-6)
+    monkeypatch.setattr(write_module, "get_config", lambda: pinned)
 
 
 class TestSetPvValueSuccess:
@@ -649,3 +673,183 @@ class TestSetPvValueBounds:
         # Fail-open carries an honest note so the un-checked write is visible.
         assert result["bounds_note"] is not None
         mock_pv_put.assert_awaited_once()
+
+
+class TestSetPvValueStep:
+    """O2b: the SECOND post-admission refusal, off unless ``EPICS_MCP_MAX_WRITE_STEP`` is set.
+
+    Bounds asks whether the value may BE there; this asks whether it may GET there in one write.
+    The autouse ``_pin_write_path_config`` fixture pins the limit to 0 for every OTHER test in this
+    module, so each test here arms it explicitly and nothing leaks between them.
+    """
+
+    @staticmethod
+    def _armed(step: float) -> EpicsConfig:
+        """A config with the step limit armed, every field it decides written out explicitly."""
+        return EpicsConfig(max_write_step=step, readback_tolerance=1e-6)
+
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
+    async def test_oversized_step_refused_before_put(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The case the whole check exists for: IN BOUNDS, and still refused.
+
+        120 is the record's own DRVH, so the drive-limit check admits it. The distance from 80 is
+        40, and the limit is 10. Without this check one wrong setpoint drives the value across the
+        full range in a single write, which is what "a mistake moves something on a plant" means.
+        """
+        monkeypatch.setattr(write_module, "get_config", lambda: self._armed(10.0))
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        mock_pv_get.return_value = {
+            "pv_name": "TEST:PV",
+            "value": 80.0,
+            "control": {"limit_low": 0.0, "limit_high": 120.0, "min_step": 0.0},
+        }
+
+        with (
+            caplog.at_level(logging.INFO, logger="epics_mcp.audit"),
+            pytest.raises(PVWriteStepError) as excinfo,
+        ):
+            await _set_pv_value("TEST:PV", "120")
+
+        # The put NEVER happened: the value never reached the IOC.
+        mock_pv_put.assert_not_awaited()
+        # Its OWN code, never the gate's: a post-admission refusal that wore PV_WRITE_DENIED would
+        # make an un-audited-looking refusal indistinguishable from an audited gate verdict.
+        assert excinfo.value.error_code == "PV_WRITE_STEP_TOO_LARGE"
+        assert "event=STEP_DENY" in caplog.text
+        # Like BOUNDS_DENY (QA-39): a pre-dispatch refusal carries NO op= token, because the id is
+        # issued when a write is dispatched and this one never was.
+        assert _audit_events(caplog) == [("STEP_DENY", None)]
+        # A refused-before-put write emits no ATTEMPT/ALLOW/READBACK.
+        assert "event=ATTEMPT" not in caplog.text
+        assert "event=ALLOW" not in caplog.text
+        assert "READBACK" not in caplog.text
+
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
+    async def test_bounds_is_reported_before_step_when_both_fail(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Order pin: out of range is the more fundamental fault and is the one reported.
+
+        130 is both outside [0, 120] and 50 away from 80. A caller told "step too large" would fix
+        the step and hit the range next; told "out of range" they fix the real fault. Red-provable
+        by moving the step block above the bounds block in ``_set_pv_value``.
+        """
+        monkeypatch.setattr(write_module, "get_config", lambda: self._armed(10.0))
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        mock_pv_get.return_value = {
+            "pv_name": "TEST:PV",
+            "value": 80.0,
+            "control": {"limit_low": 0.0, "limit_high": 120.0, "min_step": 0.0},
+        }
+
+        with pytest.raises(PVWriteBoundsError):
+            await _set_pv_value("TEST:PV", "130")
+        mock_pv_put.assert_not_awaited()
+
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
+    async def test_small_step_proceeds_with_no_step_note(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(write_module, "get_config", lambda: self._armed(10.0))
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        control = {"limit_low": 0.0, "limit_high": 120.0, "min_step": 0.0}
+        mock_pv_get.side_effect = [
+            {"pv_name": "TEST:PV", "value": 80.0, "control": control},
+            {"pv_name": "TEST:PV", "value": 85.0, "control": control},
+        ]
+        mock_pv_put.return_value = None
+
+        result = await _set_pv_value("TEST:PV", "85")
+        assert result["status"] == "success"
+        assert result["step_note"] is None
+        mock_pv_put.assert_awaited_once()
+
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
+    async def test_enum_record_is_not_step_checked_and_says_so(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The sanctioned command lane: an armed limit below 1 must not block a reset.
+
+        Built through the real client shape (``_enum_readback``), because the whole branch keys on
+        the ``enum`` block that ``_format_value`` puts there, and a hand-typed dict could assert a
+        pass this code never earns. A limit of 0.5 with an index moving 0 to 1 is exactly the
+        arithmetic that would refuse without the branch.
+        """
+        monkeypatch.setattr(write_module, "get_config", lambda: self._armed(0.5))
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        mock_pv_get.side_effect = [
+            _enum_readback(0, ["Idle", "Reset"]),
+            _enum_readback(1, ["Idle", "Reset"]),
+        ]
+        mock_pv_put.return_value = None
+
+        result = await _set_pv_value("TEST:PV", "1")
+        assert result["status"] == "success"
+        mock_pv_put.assert_awaited_once()
+        assert isinstance(result["step_note"], str) and "enum" in result["step_note"]
+
+    @patch("epics_mcp.tools.write.pv_put", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.pv_get", new_callable=AsyncMock)
+    @patch("epics_mcp.tools.write.get_safety")
+    async def test_unset_limit_checks_nothing_and_says_nothing(
+        self,
+        mock_get_safety: MagicMock,
+        mock_pv_get: AsyncMock,
+        mock_pv_put: AsyncMock,
+    ) -> None:
+        """The shipping posture: no limit configured, so the biggest possible jump goes through.
+
+        This is the pin on "no existing deployment changes behaviour". The autouse fixture already
+        pins the limit to 0, so this test states the default rather than arming anything, and it
+        drives a 0-to-120 write, the widest the record allows.
+        """
+        mock_get_safety.return_value = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        control = {"limit_low": 0.0, "limit_high": 120.0, "min_step": 0.0}
+        mock_pv_get.side_effect = [
+            {"pv_name": "TEST:PV", "value": 0.0, "control": control},
+            {"pv_name": "TEST:PV", "value": 120.0, "control": control},
+        ]
+        mock_pv_put.return_value = None
+
+        result = await _set_pv_value("TEST:PV", "120")
+        assert result["status"] == "success"
+        mock_pv_put.assert_awaited_once()
+        # Silent when the feature is off: no note on every write of a default server.
+        assert result["step_note"] is None

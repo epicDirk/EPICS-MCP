@@ -30,7 +30,9 @@ import os
 
 import pytest
 
-from epics_mcp.errors import PVWriteBoundsError
+import epics_mcp.tools.write as write_module
+from epics_mcp.config import EpicsConfig
+from epics_mcp.errors import PVWriteBoundsError, PVWriteStepError
 from epics_mcp.services.epics_client import pv_get
 from epics_mcp.tools.write import _set_pv_value
 from tests.live_gate import assert_live_available, live_demanded
@@ -161,4 +163,58 @@ class TestLiveWriteBounds:
             )
         finally:
             # Defensive restore: even though the write should never have landed.
+            await _set_pv_value(pv, str(baseline))
+
+
+class TestLiveWriteStep:
+    """The O2b step guard against a real IOC: an oversized JUMP is refused before the put.
+
+    A different class from the bounds probe above, and the difference is the reason this exists: the
+    value driven here is INSIDE the record's drive limits, so the bounds check admits it. Only the
+    distance refuses it, and only a real record can show that nothing landed.
+
+    No new environment variable. The distance comes from the two values the module already needs,
+    the live baseline and ``EPICS_MCP_LIVE_WRITE_VALUE``, and the limit is armed BELOW that
+    distance. The write TARGET is still the named ``EPICS_MCP_LIVE_WRITE_PV`` and is never derived
+    (evidence discipline 7): a probe that writes owns its data space.
+    """
+
+    async def test_oversized_step_is_refused_and_value_unchanged(
+        self, pv: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        target = os.environ.get("EPICS_MCP_LIVE_WRITE_VALUE")
+        assert_live_available(
+            bool(target),
+            "live step probe: set EPICS_MCP_LIVE_WRITE_VALUE to a safe in-range value "
+            "different from the current one; the limit is armed below the resulting distance",
+            demanded=live_demanded(os.environ),
+        )
+        assert target is not None  # narrowed by the gate above
+
+        baseline = await _read_numeric(pv)
+        distance = abs(float(target) - baseline)
+        assert_live_available(
+            distance > 0,
+            "live step probe: EPICS_MCP_LIVE_WRITE_VALUE equals the current value, so there is no "
+            "distance to refuse",
+            demanded=live_demanded(os.environ),
+        )
+
+        # Arm the limit at half the distance the probe is about to drive. Patched at the write
+        # module's own name, the seam _set_pv_value reads, exactly as the unit tests do.
+        armed = EpicsConfig(max_write_step=distance / 2, readback_tolerance=1e-6)
+        monkeypatch.setattr(write_module, "get_config", lambda: armed)
+
+        try:
+            with pytest.raises(PVWriteStepError):
+                await _set_pv_value(pv, target)
+            # And the live value must be UNCHANGED: the put never happened. A missing guard would
+            # have landed the value, so this reads it back and it must equal the baseline.
+            after = await _read_numeric(pv)
+            assert math.isclose(after, baseline, rel_tol=1e-9, abs_tol=1e-9), (
+                f"an over-step value landed at the IOC: {after!r} != baseline {baseline!r}"
+            )
+        finally:
+            # Defensive restore, with the limit lifted so the restore itself cannot be refused.
+            monkeypatch.setattr(write_module, "get_config", lambda: EpicsConfig(max_write_step=0.0))
             await _set_pv_value(pv, str(baseline))

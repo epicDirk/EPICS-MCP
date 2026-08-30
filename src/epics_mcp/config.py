@@ -80,6 +80,27 @@ class EpicsConfig(BaseSettings):
     # the compare magnitude-safe AND value≈0-safe. There is deliberately NO on/off switch: readback
     # is always-on so a silent wrong-write cannot hide (a switch would reopen that hole).
     readback_tolerance: float = Field(default=1e-6, ge=0)
+    # O2b jump limit: the largest DISTANCE one sanctioned write may move a value, in the record's
+    # OWN engineering units. Default 0.0 = DISABLED, the same opt-in shape (and for the same
+    # reason) as read_rate_limit above: an existing deployment's behaviour must not change because
+    # a new field appeared. It is the second post-admission refusal, beside the drive-limit bounds
+    # check, and the two ask different questions: bounds asks whether the value MAY BE there, the
+    # step asks whether it may GET there in one write. A wrong setpoint that lands inside
+    # [DRVL, DRVH] passes bounds and is exactly what this bounds instead.
+    #
+    # WHY A SETTING RATHER THAN A DERIVATION, decided deliberately and written here because the
+    # contract requires the rationale at the field. control_t carries DRVL/DRVH and minStep and NO
+    # max_step, and that absence is not an oversight: a permitted step is a property of how an
+    # operator wants the plant driven, not of the record. Deriving one from the drive limits (say a
+    # fraction of DRVH - DRVL) would dress an operating policy as a record property, and it would
+    # add no information either, since a value already inside the limits can move at most their
+    # width. The absolute form carries what the record cannot know.
+    #
+    # HONEST COST: one number serves the whole write lane. Where the name allowlist admits PVs in
+    # different units, a single limit is coarse. A per-PV table would be a new CONFIGURATION SHAPE
+    # (with empty-semantics of its own to decide, contract point 2) rather than a step limit, so it
+    # is named here and not built.
+    max_write_step: float = Field(default=0.0, ge=0)
 
     # --- Path boundary (opt-in; see paths.resolve_user_path) ---
     # os.pathsep-separated roots that file/dir tool arguments must resolve under.

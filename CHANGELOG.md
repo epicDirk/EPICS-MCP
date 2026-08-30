@@ -9,6 +9,16 @@ carry breaking changes).
 
 ### Added
 
+- **An optional step limit on PV writes: `EPICS_MCP_MAX_WRITE_STEP`.** The largest DISTANCE one
+  write may move a value, in the record's own units. Default `0.0` = disabled, so nothing changes
+  until an operator sets it. It catches what the always-on drive-limit check cannot: a wrong
+  setpoint INSIDE `[DRVL, DRVH]` is in range and still a jump nobody authorised. An oversized step
+  is refused BEFORE the put, with the new `PV_WRITE_STEP_TOO_LARGE` error code and a `STEP_DENY`
+  audit line; nothing reaches the IOC. `set_pv_value` answers with a new `step_note` field: null
+  when the distance was checked and allowed, and also null when no limit is configured; otherwise
+  it names why the distance could not be checked, an enum record above all, whose value is an index
+  rather than a quantity.
+
 - **The shipped operator guide now explains the `epics-doctor` report's own frame.** The header
   line, the `Privacy (ChannelFinder redaction):` block with its two allowlists, and every branch of
   the `Overall:` verdict are documented in a new drift-guarded `verdict-line` region. Before this

@@ -7,7 +7,7 @@ model is meant to FETCH BY ITSELF therefore has to be a tool. A resource is not 
 pulls from, and this guide has been exactly that: complete, guarded against drift, and never
 fetched. The resource stays; this module adds the half a model can reach.
 
-**Why a topic at all, measured rather than assumed.** The guide is around 118 KB. Served from a
+**Why a topic at all, measured rather than assumed.** The guide is around 121 KB. Served from a
 tool returning ``str``, FastMCP 3.4.4 wraps the value in ``{"result": ...}`` and sends it BOTH as
 a text block AND as ``structuredContent``, so the same document crosses the wire twice, the second
 copy JSON-escaped and therefore slightly longer: **one call costs a little over twice the

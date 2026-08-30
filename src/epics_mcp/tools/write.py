@@ -4,9 +4,9 @@ import asyncio
 import itertools
 import logging
 
-from epics_mcp.bounds import check_value_in_bounds
+from epics_mcp.bounds import check_step_within_limit, check_value_in_bounds
 from epics_mcp.config import get_config
-from epics_mcp.errors import EpicsError, PVWriteBoundsError
+from epics_mcp.errors import EpicsError, PVWriteBoundsError, PVWriteStepError
 from epics_mcp.readback import ReadbackVerification, WriteResult, verify_readback
 from epics_mcp.safety import get_safety
 from epics_mcp.services.epics_client import pv_get, pv_put
@@ -58,6 +58,29 @@ async def _set_pv_value(
                 "value": value,
                 "limit_low": bounds.limit_low,
                 "limit_high": bounds.limit_high,
+            },
+        )
+
+    # O2b step limit (opt-in, pre-put). The SECOND post-admission refusal, and it asks a different
+    # question from the one above: bounds asks whether the value may BE there, this asks whether it
+    # may GET there in one write. A wrong setpoint that lands inside [DRVL, DRVH] passes bounds and
+    # is exactly the case this catches. It runs AFTER bounds on purpose: an out-of-range value is
+    # the more fundamental fault and should be reported as one, not as an oversized step. Reuses the
+    # same pre-read `old`, so still no extra pv_get. OFF unless EPICS_MCP_MAX_WRITE_STEP is set, so
+    # an existing deployment behaves exactly as before; an enum record, a missing or non-finite
+    # current value, or a non-numeric written value are not step-checkable and the write proceeds
+    # (fail-open) with an honest note.
+    step = check_step_within_limit(value, old, get_config().max_write_step)
+    if step.within_limit is False:
+        safety.audit_step_deny(pv_name, value, step.step, step.limit)
+        raise PVWriteStepError(
+            f"Writing {value!r} to PV '{pv_name}' moves it by {step.step}, which exceeds the "
+            f"configured step limit {step.limit} (EPICS_MCP_MAX_WRITE_STEP), write refused.",
+            details={
+                "pv_name": pv_name,
+                "value": value,
+                "step": step.step,
+                "limit": step.limit,
             },
         )
 
@@ -130,4 +153,5 @@ async def _set_pv_value(
         tolerance=verification.tolerance,
         note=verification.note,
         bounds_note=bounds.note,
+        step_note=step.note,
     ).model_dump()

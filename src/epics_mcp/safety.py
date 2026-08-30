@@ -48,14 +48,17 @@ class SafetyLayer:
        construction (fail-closed), never a silent allow-all.
     3. Rate limit: at most ``write_rate_limit`` writes per 60 s window.
 
-    A write the gate ADMITS can still be refused, and that refusal is deliberately not a fourth
-    check here: :func:`bounds.check_value_in_bounds` rejects a value outside the record's own drive
-    limits (``BOUNDS_DENY``, see :meth:`audit_bounds_deny`). It runs on data fetched AFTER
-    admission, so it has already spent a rate token, which is why it carries its own event instead
-    of a ``DENY``. ``docs/write-gate-contract.md`` point 4 requires that such a post-admission
-    refusal be enumerated wherever the gate is described rather than filed under one of the three,
-    and this paragraph is that enumeration for the count above: three gate checks, one further
-    refusal. The start conditions are a third category again and are listed in ``__init__``.
+    A write the gate ADMITS can still be refused, and those refusals are deliberately not further
+    checks here. :func:`bounds.check_value_in_bounds` rejects a value outside the record's own
+    drive limits (``BOUNDS_DENY``, see :meth:`audit_bounds_deny`), and
+    :func:`bounds.check_step_within_limit` rejects a value that moves too FAR in one write
+    (``STEP_DENY``, see :meth:`audit_step_deny`, off unless ``EPICS_MCP_MAX_WRITE_STEP`` is set).
+    Both run on data fetched AFTER admission, so both have already spent a rate token, which is why
+    each carries its own event instead of a ``DENY``. ``docs/write-gate-contract.md`` point 4
+    requires that such a post-admission refusal be enumerated wherever the gate is described rather
+    than filed under one of the three, and this paragraph is that enumeration for the count above:
+    three gate checks, two further refusals. The start conditions are a third category again and
+    are listed in ``__init__``.
     """
 
     _WINDOW_SECONDS = 60.0
@@ -302,6 +305,34 @@ class SafetyLayer:
             written,
             readback_value,
             operation_id,
+            caller,
+        )
+
+    def audit_step_deny(
+        self,
+        pv_name: str,
+        value: object,
+        step: object,
+        limit: object,
+        caller: str = "set_pv_value",
+    ) -> None:
+        """Log a write REFUSED because it moves the value further than the step limit allows.
+
+        ``event=STEP_DENY``: the PV passed the name/rate gate and the value is inside the record's
+        drive limits, but the DISTANCE from the current value exceeds ``EPICS_MCP_MAX_WRITE_STEP``,
+        so the put is refused BEFORE the I/O and nothing reaches the IOC. The sibling of
+        :meth:`audit_bounds_deny` and, like it, deliberately NOT routed through :meth:`_audit_deny`:
+        both happen AFTER the pre-read, so both have spent a rate token, unlike a gate denial. That
+        also keeps this call site out of the ``_audit_deny`` census, which is what makes "the PV
+        gate is three checks wide" stay true while a second post-admission refusal exists.
+        Distances and limits are numeric metadata, never free text.
+        """
+        self._emit(
+            "PV_WRITE event=STEP_DENY pv=%s value=%r step=%r limit=%r caller=%s",
+            pv_name,
+            value,
+            step,
+            limit,
             caller,
         )
 

@@ -37,6 +37,22 @@ async def test_bounds_error_renders_its_own_code() -> None:
         await boom()
 
 
+async def test_step_error_renders_its_own_code() -> None:
+    """O2b: PVWriteStepError subclasses PVWriteDeniedError but must render its OWN error_code
+    (PV_WRITE_STEP_TOO_LARGE), not the parent's PV_WRITE_DENIED. Same trap as the bounds error,
+    and it matters more than style here: a post-admission refusal wearing a GATE's audited code
+    would make an un-audited-looking refusal indistinguishable from an audited gate verdict, which
+    write-gate contract point 4 forbids."""
+    from epics_mcp.errors import PVWriteStepError
+
+    @translate_epics_errors
+    async def boom() -> str:
+        raise PVWriteStepError("step too large")
+
+    with pytest.raises(ToolError, match=r"\[PV_WRITE_STEP_TOO_LARGE\] step too large"):
+        await boom()
+
+
 async def test_generic_exception_is_confined_to_the_class_name_and_logged(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

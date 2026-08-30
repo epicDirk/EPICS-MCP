@@ -50,6 +50,30 @@ class PVWriteBoundsError(PVWriteDeniedError):
         EpicsError.__init__(self, message, error_code="PV_WRITE_OUT_OF_BOUNDS", details=details)
 
 
+class PVWriteStepError(PVWriteDeniedError):
+    """Raised when a PV write moves the value further than the configured step limit allows.
+
+    The third distinct denial reason on this path, and the second POST-ADMISSION one. The PV is in
+    the write allowlist and the target value is inside the record's drive limits, but the DISTANCE
+    from the current value exceeds ``EPICS_MCP_MAX_WRITE_STEP``. Bounds asks "may the value be
+    there"; this asks "may it get there in one write".
+
+    Same shape as :class:`PVWriteBoundsError`, and the shape is load-bearing rather than stylistic:
+
+    * ``EpicsError.__init__`` is called DIRECTLY, never ``super().__init__``, because
+      ``PVWriteDeniedError.__init__`` hardcodes ``error_code="PV_WRITE_DENIED"``. Inheriting that
+      code would make a post-admission refusal wear a GATE's audited code, which write-gate
+      contract point 4 forbids, and ``test_no_pre_gate_refusal_carries_a_gate_error_code`` would
+      report this class the moment it is raised in ``tools/``.
+    * The signature stays ``(message, details=None)``. That guard probes a class by constructing it
+      with a single string; a required keyword would raise ``TypeError`` there and drop this class
+      out of the scanned population SILENTLY, which is worse than a red test.
+    """
+
+    def __init__(self, message: str, details: dict[str, object] | None = None) -> None:
+        EpicsError.__init__(self, message, error_code="PV_WRITE_STEP_TOO_LARGE", details=details)
+
+
 class OlogWriteDeniedError(EpicsError):
     """Raised when an Olog logbook write is rejected by the Olog write gate.
 

@@ -127,8 +127,8 @@ this PV was in alarm" is a join this server does not yet make.
   itself, because that probe is the answer it exists to give. Its four explanatory planes go
   through the shared `checkers` queries like every other caller.
 - The server **reads by default and mutates only through a gate.** `set_pv_value` is triple-gated
-  (a further refusal, the drive-limit bounds check, runs AFTER the gate admits the write and is
-  therefore not a fourth gate), and the four Olog write tools (`create_log_entry`, `reply_to_log`,
+  (two further refusals, the drive-limit bounds check and the opt-in step limit, run AFTER the gate
+  admits the write and are therefore not a fourth and fifth gate), and the four Olog write tools (`create_log_entry`, `reply_to_log`,
   `add_log_attachment` and `update_log_entry`, the last two of which MUTATE an existing entry) sit
   behind their own, separate gate of six checks. The two differ in who bounds their reach, and the difference is load-bearing:
   enabling PV write forces a loopback-only EPICS search reach and the process refuses to start

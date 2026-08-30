@@ -226,6 +226,7 @@ _INDEXED_FIELDS = frozenset(
         "shown_by_display_capped",
         "state",
         "status",
+        "step_note",
         "tolerance",
         "total",
         "total_matches",

@@ -445,6 +445,28 @@ class TestAuditBoundsDeny:
         assert "limit_low=0.0" in caplog.text
         assert "limit_high=120.0" in caplog.text
 
+    def test_step_deny_emits_record(self, caplog: pytest.LogCaptureFixture) -> None:
+        """The second post-admission refusal gets its OWN event, not a DENY and not a BOUNDS_DENY.
+
+        Its own event because it is its own fault: a caller told BOUNDS_DENY would look for a value
+        outside the drive limits and find one inside them. Metadata only, the distance and the
+        limit as numbers.
+        """
+        sl = SafetyLayer(
+            EpicsConfig(allow_pv_write=True, pv_write_pattern=r".*", write_rate_limit=10)
+        )
+        with caplog.at_level(logging.INFO, logger="epics_mcp.audit"):
+            sl.audit_step_deny("TEST:pv", "120", 40.0, 10.0)
+
+        assert "event=STEP_DENY" in caplog.text
+        assert "pv=TEST:pv" in caplog.text
+        assert "value='120'" in caplog.text
+        assert "step=40.0" in caplog.text
+        assert "limit=10.0" in caplog.text
+        # Not a gate verdict: it must not borrow either of the two events that ARE one.
+        assert "event=DENY" not in caplog.text
+        assert "event=BOUNDS_DENY" not in caplog.text
+
 
 class TestSafetyConfig:
     """Fail-closed config validation plus a thread-safe singleton."""

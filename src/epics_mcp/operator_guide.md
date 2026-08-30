@@ -250,7 +250,7 @@ explanation. Ask `get_guide` for the topic named beside the field.
 | `shown_by_display` · `shown_by_display_capped` · `total` | `err-displays` |
 | `state` · `likely_cause` · `confidence` · `evidence` · `next_steps` | `err-pv` |
 | `registered` · `withheld` | `err-pv` |
-| `new_value` · `old_value` · `readback` · `verified` · `tolerance` · `bounds_note` | `pv-write` |
+| `new_value` · `old_value` · `readback` · `verified` · `tolerance` · `bounds_note` · `step_note` | `pv-write` |
 | `status` · `note` (of a PV write, not of an archived sample or a plane) | `pv-write` |
 | `attachment_count` | `olog-output` |
 | `total_matches` · `default_level` | `olog-filters` |
@@ -382,7 +382,7 @@ If the put RAISES, there is no readback and no `verified` at all: the tool call 
 line is `FAILED`, and the caller gets an error rather than a result. Do not go looking for
 `verified` in that case, and do not read its absence as success.
 
-**All nine fields a write answers with, and which two of them are the measurement.** Four describe
+**All ten fields a write answers with, and which two of them are the measurement.** Four describe
 the REQUEST and are not evidence that anything landed. `status` is `"success"` once the put
 executed and was ALLOW-audited: a statement about the PUT, not about the value, and it stays
 `"success"` on a readback mismatch, because the write DID happen and a wrong value may now sit at
@@ -399,9 +399,13 @@ epsilon feeds a RELATIVE axis as well, which is not reported, so a large value c
 differing by far more than `tolerance` (measured: writing 10000 and reading back 10010 is
 `verified: true` with `tolerance: 0.001`). Read `verified`, do not recompute it. `bounds_note` is
 null when the value was checked against the record's own drive limits, and otherwise names the
-reason it could not be, a deliberate fail-open. So the pair to read for "did it land" is `readback`
-with `verified`; reading `status` with `new_value` answers a different question, namely whether
-this server sent it.
+reason it could not be, a deliberate fail-open. `step_note` is the same idea for the DISTANCE the
+write moved the value, and it reads null in two different situations that are not distinguished
+here: the distance was checked and allowed, or no `EPICS_MCP_MAX_WRITE_STEP` is configured, which
+is the shipping default. Where it is not null it names why the distance was not checked, an enum
+record above all, whose value is an index rather than a quantity. So the pair to read for "did it
+land" is `readback` with `verified`; reading `status` with `new_value` answers a different
+question, namely whether this server sent it.
 
 ⚠️ **Which of those two shapes an IOC refusal takes is NOT measured here.** No live test in this
 project has an IOC decline a write; the access-security material that exists is static, over the
@@ -1412,9 +1416,15 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   DENY line was written, and no rate token was spent, so a retry after fixing the configuration is
   free. `PV_WRITE_OUT_OF_BOUNDS` is a **different event that looks similar**: the gate had already
   ADMITTED the write and the value failed the record's own drive limits (`control` DRVL/DRVH), so
-  nothing reached the IOC but a rate token IS gone and the audit line is `BOUNDS_DENY`. Fix the
-  configuration for the first, the value for the second. It subclasses the denial, so an
-  `except PVWriteDeniedError` catches both and only the code tells them apart.
+  nothing reached the IOC but a rate token IS gone and the audit line is `BOUNDS_DENY`.
+  `PV_WRITE_STEP_TOO_LARGE` is the third, and it is the one that fires on a value the drive limits
+  ALLOW: the gate admitted the write, the target is inside `[DRVL, DRVH]`, and the DISTANCE from
+  the current value exceeds `EPICS_MCP_MAX_WRITE_STEP`. Nothing reached the IOC, a rate token is
+  gone, and the audit line is `STEP_DENY`. Fix the configuration for the first, the value for the
+  second, and for the third either move in smaller writes or have the limit raised. All three
+  subclass the denial, so one `except PVWriteDeniedError` catches every one of them and only the
+  code tells them apart. The step limit is OFF unless `EPICS_MCP_MAX_WRITE_STEP` is set, so on a
+  default server the third code cannot occur at all.
 - **A rate-limit refusal, and the two codes are NOT the same event.** `RATE_LIMIT_EXCEEDED` comes
   from a WRITE gate (PV or Olog), is audited, and means the per-window budget for mutations is
   spent. `READ_RATE_LIMIT_EXCEEDED` comes from the shared REST read throttle in front of every
