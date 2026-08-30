@@ -284,11 +284,23 @@ def main(argv: list[str]) -> int:
         )
         for hit in all_hits:
             sys.stderr.write(f"  {hit}\n")
+    if attempted == 0:
+        # Der letzte Schlitz derselben Klasse, und er ist im Haken erreichbar: ein Commit, der nur
+        # den Waechter und seinen Test anfasst, uebergibt ausschliesslich selbstausgenommene Pfade.
+        # Der Code bleibt 0, denn das Ueberspringen ist gewollt und kein Fehlschlag; still bleibt
+        # es trotzdem nicht, weil ein Aufrufer sonst "nichts gefunden" liest, wo "nichts gelesen"
+        # steht.
+        sys.stderr.write(
+            f"NOTHING TO CHECK: all {len(argv) - 1} given paths are self-exempt, so this run read "
+            "no file at all. That is the absence of a result, not a clean one. The exit code "
+            "stays 0 because skipping these paths is intended, not a failure.\n"
+        )
+        return 0
     if not_judged:
         sys.stderr.write(
-            f"NOT CHECKED: {len(not_judged)} of {attempted} paths could not be read, so this run "
-            "says NOTHING about them. This is not a finding about their content, it is the "
-            "absence of one:\n"
+            f"NOT CHECKED: {len(not_judged)} of the {attempted} paths this run really opened "
+            f"could not be read, out of {len(argv) - 1} given. This says NOTHING about them; it "
+            "is not a finding about their content, it is the absence of one:\n"
         )
         for entry in not_judged:
             sys.stderr.write(f"! {entry}\n")

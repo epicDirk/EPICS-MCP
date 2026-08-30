@@ -363,3 +363,25 @@ def test_the_two_reports_never_share_a_line_prefix(
     assert len(flagged) == 1, f"expected exactly one unread path, got {flagged}"
     assert str(german) in indented[0]
     assert str(probe) in flagged[0]
+
+
+def test_a_run_over_only_exempt_paths_says_so_instead_of_looking_clean(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The last slot of the same defect, found by the post-build QA and reachable from the hook.
+
+    A commit that touches only this guard and its own test hands ``main()`` nothing but
+    self-exempt paths. It then reads no file at all, and before this branch it returned 0 with an
+    empty report, which is indistinguishable from a clean run over a real population.
+
+    The exit code stays 0 on purpose: skipping those paths is the intended behaviour, not a
+    failure, and turning it into a block would stop every commit that touches the guard itself.
+    What changes is that the silence is gone.
+    """
+    exempt = [str(path) for path in _SELF_EXEMPT]
+
+    assert main(["check_language.py", *exempt]) == 0
+
+    reported = capsys.readouterr().err
+    assert "NOTHING TO CHECK" in reported
+    assert str(len(exempt)) in reported
