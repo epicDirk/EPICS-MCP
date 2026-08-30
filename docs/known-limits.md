@@ -152,6 +152,16 @@ What it cannot see, stated because a guard's reach invites over-reading:
   refreshed: this page is deliberately outside the figure guard (see entry 1), so nothing re-runs a
   number written on it, and the sentence does not need one.
 
+⭐ **One entry LEFT this list on 2026-08-30, and it is named rather than quietly deleted.** A file
+that did not decode as UTF-8 was skipped in silence: `scan` returned an empty hit list, and an
+empty hit list means "no German found" to every caller. A path nobody had read was therefore
+indistinguishable from a clean file, and every count taken from this guard was short by however
+many such paths it had been handed. It now raises `Unreadable`, `main` names the path under its
+own heading, and the run ends with **2** rather than 0. ⚠️ **That matters more in this repository
+than in the three siblings that carry the same guard:** this hook has neither a `files:` nor a
+`types:` filter, so it is handed every staged file. Today none of them fails to decode, measured
+over all tracked files; the first one that does will now say so instead of passing green.
+
 And one class it flags although it should not, known and accepted rather than repaired
 (QA 2026-07-28, measured with `german_signals` on each example): **an English proper noun that is
 spelled like a German function word.** "the von Neumann architecture", "the Weil pairing" and

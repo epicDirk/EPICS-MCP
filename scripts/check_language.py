@@ -138,6 +138,26 @@ _SELF_EXEMPT: frozenset[Path] = frozenset(
 )
 
 
+class Unreadable(Exception):
+    """A path this guard could not judge, RAISED rather than returned as an empty hit list.
+
+    An empty list means "no German found" to every caller of :func:`scan`, so a path the guard
+    never opened reads exactly like a clean file. Inside the hook that costs nothing, because
+    pre-commit hands over paths it has just staged and they are readable by construction. Run BY
+    HAND over a tree, this guard is the acceptance net of a translation tranche, and there a
+    silent skip lowers the reported number with nothing said about it.
+
+    Raised rather than reported as one more finding, and that is the load-bearing half: several
+    callers use :func:`scan` directly and take the LENGTH of what comes back. A finding would be
+    counted as one more German line; an exception cannot be mistaken for anything.
+    """
+
+    def __init__(self, path: str, reason: str) -> None:
+        super().__init__(f"{path}:0: {reason}")
+        self.path = path
+        self.reason = reason
+
+
 def german_signals(line: str) -> list[str]:
     """Return the signals *line* trips, empty when it reads as English.
 
@@ -200,11 +220,23 @@ def is_excepted(path: str, line: str, exceptions: list[tuple[str, str]]) -> bool
 
 
 def scan(path: str, exceptions: list[tuple[str, str]]) -> list[str]:
-    """Return ``file:line: signals`` for every line of *path* that reads as German."""
+    """Return ``file:line: signals`` for every line of *path* that reads as German.
+
+    Raises :exc:`Unreadable` when the file cannot be judged at all, rather than returning nothing.
+    The two failures are kept apart because they say different things, and only one of them is
+    about this guard's own population: a decode failure is NOT proof of a binary, and its ordinary
+    shape on Windows is a cp1252-encoded GERMAN file, which is exactly what this guard exists for.
+    """
     try:
         content = Path(path).read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        return []  # binary or unreadable, no prose to judge
+    except UnicodeError as problem:
+        raise Unreadable(
+            path, "not valid UTF-8, so it was NOT checked (a cp1252 German file lands here too)"
+        ) from problem
+    except OSError as problem:
+        raise Unreadable(
+            path, f"could not be read, so it was NOT checked ({problem.strerror})"
+        ) from problem
     hits: list[str] = []
     for lineno, line in enumerate(content.splitlines(), start=1):
         signals = german_signals(line)
@@ -214,13 +246,36 @@ def scan(path: str, exceptions: list[tuple[str, str]]) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    """Scan the staged files in *argv*; return 1 (block the commit) on any German line."""
+    """Scan the staged files in *argv*; return 1 (block the commit) on any German line.
+
+    THREE exit codes rather than two, and the third one is the point of the whole branch. 0 and 1
+    keep their meaning exactly. 2 says the run was not a MEASUREMENT at all: either no paths
+    arrived, or a path could not be read. Whoever counts this output has to be able to tell that
+    apart from a clean tree, because an empty report and an unread tree look identical otherwise.
+
+    The two reports are kept on separate lines for the same reason. A German finding is indented
+    by two spaces, an unread path by an exclamation mark, so a count of the German findings does
+    not silently gain the paths nobody managed to read.
+    """
+    if len(argv) < 2:
+        sys.stderr.write(
+            "check_language.py: no paths were given, so NOTHING was checked. An empty run is not "
+            "a clean run, and returning 0 here would say the opposite. Pass the files to scan, "
+            "for example the output of git ls-files.\n"
+        )
+        return 2
     exceptions = load_exceptions()
     all_hits: list[str] = []
+    not_judged: list[str] = []
+    attempted = 0
     for path in argv[1:]:
         if Path(path).resolve() in _SELF_EXEMPT:
             continue
-        all_hits.extend(scan(path, exceptions))
+        attempted += 1
+        try:
+            all_hits.extend(scan(path, exceptions))
+        except Unreadable as problem:
+            not_judged.append(str(problem))
     if all_hits:
         sys.stderr.write(
             "Blocked: this repository is written in English.\n"
@@ -229,8 +284,16 @@ def main(argv: list[str]) -> int:
         )
         for hit in all_hits:
             sys.stderr.write(f"  {hit}\n")
-        return 1
-    return 0
+    if not_judged:
+        sys.stderr.write(
+            f"NOT CHECKED: {len(not_judged)} of {attempted} paths could not be read, so this run "
+            "says NOTHING about them. This is not a finding about their content, it is the "
+            "absence of one:\n"
+        )
+        for entry in not_judged:
+            sys.stderr.write(f"! {entry}\n")
+        return 2
+    return 1 if all_hits else 0
 
 
 if __name__ == "__main__":

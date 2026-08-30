@@ -27,6 +27,18 @@ carry breaking changes).
 
 ### Changed
 
+- **The language guard no longer reports green over a file it never read.** `scripts/check_language.py`
+  used to catch both a decode failure and an access failure in one branch and return an empty hit
+  list, which every caller reads as "no German found". A path the guard could not open was
+  therefore indistinguishable from a clean file, and every count taken from it was short by
+  however many such paths it had been handed. It now raises `Unreadable`, names the path under its
+  own heading with an exclamation-mark prefix, and exits **2**; a call with no paths at all exits
+  2 as well instead of 0. Two exit codes keep their meaning exactly: 0 is a clean run, 1 is German
+  found. This matters most here, because this repository's hook carries neither a `files:` nor a
+  `types:` filter and is handed every staged file. `docs/known-limits.md` section 9 carries the
+  reach, and the two indented spaces that a tranche measurement counts stay reserved for German
+  findings alone.
+
 - **BREAKING, and both shipped filed under `### Added`: two answers moved on the wire with no
   breaking notice.** In 0.7.0, `has_display` in `coverage_audit` began answering about operator
   SCREENS alone: a PV drawn on a trend and on no `.bob` answered `has_display: yes` and now answers

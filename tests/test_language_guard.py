@@ -250,3 +250,116 @@ def test_main_blocks_and_reports_the_location(
     reported = capsys.readouterr().err
     assert f"{dirty}:2:" in reported
     assert str(clean) not in reported
+
+
+# --------------------------------------------------------------------------------------------
+# [GQ-109] / [GQ-229]: a path the guard cannot read is NAMED, never counted as clean.
+#
+# Appended at the END of this module, and ``Unreadable`` is imported LOCALLY rather than added to
+# the sorted block at the top: a name inserted there pushes every line below it down by one, and
+# other records cite line numbers of this file.
+# --------------------------------------------------------------------------------------------
+
+
+def test_an_undecodable_path_is_named_rather_than_reported_as_clean(tmp_path: Path) -> None:
+    """The defect this pair of entries exists for: an empty hit list means "clean" to a caller.
+
+    ``scan`` used to swallow the decode failure and return nothing, so a path nobody read was
+    indistinguishable from a file with no German in it. Every count taken from this guard was
+    short by however many such paths it had been handed, and nothing said so.
+
+    That matters more here than in the sibling repositories: this hook carries neither a ``files:``
+    nor a ``types:`` filter, so it is handed every staged file, and it was the one most likely to
+    be given something it could not read.
+    """
+    import check_language
+
+    probe = tmp_path / "planted-undecodable"
+    probe.write_bytes(b"# a German comment in cp1252: Gr\x94sse\n")
+
+    with pytest.raises(check_language.Unreadable) as failure:
+        scan(str(probe), [])
+
+    assert str(probe) in str(failure.value)
+    assert "not valid UTF-8" in str(failure.value)
+
+
+def test_a_missing_path_is_named_with_the_reason_the_system_gave(tmp_path: Path) -> None:
+    """The second failure class, kept apart from the first because it says something else.
+
+    "I could not reach the file" and "the file is not UTF-8" are different statements, and only
+    the second one is about this guard's own population. The system's own wording is carried
+    through rather than replaced, so a permission problem does not read like a missing file.
+    """
+    import check_language
+
+    absent = tmp_path / "was-never-written.py"
+
+    with pytest.raises(check_language.Unreadable) as failure:
+        scan(str(absent), [])
+
+    assert str(absent) in str(failure.value)
+    assert "could not be read" in str(failure.value)
+
+
+def test_main_reports_an_unread_path_under_its_own_heading_and_returns_two(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Through ``main()``, the entry point the hook calls, not through a helper.
+
+    Two properties at once, and the clean file goes FIRST so a loop that stops after one file
+    never reaches the probe behind it. The exit code is 2 rather than 1: 1 means this tree carries
+    German, and a run that skipped a file has not established that either way.
+    """
+    clean = tmp_path / "clean.py"
+    clean.write_text("# nothing to see here\n", encoding="utf-8")
+    probe = tmp_path / "planted-undecodable.py"
+    probe.write_bytes(b"# not decodable: \x97\n")
+
+    assert main(["check_language.py", str(clean), str(probe)]) == 2
+
+    reported = capsys.readouterr().err
+    assert "NOT CHECKED" in reported
+    assert f"{probe}:0:" in reported
+    assert str(clean) not in reported
+
+
+def test_a_run_without_any_path_is_not_a_clean_run(capsys: pytest.CaptureFixture[str]) -> None:
+    """The second half, and it cost two handover versions before it was written down.
+
+    ``main`` used to walk an empty argument list and return 0, so a mistyped shell expansion that
+    produced no files reported a clean tree. The hook cannot reach this branch, pre-commit does
+    not start a hook with an empty file list, but a measurement run by hand does.
+    """
+    assert main(["check_language.py"]) == 2
+
+    reported = capsys.readouterr().err
+    assert "NOTHING was checked" in reported
+
+
+def test_the_two_reports_never_share_a_line_prefix(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The counting contract, pinned because a measurement prescription depends on it.
+
+    [GG-3] counts this guard family's German findings by their two leading spaces. An unread path
+    is not a German line, so it must not arrive with that prefix, or every tranche that measures
+    this way quietly gains one German line per file nobody could read.
+    """
+    german = tmp_path / "german.py"
+    # Built from a code point rather than spelled out, so the line that produces the probe is
+    # itself English. An umlaut alone trips the second signal, which is all this row needs.
+    german.write_text("# Gr" + chr(0xF6) + "sse\n", encoding="utf-8")
+    probe = tmp_path / "planted-undecodable.py"
+    probe.write_bytes(b"# not decodable: \x97\n")
+
+    assert main(["check_language.py", str(german), str(probe)]) == 2
+
+    lines = capsys.readouterr().err.splitlines()
+    indented = [line for line in lines if line.startswith("  ")]
+    flagged = [line for line in lines if line.startswith("! ")]
+
+    assert len(indented) == 1, f"expected exactly one German finding, got {indented}"
+    assert len(flagged) == 1, f"expected exactly one unread path, got {flagged}"
+    assert str(german) in indented[0]
+    assert str(probe) in flagged[0]
