@@ -850,6 +850,76 @@ async def test_the_refusal_reaches_a_client_over_the_wire(tmp_path: Path) -> Non
     assert ".bob" in message
 
 
+# --- GQ-27: the corrections inside the pinned engine are anchored, not only made ----------------
+#: The server words the skill repository's ``references/glossary.md`` carries in its ``Never``
+#: column, and which [GQ-12] removed from the engine on 2026-08-24.
+#:
+#: ASSEMBLED FROM PARTS, and that is not decoration. The workspace guard ``glossary_lint`` reads
+#: source the way it reads prose and cannot tell USING a forbidden word from FORBIDDING one; the
+#: same trap caught a workspace script during [GQ-91], and splitting the needle was the fix there
+#: too. It only reports for this repository rather than blocking, but a report nobody can act on
+#: is noise.
+#:
+#: A LITERAL list, and that is a cost decision stated rather than hidden: the glossary lives in a
+#: repository this one does not depend on, so there is nothing to read it from. It ages. The
+#: failure mode of a stale entry is one word checked too many, never a false green.
+_RETIRED_SERVER_WORDS = tuple(
+    head + tail
+    for head, tail in (
+        ("Datei", "-MCP"),
+        ("Live", "-MCP"),
+        ("Python", "-MCP"),
+        ("Datei", "-Server"),
+        ("Datei", "-/Offline-MCP"),
+    )
+)
+
+
+def test_the_pinned_engine_names_no_retired_server_word() -> None:
+    """The [GQ-12] corrections inside ``opi_navigation`` are ANCHORED here, not only made.
+
+    WHY THIS SERVER HOLDS A FOREIGN PACKAGE'S PROSE, and why nobody else can. The engine is
+    pinned by SHA and reaches this repository only through a pin move. Its own repository has no
+    blocking guard for this vocabulary; the workspace one carries this tree as a sibling and
+    therefore only REPORTS. Measured before this test existed: reverting the two corrected
+    comments to their measured-wrong wording turned nothing red anywhere.
+
+    THAT IS THE POINT OF [GQ-27]. A guard message does not become right because somebody repaired
+    one branch, and a corrected line without an anchor is a line that quietly falls back at the
+    next rewrite. Seven corrections of that pass were left unanchored; this is the cheap shape the
+    entry itself names for starting on them.
+
+    THE SHAPE IS THE ONE FROM ``tests/test_checkers.py``: a NEGATIVE assertion over an imported
+    module, the cheapest anchor there is. It says nothing about whether the replacement wording is
+    good, only that the retired one is gone. The vendored fork is excluded BY NAME: it is upstream
+    code, not ours to police.
+    """
+    import opi_navigation
+
+    package_root = Path(opi_navigation.__file__).parent
+    sources = sorted(p for p in package_root.rglob("*.py") if "_vendor" not in p.parts)
+
+    assert sources, (
+        f"the pinned engine at {package_root} exposes no source file, so this guard has measured "
+        f"NOTHING and would stay green over any wording. REPAIR: check the import and the "
+        f"_vendor exclusion in this test before trusting a green run."
+    )
+
+    findings = [
+        f"{path.relative_to(package_root).as_posix()}: {word!r}"
+        for path in sources
+        for word in _RETIRED_SERVER_WORDS
+        if word in path.read_text(encoding="utf-8")
+    ]
+
+    assert not findings, (
+        f"the pinned engine names a retired server word again: {findings}. REPAIR: rewrite the "
+        f"comment in the SKILL repository (opi_navigation), then move the pin here. Do not edit "
+        f"the installed package, and do not drop the word from _RETIRED_SERVER_WORDS to make the "
+        f"run green: that removes the anchor instead of the fault."
+    )
+
+
 # --- The two views (GB-4) ---------------------------------------------------------------------
 # A dataset that separates the cases the two views disagree on. Deliberately richer than
 # ``_dataset``: that one's parent declares no PV of its own, so it can only ever exercise the
