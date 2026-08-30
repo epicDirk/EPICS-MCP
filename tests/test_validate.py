@@ -461,7 +461,7 @@ def _declared_suffix_candidates(declarations: dict[str, object]) -> set[str]:
 
     A MAPPING IS UNFOLDED BY ITS KEYS rather than refused, and that repair came from the review.
     Refusing it made a defect-FREE declaration red: the engine's collecting structure is literally
-    a dict (``eimer = {_BOB_SUFFIX: displays, ...}``), so hoisting it to a module constant, the
+    a dict (``buckets = {_BOB_SUFFIX: displays, ...}``), so hoisting it to a module constant, the
     most natural refactor there is, turned this guard red while nothing was wrong. That is exactly
     the counter-force the rebuild set out to avoid, reintroduced by the shape check.
 
@@ -508,7 +508,7 @@ def _engine_literal_candidates() -> set[str]:
 
     ⚠️ THIS EXISTS BECAUSE THE DECLARATION SWEEP ALONE WAS PROVEN INSUFFICIENT, and the proof came
     from the review rather than from reasoning. A widening written as an inline literal inside the
-    collecting dict (``eimer = {_BOB_SUFFIX: displays, ".json": displays, ...}``) declares nothing
+    collecting dict (``buckets = {_BOB_SUFFIX: displays, ".json": displays, ...}``) declares nothing
     at module level, so it entered no candidate set: measured against a mutated engine, the entire
     suite stayed green while the engine collected ``.json`` and this server refused it. That is
     the GB-79 defect itself, alive again one rename away from the shape GB-91 closed.
@@ -601,11 +601,16 @@ def test_our_suffixes_are_exactly_the_engines_collecting_suffixes(tmp_path: Path
     be a name exception list that blinds it again. So the declarations only supply CANDIDATES;
     which of them the engine actually collects is answered by running ``find_repo_files`` over a
     directory of probe files. Measured 2026-08-15, that function decides purely on the suffix
-    (``eimer.get(candidate.suffix.lower())``, no parsing), so a probe of any content is a valid
+    (``buckets.get(candidate.suffix.lower())``, no parsing), so a probe of any content is a valid
     question, and ``extraction._TREND_TARGET_SUFFIX`` is simply not collected rather than a false
-    alarm. (``eimer`` is the engine's own identifier. The engine is a German-language package, and
-    these are quotations of its source: translating a symbol name inside a quotation would make the
-    quotation wrong and unfindable by grep. Every word this repository writes is still English.)
+    alarm. (``buckets`` is the engine's own identifier, and it read ``eimer`` until [GG-10] engine
+    charge 3 translated ``discovery.py`` on 2026-08-30. These are quotations of engine source, and
+    such a quotation moves WITH the engine and only with it: translating one early makes it wrong
+    and unfindable by grep, and leaving one behind does exactly the same. ⚠️ THE SECOND HALF IS
+    WHAT HAPPENED HERE: the charge renamed the identifier, pulled the pin of this repository to it,
+    and these four quotations stayed German for one commit. No gate saw it, because a quotation in
+    prose is what neither the language guard nor the pin consistency test reads. Every word this
+    repository writes is still English.)
 
     The equality then states both halves. A suffix the ENGINE gains reddens it, because we would
     refuse files the inventory reads, which is the GB-79 defect itself. A suffix WE accept and the
