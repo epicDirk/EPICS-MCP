@@ -239,6 +239,23 @@ State this plainly where the gate is described, because the word "gate" invites 
   in-memory assertion alone: an in-memory-only deny test proves the branch, not that the gate fires against
   the wire. A gate whose refusals are only asserted in prose, never observed going red, has a documented
   promise, not a verified one.
+- **The raw write call is reachable only from places somebody REGISTERED, inside this distribution.**
+  This does not narrow the scope statement this point opens with: a caller outside the process still
+  reaches the target without the gate, by construction. What is guarded is the layer this distribution
+  owns, and it is stated positively rather than as a count.
+  `tests/test_write_gate_contract.py` registers every call site of the raw put under `src/epics_mcp`,
+  each with the reason that module may hold one; an unregistered call site fails the build, a
+  registered one that no longer exists fails it too, and the registered site is additionally checked
+  to call the gate first, in the same function, above the put. The scan reads function bodies, so a
+  call reached through a function-local import is seen.
+  ⚠️ **Say the reach wherever this is described, because the limit is structural rather than an
+  oversight: there is no place that sees both trees at every commit.** A scan here never sees a caller
+  that lives in another repository, and a scan there does not run on a commit that touches only this
+  one. **One such caller exists today**, a sanctioned bypass outside this distribution which
+  re-checks the write allowlist itself before every put. It is named here by its KIND and never by a
+  path or a target name, because this repository stays facility-agnostic. Which is also why the claim
+  is positive: "the raw put has one caller" would have shipped as false the day that caller was
+  written, while a registry of call sites stays true whatever lives outside it.
 
 **Honest limit:** points 1-5 are enforceable in code and are drift-guarded per gate by
 `tests/test_write_gate_contract.py`; point 6 and the empty-semantics *rationale* of point 2 are **prose**,

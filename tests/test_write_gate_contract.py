@@ -8,7 +8,9 @@ verdict; (5) a fail-closed reach/URL boundary where the surface has network reac
 scope statement plus **every deny path must be red-provable**.
 
 This module is point 6 made executable, and it is the template a THIRD write surface inherits.
-It has two halves that must agree:
+Its parts are described here WITHOUT a count, and that is a repair rather than a preference: this
+docstring said "two halves" while the file carried five section banners, two of which are numbered
+"Half 3". A figure nothing derives is the kind that rots, and this one had. What the parts do:
 
 * **Executable rows**: :data:`DENY_PATHS` lists every way each gate can refuse. Each row is driven
   for real and checked on four axes: the typed exception, its machine-readable ``error_code``,
@@ -17,6 +19,13 @@ It has two halves that must agree:
 * **A drift guard**: the AST scan counts the ``_audit_deny`` call sites per gate module and
   compares them against the same canonical map. A new deny path that nobody registered here fails
   the build instead of shipping untested.
+* **The rule that drift guard cannot see**: a refusal raised ABOVE a gate writes no audit line, so
+  it must not wear a gate's audited error code.
+* **The prose numbers**: what a counted claim about a gate's width says, against what the gate has.
+* **The refuse-to-start conditions**: how many of them a gate really has, read off the code.
+* **The raw put's reach**: every call site of the raw put INSIDE this distribution is registered
+  with a named reason, and the registered site runs the gate first. It does not claim the put is
+  unreachable from outside, which contract point 6 declares out of reach by construction.
 
 The two gates deliberately differ where the contract says the shape is a per-surface choice:
 the PV gate *refuses to start* on an empty name-pattern and emits ATTEMPT/UNKNOWN around its
@@ -1507,4 +1516,221 @@ def test_every_start_condition_count_matches_the_gate() -> None:
         "docs/write-gate-contract.md, where tests/test_gate_lists.py counts them against this "
         "same measurement, so correct the words there in the same change or that guard goes "
         "red next."
+    )
+
+
+# ======================================================================================
+# The raw put's REACH: every call site inside this distribution is registered
+# ======================================================================================
+#
+# Deliberately named rather than numbered. The numbered sections above are not a sequence any
+# more (two of them carry the same number), and adding a third one of those would extend a
+# defect instead of a guard.
+#
+# WHAT THIS DOES NOT CLAIM. Contract point 6 states that a caller with a shell, or with the write
+# library this server depends on in order to run, reaches the same target WITHOUT passing the
+# gate, and that this is the gate's SHAPE rather than a hole to be patched inside the server. So
+# nothing here claims the raw put is unreachable.
+#
+# WHAT IT DOES CLAIM, positively, because the negative form was measured FALSE. "pv_put has
+# exactly one caller" is not true of the world: a caller exists OUTSIDE this distribution, in a
+# separate tree, a sanctioned bypass that re-checks the write allowlist itself before every put.
+# Writing the negative sentence into the contract would ship a promise the code cannot keep. What
+# a scan of this distribution CAN establish is the positive one:
+#
+#     every call site of ``pv_put`` inside this package is REGISTERED and carries a named reason,
+#     and an unregistered one fails the build.
+#
+# A registry stays true whatever lives outside it, and it makes the next call site a deliberate
+# act with a written reason rather than an import nobody reviewed.
+
+#: Every call site of the raw put inside this distribution, keyed by the module's path relative to
+#: the package root, valued with WHY that module may hold one.
+RAW_PUT_CALL_SITES: dict[str, str] = {
+    "tools/write.py": (
+        "the gated write path: check_write_allowed runs first, in the same function, with the "
+        "value-bounds refusal between it and the put"
+    ),
+}
+
+#: The raw put, and the gate call that has to precede it. Named once so a rename breaks the
+#: anchor assertions below LOUDLY rather than emptying the scan.
+_RAW_PUT = "pv_put"
+_GATE_CALL = "check_write_allowed"
+_RAW_PUT_MODULE = "services/epics_client.py"
+
+
+def _package_modules() -> list[Path]:
+    """Every module of the package, RECURSIVELY.
+
+    Written here rather than borrowed, and the reason belongs beside it: none of this suite's
+    shared helpers (``prose_numbers``, ``gate_lists``, ``conftest``, ``engine_gate``,
+    ``live_gate``) carries a walker, and the test modules that do have one cannot be imported from
+    here without a cycle (``test_prose_counters`` and ``test_gate_lists`` both import THIS module).
+
+    Recursive on purpose: ``_discover_gate_modules`` above globs the package root FLAT, which is
+    right for the gate modules that live there, and would miss the raw put entirely, since it
+    lives one directory down in ``services/``.
+    """
+    return sorted(
+        path for path in _GATE_PACKAGE_DIR.rglob("*.py") if "__pycache__" not in path.parts
+    )
+
+
+def _module_label(path: Path) -> str:
+    """A module's path relative to the package root, the key ``RAW_PUT_CALL_SITES`` uses."""
+    return path.relative_to(_GATE_PACKAGE_DIR).as_posix()
+
+
+def _calls_of(tree: ast.AST, name: str) -> list[ast.Call]:
+    """Every call of *name* in *tree*, as a bare name or through an attribute.
+
+    Both spellings, because a future caller may import the name (``pv_put(...)``) or reach it
+    through its module (``epics_client.pv_put(...)``), and the second one is exactly the form a
+    reader would expect a name-only scan to miss.
+    """
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Name) and node.func.id == name)
+            or (isinstance(node.func, ast.Attribute) and node.func.attr == name)
+        )
+    ]
+
+
+def _raw_put_call_sites() -> dict[str, list[int]]:
+    """``{module label: [line numbers]}`` for every call of the raw put in the package.
+
+    ``ast.walk`` descends into function bodies, so a call reached through a FUNCTION-LOCAL import
+    is seen. That is not a detail: the known caller outside this distribution uses exactly that
+    form, deferring the import so the p4p context is built after its environment is bound, and a
+    scan that only read module-level imports would report it as absent.
+
+    The definition module is excluded from the RESULT (defining the function is not calling it)
+    but is asserted to exist, so a rename empties nothing silently.
+    """
+    definition_seen = False
+    sites: dict[str, list[int]] = {}
+    for path in _package_modules():
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        label = _module_label(path)
+        if label == _RAW_PUT_MODULE:
+            definition_seen = any(
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == _RAW_PUT
+                for node in ast.walk(tree)
+            )
+            continue
+        lines = [node.lineno for node in _calls_of(tree, _RAW_PUT)]
+        if lines:
+            sites[label] = sorted(lines)
+    assert definition_seen, (
+        f"{_RAW_PUT_MODULE} no longer defines {_RAW_PUT!r}; the anchor for the reach scan broke. "
+        "An empty scan would read exactly like 'nothing calls the raw put', which is the one "
+        "conclusion this guard must never reach by accident."
+    )
+    return sites
+
+
+def test_every_raw_put_call_site_is_registered() -> None:
+    """Every call of the raw put inside this package is in ``RAW_PUT_CALL_SITES``, and vice versa.
+
+    Both directions, for the reason ``test_canonical_map_covers_every_audited_deny_call_site``
+    gives for the deny paths: an unregistered call site is a gate bypass nobody reviewed, and a
+    registered one that no longer exists is a reason still standing for code that is gone.
+
+    HONEST LIMITS, so nobody reads more into a green run than it proves:
+
+    * It sees ``src/epics_mcp`` and nothing else. A caller in ``tests/``, in a script, or in
+      another repository is outside the scan by construction, and one such caller EXISTS (see the
+      section comment). There is no place that sees both trees at every commit: a scan here never
+      sees that caller, and a scan over there does not run on a commit that only touches this
+      package.
+    * Static shapes only. ``getattr(epics_client, "pv_put")``, a star-import, and an
+      ``importlib`` lookup all hide the name this scan resolves, the same class of limit
+      :func:`test_no_pre_gate_refusal_carries_a_gate_error_code` records for its own sweep.
+    * It says WHERE the put is called, never that the call is correct. That the gate runs first is
+      the next test, and that no branch reaches the put without it is
+      ``test_write.py``, where a gate denial is asserted to leave ``pv_put`` un-awaited.
+
+    RED-PROOF: add ``from epics_mcp.services.epics_client import pv_put`` and a call to any module
+    under ``src/epics_mcp`` (a function-local import included, which is the form the outside
+    caller uses) and this reports the unregistered site with its file and line. Delete the
+    ``tools/write.py`` entry from the registry instead and the same test reports it from the other
+    direction.
+    """
+    found = _raw_put_call_sites()
+    unregistered = sorted(set(found) - set(RAW_PUT_CALL_SITES))
+    assert not unregistered, (
+        f"unregistered call site of {_RAW_PUT}: "
+        + ", ".join(f"{label}:{found[label]}" for label in unregistered)
+        + ". The raw put bypasses the write gate by construction, so a new call site is a "
+        "deliberate act: register it in RAW_PUT_CALL_SITES with the reason it may be one, or "
+        "route the write through tools/write.py, which runs the gate first."
+    )
+    vanished = sorted(set(RAW_PUT_CALL_SITES) - set(found))
+    assert not vanished, (
+        "registered call site of "
+        f"{_RAW_PUT} has no call site in the tree: {', '.join(vanished)}. A reason left standing "
+        "for code that is gone reads as coverage; drop the entry in the same change."
+    )
+
+
+def _innermost_function_containing(tree: ast.Module, target: ast.Call) -> ast.AST | None:
+    """The most deeply nested function whose subtree holds *target*, or None at module level.
+
+    "Most deeply nested" is read as the LAST function to start before the call, among those that
+    contain it: an outer function trivially contains everything an inner one does, so asking the
+    outer would let a gate call in the outer acquit a put smuggled into an inner closure.
+    """
+    holders = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and any(child is target for child in ast.walk(node))
+    ]
+    return max(holders, key=lambda node: node.lineno) if holders else None
+
+
+def test_the_registered_call_site_runs_the_gate_first() -> None:
+    """Each registered call site calls the write gate, in the same function, before the put.
+
+    This is the half that makes the registry mean something: an entry saying "the gated write
+    path" is a sentence until something checks that the gate is actually there.
+
+    HONEST LIMIT, and it is the load-bearing one: this reads SOURCE ORDER, not control flow. It
+    establishes that the gate call is written above the put inside the same function, not that
+    every branch reaching the put has executed it. The behavioural half lives in ``test_write.py``,
+    where a gate denial is asserted to leave ``pv_put`` un-awaited; neither test replaces the
+    other.
+
+    RED-PROOF: move the ``safety.check_write_allowed(pv_name)`` line in ``tools/write.py`` below
+    the ``await pv_put(...)`` line and this reports that the gate call does not precede the put.
+    Delete it entirely and the same test reports the gate call as absent.
+    """
+    findings: list[str] = []
+    for label in sorted(RAW_PUT_CALL_SITES):
+        tree = ast.parse((_GATE_PACKAGE_DIR / label).read_text(encoding="utf-8"))
+        for put in _calls_of(tree, _RAW_PUT):
+            holder = _innermost_function_containing(tree, put)
+            if holder is None:
+                findings.append(f"{label}:{put.lineno}: the put is called at module level")
+                continue
+            gates = [call.lineno for call in _calls_of(holder, _GATE_CALL)]
+            if not gates:
+                findings.append(
+                    f"{label}:{put.lineno}: {getattr(holder, 'name', '?')} calls {_RAW_PUT} "
+                    f"without calling {_GATE_CALL} at all"
+                )
+            elif min(gates) >= put.lineno:
+                findings.append(
+                    f"{label}:{put.lineno}: the gate call does not precede the put "
+                    f"({_GATE_CALL} at line {min(gates)})"
+                )
+    assert not findings, (
+        "a registered raw-put call site does not run the write gate first:\n  "
+        + "\n  ".join(findings)
+        + "\n  The gate is what turns a raw put into a sanctioned write; a call site that "
+        "reaches the put without it is the bypass this section exists to stop."
     )
