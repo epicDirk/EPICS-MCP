@@ -19,9 +19,13 @@ holding the copies together and chose this one, keeping the shared hook DEFERRED
 dropping it. It comes back when a fifth copy appears, or when a second defect turns up in a
 part all four spell alike.
 
-This copy was created here at ``706294c`` (2026-07-28). Deliberately no claim is made about
-which repository wrote it first: the commit dates of the four do not agree with the genealogy
-the sibling copies record, and that is reported rather than quietly resolved.
+This copy was created here at ``706294c`` (2026-07-28). Deliberately no claim is made HERE about
+which repository wrote the guard first: that question is settled by measurement in the
+record, not by a sentence in a copy.
+
+Every pointer this text carries has been re-grounded against THIS repository or removed,
+because a pointer that travels with a copy lands in the void. That is also why the four are
+MEANT to differ: each one is written for the tree it guards.
 
 WHY THREE SIGNALS, and why the obvious one alone is a trap. The first sweep searched with
 ``grep [aeoeueAEOEUEss]`` (the umlauts and the eszett) and declared the job done. It had missed 21
