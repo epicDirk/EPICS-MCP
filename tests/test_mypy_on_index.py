@@ -6,9 +6,13 @@ checking the wrong files, which is the failure mode the script exists to prevent
 two claims that carry it are measured here: the tree IS the index, and a reused tree
 never keeps a file the commit removed.
 
-The script is loaded by path rather than imported by name. ``scripts/`` is not on the
-test path in every repository that carries this file, and a ``sys.path`` splice is ruled
-out by QUALITY-STANDARD.md.
+The script is loaded by path rather than imported by name. ``scripts/`` is not an
+importable package, so there is no name to import it by, and loading by path keeps
+THIS repository's own copy under test. The reason given here until 2026-08-31 is
+overtaken: it said a ``sys.path`` splice was ruled out by QUALITY-STANDARD.md.
+``D-20260831-080649 (a)`` reads that clause narrowly, as being about package layout,
+and its own record names the ten places that go false with it. The technique stays;
+only its justification was wrong.
 
 Byte-identical copies of this file live next to each copy of the script; see its
 PROVENANCE block.

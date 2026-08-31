@@ -5,6 +5,24 @@ It was not always. The public fork grew out of a German-speaking project and car
 comments and docstrings for months; removing them took 155 lines across 22 files, translated
 rather than deleted. This guard exists so that is a one-off.
 
+PROVENANCE, and this copy is DELIBERATE rather than an accident nobody noticed. The guard is
+hand-kept in each of the four build repositories of this project: ``CS-Studio-MCP-Plugin``,
+``EPICS-MCP-Server``, the ``opi-foundry`` skill repository and ``cs-studio-mcp``. Measured on
+2026-08-31 against the raw bytes of ``scripts/check_language.py`` in each of them: four
+different hashes. The four differ in their prose, they are MEANT to, and nothing watches that.
+
+Two reasons, and both are decisions on the record rather than oversights. The first is
+mechanical: the sanctioned way to share a guard is one hook published through a
+``.pre-commit-hooks.yaml`` in a source repository, and none of the four has one. There is
+nothing to share FROM. The second is a decision: ``D-20260831-080649 (c)`` weighed five ways of
+holding the copies together and chose this one, keeping the shared hook DEFERRED rather than
+dropping it. It comes back when a fifth copy appears, or when a second defect turns up in a
+part all four spell alike.
+
+This copy was created here at ``706294c`` (2026-07-28). Deliberately no claim is made about
+which repository wrote it first: the commit dates of the four do not agree with the genealogy
+the sibling copies record, and that is reported rather than quietly resolved.
+
 WHY THREE SIGNALS, and why the obvious one alone is a trap. The first sweep searched with
 ``grep [aeoeueAEOEUEss]`` (the umlauts and the eszett) and declared the job done. It had missed 21
 German lines that happen to carry no umlaut, and the miss was invisible: a search that finds

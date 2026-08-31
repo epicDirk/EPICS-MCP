@@ -39,14 +39,16 @@ PATHS. mypy runs with the scratch tree as its working directory and therefore pr
 repository-relative locations (measured: ``src\\foo.py:1: error: ...``). No rewriting is
 needed and error locations stay clickable from the repository root.
 
-PROVENANCE, because a copied file that does not say where it came from is how three
-versions of one guard start drifting apart. Byte-identical copies live in three
+PROVENANCE, because a copied file that does not say where it came from is how
+hand-kept copies of one guard start drifting apart. Byte-identical copies live in three
 repositories, each as ``scripts/mypy_on_index.py``: cs-studio-mcp, EPICS-MCP-Server and
 the opi-foundry skill repository. The file is written in English and pure ASCII so that
 all three accept it (EPICS-MCP-Server enforces both by hook). A reporting guard in the
 opi-foundry workspace compares the three hashes and says so when they diverge; it never
 blocks. The sanctioned alternative, one shared hook via ``.pre-commit-hooks.yaml`` and a
-``rev:`` pin, is currently closed by QUALITY-STANDARD.md.
+``rev:`` pin, is DEFERRED rather than closed: ``D-20260831-080649 (b)`` reads the
+QUALITY-STANDARD clause as barring UPSTREAM hooks only, and (c) defers the shared
+hook to a measured trigger.
 
 EVERYTHING IS INSIDE ``main()`` on purpose. A half-written copy of this file must be a
 syntax error, which is loud, rather than a module that imports cleanly and checks
