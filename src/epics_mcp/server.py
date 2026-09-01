@@ -283,9 +283,11 @@ mcp = FastMCP(
 def _feed_guide_size[F: Callable[..., object]](fn: F) -> F:
     """Replace the GUIDE_KB brace token in *fn*'s docstring with the computed rounding.
 
-    Applied UNDER ``translate_epics_errors``, deliberately: decorators run bottom-up, so the
-    substitution happens first, ``functools.wraps`` copies the already-fed docstring onto the
-    wrapper, and ``mcp.tool`` registers that as the wire description. The figure a caller reads
+    Applied UNDER ``translate_epics_errors``: decorators run bottom-up, so the substitution
+    happens first, ``functools.wraps`` copies the already-fed docstring onto the wrapper, and
+    ``mcp.tool`` registers that as the wire description. Measured, the other order would work
+    too (``wraps`` copies the token and the replace would land on the wrapper); this one is
+    convention, not necessity. The figure a caller reads
     therefore comes from :func:`epics_mcp.tools.guide.rounded_guide_kb`, never from a hand-typed
     copy; ``tests/test_guide_tool.py::test_the_rounded_size_claims_still_hold`` holds the served
     description against its own independent rounding.

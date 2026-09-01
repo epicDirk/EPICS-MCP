@@ -3311,19 +3311,23 @@ async def test_stripped_tool_still_returns_structured_content(
 # machine-readable (the core value of S29) and cost only ~1% more context per agent turn, so the
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
-# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-08-30 after QA-34: the
-# core lane is 77_386 and the full lane 91_471. Both moved because every byte of that edit sits on
-# ``set_pv_value``, a CORE tool, which is the shape that makes the two deltas nearly coincide; the
-# 12-byte difference between them is the pre-existing drift below, not part of the edit.
-# ⚠️ The FULL lane had drifted to 90_902 BEFORE that edit, 30 under the 90_932 recorded here on
-# 2026-08-23, so the +539 against the written figure and the +569 against the measured tree are
-# both true and answer different questions. The drift is not attributable to QA-34, whose earlier
-# commits changed only a same-width figure and two Python comments; it is the fourth time this
-# pair has been found stale, which is what the instruction above exists for.
+# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-09-01 after GQ-231: the
+# core lane is 77_387 and the full lane 91_472, +1 each against QA-34's pair. The whole delta is
+# one re-wrapped paragraph: the get_guide size sentence now carries a substituted token, the line
+# had to re-break for the 100-column limit, one inter-word space became a newline, and a newline
+# is TWO chars in this JSON payload while a space is one. The description's own length held at
+# 1_070 chars, so "the char count held" and "the wire grew by 1" are both true and answer
+# different questions; get_guide is core, hence both lanes.
 # ⚠️ The core figure is
 # measured by dropping those four from the same ``list_tools`` result, not by a core-only install,
 # so it is the payload that lane WOULD emit; the full figure comes straight off the run.
 # (the docstring below carries the deltas, and the
+# pair 77_386 / 91_471 measured 2026-08-30 after QA-34, all of it on ``set_pv_value``, a CORE
+# tool, which is the shape that makes the two deltas nearly coincide, with the 12-byte
+# difference between them being pre-existing drift (the FULL lane had drifted to 90_902 BEFORE
+# that edit, 30 under the recorded 90_932, so QA-34's +539 against the written figure and +569
+# against the measured tree were both true; that drift was the fourth time this pair was found
+# stale, which is what the instruction above exists for), the
 # pair 76_835 / 90_172 measured 2026-08-23 after GQ-21, the
 # pair 76_835 / 89_868 measured 2026-08-19 after GQ-33, the
 # pair 75_883 / 88_746 measured 2026-08-16 after GB-64 (d), the
@@ -3354,10 +3358,13 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 77_386 and the full lane
-    91_471, re-measured 2026-08-30 on both lanes with the display-gated tools excluded for the core
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 77_387 and the full lane
+    91_472, re-measured 2026-09-01 on both lanes with the display-gated tools excluded for the core
     one, since a lane estimated rather than measured is the error the constant's comment records.
-    QA-34 added +551 / +539 against the WRITTEN pair, all of it description text on
+    GQ-231 added +1 / +1: the get_guide size sentence re-wrapped for its substituted token, one
+    space became a newline, and a newline is two chars in the JSON payload (the description's own
+    char count held at 1_070; the constant's comment above carries the split).
+    QA-34 added +551 / +539 against the pair written before it, all of it description text on
     ``set_pv_value``: the step limit's own paragraph, plus the repair of a sentence the same ticket
     had made false ("the write proceeds" for a record with no drive limits, which an armed step
     limit can still refuse). Both lanes move because that tool is core. ⚠️ Against the tree as it

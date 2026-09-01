@@ -583,8 +583,10 @@ async def test_the_rounded_size_claims_still_hold() -> None:
     ``rounded_guide_kb`` in tools/guide.py, so this asserts the RENDERED surfaces, the module
     docstring and the description the server actually lists, against a rounding derived HERE,
     independently: calling ``rounded_guide_kb`` on both sides would make this a tautology that
-    stays green under a tampered computation. Exact equality, no tolerance: a computed figure
-    has no honest reason to be off by even one.
+    stays green under a tampered computation. Independent means the ROUNDING, not the
+    measurement: both sides read the same ``get_guide()`` on purpose, because the claim
+    describes the SERVED document (the raw file is test_guide's and test_packaging's subject).
+    Exact equality, no tolerance: a computed figure has no honest reason to be off by even one.
 
     ⚠️ WHAT IS ASSERTED IS THE SENTENCE, NOT A CONSTANT. The remaining hand-rounded claims are
     parsed out of the prose that makes them and compared against the live measurement within one

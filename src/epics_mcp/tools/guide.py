@@ -302,7 +302,9 @@ def rounded_guide_kb() -> int:
     this function, so no hand-typed copy of the figure exists to rot. Decimal KB and ``round``,
     the unit the claims have always used (see ``_KB`` in ``tests/test_guide_tool.py``); the guard
     there derives the same rounding INDEPENDENTLY, so tampering with this computation goes red
-    rather than moving the claim and its check together.
+    rather than moving the claim and its check together. ``round`` ties half-to-even: at an
+    exact .5 the even neighbour wins, which "around" absorbs; it is named here so the next
+    reader does not file it as a bug.
     """
     return round(len(get_guide().encode("utf-8")) / 1000)
 

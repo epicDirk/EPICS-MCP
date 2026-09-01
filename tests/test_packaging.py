@@ -271,8 +271,9 @@ def test_package_data_ships_in_the_wheel(tmp_path: Path) -> None:
         names = wheel.namelist()
     shipped = sorted(n for n in names if n.startswith("epics_mcp/"))
     assert "epics_mcp/operator_guide.md" in names, (
-        "operator_guide.md missing from the wheel, the guide resource would raise "
-        f"FileNotFoundError in a pip-installed server. Package files: {shipped}"
+        "operator_guide.md missing from the wheel; since GQ-231 a pip-installed server would "
+        "fail at import (tools.guide computes the size figure from it), not merely at the first "
+        f"guide read. Package files: {shipped}"
     )
     assert "epics_mcp/py.typed" in names, (
         "py.typed missing from the wheel, so the Typing :: Typed classifier in pyproject.toml is "
