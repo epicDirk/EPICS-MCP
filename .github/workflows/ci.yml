@@ -1,6 +1,35 @@
 name: CI
 
-on: [push, pull_request]
+# TRIGGER AND CONCURRENCY, changed on 2026-09-01 under GQ-38. Both are hygiene here rather than
+# saving, and saying so is the point: this repository is PUBLIC, so its Actions minutes are free.
+# The three private siblings pay, and their bill is what that ticket is about. What IS measurable
+# here is the double run: dependabot pushes a branch and opens a pull request for the same commit,
+# so today it starts two runs. A branch filter leaves the pull_request one, which is the one a
+# reviewer looks at.
+#
+# THE GROUP KEY CARRIES THE EVENT, and that is not decoration. Under a bare github.ref a run
+# started by hand and a push sit in the SAME group, while cancel-in-progress evaluates to false
+# for a dispatch, so an arriving dispatch neither cancels nor gets cancelled, it just waits behind
+# a run it has nothing to do with. Measured on real runs of 2026-08-09 in the sibling repository
+# epicDirk/opi-foundry: two push runs were caught 6 and 7 seconds later by a dispatch of the same
+# workflow and were NOT cancelled. With the event in the key the two never share a group.
+#
+# workflow_dispatch is new, so the state of this workflow can be measured without producing a real
+# push. That is exactly what was missing in the private siblings while they had no quota left.
+#
+# WHAT THE BRANCH FILTER GIVES UP, named rather than assumed: a push to any branch other than main
+# now starts no run at all, only a pull request does. Measured over 2026-08-09 to 2026-08-16, all
+# 241 runs of the three private repositories sat on their working branch; here the exception is
+# real and it is dependabot, which is precisely the case the filter is meant to halve.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   # Tests on ubuntu-latest: the p4p Linux wheels are the battle-tested ones, and Linux was the OS
