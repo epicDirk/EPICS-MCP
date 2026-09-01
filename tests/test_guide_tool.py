@@ -532,7 +532,9 @@ def test_the_unguarded_pages_do_not_restate_the_size_promise() -> None:
 _KB = 1000
 
 #: How far a rounded word may sit from the measurement and still be honest. One number, applied to
-#: every claim, so nobody can widen the tolerance of the one claim that has gone wrong.
+#: every HAND-rounded claim, so nobody can widen the tolerance of the one claim that has gone
+#: wrong. The whole-document figure takes no tolerance at all since GQ-231: it is computed and
+#: substituted at import, and its guard compares exactly.
 #:
 #: ⚠️ 3, not 5, and the difference is the whole point: the drift this guard exists for moved the
 #: document by 5.2 kB, so a tolerance of 5 would have accepted the stale sentence it was built to
@@ -564,8 +566,8 @@ def _claimed(source: str, pattern: str, where: str) -> float:
     return float(match.group(1))
 
 
-def test_the_rounded_size_claims_still_hold() -> None:
-    """GP-20: the prose rounds, and this measures whether the rounding is still true.
+async def test_the_rounded_size_claims_still_hold() -> None:
+    """GP-20 / GQ-231: the prose rounds, and this measures whether the rounding is still true.
 
     ⛔ WHY ROUNDED AND NOT PINNED. An exact byte count for this document stood in three files,
     eight occurrences over seven lines. It was stale in its OWN commit, which raised the guide by
@@ -575,28 +577,65 @@ def test_the_rounded_size_claims_still_hold() -> None:
     error, and a fourth, the tool inventory, moved by the same 50 B in the same commit. Nothing
     re-ran any of them: measured, no test in this repository checked the size of the guide at all.
 
-    ⚠️ WHAT IS ASSERTED IS THE SENTENCE, NOT A CONSTANT. Each claim is parsed out of the prose that
-    makes it and compared against the live measurement within one shared tolerance. So the two
-    ways this can be wrong are both caught: the guide drifting away from its description, and a
-    description edited to something the guide is not.
+    ⛔ AND WHY THE WHOLE-DOCUMENT FIGURE IS NOW COMPUTED, NOT TYPED (GQ-231). Even the rounded
+    figure tore once (2026-08-30, 3.092 KB past the band) and was pulled back BY HAND, in two
+    files. Both sentences now carry a GUIDE_KB brace token in the source, fed at import from
+    ``rounded_guide_kb`` in tools/guide.py, so this asserts the RENDERED surfaces, the module
+    docstring and the description the server actually lists, against a rounding derived HERE,
+    independently: calling ``rounded_guide_kb`` on both sides would make this a tautology that
+    stays green under a tampered computation. Exact equality, no tolerance: a computed figure
+    has no honest reason to be off by even one.
 
-    ⛔ WHEN THIS GOES RED, EDIT THE PROSE. Widening the tolerance to fit is how the pinned figure
-    survived four sizes; it is one number for all four claims precisely so that it cannot be
-    stretched for whichever one has gone wrong.
+    ⚠️ WHAT IS ASSERTED IS THE SENTENCE, NOT A CONSTANT. The remaining hand-rounded claims are
+    parsed out of the prose that makes them and compared against the live measurement within one
+    shared tolerance. So the two ways this can be wrong are both caught: the guide drifting away
+    from its description, and a description edited to something the guide is not.
+
+    ⛔ WHEN THIS GOES RED ON A HAND-ROUNDED CLAIM, EDIT THE PROSE. Widening the tolerance to fit
+    is how the pinned figure survived four sizes; it is one number for the hand-rounded claims
+    precisely so that it cannot be stretched for whichever one has gone wrong.
     """
     whole_bytes = len(guide_text().encode("utf-8"))
     whole_kb = whole_bytes / _KB
-    claimed_whole = _claimed(_MODULE_DOC, r"guide is around (\d+) KB", "tools/guide.py")
-    assert abs(whole_kb - claimed_whole) <= _ROUNDING_TOLERANCE_KB, (
-        f"the guide measures {whole_bytes} B ({whole_kb:.1f} KB) and tools/guide.py says around "
-        f"{claimed_whole:.0f} KB. Re-word the claim, in tools/guide.py AND in the get_guide "
-        "docstring in server.py, which is the copy a caller reads."
+    expected_kb = round(whole_bytes / _KB)
+    rendered_module = guide_module.__doc__ or ""
+    claimed_whole = _claimed(
+        rendered_module, r"guide is around (\d+) KB", "the rendered tools/guide.py docstring"
     )
-    claimed_by_server = _claimed(_SERVER_DOC, r"document is around (\d+) KB", "server.py")
-    assert claimed_by_server == claimed_whole, (
-        f"the two roundings disagree: server.py says {claimed_by_server:.0f} KB, tools/guide.py "
-        f"says {claimed_whole:.0f} KB. They describe the same document and must not drift apart."
+    assert claimed_whole == expected_kb, (
+        f"the guide measures {whole_bytes} B ({whole_kb:.1f} KB, rounds to {expected_kb}) and the "
+        f"rendered tools/guide.py docstring says around {claimed_whole:.0f} KB. The figure is "
+        "computed by rounded_guide_kb() and substituted at import, so a mismatch means that "
+        "computation or the substitution was tampered with, not that the guide grew."
     )
+    async with Client(mcp) as client:
+        tools = {tool.name: tool for tool in await client.list_tools()}
+    served_description = tools["get_guide"].description or ""
+    claimed_by_server = _claimed(
+        served_description, r"document is around (\d+) KB", "the served get_guide description"
+    )
+    assert claimed_by_server == expected_kb, (
+        f"the served get_guide description says around {claimed_by_server:.0f} KB and the guide "
+        f"measures {whole_bytes} B (rounds to {expected_kb}). The description is fed by "
+        "_feed_guide_size in server.py from rounded_guide_kb(); a mismatch means the feed or the "
+        "computation was tampered with."
+    )
+    # The source ratchet: the figure must not come back as a literal. The SENTENCE must carry the
+    # token, and neither file may carry a hand-typed whole-document figure beside it. Anchored on
+    # the sentence fragment, not on bare token presence: the substitution lines themselves contain
+    # the token as a string literal, so a bare `in` check would stay green with the sentence
+    # de-tokenised (measured while writing the red-proof expectations, not merely suspected).
+    for where, source in (("tools/guide.py", _MODULE_DOC), ("server.py", _SERVER_DOC)):
+        assert re.search(r"around \{GUIDE_KB\} KB", source), (
+            f"the 'around {{GUIDE_KB}} KB' token sentence is gone from {where}, so the size "
+            "sentence there is no longer fed by rounded_guide_kb(). Restore the token; do not "
+            "type the figure."
+        )
+        assert not re.search(r"around \d+ KB", source), (
+            f"a hand-typed 'around NN KB' literal is back in {where}. The whole-document figure "
+            "is computed (GQ-231): carry the GUIDE_KB brace token and let the import substitute "
+            "it, so the sentence cannot rot."
+        )
 
     # The second copy a ``-> str`` return would add. json.dumps is the same escaping the protocol
     # applies, so this measures the cost the ToolResult shape avoids rather than restating it.

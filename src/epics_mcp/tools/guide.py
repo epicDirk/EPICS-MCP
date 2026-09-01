@@ -7,23 +7,28 @@ model is meant to FETCH BY ITSELF therefore has to be a tool. A resource is not 
 pulls from, and this guide has been exactly that: complete, guarded against drift, and never
 fetched. The resource stays; this module adds the half a model can reach.
 
-**Why a topic at all, measured rather than assumed.** The guide is around 121 KB. Served from a
-tool returning ``str``, FastMCP 3.4.4 wraps the value in ``{"result": ...}`` and sends it BOTH as
-a text block AND as ``structuredContent``, so the same document crosses the wire twice, the second
-copy JSON-escaped and therefore slightly longer: **one call costs a little over twice the
-document**. The server side answers that with a ``ToolResult`` carrying one text block and no
+**Why a topic at all, measured rather than assumed.** The guide is around {GUIDE_KB} KB. Served
+from a tool returning ``str``, FastMCP 3.4.4 wraps the value in ``{"result": ...}`` and sends it
+BOTH as a text block AND as ``structuredContent``: the same document crosses the wire twice, the
+second copy JSON-escaped and therefore slightly longer, so **one call costs a little over twice
+the document**. The server side answers that with a ``ToolResult`` carrying one text block and no
 structured payload (see the tool in ``server.py``); this module answers the other half, which is
 that a document this size is still too much to hand over for a question about one error signature.
 
-⚠️ **The sizes here are ROUNDED and DECIMAL, and that is the fix rather than sloppiness.** An
-exact byte count stood in three files, eight times over. It was stale in its own commit, which
-raised the document by 50 B in the same change, and across one day the document took SIX different
-sizes spanning nearly 8 KB in both directions while the pinned figure never moved. A size that
-changes whenever anyone edits a sentence cannot be carried in prose. What IS stable is the RATIO
-(two copies per call), so that is what this paragraph states, and
-``tests/test_guide_tool.py::test_the_rounded_size_claims_still_hold`` reads these very sentences,
-measures the real figures, and goes red when a rounded word here stops being true. Re-measure
-rather than trust: ``len(get_guide().encode("utf-8"))``.
+⚠️ **The sizes here are ROUNDED and DECIMAL, and the whole-document figure above is COMPUTED, not
+typed.** An exact byte count stood in three files, eight times over. It was stale in its own
+commit, which raised the document by 50 B in the same change, and across one day the document took
+SIX different sizes spanning nearly 8 KB in both directions while the pinned figure never moved.
+Even the ROUNDED figure then tore once (measured 2026-08-30, 3.092 KB past its band) and was pulled
+back by hand, in two files. A size that changes whenever anyone edits a sentence cannot be carried
+in prose BY HAND at all: the sentence above therefore holds a ``GUIDE_KB`` token (in braces) in
+the source, replaced at import with the rounding :func:`rounded_guide_kb` computes, and the
+``get_guide`` docstring in ``server.py`` carries the same token fed by the same function, so the
+figure exists in exactly ONE computation. What IS stable is the RATIO (two copies per call), so
+that is what the paragraph above states, and
+``tests/test_guide_tool.py::test_the_rounded_size_claims_still_hold`` measures the ratio, the
+remaining hand-rounded figures, and the substituted figure against its own independent rounding.
+Re-measure rather than trust: ``len(get_guide().encode("utf-8"))``.
 
 **Two levels of key, because one is not enough here.** Splitting only on ``## `` leaves sections
 of 27 KB and more, each larger than a sibling surface's ENTIRE guide. So the keys PARTITION the
@@ -287,3 +292,23 @@ def serve_guide(topic: str | None = None) -> str:
             details={"topic": key, "known_topics": list(TOPICS)},
         )
     return part
+
+
+def rounded_guide_kb() -> int:
+    """The guide's size in whole decimal KB, measured from the served document.
+
+    The ONE computed source of the size claim: the module docstring above and the ``get_guide``
+    tool docstring in ``server.py`` both carry a ``GUIDE_KB`` token in braces and are fed from
+    this function, so no hand-typed copy of the figure exists to rot. Decimal KB and ``round``,
+    the unit the claims have always used (see ``_KB`` in ``tests/test_guide_tool.py``); the guard
+    there derives the same rounding INDEPENDENTLY, so tampering with this computation goes red
+    rather than moving the claim and its check together.
+    """
+    return round(len(get_guide().encode("utf-8")) / 1000)
+
+
+# Feed the module docstring from the computation above. ``str.replace`` rather than ``str.format``,
+# because the docstring carries literal braces in its code examples. This import-time read is the
+# first (cached) call of ``get_guide``; the trade it makes with the read-time-error design is
+# recorded on ``resources.get_guide`` itself.
+__doc__ = (__doc__ or "").replace("{GUIDE_KB}", str(rounded_guide_kb()))

@@ -29,9 +29,12 @@ def get_guide() -> str:
 
     Reads the package-data file ``operator_guide.md`` (a sibling of ``py.typed`` inside the
     package, so hatchling ships it in the wheel and ``importlib.resources`` finds it in both an
-    editable and an installed layout). Only invoked at resource-read time, so a missing file
-    surfaces as a read-time error, never an import crash; ``lru_cache`` does not cache exceptions,
-    so a genuinely absent file re-raises on each call.
+    editable and an installed layout). Invoked at read time AND once at import: ``tools.guide``
+    computes the size figure for the two docstrings from the served text, so a missing file is
+    loud when that module loads rather than at the first call. A deliberate trade, not drift:
+    only a broken installation is missing its own package data, and failing at import names the
+    problem before a caller has invested a session. ``lru_cache`` does not cache exceptions, so
+    a genuinely absent file re-raises on each call.
     """
     return (
         importlib.resources.files("epics_mcp")

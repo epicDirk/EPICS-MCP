@@ -70,6 +70,7 @@ from epics_mcp.tools.channelfinder import _find_channels, _list_channel_vocabula
 from epics_mcp.tools.diagnose_connection import _diagnose_connection
 from epics_mcp.tools.discover import DiscoverPvsResult, _discover_pvs
 from epics_mcp.tools.guide import TOPICS as _GUIDE_TOPICS
+from epics_mcp.tools.guide import rounded_guide_kb as _rounded_guide_kb
 from epics_mcp.tools.guide import serve_guide as _serve_guide
 from epics_mcp.tools.info import _get_pv_info
 from epics_mcp.tools.monitor import _monitor_pv
@@ -279,6 +280,20 @@ mcp = FastMCP(
 # === Tools ===
 
 
+def _feed_guide_size[F: Callable[..., object]](fn: F) -> F:
+    """Replace the GUIDE_KB brace token in *fn*'s docstring with the computed rounding.
+
+    Applied UNDER ``translate_epics_errors``, deliberately: decorators run bottom-up, so the
+    substitution happens first, ``functools.wraps`` copies the already-fed docstring onto the
+    wrapper, and ``mcp.tool`` registers that as the wire description. The figure a caller reads
+    therefore comes from :func:`epics_mcp.tools.guide.rounded_guide_kb`, never from a hand-typed
+    copy; ``tests/test_guide_tool.py::test_the_rounded_size_claims_still_hold`` holds the served
+    description against its own independent rounding.
+    """
+    fn.__doc__ = (fn.__doc__ or "").replace("{GUIDE_KB}", str(_rounded_guide_kb()))
+    return fn
+
+
 @mcp.tool(
     annotations=ToolAnnotations(
         readOnlyHint=True,
@@ -291,6 +306,7 @@ mcp = FastMCP(
     ),
 )
 @translate_epics_errors
+@_feed_guide_size
 async def get_guide(
     topic: Annotated[
         str | None,
@@ -325,10 +341,11 @@ async def get_guide(
     prove. It reads nothing but its own packaged document: no PV, no REST plane, no file of
     yours, so it can neither time out nor depend on how this instance is configured.
 
-    The whole document is around 121 KB, which is why 'topic' exists and why omitting it should be
-    the exception. The keys partition the document: each returns exactly its own part, VERBATIM,
-    so an excerpt is a real excerpt and never a rendering, and the largest single part is under a
-    third of the whole. An unknown topic is refused with [UNKNOWN_TOPIC] naming every valid key.
+    The whole document is around {GUIDE_KB} KB, which is why 'topic' exists and why omitting it
+    should be the exception. The keys partition the document: each returns exactly its own part,
+    VERBATIM, so an excerpt is a real excerpt and never a rendering, and the largest single part
+    is under a third of the whole. An unknown topic is refused with [UNKNOWN_TOPIC] naming every
+    valid key.
 
     The same text is also served as the resource epics://guide, for a human or an application.
     An application has to ask for it, though, which is why this tool exists beside it.
