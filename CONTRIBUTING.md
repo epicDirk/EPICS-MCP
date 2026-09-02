@@ -368,6 +368,15 @@ show a bare `-m live` predate that reading and mean "with the module named".
 explicitly for that reason: a test that picked one from the server's own answer once resolved onto
 a colleague's fixture logbook and left entries in a service with no delete.
 
+An acceptance run of this suite against a real facility exists: on 2026-09-02 the seven read
+modules ran level by level against a production read lane (64 tests, 55 green; each of the 9 red
+ones traced to a target precondition or a single-page fixture assumption rather than a server
+defect; the write modules stayed out as a freshly identified set, and both write gates stayed
+off). The evidence, including the per-level reach protocol and the chosen targets, lives outside
+this repository, in the opi-foundry workspace under
+analysis/gq162-ess-abnahme-2026-09-02/BERICHT.md. That is a prose pointer on purpose: the file is
+not tracked here, so a relative link would break the doc-link test.
+
 ## Code style
 
 Small, focused, deterministic functions; speaking names; comments explain *why*. The
