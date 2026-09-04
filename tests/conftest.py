@@ -21,6 +21,24 @@ from tests.engine_gate import (
     engine_collection_decision,
 )
 
+# A safe default for the BLAS thread arena, so the suite no longer depends on the caller
+# remembering a prefix (see CONTRIBUTING.md, the dev-setup section, for the symptom and the
+# history). ``setdefault``, never an assignment: an explicit value from the caller still wins.
+#
+# WHY IT WORKS HERE AND NOWHERE LATER: OpenBLAS reads this variable when it is loaded, and it
+# arrives through numpy, which arrives through p4p. None of the imports above reaches either
+# (pinned by ``test_conftest_import_closure.py``, which is what keeps this placement true), while
+# a large share of the suite does reach one of them at COLLECTION, which happens after this line.
+# So this is the last moment at which the value is still free to set. (26 test modules on
+# 2026-09-04, dated rather than tracked: the figure grows with the suite and nothing watches it,
+# so a number in the present tense here would rot. The pinned claim is the one above it.)
+#
+# HONEST REACH, because a measure that promises more than it delivers misdirects the next
+# diagnosis: it covers a run that goes through this conftest, and nothing else. A crash during
+# interpreter or plugin start-up happens before this line, and a caller that bypasses pytest
+# (``scripts/guard_audit.py`` is the one in this repository) sets the variable itself.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
 # The display-aware tools and their opi_navigation-coupled tests need the optional
 # `displays` dependency group. When opi_navigation is not installed (a standalone core install),
 # skip those test modules at collection so the core suite still runs, mirroring

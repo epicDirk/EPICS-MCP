@@ -53,12 +53,27 @@ per-clone state outside the tree, so **a fresh clone has no message guard until 
 run**. Verify with `ls .git/hooks/commit-msg`. What it refuses, and what it deliberately does not
 look at, is documented at `scripts/check_commit_message.py`.
 
-⚠️ **If `uv run pytest` exits 1 with no output at all, put `OPENBLAS_NUM_THREADS=1` in front of
-it.** On a machine with many cores the OpenBLAS thread arena, which arrives through numpy, can
-abort the process before pytest prints a single character, so a crashed BLAS looks exactly like a
-crashed test suite. `OPENBLAS_NUM_THREADS=1 uv run pytest` is the whole fix, and it costs nothing
-on a machine that does not have the problem. `scripts/guard_audit.py` already sets the variable for
-the subprocess it drives; this paragraph is the reason it does.
+**The BLAS thread arena, and why `pytest` no longer needs a prefix.** On a machine with many cores
+OpenBLAS, which arrives through numpy, which arrives through p4p, can abort the process before
+pytest prints a single character, so a crashed BLAS looks exactly like a crashed test suite: exit 1
+with no output at all. `tests/conftest.py` now sets `os.environ.setdefault("OPENBLAS_NUM_THREADS",
+"1")` right below its import block, so **a plain `uv run pytest` carries the default itself** and an
+explicit value from the caller still wins. `tests/test_conftest_import_closure.py` pins the one
+thing that placement depends on, that nothing `conftest.py` imports loads a BLAS carrier above that
+line.
+
+⚠️ The prefix still matters for a run that does NOT go through this conftest: anything driving
+pytest as a subprocess, or importing the package outside the suite. `scripts/guard_audit.py` is the
+one such caller in this repository and sets the variable itself; that is why it does.
+
+⚠️ Honest state of the evidence, so the next reader does not over-trust the default. The crash is a
+failed thread-arena allocation and is therefore **not deterministic**: on 2026-09-04 three full
+runs with `OPENBLAS_NUM_THREADS` and `OMP_NUM_THREADS` stripped from the environment were green
+(2837 passed, 78 skipped, about 175 s each), so the setting rests on the earlier occurrences this
+paragraph was written from, not on a crash reproduced the day it was added. Note also that a green
+run proves nothing unless the variable was really absent: a development environment can export it
+for every shell, which is exactly how a run that looks like "without the prefix" can silently have
+it.
 
 **Extra vs group.** `dev` is the only published extra and carries the toolchain. The
 `opi_navigation` PV engine, which the display-aware tools need, is a **dependency group**
