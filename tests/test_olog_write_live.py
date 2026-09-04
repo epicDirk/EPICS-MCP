@@ -2,9 +2,11 @@
 
 Opt-in: ``pytest tests/test_olog_write_live.py -m live`` against a WRITABLE Olog.
 
-This is the live half of ``tests/test_olog_write.py``, which holds the same guard's offline half,
-and it is the only Olog module that had no live partner. That is the whole reason this file exists
-as its own module rather than as one more test somewhere else.
+This is the live half of ``tests/test_olog_write.py``, which holds the same guard's offline half.
+That pairing is the reason this file exists as its own module rather than as one more test
+somewhere else: nine of the live modules already sit opposite an offline module of the same stem,
+and the OQ1 write guard was one of the two Olog surfaces missing that partner (the other is
+``tests/test_olog_update.py``, which still has none and is not this module's business).
 
 WHY IT IS NOT IN ``test_olog_live.py`` ANY MORE
 -----------------------------------------------
@@ -40,7 +42,9 @@ from epics_mcp.services.olog_client import OlogClient
 from tests.live_gate import assert_live_available, live_demanded
 
 #: The write preconditions, read once at import so the gate and the body share one snapshot, the
-#: same shape as the sibling write modules. ``EPICS_MCP_OLOG_URL`` belongs in here and not only in
+#: same MECHANISM as the sibling write modules but deliberately not the same LIST: they demand
+#: five keys including the password, this gate demands four, because this test needs no password
+#: to be correct. ``EPICS_MCP_OLOG_URL`` belongs in here and not only in
 #: the body: the body reads it with ``os.environ[...]``, so a missing value would raise KeyError at
 #: setup instead of skipping. ``EPICS_MCP_OLOG_WRITE_PASSWORD`` deliberately does NOT belong in it,
 #: because the body reads that one with a ``""`` default and a wrong password fails loudly as 401.

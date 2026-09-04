@@ -256,7 +256,7 @@ _PAGE = 200
 _WINDOW_LADDER = (25, 50, 100)
 
 
-def _wire_window(start: str) -> dict[str, str]:
+def _wire_window(start: str, end: str) -> dict[str, str]:
     """The window as ``search_logbook`` puts it ON THE WIRE, for the raw-query helper above.
 
     Not hand-built: Olog cannot read ISO-8601 and does not say so, it degrades an unparseable value
@@ -265,11 +265,11 @@ def _wire_window(start: str) -> dict[str, str]:
     the same window the client-side calls are, which is what makes the two comparable at all.
     """
     params: dict[str, str] = {}
-    OlogClient._add_window(params, start, None)
+    OlogClient._add_window(params, start, end)
     return params
 
 
-def _bounded_corpus(client: OlogClient) -> tuple[str, list[dict[str, object]]] | None:
+def _bounded_corpus(client: OlogClient) -> tuple[str, str, list[dict[str, object]]] | None:
     """A window whose ENTIRE content fits one page, plus that content. ``None`` if none is found.
 
     WHY THE PROBES BELOW NEED THIS. They compare a count read from an unfiltered page against a
@@ -279,14 +279,21 @@ def _bounded_corpus(client: OlogClient) -> tuple[str, list[dict[str, object]]] |
     went red without a server defect and could neither prove nor disprove anything (GQ-279).
     Bounding every query by one derived window restores the identity at any corpus size.
 
+    WHY THE WINDOW IS CLOSED AT BOTH ENDS. An open-ended window is a race against a logbook that
+    is still being written: an entry created between deriving the window and a later query of the
+    same probe lands inside it and flips a count, which would reproduce the very failure class
+    this rebuild removes, only rarer and harder to read. Both ends come from the sample page, so
+    the whole window lies in the past of the run and nothing can enter it. (The first version of
+    this helper set only a start, and this paragraph is the reason it no longer does.)
+
     WHAT PROVES THE BOUND, and it is deliberately not ``hitCount``. ``capped`` comes from the extra
     element ``search_logbook`` requests on purpose, so it answers "did this result fit" from the
     page itself. ``hitCount`` is an Elasticsearch total, and Olog does not ask for an exact one, so
     on a large enough corpus it is a ceiling rather than a count. It is still used below, but only
     inside the window, where the number is small and the ceiling cannot be reached.
 
-    The boundary is DERIVED FROM DATA, never from the clock, which is this file's standing promise:
-    the same corpus yields the same window on every run.
+    The boundary is DERIVED FROM DATA, never from the clock, which is this file's standing promise.
+    Inclusivity of either end does not matter, because every query of a probe uses the SAME pair.
     """
     for sample in _WINDOW_LADDER:
         page, _capped, _total = client.search_logbook(size=sample, sort="down")
@@ -295,12 +302,12 @@ def _bounded_corpus(client: OlogClient) -> tuple[str, list[dict[str, object]]] |
         stamps = [int(str(e["createdDate"])) for e in page if e.get("createdDate") is not None]
         if not stamps:
             return None
-        start = _iso_from_ms(min(stamps))
-        whole, capped, _t = client.search_logbook(start=start, size=_PAGE, sort="down")
+        start, end = _iso_from_ms(min(stamps)), _iso_from_ms(max(stamps))
+        whole, capped, _t = client.search_logbook(start=start, end=end, size=_PAGE, sort="down")
         if capped:
             return None  # even the smallest sample overflows the page; a larger one cannot help
         if len({str(e["level"]) for e in whole if e.get("level")}) >= 2:
-            return start, whole
+            return start, end, whole
     return None
 
 
@@ -327,12 +334,12 @@ def test_level_filter_is_honoured_by_the_server(client: OlogClient) -> None:
     bounded = _bounded_corpus(client)
     if bounded is None:
         pytest.skip(_NO_WINDOW)
-    start, whole = bounded
-    window = _wire_window(start)
+    start, end, whole = bounded
+    window = _wire_window(start, end)
     counts = Counter(str(e["level"]) for e in whole if e.get("level"))
     (level, count), (other, _other_count) = counts.most_common(2)
 
-    entries, capped, _total = client.search_logbook(level=level, start=start, size=_PAGE)
+    entries, capped, _total = client.search_logbook(level=level, start=start, end=end, size=_PAGE)
     assert entries, _NO_REFERENCE
     assert not capped, "the filtered result outgrew the page inside the window; window is unsound"
     assert {str(entry["level"]) for entry in entries} == {level}  # negative: nothing else got in
@@ -354,6 +361,10 @@ def test_level_filter_is_honoured_by_the_server(client: OlogClient) -> None:
         "the ignored-parameter control did not come back unfiltered, this server may now reject "
         "unknown parameters, which would make the control meaningless (re-measure before trusting)"
     )
+    # The stated precondition, at the point where it is relied on: the window carries more than
+    # one level, so a filtered result that equals the unfiltered one means the filter was dropped.
+    # It restates the guarantee of _bounded_corpus rather than adding a second control, and it is
+    # written down because the equality above only discriminates while it holds.
     assert len(entries) != unfiltered, (
         f"the level filter narrowed nothing ({level!r} matched all {unfiltered} entries in the "
         f"window, which also carries {other!r}), indistinguishable from having been dropped"
@@ -364,14 +375,16 @@ def test_level_filter_is_case_insensitive(client: OlogClient) -> None:
     """The index analyzer lowercases, so the filter is case-insensitive. Documented in the tool
     description, therefore pinned here rather than assumed from reading the mapping.
 
-    Bounded by the same derived window as the probe above, and for the same reason. The narrowing
-    assertion is NOT decoration: without it, a server that dropped the level filter entirely would
-    return the same number for both spellings and satisfy the equality below, so the probe would
-    report case-insensitivity on a filter that was not applied at all."""
+    Bounded by the same derived window as the probe above, and for the same reason. What
+    discriminates a DROPPED filter here is the equality against ``count``, which is read from the
+    unfiltered window: a dropped filter returns the whole window, and the window is guaranteed to
+    carry more than one level, so the two numbers differ. The assertion below states that
+    guarantee at the point where it is relied on rather than leaving it implicit in
+    :func:`_bounded_corpus`; it is a stated precondition, not a second control."""
     bounded = _bounded_corpus(client)
     if bounded is None:
         pytest.skip(_NO_WINDOW)
-    start, whole = bounded
+    start, end, whole = bounded
     counts = Counter(str(e["level"]) for e in whole if e.get("level"))
     level, count = counts.most_common(1)[0]
     assert count < len(whole), (
@@ -379,7 +392,9 @@ def test_level_filter_is_case_insensitive(client: OlogClient) -> None:
         "working one here; the window needs a level mix"
     )
     for spelling in (level.lower(), level.upper()):
-        entries, capped, _total = client.search_logbook(level=spelling, start=start, size=_PAGE)
+        entries, capped, _total = client.search_logbook(
+            level=spelling, start=start, end=end, size=_PAGE
+        )
         assert not capped, "the filtered result outgrew the page inside the window"
         assert len(entries) == count, f"{spelling!r} did not match as {level!r}"
 
@@ -461,14 +476,14 @@ def test_documented_combination_semantics_hold(client: OlogClient) -> None:
     bounded = _bounded_corpus(client)
     if bounded is None:
         pytest.skip(_NO_WINDOW)
-    start, whole = bounded
+    start, end, whole = bounded
     counts = Counter(str(e["level"]) for e in whole if e.get("level"))
     nonzero = [name for name, count in counts.items() if count]
     first, second = nonzero[0], nonzero[1]
     union = counts[first] + counts[second]
     for separator in (",", ";", "|"):
         joined, capped, _t = client.search_logbook(
-            level=f"{first}{separator}{second}", start=start, size=_PAGE
+            level=f"{first}{separator}{second}", start=start, end=end, size=_PAGE
         )
         assert not capped, f"{separator!r}: the OR result outgrew the page inside the window"
         assert len(joined) == union, f"{separator!r} did not OR the two levels"
@@ -481,7 +496,7 @@ def test_documented_combination_semantics_hold(client: OlogClient) -> None:
         pytest.skip("no multi-word title in the window, cannot probe AND/phrase")
 
     def hits(value: str) -> int:
-        page, capped, _t = client.search_logbook(title=value, start=start, size=_PAGE)
+        page, capped, _t = client.search_logbook(title=value, start=start, end=end, size=_PAGE)
         assert not capped, f"title {value!r} outgrew the page inside the window"
         return len(page)
 

@@ -8,9 +8,12 @@ is visible at the call site, and the failure mode is a suite that crashes exactl
 the line sits there looking like a fix.
 
 So the invariant is pinned here rather than written into a comment. One future import in
-``conftest.py`` from any of the sixteen ``src`` modules that carry p4p at module level, and this
-test goes red with the name of the offending import, which is the moment somebody can still choose
-between moving the ``setdefault`` up and importing something else.
+``conftest.py`` from any of the eighteen ``src`` modules whose module-level imports reach a
+carrier, and this test goes red with the name of the offending import, which is the moment
+somebody can still choose between moving the ``setdefault`` up and importing something else.
+(Eighteen is the number this file's own walk returns, and it counts guarded imports, ``if
+TYPE_CHECKING`` among them, so it is a CEILING on what really loads. Only two modules import a
+carrier directly. Erring high is the right direction for a guard.)
 
 The AST walk is NOT reimplemented: ``tests/test_engine_gate.py`` already owns it for the display
 engine, and its ``_names_of`` docstring records what happened the one time two walkers answered the
@@ -91,7 +94,7 @@ def test_the_walk_finds_the_carriers_it_is_meant_to_find() -> None:
     )
     assert len(tainted) >= 10, (
         f"only {len(tainted)} src module(s) reach a BLAS carrier at module level, which is far "
-        "below every previous measurement (16 on 2026-09-04); suspect the walk, not the tree"
+        "below every previous measurement (18 on 2026-09-04); suspect the walk, not the tree"
     )
 
 

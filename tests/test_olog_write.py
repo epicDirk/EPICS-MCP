@@ -887,6 +887,12 @@ class TestToolOrchestration:
 
 # ======================================================================================
 # Create: level vocabulary (OQ1), the write-side counterpart to the update path's checks
+#
+# The refusals below are only correct while the SERVER does not validate the level itself, and
+# that premise cannot be settled in memory. It is pinned live by
+# tests/test_olog_write_live.py::test_server_does_not_validate_a_written_level, this module's
+# live half. Named here because the pointer used to exist in one direction only: whoever
+# arrived from the offline side found no trace of the live pin at all.
 # ======================================================================================
 
 

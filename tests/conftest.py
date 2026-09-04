@@ -29,7 +29,7 @@ from tests.engine_gate import (
 # arrives through numpy, which arrives through p4p. None of the imports above reaches either
 # (pinned by ``test_conftest_import_closure.py``, which is what keeps this placement true), while
 # a large share of the suite does reach one of them at COLLECTION, which happens after this line.
-# So this is the last moment at which the value is still free to set. (26 test modules on
+# So this is the last moment at which the value is still free to set. (27 test modules on
 # 2026-09-04, dated rather than tracked: the figure grows with the suite and nothing watches it,
 # so a number in the present tense here would rot. The pinned claim is the one above it.)
 #
