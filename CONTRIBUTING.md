@@ -375,9 +375,17 @@ mid-run.
 ⛔ **Scope a live run to the module you mean, always: `pytest tests/<module>_live.py -m live`.**
 `[tool.pytest.ini_options]` sets `testpaths = ["tests"]` and deliberately declares no `addopts`, so
 a bare `-m live` falls back to the whole directory and selects EVERY live module, including the
-three that write real logbook entries into a service with no delete. Nothing here guards against
+four that write real logbook entries into a service with no delete
+(`test_olog_write_live.py`, `test_olog_attachments_live.py`, `test_olog_remote_https_live.py`,
+`test_write_gate_live.py`). Nothing here guards against
 the forgotten path; the path is the guard. The examples in this file and in `pyproject.toml` that
 show a bare `-m live` predate that reading and mean "with the module named".
+
+⚠️ The number said "three" until 2026-09-04, and the correction is older than the sentence that
+carries it: it was right when written on 2026-08-27, and `test_olog_remote_https_live.py` came back
+into the tree on 2026-08-29. Nothing watches either occurrence of this figure, here or in
+`tests/test_read_live.py`, so both are re-measured by hand or not at all. The measuring rule is a
+grep for `create_log_entry`, `update_log_entry` and `add_log_attachment` over `tests/*_live.py`.
 
 ⚠️ A live test that writes owns its target and never derives it. The deny logbook above is named
 explicitly for that reason: a test that picked one from the server's own answer once resolved onto

@@ -24,7 +24,6 @@ from typing import Any
 
 import pytest
 
-from epics_mcp.services._http import basic_auth_header
 from epics_mcp.services._time_window import TimeWindowFormatError
 from epics_mcp.services.olog_client import OlogClient
 from epics_mcp.services.olog_exceptions import OlogError, OlogFilterValueError
@@ -439,7 +438,9 @@ def test_levels_listing_satisfies_the_strict_schema(client: OlogClient) -> None:
     # 2026-07-20: an entry written with an unlisted level ("Urgnet") is stored verbatim, so the
     # unlisted-level state is not a sandbox defect but the normal case the code is designed around:
     # and the WRITE-side guard exists exactly because the server allows it (see
-    # test_server_does_not_validate_a_written_level, which deliberately creates such an entry).
+    # tests/test_olog_write_live.py::test_server_does_not_validate_a_written_level, which
+    # deliberately creates such an entry; it used to live in THIS module, whose gate asks only for
+    # a read URL, which is why it moved).
     #
     # What is still worth pinning: the listing must describe the levels entries ACTUALLY use, i.e.
     # the fixture must exercise at least one listed level. A listing that shares nothing with the
@@ -460,87 +461,3 @@ def test_unknown_id_error_is_loud_not_a_not_found(client: OlogClient) -> None:
     documented contract finally matches the wire and this pin gets updated."""
     with pytest.raises(OlogError):
         client.get_log_entry("99999999")
-
-
-# ======================================================================================
-# The premise behind the WRITE-side level guard (OQ1), pinned so it goes red if Olog changes
-# ======================================================================================
-
-
-def test_server_does_not_validate_a_written_level() -> None:
-    """The PREMISE of the OQ1 guard, measured instead of read off the Java source.
-
-    ``create_log_entry`` / ``update_log_entry`` refuse an unknown or blank ``level``. That refusal
-    is only correct while the server itself does NOT validate, otherwise the client would be
-    turning a server-side 400 into a made-up story, or worse, refusing something the server would
-    have accepted meaningfully.
-
-    CLAUDE.md is explicit that reading ``LevelsResource``/``LogResource`` is NOT a measurement here
-    ("wrong five times in one week"), and that a refusal's premise must be pinned live "so it goes
-    red when the server improves". This is that pin. If a future Olog starts rejecting an unknown
-    level, this test fails FIRST and the three tool descriptions + the operator guide get corrected
-    instead of quietly lying.
-
-    Deliberately bypasses the service layer and drives the client directly, the service is exactly
-    what refuses, so going through it could never observe the server.
-    """
-    assert_live_available(
-        bool(
-            os.environ.get("EPICS_MCP_ALLOW_OLOG_WRITE", "").lower() == "true"
-            and os.environ.get("EPICS_MCP_OLOG_WRITE_LOGBOOKS")
-            and os.environ.get("EPICS_MCP_OLOG_WRITE_USER")
-        ),
-        "pins the server behaviour that justifies the write-side level refusal: needs a WRITABLE "
-        "loopback Olog (EPICS_MCP_ALLOW_OLOG_WRITE + _WRITE_LOGBOOKS + _WRITE_USER; the "
-        "password is read with a '' default, a wrong one fails loudly as 401)",
-        demanded=live_demanded(os.environ),
-    )
-    logbook = str(os.environ["EPICS_MCP_OLOG_WRITE_LOGBOOKS"]).split(",")[0].strip()
-    url = os.environ["EPICS_MCP_OLOG_URL"]
-    client = OlogClient(
-        url,
-        timeout=15.0,
-        auth_header=basic_auth_header(
-            os.environ["EPICS_MCP_OLOG_WRITE_USER"],
-            os.environ.get("EPICS_MCP_OLOG_WRITE_PASSWORD", ""),
-        ),
-    )
-    known, _default, _note = client.list_log_levels()
-    bogus = "Urgnet"  # a typo of a real level, so it cannot collide with a site's vocabulary
-    assert bogus not in known, "pick a value the server really does not know"
-
-    # (1) an UNKNOWN level is accepted and stored verbatim, no 400, no coercion to the default
-    created = client.create_log_entry(
-        title="live pin: unknown level is not validated",
-        logbooks=[logbook],
-        description="synthetic probe entry",
-        level=bogus,
-    )
-    entry_id = str(created["id"])
-    stored = client.get_raw_entry(entry_id)
-    assert stored is not None
-    assert stored["level"] == bogus, (
-        "the server VALIDATES a written level now, the write-side refusal's premise is gone; "
-        "update the level descriptions in server.py and the operator guide"
-    )
-
-    # ...and the entry is therefore invisible to every valid level filter (the actual damage)
-    hits, _capped, _total = client.search_logbook(level=",".join(known), size=200)
-    assert all(str(h.get("id")) != entry_id for h in hits)
-
-    # (2) a BLANK level is accepted too, and CLEARS the field rather than leaving it alone
-    with_level = client.create_log_entry(
-        title="live pin: blank level clears the field",
-        logbooks=[logbook],
-        description="synthetic probe entry",
-        level=known[0],
-    )
-    blank_id = str(with_level["id"])
-    raw = client.get_raw_entry(blank_id)
-    assert raw is not None and raw["level"] == known[0]
-    client.update_log_entry(raw, level="")
-    after = client.get_raw_entry(blank_id)
-    assert after is not None
-    assert after["level"] in ("", None), (
-        "a blank level no longer clears the field, the blank-level refusal needs a rethink"
-    )

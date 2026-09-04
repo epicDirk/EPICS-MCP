@@ -5,8 +5,9 @@ Opt-in: ``pytest tests/test_read_live.py -m live`` with a PVA search lane in
 
 SCOPE EVERY RUN TO THIS FILE. ``pyproject.toml`` sets ``testpaths = ["tests"]`` and declares no
 ``addopts``, so a bare ``pytest -m live`` falls back to the whole directory and collects ALL live
-modules. Three of those write real logbook entries into a service with no delete. Nothing in this
-repository guards against the missing path; the path itself is the guard.
+modules. Four of those write real logbook entries into a service with no delete. Nothing in this
+repository guards against the missing path; the path itself is the guard, and nothing watches this
+figure either (CONTRIBUTING.md carries the same one and the rule for re-measuring it).
 
 WHY THESE EXIST
 ---------------
