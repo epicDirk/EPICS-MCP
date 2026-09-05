@@ -3313,7 +3313,12 @@ async def test_stripped_tool_still_returns_structured_content(
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
 # RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-09-05 after GQ-297: the
-# core lane is 78_252 and the full lane 92_337, +865 each against the pair before it. Two causes,
+# core lane is 78_361 and the full lane 92_446, +974 each against the pair before it. Measured
+# THREE times, and the last one is the recorded one, which is the whole reason this comment says
+# "ANY change that can reach the wire" rather than "any code change": the post-build QA replaced
+# two sentences of that same description, one false at exactly ceiling-many hits and one that
+# undercounted the note producers, and each rewrite moved both lanes again. A figure taken before
+# the QA of the commit that carries it is a figure taken too early. Two causes,
 # both on ``search_logbook`` and both core, hence the identical delta: the new
 # ``total_matches_capped`` property in its outputSchema, and the paragraph in its description that
 # says what a saturated ``total_matches`` means. Measured with the recipe in
@@ -3361,10 +3366,10 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 78_252 and the full lane
-    92_337, re-measured 2026-09-05 on both lanes with the display-gated tools excluded for the core
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 78_361 and the full lane
+    92_446, re-measured 2026-09-05 on both lanes with the display-gated tools excluded for the core
     one, since a lane estimated rather than measured is the error the constant's comment records.
-    GQ-297 added +865 / +865, all of it on ``search_logbook`` and therefore on both lanes: the new
+    GQ-297 added +974 / +974, all of it on ``search_logbook`` and therefore on both lanes: the new
     ``total_matches_capped`` property plus the description paragraph explaining a saturated
     ``total_matches``. Before it, GQ-231 added +1 / +1 (a re-wrapped size sentence, one space
     becoming a newline, and a newline is two chars in the JSON payload).

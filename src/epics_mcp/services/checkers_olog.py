@@ -205,17 +205,21 @@ _OLOG_DISABLED_NOTE = (
     "Phoebus Olog is disabled. Set EPICS_MCP_OLOG_URL to the Olog REST root "
     "(e.g. http://host:8080/Olog) to enable logbook search."
 )
-# The SECOND producer of ``note`` on the search path, and it can never collide with the level one
-# below: that one requires a falsy total_matches, this one requires a total_matches at or above the
-# ceiling. Written out rather than left to the flag alone because the flag only reaches a caller who
+# A ``note`` producer on the ENABLED search path, and it can never collide with the level note
+# below: that one requires a falsy total_matches, this one requires a total_matches at or above
+# the ceiling. ⚠ Counting the whole function there is a THIRD, the disabled early return,
+# but it is not a competitor: it fires where no search ran at all and the answer says
+# enabled:false.
+# Written out rather than left to the flag alone because the flag only reaches a caller who
 # already knew to look for it, and a saturated total is exactly the answer a caller does not know to
 # doubt. Same remedy the unknown-level case already gets, for the same reason: an answer that cannot
 # be told apart from a different answer explains itself in the payload.
 _CAPPED_TOTAL_NOTE = (
-    "total_matches sits at the ceiling this Olog's Elasticsearch stops counting at, so it is a "
-    "floor and not a count: at least that many matched, and the exact number is not in this "
-    "answer. Narrow the search (start/end, or a tighter filter) until total_matches_capped is "
-    "false to obtain an exact one."
+    "total_matches has reached the ceiling Elasticsearch stops counting at by default, so read it "
+    "as a floor rather than a count: at least that many matched, and this answer cannot say "
+    "whether more did. Paging past the ceiling does not reach them either, the server refuses it. "
+    "Narrow the search (start/end, or a tighter filter) until total_matches_capped is false to "
+    "obtain an exact one."
 )
 # A base64 download is returned IN the tool result (response tokens), so it is capped far below the
 # path-based ceiling (olog_attach_max_bytes), a large blob must go to a workspace file, not the
@@ -328,15 +332,18 @@ async def query_olog_search(
     the marker that would have said so, so a saturated value arrives indistinguishable from a real
     total; ``total_matches_capped`` is the verdict on that, and it is ``None`` exactly when
     ``total_matches`` is (an older Olog that sends no count at all). Where it is True the value is
-    a FLOOR, at least that many matched, and a ``note`` says so in the payload.
+    a FLOOR, at least that many matched, and a ``note`` says so in the payload. The verdict
+    compares against a constant rather than asking the server; the honest limit of that sits on
+    :func:`~epics_mcp.services.olog_client.hit_count_is_capped`.
 
     *level* and *title* (OA2/OA5) filter by triage level and title; both are server-honoured and
     case-insensitive (differentially probed 2026-07-19, both controls). A blank value for either is
     refused before any request. Because Olog answers an UNKNOWN level with 0 hits instead of an
     error, an empty level-filtered result gets a ``note`` saying so (:func:`_unknown_level_note`):
     otherwise "this level does not exist" is indistinguishable from "no entries have it". A
-    saturated ``total_matches`` gets a ``note`` for the same reason, and the two can never collide
-    (one needs a falsy total, the other a total at the ceiling). Backs ``search_logbook``.
+    saturated ``total_matches`` gets a ``note`` for the same reason, and those two can never collide
+    (one needs a falsy total, the other a total at the ceiling). The disabled early return carries a
+    ``note`` of its own, on a path where no search ran. Backs ``search_logbook``.
     """
     cfg = get_config()
     if not cfg.olog_url:

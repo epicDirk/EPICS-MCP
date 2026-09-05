@@ -169,20 +169,26 @@ _UNOBSERVED: dict[str, str] = {
     "olog_client.py:183": "lenient name filter inside an already-anchored entry",
     "olog_client.py:391": "attachment filename check",
     # Moved +14 by the OQ11 docstring on ``_expand_log_entry``, then +24 more by OQ12 (the union
-    # check in ``add_attachment`` plus its widened docstring), then +40 by GQ-297 (the hit-count
+    # check in ``add_attachment`` plus its widened docstring), then +55 by GQ-297 (the hit-count
     # ceiling constant, ``hit_count_is_capped`` and two widened docstrings) - every one of them
     # ABOVE this line - and each time RE-LOCATED, not re-judged: the line still carries the same
     # guard (``source if isinstance(source, str) else ""`` feeding the inline-markup
-    # concatenation), verified against the surrounding code AND against ``git show HEAD:...`` at
-    # the old number: 1020 in HEAD and 1060 in the tree are byte-identical, and the new line
-    # carries the same SINGLE target the old one did, so ``_targets_behind_recorded_keys`` holds.
-    # ⚠ The pair this comment named before GQ-297 (991 and 1015) had gone stale unnoticed: 991
-    # names a different statement entirely and 1015 a string fragment. A pair recorded here has to
-    # be re-measured whenever the number moves, not carried forward, which is exactly the rot the
-    # epics_client rows above describe, found in this row itself. ⚠ The test below only checks
-    # that the key names SOME guard line, so it cannot tell a correct relocation from a
-    # coincidence: that comparison is this comment, and it has to be redone by hand.
-    "olog_client.py:1060": "source default before concatenation",
+    # concatenation), verified against the surrounding code AND against the blob at the old number:
+    # measured 2026-09-05, ``git show 0d62eb5:...`` line 1020 and the tree's line 1075 are
+    # byte-identical, and the new line carries the same SINGLE target the old one did, so
+    # ``_targets_behind_recorded_keys`` and ``_keys_with_several_targets`` both hold.
+    # ⛔ The COMMIT ID is deliberate and it is the second half of this row's own lesson. The pair
+    # named here before GQ-297 read "991 in HEAD and 1015 in the tree", and both halves had gone
+    # stale: 991 names a different statement entirely, 1015 a string fragment. It rotted because
+    # ``HEAD`` MOVES: the recipe stops reproducing the moment the commit that fixed the row lands,
+    # so the next reader runs it, gets a mismatch, and reads a correct relocation as a defect.
+    # Pin the blob, never the branch. ⛔ And the offset itself moved TWICE inside GQ-297, +40 at
+    # the build and +55 after its own QA restored a source pointer above this line, which is why
+    # this number is re-measured at the END of a change and not in the middle of one.
+    # ⚠ The test below only checks that the key names SOME guard
+    # line, so it cannot tell a correct relocation from a coincidence: that comparison is this
+    # comment, and it has to be redone by hand.
+    "olog_client.py:1075": "source default before concatenation",
 }
 
 # Neither polarity is noticed, and lines no test executes at all. Both are TEST GAPS at the

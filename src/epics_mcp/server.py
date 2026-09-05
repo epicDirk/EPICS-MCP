@@ -1351,10 +1351,10 @@ async def search_logbook(
 
     total_matches (Olog hitCount) is a total across all pages ONLY while total_matches_capped is
     false. Elasticsearch stops counting at a ceiling and Olog discards the marker that would have
-    said so, so a saturated value arrives looking exactly like a real total: measured against the
-    ESS production logbook it answers the same number whether a single record or a full page is
-    asked for. Where total_matches_capped is true the value is a FLOOR, at least that many
-    matched, the exact number is NOT in the answer, and a note says so; narrow the search with
+    said so, so a saturated value arrives looking exactly like a real total: measured 2026-09-04
+    against a production logbook it answers the same number whether a single record or a full
+    page is asked for. Where total_matches_capped is true the value is a FLOOR, at least that many
+    matched and the answer cannot say whether more did, and a note says so; narrow the search with
     start/end until the flag is false to obtain an exact one. Both are null on an older Olog that
     sends no count at all.
 
@@ -1372,9 +1372,10 @@ async def search_logbook(
     configured level; call list_log_levels for the valid values. The note states a fact about the
     VALUE and does not claim to be the cause, another filter in the same search can produce the
     same 0, an OR-ed list still runs on its recognised parts, and a wildcard level is honoured by
-    the server and so cannot be checked against the name list at all. The note field has one other
-    producer, the saturated total above, and the two can never arrive together: that one needs a
-    falsy total_matches, this one needs a total at the ceiling.
+    the server and so cannot be checked against the name list at all. On an enabled search the note
+    field has one other producer, the saturated total above, and the two can never arrive together:
+    that one needs a falsy total_matches, this one needs a total at the ceiling. The disabled
+    answer carries a note of its own, on a path where no search ran.
 
     A blank level/title is rejected before any request, because blank is never 'no filter' here and
     the two possible outcomes disagree: an empty-string level matches nothing (0 hits), while a

@@ -492,10 +492,10 @@ def _entries_of(data: object) -> list[object]:
 #: ``long``, so the ``relation`` half never reaches the wire. The saturated number therefore
 #: arrives looking exactly like a real total, which is the whole reason this constant exists.
 #:
-#: Measured 2026-09-04 against the ESS production Olog: ``hitCount`` answered 10000 for a
-#: requested size of 1, of 50 and of 200 alike. Measured 2026-09-05 against a local Olog holding
-#: 109 entries: it answered 109 for each of those sizes, and a requested size of 200 really did
-#: return 109 entries, so below the ceiling the number is exact and independent of the page.
+#: Measured 2026-09-04 against a production Olog: ``hitCount`` answered 10000 for a requested size
+#: of 1, of 50 and of 200 alike. Measured 2026-09-05 against a local Olog holding 109 entries: it
+#: answered 109 for a requested size of 1, 5, 50, 200 and 500, and a requested size of 200 really
+#: did return 109 entries, so below the ceiling the number is exact and independent of the page.
 HIT_COUNT_CEILING = 10_000
 
 
@@ -510,6 +510,15 @@ def hit_count_is_capped(count: int | None) -> bool | None:
 
     A corpus of exactly ceiling-many hits reads as capped too. Same trade, same safe direction: no
     caller is ever told more than the payload can support.
+
+    ⚠ HONEST LIMIT, and it is this ticket's own failure mode one level up if left unsaid: this
+    reads a CONSTANT and never the server. On a stock deployment the constant IS the ceiling,
+    because Elasticsearch's default applies and Olog asks for nothing else (measured). A
+    deployment that moved it breaks this in one of two ways, and only one of them is safe. A
+    HIGHER ceiling makes a real count read as a floor, where "at least N" stays true. A LOWER one
+    would make a saturated count read as EXACT, which is precisely the deception this whole repair
+    exists to end. Nothing in an Olog answer names the setting, so neither case is detectable from
+    here, and every sentence downstream that calls an uncapped total "exact" inherits this limit.
     """
     if count is None:
         return None
@@ -524,10 +533,15 @@ def _hit_count(data: object) -> int | None:
     A PRESENT-but-unreadable count raises (S11): it must never silently become ``None``, which
     reads as "no count provided".
 
-    ⚠ It is a total across ALL pages only BELOW :data:`HIT_COUNT_CEILING`, and either way it
-    need not equal the returned page size (it differs whenever ``from``/``size`` paginate). AT the
-    ceiling it is a floor, and nothing in the payload says so, which is why
-    :func:`hit_count_is_capped` has to decide it from the value.
+    ⚠ It is a total across ALL pages only BELOW :data:`HIT_COUNT_CEILING`, which is a constant
+    here and not a reading of the server; the honest limit of that sits on
+    :func:`hit_count_is_capped`. AT the ceiling it is a floor, and nothing in the payload says so,
+    which is why that function has to decide it from the value.
+
+    Either way it need not equal the returned page size, and Olog documents THAT much itself on
+    ``SearchResult``: "this need not be the same as the size of {@link #logs}, e.g. in a
+    pagination search where search can specify from and size". What it documents nowhere is the
+    ceiling.
     """
     if isinstance(data, dict):
         count = data.get("hitCount")
@@ -673,7 +687,8 @@ class OlogClient:
         ``capped`` is True when more than *size* matched on this page (one extra is requested to
         detect it honestly, the Archiver/ChannelFinder pattern). ``total_matches`` is the Olog
         ``hitCount``, and it has THREE states rather than the two this used to claim: an exact
-        total across all pages below :data:`HIT_COUNT_CEILING`; a FLOOR at or above it, because
+        total across all pages below :data:`HIT_COUNT_CEILING` as far as this client can tell; a
+        FLOOR at or above it, because
         Elasticsearch stops counting there and Olog drops the marker that would have said so; and
         ``None`` when the Olog version returns a bare list with no count at all. The caller cannot
         tell the first from the second by looking, so :func:`hit_count_is_capped` decides it and
