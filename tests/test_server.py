@@ -860,6 +860,7 @@ _OLOG_FIELD_BASE_TYPE: dict[str, str] = {
     "entries": "array",
     "total": "integer",
     "total_matches": "integer",
+    "total_matches_capped": "boolean",
     "capped": "boolean",
     "note": "string",
     "id": "string",
@@ -3311,13 +3312,15 @@ async def test_stripped_tool_still_returns_structured_content(
 # machine-readable (the core value of S29) and cost only ~1% more context per agent turn, so the
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
-# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-09-01 after GQ-231: the
-# core lane is 77_387 and the full lane 91_472, +1 each against QA-34's pair. The whole delta is
-# one re-wrapped paragraph: the get_guide size sentence now carries a substituted token, the line
-# had to re-break for the 100-column limit, one inter-word space became a newline, and a newline
-# is TWO chars in this JSON payload while a space is one. The description's own length held at
-# 1_070 chars, so "the char count held" and "the wire grew by 1" are both true and answer
-# different questions; get_guide is core, hence both lanes.
+# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-09-05 after GQ-297: the
+# core lane is 78_252 and the full lane 92_337, +865 each against the pair before it. Two causes,
+# both on ``search_logbook`` and both core, hence the identical delta: the new
+# ``total_matches_capped`` property in its outputSchema, and the paragraph in its description that
+# says what a saturated ``total_matches`` means. Measured with the recipe in
+# ``test_tools_list_within_budget`` below, both lanes, no estimate.
+# Before that, 2026-09-01 after GQ-231: 77_387 / 91_472, +1 each against QA-34's pair, the whole
+# delta one re-wrapped paragraph where an inter-word space became a newline and a newline is TWO
+# chars in this JSON payload while a space is one.
 # ⚠️ The core figure is
 # measured by dropping those four from the same ``list_tools`` result, not by a core-only install,
 # so it is the payload that lane WOULD emit; the full figure comes straight off the run.
@@ -3358,12 +3361,13 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 77_387 and the full lane
-    91_472, re-measured 2026-09-01 on both lanes with the display-gated tools excluded for the core
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 78_252 and the full lane
+    92_337, re-measured 2026-09-05 on both lanes with the display-gated tools excluded for the core
     one, since a lane estimated rather than measured is the error the constant's comment records.
-    GQ-231 added +1 / +1: the get_guide size sentence re-wrapped for its substituted token, one
-    space became a newline, and a newline is two chars in the JSON payload (the description's own
-    char count held at 1_070; the constant's comment above carries the split).
+    GQ-297 added +865 / +865, all of it on ``search_logbook`` and therefore on both lanes: the new
+    ``total_matches_capped`` property plus the description paragraph explaining a saturated
+    ``total_matches``. Before it, GQ-231 added +1 / +1 (a re-wrapped size sentence, one space
+    becoming a newline, and a newline is two chars in the JSON payload).
     QA-34 added +551 / +539 against the pair written before it, all of it description text on
     ``set_pv_value``: the step limit's own paragraph, plus the repair of a sentence the same ticket
     had made false ("the write proceeds" for a record with no drive limits, which an armed step

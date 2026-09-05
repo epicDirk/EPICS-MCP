@@ -483,15 +483,51 @@ def _entries_of(data: object) -> list[object]:
     )
 
 
+#: The value at which an Olog ``hitCount`` stops being a count and becomes a floor.
+#:
+#: Elasticsearch does not count past its ``track_total_hits`` default; it reports the saturated
+#: value and marks it with a ``relation`` of ``gte`` beside it. Olog never asks for an exact total
+#: (the string ``track_total_hits`` appears nowhere in its source, swept 2026-09-05 across .java,
+#: .properties, .yml and .json) and keeps what comes back in ``SearchResult.hitCount``, a bare
+#: ``long``, so the ``relation`` half never reaches the wire. The saturated number therefore
+#: arrives looking exactly like a real total, which is the whole reason this constant exists.
+#:
+#: Measured 2026-09-04 against the ESS production Olog: ``hitCount`` answered 10000 for a
+#: requested size of 1, of 50 and of 200 alike. Measured 2026-09-05 against a local Olog holding
+#: 109 entries: it answered 109 for each of those sizes, and a requested size of 200 really did
+#: return 109 entries, so below the ceiling the number is exact and independent of the page.
+HIT_COUNT_CEILING = 10_000
+
+
+def hit_count_is_capped(count: int | None) -> bool | None:
+    """Whether *count* is a saturated ceiling rather than a total; ``None`` when there is no count.
+
+    ``>=`` rather than ``==``, and the asymmetry is deliberate. A later Olog that asked for an
+    exact total, or a differently configured ``track_total_hits``, would put a REAL number above
+    this line; reading it as a floor is then merely less precise, because "at least N" stays true.
+    ``==`` would instead go silently blind the moment the ceiling moved, which is the failure this
+    whole repair exists to end.
+
+    A corpus of exactly ceiling-many hits reads as capped too. Same trade, same safe direction: no
+    caller is ever told more than the payload can support.
+    """
+    if count is None:
+        return None
+    return count >= HIT_COUNT_CEILING
+
+
 def _hit_count(data: object) -> int | None:
-    """The Olog ``hitCount`` (total matches for the query) from a ``{logs, hitCount}`` wrapper.
+    """The Olog ``hitCount`` for the query, from a ``{logs, hitCount}`` wrapper.
 
     Returns ``None`` when the response carries no count at all (the bare-list variant of an older
     Olog, or a wrapper without the field), the honest "this server version provides no total".
     A PRESENT-but-unreadable count raises (S11): it must never silently become ``None``, which
-    reads as "no count provided". ``hitCount`` is the total across ALL pages and need not equal
-    the returned page size; Olog documents this on ``SearchResult`` (it differs whenever
-    ``from``/``size`` paginate).
+    reads as "no count provided".
+
+    ⚠ It is a total across ALL pages only BELOW :data:`HIT_COUNT_CEILING`, and either way it
+    need not equal the returned page size (it differs whenever ``from``/``size`` paginate). AT the
+    ceiling it is a floor, and nothing in the payload says so, which is why
+    :func:`hit_count_is_capped` has to decide it from the value.
     """
     if isinstance(data, dict):
         count = data.get("hitCount")
@@ -635,10 +671,14 @@ class OlogClient:
         several words are AND-ed; it is a separate axis from *text*, which searches the body only.
 
         ``capped`` is True when more than *size* matched on this page (one extra is requested to
-        detect it honestly, the Archiver/ChannelFinder pattern). ``total_matches`` is the true total
-        across all pages (Olog ``hitCount``); it is ``None`` only when the Olog version returns a
-        bare list with no count, ``capped`` then still signals honestly whether more matched (no
-        fabricated total).
+        detect it honestly, the Archiver/ChannelFinder pattern). ``total_matches`` is the Olog
+        ``hitCount``, and it has THREE states rather than the two this used to claim: an exact
+        total across all pages below :data:`HIT_COUNT_CEILING`; a FLOOR at or above it, because
+        Elasticsearch stops counting there and Olog drops the marker that would have said so; and
+        ``None`` when the Olog version returns a bare list with no count at all. The caller cannot
+        tell the first from the second by looking, so :func:`hit_count_is_capped` decides it and
+        the service layer publishes the verdict. ``capped`` answers a different question in every
+        one of those states, honestly and about this PAGE alone (no fabricated total).
         """
         # Refused before anything is sent: a blank filter is never what the caller meant, and the
         # two servers-side outcomes are BOTH misleading (a blank level matches nothing → a

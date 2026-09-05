@@ -34,6 +34,7 @@ from epics_mcp.services.olog_attachments import (
 from epics_mcp.services.olog_client import (
     DEFAULT_MAX_LOGS,
     OlogClient,
+    hit_count_is_capped,
     split_level_values,
     unroundtrippable_attachment_filenames,
 )
@@ -117,6 +118,7 @@ class OlogSearchResult(TypedDict, total=False):
     entries: list[dict[str, object]]
     total: int
     total_matches: int | None
+    total_matches_capped: bool | None
     capped: bool | None
     note: str | None
     reach: Reach
@@ -202,6 +204,18 @@ class OlogListAttachmentsResult(TypedDict, total=False):
 _OLOG_DISABLED_NOTE = (
     "Phoebus Olog is disabled. Set EPICS_MCP_OLOG_URL to the Olog REST root "
     "(e.g. http://host:8080/Olog) to enable logbook search."
+)
+# The SECOND producer of ``note`` on the search path, and it can never collide with the level one
+# below: that one requires a falsy total_matches, this one requires a total_matches at or above the
+# ceiling. Written out rather than left to the flag alone because the flag only reaches a caller who
+# already knew to look for it, and a saturated total is exactly the answer a caller does not know to
+# doubt. Same remedy the unknown-level case already gets, for the same reason: an answer that cannot
+# be told apart from a different answer explains itself in the payload.
+_CAPPED_TOTAL_NOTE = (
+    "total_matches sits at the ceiling this Olog's Elasticsearch stops counting at, so it is a "
+    "floor and not a count: at least that many matched, and the exact number is not in this "
+    "answer. Narrow the search (start/end, or a tighter filter) until total_matches_capped is "
+    "false to obtain an exact one."
 )
 # A base64 download is returned IN the tool result (response tokens), so it is capped far below the
 # path-based ceiling (olog_attach_max_bytes), a large blob must go to a workspace file, not the
@@ -307,15 +321,22 @@ async def query_olog_search(
     *offset*
     (Olog wire ``from``) pages past the first *size* results; *sort* orders by create time (``down``
     newest-first default, ``up`` oldest-first). ``total`` is the number of entries returned;
-    ``total_matches`` is the true total across all pages (Olog ``hitCount``, ``None`` if the Olog
-    version omits it); ``capped`` is True when more than *size* matched on this page.
+    ``capped`` is True when more than *size* matched on this page.
+
+    ``total_matches`` (Olog ``hitCount``) is a total across all pages ONLY while
+    ``total_matches_capped`` is False. Elasticsearch stops counting at a ceiling and Olog discards
+    the marker that would have said so, so a saturated value arrives indistinguishable from a real
+    total; ``total_matches_capped`` is the verdict on that, and it is ``None`` exactly when
+    ``total_matches`` is (an older Olog that sends no count at all). Where it is True the value is
+    a FLOOR, at least that many matched, and a ``note`` says so in the payload.
 
     *level* and *title* (OA2/OA5) filter by triage level and title; both are server-honoured and
     case-insensitive (differentially probed 2026-07-19, both controls). A blank value for either is
     refused before any request. Because Olog answers an UNKNOWN level with 0 hits instead of an
     error, an empty level-filtered result gets a ``note`` saying so (:func:`_unknown_level_note`):
-    otherwise "this level does not exist" is indistinguishable from "no entries have it". Backs
-    ``search_logbook``.
+    otherwise "this level does not exist" is indistinguishable from "no entries have it". A
+    saturated ``total_matches`` gets a ``note`` for the same reason, and the two can never collide
+    (one needs a falsy total, the other a total at the ceiling). Backs ``search_logbook``.
     """
     cfg = get_config()
     if not cfg.olog_url:
@@ -335,13 +356,17 @@ async def query_olog_search(
             level=level,
             title=title,
         )
+        capped_total = hit_count_is_capped(total_matches)
         result: OlogSearchResult = {
             "enabled": True,
             "entries": entries,
             "total": len(entries),
             "total_matches": total_matches,
+            "total_matches_capped": capped_total,
             "capped": capped,
         }
+        if capped_total:
+            result["note"] = _CAPPED_TOTAL_NOTE
         # Only a GENUINELY empty result is worth explaining. An empty PAGE past the end of a
         # paginated set (offset beyond total_matches) also has no entries, but something DID match,
         # annotating it would contradict total_matches in the very same payload.

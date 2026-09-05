@@ -1346,9 +1346,17 @@ async def search_logbook(
     otherwise, because Olog does not reject an unrecognized order: it silently applies 'up':
     the REVERSE of the documented default, and answers 200 with a well-formed page (measured
     live 2026-07-15: 'newest' and 'garbage' both returned oldest-first). total is the number of
-    entries returned; total_matches is the true total across all pages (Olog hitCount); capped is
-    true when more than size matched on this page. An unreadable payload or entry raises a loud
-    error, never an empty result that reads as 'nothing matched'.
+    entries returned; capped is true when more than size matched on this page. An unreadable
+    payload or entry raises a loud error, never an empty result that reads as 'nothing matched'.
+
+    total_matches (Olog hitCount) is a total across all pages ONLY while total_matches_capped is
+    false. Elasticsearch stops counting at a ceiling and Olog discards the marker that would have
+    said so, so a saturated value arrives looking exactly like a real total: measured against the
+    ESS production logbook it answers the same number whether a single record or a full page is
+    asked for. Where total_matches_capped is true the value is a FLOOR, at least that many
+    matched, the exact number is NOT in the answer, and a note says so; narrow the search with
+    start/end until the flag is false to obtain an exact one. Both are null on an older Olog that
+    sends no count at all.
 
     Filter by triage level and by title with level/title. Both ARE honoured by the server and both
     are case-insensitive, probed differentially 2026-07-19 against a running Olog with a positive
@@ -1364,7 +1372,9 @@ async def search_logbook(
     configured level; call list_log_levels for the valid values. The note states a fact about the
     VALUE and does not claim to be the cause, another filter in the same search can produce the
     same 0, an OR-ed list still runs on its recognised parts, and a wildcard level is honoured by
-    the server and so cannot be checked against the name list at all.
+    the server and so cannot be checked against the name list at all. The note field has one other
+    producer, the saturated total above, and the two can never arrive together: that one needs a
+    falsy total_matches, this one needs a total at the ceiling.
 
     A blank level/title is rejected before any request, because blank is never 'no filter' here and
     the two possible outcomes disagree: an empty-string level matches nothing (0 hits), while a

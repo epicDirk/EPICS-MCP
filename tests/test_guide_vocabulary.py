@@ -230,6 +230,7 @@ _INDEXED_FIELDS = frozenset(
         "tolerance",
         "total",
         "total_matches",
+        "total_matches_capped",
         "unalarmed",
         "unarchived",
         "val",

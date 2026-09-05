@@ -27,6 +27,20 @@ carry breaking changes).
 
 ### Changed
 
+- **BREAKING: `search_logbook` no longer presents `total_matches` as a total.** Olog takes its
+  `hitCount` from Elasticsearch, which stops counting at a ceiling and marks the saturated value
+  with a `relation` field that Olog then discards. Measured against a production logbook, the same
+  number came back whether a single record or a full page was requested, so a caller reading the
+  answer had no way to tell a real total from a saturated one. The VALUE on the wire is unchanged;
+  what is new is that the answer now says when it is a floor. `search_logbook` gained
+  `total_matches_capped` (`true` = the number is a floor, `false` = it is exact, `null` = the
+  server sent no count), a `note` explains it in plain text whenever the ceiling is reached, and
+  the tool description, the service layer and the shipped operator guide no longer call the number
+  a total across all pages without that condition.
+  **Are you affected?** Search your code for `total_matches`. A caller that reports it as a count,
+  sums it, or compares it against the length of the page is wrong on any corpus large enough to
+  reach the ceiling. Read `total_matches_capped` first and treat `true` as "at least this many".
+
 - **The language guard no longer reports green over a file it never read.** `scripts/check_language.py`
   used to catch both a decode failure and an access failure in one branch and return an empty hit
   list, which every caller reads as "no German found". A path the guard could not open was

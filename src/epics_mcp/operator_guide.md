@@ -253,7 +253,7 @@ explanation. Ask `get_guide` for the topic named beside the field.
 | `new_value` · `old_value` · `readback` · `verified` · `tolerance` · `bounds_note` · `step_note` | `pv-write` |
 | `status` · `note` (of a PV write, not of an archived sample or a plane) | `pv-write` |
 | `attachment_count` | `olog-output` |
-| `total_matches` · `default_level` | `olog-filters` |
+| `total_matches` · `total_matches_capped` · `default_level` | `olog-filters` |
 | `config_msg` · `capped` (alarm history) | `alarm-tree` |
 | `archive_fields` · `host_name` · `creation_time` · `identity` | `err-archiver` |
 | `secs` · `nanos` · `val` (one archived sample) | `err-archiver` |
@@ -352,14 +352,22 @@ answers with HTTP 200 and that no filter ever finds again. A blank level is refu
 server accepts it and silently clears the entry's triage level. The match is exact: no casefolding,
 no trimming, no `,`/`;`/`|` splitting. Those are search semantics; a level being written is a scalar.
 
-**Two counters that are allowed to be absent, and both read as a zero if you let them.**
+**Two counters that mislead, and they mislead in OPPOSITE directions.**
 `total_matches` (`search_logbook`) and `default_level` (`list_log_levels`) are each explained field
-by field in their tool's own description; what that description cannot say is what an OLDER Olog
-does with them. `total_matches` is `null` on a server version that returns no hit count at all, so
-compare it against the length of the page rather than treating a missing total as no matches. And
-`default_level` is `null` far more often than it looks: a stock Olog seed file flags TWO defaults,
-and the server refuses to guess between them, so pass `level` explicitly rather than reading `null`
-as a fault.
+by field in their tool's own description; what that description cannot say is how each one goes
+wrong. `default_level` errs low: it is `null` far more often than it looks, because a stock Olog
+seed file flags TWO defaults and the server refuses to guess between them, so pass `level`
+explicitly rather than reading `null` as a fault.
+
+`total_matches` errs HIGH, and that is the dangerous one, because a number that is too large still
+looks like an answer. It is `null` on a server version that returns no hit count at all, and on a
+large corpus it arrives SATURATED: Elasticsearch stops counting at a ceiling and Olog discards the
+marker that would have said so. Measured against a production logbook, the same value comes back
+whether a single record or a full page is requested. **Read `total_matches_capped` before you read
+the number.** While it is `false` the total is exact; while it is `true` the total is a FLOOR, at
+least that many matched, and a `note` in the same answer says so; it is `null` exactly when the
+count itself is missing. To turn a floor back into a count, narrow the search with `start`/`end`
+until the flag reads `false`.
 
 An unbalanced double quote in `title` makes the server throw, which an anonymous read sees as **401**
 (Olog's error dispatch requires auth and so masks its own 400). On this read path a 401 almost always

@@ -9,7 +9,12 @@ import requests
 from epics_mcp.config import EpicsConfig
 from epics_mcp.errors import EpicsConnectionError, EpicsError
 from epics_mcp.services._time_window import TimeWindowFormatError
-from epics_mcp.services.olog_client import OlogClient, split_level_values
+from epics_mcp.services.olog_client import (
+    HIT_COUNT_CEILING,
+    OlogClient,
+    hit_count_is_capped,
+    split_level_values,
+)
 from epics_mcp.services.olog_exceptions import (
     OlogConnectionError,
     OlogError,
@@ -205,7 +210,7 @@ def test_search_logbook_capped_and_query_params(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_search_logbook_wrapped_response(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An Olog {logs, hitCount} wrapper is handled; hitCount → total_matches (the true total)."""
+    """An Olog {logs, hitCount} wrapper is handled; hitCount reaches total_matches."""
     client = OlogClient("http://olog")
     monkeypatch.setattr(
         client.session, "get", Mock(return_value=_resp({"logs": [_RAW_ENTRY], "hitCount": 7}))
@@ -213,7 +218,102 @@ def test_search_logbook_wrapped_response(monkeypatch: pytest.MonkeyPatch) -> Non
     entries, _capped, total_matches = client.search_logbook()
     assert len(entries) == 1
     assert entries[0]["id"] == 42
-    assert total_matches == 7  # authoritative total across all pages, NOT len(entries)
+    assert total_matches == 7  # the server's own count, NOT len(entries); exact below the
+    # ceiling, see test_a_hit_count_at_the_ceiling_is_declared_a_floor for the other state
+
+
+def _olog_session(monkeypatch: pytest.MonkeyPatch, payload: object) -> None:
+    """Point the service layer at a session double answering *payload*, without a class double.
+
+    Deliberately NOT the ``_FakeSearch`` seam below: ``scripts/guard_audit.py`` counts every
+    ``monkeypatch.setattr`` that replaces a ``*Client`` CLASS and pins the total, so a test
+    installing ``OlogClient`` moves a figure that has nothing to do with what it measures. Patching
+    the shared session leaves the REAL client in the path, which is also the stricter test.
+    """
+    session = Mock()
+    session.get.return_value = _resp(payload)
+    monkeypatch.setattr(
+        "epics_mcp.services.checkers_olog.get_config",
+        lambda: EpicsConfig(olog_url="http://olog"),
+    )
+    monkeypatch.setattr(
+        "epics_mcp.services.olog_client.get_shared_session", lambda **_kwargs: session
+    )
+
+
+def test_hit_count_is_capped_reads_the_ceiling_and_nothing_else() -> None:
+    """The pure verdict, with no client, no session and no mock in the way.
+
+    Deliberately kept as its own function rather than folded into the service tests: the service
+    ones prove the verdict REACHES the answer, this one proves what the verdict IS. A boundary
+    read from a value has to be pinned ON the boundary, so both sides of it are here.
+    """
+    assert hit_count_is_capped(None) is None
+    assert hit_count_is_capped(0) is False
+    assert hit_count_is_capped(HIT_COUNT_CEILING - 1) is False
+    assert hit_count_is_capped(HIT_COUNT_CEILING) is True
+    assert hit_count_is_capped(HIT_COUNT_CEILING + 1) is True
+
+
+@pytest.mark.asyncio
+async def test_a_hit_count_at_the_ceiling_is_declared_a_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole point of GQ-297: a saturated Elasticsearch total must not read as a count.
+
+    Measured 2026-09-04 against the ESS production Olog: ``hitCount`` answers 10000 for size 1, 50
+    and 200 alike. Olog reads the value from ``hits().total().value()`` and never asks for an exact
+    one (no ``track_total_hits`` anywhere in its source), so Elasticsearch saturates it and marks
+    that in a ``relation`` field which ``SearchResult.hitCount``, a bare long, discards. The number
+    therefore arrives indistinguishable from a real total, which is what the two extra carriers
+    here exist to prevent.
+    """
+    _olog_session(monkeypatch, {"logs": [_RAW_ENTRY], "hitCount": HIT_COUNT_CEILING})
+
+    result = await _search_logbook(text="vacuum")
+
+    assert result["total_matches"] == HIT_COUNT_CEILING
+    assert result["total_matches_capped"] is True
+    note = result["note"]
+    assert note is not None and "ceiling" in note, note
+
+
+@pytest.mark.asyncio
+async def test_a_hit_count_below_the_ceiling_is_declared_exact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other direction, and it is what makes the flag worth reading.
+
+    A flag that were true everywhere would carry no information. Measured 2026-09-05 against a
+    local Olog holding 109 entries: ``hitCount`` answered 109 for size 1, 5, 50, 200 and 500, and
+    at size 200 the same call really did return 109 entries, so the number is proved against
+    itself rather than asserted. Below the ceiling the total IS the total, and nothing annotates it.
+    """
+    _olog_session(monkeypatch, {"logs": [_RAW_ENTRY], "hitCount": 109})
+
+    result = await _search_logbook(text="vacuum")
+
+    assert result["total_matches"] == 109
+    assert result["total_matches_capped"] is False
+    assert "note" not in result
+
+
+@pytest.mark.asyncio
+async def test_a_server_without_a_hit_count_qualifies_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No count at all is a THIRD state, and the flag has to say so rather than guess.
+
+    An older Olog answers a bare list. ``total_matches`` is then the honest ``None`` pinned by
+    ``test_search_returns_whole_entries``, and a flag of ``False`` there would read as "this total
+    is exact" about a total that does not exist. It is ``None`` exactly when the count is.
+    """
+    _olog_session(monkeypatch, [_RAW_ENTRY])
+
+    result = await _search_logbook(text="vacuum")
+
+    assert result["total_matches"] is None
+    assert result["total_matches_capped"] is None
 
 
 def test_get_log_entry_found(monkeypatch: pytest.MonkeyPatch) -> None:
