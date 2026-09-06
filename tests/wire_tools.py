@@ -1,11 +1,16 @@
-"""The registered tools as they go over the WIRE, in one place instead of five spellings.
+"""The registered tools as they go over the WIRE, in one place instead of nine spellings.
 
 ``mcp.list_tools()`` answers FastMCP's own ``Tool`` objects; what a client receives is the
 ``mcp.types.Tool`` each of them serialises to via ``to_mcp_tool()``. Every test that asserts
 something about a name, a description or a schema has to make that conversion first, and the
-suite made it in five literally different ways at 43 places in ``test_server.py`` alone, plus
-eight more across seven other modules. All five did the same thing, so the differences carried no
-information: they were the residue of the site being copied from whichever neighbour was nearest.
+suite made it in NINE literally different ways at 51 places across eight modules: five of those
+forms in ``test_server.py``, which held 43 of the sites, and four more spread over its seven
+siblings. All nine did the same thing, so the differences carried no information: they were the
+residue of each site being copied from whichever neighbour was nearest.
+
+⚠ The work item said five, and five is what ``test_server.py`` alone carried. Counting only the
+one file is how the sibling forms stayed invisible; the measuring rule that found the other four
+is in the evidence folder of GQ-270, and it counts OCCURRENCES rather than lines.
 
 ⚠ ``mcp`` is imported inside the functions, not at module level, and that is not style. It pulls
 in the whole server stack and through it p4p, numpy and OpenBLAS; a module-level import here would

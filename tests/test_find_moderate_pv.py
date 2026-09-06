@@ -32,8 +32,15 @@ home:
       band filter                        that_passed_the_band
 * M17 glob predicate always True      → test_the_glob_predicate_reports_whether_getallpvs_really_
                                          filters[glob-ignored]
+* M18 past window checked by count    → test_each_live_premise_is_checked_on_its_own[past-window-
+      only, not by status                unreadable],
+                                         test_an_unreadable_past_window_is_not_an_empty_one
 
-⚠ M13 to M17 arrived with GQ-289 and are APPENDED, never inserted: the numbers are identities,
+⚠ M18 is the post-build review's own finding: the first version checked the past window by
+sample count alone, and a withheld result has zero samples by construction, so every unreadable
+answer passed as a good fixture.
+
+⚠ M13 to M18 arrived with GQ-289 and are APPENDED, never inserted: the numbers are identities,
 cited from commit messages and analysis notes, so renumbering would quietly re-point every earlier
 citation at a different mutant.
 
@@ -349,6 +356,7 @@ class _FakeArchiver:
         status: str = "Being archived",
         found: bool = True,
         past_samples: int = 0,
+        past_status: Literal["ok", "empty", "withheld"] = "empty",
         schema_status: Literal["ok", "empty", "withheld"] = "ok",
         all_pvs: object = ("A", "B", "C"),
         filtered_pvs: object = ("A",),
@@ -357,6 +365,7 @@ class _FakeArchiver:
         self.status = status
         self.found = found
         self.past_samples = past_samples
+        self.past_status = past_status
         self.schema_status = schema_status
         self.all_pvs = all_pvs
         self.filtered_pvs = filtered_pvs
@@ -375,7 +384,7 @@ class _FakeArchiver:
         # the start made this fake answer the schema probe with the past probe's history, and the
         # two schema cases below were the ones that caught it.
         if end == FIXTURE_PAST_WINDOW[1]:
-            return _history([_sample(_LO + 10)] * self.past_samples)
+            return _history([_sample(_LO + 10)] * self.past_samples, status=self.past_status)
         return _history([_sample(_LO + 10)], status=self.schema_status)
 
     def _get(self, _url: str, params: dict[str, str]) -> object:
@@ -399,6 +408,7 @@ def test_a_candidate_meeting_every_premise_reports_nothing_unmet() -> None:
         ({"status": ""}, "not_archived"),
         ({"found": False}, "no_type_info"),
         ({"past_samples": 1}, "past_window_not_empty"),
+        ({"past_status": "withheld"}, "past_window_withheld"),
         ({"schema_status": "empty"}, "schema_window_not_ok"),
         ({"schema_status": "withheld"}, "schema_window_not_ok"),
     ],
@@ -407,6 +417,7 @@ def test_a_candidate_meeting_every_premise_reports_nothing_unmet() -> None:
         "empty-status-string",
         "no-type-record",
         "past-window-carries-a-sample",
+        "past-window-unreadable",
         "schema-window-empty",
         "schema-window-withheld",
     ],
@@ -516,3 +527,25 @@ def test_the_glob_predicate_reports_whether_getallpvs_really_filters(
     client = _FakeArchiver(all_pvs=all_pvs, filtered_pvs=filtered_pvs)
 
     assert glob_discriminates(cast(ArchiverClient, client), "SIM:PS-01:*") is discriminates
+
+
+def test_an_unreadable_past_window_is_not_an_empty_one() -> None:
+    """⛔ The sharpest correction the post-build review made, and it is worth its own test.
+
+    ``_withheld_history`` returns ``samples=[]`` by construction, so an UNREADABLE past window has
+    zero samples exactly like a genuinely empty one. A check that only counts therefore verifies
+    every such candidate as a good fixture, and the live suite then fails on it at an assertion
+    the search never made.
+
+    That is the same conflation of "no data" with "could not read" that GQ-290 removed from the
+    archiver client one commit earlier, reappearing one layer up in the tool that consumes it.
+    """
+    unreadable = _FakeArchiver(past_status="withheld")
+    genuinely_empty = _FakeArchiver(past_status="empty")
+
+    # The two are indistinguishable by sample count, which is why counting is not enough.
+    assert unreadable.get_pv_history("X", *FIXTURE_PAST_WINDOW)["samples"] == []
+    assert genuinely_empty.get_pv_history("X", *FIXTURE_PAST_WINDOW)["samples"] == []
+
+    assert _premises(unreadable) == ["past_window_withheld"]
+    assert _premises(genuinely_empty) == []

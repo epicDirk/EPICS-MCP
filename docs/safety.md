@@ -262,7 +262,13 @@ This is a controls tool, so the trust questions come first.
 **Strict response schemas (S11).** Every REST client validates a 2xx payload against the
 measured schema of its endpoint. An unreadable payload **raises a loud error**, except in
 `get_pv_history`, whose existing `status` channel reports it as `withheld`, and is **never**
-minted into a definitive answer. (`is_alarm_configured`'s `null` stays the *readable-but-
+minted into a definitive answer. ⚠ Where that boundary runs for `get_pv_history` moved with
+GQ-290: a bare `[]` is now read as `empty` rather than `withheld`, because it is the shape this
+appliance sends for a window that holds no stream, and an unknown PV cannot produce it (the
+retrieval servlet answers 404, which raises first). That reading is the ordinary one, not a
+proof: the same bytes come back when a retrieval fails server-side and is only logged there, and
+the two are indistinguishable from the client. The result's `note` carries that limit to the
+caller. (`is_alarm_configured`'s `null` stays the *readable-but-
 tree-ambiguous* verdict; an unreadable payload there raises like everywhere else.) Definitive
 negatives come only from each service's measured signal: Archiver `getPVTypeInfo` HTTP 404 and
 Olog `get_log_entry` HTTP 404. **Naming HTTP 204/404 is definitive only once the responder proves

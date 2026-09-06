@@ -70,7 +70,7 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   ⚠️ Two caveats on the counterpart number. First, "observed in both polarities" is weaker than it
   sounds for the 21 RAISE guards: their enabling polarity fires the guard on every input, so every
   covering test dies by construction and only the disabling half carries information. Second,
-  three entries below (`alarm_client.py:247`, `epics_client.py:653`, `olog_client.py:183`) sit in
+  three entries below (`alarm_client.py:247`, `epics_client.py:661`, `olog_client.py:183`) sit in
   comprehension filters, where the tool builds no whole-condition target, for those "unobserved"
   means "this CONJUNCT is unobserved", the rest of the condition still stood during the mutant.
   ⚠️ Those two numbers were `490` and `181` until GQ-276 and had rotted where the table below had
@@ -161,9 +161,11 @@ _GUARD_POPULATION: dict[str, tuple[int, int]] = {
 _UNOBSERVED: dict[str, str] = {
     "alarm_client.py:244": "empty-list fallback; disabling it is not noticed",
     "alarm_client.py:247": "any() filter over the config records",
-    # RE-LOCATED +5 by the widened HistoryResult docstring in GQ-290, byte-identical against
-    # ``git show 39c276d:src/epics_mcp/services/archiver_client.py`` at its old number 152.
-    "archiver_client.py:157": "sample check, masked by the following 'secs'/'val' membership test",
+    # RE-LOCATED +5 by the widened HistoryResult docstring in GQ-290 (byte-identical against
+    # ``git show 39c276d:...`` at its old number 152), then +3 more by that change's post-build
+    # review, which qualified the empty-branch comment and the status docstring
+    # (``git show f8cdaa2:...`` at 157).
+    "archiver_client.py:160": "sample check, masked by the following 'secs'/'val' membership test",
     # ⛔ ``archiver_client.py:497`` ("history block shape") is GONE from this table, and it is the
     # one row here that was RE-JUDGED rather than re-located. GQ-290 split its middle conjunct out
     # (the bare ``[]`` now means empty, not unreadable), so the old line has NO byte-identical
@@ -186,20 +188,25 @@ _UNOBSERVED: dict[str, str] = {
     # recorded epics_client line, including the two tuples below, was compared against the OLD
     # blob at its OLD number, and all eight were byte-identical at old+33.
     # Then +30 more with GQ-276, which put ``reset_context`` and a widened ``get_context``
-    # docstring ABOVE every one of them. Verified the same mechanical way, against the blob and
-    # not against a branch:
-    #     git show 5bd6b7f:src/epics_mcp/services/epics_client.py
-    # all eight are byte-identical at old+30. A uniform offset over every row is what an insertion
+    # docstring ABOVE every one of them, and +8 more when that change's own post-build review
+    # wrapped the close in a try/finally and explained it. Verified the same mechanical way,
+    # against the blob and not against a branch:
+    #     git show 5bd6b7f:src/epics_mcp/services/epics_client.py   (for the +30 step)
+    #     git show f8cdaa2:src/epics_mcp/services/epics_client.py   (for the +8 step)
+    # all eight are byte-identical at each step.
+    # ⚠ TWO steps inside one working session, which is this row's recurring lesson stated once
+    # more: the offset is measured at the END of a change, and a review that touches the file
+    # again starts a new change. A uniform offset over every row is what an insertion
     # ABOVE all of them produces; a re-judged finding would not move as a block.
     # ⭐ And this time the coincidence the note below warns about was RULED OUT rather than
     # assumed: +30 is the ONLY offset in -5..+59 under which all eight lines match their old
     # bytes, so no other relocation is consistent with the evidence. Re-running that sweep is the
     # cheapest way to redo this check after the next move.
-    "epics_client.py:195": "PVNotFoundError branch of the gather dispatch",
-    "epics_client.py:614": "NTNDArray element_count",
-    "epics_client.py:624": "int-or-none column coercion",
-    "epics_client.py:653": "NTMatrix dim entries",
-    "epics_client.py:855": "NaN alarm field",
+    "epics_client.py:203": "PVNotFoundError branch of the gather dispatch",
+    "epics_client.py:622": "NTNDArray element_count",
+    "epics_client.py:632": "int-or-none column coercion",
+    "epics_client.py:661": "NTMatrix dim entries",
+    "epics_client.py:863": "NaN alarm field",
     "olog_client.py:183": "lenient name filter inside an already-anchored entry",
     "olog_client.py:391": "attachment filename check",
     # Moved +14 by the OQ11 docstring on ``_expand_log_entry``, then +24 more by OQ12 (the union
@@ -227,8 +234,8 @@ _UNOBSERVED: dict[str, str] = {
 
 # Neither polarity is noticed, and lines no test executes at all. Both are TEST GAPS at the
 # refusal path, not evidence that the check is removable: production input is not test input.
-_UNOBSERVED_EITHER_WAY: tuple[str, ...] = ("epics_client.py:197",)
-_NEVER_EXECUTED: tuple[str, ...] = ("epics_client.py:199", "epics_client.py:547")
+_UNOBSERVED_EITHER_WAY: tuple[str, ...] = ("epics_client.py:205",)
+_NEVER_EXECUTED: tuple[str, ...] = ("epics_client.py:207", "epics_client.py:555")
 
 _RERUN = (
     "re-run the audit: COVERAGE_CORE=ctrace COVERAGE_FILE=<scratch>/cov uv run pytest "

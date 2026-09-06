@@ -204,14 +204,23 @@ def suggest_glob(pv_name: str) -> str:
 def unmet_extra_premises(client: ArchiverClient, pv_name: str) -> list[str]:
     """Every live-suite premise beyond the sample band that *pv_name* fails, empty when it holds.
 
-    The four the walk used to ignore, each named after the live assertion it reproduces:
+    The premises the walk used to ignore, each named after the live assertion it reproduces:
 
     * ``not_archived``: the suite asserts ``is_archived(pv)`` is True and the status a non-empty
       string.
     * ``no_type_info``: it asserts ``get_pv_type_info(pv)["found"]`` is True.
-    * ``past_window_not_empty``: it asserts the 2020 short window returns NOTHING.
+    * ``past_window_not_empty``: it asserts the 2020 short window returns no samples.
+    * ``past_window_withheld``: it ALSO asserts that window's ``status`` is ``"empty"`` and its
+      ``withheld_reason`` ``None``, which is a second, independent condition on the same probe.
     * ``schema_window_not_ok``: it asserts the 2020-2030 window answers ``ok``, so the sample
       schema anchor has something to pin.
+
+    ⛔ The past window needs BOTH of its checks, and leaving the second out was a real defect in
+    this function's first version. ``_withheld_history`` always returns ``samples=[]``, so an
+    UNREADABLE answer passes a length check by construction: counting alone would verify every
+    such PV as a good fixture and hand the live suite one that fails at its status assertion. The
+    build that introduced this had proven that exact point one commit earlier, in the live test's
+    own comment, and then reproduced only the counting half.
 
     ⛔ ``past_window_not_empty`` counts the RESULT LENGTH, deliberately, and not
     :func:`count_inside`. The live test counts the same way, and the two differ: the appliance
@@ -235,6 +244,14 @@ def unmet_extra_premises(client: ArchiverClient, pv_name: str) -> list[str]:
     past = client.get_pv_history(pv_name, *FIXTURE_PAST_WINDOW, max_points=FIXTURE_MAX_POINTS)
     if len(past["samples"]) != 0:
         unmet.append("past_window_not_empty")
+    elif past["status"] != "empty":
+        # ⛔ Counting alone is NOT the test's criterion, and this line is the post-build review's
+        # correction of a build that had just proven the same point one commit earlier. The live
+        # test asserts three things about this window: no samples, status "empty", and no
+        # withheld_reason. A withheld result satisfies the first of those by construction, because
+        # _withheld_history always returns samples=[]. Checking only the count therefore verifies
+        # every unreadable answer as a good fixture and hands the live suite a PV that fails it.
+        unmet.append("past_window_withheld")
 
     schema = client.get_pv_history(pv_name, *FIXTURE_SCHEMA_WINDOW, max_points=FIXTURE_MAX_POINTS)
     if schema["status"] != "ok":
@@ -250,10 +267,18 @@ def glob_discriminates(client: ArchiverClient, glob: str) -> bool:
     into its fixture recipe and never checks it, while the live suite hangs two assertions on it.
     A perfect fixture PV can therefore still leave the suite red.
 
-    Of those two assertions this reproduces the LOAD-BEARING one. The sibling assertion says
-    ``getPVsForThisAppliance`` IGNORES the filter, and a glob matching nothing at all satisfies
-    that just as well; only this one, that ``getAllPVs`` answers something different WITH the
-    glob than without it, distinguishes a working glob from a useless one.
+    ⛔ This does NOT reproduce either live assertion literally, and the first version of this
+    docstring claimed it did. Measured: the live test builds ``unfiltered`` from
+    ``getPVsForThisAppliance`` and compares ``getAllPVs``-with-glob against THAT, so its second
+    assertion spans two different endpoints and is satisfied by any glob whenever the two
+    endpoints answer different lists, which on a cluster they routinely do. What is checked here
+    is the property that assertion is FOR, stated in the comment above it: that ``getAllPVs``
+    really filters. Same endpoint, with and without the glob.
+
+    ⚠ That makes this predicate STRICTER than the assertion it guards, which is the safe
+    direction: a glob passing here passes there, and the reverse does not hold. It also means a
+    green run here is not a proof about the live assertion's literal text, and the discrepancy in
+    that text is reported as its own finding rather than quietly patched from this side.
     """
     unfiltered = client._get(f"{client.base_url}/mgmt/bpl/getAllPVs", {"limit": "5"})
     by_name = client._get(f"{client.base_url}/mgmt/bpl/getAllPVs", {"limit": "5", "pv": glob})

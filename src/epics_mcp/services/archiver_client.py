@@ -120,12 +120,15 @@ class HistoryResult(TypedDict):
     ``status`` tells apart the three cases a bare ``([], False)`` tuple used to conflate:
 
     * ``"ok"``: samples were returned (``capped`` says whether the cap truncated them).
-    * ``"empty"``: a VALID response carrying no samples: genuinely no samples in the window.
-      This is the ONLY empty-``samples`` case with ``withheld_reason=None``. TWO wire shapes
-      reach it, and the second is the one that actually occurs: a block whose ``data`` array is
-      empty, and a bare ``[]`` with no block at all. Measured on appliance 2.2.1 (GQ-290), a
-      window before a PV's first sample answers ``[]``; the block-with-empty-data shape was not
-      observed on the wire and is kept because it is equally readable.
+    * ``"empty"``: a VALID response carrying no samples: no samples in the window. This is the
+      ONLY empty-``samples`` case with ``withheld_reason=None``. TWO wire shapes reach it, and the
+      second is the one that actually occurs: a block whose ``data`` array is empty, and a bare
+      ``[]`` with no block at all. Measured on appliance 2.2.1 (GQ-290), a window before a PV's
+      first sample answers ``[]``; the block-with-empty-data shape was not observed on the wire
+      and is kept because it is equally readable. ⚠ ``empty`` is the ordinary reading of ``[]``,
+      not a proof: the same six bytes come back when a retrieval fails server-side and is only
+      logged there. ``note`` says so; see the branch in ``get_pv_history`` for why the ordinary
+      reading is still the right default.
     * ``"withheld"``: the response could not be interpreted; ``withheld_reason`` says why
       (``"unexpected_payload"`` / ``"unexpected_sample_shape"``). NOT "no data", the sample
       history is unknown, not proven empty. ⚠ A bare ``[]`` used to land here, which said
@@ -500,38 +503,55 @@ class ArchiverClient:
         )
         # getData.json returns [{"meta": {...}, "data": [ {secs,nanos,val,severity,status}, ... ]}]
         if isinstance(data, list) and not data:
-            # A bare [] is EMPTY, not unreadable, and this is the only empty answer the appliance
-            # actually produces (GQ-290). Three measurements, none of them inferred:
+            # A bare [] is EMPTY rather than unreadable (GQ-290). Three measurements:
             #
             # 1. The wire. A window before a PV's first sample answers HTTP 200,
             #    Content-Type application/json, body b"[ \n ]\n" - six bytes, measured against
             #    appliance 2.2.1 on 2026-09-06.
             # 2. The source. Without a data stream the JSON responder writes only "[ " when the
             #    output stream opens and " ]" when it closes, because the per-PV branch never
-            #    runs (JSONResponse.java, setOutputStream/close). There is no other shape it can
-            #    emit for "nothing to send".
+            #    runs (JSONResponse.java, setOutputStream/close).
             # 3. It cannot mean "unknown PV". Without a PVTypeInfo the retrieval servlet answers
             #    404, and a 404 raises in _get long before this line, so an unknown name never
             #    reaches the classifier at all.
             #
-            # So [] has exactly one reading: the PV is known and the window holds no stream. That
-            # is "empty", and calling it "withheld" told every caller the history was UNKNOWN when
-            # it was in fact proven absent. The two shapes below stay withheld: a payload that is
-            # not a list, and a list whose first element is not a block, are genuinely unreadable.
+            # ⛔ WHAT THIS IS NOT: a proof that [] has only one reading. The build first claimed
+            # that, and its own post-build review disproved it from the same source. The retrieval
+            # servlet opens its consumer inside a try-with-resources, so the opening "[ " is
+            # already written when the body runs; if anything there throws, the consumer is closed
+            # (writing " ]") and the handler only LOGS, with no sendError
+            # (DataRetrievalServlet.java, the catch around the retrieval block, and the per-stream
+            # catch below it). A caller then sees HTTP 200 and exactly these six bytes for a run
+            # that FAILED server-side.
             #
-            # ⚠ Sharper than it looks: the appliance carries the last sample from BEFORE the
-            # window into any window that has one, so a [] means there is no sample in the window
-            # AND none before it.
+            # So the two readings are indistinguishable at this end, and the choice between them
+            # is a judgement, not a measurement:
+            #   * "window is empty" is the ordinary case, and it happens for every window before a
+            #     PV's first sample, which is a normal thing to ask for;
+            #   * "the retrieval broke and was only logged" is an exception on the server, which
+            #     the server records and this client cannot see.
+            # Calling every [] "withheld" made the ordinary case unusable to say something true
+            # about the rare one. Calling it "empty" is right in the ordinary case and, in the
+            # rare one, says less than it should. The note below carries that limit to the caller
+            # rather than hiding it, because a caller chasing a genuinely missing measurement must
+            # be able to learn that this answer has a second reading.
+            #
+            # ⚠ The two shapes below stay withheld: a payload that is not a list, and a list whose
+            # first element is not a block, are genuinely unreadable.
             return HistoryResult(
                 samples=[],
                 capped=False,
                 meta={},
                 status="empty",
                 note=(
-                    "No samples in the requested window, and none before it either (the appliance "
-                    "carries the preceding sample into a window when there is one). If you "
-                    "expected data, verify the PV is archived on this appliance (is_archived / "
-                    "get_archive_info) and check the window and its timezone."
+                    "No samples in the requested window. The appliance carries the last sample "
+                    "from BEFORE a window into any window that has one, so there is none before "
+                    "it either. If you expected data, verify the PV is archived on this appliance "
+                    "(is_archived / get_archive_info) and check the window and its timezone. "
+                    "NOTE: an empty top-level payload is also what this appliance returns when a "
+                    "retrieval fails server-side and is only logged there, and the two are not "
+                    "distinguishable from here; if the data should exist, the appliance's own log "
+                    "is the next place to look."
                 ),
                 withheld_reason=None,
             )

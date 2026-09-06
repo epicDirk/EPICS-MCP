@@ -6,6 +6,7 @@ import os
 import threading
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 from p4p.client.thread import Cancelled, Disconnected, Finished, RemoteError
@@ -1446,3 +1447,64 @@ def test_reset_context_is_a_no_op_without_a_context() -> None:
     epics_client.reset_context()
 
     assert epics_client._context is None
+
+
+# ---------------------------------------------------------------------------
+# The autouse reset is itself guarded, by the PAIR below. Read them together.
+#
+# ⛔ These two are COUPLED and must stay adjacent and in this order. pytest collects a module in
+# definition order, so the first one's leftover Context is what the second one measures. Reorder
+# them, put anything between them, or split them across modules, and the guard silently stops
+# guarding: the second would then pass for the trivial reason that whatever ran before it left no
+# Context either.
+#
+# The post-build review of GQ-276 measured that deleting the conftest fixture turned NOTHING red,
+# which made the mechanism of this whole change a guard of the kind guard_audit hunts: one whose
+# removal no test notices. A first attempt at closing that failed for exactly the reason spelled
+# out above, and this pair is the version that was proven able to go red.
+# ---------------------------------------------------------------------------
+
+
+def test_a_context_is_left_behind_for_the_reset_to_clear(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Half one of the pair: build a Context and deliberately do NOT clean it up."""
+    _set_lane(monkeypatch, _OFF_LANE)
+    epics_client.get_context()
+
+    assert epics_client._context is not None, "premise: this test really does build one"
+
+
+def test_the_autouse_reset_cleared_the_previous_test_s_context() -> None:
+    """Half two: the Context its predecessor left is gone, so the autouse teardown ran.
+
+    This is the only assertion in the suite that fails when ``_reset_epics_context`` is removed
+    from conftest. Without it the fixture is a guard nobody watches, and the lane leak it prevents
+    would come back silently at the one place it is dangerous, the live write path.
+    """
+    assert epics_client._context is None, (
+        "a Context survived from the test above: the autouse reset in tests/conftest.py is not "
+        "running, so the FIRST module in a process to build a Context again decides the search "
+        "lane for every later one, and a lane assertion elsewhere is back to proving nothing"
+    )
+
+
+def test_reset_context_drops_the_singleton_even_if_close_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failing close() must not leave the stale Context installed for every following test.
+
+    Found by the post-build review: the drop used to sit after ``close()`` with nothing between
+    them, so an exception there kept the singleton alive. As a once-per-process atexit helper that
+    was nearly harmless; as a per-test teardown it would turn one teardown error into failures in
+    unrelated tests later, which is the diagnosis confusion this package exists to remove.
+    """
+    _set_lane(monkeypatch, _LOOPBACK_LANE)
+    context = epics_client.get_context()
+    monkeypatch.setattr(context, "close", Mock(side_effect=RuntimeError("close failed")))
+
+    with pytest.raises(RuntimeError, match="close failed"):
+        epics_client.reset_context()
+
+    assert epics_client._context is None, (
+        "the failing close() left the stale Context installed; the next get_context() would hand "
+        "it to a test that never built it"
+    )

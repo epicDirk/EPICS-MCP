@@ -206,26 +206,41 @@ def test_get_pv_history_reads_a_bare_empty_list_as_empty(
     assert result["meta"] == {}
 
 
-def test_the_measured_empty_bytes_really_parse_to_a_bare_list() -> None:
-    """The premise under the test above, pinned against the BYTES rather than a hand-typed ``[]``.
+def test_the_measured_empty_bytes_classify_as_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The same claim as the test above, but starting from the BYTES the appliance really sent.
 
-    Without this the suite would only prove what happens once someone has already decided the
-    payload is ``[]``. The point of GQ-290 is that the appliance sends these exact bytes, so the
-    fixture is the measurement itself.
+    The sibling hands ``_resp`` an already-decoded ``[]``, so it proves what the classifier does
+    once someone has decided the payload is a list. This one starts one layer lower, at the six
+    bytes captured from appliance 2.2.1 on 2026-09-06, and lets the production path decode them:
+    a real ``requests.Response``, handed to the client through ``session.get``, driven through
+    ``get_pv_history``.
+
+    ⛔ The first version of this test stopped at ``response.json() == []`` and never touched
+    ``epics_mcp`` at all, so it proved that requests can parse six bytes and would have stayed
+    green with the whole GQ-290 change reverted. Its own post-build review caught that, and it is
+    worth naming: a test whose name promises a classification and which measures a third-party
+    library is the exact failure this package was built against.
 
     ``_content`` because there is no public way in: ``Response.content`` is a property with no
     setter, and ``_content`` is what requests itself writes there, listed in ``Response.__attrs__``
-    and restored by ``__setstate__``. The alternatives cost more than they are worth for one
-    assertion: a real HTTP server, or a mocking library this repository does not depend on.
+    and restored by ``__setstate__``. The alternatives cost more than they are worth: a real HTTP
+    server, or a mocking library this repository does not depend on.
     """
     measured = b"[ \n ]\n"  # captured from appliance 2.2.1 on 2026-09-06, byte for byte
+    assert len(measured) == 6
     response = requests.Response()
     response.status_code = 200
     response._content = measured
     response.headers["Content-Type"] = "application/json"
 
-    assert response.json() == []
-    assert len(measured) == 6
+    client = ArchiverClient("http://arch")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=response))
+
+    result = client.get_pv_history("X", _T0, _T1)
+
+    assert result["status"] == "empty"
+    assert result["withheld_reason"] is None
+    assert result["samples"] == []
 
 
 @pytest.mark.parametrize(

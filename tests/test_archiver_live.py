@@ -22,6 +22,7 @@ import pytest
 
 from epics_mcp.find_moderate_pv import (
     FIXTURE_MAX_POINTS,
+    FIXTURE_MIN_INSIDE,
     FIXTURE_PAST_WINDOW,
     FIXTURE_SCHEMA_WINDOW,
     FIXTURE_WINDOW,
@@ -116,6 +117,12 @@ def test_absolute_window_finds_samples(client: ArchiverClient, pv: str) -> None:
     )
 
 
+# ⚠ These three ARE literals and stay literals: they are three SPELLINGS of the instant
+# FIXTURE_WINDOW[0] denotes, and the subject of the test is precisely that the spellings differ
+# while the instant does not. Deriving them from the constant would delete the test. They are
+# coupled to it by hand, so a change to FIXTURE_WINDOW[0] has to be carried here; the assertion
+# below compares against a reference window that IS derived, so a drift shows up as a mismatch
+# rather than as a silent pass.
 @pytest.mark.parametrize(
     "start",
     [
@@ -138,7 +145,7 @@ def test_sibling_notations_agree_with_iso_z(client: ArchiverClient, pv: str, sta
     throws that distinction away and would let an uninterpretable response pass as agreement.
     """
     reference = _history(client, pv, *_window())
-    sibling = _history(client, pv, start, "2027-01-01T00:00:00Z")
+    sibling = _history(client, pv, start, FIXTURE_WINDOW[1])
 
     for label, result in (("reference", reference), (f"{start!r}", sibling)):
         assert result["status"] == "ok", (
@@ -156,7 +163,7 @@ def test_sibling_notations_agree_with_iso_z(client: ArchiverClient, pv: str, sta
     # all. Measured across 24 archived PVs: n minus inside == 1 in every case, and 5 of them had
     # n=1/inside=0. Demand a reference that genuinely spans the window.
     inside = _inside_window(reference["samples"], *_window())
-    assert inside >= 2, (
+    assert inside >= FIXTURE_MIN_INSIDE, (
         f"the reference holds {len(reference['samples'])} sample(s) but only {inside} inside the "
         "window, the appliance carries the last value from before the start, so this PV cannot "
         "discriminate between windows. Pick a PV with several samples in the window "

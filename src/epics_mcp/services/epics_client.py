@@ -100,12 +100,20 @@ def reset_context() -> None:
 
     Holds ``_lock``, unlike the private helper it replaces: the reset and the rebuild must not
     interleave with a concurrent :func:`get_context`.
+
+    ⛔ The drop is in a ``finally``, and that is not defensive habit. This now runs as a teardown
+    around EVERY test, so a single failing ``close()`` would otherwise leave the singleton set and
+    hand the stale Context to every test that follows: one error at the teardown, the damage at
+    unrelated tests later. Dropping the reference regardless costs at worst a leaked socket in a
+    case that already went wrong, and keeps the failure where it happened.
     """
     global _context
     with _lock:
         if _context is not None:
-            _context.close()
-            _context = None
+            try:
+                _context.close()
+            finally:
+                _context = None
 
 
 # Registered once at import, not inside the build branch: registering per build would stack one
