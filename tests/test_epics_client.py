@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import threading
 from types import SimpleNamespace
 from typing import Any
@@ -10,6 +11,7 @@ import pytest
 from p4p.client.thread import Cancelled, Disconnected, Finished, RemoteError
 
 import epics_mcp.services.epics_client as epics_client
+from epics_mcp.epics_address import is_loopback_host, split_host
 from epics_mcp.errors import EpicsConnectionError, EpicsError, PVNotFoundError, PVTimeoutError
 from epics_mcp.services.epics_client import _classify_p4p_error, _format_value
 from epics_mcp.tools.info import _get_pv_info
@@ -1353,3 +1355,94 @@ def test_a_value_makes_the_detail_line_disappear() -> None:
 
     assert recorder.state() == "connected"
     assert recorder.detail() is None
+
+
+# ---------------------------------------------------------------------------
+# GQ-276: the search lane belongs to the SOCKET, not to os.environ
+#
+# These build a REAL Context, and they stay egress-free by construction rather than by luck, the
+# same way test_epics_address_ports_pinned.py does: IP LITERALS only (no name resolution),
+# EPICS_PVA_AUTO_ADDR_LIST=NO (no subnet broadcast destination is added), and nothing is ever
+# searched for, so no packet leaves. 192.0.2.10 is TEST-NET-1 (RFC 5737), reserved for
+# documentation and never routed, so even a future regression that DID search could not reach a
+# real facility host.
+# ---------------------------------------------------------------------------
+
+_OFF_LANE = "192.0.2.10"
+_LOOPBACK_LANE = "127.0.0.1"
+
+
+def _lane_of(context: object) -> list[str]:
+    """The hosts a built Context really searches on, read off the Context itself.
+
+    Per token via ``split_host``, never as a whole string: pvxs parses, expands, de-duplicates and
+    RE-RENDERS the address list, appending the port. Measured 2026-09-06 on p4p 4.2.2 / pvxs
+    1.5.1, a Context built with ``EPICS_PVA_ADDR_LIST=192.0.2.10`` reports ``'192.0.2.10:5076'``,
+    so an equality check against the value that was set would fail on a correct Context.
+    """
+    conf = context.conf()  # type: ignore[attr-defined]
+    tokens = f"{conf.get('EPICS_PVA_ADDR_LIST', '')} {conf.get('EPICS_PVA_NAME_SERVERS', '')}"
+    return [split_host(token) for token in tokens.split()]
+
+
+def _set_lane(monkeypatch: pytest.MonkeyPatch, addr: str) -> None:
+    monkeypatch.setenv("EPICS_PVA_ADDR_LIST", addr)
+    monkeypatch.setenv("EPICS_PVA_AUTO_ADDR_LIST", "NO")
+    monkeypatch.delenv("EPICS_PVA_NAME_SERVERS", raising=False)
+
+
+def test_a_built_context_keeps_the_lane_it_was_built_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The defect GQ-276 names, pinned as a property rather than described in prose.
+
+    A later ``EPICS_PVA_*`` change moves os.environ and NOTHING about the sockets the Context
+    already searches on: pvxs applies the environment once, in the ClientProvider constructor
+    (``git show 4.2.2:src/p4p/_p4p.pyx`` line 612), and ``Context::config()`` returns the
+    ``effective`` config built there (``git show 1.5.1:src/client.cpp`` lines 414-420).
+
+    This is why an assertion that reads os.environ is not a proof about the lane: it would pass
+    HERE, where the socket is still on the other one. That is the whole class this test guards.
+    """
+    _set_lane(monkeypatch, _OFF_LANE)
+    context = epics_client.get_context()
+    assert _lane_of(context) == [_OFF_LANE], "premise: the Context was built on the off lane"
+
+    _set_lane(monkeypatch, _LOOPBACK_LANE)
+
+    assert os.environ["EPICS_PVA_ADDR_LIST"] == _LOOPBACK_LANE, (
+        "premise: the environment now says loopback, which is what an environment-reading "
+        "assertion would see"
+    )
+    assert epics_client.get_context() is context, "the singleton is not rebuilt on its own"
+    assert _lane_of(context) == [_OFF_LANE], (
+        "the SOCKET still searches on the off lane; anything that reads os.environ instead would "
+        "report loopback here and prove nothing"
+    )
+    assert not all(is_loopback_host(host) for host in _lane_of(context))
+
+
+def test_reset_context_makes_the_new_lane_take_effect(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The other direction: after reset_context() the next get_context() really is on the new lane.
+
+    Red-proof for the repair itself. Without the ``close()`` + drop in reset_context the assertion
+    below reports the off lane, which is exactly the state the test above pins.
+    """
+    _set_lane(monkeypatch, _OFF_LANE)
+    stale = epics_client.get_context()
+    assert _lane_of(stale) == [_OFF_LANE]
+
+    _set_lane(monkeypatch, _LOOPBACK_LANE)
+    epics_client.reset_context()
+    rebuilt = epics_client.get_context()
+
+    assert rebuilt is not stale
+    assert _lane_of(rebuilt) == [_LOOPBACK_LANE]
+    assert all(is_loopback_host(host) for host in _lane_of(rebuilt))
+
+
+def test_reset_context_is_a_no_op_without_a_context() -> None:
+    """It is called from an autouse fixture around EVERY test, so the un-built case is the common
+    one and must be free of side effects."""
+    epics_client.reset_context()
+    epics_client.reset_context()
+
+    assert epics_client._context is None

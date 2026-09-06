@@ -34,13 +34,19 @@ _lock = threading.Lock()
 
 
 def get_context() -> Context:
-    """Return (or create) the process-wide p4p ``Context``."""
+    """Return (or create) the process-wide p4p ``Context``.
+
+    ⚠ The Context reads the EPICS search environment ONCE, when it is built: pvxs applies the
+    environment in the ClientProvider constructor and never re-reads it (``applyEnv`` at
+    ``git show 4.2.2:src/p4p/_p4p.pyx`` line 612). Changing ``EPICS_PVA_*`` afterwards therefore
+    moves nothing about the sockets this Context already searches on. Use
+    :func:`reset_context` to make a changed environment take effect.
+    """
     global _context
     with _lock:
         if _context is None:
             cfg = get_config()
             _context = Context(cfg.provider)
-            atexit.register(_cleanup)
         return _context
 
 
@@ -77,11 +83,35 @@ def effective_provider(configured: str) -> str:
     return offered[0] if offered else configured
 
 
-def _cleanup() -> None:
+def reset_context() -> None:
+    """Close and drop the singleton so the next :func:`get_context` rebuilds it from the CURRENT
+    EPICS search environment.
+
+    Why this is public and not a private atexit helper (GQ-276). A Context binds its search
+    destinations at construction and never re-reads the environment, so within one process the
+    FIRST builder decides the lane for every later caller. A test that pins its own lane by
+    setting ``EPICS_PVA_*`` proves nothing about the socket if an earlier test in the same process
+    already built one: the assertion passes while the traffic still goes where the first test sent
+    it. Resetting between such modules is what makes the lane an observable property again.
+
+    ``close()`` rather than dropping the reference: p4p interrupts and joins the provider's worker
+    threads there, so a bare ``_context = None`` would leave the old sockets and threads alive for
+    the garbage collector to reach whenever it feels like it.
+
+    Holds ``_lock``, unlike the private helper it replaces: the reset and the rebuild must not
+    interleave with a concurrent :func:`get_context`.
+    """
     global _context
-    if _context is not None:
-        _context.close()
-        _context = None
+    with _lock:
+        if _context is not None:
+            _context.close()
+            _context = None
+
+
+# Registered once at import, not inside the build branch: registering per build would stack one
+# callback per rebuild now that reset_context() makes rebuilds possible, and atexit never
+# de-duplicates. The handler is a no-op when no Context was ever built.
+atexit.register(reset_context)
 
 
 # ---------------------------------------------------------------------------

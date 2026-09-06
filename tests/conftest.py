@@ -2,6 +2,7 @@
 
 import collections
 import os
+import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -174,6 +175,38 @@ def _reset_read_throttle() -> Iterator[None]:
     reset_read_throttle()
     yield
     reset_read_throttle()
+
+
+@pytest.fixture(autouse=True)
+def _reset_epics_context() -> Iterator[None]:
+    """GQ-276: the p4p Context is a process-global singleton that binds its search destinations
+    ONCE, at construction. Reset it around every test so the lane a test sets is the lane its
+    sockets actually use.
+
+    Without this the FIRST module in a process to build a Context decides the lane for every later
+    one, and a later module's ``EPICS_PVA_*`` monkeypatch moves only ``os.environ``. The assertion
+    that reads the environment then passes while the traffic still goes where the first module
+    sent it: a green test proving something other than what it claims. Measured order in this
+    suite: ``test_read_live`` (facility lane) sorts before ``test_write_live`` (loopback).
+
+    ⛔ Imported LAZILY, and only when the module is ALREADY loaded. ``epics_client`` pulls in p4p
+    and therefore numpy and OpenBLAS; importing it from this file's header would defeat the
+    ``OPENBLAS_NUM_THREADS`` default set above and break the closure
+    ``test_conftest_import_closure.py`` pins. The ``sys.modules`` check keeps a run that never
+    touches the client free of the import altogether, rather than trading one global cost for
+    another.
+    """
+
+    def reset_if_loaded() -> None:
+        if "epics_mcp.services.epics_client" not in sys.modules:
+            return
+        from epics_mcp.services.epics_client import reset_context
+
+        reset_context()
+
+    reset_if_loaded()
+    yield
+    reset_if_loaded()
 
 
 # The loopback lane a write-enabled SafetyLayer accepts (E8): both providers' search reach

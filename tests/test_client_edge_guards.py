@@ -62,9 +62,12 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   ⚠️ Two caveats on the counterpart number. First, "observed in both polarities" is weaker than it
   sounds for the 21 RAISE guards: their enabling polarity fires the guard on every input, so every
   covering test dies by construction and only the disabling half carries information. Second,
-  three entries below (`alarm_client.py:247`, `epics_client.py:490`, `olog_client.py:181`) sit in
+  three entries below (`alarm_client.py:247`, `epics_client.py:653`, `olog_client.py:183`) sit in
   comprehension filters, where the tool builds no whole-condition target, for those "unobserved"
   means "this CONJUNCT is unobserved", the rest of the condition still stood during the mutant.
+  ⚠️ Those two numbers were `490` and `181` until GQ-276 and had rotted where the table below had
+  not: prose carries no key a guard can check, so nothing went red while `490` drifted onto a
+  blank line. They are the table's own rows, spelled again here, and they move with it.
 
 Honest scope, because the numbers invite over-reading: measured WITHOUT the live lane (the twelve
 ``*_live`` modules; 66 tests skipped at the time of the sweep, when that lane still had nine
@@ -157,15 +160,23 @@ _UNOBSERVED: dict[str, str] = {
     # surrounding code. This is the offset rot the comment above predicts, not a new finding.
     # Then +33 more, from ``available_providers``/``effective_provider`` being added above them.
     # RE-LOCATED again, and this time the verification is mechanical rather than by eye: every
-    # recorded epics_client line, including the two tuples below, was compared against
-    # ``git show HEAD:src/epics_mcp/services/epics_client.py`` at its OLD number, and all eight
-    # are byte-identical at old+33. A uniform offset over every row is what an insertion ABOVE
-    # all of them produces; a re-judged finding would not move as a block.
-    "epics_client.py:165": "PVNotFoundError branch of the gather dispatch",
-    "epics_client.py:584": "NTNDArray element_count",
-    "epics_client.py:594": "int-or-none column coercion",
-    "epics_client.py:623": "NTMatrix dim entries",
-    "epics_client.py:825": "NaN alarm field",
+    # recorded epics_client line, including the two tuples below, was compared against the OLD
+    # blob at its OLD number, and all eight were byte-identical at old+33.
+    # Then +30 more with GQ-276, which put ``reset_context`` and a widened ``get_context``
+    # docstring ABOVE every one of them. Verified the same mechanical way, against the blob and
+    # not against a branch:
+    #     git show 5bd6b7f:src/epics_mcp/services/epics_client.py
+    # all eight are byte-identical at old+30. A uniform offset over every row is what an insertion
+    # ABOVE all of them produces; a re-judged finding would not move as a block.
+    # ⭐ And this time the coincidence the note below warns about was RULED OUT rather than
+    # assumed: +30 is the ONLY offset in -5..+59 under which all eight lines match their old
+    # bytes, so no other relocation is consistent with the evidence. Re-running that sweep is the
+    # cheapest way to redo this check after the next move.
+    "epics_client.py:195": "PVNotFoundError branch of the gather dispatch",
+    "epics_client.py:614": "NTNDArray element_count",
+    "epics_client.py:624": "int-or-none column coercion",
+    "epics_client.py:653": "NTMatrix dim entries",
+    "epics_client.py:855": "NaN alarm field",
     "olog_client.py:183": "lenient name filter inside an already-anchored entry",
     "olog_client.py:391": "attachment filename check",
     # Moved +14 by the OQ11 docstring on ``_expand_log_entry``, then +24 more by OQ12 (the union
@@ -193,8 +204,8 @@ _UNOBSERVED: dict[str, str] = {
 
 # Neither polarity is noticed, and lines no test executes at all. Both are TEST GAPS at the
 # refusal path, not evidence that the check is removable: production input is not test input.
-_UNOBSERVED_EITHER_WAY: tuple[str, ...] = ("epics_client.py:167",)
-_NEVER_EXECUTED: tuple[str, ...] = ("epics_client.py:169", "epics_client.py:517")
+_UNOBSERVED_EITHER_WAY: tuple[str, ...] = ("epics_client.py:197",)
+_NEVER_EXECUTED: tuple[str, ...] = ("epics_client.py:199", "epics_client.py:547")
 
 _RERUN = (
     "re-run the audit: COVERAGE_CORE=ctrace COVERAGE_FILE=<scratch>/cov uv run pytest "
