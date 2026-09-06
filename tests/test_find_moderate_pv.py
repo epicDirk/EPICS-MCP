@@ -21,6 +21,26 @@ home:
 * M11 naive window read as local     → test_naive_window_is_read_as_utc (proven on a
       non-UTC machine; on a UTC machine the mutant is invisible by construction)
 * M12 argument validation removed    → test_impossible_argument_combinations_are_usage_errors
+* M13 an extra premise not checked    → test_each_live_premise_is_checked_on_its_own (6 ids:
+      not-archived, empty-status-string, no-type-record, past-window-carries-a-sample,
+      schema-window-empty, schema-window-withheld)
+* M14 past window counted with        → test_the_past_window_criterion_counts_the_RESULT_and_
+      count_inside instead of len()      not_the_inside_samples
+* M15 premise failure not counted     → test_a_failing_premise_keeps_the_candidate_out_and_names_
+      into fail_reasons                  the_reason
+* M16 premises probed before the      → test_the_extra_premises_are_only_paid_for_by_candidates_
+      band filter                        that_passed_the_band
+* M17 glob predicate always True      → test_the_glob_predicate_reports_whether_getallpvs_really_
+                                         filters[glob-ignored]
+
+⚠ M13 to M17 arrived with GQ-289 and are APPENDED, never inserted: the numbers are identities,
+cited from commit messages and analysis notes, so renumbering would quietly re-point every earlier
+citation at a different mutant.
+
+⚠ Two rows the table did NOT have before and still does not claim as mutants: ``too_few_samples``
+and the ``withheld`` branch each have a test but no mutant line. They were measured as gaps while
+GQ-289 was built and are named here rather than left implicit, because a table that silently
+covers less than it appears to is the failure this module is about.
 
 All names are synthetic: no facility value is committed.
 """
@@ -29,22 +49,25 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable
-from typing import Literal
+from typing import Literal, cast
 
 import pytest
 
 from epics_mcp.find_moderate_pv import (
+    FIXTURE_PAST_WINDOW,
     RateEntry,
     _parse_args,
     classify_history,
     count_inside,
     filter_band,
+    glob_discriminates,
     parse_rate_report,
     suggest_glob,
+    unmet_extra_premises,
     walk_candidates,
     window_epoch_bounds,
 )
-from epics_mcp.services.archiver_client import HistoryResult, Sample
+from epics_mcp.services.archiver_client import ArchiverClient, HistoryResult, Sample
 from epics_mcp.services.archiver_exceptions import (
     ArchiverConnectionError,
     ArchiverResponseError,
@@ -222,10 +245,18 @@ def _walk(
     *,
     want: int = 3,
     max_verify: int = 200,
+    extra_premises: Callable[[str], list[str]] | None = None,
 ) -> tuple[list[tuple[RateEntry, int, int]], Counter[str], int]:
+    """The band-only walk unless a test says otherwise.
+
+    ``extra_premises`` is REQUIRED by walk_candidates and defaulted here rather than there: the
+    tests below are about the band logic, and every one of them would otherwise carry the same
+    noise. The production call site has no such default, which is the point (GQ-289).
+    """
     return walk_candidates(
         band,
         fetch,
+        extra_premises=extra_premises if extra_premises is not None else (lambda _pv: []),
         lo_ts=_LO,
         hi_ts=_HI,
         min_samples=3,
@@ -296,3 +327,192 @@ def test_impossible_argument_combinations_are_usage_errors(argv: list[str]) -> N
     with pytest.raises(SystemExit) as excinfo:
         _parse_args(argv)
     assert excinfo.value.code == 2
+
+
+# ---------------------------------------------------------------------------
+# GQ-289: the four live premises the band cannot see, plus the glob
+#
+# A fake client rather than a Mock: each probe has to answer a DIFFERENT shape, and naming them as
+# fields makes the per-criterion cases below read as the criteria they test.
+# ---------------------------------------------------------------------------
+
+
+class _FakeArchiver:
+    """Answers the four probes ``unmet_extra_premises`` makes, each independently steerable."""
+
+    base_url = "http://arch/x"
+
+    def __init__(
+        self,
+        *,
+        archived: bool = True,
+        status: str = "Being archived",
+        found: bool = True,
+        past_samples: int = 0,
+        schema_status: Literal["ok", "empty", "withheld"] = "ok",
+        all_pvs: object = ("A", "B", "C"),
+        filtered_pvs: object = ("A",),
+    ) -> None:
+        self.archived = archived
+        self.status = status
+        self.found = found
+        self.past_samples = past_samples
+        self.schema_status = schema_status
+        self.all_pvs = all_pvs
+        self.filtered_pvs = filtered_pvs
+
+    def is_archived(self, _pv: str) -> tuple[bool, str]:
+        return self.archived, self.status
+
+    def get_pv_type_info(self, _pv: str) -> dict[str, object]:
+        return {"found": self.found}
+
+    def get_pv_history(
+        self, _pv: str, _start: str, end: str, *, max_points: int = 50
+    ) -> HistoryResult:
+        # Keyed on the END, not the start: FIXTURE_PAST_WINDOW and FIXTURE_SCHEMA_WINDOW share
+        # the same start ("2020-01-01T00:00:00Z") and differ only in where they close. Keying on
+        # the start made this fake answer the schema probe with the past probe's history, and the
+        # two schema cases below were the ones that caught it.
+        if end == FIXTURE_PAST_WINDOW[1]:
+            return _history([_sample(_LO + 10)] * self.past_samples)
+        return _history([_sample(_LO + 10)], status=self.schema_status)
+
+    def _get(self, _url: str, params: dict[str, str]) -> object:
+        return self.filtered_pvs if "pv" in params else self.all_pvs
+
+
+def _premises(client: _FakeArchiver) -> list[str]:
+    return unmet_extra_premises(cast(ArchiverClient, client), "SIM:PS-01:Cur-RB")
+
+
+def test_a_candidate_meeting_every_premise_reports_nothing_unmet() -> None:
+    """The positive control. Without it every case below would also pass on a predicate that
+    always reports something."""
+    assert _premises(_FakeArchiver()) == []
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        ({"archived": False}, "not_archived"),
+        ({"status": ""}, "not_archived"),
+        ({"found": False}, "no_type_info"),
+        ({"past_samples": 1}, "past_window_not_empty"),
+        ({"schema_status": "empty"}, "schema_window_not_ok"),
+        ({"schema_status": "withheld"}, "schema_window_not_ok"),
+    ],
+    ids=[
+        "not-archived",
+        "empty-status-string",
+        "no-type-record",
+        "past-window-carries-a-sample",
+        "schema-window-empty",
+        "schema-window-withheld",
+    ],
+)
+def test_each_live_premise_is_checked_on_its_own(kwargs: dict[str, object], expected: str) -> None:
+    """One case per criterion the live suite asserts and the walk used to ignore.
+
+    Named after the reason string rather than a number, because the reason is what a run PRINTS in
+    its fail_reasons counter: a reader who sees ``past_window_not_empty`` there can find this row.
+    """
+    assert _premises(_FakeArchiver(**kwargs)) == [expected]  # type: ignore[arg-type]
+
+
+def test_the_past_window_criterion_counts_the_RESULT_and_not_the_inside_samples() -> None:
+    """⛔ The sharp edge of GQ-289, and the one a reasonable person gets wrong.
+
+    The appliance carries the last sample from BEFORE a window into the result, so a PV whose
+    archive starts before the short window answers ONE sample there while having none INSIDE it.
+    The live test counts the result length, so a walk counting only the inside ones would verify a
+    candidate the suite then rejects: green here, red there, which is the whole failure mode this
+    change exists to remove.
+
+    The fake below is exactly that case: one sample, carried, none inside the 2020 short window.
+    """
+    carried_only = _FakeArchiver(past_samples=1)
+
+    assert count_inside([_sample(_LO + 10)], _LO, _HI) == 1  # the sample is not inside 2020
+    assert _premises(carried_only) == ["past_window_not_empty"]
+
+
+def test_several_failing_premises_are_all_reported_not_only_the_first() -> None:
+    """A run that fixes one criterion and rediscovers the next is a run wasted, and every probe is
+    already paid for by the time the first fails."""
+    assert _premises(_FakeArchiver(archived=False, found=False, past_samples=2)) == [
+        "not_archived",
+        "no_type_info",
+        "past_window_not_empty",
+    ]
+
+
+def test_a_failing_premise_keeps_the_candidate_out_and_names_the_reason() -> None:
+    """The walk's half of the same criterion: the reason reaches fail_reasons under its own name
+    instead of being folded into a generic rejection."""
+    band = [_entry("SIM:PS-01:Cur-RB")]
+
+    verified, reasons, checked = _walk(
+        band, lambda _pv: _history(_GOOD), extra_premises=lambda _pv: ["not_archived"]
+    )
+
+    assert verified == []
+    assert checked == 1
+    assert reasons == Counter({"not_archived": 1})
+
+
+def test_the_extra_premises_are_only_paid_for_by_candidates_that_passed_the_band() -> None:
+    """Four GETs per candidate is a real cost over a 200-candidate walk, and a candidate the band
+    already rejected cannot become a fixture whatever the premises say."""
+    asked: list[str] = []
+
+    def record(pv_name: str) -> list[str]:
+        asked.append(pv_name)
+        return []
+
+    band = [_entry("SIM:PS-01:Cur-RB"), _entry("SIM:PS-02:Cur-RB")]
+    # The first candidate fails the band (too few samples), the second passes it.
+    histories = {"SIM:PS-01:Cur-RB": _history([]), "SIM:PS-02:Cur-RB": _history(_GOOD)}
+
+    _walk(band, lambda pv: histories[pv], extra_premises=record)
+
+    assert asked == ["SIM:PS-02:Cur-RB"]
+
+
+def test_a_premise_probe_that_answers_unreadably_counts_as_a_response_error() -> None:
+    """Same discipline the band fetch already follows: one odd PV must not abort the walk, and it
+    must not be silently read as a failing premise either."""
+
+    def raising(_pv: str) -> list[str]:
+        raise ArchiverResponseError("unreadable")
+
+    verified, reasons, checked = _walk(
+        [_entry("SIM:PS-01:Cur-RB")], lambda _pv: _history(_GOOD), extra_premises=raising
+    )
+
+    assert verified == []
+    assert checked == 1
+    assert reasons == Counter({"response_error": 1})
+
+
+@pytest.mark.parametrize(
+    ("all_pvs", "filtered_pvs", "discriminates"),
+    [
+        (("A", "B", "C"), ("A",), True),
+        (("A", "B", "C"), ("A", "B", "C"), False),
+        (("A", "B", "C"), (), True),
+    ],
+    ids=["glob-filters", "glob-ignored", "glob-matches-nothing"],
+)
+def test_the_glob_predicate_reports_whether_getallpvs_really_filters(
+    all_pvs: object, filtered_pvs: object, discriminates: bool
+) -> None:
+    """The fifth criterion. ``glob-ignored`` is the failing case the recipe used to print anyway.
+
+    ``glob-matches-nothing`` is True on purpose and is NOT an oversight: an empty answer DOES
+    differ from the unfiltered one, which is exactly what the live assertion demands. A glob that
+    matches nothing is useless for other reasons, and it is not this predicate's job to say so.
+    """
+    client = _FakeArchiver(all_pvs=all_pvs, filtered_pvs=filtered_pvs)
+
+    assert glob_discriminates(cast(ArchiverClient, client), "SIM:PS-01:*") is discriminates

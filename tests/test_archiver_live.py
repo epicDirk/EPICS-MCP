@@ -20,6 +20,14 @@ from datetime import datetime
 
 import pytest
 
+from epics_mcp.find_moderate_pv import (
+    FIXTURE_MAX_POINTS,
+    FIXTURE_PAST_WINDOW,
+    FIXTURE_SCHEMA_WINDOW,
+    FIXTURE_WINDOW,
+    glob_discriminates,
+    unmet_extra_premises,
+)
 from epics_mcp.services._time_window import TimeWindowFormatError
 from epics_mcp.services.archiver_client import ArchiverClient, HistoryResult, Sample
 from tests.live_gate import assert_live_available, live_demanded
@@ -45,7 +53,10 @@ def _require_live_stack() -> None:
 
 
 # A window far in the past: the negative control. Fixed, not clock-derived, so runs reproduce.
-_PAST = ("2020-01-01T00:00:00Z", "2020-01-02T00:00:00Z")
+# From find_moderate_pv, which is the ONE place the fixture criteria are written down (GQ-289):
+# the search that PICKS a fixture PV and the suite that CONSUMES it must not hold two copies of
+# the same window, or the search verifies a candidate against criteria this file no longer uses.
+_PAST = FIXTURE_PAST_WINDOW
 
 
 @pytest.fixture
@@ -66,7 +77,7 @@ def pv() -> str:
 
 #: The per-probe sample cap. Deliberately NOT raised to paper over truncation: a higher cap only
 #: moves the threshold. The guard is ``capped is False`` in the test that compares.
-_MAX_POINTS = 50
+_MAX_POINTS = FIXTURE_MAX_POINTS
 
 #: The message for a failed positive control. It must NOT claim "your data is stale": an empty
 #: reference also comes from auth, a wrong URL, a client regression, a changed payload, or a
@@ -95,7 +106,7 @@ def _count(client: ArchiverClient, pv: str, start: str, end: str) -> int:
 
 def _window() -> tuple[str, str]:
     """A wide, fixed absolute window that should hold samples for any long-archived PV."""
-    return ("2026-01-01T00:00:00Z", "2027-01-01T00:00:00Z")
+    return FIXTURE_WINDOW
 
 
 def test_absolute_window_finds_samples(client: ArchiverClient, pv: str) -> None:
@@ -243,9 +254,56 @@ def test_live_enumeration_and_samples_satisfy_the_strict_schema(
     raises/withholds on anything else, so ok/empty here IS the schema proof."""
     names, _capped = client.get_all_pvs(limit=3)
     assert names and all(isinstance(name, str) for name in names)
-    result = _history(client, pv, "2020-01-01T00:00:00Z", "2030-01-01T00:00:00Z")
+    result = _history(client, pv, *FIXTURE_SCHEMA_WINDOW)
     assert result["status"] in ("ok", "empty")
     assert result["status"] == "ok", (
         "positive control not met: no samples for the fixture PV in a 2020-2030 window, "
         "the sample-schema anchor cannot pin anything. Check EPICS_MCP_LIVE_ARCHIVER_PV."
+    )
+
+
+# ---------------------------------------------------------------------------
+# GQ-289: the search and this suite agree about what a fixture must satisfy
+# ---------------------------------------------------------------------------
+
+
+def test_the_search_criteria_accept_the_fixture_this_suite_actually_runs_on(
+    client: ArchiverClient, pv: str
+) -> None:
+    """``find_moderate_pv`` must accept exactly the PVs this file accepts, and this is the test
+    that keeps the two from drifting apart again.
+
+    The search verified candidates against the sample band alone and printed them as ready to use,
+    while this suite additionally demands an archived PV with a type record, an empty 2020 short
+    window and an ``ok`` 2020-2030 window. A candidate could pass the search and fail four
+    assertions here, which is why window 247 had to counter-check its candidate by hand before
+    trusting it.
+
+    Both sides now read the same criteria. If this goes red while the assertions above stay green,
+    the search has grown STRICTER than the suite and would reject usable fixtures; the other
+    direction shows up as one of those assertions failing on a freshly suggested PV.
+    """
+    assert unmet_extra_premises(client, pv) == [], (
+        "the fixture PV this suite is running on would be REJECTED by find_moderate_pv: the "
+        "search and the suite disagree about the criteria, which is the drift GQ-289 closed"
+    )
+
+
+def test_the_search_verifies_the_glob_this_suite_needs(client: ArchiverClient) -> None:
+    """The fifth criterion, and the one the search used to print without ever checking.
+
+    ``suggest_glob`` derives a glob from the PV name and the recipe printed it unverified, so a
+    perfectly good fixture PV could still leave the enumeration premise red, and the failure then
+    read as a problem with the PV.
+
+    This pins the predicate against the same glob the suite runs on, and it reproduces the
+    LOAD-BEARING half of that premise: that ``getAllPVs`` answers differently with the glob than
+    without it. The sibling assertion, that ``getPVsForThisAppliance`` ignores the filter, is
+    satisfied by a glob that matches nothing at all and cannot stand in for this one.
+    """
+    glob = os.environ["EPICS_MCP_LIVE_ARCHIVER_GLOB"]
+
+    assert glob_discriminates(client, glob), (
+        f"the glob {glob!r} does not filter getAllPVs, so find_moderate_pv would refuse to print "
+        "it as a recipe while this suite is configured with it"
     )

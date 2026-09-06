@@ -2,9 +2,15 @@
 
 WHY THIS EXISTS
 ---------------
-The archiver live tests need a fixture PV with a handful of samples in a FIXED absolute window
-(the defaults mirror ``tests/test_archiver_live.py``: 3-50 samples, at least 2 strictly inside,
-not capped at ``max_points=50``). Blind enumeration cannot find one: an archive population is
+The archiver live tests need a fixture PV with a handful of samples in a FIXED absolute window,
+and it must satisfy every premise that suite asserts, not merely the sample band. Both sides now
+read the criteria from ``FIXTURE_*`` below and the extra premises from
+:func:`unmet_extra_premises`, so there is one place to change and no second copy to drift
+(GQ-289; until then this paragraph claimed the defaults "mirror" the live test, which held for
+the window, the counts and the cap and for nothing else, and a "verified" candidate could still
+fail four assertions and need a hand-run counter-check).
+
+Blind enumeration cannot find one: an archive population is
 often bimodal (fast, capped PVs plus carried-only ones whose single sample predates any window),
 so a blind stride finds no middle, measured: five blind strategies over 153 candidates found
 none, while the rate-report walk below verified its first five candidates in one pass.
@@ -50,6 +56,36 @@ from epics_mcp.services.archiver_exceptions import (
     ArchiverConnectionError,
     ArchiverResponseError,
 )
+
+# ---------------------------------------------------------------------------
+# The fixture criteria, and this is the ONE place they are written down (GQ-289).
+#
+# ``tests/test_archiver_live.py`` imports these instead of spelling its own copies. Before that
+# the two sides drifted: this module's docstring claimed "the defaults mirror the live test", and
+# it was true for the window, the sample counts and the cap and for nothing else. The live suite
+# additionally demands that the PV be archived, carry a type record, hold no samples in the 2020
+# short window, and answer ``ok`` over 2020-2030, and a candidate this module "verified" could
+# still fail all four. Someone then had to counter-check every candidate by hand, which is the
+# cost that made the drift visible.
+#
+# ⚠ Constants only, plus one predicate over the extra premises. The live test keeps its own
+# ASSERTIONS: it is the guard that pins the wire schema, and a guard that calls the code it guards
+# proves nothing. What is shared is the CRITERIA, not the checking.
+# ---------------------------------------------------------------------------
+
+#: The window the fixture must hold a handful of samples in.
+FIXTURE_WINDOW = ("2026-01-01T00:00:00Z", "2027-01-01T00:00:00Z")
+#: The past window that must come back EMPTY: the live suite's negative control, without which
+#: its positive test would also pass if the window were ignored and the whole history returned.
+FIXTURE_PAST_WINDOW = ("2020-01-01T00:00:00Z", "2020-01-02T00:00:00Z")
+#: The wide window the live schema anchor reads samples from; it must answer ``ok``.
+FIXTURE_SCHEMA_WINDOW = ("2020-01-01T00:00:00Z", "2030-01-01T00:00:00Z")
+#: The per-probe sample cap the fixture must stay UNDER (not merely at).
+FIXTURE_MAX_POINTS = 50
+#: Minimum samples in the result, carried pre-window sample included.
+FIXTURE_MIN_SAMPLES = 3
+#: Minimum samples strictly inside the window; the carried sample never counts.
+FIXTURE_MIN_INSIDE = 2
 
 
 class RateEntry(TypedDict):
@@ -165,10 +201,70 @@ def suggest_glob(pv_name: str) -> str:
     return f"{stem}:*" if sep else f"{pv_name}*"
 
 
+def unmet_extra_premises(client: ArchiverClient, pv_name: str) -> list[str]:
+    """Every live-suite premise beyond the sample band that *pv_name* fails, empty when it holds.
+
+    The four the walk used to ignore, each named after the live assertion it reproduces:
+
+    * ``not_archived``: the suite asserts ``is_archived(pv)`` is True and the status a non-empty
+      string.
+    * ``no_type_info``: it asserts ``get_pv_type_info(pv)["found"]`` is True.
+    * ``past_window_not_empty``: it asserts the 2020 short window returns NOTHING.
+    * ``schema_window_not_ok``: it asserts the 2020-2030 window answers ``ok``, so the sample
+      schema anchor has something to pin.
+
+    ⛔ ``past_window_not_empty`` counts the RESULT LENGTH, deliberately, and not
+    :func:`count_inside`. The live test counts the same way, and the two differ: the appliance
+    carries the last sample from before a window into the result, so a PV whose archive starts
+    before 2020-01-02 can return a sample here while having none INSIDE. Counting only the inside
+    ones would pass a candidate the live suite then rejects, which is the exact failure this whole
+    change is about. The rule is to reproduce the test's criterion, not to invent a better one.
+
+    Every probe is a GET. An unreadable answer is not swallowed: ``ArchiverResponseError``
+    propagates to the walk, which counts the candidate as ``response_error`` and moves on, so an
+    odd PV is never silently read as a failing premise.
+    """
+    unmet: list[str] = []
+
+    archived, status = client.is_archived(pv_name)
+    if not archived or not status:
+        unmet.append("not_archived")
+    if client.get_pv_type_info(pv_name).get("found") is not True:
+        unmet.append("no_type_info")
+
+    past = client.get_pv_history(pv_name, *FIXTURE_PAST_WINDOW, max_points=FIXTURE_MAX_POINTS)
+    if len(past["samples"]) != 0:
+        unmet.append("past_window_not_empty")
+
+    schema = client.get_pv_history(pv_name, *FIXTURE_SCHEMA_WINDOW, max_points=FIXTURE_MAX_POINTS)
+    if schema["status"] != "ok":
+        unmet.append("schema_window_not_ok")
+
+    return unmet
+
+
+def glob_discriminates(client: ArchiverClient, glob: str) -> bool:
+    """Whether *glob* really filters ``getAllPVs``, the premise the printed recipe depends on.
+
+    The fifth gap, and it was not in the original report of this defect: the walk PRINTS a glob
+    into its fixture recipe and never checks it, while the live suite hangs two assertions on it.
+    A perfect fixture PV can therefore still leave the suite red.
+
+    Of those two assertions this reproduces the LOAD-BEARING one. The sibling assertion says
+    ``getPVsForThisAppliance`` IGNORES the filter, and a glob matching nothing at all satisfies
+    that just as well; only this one, that ``getAllPVs`` answers something different WITH the
+    glob than without it, distinguishes a working glob from a useless one.
+    """
+    unfiltered = client._get(f"{client.base_url}/mgmt/bpl/getAllPVs", {"limit": "5"})
+    by_name = client._get(f"{client.base_url}/mgmt/bpl/getAllPVs", {"limit": "5", "pv": glob})
+    return bool(by_name != unfiltered)
+
+
 def walk_candidates(
     band: list[RateEntry],
     fetch: Callable[[str], HistoryResult],
     *,
+    extra_premises: Callable[[str], list[str]],
     lo_ts: float,
     hi_ts: float,
     min_samples: int,
@@ -184,6 +280,17 @@ def walk_candidates(
     the walk, but it is COUNTED, never silently dropped. Any other exception (a transport
     failure above all) PROPAGATES: the caller must not read a dead transport as a
     non-finding.
+
+    *extra_premises* answers the live-suite premises the sample band cannot see, normally
+    :func:`unmet_extra_premises`; each name it returns is counted as its own fail reason. It is
+    consulted only AFTER the band criteria pass, so its four GETs are spent on the few candidates
+    that got that far rather than on every row of the report.
+
+    ⛔ Required, not defaulted, and deliberately so (GQ-289). A default of "check nothing" is how
+    this walk shipped a candidate the live suite then rejected: the omission had no symptom at the
+    call site, and the cost surfaced only as a counter-check someone ran by hand. A caller that
+    genuinely wants no extra probe says so in its own words, ``lambda _pv: []``, and that is then
+    visible in the diff.
     """
     reasons: Counter[str] = Counter()
     verified: list[tuple[RateEntry, int, int]] = []
@@ -194,17 +301,21 @@ def walk_candidates(
         checked += 1
         try:
             history = fetch(entry["pv_name"])
+            reason = classify_history(
+                history, lo_ts=lo_ts, hi_ts=hi_ts, min_samples=min_samples, min_inside=min_inside
+            )
+            if reason is not None:
+                reasons[reason] += 1
+                continue
+            unmet = extra_premises(entry["pv_name"])
         except ArchiverResponseError:
             reasons["response_error"] += 1
             continue
-        reason = classify_history(
-            history, lo_ts=lo_ts, hi_ts=hi_ts, min_samples=min_samples, min_inside=min_inside
-        )
-        if reason is None:
-            inside = count_inside(history["samples"], lo_ts, hi_ts)
-            verified.append((entry, len(history["samples"]), inside))
-        else:
-            reasons[reason] += 1
+        if unmet:
+            reasons.update(unmet)
+            continue
+        inside = count_inside(history["samples"], lo_ts, hi_ts)
+        verified.append((entry, len(history["samples"]), inside))
     return verified, reasons, checked
 
 
@@ -219,24 +330,27 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--band-min", type=float, default=1e-7, help="band lower bound in Hz")
     parser.add_argument("--band-max", type=float, default=1.6e-6, help="band upper bound in Hz")
     parser.add_argument(
-        "--window-start", default="2026-01-01T00:00:00Z", help="target window start (ISO-8601)"
+        "--window-start", default=FIXTURE_WINDOW[0], help="target window start (ISO-8601)"
     )
     parser.add_argument(
-        "--window-end", default="2027-01-01T00:00:00Z", help="target window end (ISO-8601)"
+        "--window-end", default=FIXTURE_WINDOW[1], help="target window end (ISO-8601)"
     )
     parser.add_argument(
-        "--max-points", type=int, default=50, help="history cap the fixture must stay under"
+        "--max-points",
+        type=int,
+        default=FIXTURE_MAX_POINTS,
+        help="history cap the fixture must stay under",
     )
     parser.add_argument(
         "--min-samples",
         type=int,
-        default=3,
+        default=FIXTURE_MIN_SAMPLES,
         help="minimum samples in the RESULT (includes the carried pre-window sample)",
     )
     parser.add_argument(
         "--min-inside",
         type=int,
-        default=2,
+        default=FIXTURE_MIN_INSIDE,
         help="minimum samples inside [start, end] (the carried pre-window sample never counts)",
     )
     parser.add_argument(
@@ -306,10 +420,14 @@ def main(argv: list[str] | None = None) -> int:
             pv_name, args.window_start, args.window_end, max_points=args.max_points
         )
 
+    def extra_premises(pv_name: str) -> list[str]:
+        return unmet_extra_premises(client, pv_name)
+
     try:
         verified, reasons, checked = walk_candidates(
             band,
             fetch,
+            extra_premises=extra_premises,
             lo_ts=lo_ts,
             hi_ts=hi_ts,
             min_samples=args.min_samples,
@@ -346,9 +464,28 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     first = verified[0][0]["pv_name"]
+    glob = suggest_glob(first)
+    # The glob is VERIFIED before it is printed, not merely derived (GQ-289). A recipe whose glob
+    # does not discriminate leaves the live suite red with a perfectly good fixture PV, and the
+    # failure then reads as a problem with the PV.
+    try:
+        discriminates = glob_discriminates(client, glob)
+    except (ArchiverConnectionError, ArchiverResponseError) as exc:
+        sys.stderr.write(
+            f"find_moderate_pv: the glob probe could not run ({exc}); the PV below is verified, "
+            f"the glob is NOT\n"
+        )
+        discriminates = True  # unmeasured, and said so above: never silently reported as failed
     out("fixture recipe (first verified candidate):\n")
     out(f"  export EPICS_MCP_LIVE_ARCHIVER_PV='{first}'\n")
-    out(f"  export EPICS_MCP_LIVE_ARCHIVER_GLOB='{suggest_glob(first)}'\n")
+    out(f"  export EPICS_MCP_LIVE_ARCHIVER_GLOB='{glob}'\n")
+    if not discriminates:
+        sys.stderr.write(
+            "find_moderate_pv: the suggested glob does NOT filter getAllPVs (the live premise "
+            "test compares a filtered against an unfiltered enumeration and needs them to "
+            "differ); widen or shorten it by hand before using this recipe\n"
+        )
+        return 1
     return 0
 
 
