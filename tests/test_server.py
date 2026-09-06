@@ -15,6 +15,7 @@ from fastmcp.exceptions import ToolError
 from epics_mcp.errors import PVNotFoundError, PVTimeoutError
 from tests.display_tools_source import display_tool_names
 from tests.engine_gate import engine_available
+from tests.wire_tools import wire_tools, wire_tools_by_name
 
 _Fn = Callable[..., object]
 
@@ -652,7 +653,6 @@ async def test_olog_tools_expose_typed_output_schema() -> None:
     Checking the base type of the NULLABLE fields too closes a widening that hides behind
     nullability: ``found: bool | None`` -> ``int | None`` passes mypy (bool ⊆ int) and stays
     an anyOf, so a bare-``type`` check skips it, but it flips the base type boolean -> integer."""
-    from epics_mcp.server import mcp
     from epics_mcp.services.checkers_olog import (
         OlogAddAttachmentResult,
         OlogCreateResult,
@@ -683,7 +683,7 @@ async def test_olog_tools_expose_typed_output_schema() -> None:
         "download_log_attachment": OlogDownloadResult,
         "list_log_attachments": OlogListAttachmentsResult,
     }
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     for name, typ in expected_type.items():
         schema = tools[name].outputSchema or {}
         properties = schema.get("properties", {})
@@ -931,7 +931,7 @@ async def test_olog_structured_output_conforms_to_its_schema(
 
     # Force the disabled path deterministically (independent of the ambient EPICS_MCP_OLOG_URL).
     monkeypatch.setattr(checkers_olog, "get_config", lambda: EpicsConfig(olog_url=""))
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     # Minimal args that reach each tool's disabled return. download_log_attachment validates its
     # identity/sink BEFORE the config gate, so it needs a fully-specified pair.
     disabled_args: dict[str, dict[str, Any]] = {
@@ -1028,9 +1028,8 @@ async def test_archiver_history_exposes_typed_output_schema() -> None:
     ``Literal["ok","empty","withheld"] | None`` and a bare ``str | None`` yield base type "string",
     so dropping the Literal's members leaves this test green. That belongs to
     test_typed_output_schema_enums_declare_their_members, which pins the members themselves."""
-    from epics_mcp.server import mcp
 
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     schema = tools["get_pv_history"].outputSchema or {}
     properties = schema.get("properties", {})
     assert properties, "get_pv_history: outputSchema carries no typed properties"
@@ -1073,7 +1072,7 @@ async def test_archiver_history_structured_output_conforms_to_its_schema(
     # ``from ... import get_config``), so patch it THERE, NOT checkers_olog.get_config, which the
     # Olog conformance test patches (a different module for a different tool cluster).
     monkeypatch.setattr(archiver, "get_config", lambda: EpicsConfig(archiver_url=""))
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     properties = (tools["get_pv_history"].outputSchema or {}).get("properties", {})
 
     # Part A: the emitted structuredContent conforms on the disabled path. Standalone FastMCP's
@@ -1148,9 +1147,8 @@ async def test_alarm_configured_exposes_typed_output_schema() -> None:
     (``X | None``). Checking the NULLABLE fields' base type too closes a widening that hides behind
     nullability (e.g. configured: bool | None widened to int | None, mypy-legal since bool ⊆ int,
     anyOf-shaped so a presence check skips it, but boolean -> integer here)."""
-    from epics_mcp.server import mcp
 
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     schema = tools["is_alarm_configured"].outputSchema or {}
     properties = schema.get("properties", {})
     assert properties, "is_alarm_configured: outputSchema carries no typed properties"
@@ -1194,7 +1192,7 @@ async def test_alarm_configured_structured_output_conforms_to_its_schema(
     # ``from ... import get_config``), so patch it THERE, NOT tools.alarm.get_config (the thin
     # adapter has none) and NOT checkers_olog.get_config (a different module for the Olog cluster).
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(alarm_url=""))
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     properties = (tools["is_alarm_configured"].outputSchema or {}).get("properties", {})
 
     # Part A: the emitted structuredContent conforms on the disabled path. Standalone FastMCP's
@@ -1266,9 +1264,8 @@ async def test_name_lookup_exposes_typed_output_schema() -> None:
     checking the NULLABLE fields' base type closes a widening hidden behind nullability (e.g.
     registered: bool | None widened to int | None, mypy-legal since bool ⊆ int, anyOf-shaped, so
     a presence check skips it, but boolean -> integer here)."""
-    from epics_mcp.server import mcp
 
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     schema = tools["lookup_device_name"].outputSchema or {}
     properties = schema.get("properties", {})
     assert properties, "lookup_device_name: outputSchema carries no typed properties"
@@ -1313,7 +1310,7 @@ async def test_name_lookup_structured_output_conforms_to_its_schema(
     # naming_url. So patch checkers.get_config HERE, NOT tools.naming.get_config (the thin adapter
     # has none), to drive build_naming_client -> None -> the disabled ``client is None`` return.
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(naming_url=""))
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     properties = (tools["lookup_device_name"].outputSchema or {}).get("properties", {})
 
     # Part A: the emitted structuredContent conforms on the disabled path. Standalone FastMCP's
@@ -1385,9 +1382,8 @@ async def test_is_archived_exposes_typed_output_schema() -> None:
     ``object | None`` enrichment fields must advertise NO base type (``None``), a widening to a
     concrete scalar (e.g. one wrongly typed ``str``) would flip _base_type to ``"string"`` and trip
     the assertion."""
-    from epics_mcp.server import mcp
 
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     schema = tools["is_archived"].outputSchema or {}
     properties = schema.get("properties", {})
     assert properties, "is_archived: outputSchema carries no typed properties"
@@ -1429,7 +1425,7 @@ async def test_is_archived_structured_output_conforms_to_its_schema(
     # ``from ... import get_config``), so patch it THERE, NOT tools.archiver.get_config (the
     # get_pv_history/get_archive_info seam, a different module) and NOT the thin _is_archived one.
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(archiver_url=""))
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     properties = (tools["is_archived"].outputSchema or {}).get("properties", {})
 
     # Part A: the emitted structuredContent conforms on the disabled path.
@@ -1480,9 +1476,8 @@ async def test_list_archived_pvs_exposes_typed_output_schema() -> None:
     (1) properties are non-empty; (2) they are EXACTLY the 6 mapped fields, completeness both ways
     (mypy --strict guards an undeclared key in a literal; this guards a dropped one); (3) each field
     carries the expected JSON base type via :func:`_base_type`."""
-    from epics_mcp.server import mcp
 
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     schema = tools["list_archived_pvs"].outputSchema or {}
     properties = schema.get("properties", {})
     assert properties, "list_archived_pvs: outputSchema carries no typed properties"
@@ -1513,7 +1508,7 @@ async def test_list_archived_pvs_structured_output_conforms_to_its_schema(
     # list_archived_pvs is tool-only: it resolves get_config in tools/archiver's OWN namespace, so
     # patch archiver.get_config, NOT checkers.get_config (that seam is for the shared query_*).
     monkeypatch.setattr(archiver, "get_config", lambda: EpicsConfig(archiver_url=""))
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     properties = (tools["list_archived_pvs"].outputSchema or {}).get("properties", {})
 
     # Part A: the emitted structuredContent conforms on the disabled path.
@@ -1567,9 +1562,8 @@ async def test_get_appliance_info_exposes_typed_output_schema() -> None:
     accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype. Checks
     properties non-empty, EXACTLY the 11 mapped fields (completeness both ways), and each field's
     :func:`_base_type`, the 8 object|None topology fields advertise NO base type (None)."""
-    from epics_mcp.server import mcp
 
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     schema = tools["get_appliance_info"].outputSchema or {}
     properties = schema.get("properties", {})
     assert properties, "get_appliance_info: outputSchema carries no typed properties"
@@ -1599,7 +1593,7 @@ async def test_get_appliance_info_structured_output_conforms_to_its_schema(
 
     # tool-only: resolves get_config in tools/archiver's OWN namespace, patch archiver.get_config.
     monkeypatch.setattr(archiver, "get_config", lambda: EpicsConfig(archiver_url=""))
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     properties = (tools["get_appliance_info"].outputSchema or {}).get("properties", {})
 
     # Part A: the emitted structuredContent conforms on the disabled path.
@@ -1674,9 +1668,8 @@ async def test_get_archive_info_exposes_typed_output_schema() -> None:
     accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype. Checks
     properties non-empty, EXACTLY the 31 mapped fields (completeness both ways), and each field's
     :func:`_base_type`, the 26 object|None type-info fields advertise NO base type (None)."""
-    from epics_mcp.server import mcp
 
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     schema = tools["get_archive_info"].outputSchema or {}
     properties = schema.get("properties", {})
     assert properties, "get_archive_info: outputSchema carries no typed properties"
@@ -1708,7 +1701,7 @@ async def test_get_archive_info_structured_output_conforms_to_its_schema(
 
     # tool-only: resolves get_config in tools/archiver's OWN namespace, patch archiver.get_config.
     monkeypatch.setattr(archiver, "get_config", lambda: EpicsConfig(archiver_url=""))
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     properties = (tools["get_archive_info"].outputSchema or {}).get("properties", {})
 
     # Part A: emitted structuredContent conforms on the disabled path (found is emitted as null).
@@ -1757,9 +1750,8 @@ async def test_list_channel_vocabulary_exposes_typed_output_schema() -> None:
     not the accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype.
     Checks properties non-empty, EXACTLY the 5 mapped fields (completeness both ways), and each
     field's :func:`_base_type`."""
-    from epics_mcp.server import mcp
 
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     schema = tools["list_channel_vocabulary"].outputSchema or {}
     properties = schema.get("properties", {})
     assert properties, "list_channel_vocabulary: outputSchema carries no typed properties"
@@ -1789,7 +1781,7 @@ async def test_list_channel_vocabulary_structured_output_conforms_to_its_schema(
 
     # shared query_*: resolves get_config in the checkers module's OWN namespace, patch it there.
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(channelfinder_url=""))
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     properties = (tools["list_channel_vocabulary"].outputSchema or {}).get("properties", {})
 
     structured = cast(
@@ -1839,9 +1831,8 @@ async def test_get_alarm_history_exposes_typed_output_schema() -> None:
     accept-all schema a plain ``dict[str, object]`` return yields. Red before the retype. Checks
     properties non-empty, EXACTLY the 9 mapped fields (completeness both ways), and each field's
     :func:`_base_type`."""
-    from epics_mcp.server import mcp
 
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     schema = tools["get_alarm_history"].outputSchema or {}
     properties = schema.get("properties", {})
     assert properties, "get_alarm_history: outputSchema carries no typed properties"
@@ -1871,7 +1862,7 @@ async def test_get_alarm_history_structured_output_conforms_to_its_schema(
 
     # shared query_*: resolves get_config in the checkers module's OWN namespace, patch it there.
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(alarm_url=""))
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     properties = (tools["get_alarm_history"].outputSchema or {}).get("properties", {})
 
     args = {
@@ -1927,9 +1918,8 @@ async def test_discover_pvs_exposes_typed_output_schema() -> None:
     OVERRIDES the annotation-derived schema (that kwarg, not any post-pass, is what keeps the
     untyped tools schema-less). Checks properties non-empty, EXACTLY the 7 mapped fields
     (completeness both ways), and each field's :func:`_base_type`."""
-    from epics_mcp.server import mcp
 
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     schema = tools["discover_pvs"].outputSchema or {}
     properties = schema.get("properties", {})
     assert properties, "discover_pvs: outputSchema carries no typed properties"
@@ -1986,7 +1976,7 @@ async def test_discover_pvs_structured_output_conforms_to_its_schema(
     # discover_pvs -> _discover_by_channelfinder -> query_channels, which resolves get_config in
     # the checkers module's OWN namespace, patch it there (NOT tools.discover).
     monkeypatch.setattr(checkers, "get_config", lambda: EpicsConfig(channelfinder_url=""))
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     properties = (tools["discover_pvs"].outputSchema or {}).get("properties", {})
 
     async def _fake_pv_get(pv: str, timeout: float | None = None) -> dict[str, object]:
@@ -2104,9 +2094,8 @@ async def test_find_channels_exposes_typed_output_schema() -> None:
     annotation-derived schema (that kwarg, not any post-pass, is what keeps the untyped tools
     schema-less). Checks properties non-empty, EXACTLY the 7 mapped fields (completeness both
     ways), and each field's :func:`_base_type`."""
-    from epics_mcp.server import mcp
 
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     schema = tools["find_channels"].outputSchema or {}
     properties = schema.get("properties", {})
     assert properties, "find_channels: outputSchema carries no typed properties"
@@ -2185,7 +2174,7 @@ async def test_find_channels_structured_output_conforms_to_its_schema(
     from epics_mcp.config import EpicsConfig
     from epics_mcp.server import mcp
 
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     properties = (tools["find_channels"].outputSchema or {}).get("properties", {})
     assert properties, "find_channels: outputSchema carries no typed properties"
 
@@ -2545,7 +2534,7 @@ async def test_every_typed_tool_conforms_to_its_schema_over_the_wire(
     ):
         monkeypatch.setattr(f"{module_path}.get_config", lambda: disabled)
 
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     async with Client(mcp) as client:
         for name in sorted(_DISABLED_WIRE_ARGS):
             # Raises ToolError("Output validation error: ...") if the payload does not conform.
@@ -2612,9 +2601,8 @@ async def test_typed_output_schema_enums_declare_their_members() -> None:
 
     Red-proof: widen tools/archiver.py's ``status`` annotation from ``Literal[...] | None`` to
     ``str | None``."""
-    from epics_mcp.server import mcp
 
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     discovered: dict[tuple[str, str], frozenset[object]] = {}
     for name in sorted(_TYPED_OUTPUT_TOOLS):
         properties = (tools[name].outputSchema or {}).get("properties", {})
@@ -2733,9 +2721,8 @@ async def test_typed_output_schema_arrays_declare_their_element_schema() -> None
     yet, which have no advertised schema to pin.
 
     Red-proof: widen services/checkers.py's ``ChannelVocabularyResult.tags`` to ``list[Any]``."""
-    from epics_mcp.server import mcp
 
-    tools = {tool.name: tool for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     discovered: dict[tuple[str, str], dict[str, object] | None] = {}
     for name in sorted(_TYPED_OUTPUT_TOOLS):
         properties = (tools[name].outputSchema or {}).get("properties", {})
@@ -3058,9 +3045,8 @@ async def test_input_schemas_carry_no_title_annotation() -> None:
     Standalone fastmcp omits them natively, the hand-written post-pass this once guarded was
     deleted in `6bd12c6`. The guard stays: it is what would catch an SDK regression that starts
     emitting them again. Red on the SDK-bundled FastMCP 1.0 code (titles on every node)."""
-    from epics_mcp.server import mcp
 
-    for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]:
+    for tool in await wire_tools():
         residual = _schema_nodes_with_title(tool.inputSchema)
         assert not residual, f"{tool.name}: title annotation(s) survived at {residual}"
 
@@ -3071,9 +3057,8 @@ async def test_output_schema_fields_carry_no_title_annotation() -> None:
     neither field-level nor the root TypedDict name (the SDK stack carried the latter; the
     ``*_exposes_typed_output_schema`` tests re-anchor identity on the field SET instead). This
     guards that no title noise regrows on the wire."""
-    from epics_mcp.server import mcp
 
-    for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]:
+    for tool in await wire_tools():
         if tool.name not in _TYPED_OUTPUT_TOOLS:
             continue
         assert tool.outputSchema is not None, f"{tool.name}: typed tool lost its outputSchema"
@@ -3090,9 +3075,8 @@ async def test_output_schemas_carry_no_null_default() -> None:
     ``total=False`` annotation). Standalone fastmcp omits them natively; the hand-written pass this
     once guarded was deleted in `6bd12c6`, and the guard stays as the SDK-regression net. Red
     against the SDK-bundled FastMCP 1.0 code (every field emitted default:null)."""
-    from epics_mcp.server import mcp
 
-    for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]:
+    for tool in await wire_tools():
         if tool.name not in _TYPED_OUTPUT_TOOLS:
             continue
         assert tool.outputSchema is not None, f"{tool.name}: typed tool lost its outputSchema"
@@ -3106,9 +3090,8 @@ async def test_only_real_title_parameters_remain() -> None:
     inputSchemas are the real ``title`` PARAMETER names, one per tool that declares one at the top
     level. Naive count == count of tools with a top-level ``title`` property. Red against the
     SDK-bundled FastMCP 1.0 code, where the annotations inflated the naive count."""
-    from epics_mcp.server import mcp
 
-    tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
+    tools = await wire_tools()
     residual = sum(_count_title_keys(t.inputSchema) for t in tools)
     expected = sum(1 for t in tools if "title" in (t.inputSchema.get("properties") or {}))
     assert residual == expected, (
@@ -3136,9 +3119,8 @@ async def test_title_parameter_tools_keep_their_title_property() -> None:
 
     Red proof, executed: add a ``title`` parameter to ``list_tags`` in server.py. Before this
     assertion the node stayed green; with it the node names list_tags as on-the-wire-only."""
-    from epics_mcp.server import mcp
 
-    tools = {t.name: t for t in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     for name in _TITLE_PARAMETER_TOOLS:
         properties = tools[name].inputSchema.get("properties") or {}
         assert "title" in properties, f"{name}: title parameter lost from properties"
@@ -3164,9 +3146,8 @@ async def test_every_required_arg_exists_in_properties() -> None:
     in ``properties``. A naive title-strip leaves ``title`` in create_log_entry/reply_to_log's
     ``required`` but deletes it from ``properties``, a required arg hidden from the wire while
     pydantic still enforces it. Red on a naive strip."""
-    from epics_mcp.server import mcp
 
-    for tool in [_t.to_mcp_tool() for _t in await mcp.list_tools()]:
+    for tool in await wire_tools():
         schema = tool.inputSchema
         properties = schema.get("properties") or {}
         for req in schema.get("required", []):
@@ -3189,9 +3170,8 @@ async def test_output_schema_typed_only_for_typed_tools() -> None:
     because its ``@mcp.tool(output_schema=None)`` still overrides the annotation. Two sibling tests
     (title-annotation, null-default) assert ``outputSchema is not None`` for set members too, so
     that red-proof trips THREE tests, not one, measured, not assumed."""
-    from epics_mcp.server import mcp
 
-    tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
+    tools = await wire_tools()
     for tool in tools:
         schema = tool.outputSchema
         if tool.name in _TYPED_OUTPUT_TOOLS:
@@ -3213,9 +3193,8 @@ async def test_output_schema_typed_only_for_typed_tools() -> None:
 async def test_field_descriptions_survive_the_strip() -> None:
     """MA-Q1: whatever suppresses the ``title`` ANNOTATIONS must not touch field ``description``s:
     the point-of-need semantics the repo DoD requires. Spot-check a distinctive, anchored one."""
-    from epics_mcp.server import mcp
 
-    tools = {t.name: t for t in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     name_pattern = tools["find_channels"].inputSchema["properties"]["name_pattern"]
     assert "ANCHORED" in name_pattern["description"]
 
@@ -3232,9 +3211,8 @@ async def test_find_channels_description_separates_a_refusal_from_a_silent_zero(
     INVALID_INPUT before any network call); this pins that the description still says so, since
     a wrong tool description is read as fact and nothing else guards this prose.
     """
-    from epics_mcp.server import mcp
 
-    tools = {t.name: t for t in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     # Whitespace-normalised: the description is a wrapped docstring, so a phrase that reads as one
     # line in the source is split by a newline plus indentation here. Asserting on the raw text
     # would pin the line breaks rather than the claim, and go red on a harmless re-wrap.
@@ -3290,7 +3268,7 @@ async def test_stripped_tool_still_returns_structured_content(
 
     driven = "get_pv_value"
     args: dict[str, Any] = {"pv_name": "SIM:PS-01:Cur-RB"}
-    tools = {t.name: t for t in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     assert tools[driven].outputSchema is None, (
         f"{driven} now advertises an outputSchema, so driving it no longer demonstrates the "
         "ADVERTISE-ONLY property this test exists for, re-point it at a still-untyped tool "
@@ -3511,9 +3489,7 @@ async def test_tools_list_within_budget() -> None:
     ceiling below the current full-lane payload."""
     from mcp.types import ListToolsResult
 
-    from epics_mcp.server import mcp
-
-    tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
+    tools = await wire_tools()
     wire = len(ListToolsResult(tools=tools).model_dump_json(by_alias=True, exclude_none=True))
     assert wire <= _TOOLS_LIST_WIRE_CEILING, (
         f"tools/list wire payload grew to {wire} chars (> {_TOOLS_LIST_WIRE_CEILING} ceiling), "
@@ -3550,9 +3526,7 @@ async def test_destructive_tools_carry_consent_meta_or_are_explicitly_deferred()
     """
     from mcp.types import ListToolsResult
 
-    from epics_mcp.server import mcp
-
-    tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
+    tools = await wire_tools()
     offenders = [
         t.name
         for t in tools
@@ -3585,11 +3559,10 @@ async def test_consent_meta_tools_document_the_client_scope() -> None:
 
     Provably red: remove ``requiresUserInteraction`` from set_pv_value's docstring -> goes red.
     """
-    from epics_mcp.server import mcp
 
     undocumented = [
         t.name
-        for t in [_t.to_mcp_tool() for _t in await mcp.list_tools()]
+        for t in await wire_tools()
         if (t.meta or {}).get(_CONSENT_KEY) is True
         and not (t.description and "requiresUserInteraction" in t.description)
     ]
@@ -3736,9 +3709,8 @@ async def test_every_tool_carries_complete_annotations() -> None:
 
     Provably red: drop a hint kwarg (or annotations=) on one tool in server.py -> offender.
     """
-    from epics_mcp.server import mcp
 
-    tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
+    tools = await wire_tools()
     assert len(tools) >= 29, "list_tools() returned < core-lane count, tool registration broke"
     offenders = [
         t.name
@@ -3767,9 +3739,8 @@ async def test_destructive_tools_are_not_marked_read_only() -> None:
 
     Provably red: flip set_pv_value's readOnlyHint to True (destructive stays True) -> offender.
     """
-    from epics_mcp.server import mcp
 
-    tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
+    tools = await wire_tools()
     assert len(tools) >= 29, "list_tools() returned < core-lane count, tool registration broke"
     offenders = [
         t.name
@@ -3800,9 +3771,8 @@ async def test_tool_annotations_match_golden_map() -> None:
 
     Provably red: change a golden tuple, flip a live annotation, or rename a tool.
     """
-    from epics_mcp.server import mcp
 
-    tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
+    tools = await wire_tools()
     assert len(tools) >= 29, "list_tools() returned < core-lane count, tool registration broke"
 
     golden_names = set(_ANNOTATION_GOLDEN)

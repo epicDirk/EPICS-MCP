@@ -10,6 +10,7 @@ from epics_mcp.services._time_window import TimeWindowFormatError
 from epics_mcp.services.alarm_client import AlarmClient
 from epics_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
 from epics_mcp.tools.alarm import _get_alarm_history, _is_alarm_configured
+from tests.wire_tools import wire_tools
 
 
 def _resp(payload: object, *, ok: bool = True) -> Mock:
@@ -569,9 +570,8 @@ async def test_is_alarm_configured_tool_requires_config_name() -> None:
     """MA-2b(d): the alarm tree is a REQUIRED tool parameter, no silent 'Accelerator' default that
     matches nothing at a real facility (is_alarm_configured would else always withhold). Mutant
     (a default restored) -> config_name drops out of the schema's 'required' -> this fails."""
-    from epics_mcp.server import mcp
 
-    tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
+    tools = await wire_tools()
     tool = next(t for t in tools if t.name == "is_alarm_configured")
     required = tool.inputSchema.get("required", [])
     assert "pv_name" in required
@@ -656,9 +656,7 @@ async def test_get_alarm_history_tool_severity_and_command_are_enums() -> None:
     server and broaden). Mutant (free str) -> the enum vanishes from the schema -> this fails."""
     import json
 
-    from epics_mcp.server import mcp
-
-    tools = [_t.to_mcp_tool() for _t in await mcp.list_tools()]
+    tools = await wire_tools()
     tool = next(t for t in tools if t.name == "get_alarm_history")
     props = tool.inputSchema["properties"]
     command_schema = json.dumps(props["command"])

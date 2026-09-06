@@ -81,6 +81,7 @@ from epics_mcp.services.inventory_adapter import (
 )
 from epics_mcp.tools.find_device import _run_lookup
 from epics_mcp.tools.validate import _run_validate
+from tests.wire_tools import wire_tools_by_name
 
 #: The one seam every consumer now goes through. Patching it feeds a known tail to all four at once,
 #: which is what makes this an equality test rather than four independent ones.
@@ -675,9 +676,7 @@ async def test_every_display_tool_names_both_walk_limits_on_the_wire() -> None:
     """
     from mcp.types import ListToolsResult
 
-    from epics_mcp.server import mcp
-
-    tools = {t.name: t for t in await mcp.list_tools() if t.name in _DISPLAY_TOOLS}
+    tools = {n: t for n, t in (await wire_tools_by_name()).items() if n in _DISPLAY_TOOLS}
     assert set(tools) == _DISPLAY_TOOLS, (
         f"expected the four display tools on the wire, found {sorted(tools)}. Running without the "
         "displays group? Then this test cannot make its statement and must not pass quietly."
@@ -687,7 +686,7 @@ async def test_every_display_tool_names_both_walk_limits_on_the_wire() -> None:
         name: [phrase for phrase in _WIRE_CAP_PHRASES if phrase not in serialised]
         for name, tool in tools.items()
         if (
-            serialised := ListToolsResult(tools=[tool.to_mcp_tool()]).model_dump_json(
+            serialised := ListToolsResult(tools=[tool]).model_dump_json(
                 by_alias=True, exclude_none=True
             )
         )

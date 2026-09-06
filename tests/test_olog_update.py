@@ -44,6 +44,7 @@ from epics_mcp.services.olog_exceptions import (
     OlogResponseError,
     OlogRoundTripUnsafe,
 )
+from tests.wire_tools import wire_tools_by_name
 
 _AUDIT_LOGGER = "epics_mcp.olog_audit"
 _LOOPBACK = "http://localhost:8080/Olog"
@@ -326,9 +327,7 @@ class TestReadModifyWriteSignpost:
 
     @pytest.mark.asyncio
     async def test_the_signpost_reaches_the_wire_on_every_surface(self) -> None:
-        from epics_mcp.server import mcp
-
-        tools = {tool.name: tool.to_mcp_tool() for tool in await mcp.list_tools()}
+        tools = await wire_tools_by_name()
         # The premise first. A tool that fell off the wire has to SAY so; without this the test
         # dies of a KeyError whose cause nobody can read. All three are registered
         # unconditionally, so this holds in the core-only lane as well as the full one.

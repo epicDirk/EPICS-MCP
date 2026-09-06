@@ -24,8 +24,8 @@ import pytest
 # list from module-level imports that REACH the engine, so a lazy import here would leave this file
 # listed in ``ENGINE_COUPLED_MODULES`` while the guard sees no coupling and calls the entry stale.
 # Measured: it did, on the first run. The honest shape is the one the guard can see.
-from epics_mcp.server import mcp
 from epics_mcp.tools.find_device import _find_device
+from tests.wire_tools import wire_tools_by_name
 
 #: One operator screen that both READS and WRITES the same device: a ``textupdate`` on its status
 #: and a ``textentry`` on its command. That pairing IS the claim under test, so the fixture cannot
@@ -57,7 +57,7 @@ async def test_find_device_description_names_the_roles() -> None:
     answerable and unadvertised, which is the same as unanswerable for a caller who reads the
     channel rather than the source.
     """
-    tools = {t.name: t for t in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     description = " ".join((tools["find_device"].description or "").split())
     assert "roles it uses the device in, read and/or write" in description, (
         "the roles half of the answer is unadvertised again"

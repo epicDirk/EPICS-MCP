@@ -34,13 +34,13 @@ from typing import Any
 import pytest
 
 from epics_mcp.presets import PRESETS
+from tests.wire_tools import wire_tools_by_name
 
 
 async def _description(tool_name: str) -> str:
     """The whitespace-normalised description as a CLIENT receives it, not as it is written."""
-    from epics_mcp.server import mcp
 
-    tools = {t.name: t for t in [_t.to_mcp_tool() for _t in await mcp.list_tools()]}
+    tools = await wire_tools_by_name()
     return " ".join((tools[tool_name].description or "").split())
 
 

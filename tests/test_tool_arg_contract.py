@@ -45,7 +45,8 @@ from typing import Any
 
 from epics_mcp.prompts import compare_machine_state, diagnose_pv
 from epics_mcp.resources import get_guide
-from epics_mcp.server import _DISPLAY_TOOLS_AVAILABLE, mcp
+from epics_mcp.server import _DISPLAY_TOOLS_AVAILABLE
+from tests.wire_tools import wire_tools_by_name
 
 _README = Path(__file__).resolve().parent.parent / "README.md"
 
@@ -102,7 +103,7 @@ _DISPLAY_GATED: frozenset[str] = frozenset({"validate_pvs", "find_device"})
 
 async def _input_schemas() -> dict[str, dict[str, Any]]:
     """``tool name → inputSchema`` as it goes on the WIRE (not as the source reads)."""
-    return {tool.name: (tool.to_mcp_tool().inputSchema or {}) for tool in await mcp.list_tools()}
+    return {name: (tool.inputSchema or {}) for name, tool in (await wire_tools_by_name()).items()}
 
 
 def _properties(schema: Mapping[str, Any]) -> set[str]:

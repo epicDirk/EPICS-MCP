@@ -26,6 +26,7 @@ from epics_mcp.provenance import (
     scope_of,
     with_reach,
 )
+from tests.wire_tools import wire_tools
 
 #: The repository's own loopback lane (``presets._LOOPBACK_SEARCH``), spelled out rather than
 #: imported: these tests are about what the classifier answers for a given environment, so the
@@ -546,7 +547,6 @@ def test_the_comment_that_names_how_often_the_shape_ships_is_still_right() -> No
     import re
 
     from epics_mcp import provenance
-    from epics_mcp.server import mcp
 
     words = {
         "TWELVE": 12,
@@ -563,10 +563,9 @@ def test_the_comment_that_names_how_often_the_shape_ships_is_still_right() -> No
     claimed = [n for word, n in words.items() if re.search(rf"ships {word} times", source)]
     assert len(claimed) == 1, f"the comment names {len(claimed)} counts, expected exactly one"
 
-    tools = asyncio.run(mcp.list_tools())
     carrying = [
         t
-        for t in (tool.to_mcp_tool() for tool in tools)
+        for t in asyncio.run(wire_tools())
         if "reach" in ((t.outputSchema or {}).get("properties") or {})
     ]
     assert claimed[0] == len(carrying), (
