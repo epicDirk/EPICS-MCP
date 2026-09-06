@@ -71,9 +71,11 @@ failed thread-arena allocation and is therefore **not deterministic**: on 2026-0
 runs with `OPENBLAS_NUM_THREADS` and `OMP_NUM_THREADS` stripped from the environment were green
 (2837 passed, 78 skipped, 171 to 181 s), so the setting rests on the earlier occurrences this
 paragraph was written from, not on a crash reproduced the day it was added. Only `OPENBLAS_NUM_THREADS`
-is defaulted, deliberately: `OMP_NUM_THREADS` appears exactly once in this repository, in the
-`guard_audit.py` call above, without a reason of its own, and duplicating an unexplained setting
-is not a fix. Whoever wants it measures first whether this OpenBLAS build is OpenMP-driven at all. Note also that a green
+is defaulted, deliberately: measured 2026-09-06, the only place in this repository that SETS
+`OMP_NUM_THREADS` is the `guard_audit.py` call above, and that call now carries the reason it
+does (2026-09-04, GQ-296): this OpenBLAS is a pthreads build that reads the variable only as a
+last fallback, so defaulting it here as well would cap nothing `OPENBLAS_NUM_THREADS` does not
+already cap. Note also that a green
 run proves nothing unless the variable was really absent: a development environment can export it
 for every shell, which is exactly how a run that looks like "without the prefix" can silently have
 it.

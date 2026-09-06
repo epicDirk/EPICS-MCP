@@ -764,6 +764,12 @@ def _run_selection(node_ids: list[str], timeout: int) -> tuple[int, str]:
     env = dict(os.environ)
     # OPENBLAS_NUM_THREADS pins the BLAS thread arena: on a many-core machine it can abort
     # the child before pytest prints anything (see CONTRIBUTING.md, the dev-setup section).
+    # OMP_NUM_THREADS is not a second spelling of that one. Measured 2026-09-04 (GQ-296): this
+    # OpenBLAS is a pthreads build, without USE_OPENMP and with no OpenMP runtime linked, so it
+    # reads OMP_NUM_THREADS only as a last fallback and the variable above already decides its
+    # arena. It is set anyway because it caps every OTHER OpenMP consumer the child pulls in.
+    # Measurement rule for the effect it does have: `nproc` answers 1 where the variable is
+    # exported and the real core count under `env -u OMP_NUM_THREADS nproc`.
     env.update(
         PYTHONDONTWRITEBYTECODE="1",
         OPENBLAS_NUM_THREADS="1",
