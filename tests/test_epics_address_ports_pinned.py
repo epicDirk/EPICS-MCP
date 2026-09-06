@@ -6,9 +6,23 @@ egress, and constructing a Context binds sockets, starts worker threads and reso
 promise is only affordable because the port arithmetic it re-implements is pinned HERE against the
 library that really decides it. Take this file away and the reach line becomes an opinion.
 
-⚠️ This is the one test module in the repository that BUILDS a client Context. That is the point,
-not an oversight: a pin against a hand-written model of pvxs would pin the model. It stays cheap
-and egress-free by construction, never by luck:
+⚠️ This module BUILDS a client Context. That is the point, not an oversight: a pin against a
+hand-written model of pvxs would pin the model.
+
+⚠️ It is not the only module that does, and no grep settles how many there are, which is why what
+follows names SEARCH RULES and their blind spot instead of a figure. Measured 2026-09-06 over
+``tests/``: ``Context("pva"`` finds the direct constructions, this file and
+``test_cli_testpv.py``; ``get_context()`` finds the modules that call the process-wide singleton
+in :mod:`epics_mcp.services.epics_client` by name. That is ``test_epics_client.py``, and it really
+does build: discounting the ``monkeypatch.setattr`` lines, which install a double instead of
+calling it, six calls across four tests remain. Neither rule sees a TRANSITIVE build: ``pv_get``
+calls ``get_context`` itself, and so does the tool layer above it, so a module that writes neither
+name still builds one. ``test_read_live.py`` and ``test_write_live.py`` do exactly that. Both are
+marked ``live``, which is what keeps them out of the default run, and that is a property of the
+mark and not of the search. A real population needs a runtime probe on ``epics_client._context``,
+not a grep.
+
+This one stays cheap and egress-free by construction, never by luck:
 
 * ``useenv=False`` with an explicit ``conf`` dict, so the ambient environment cannot leak in and
   the answer is a function of the argument;
