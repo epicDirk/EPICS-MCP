@@ -383,15 +383,27 @@ mid-run.
 a bare `-m live` falls back to the whole directory and selects EVERY live module, including the
 four that write real logbook entries into a service with no delete
 (`test_olog_write_live.py`, `test_olog_attachments_live.py`, `test_olog_remote_https_live.py`,
-`test_write_gate_live.py`). Nothing here guards against
-the forgotten path; the path is the guard. The examples in this file and in `pyproject.toml` that
+`test_write_gate_live.py`). The examples in this file and in `pyproject.toml` that
 show a bare `-m live` predate that reading and mean "with the module named".
 
-⚠️ The number said "three" until 2026-09-04, and the correction is older than the sentence that
-carries it: it was right when written on 2026-08-27, and `test_olog_remote_https_live.py` came back
-into the tree on 2026-08-29. Nothing watches either occurrence of this figure, here or in
-`tests/test_read_live.py`, so both are re-measured by hand or not at all. The measuring rule is a
-grep for `create_log_entry`, `update_log_entry` and `add_log_attachment` over `tests/*_live.py`.
+⭐ **Since 2026-09-07 the forgotten path is no longer the only guard.** Every live module that
+mutates Olog calls `assert_write_target_is_local` (`tests/live_gate.py`) at setup, before any
+client is built, and a non-loopback target is a LOUD failure rather than a skip. The check is
+resolution-free, as `docs/write-gate-contract.md` requires of this family of boundaries, so a
+hostname is never trusted as loopback; `tests/test_olog_remote_https_live.py` aims at a hostname on
+purpose and names in its own docstring what that leaves uncovered and what covers it instead.
+Scoping the run still matters, because the guard bounds WHERE a probe may write, not WHETHER it
+writes.
+
+⚠️ **What is watched is the OBLIGATION, not the number.** `tests/test_live_gate.py` derives which
+modules write, from the AST rather than from a grep, and fails when one of them does not call the
+guard, so a fifth write module is covered the day it is written. The count of four above, and its
+twin in `tests/test_read_live.py`, stay unwatched prose and are re-measured by hand or not at all.
+Deliberately not a grep for the four MCP tool names: measured 2026-09-07, the client method is
+`add_attachment` rather than `add_log_attachment` and `reply_to_log` appears in no test at all, so
+a name list of that shape matches this tree through docstrings instead of through calls. The rule
+that stood here was such a grep, and the figure it carried said "three" until 2026-09-04 while
+`test_olog_remote_https_live.py` had been back in the tree since 2026-08-29.
 
 ⚠️ A live test that writes owns its target and never derives it. The deny logbook above is named
 explicitly for that reason: a test that picked one from the server's own answer once resolved onto

@@ -5,9 +5,11 @@ Opt-in: ``pytest tests/test_read_live.py -m live`` with a PVA search lane in
 
 SCOPE EVERY RUN TO THIS FILE. ``pyproject.toml`` sets ``testpaths = ["tests"]`` and declares no
 ``addopts``, so a bare ``pytest -m live`` falls back to the whole directory and collects ALL live
-modules. Four of those write real logbook entries into a service with no delete. Nothing in this
-repository guards against the missing path; the path itself is the guard, and nothing watches this
-figure either (CONTRIBUTING.md carries the same one and the rule for re-measuring it).
+modules. Four of those write real logbook entries into a service with no delete. Since 2026-09-07
+each of them refuses a non-loopback target at setup (``assert_write_target_is_local``), which
+bounds WHERE such a run writes but not WHETHER it writes, so naming the path is still yours to do.
+The figure four itself stays unwatched prose, here and in CONTRIBUTING.md, which carries what is
+watched instead and the rule for re-measuring the number.
 
 WHY THESE EXIST
 ---------------
