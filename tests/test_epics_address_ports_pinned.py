@@ -14,13 +14,18 @@ follows names SEARCH RULES and their blind spot instead of a figure. Measured 20
 ``tests/``: ``Context("pva"`` finds the direct constructions, this file and
 ``test_cli_testpv.py``; ``get_context()`` finds the modules that call the process-wide singleton
 in :mod:`epics_mcp.services.epics_client` by name. That is ``test_epics_client.py``, and it really
-does build: discounting the ``monkeypatch.setattr`` lines, which install a double instead of
-calling it, six calls across four tests remain. Neither rule sees a TRANSITIVE build: ``pv_get``
-calls ``get_context`` itself, and so does the tool layer above it, so a module that writes neither
-name still builds one. ``test_read_live.py`` and ``test_write_live.py`` do exactly that. Both are
-marked ``live``, which is what keeps them out of the default run, and that is a property of the
-mark and not of the search. A real population needs a runtime probe on ``epics_client._context``,
-not a grep.
+does build: discounting the two hits that only NAME the function, a docstring line and an
+assertion message, six calls across four tests remain. Neither rule sees a TRANSITIVE build:
+``pv_get`` calls ``get_context`` itself, and the tool layer reaches the same singleton through
+``pv_get`` / ``pv_get_batch`` / ``pv_put`` / ``pv_monitor``, so a module that writes neither name
+still builds one. ``test_read_live.py`` and ``test_write_live.py`` do exactly that. What keeps
+those two out of a default run is NOT their ``live`` mark, which only SELECTS under ``-m live``
+(``pyproject.toml`` deliberately declares no ``addopts``), but the setup-time gate in
+``tests/live_gate.py``: with the plane variables unset they skip. A real population therefore
+needs two instruments and not a grep, and either one alone would miss half of them: a runtime
+probe on ``epics_client._context`` for the singleton path, and the constructor itself for the
+direct one, because a direct ``Context(...)`` never touches the singleton and this file is one of
+those.
 
 This one stays cheap and egress-free by construction, never by luck:
 

@@ -767,9 +767,11 @@ def _run_selection(node_ids: list[str], timeout: int) -> tuple[int, str]:
     # OMP_NUM_THREADS is not a second spelling of that one. Measured 2026-09-04 (GQ-296): this
     # OpenBLAS is a pthreads build, without USE_OPENMP and with no OpenMP runtime linked, so it
     # reads OMP_NUM_THREADS only as a last fallback and the variable above already decides its
-    # arena. It is set anyway because it caps every OTHER OpenMP consumer the child pulls in.
-    # Measurement rule for the effect it does have: `nproc` answers 1 where the variable is
-    # exported and the real core count under `env -u OMP_NUM_THREADS nproc`.
+    # arena. It is kept because GQ-296 decided it, and the honest scope of that decision is
+    # narrow: what is measured is that the value reaches the child and is obeyed by anything
+    # reading it, NOT that it caps a consumer in this child, which nobody has measured. The rule
+    # for the measured half needs GNU coreutils, so Git Bash on Windows: `nproc` answers the
+    # EXPORTED value and `env -u OMP_NUM_THREADS nproc` the real core count.
     env.update(
         PYTHONDONTWRITEBYTECODE="1",
         OPENBLAS_NUM_THREADS="1",

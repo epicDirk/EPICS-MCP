@@ -72,10 +72,11 @@ runs with `OPENBLAS_NUM_THREADS` and `OMP_NUM_THREADS` stripped from the environ
 (2837 passed, 78 skipped, 171 to 181 s), so the setting rests on the earlier occurrences this
 paragraph was written from, not on a crash reproduced the day it was added. Only `OPENBLAS_NUM_THREADS`
 is defaulted, deliberately: measured 2026-09-06, the only place in this repository that SETS
-`OMP_NUM_THREADS` is the `guard_audit.py` call above, and that call now carries the reason it
-does (2026-09-04, GQ-296): this OpenBLAS is a pthreads build that reads the variable only as a
-last fallback, so defaulting it here as well would cap nothing `OPENBLAS_NUM_THREADS` does not
-already cap. Note also that a green
+`OMP_NUM_THREADS` is the `guard_audit.py` call above, and that call now carries what is measured
+about it (2026-09-04, GQ-296): this OpenBLAS is a pthreads build that reads the variable only as a
+last fallback. The crashes on record here are BLAS thread-arena crashes and nothing on record
+points at another OpenMP consumer, so defaulting a second variable would add a setting nobody has
+measured a need for. Note also that a green
 run proves nothing unless the variable was really absent: a development environment can export it
 for every shell, which is exactly how a run that looks like "without the prefix" can silently have
 it.
