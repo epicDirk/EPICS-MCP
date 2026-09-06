@@ -54,7 +54,11 @@ from epics_mcp.services._http import basic_auth_header, is_ssl_error
 from epics_mcp.services.checkers_olog import query_olog_create
 from epics_mcp.services.olog_client import AttachmentUpload, OlogClient
 from epics_mcp.services.olog_exceptions import OlogConnectionError
-from tests.live_gate import assert_live_available, live_demanded
+from tests.live_gate import (
+    assert_live_available,
+    assert_write_target_is_local,
+    live_demanded,
+)
 
 #: The rig, read once at import so the gate and the bodies share one snapshot.
 _PROXY = os.environ.get("OA1C_PROXY_URL")  # e.g. https://olog.localtest.me:8443/Olog
@@ -82,6 +86,24 @@ def _require_live_stack() -> None:
         "OA1C_WRITE_USER + OA1C_WRITE_PASSWORD + OA1C_LOGBOOK",
         demanded=live_demanded(os.environ),
     )
+
+
+@pytest.fixture(autouse=True)
+def _refuse_a_non_local_write_target() -> None:
+    """The TARGET guard, on the LOOPBACK half of this rig.
+
+    Every entry this module creates lands in the Olog BEHIND the proxy, and that is the same
+    instance the cross-check reads back over ``OA1C_LOOPBACK_URL``. So this is the address that
+    must be local, and it is the one checked.
+
+    ⛔ The PROXY URL is deliberately NOT checked here, and the gap is named rather than
+    papered over. This module aims at a HOSTNAME on purpose, and a hostname can only be shown
+    to be local by resolving it, which ``docs/write-gate-contract.md`` forbids for this family
+    of boundaries ("a hostname is never trusted as loopback"). What covers the proxy instead is
+    that no lane ever sets this module's six ``OA1C_`` variables: they occur in this file and
+    in ``docs/known-limits.md`` and nowhere else, so nothing can inherit them into a shell.
+    """
+    assert_write_target_is_local(_LOOPBACK, variable="OA1C_LOOPBACK_URL")
 
 
 #: A one-pixel PNG. Small enough to compare byte for byte in a failure message, and a real image

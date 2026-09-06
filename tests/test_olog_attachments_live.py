@@ -17,7 +17,11 @@ import pytest
 
 from epics_mcp.services._http import basic_auth_header
 from epics_mcp.services.olog_client import AttachmentUpload, OlogClient
-from tests.live_gate import assert_live_available, live_demanded
+from tests.live_gate import (
+    assert_live_available,
+    assert_write_target_is_local,
+    live_demanded,
+)
 
 _URL = os.environ.get("EPICS_MCP_OLOG_URL")
 _WRITE = os.environ.get("EPICS_MCP_ALLOW_OLOG_WRITE", "").lower() == "true"
@@ -50,6 +54,17 @@ def _require_live_stack() -> None:
         "write creds (_WRITE_USER/_WRITE_PASSWORD)",
         demanded=live_demanded(os.environ),
     )
+
+
+@pytest.fixture(autouse=True)
+def _refuse_a_non_local_write_target() -> None:
+    """The TARGET guard: this module uploads real attachments, so the URL must be local.
+
+    The module docstring advertises "a WRITABLE loopback Olog sandbox". Until this fixture
+    existed that word was prose: nothing checked it, and the client is built directly, so the
+    production gate is not on this path either.
+    """
+    assert_write_target_is_local(_URL, variable="EPICS_MCP_OLOG_URL")
 
 
 # A real 1x1 transparent PNG (so the server sees genuine image bytes) + an arbitrary non-image blob.

@@ -21,10 +21,12 @@ with ``--deselect``, which is a plaster on a module boundary that was simply in 
 Now the module gate IS the write precondition: without it the file skips as a whole, and a demanded
 run fails on the gate with a reason instead of somewhere inside a test.
 
-WHAT THIS STILL DOES NOT GUARD, so nobody reads it as more than it is: the client below is built
-directly, so ``OlogWriteGate`` and its loopback boundary are not on this path. The environment is
-what decides where these entries land. That gap is tracked separately; it is a property of every
-Olog write module here, not of this move.
+WHAT THE MOVE ITSELF DID NOT GUARD, and what closed it since: the client below is built directly,
+so ``OlogWriteGate`` and its loopback boundary are not on this path, and for a while the
+environment alone decided where these entries land. Since 2026-09-07 the module gate below has a
+second half, ``assert_write_target_is_local``, which refuses a non-loopback ``EPICS_MCP_OLOG_URL``
+before any client is built. It is a guard on the TEST level and deliberately not a second copy of
+the production gate: building the client directly is contract point 6 and stays.
 
 MUTATION, NAMED: a full green run leaves TWO entries on the server, one carrying an unknown level
 and one whose level is then cleared. Both titles mark them as probes, because Olog has no delete
@@ -39,7 +41,11 @@ import pytest
 
 from epics_mcp.services._http import basic_auth_header
 from epics_mcp.services.olog_client import OlogClient
-from tests.live_gate import assert_live_available, live_demanded
+from tests.live_gate import (
+    assert_live_available,
+    assert_write_target_is_local,
+    live_demanded,
+)
 
 #: The write preconditions, read once at import so the gate and the body share one snapshot, the
 #: same MECHANISM as the sibling write modules but deliberately not the same LIST: they demand
@@ -67,6 +73,17 @@ def _require_write_stack() -> None:
         "the password is read with a '' default, a wrong one fails loudly as 401)",
         demanded=live_demanded(os.environ),
     )
+
+
+@pytest.fixture(autouse=True)
+def _refuse_a_non_local_write_target() -> None:
+    """The TARGET guard: a full green run leaves TWO real entries, so the URL must be local.
+
+    The gate above proves the write stack is CONFIGURED and says nothing about where it POINTS.
+    Both are needed here for the reason this module already states: the client below is built
+    directly, so ``OlogWriteGate`` and its loopback boundary are not on that path.
+    """
+    assert_write_target_is_local(_URL, variable="EPICS_MCP_OLOG_URL")
 
 
 def test_server_does_not_validate_a_written_level() -> None:

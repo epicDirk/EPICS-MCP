@@ -101,7 +101,11 @@ from epics_mcp.errors import OlogWriteDeniedError
 from epics_mcp.services._http import basic_auth_header
 from epics_mcp.services.checkers_olog import query_olog_add_attachment, query_olog_update
 from epics_mcp.services.olog_client import OlogClient
-from tests.live_gate import assert_live_available, live_demanded
+from tests.live_gate import (
+    assert_live_available,
+    assert_write_target_is_local,
+    live_demanded,
+)
 
 _URL = os.environ.get("EPICS_MCP_OLOG_URL")
 _WRITE = os.environ.get("EPICS_MCP_ALLOW_OLOG_WRITE", "").lower() == "true"
@@ -137,6 +141,17 @@ def _require_live_stack() -> None:
         "+ _OLOG_WRITE_USER + _OLOG_WRITE_PASSWORD",
         demanded=live_demanded(os.environ),
     )
+
+
+@pytest.fixture(autouse=True)
+def _refuse_a_non_local_write_target() -> None:
+    """The TARGET guard: a full green run leaves FOUR real entries, so the URL must be local.
+
+    Every one of them is laid down through the RAW client, which by contract point 6 does NOT
+    pass the gate. That is precisely why the target needs a boundary on THIS level: the one the
+    production code applies is, by design, not on the path this module uses.
+    """
+    assert_write_target_is_local(_URL, variable="EPICS_MCP_OLOG_URL")
 
 
 @pytest.fixture(autouse=True)
