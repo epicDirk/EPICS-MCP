@@ -577,6 +577,13 @@ def _reject_unknown_level(client: OlogClient, level: str | None, caller: str) ->
     level is worse than unknown, it is accepted and silently CLEARS the field, so it is refused
     separately, before any request, and with its own message.
 
+    The premise this refusal rests on, that the server does not validate the level itself, cannot
+    be settled in memory. It is pinned live by
+    ``tests/test_olog_write_live.py::test_server_does_not_validate_a_written_level``, which
+    deliberately writes an unlisted level and reads it back. Named HERE because the pointer used
+    to stand on the test side alone: whoever arrived at the refusal itself found no trace of the
+    live pin.
+
     Exact string match, deliberately. Neither read-side helper fits here:
     :func:`~epics_mcp.services.olog_client.split_level_values` is search semantics (OR-split on
     ``[|,;]`` + trim) and :func:`_unknown_level_note` matches casefold and tolerates wildcards. A

@@ -158,9 +158,11 @@ async def _discover_by_channelfinder(pattern: str, timeout: float | None) -> Dis
     # of payload. Named by FUNCTION, and that is the repair rather than the style: this sentence
     # carried ``diagnose.py:386-387`` and ``checkers_olog.py:751-753``, which pointed at the right
     # blocks when written (429f2ce, 2026-07-25; the second window stopped one line short of the
-    # filter itself) and have since drifted by +3 and by -36 lines onto a
-    # ``ChannelFinderEvidence`` return and a dict literal. A reader checking them today finds
-    # unrelated code and concludes the comment is confused. Same rot that
+    # filter itself) and have drifted since. Neither the distance nor what the old numbers now
+    # point at is given here as a figure: both move with every edit above either line, so a figure
+    # would rot exactly the way the pointers it describes did. Measure it with ``git log -L`` when
+    # you need it. A reader checking them today finds unrelated code and concludes the comment is
+    # confused. Same rot that
     # ``tests/test_client_edge_guards.py`` records for its own table.
     #
     # Honest scope (S35). Both checks are OBSERVED now by the S35 block in
