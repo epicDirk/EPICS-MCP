@@ -174,11 +174,71 @@ def test_get_pv_history_status_empty_keeps_meta(monkeypatch: pytest.MonkeyPatch)
     assert result["meta"] == {"name": "X", "EGU": "V", "PREC": "2"}
 
 
+def test_get_pv_history_reads_a_bare_empty_list_as_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GQ-290: a bare ``[]`` is EMPTY history, not withheld, and it is the shape the appliance
+    really sends for a window before a PV's first sample.
+
+    This row asserted the opposite until GQ-290, on the reasoning that a top-level list with no
+    block "could not be read". Three measurements retired that reading:
+
+    * the wire: appliance 2.2.1 answers a pre-existence window with HTTP 200, JSON content type
+      and the six bytes ``b"[ \\n ]\\n"`` (measured 2026-09-06);
+    * the source: with no data stream the JSON responder emits only its opening ``[`` and closing
+      ``]``, so this is the ONLY shape it has for "nothing to send";
+    * the exclusion: an unknown PV gets a 404 from the retrieval servlet, which raises in the HTTP
+      layer, so ``[]`` can never mean "unknown name" here.
+
+    Empty rather than withheld therefore loses no information: the window is provably empty, and
+    saying "unknown" about it was the false half. The genuinely unreadable shapes are the ones in
+    the test below, which is the other direction of this proof.
+    """
+    client = ArchiverClient("http://arch")
+    monkeypatch.setattr(client.session, "get", Mock(return_value=_resp([])))
+
+    result = client.get_pv_history("X", _T0, _T1)
+
+    assert result["status"] == "empty"
+    assert result["withheld_reason"] is None
+    assert result["samples"] == []
+    assert result["capped"] is False
+    assert result["meta"] == {}
+
+
+def test_the_measured_empty_bytes_really_parse_to_a_bare_list() -> None:
+    """The premise under the test above, pinned against the BYTES rather than a hand-typed ``[]``.
+
+    Without this the suite would only prove what happens once someone has already decided the
+    payload is ``[]``. The point of GQ-290 is that the appliance sends these exact bytes, so the
+    fixture is the measurement itself.
+
+    ``_content`` because there is no public way in: ``Response.content`` is a property with no
+    setter, and ``_content`` is what requests itself writes there, listed in ``Response.__attrs__``
+    and restored by ``__setstate__``. The alternatives cost more than they are worth for one
+    assertion: a real HTTP server, or a mocking library this repository does not depend on.
+    """
+    measured = b"[ \n ]\n"  # captured from appliance 2.2.1 on 2026-09-06, byte for byte
+    response = requests.Response()
+    response.status_code = 200
+    response._content = measured
+    response.headers["Content-Type"] = "application/json"
+
+    assert response.json() == []
+    assert len(measured) == 6
+
+
 @pytest.mark.parametrize(
     "payload",
     [
-        [],  # malformed top-level (empty)
         "nope",  # malformed top-level (not a list)
+        # The two FALSY non-lists, and they earn their place: the empty branch above is guarded by
+        # ``isinstance(data, list) and not data``, and a mutant that drops the isinstance half
+        # survived every other row here (measured 2026-09-06, GQ-290). "nope" is truthy, so it
+        # falls through to this branch either way. These two are the only inputs that tell a
+        # correct guard from one that reads "empty" off any falsy payload at all.
+        "",  # falsy, but a string: unreadable, not an empty window
+        {},  # falsy, but an object: unreadable, not an empty window
         [123],  # top-level list whose element is not a dict
         [{"meta": {"name": "X"}}],  # block present but no 'data' key
         [{"meta": {"name": "X"}, "data": "not-a-list"}],  # 'data' is not a list
@@ -188,8 +248,12 @@ def test_get_pv_history_withheld_unexpected_payload(
     monkeypatch: pytest.MonkeyPatch, payload: object
 ) -> None:
     """DS-4B: an uninterpretable response is WITHHELD (status 'withheld',
-    withheld_reason 'unexpected_payload'), a bare [] must never masquerade as 'empty history'
-    when the truth is 'could not read'."""
+    withheld_reason 'unexpected_payload'), never reported as 'empty history' when the truth is
+    'could not read'.
+
+    ⚠ A bare ``[]`` was in this list until GQ-290 and is now its own test above: it is readable,
+    and it means empty. These four are not readable, and that difference is the whole point of the
+    two statuses. Keeping them here is the second direction of that proof."""
     client = ArchiverClient("http://arch")
     monkeypatch.setattr(client.session, "get", Mock(return_value=_resp(payload)))
     result = client.get_pv_history("X", _T0, _T1)

@@ -156,8 +156,22 @@ def test_sibling_notations_agree_with_iso_z(client: ArchiverClient, pv: str, sta
 
 def test_past_window_returns_nothing(client: ArchiverClient, pv: str) -> None:
     """The negative control, and it is not optional: the test above would ALSO pass if the window
-    were dropped and the whole history returned."""
-    assert _count(client, pv, *_PAST) == 0
+    were dropped and the whole history returned.
+
+    ⚠ It reads ``status`` as well as the count, and that is the point of GQ-290 rather than
+    decoration. Counting alone kept this test green through a real classification defect: the
+    appliance answers this window with a bare ``[]``, the client called that WITHHELD ("history
+    unknown") instead of EMPTY ("provably no samples"), and ``len(samples) == 0`` is true either
+    way. This assertion is now the only guard that would notice if the wire shape changed, rather
+    than swallowing the change."""
+    result = _history(client, pv, *_PAST)
+
+    assert len(result["samples"]) == 0
+    assert result["status"] == "empty", (
+        "a window before the PV's first sample must be reported as provably empty, not as "
+        f"withheld ({result['withheld_reason']}): withheld means the history is UNKNOWN"
+    )
+    assert result["withheld_reason"] is None
 
 
 def test_relative_amount_refused_before_any_request(client: ArchiverClient, pv: str) -> None:

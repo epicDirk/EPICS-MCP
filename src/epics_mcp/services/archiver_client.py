@@ -120,11 +120,16 @@ class HistoryResult(TypedDict):
     ``status`` tells apart the three cases a bare ``([], False)`` tuple used to conflate:
 
     * ``"ok"``: samples were returned (``capped`` says whether the cap truncated them).
-    * ``"empty"``: a VALID response whose ``data`` array was empty: genuinely no samples in
-      the window. This is the ONLY empty-``samples`` case with ``withheld_reason=None``.
+    * ``"empty"``: a VALID response carrying no samples: genuinely no samples in the window.
+      This is the ONLY empty-``samples`` case with ``withheld_reason=None``. TWO wire shapes
+      reach it, and the second is the one that actually occurs: a block whose ``data`` array is
+      empty, and a bare ``[]`` with no block at all. Measured on appliance 2.2.1 (GQ-290), a
+      window before a PV's first sample answers ``[]``; the block-with-empty-data shape was not
+      observed on the wire and is kept because it is equally readable.
     * ``"withheld"``: the response could not be interpreted; ``withheld_reason`` says why
       (``"unexpected_payload"`` / ``"unexpected_sample_shape"``). NOT "no data", the sample
-      history is unknown, not proven empty.
+      history is unknown, not proven empty. ⚠ A bare ``[]`` used to land here, which said
+      "unknown" about a window that was provably empty.
 
     ``meta`` is the getData.json ``meta`` block (EGU/PREC) when present, else ``{}``. ``note`` is a
     human-readable explanation (``""`` on ``"ok"``).
@@ -494,7 +499,43 @@ class ArchiverClient:
             },
         )
         # getData.json returns [{"meta": {...}, "data": [ {secs,nanos,val,severity,status}, ... ]}]
-        if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+        if isinstance(data, list) and not data:
+            # A bare [] is EMPTY, not unreadable, and this is the only empty answer the appliance
+            # actually produces (GQ-290). Three measurements, none of them inferred:
+            #
+            # 1. The wire. A window before a PV's first sample answers HTTP 200,
+            #    Content-Type application/json, body b"[ \n ]\n" - six bytes, measured against
+            #    appliance 2.2.1 on 2026-09-06.
+            # 2. The source. Without a data stream the JSON responder writes only "[ " when the
+            #    output stream opens and " ]" when it closes, because the per-PV branch never
+            #    runs (JSONResponse.java, setOutputStream/close). There is no other shape it can
+            #    emit for "nothing to send".
+            # 3. It cannot mean "unknown PV". Without a PVTypeInfo the retrieval servlet answers
+            #    404, and a 404 raises in _get long before this line, so an unknown name never
+            #    reaches the classifier at all.
+            #
+            # So [] has exactly one reading: the PV is known and the window holds no stream. That
+            # is "empty", and calling it "withheld" told every caller the history was UNKNOWN when
+            # it was in fact proven absent. The two shapes below stay withheld: a payload that is
+            # not a list, and a list whose first element is not a block, are genuinely unreadable.
+            #
+            # ⚠ Sharper than it looks: the appliance carries the last sample from BEFORE the
+            # window into any window that has one, so a [] means there is no sample in the window
+            # AND none before it.
+            return HistoryResult(
+                samples=[],
+                capped=False,
+                meta={},
+                status="empty",
+                note=(
+                    "No samples in the requested window, and none before it either (the appliance "
+                    "carries the preceding sample into a window when there is one). If you "
+                    "expected data, verify the PV is archived on this appliance (is_archived / "
+                    "get_archive_info) and check the window and its timezone."
+                ),
+                withheld_reason=None,
+            )
+        if not isinstance(data, list) or not isinstance(data[0], dict):
             return self._withheld_history(
                 {},
                 "unexpected_payload",

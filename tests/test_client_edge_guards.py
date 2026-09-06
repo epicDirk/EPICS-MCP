@@ -44,21 +44,29 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   107 / 102 / 20 said five of the population reached a guard line; four of those five were
   miscounted into the population, and the fifth was credited with a SAME-NAMED test's execution in
   another file.
-* Unobserved polarities (direction A): 19 of 96 targets, plus one where neither polarity is
+* Unobserved polarities (direction A): 19 of 98 targets, plus one where neither polarity is
   noticed and two that no test executes at all. They are declared below. (The denominator rose
   from 93 with QA-31, which added three guard sites to ``epics_client``; the findings themselves
-  were only RE-LOCATED to their moved lines, so the numerator is unchanged and unreviewed.)
+  were only RE-LOCATED to their moved lines, so the numerator is unchanged and unreviewed. It rose
+  again to 98 with GQ-290, which added the bare-``[]`` branch to ``archiver_client``: that site is
+  observed in both polarities, so it lands in the denominator only.)
 
-  The sweep counted 19 such targets and the table below has 17 rows, which is not a discrepancy:
-  the key is ``module:line``, and one line can carry several targets, eight of those keys do.
+  The sweep counted 19 such targets and the table below has 16 rows, which is not a discrepancy:
+  the key is ``module:line``, and one line can carry several targets, seven of those keys do.
   ``channelfinder_client.py`` line 473 carries three: the two ``isinstance`` calls its row calls
-  "both halves", plus the whole condition. Measured, those 17 keys sit on 28 targets in total. A
+  "both halves", plus the whole condition. Measured, those 16 keys sit on 25 targets in total. A
   key is not a target, and reading the table as if it were is how a reader concludes that two
   findings have been lost.
-  ⚠️ What is DERIVED here is the 28 and the eight, not the 19. 28 counts every target on those
+  ⚠️ What is DERIVED here is the 25 and the seven, not the 19. 25 counts every target on those
   lines, observed and unobserved alike, so it shows only that a key CAN carry several findings;
   which two of them share a key is a fact about the sweep, and the sweep's per-key breakdown was
   not recorded. Re-deriving the 19 needs the coverage run.
+  ⚠️ The rows went 17 -> 16 and the derived pair 28 -> 25 and eight -> seven with GQ-290, which
+  RE-JUDGED the ``archiver_client`` history-block row out of the table (its reasoning sits at that
+  row's former place below). The 19 does NOT move with it: it is the sweep's own number, and this
+  file cannot re-derive it without the coverage run. So the numerator now names one finding whose
+  row is gone, which is honest and unavoidable until the next sweep, and better than silently
+  decrementing a figure this file did not measure.
   ⚠️ Two caveats on the counterpart number. First, "observed in both polarities" is weaker than it
   sounds for the 21 RAISE guards: their enabling polarity fires the guard on every input, so every
   covering test dies by construction and only the disabling half carries information. Second,
@@ -135,7 +143,12 @@ def _keys_with_several_targets() -> int:
 # conjunct leaves the rest of the guard standing.
 _GUARD_POPULATION: dict[str, tuple[int, int]] = {
     "alarm_client.py": (6, 1),
-    "archiver_client.py": (15, 6),
+    # 15/6 -> 16/7 with GQ-290: the bare-[] branch in get_pv_history adds one isinstance call and
+    # one whole condition. A FORM change, not a verdict change: the new site is observed in both
+    # polarities, so it belongs in no _UNOBSERVED row. Measured rather than argued, branch
+    # coverage of tests/test_archiver.py over this module on 2026-09-06 takes both arcs off that
+    # line and leaves the file at 0 missing branches.
+    "archiver_client.py": (16, 7),
     "channelfinder_client.py": (16, 5),
     "epics_client.py": (19, 2),
     "naming_client.py": (2, 1),
@@ -148,8 +161,18 @@ _GUARD_POPULATION: dict[str, tuple[int, int]] = {
 _UNOBSERVED: dict[str, str] = {
     "alarm_client.py:244": "empty-list fallback; disabling it is not noticed",
     "alarm_client.py:247": "any() filter over the config records",
-    "archiver_client.py:152": "sample check, masked by the following 'secs'/'val' membership test",
-    "archiver_client.py:497": "history block shape",
+    # RE-LOCATED +5 by the widened HistoryResult docstring in GQ-290, byte-identical against
+    # ``git show 39c276d:src/epics_mcp/services/archiver_client.py`` at its old number 152.
+    "archiver_client.py:157": "sample check, masked by the following 'secs'/'val' membership test",
+    # ⛔ ``archiver_client.py:497`` ("history block shape") is GONE from this table, and it is the
+    # one row here that was RE-JUDGED rather than re-located. GQ-290 split its middle conjunct out
+    # (the bare ``[]`` now means empty, not unreadable), so the old line has NO byte-identical
+    # counterpart in the tree: the guard itself changed, and a verdict measured about the
+    # three-conjunct version says nothing about the two-conjunct one.
+    # Re-measured with the same instrument the 2026-07-25 sweep used, a mutant: removing the whole
+    # condition now takes FOUR tests down (the four unexpected_payload rows), so the guard is
+    # observed and no longer belongs in a table of findings nobody noticed. Two of those four rows
+    # are new, added in the same change precisely because a mutant survived without them.
     "channelfinder_client.py:96": "list check, masked by the item check at :98",
     "channelfinder_client.py:103": "the dict half of the item check: no NON-dict item is tested",
     "channelfinder_client.py:340": "find_channels list check, masked by its item check at :343",

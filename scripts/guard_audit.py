@@ -404,7 +404,12 @@ PINNED_AST: dict[str, int] = {
     DOUBLES: 102,
     EDGE_VOCABULARY: 21,
     CLIENT_MODULES: 6,
-    GUARD_TARGETS: 96,
+    # 96 -> 98 with GQ-290: the bare-[] branch in ArchiverClient.get_pv_history is one new
+    # isinstance call plus one new whole condition. Re-recorded because the SHAPE grew, not
+    # because a verdict changed: the new site is executed in both polarities (branch coverage of
+    # tests/test_archiver.py over archiver_client.py, 2026-09-06, both arcs taken, no missing
+    # branch), so it adds nothing to the unobserved tables.
+    GUARD_TARGETS: 98,
 }
 PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 102, SHAM_CANDIDATES: 21}
 PINNED: dict[str, int] = {**PINNED_AST, **PINNED_COVERAGE}
