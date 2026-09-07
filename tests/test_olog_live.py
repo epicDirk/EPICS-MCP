@@ -11,9 +11,12 @@ containing everything. Two reviewers read the Java and drew opposite (both wrong
 execution settled it.
 
 The assertions are DIFFERENTIAL: the same window expressed several ways must give the same answer:
-rather than exact counts, so they hold against any Olog with any data. No window here comes from the
-CLOCK, so a run is reproducible: the older probes use fixed constants, and the ones that need a
-corpus bounded to one page derive their window from the DATA (:func:`_page_bounded_window`).
+rather than exact counts, so they hold against any Olog with any data. A run is reproducible because
+no window is left to the CLOCK: the older probes use fixed constants and the ones that need a corpus
+bounded to one page derive their window from the DATA (:func:`_page_bounded_window`). The single
+exception is deliberate and says so in its own docstring: the relative amount in
+``test_relative_window_agrees_with_absolute``, which the server resolves against now, and which
+exists to pin that such an amount PARSES at all.
 """
 
 from __future__ import annotations
@@ -239,17 +242,20 @@ def _levels_in_fixture(client: OlogClient) -> Counter[str]:
     field the server always supplies, so this counts the corpus without touching its free text.
 
     Only the level NAMES are safe to use from this: the counts hold for the newest page and for no
-    larger corpus, which is why the probes below take theirs from :func:`_bounded_corpus` instead.
+    larger corpus, which is why the probes below take theirs from a bounded window instead
+    (:func:`_bounded_corpus` for the level ones, :func:`_page_bounded_window` for the title one).
     """
     entries, _capped, _total = client.search_logbook(size=_PAGE)
     return Counter(str(entry["level"]) for entry in entries if entry.get("level"))
 
 
-#: The page every probe below asks for. One spelling, because every window-bounded query has to
-#: agree on it for the bounded-window arithmetic to mean anything. Deliberately no COUNT of those
-#: queries: nothing watches one here (this file is not in tests/test_prose_counters.py::_WATCHED),
-#: and a sentence that says "six" is one probe away from being wrong. `grep -n "size=_PAGE"` names
-#: them at any time, and the ones that MUST agree are those carrying start/end.
+#: The page size the probes ask for. One spelling, because every window-bounded query has to agree
+#: on it for the bounded-window arithmetic to mean anything. Deliberately no COUNT of those queries:
+#: nothing watches one here (this file is not in tests/test_prose_counters.py::_WATCHED), so a
+#: number written down would be one probe away from rotting. `grep -n _PAGE` names them at any time,
+#: and the ones that MUST agree are those carrying a window (``start``/``end``, or ``**window`` for
+#: the raw-query helper, which spells the size as ``str(_PAGE)`` and would be missed by a narrower
+#: pattern).
 _PAGE = 200
 
 #: How many of the newest entries the derived window is sized around, tried in this order. Every
@@ -301,8 +307,10 @@ def _page_bounded_window(
     WHAT PROVES THE BOUND, and it is deliberately not ``hitCount``. ``capped`` comes from the extra
     element ``search_logbook`` requests on purpose, so it answers "did this result fit" from the
     page itself. ``hitCount`` is an Elasticsearch total, and Olog does not ask for an exact one, so
-    on a large enough corpus it is a ceiling rather than a count. It is still used below, but only
-    inside the window, where the number is small and the ceiling cannot be reached.
+    on a large enough corpus it is a ceiling rather than a count. Probes that compare hitCounts
+    INSIDE a window are safe, because the number is small there and the ceiling cannot be reached;
+    the ones that read it unbounded (``test_blank_filters_are_refused_before_any_request``) compare
+    a ceiling against the same ceiling, which is a different argument and holds on its own.
 
     ``sample`` must leave headroom below ``_PAGE``: the boundary is a whole SECOND (the resolution
     :func:`_iso_from_ms` emits), so the window reaches slightly further back than the sample and
@@ -346,9 +354,11 @@ def _bounded_corpus(client: OlogClient) -> tuple[str, str, list[dict[str, object
     return None
 
 
-#: Why a LEVEL probe below could not run, phrased once because the level probes share it. No count
-#: of them is stated: nothing watches one here (this file is not in
-#: tests/test_prose_counters.py::_WATCHED), and `grep -n _NO_WINDOW` names its users at any time.
+#: Why a probe that needs a LEVEL MIX could not run, phrased once because every such probe shares
+#: it. That is not the same as "the level probes": the combination probe below asks for a level mix
+#: and then goes on to test titles, so it takes this text too. No count of the users is stated:
+#: nothing watches one here (this file is not in tests/test_prose_counters.py::_WATCHED), and
+#: `grep -n _NO_WINDOW` names them at any time.
 _NO_WINDOW = (
     "no time window found that holds two distinct levels and still fits one page; the level "
     "arithmetic needs a bounded corpus, and a fixture that cannot supply one says nothing about "
@@ -357,10 +367,12 @@ _NO_WINDOW = (
 
 #: The same for the TITLE probe, which needs no level at all. Its own text, because _NO_WINDOW
 #: speaks only of level arithmetic and would explain a skip by something this probe never asks for.
+#: It covers the WINDOW failing only; the two ways a window can fail to yield a probe word carry
+#: their own messages at the point they are decided, so a reader is never sent to the wrong place.
 _NO_TITLE_WINDOW = (
-    "no time window found that fits one page and yields a usable probe word; the word and the "
-    "assertion have to come from the SAME set, and a fixture that cannot supply one says nothing "
-    "about whether title matches whole words"
+    "no time window found that fits one page; the probe word and the assertion have to come from "
+    "the SAME set, and a fixture that cannot supply a bounded one says nothing about whether title "
+    "matches whole words"
 )
 
 
@@ -479,21 +491,30 @@ def test_title_filter_is_honoured_and_matches_whole_words(client: OlogClient) ->
     corpus, and four of the twenty longest candidate words would have made the probe red with no
     server defect at all. It was green by luck (GQ-298 (c)).
 
-    THE SMALLEST RUNG on purpose, not the ladder :func:`_bounded_corpus` walks. That ladder is
+    THE SMALLEST RUNG on purpose, not the ladder :func:`_bounded_corpus` walks, and taken as
+    ``min()`` rather than by index so a reordering of that tuple (which is ordered for a LEVEL
+    reason this probe does not share) cannot silently hand it the largest one. That ladder is
     level-monotone by construction (more entries can only add levels), and for THIS probe the
     monotonicity does not hold: a larger window offers more candidate words but also more tokens
     that disqualify a fragment. What replaces the ladder here is searching ALL candidates instead of
-    giving up on the longest one.
+    giving up on the longest one. There is no rung BELOW the smallest, so a corpus dense enough to
+    overflow one page within the seconds the newest sample spans skips this probe with no way
+    around it; that is the same bound the level probes have and it is stated rather than hidden.
 
     Worth stating because it is the OPPOSITE of ``find_channels``, whose bare value is an anchored
     substring glob, copying that wording over would have been a false documented promise."""
-    bounded = _page_bounded_window(client, _WINDOW_LADDER[0])
+    bounded = _page_bounded_window(client, min(_WINDOW_LADDER))
     if bounded is None:
         pytest.skip(_NO_TITLE_WINDOW)
     start, end, whole = bounded
-    # Kept from the unbounded version, where it guarded the reference page: an empty answer also
-    # comes from auth, a wrong URL, a client regression or a changed payload, and the helper above
-    # turns exactly that case into a silent skip. Asserted on the WINDOW it is stronger than before.
+    # The positive control, MOVED rather than kept, and the difference is worth being exact about.
+    # In the unbounded version it guarded the reference page, so an empty or unreachable Olog went
+    # loudly red. The helper above now catches that case first (an empty page returns None) and it
+    # becomes a SKIP: this assertion is therefore neither the same control nor a stronger one, and
+    # it cannot be, because it runs after that decision. What it does catch is a window the server
+    # degraded to empty while the corpus is not, which is this file's own failure class. The old
+    # case stays covered module-wide: ten other probes assert _NO_REFERENCE on an unbounded read,
+    # so an Olog nobody can reach still turns this module red.
     assert whole, _NO_REFERENCE
     titles = [str(entry["title"]) for entry in whole if isinstance(entry.get("title"), str)]
     if not titles:
@@ -503,8 +524,12 @@ def test_title_filter_is_honoured_and_matches_whole_words(client: OlogClient) ->
     # assumed: the server indexes terms, so a title "cooling-threshold" contributes "threshold" to
     # what a search can find while `.split()` plus `isalnum()` drops the whole thing. In the window
     # of 2026-09-07 that gap was eleven tokens. Splitting on non-word characters over-approximates
-    # the analyzer rather than reproducing it (which is unmeasured), and over-approximating is the
-    # safe direction: it can only reject a candidate, never admit a colliding one.
+    # the analyzer's TOKENISATION rather than reproducing it, and over-approximating is the safe
+    # direction there: a wider set can only reject a candidate, never admit a colliding one. It says
+    # nothing about term FILTERS, which are unmeasured: only lowercasing is matched on both sides,
+    # so a stemmer or an asciifolder could still index a term neither set holds. That would show up
+    # as this probe going red on a server that is in fact honouring the contract, which is why the
+    # assertion below says "re-measure" rather than naming a defect.
     tokens = words | {t for title in titles for t in re.split(r"[\W_]+", title.lower()) if t}
 
     # Sorted by (-length, word) so a length tie breaks on the WORD, not on set-iteration order:
