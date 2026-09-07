@@ -23,7 +23,10 @@ in-memory test in this repository.
   makes the write succeed.
 
 Opt-in: ``pytest -m live`` with the proxy and certificate wired through the environment (see the
-gate fixture below). The rig is deliberately EXTERNAL rather than built here, and that is a
+gate fixture below), plus ``OA1C_PROXY_IS_LOCAL`` repeating ``OA1C_PROXY_URL`` verbatim, which is
+how the operator declares that the proxy is their local rig rather than a real service.
+
+The rig is deliberately EXTERNAL rather than built here, and that is a
 decision rather than an omission: building the certificate in-process would need a cryptography
 dependency this package does not declare, which would move ``uv.lock`` and pull the dependency-pin
 guards into the radius of a test module. What the rig has to provide is stated here; how it is
@@ -67,6 +70,10 @@ _USER = os.environ.get("OA1C_WRITE_USER", "")
 _PASS = os.environ.get("OA1C_WRITE_PASSWORD", "")
 _LOGBOOK = os.environ.get("OA1C_LOGBOOK", "")
 _LOOPBACK = os.environ.get("OA1C_LOOPBACK_URL", "http://localhost:8080/Olog")
+#: The operator's DECLARATION that the proxy is their local rig, and not a prerequisite: it
+#: is deliberately absent from the gate below, because a missing declaration must FAIL the
+#: target guard rather than skip the module.
+_PROXY_IS_LOCAL = os.environ.get("OA1C_PROXY_IS_LOCAL")
 
 pytestmark = pytest.mark.live
 
@@ -90,19 +97,28 @@ def _require_live_stack() -> None:
 
 @pytest.fixture(autouse=True)
 def _refuse_a_non_local_write_target() -> None:
-    """The TARGET guard, on the LOOPBACK half of this rig.
+    """The TARGET guard, on the address this module actually WRITES to.
 
-    Every entry this module creates lands in the Olog BEHIND the proxy, and that is the same
-    instance the cross-check reads back over ``OA1C_LOOPBACK_URL``. So this is the address that
-    must be local, and it is the one checked.
+    ⚠️ The first revision of this fixture checked ``OA1C_LOOPBACK_URL`` and argued that the
+    entries land in the instance behind the proxy. A QA pass measured that wrong twice over:
+    ``OA1C_LOOPBACK_URL`` carries a loopback DEFAULT and is named in no rig instruction, so the
+    check was reading a literal out of this file; and it is the READ-BACK address, while every
+    entry goes to ``OA1C_PROXY_URL``. Pointing the proxy at a facility passed that check and wrote
+    there. The negative control was the worse half: it expects TLS to fail, so against a
+    certificate the system already trusts, the upload SUCCEEDS and the entry stays.
 
-    ⛔ The PROXY URL is deliberately NOT checked here, and the gap is named rather than
-    papered over. This module aims at a HOSTNAME on purpose, and a hostname can only be shown
-    to be local by resolving it, which ``docs/write-gate-contract.md`` forbids for this family
-    of boundaries ("a hostname is never trusted as loopback"). What covers the proxy instead is
-    that no lane ever sets this module's six ``OA1C_`` variables: they occur in this file and
-    in ``docs/known-limits.md`` and nowhere else, so nothing can inherit them into a shell.
+    So the PROXY is what is checked. It is a hostname by design, which no resolution-free check can
+    call local, so the operator DECLARES it by repeating the URL verbatim in
+    ``OA1C_PROXY_IS_LOCAL``. That stops an inherited or mistyped target; it cannot stop a
+    deliberate declaration of a production URL, and it is not meant to. The read-back address is
+    checked as well, because it costs nothing.
     """
+    assert_write_target_is_local(
+        _PROXY,
+        variable="OA1C_PROXY_URL",
+        ack=_PROXY_IS_LOCAL,
+        ack_variable="OA1C_PROXY_IS_LOCAL",
+    )
     assert_write_target_is_local(_LOOPBACK, variable="OA1C_LOOPBACK_URL")
 
 

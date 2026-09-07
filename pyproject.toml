@@ -330,6 +330,9 @@ asyncio_mode = "auto"
 # fulfilled live run). The demand applies to the SELECTED set: scope a partial live run with
 # `-m live -k <plane>`; data-dependent skips INSIDE a running probe stay skips. Deliberately NO
 # `addopts = -m "not live"` (would change default pytest for everyone and is brittle).
+# A live module that WRITES to Olog carries a SECOND setup-time gate from the same file,
+# assert_write_target_is_local, and that one FAILS instead of skipping: a target outside loopback
+# is forbidden rather than missing, and Olog has no delete.
 markers = [
     "live: needs a running local EPICS stack; opt-in via -m live + the plane's EPICS_MCP_* vars; EPICS_MCP_REQUIRE_LIVE=1 turns a missing prerequisite into a loud failure",
 ]

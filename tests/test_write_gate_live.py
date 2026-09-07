@@ -78,6 +78,8 @@ Run::
 with ``EPICS_MCP_OLOG_URL`` / ``_ALLOW_OLOG_WRITE`` /
 ``_OLOG_WRITE_LOGBOOKS`` / ``_OLOG_WRITE_USER`` / ``_OLOG_WRITE_PASSWORD`` set, and with
 ``EPICS_MCP_AUDIT_LOG_FILE`` UNSET (this module refuses to run otherwise; see the fixture).
+``EPICS_MCP_OLOG_URL`` must name a LOOPBACK host: this module lays down four real entries, and the
+target guard refuses anything else before a client is built.
 
 **Required, not optional:** ``EPICS_MCP_LIVE_OLOG_DENY_LOGBOOK`` names the SCRATCH logbook the deny
 targets are created in. Unset is a refusal, never a guess, see :func:`denied_logbook`. It is

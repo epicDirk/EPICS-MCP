@@ -356,7 +356,11 @@ in-memory test in this repository and fails that one.
 in-process would need a cryptography dependency this package does not declare; declaring one moves
 `uv.lock` and pulls the dependency-pin guards into the radius of a test module. So the module reads
 its proxy URL, CA path, credentials and target logbook from `OA1C_*` environment variables and
-refuses to guess: without them it skips, and under `EPICS_MCP_REQUIRE_LIVE=1` it fails loudly. What
+refuses to guess: without them it skips, and under `EPICS_MCP_REQUIRE_LIVE=1` it fails loudly.
+Since 2026-09-07 it also refuses to WRITE anywhere it has not been told is local: the proxy is a
+hostname, which the resolution-free target guard cannot call local, so `OA1C_PROXY_IS_LOCAL` must
+repeat `OA1C_PROXY_URL` verbatim. That is a declaration by the operator, not a proof, and it exists
+so that an inherited or mistyped proxy cannot quietly become the write target. What
 the rig has to BE is stated in the module docstring; standing it up is an `openssl` invocation and a
 reverse proxy of some fifty stdlib lines. **Nothing in this repository checks that such a rig
 exists**, which is the same class of limit as every other live probe here: no CI guard can prove a

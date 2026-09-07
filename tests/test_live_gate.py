@@ -110,6 +110,9 @@ def test_demand_changes_the_outcome_class() -> None:
     assert type(silent) is not type(loud)
 
 
+_TESTS_DIR = Path(__file__).parent
+
+
 # --- assert_write_target_is_local: where a write probe may point --------------
 
 
@@ -158,14 +161,16 @@ def test_a_non_local_target_is_refused(url: str) -> None:
     assert isinstance(outcome, pytest.fail.Exception), f"expected Failed, got {outcome!r}"
 
 
-def test_the_refusal_is_never_a_skip() -> None:
-    """The whole point: a forbidden target must not be silently skipped.
+def test_the_refusal_is_a_failure_and_never_a_skip() -> None:
+    """A forbidden target must go red, and it must not go red as a SKIP.
 
-    A skip would hide the near miss it exists to make visible, and it would do so on exactly the
-    run where somebody had write credentials in their shell. Compared by CLASS, not by text, so a
-    reworded message cannot make this tautological.
+    Both halves are asserted, and the second alone would be a trap: with the refusal replaced by a
+    bare ``return`` the outcome is ``None``, and ``None`` is not a Skipped either, so a test that
+    only forbade the skip class would stay green over a guard that does nothing. Measured on that
+    mutant.
     """
     outcome = _outcome_of(lambda: assert_write_target_is_local(FORBIDDEN_URL, variable="X"))
+    assert isinstance(outcome, pytest.fail.Exception), f"the guard did not fail: {outcome!r}"
     assert not isinstance(outcome, pytest.skip.Exception), f"the guard skipped: {outcome!r}"
 
 
@@ -181,25 +186,118 @@ def test_the_refusal_names_the_variable_the_host_and_the_reason() -> None:
     assert "resolution-free" in message, message
 
 
+def test_the_refusal_does_not_echo_credentials() -> None:
+    """The message names the HOST, never the URL, because a URL can carry a password.
+
+    This repository has already paid for that class once, which is why ``url_without_credentials``
+    and ``shown_url`` exist. A message built from the raw URL would pass the assertions above and
+    print the secret into every CI log that captures the failure.
+    """
+    outcome = _outcome_of(
+        lambda: assert_write_target_is_local(
+            "https://svc:hunter2@10.0.0.5/Olog", variable="EPICS_MCP_OLOG_URL"
+        )
+    )
+    message = str(outcome)
+    assert "10.0.0.5" in message, message
+    assert "hunter2" not in message, "the refusal echoed a credential from the URL"
+    assert "svc" not in message, "the refusal echoed the user name from the URL"
+
+
+def test_an_unparseable_target_gets_its_own_repair_instruction() -> None:
+    """A URL without a scheme has no host, and "point it at localhost" would be useless advice.
+
+    ``localhost:8080/Olog`` IS localhost to a human and is not a URL to any parser, so the reader
+    needs to be told the scheme is missing, not the host.
+    """
+    outcome = _outcome_of(
+        lambda: assert_write_target_is_local("localhost:8080/Olog", variable="EPICS_MCP_OLOG_URL")
+    )
+    message = str(outcome)
+    assert isinstance(outcome, pytest.fail.Exception), f"expected Failed, got {outcome!r}"
+    assert "scheme" in message, message
+
+
+# --- the declared-local lane --------------------------------------------------
+
+
+DECLARED_URL = "https://olog.rig.example:8443/Olog"
+
+
+def test_a_verbatim_declaration_lets_a_hostname_rig_through() -> None:
+    """A local rig reached under a hostname is admitted when the operator repeats its URL."""
+    outcome = _outcome_of(
+        lambda: assert_write_target_is_local(
+            DECLARED_URL, variable="P", ack=DECLARED_URL, ack_variable="P_IS_LOCAL"
+        )
+    )
+    assert outcome is None, f"a declared rig was refused: {outcome!r}"
+
+
+@pytest.mark.parametrize(
+    ("ack", "why"),
+    [
+        (None, "no declaration at all"),
+        ("", "an empty declaration"),
+        ("true", "a switch instead of the URL"),
+        ("https://olog.rig.example:8444/Olog", "a different port"),
+        ("https://olog.other.example:8443/Olog", "a different host"),
+    ],
+)
+def test_a_declaration_that_is_not_the_url_verbatim_does_not_count(
+    ack: str | None, why: str
+) -> None:
+    """The declaration must BE the URL, so it cannot degrade into an on switch.
+
+    That is what makes it worth anything: an inherited or mistyped target cannot match a
+    declaration nobody typed for it, whereas a boolean would be set once and forgotten.
+    """
+    outcome = _outcome_of(
+        lambda: assert_write_target_is_local(
+            DECLARED_URL, variable="P", ack=ack, ack_variable="P_IS_LOCAL"
+        )
+    )
+    assert isinstance(outcome, pytest.fail.Exception), f"{why} was accepted: {outcome!r}"
+
+
+def test_a_declaration_is_ignored_where_no_lane_was_opened() -> None:
+    """Without an *ack_variable* the caller has not opened the lane, so a matching *ack* is inert.
+
+    Negative control for the lane itself: a guard that honoured a bare *ack* would let any caller
+    self-authorise.
+    """
+    outcome = _outcome_of(
+        lambda: assert_write_target_is_local(DECLARED_URL, variable="P", ack=DECLARED_URL)
+    )
+    assert isinstance(outcome, pytest.fail.Exception), f"the lane opened itself: {outcome!r}"
+
+
+# --- resolution-free, asserted rather than asserted about ---------------------
+
+
 @pytest.mark.parametrize(
     "url",
     [
         "https://olog.example.org/Olog",
-        # This one really does resolve to 127.0.0.1 for everyone, and must STILL be refused:
-        # being local in fact is not the same as being local in the configuration.
+        # `*.localtest.me` is the shape this repository's own remote rig uses, and
+        # docs/known-limits.md records that it resolves to 127.0.0.1 (with the caveat that a network
+        # intercepting DNS breaks that). Whatever it resolves to, it must be REFUSED: local in fact
+        # is not the same as local in the configuration.
         "https://olog.localtest.me:8443/Olog",
     ],
 )
-def test_the_guard_resolves_nothing(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """RESOLUTION-FREE is a contract, so it is asserted by removing the ability to resolve.
+def test_the_guard_does_not_resolve_late_bound_names(
+    url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Half one of the resolution-free proof: the attribute lookup is removed.
 
-    ``docs/write-gate-contract.md`` and ``docs/safety.md`` both require of this family of target
-    boundaries that a hostname is never trusted as loopback. Same guard shape as
-    ``tests/test_provenance.py::test_nothing_here_opens_a_socket``, and faked at the ``socket``
-    module rather than at a client class for the reason stated there: a class-level double would
-    remove the very call it is meant to forbid.
+    Same guard shape as ``tests/test_provenance.py::test_nothing_here_opens_a_socket``, and faked
+    at the ``socket`` module rather than at a client class for the reason stated there: a
+    class-level double would remove the very call it is meant to forbid.
 
-    Provably red: make the guard call ``socket.getaddrinfo`` before classifying.
+    ⚠️ This half alone is not the proof, and measuring showed why: a ``from socket import
+    getaddrinfo`` in ``live_gate`` binds the name at import and walks straight past this
+    monkeypatch. That mutation is caught by the test below, not by this one.
     """
 
     def _refuse(*args: Any, **kwargs: Any) -> Any:
@@ -213,41 +311,79 @@ def test_the_guard_resolves_nothing(url: str, monkeypatch: pytest.MonkeyPatch) -
     assert isinstance(outcome, pytest.fail.Exception), f"{url}: {outcome!r}"
 
 
+def test_the_gate_module_cannot_resolve_at_all() -> None:
+    """Half two: ``live_gate`` names nothing that could resolve, however it was imported.
+
+    Read from the source rather than from behaviour, because that is the only way to catch an
+    early-bound name: ``from socket import getaddrinfo`` survives every monkeypatch of the module
+    attribute. Since the module imports no resolver under any name, the guard cannot call one.
+
+    Provably red: add ``import socket`` to ``tests/live_gate.py``.
+    """
+    tree = ast.parse((_TESTS_DIR / "live_gate.py").read_text(encoding="utf-8"))
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported |= {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            imported.add((node.module or "").split(".")[0])
+            imported |= {alias.name for alias in node.names}
+    forbidden = imported & {
+        "socket",
+        "getaddrinfo",
+        "gethostbyname",
+        "getfqdn",
+        "create_connection",
+    }
+    assert not forbidden, (
+        f"live_gate imports a resolver, so it can no longer promise not to: {forbidden}"
+    )
+
+
 # --- the population: every live module that WRITES must carry both guards -----
 
 
-_TESTS_DIR = Path(__file__).parent
-
-#: The Olog operations that MUTATE, named at the two levels a test can actually reach them: the
-#: service layer (``epics_mcp.services.checkers_olog``) and the client
-#: (``epics_mcp.services.olog_client``).
+#: The Olog operations that MUTATE, named at every layer a test can actually reach them. Three,
+#: because a test may enter at any of them and this tree already does at two:
 #:
-#: Deliberately NOT the four MCP tool names. Measured 2026-09-07: the client method is
-#: ``add_attachment``, not ``add_log_attachment``, and ``reply_to_log`` exists only as a tool, so a
-#: list of tool names matches this tree through docstrings and test names instead of through calls.
+#: * the tool layer (``epics_mcp.tools.olog``), what the MCP tools call,
+#: * the service layer (``epics_mcp.services.checkers_olog``), used by two modules here,
+#: * the client (``epics_mcp.services.olog_client``) and the raw transport under it
+#:   (``epics_mcp.services._http``), used by three.
+#:
+#: Deliberately NOT the four MCP tool names on their own. Measured 2026-09-07: the client method is
+#: ``add_attachment`` rather than ``add_log_attachment``, and ``add_log_attachment`` appears in one
+#: live module that never calls it, so a list of tool names alone matches this tree through
+#: docstrings and test names instead of through calls.
 _WRITE_CALLS = frozenset(
     {
+        # tool layer
+        "_create_log_entry",
+        "_reply_to_log",
+        "_add_log_attachment",
+        "_update_log_entry",
+        # service layer
         "query_olog_create",
         "query_olog_add_attachment",
         "query_olog_update",
+        # client
         "create_log_entry",
         "add_attachment",
         "update_log_entry",
+        # raw transport
+        "rest_put_json",
+        "rest_put_multipart",
+        "rest_post_multipart",
     }
 )
 
 
-def _called_names(path: Path) -> set[str]:
-    """Every function or method name CALLED in *path*, read from the AST.
-
-    The AST rather than a grep, because a grep over this tree matches PROSE: of the six names
-    above, one occurs in a live module ONLY inside docstrings and test names, and never as a call.
-    """
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+def _call_names(node: ast.AST) -> set[str]:
+    """Every function or method name called anywhere under *node*."""
     names: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            func = node.func
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call):
+            func = child.func
             if isinstance(func, ast.Attribute):
                 names.add(func.attr)
             elif isinstance(func, ast.Name):
@@ -255,56 +391,111 @@ def _called_names(path: Path) -> set[str]:
     return names
 
 
-def _live_modules() -> dict[str, set[str]]:
-    """Every ``*_live.py`` beside this file, mapped to the names it calls."""
-    return {path.name: _called_names(path) for path in sorted(_TESTS_DIR.glob("*_live.py"))}
+def _is_autouse_fixture(node: ast.FunctionDef) -> bool:
+    """Whether *node* is decorated ``@pytest.fixture(autouse=True)``.
+
+    Autouse is what makes a call RUN. A guard call sitting in an ordinary function, or in a fixture
+    nothing requests, is present in the source and absent from the run, and the difference is the
+    whole point of the two tests below.
+    """
+    for dec in node.decorator_list:
+        if not isinstance(dec, ast.Call):
+            continue
+        target = dec.func
+        name = target.attr if isinstance(target, ast.Attribute) else getattr(target, "id", "")
+        if name != "fixture":
+            continue
+        for kw in dec.keywords:
+            if (
+                kw.arg == "autouse"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value is True
+            ):
+                return True
+    return False
+
+
+def _module_facts(path: Path) -> tuple[set[str], set[str]]:
+    """(everything called in *path*, everything called from an autouse fixture of *path*)."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    autouse: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and _is_autouse_fixture(node):
+            autouse |= _call_names(node)
+    return _call_names(tree), autouse
+
+
+def _live_modules() -> dict[str, tuple[set[str], set[str]]]:
+    """Every ``*_live.py`` beside this file, mapped to its two call sets."""
+    return {path.name: _module_facts(path) for path in sorted(_TESTS_DIR.glob("*_live.py"))}
 
 
 def test_every_live_module_that_writes_guards_its_target() -> None:
-    """A live module that mutates Olog must call the target guard. Olog has no delete.
+    """A live module that mutates Olog must call the target guard FROM AN AUTOUSE FIXTURE.
 
-    This is the half that survives the author who forgets. Which modules write is DERIVED here
-    rather than listed, so a fifth one is covered the day it is written.
+    Olog has no delete, so this is the half that survives the author who forgets. Which modules
+    write is DERIVED rather than listed, so a fifth one is covered the day it is written, subject
+    to the limits below.
+
+    Autouse is checked rather than mere presence, and that is not pedantry: dropping the
+    ``autouse=True`` from a fixture removes the guard from every run while leaving the call in the
+    file. A guard a one-word edit can switch off silently is the defect it was written against.
 
     WHAT THIS DOES NOT SEE, so nobody reads it as more than it is:
 
-    * it checks THAT the guard is called, not WITH WHICH target. A module could hand it a
-      constant. The guard's own tests above cover the decision; this one covers the wiring.
-    * its population is every ``*_live.py`` beside this file. A write probe under another name,
-      or in another directory, is invisible to it.
-    * a module that writes through a HELPER of its own, whose name is not in ``_WRITE_CALLS``,
-      escapes it.
-    * ``_WRITE_CALLS`` is a list, and the server can grow a mutating operation without this file
-      appearing in the diff. It is re-measured by hand or not at all.
+    * it checks THAT the guard is called and that the call can run, never WITH WHICH target. A
+      module could hand it a local-looking constant. The guard's own tests above cover the
+      decision, this one covers the wiring, and that gap has been real in this tree: the first
+      version of the remote-https fixture passed a variable with a loopback DEFAULT.
+    * its population is every ``*_live.py`` beside this file. A write probe under another name, or
+      in another directory, is invisible to it.
+    * a module that writes through a helper, its own or another module's, whose name is not in
+      ``_WRITE_CALLS``, escapes it. So does a dispatch through ``getattr``.
+    * ``_WRITE_CALLS`` is a list of names across three layers, and the server can grow a mutating
+      operation without this file appearing in the diff. It is re-measured by hand or not at all.
+    * it says nothing about the ORDER in which fixtures run. Today every fixture in every write
+      module is function-scoped, so the autouse ones run first; a module-scoped client fixture
+      would run before them, and nothing here would notice.
 
-    Provably red: delete the ``assert_write_target_is_local`` call from any module it names.
+    Provably red: delete the ``assert_write_target_is_local`` call from any module it names, or
+    merely drop the ``autouse=True`` from the fixture that holds it.
     """
-    writing = {name: calls for name, calls in _live_modules().items() if calls & _WRITE_CALLS}
+    modules = _live_modules()
+    writing = {name: facts for name, facts in modules.items() if facts[0] & _WRITE_CALLS}
     # Idle-run anchor: an empty population would make the assertion below vacuously true, which is
     # the failure mode of every guard built on a glob.
     assert writing, "no live module calls a mutating Olog operation, the population broke"
     unguarded = sorted(
-        name for name, calls in writing.items() if "assert_write_target_is_local" not in calls
+        name
+        for name, (_all, autouse) in writing.items()
+        if "assert_write_target_is_local" not in autouse
     )
     assert not unguarded, (
-        f"these live modules write to Olog without guarding their target: {unguarded}. "
+        f"these live modules write to Olog without an autouse target guard: {unguarded}. "
         "Olog has no delete. Add an autouse fixture calling assert_write_target_is_local."
     )
 
 
 def test_every_live_module_gates_itself() -> None:
-    """Every live module must call the SKIP gate, not only the writing ones.
+    """Every live module must call the SKIP gate from an autouse fixture, not only the writers.
 
     Two reasons it is pinned rather than left to review. A live module without it skips SILENTLY,
     which is the defect ``live_gate.py`` was written against in the first place. And the target
-    guard above DEPENDS on it: an unconfigured module is supposed to skip at the skip gate, which
-    is why the target guard treats an unset URL as none of its business.
+    guard DEPENDS on it: an unconfigured module is supposed to skip at the skip gate, which is why
+    the target guard treats an unset URL as none of its business.
 
-    Provably red: delete the ``assert_live_available`` call from any live module.
+    Autouse again, and here it was measured rather than assumed: the first attempt at a red proof
+    for this test removed one of two ``assert_live_available`` calls from a module and stayed
+    GREEN. Counting only autouse calls makes that mutation, and the ``autouse=True`` one, red.
+
+    Provably red: delete the ``assert_live_available`` call from any live module's autouse fixture,
+    or drop the ``autouse=True``.
     """
     modules = _live_modules()
     assert modules, "no live modules found, the population broke"
     ungated = sorted(
-        name for name, calls in modules.items() if "assert_live_available" not in calls
+        name for name, (_all, autouse) in modules.items() if "assert_live_available" not in autouse
     )
-    assert not ungated, f"these live modules never call the skip gate: {ungated}"
+    assert not ungated, (
+        f"these live modules never call the skip gate from an autouse fixture: {ungated}"
+    )

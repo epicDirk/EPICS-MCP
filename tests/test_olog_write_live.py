@@ -1,6 +1,6 @@
 """Live premise behind the WRITE-side level guard (OQ1), pinned so it goes red if Olog changes.
 
-Opt-in: ``pytest tests/test_olog_write_live.py -m live`` against a WRITABLE Olog.
+Opt-in: ``pytest tests/test_olog_write_live.py -m live`` against a WRITABLE loopback Olog.
 
 This is the live half of ``tests/test_olog_write.py``, which holds the same guard's offline half.
 That pairing is the reason this file exists as its own module rather than as one more test
@@ -47,12 +47,12 @@ from tests.live_gate import (
     live_demanded,
 )
 
-#: The write preconditions, read once at import so the gate and the body share one snapshot, the
-#: same MECHANISM as the sibling write modules but deliberately not the same LIST: they demand
-#: five keys including the password, this gate demands four, because this test needs no password
-#: to be correct. ``EPICS_MCP_OLOG_URL`` belongs in here and not only in
-#: the body: the body reads it with ``os.environ[...]``, so a missing value would raise KeyError at
-#: setup instead of skipping. ``EPICS_MCP_OLOG_WRITE_PASSWORD`` deliberately does NOT belong in it,
+#: The write preconditions, read once at import, the same MECHANISM as the sibling write modules
+#: but deliberately not the same LIST: they demand five keys including the password, this gate
+#: demands four, because this test needs no password to be correct.
+#: ``EPICS_MCP_OLOG_URL`` belongs in here and not only in the body: it is what the body CONNECTS
+#: with, and the target guard judges this same constant, so gate, guard and body are one value
+#: rather than three reads. ``EPICS_MCP_OLOG_WRITE_PASSWORD`` deliberately does NOT belong in it,
 #: because the body reads that one with a ``""`` default and a wrong password fails loudly as 401.
 _URL = os.environ.get("EPICS_MCP_OLOG_URL")
 _WRITE = os.environ.get("EPICS_MCP_ALLOW_OLOG_WRITE", "").lower() == "true"
@@ -104,9 +104,12 @@ def test_server_does_not_validate_a_written_level() -> None:
     what refuses, so going through it could never observe the server.
     """
     logbook = str(os.environ["EPICS_MCP_OLOG_WRITE_LOGBOOKS"]).split(",")[0].strip()
-    url = os.environ["EPICS_MCP_OLOG_URL"]
+    # The CONSTANT, not a fresh read: the target guard above judges ``_URL``, and a body that
+    # re-read the variable could connect somewhere the guard never saw. Measured in QA; the two
+    # values agree today only because nothing in this suite changes the variable at run time.
+    assert _URL is not None  # guarded by the module gate
     client = OlogClient(
-        url,
+        _URL,
         timeout=15.0,
         auth_header=basic_auth_header(
             os.environ["EPICS_MCP_OLOG_WRITE_USER"],

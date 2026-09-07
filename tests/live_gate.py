@@ -76,7 +76,13 @@ def assert_live_available(available: bool, reason: str, *, demanded: bool) -> No
     pytest.skip(reason)
 
 
-def assert_write_target_is_local(url: str | None, *, variable: str) -> None:
+def assert_write_target_is_local(
+    url: str | None,
+    *,
+    variable: str,
+    ack: str | None = None,
+    ack_variable: str | None = None,
+) -> None:
     """The TARGET guard. Belongs BEFORE any client is built, in a module that WRITES.
 
     :func:`assert_live_available` asks whether a prerequisite is THERE. This one asks where it
@@ -84,44 +90,82 @@ def assert_write_target_is_local(url: str | None, *, variable: str) -> None:
     and aimed at a production Olog passes the first one and must not run. Olog has no delete, so
     an entry a probe leaves there can be labelled but never removed.
 
-    Three outcomes, and the first one is why this guard is order-independent:
+    Four outcomes, and the first is why this guard is order-independent:
 
-    - empty or ``None``  -> returns. That is the UNCONFIGURED case, which
+    - empty or ``None``   -> returns. That is the UNCONFIGURED case, which
       :func:`assert_live_available` already owns, and an empty URL reaches no server. Handling it
       here means this guard can never turn an unconfigured run red, whatever order the autouse
       fixtures of a module happen to run in.
-    - a loopback target  -> returns.
-    - anything else      -> ``fail``, UNCONDITIONALLY, not through the live gate.
+    - a loopback target   -> returns.
+    - a target the operator DECLARED local, by repeating it verbatim in *ack_variable* -> returns.
+      See "The declared-local lane" below.
+    - anything else       -> ``fail``, UNCONDITIONALLY, not through the live gate.
 
     The refusal deliberately does not go through ``assert_live_available``: a non-loopback target
     is not a MISSING prerequisite, it is a FORBIDDEN one, and a silent skip would hide exactly
     what this guard exists to make visible. Same reasoning and same shape as
     ``tests/test_write_gate_live.py::_refuse_to_pollute_a_real_audit_trail``.
 
-    RESOLUTION-FREE, which is a repository contract rather than a shortcut.
-    ``docs/write-gate-contract.md`` and ``docs/safety.md`` both require of this family of target
-    boundaries that "a hostname is never trusted as loopback", because resolving would make the
-    verdict depend on the resolver's answer at assert time instead of on the configuration
-    (:mod:`epics_mcp.epics_address` carries the reason). So the decision runs through
-    :func:`~epics_mcp.services._http.is_loopback_url`, the same hardened primitive the production
-    gate uses, and a hostname that happens to point at this machine is refused like any other.
-    The consequence is named where it bites: ``tests/test_olog_remote_https_live.py`` aims at a
-    hostname on purpose, so its proxy URL is not what this guard is handed.
+    RESOLUTION-FREE, and the attribution matters because the contract is worded per FAMILY.
+    ``docs/write-gate-contract.md`` states "a hostname is never trusted as loopback" in its bullet
+    about a target FIXED AT CONSTRUCTION (a client search reach), and ``docs/safety.md`` repeats it
+    for the EPICS write reach. The bullet that actually covers THIS case, a per-write HTTP URL,
+    demands something else: take the host from the same parser the client will connect with. Both
+    are satisfied here, and neither is satisfied by accident: the decision runs through
+    :func:`~epics_mcp.services._http.is_loopback_url`, which is the very function the production
+    gate applies to the same question (``epics_mcp.olog_safety``), and which parses with urllib3,
+    the parser ``requests`` connects with. Resolving would give this guard a different notion of
+    locality from the gate standing beside it, and would make the verdict depend on a resolver at
+    assert time rather than on the configuration (the reason is spelled out in
+    :mod:`epics_mcp.epics_address`).
 
-    The URL is an ARGUMENT and is never read from ``os.environ`` here. The write modules read
-    their targets once at import so that gate and body share one snapshot; a guard that looked
-    the value up again would judge a different state from the one the test uses.
+    THE DECLARED-LOCAL LANE, and what it is worth. A rig can be local and still not look loopback:
+    a TLS reverse proxy in front of a sandbox is reached under a hostname, and this repository pins
+    that such a name is NOT loopback (``tests/test_http.py`` does it for a compose service name).
+    Refusing it outright would forbid a legitimate rig; resolving it is out. So the operator may
+    DECLARE the target by repeating the URL verbatim in a second variable whose name says so. What
+    that buys is precise: an inherited or mistyped target cannot match a declaration nobody typed
+    for it. What it does not buy: it cannot stop somebody who deliberately declares a production
+    URL. It converts an unguarded target into a declared one, not into a proven one.
+
+    TWO LIMITS THIS GUARD CANNOT LIFT, stated because a guard read as wider than it is misleads:
+
+    * loopback is not the same thing as a sandbox. The host is checked, never the port, so a
+      tunnel or a local reverse proxy on ``127.0.0.1`` that fronts a real facility passes.
+    * this is STRICTER than the production boundary next to it, deliberately. That one also admits
+      an exactly-allowlisted remote https URL; this one does not, because a test that lays down
+      artifacts is not the place to exercise that lane.
+
+    The URL is an ARGUMENT and is never read from ``os.environ`` here, so the caller decides which
+    value is judged and a test can ask the question without mutating process state. ⚠️ The caller
+    must hand over the value its BODY connects with, and that is a real trap rather than a
+    formality: one module here used to re-read the variable at call time while its gate judged the
+    import-time constant, so the guard would have been judging a value nothing used. It was
+    changed to connect with the constant; all four now do.
     """
     if not url:
         return
     if is_loopback_url(url):
         return
+    if ack_variable and ack and ack.strip() == url.strip():
+        return
     host = url_host(url)
-    named = repr(host) if host is not None else "a host this parser cannot read"
+    if host is None:
+        repair = (
+            f"{variable} cannot be parsed as a URL at all (a base URL needs a scheme, so "
+            f"'localhost:8080/Olog' is not one and 'http://localhost:8080/Olog' is)"
+        )
+    else:
+        repair = f"{variable} points at {host!r}, which is not a loopback host"
+    lane = (
+        f" A rig that is local under a hostname is declared by repeating the URL verbatim in "
+        f"{ack_variable}."
+        if ack_variable
+        else ""
+    )
     pytest.fail(
-        f"{variable} points at {named}, which is not a loopback host. This module WRITES to Olog, "
-        "and Olog has no delete, so a write probe may only target a local sandbox. The check is "
-        "resolution-free (docs/write-gate-contract.md), so a hostname is never trusted as "
-        "loopback: point the variable at a loopback literal or at localhost.",
+        f"{repair}. This module WRITES to Olog, and Olog has no delete, so a write probe may only "
+        "target a local sandbox. The check is resolution-free, so a hostname is never trusted as "
+        f"loopback however it resolves.{lane}",
         pytrace=False,
     )

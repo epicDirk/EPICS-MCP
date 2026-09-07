@@ -6,10 +6,12 @@ Opt-in: ``pytest tests/test_read_live.py -m live`` with a PVA search lane in
 SCOPE EVERY RUN TO THIS FILE. ``pyproject.toml`` sets ``testpaths = ["tests"]`` and declares no
 ``addopts``, so a bare ``pytest -m live`` falls back to the whole directory and collects ALL live
 modules. Four of those write real logbook entries into a service with no delete. Since 2026-09-07
-each of them refuses a non-loopback target at setup (``assert_write_target_is_local``), which
-bounds WHERE such a run writes but not WHETHER it writes, so naming the path is still yours to do.
-The figure four itself stays unwatched prose, here and in CONTRIBUTING.md, which carries what is
-watched instead and the rule for re-measuring the number.
+each of them refuses a non-loopback target at setup (``assert_write_target_is_local``); the
+remote-https module reaches its rig under a hostname and is admitted only against a declaration the
+operator repeats verbatim. That bounds WHERE such a run writes, not WHETHER it writes, and it says
+nothing about the port, so naming the path is still yours to do. The figure four itself stays
+unwatched prose, here and in CONTRIBUTING.md, which carries what is watched instead and the rule
+for re-measuring the number.
 
 WHY THESE EXIST
 ---------------
