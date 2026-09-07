@@ -11,13 +11,15 @@ containing everything. Two reviewers read the Java and drew opposite (both wrong
 execution settled it.
 
 The assertions are DIFFERENTIAL: the same window expressed several ways must give the same answer:
-rather than exact counts, so they hold against any Olog with any data. The windows are fixed
-constants, not derived from the clock, so a run is reproducible.
+rather than exact counts, so they hold against any Olog with any data. No window here comes from the
+CLOCK, so a run is reproducible: the older probes use fixed constants, and the ones that need a
+corpus bounded to one page derive their window from the DATA (:func:`_page_bounded_window`).
 """
 
 from __future__ import annotations
 
 import os
+import re
 from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
@@ -243,8 +245,11 @@ def _levels_in_fixture(client: OlogClient) -> Counter[str]:
     return Counter(str(entry["level"]) for entry in entries if entry.get("level"))
 
 
-#: The page every probe below asks for. One spelling, because six queries have to agree on it for
-#: the bounded-window arithmetic to mean anything.
+#: The page every probe below asks for. One spelling, because every window-bounded query has to
+#: agree on it for the bounded-window arithmetic to mean anything. Deliberately no COUNT of those
+#: queries: nothing watches one here (this file is not in tests/test_prose_counters.py::_WATCHED),
+#: and a sentence that says "six" is one probe away from being wrong. `grep -n "size=_PAGE"` names
+#: them at any time, and the ones that MUST agree are those carrying start/end.
 _PAGE = 200
 
 #: How many of the newest entries the derived window is sized around, tried in this order. Every
@@ -269,15 +274,22 @@ def _wire_window(start: str, end: str) -> dict[str, str]:
     return params
 
 
-def _bounded_corpus(client: OlogClient) -> tuple[str, str, list[dict[str, object]]] | None:
-    """A window whose ENTIRE content fits one page, plus that content. ``None`` if none is found.
+def _page_bounded_window(
+    client: OlogClient, sample: int
+) -> tuple[str, str, list[dict[str, object]]] | None:
+    """A window around the newest *sample* entries whose ENTIRE content fits one page, plus that
+    content. ``None`` when this sample cannot supply one.
 
-    WHY THE PROBES BELOW NEED THIS. They compare a count read from an unfiltered page against a
-    filtered search. That identity holds only while both cover the same set, and it stops holding
-    the moment the corpus outgrows one page: measured against a production Olog on 2026-09-02, the
-    filtered search saturated at ``_PAGE`` while the reference page counted fewer, so the probes
-    went red without a server defect and could neither prove nor disprove anything (GQ-279).
-    Bounding every query by one derived window restores the identity at any corpus size.
+    WHY THE PROBES BELOW NEED A BOUNDED WINDOW AT ALL. Each of them reads a precondition off one
+    result and then asserts something about another, and that identity holds only while both cover
+    the same set. It stops holding the moment the corpus outgrows one page: measured against a
+    production Olog on 2026-09-02, a filtered search saturated at ``_PAGE`` while the reference page
+    counted fewer, so the probes went red without a server defect and could neither prove nor
+    disprove anything (GQ-279). Measured again on 2026-09-07 for the title probe, which had kept an
+    UNBOUNDED form: its reference page came back with ``capped`` true out of a corpus whose hit
+    count had reached the Elasticsearch ceiling, so a precondition read from at most 2 percent of
+    the logbook decided a claim measured over all of it (GQ-298 (c)). Bounding every query by one
+    derived window restores the identity at any corpus size.
 
     WHY THE WINDOW IS CLOSED AT BOTH ENDS. An open-ended window is a race against a logbook that
     is still being written: an entry created between deriving the window and a later query of the
@@ -292,30 +304,63 @@ def _bounded_corpus(client: OlogClient) -> tuple[str, str, list[dict[str, object
     on a large enough corpus it is a ceiling rather than a count. It is still used below, but only
     inside the window, where the number is small and the ceiling cannot be reached.
 
+    ``sample`` must leave headroom below ``_PAGE``: the boundary is a whole SECOND (the resolution
+    :func:`_iso_from_ms` emits), so the window reaches slightly further back than the sample and
+    picks up whatever shares that second.
+
     The boundary is DERIVED FROM DATA, never from the clock, which is this file's standing promise.
     Inclusivity of either end does not matter, because every query of a probe uses the SAME pair.
     """
+    page, _capped, _total = client.search_logbook(size=sample, sort="down")
+    if not page:
+        return None
+    stamps = [int(str(e["createdDate"])) for e in page if e.get("createdDate") is not None]
+    if not stamps:
+        return None
+    start, end = _iso_from_ms(min(stamps)), _iso_from_ms(max(stamps))
+    whole, capped, _t = client.search_logbook(start=start, end=end, size=_PAGE, sort="down")
+    if capped:
+        return None
+    return start, end, whole
+
+
+def _bounded_corpus(client: OlogClient) -> tuple[str, str, list[dict[str, object]]] | None:
+    """A bounded window that also carries at least TWO distinct levels, or ``None``.
+
+    The window itself comes from :func:`_page_bounded_window`; this adds the one precondition the
+    LEVEL probes need and nothing else. The split is deliberate: the ladder below exists solely for
+    that precondition, and a probe that needs no level at all (the title one) takes the core
+    directly rather than inheriting a skip reason that talks about something it never touches.
+
+    A ``None`` from the core ends the search instead of trying a larger sample, and every one of its
+    three causes says why: an empty logbook and unreadable timestamps do not improve with more
+    entries, and if even the smallest sample overflows the page, a larger one cannot help.
+    """
     for sample in _WINDOW_LADDER:
-        page, _capped, _total = client.search_logbook(size=sample, sort="down")
-        if not page:
+        window = _page_bounded_window(client, sample)
+        if window is None:
             return None
-        stamps = [int(str(e["createdDate"])) for e in page if e.get("createdDate") is not None]
-        if not stamps:
-            return None
-        start, end = _iso_from_ms(min(stamps)), _iso_from_ms(max(stamps))
-        whole, capped, _t = client.search_logbook(start=start, end=end, size=_PAGE, sort="down")
-        if capped:
-            return None  # even the smallest sample overflows the page; a larger one cannot help
+        start, end, whole = window
         if len({str(e["level"]) for e in whole if e.get("level")}) >= 2:
             return start, end, whole
     return None
 
 
-#: Why a probe below could not run, phrased once because three of them can hit it.
+#: Why a LEVEL probe below could not run, phrased once because the level probes share it. No count
+#: of them is stated: nothing watches one here (this file is not in
+#: tests/test_prose_counters.py::_WATCHED), and `grep -n _NO_WINDOW` names its users at any time.
 _NO_WINDOW = (
     "no time window found that holds two distinct levels and still fits one page; the level "
     "arithmetic needs a bounded corpus, and a fixture that cannot supply one says nothing about "
     "whether the level filter works"
+)
+
+#: The same for the TITLE probe, which needs no level at all. Its own text, because _NO_WINDOW
+#: speaks only of level arithmetic and would explain a skip by something this probe never asks for.
+_NO_TITLE_WINDOW = (
+    "no time window found that fits one page and yields a usable probe word; the word and the "
+    "assertion have to come from the SAME set, and a fixture that cannot supply one says nothing "
+    "about whether title matches whole words"
 )
 
 
@@ -422,38 +467,72 @@ def test_title_filter_is_honoured_and_matches_whole_words(client: OlogClient) ->
     """``title`` filters as named, case-insensitively, and matches whole WORDS, not substrings.
 
     The fragment is DERIVED, not hard-coded: a strict prefix of a real title word that is itself not
-    a word anywhere in the fixture. That makes the substring claim decidable rather than likely:
+    a token anywhere in the WINDOW. That makes the substring claim decidable rather than likely:
     bare, it must find nothing; wildcarded, it must find the word it was taken from. (Nothing from
     the fixture is committed; titles are read at runtime.)
 
+    BOUNDED BY ONE DERIVED WINDOW, and the word "window" is the whole point of this rebuild. Until
+    2026-09-07 the probe word came from ONE PAGE and every assertion was then measured over the
+    corpus, so the fragment claim decided entries the derivation had never seen. Measured that day
+    against the production Olog: the reference page came back with ``capped`` true and a hit count
+    at the Elasticsearch ceiling, the chosen word occurred once on that page and four times in the
+    corpus, and four of the twenty longest candidate words would have made the probe red with no
+    server defect at all. It was green by luck (GQ-298 (c)).
+
+    THE SMALLEST RUNG on purpose, not the ladder :func:`_bounded_corpus` walks. That ladder is
+    level-monotone by construction (more entries can only add levels), and for THIS probe the
+    monotonicity does not hold: a larger window offers more candidate words but also more tokens
+    that disqualify a fragment. What replaces the ladder here is searching ALL candidates instead of
+    giving up on the longest one.
+
     Worth stating because it is the OPPOSITE of ``find_channels``, whose bare value is an anchored
     substring glob, copying that wording over would have been a false documented promise."""
-    entries, _capped, _total = client.search_logbook(size=200)
-    assert entries, _NO_REFERENCE
-    titles = [str(entry["title"]) for entry in entries if isinstance(entry.get("title"), str)]
+    bounded = _page_bounded_window(client, _WINDOW_LADDER[0])
+    if bounded is None:
+        pytest.skip(_NO_TITLE_WINDOW)
+    start, end, whole = bounded
+    # Kept from the unbounded version, where it guarded the reference page: an empty answer also
+    # comes from auth, a wrong URL, a client regression or a changed payload, and the helper above
+    # turns exactly that case into a silent skip. Asserted on the WINDOW it is stronger than before.
+    assert whole, _NO_REFERENCE
+    titles = [str(entry["title"]) for entry in whole if isinstance(entry.get("title"), str)]
     if not titles:
-        pytest.skip("no readable string titles in the fixture, no probe word")
+        pytest.skip("no readable string titles in the window, no probe word")
     words = {word for title in titles for word in title.lower().split() if word.isalnum()}
+    # The DISQUALIFYING set is deliberately WIDER than the candidate set, and measured rather than
+    # assumed: the server indexes terms, so a title "cooling-threshold" contributes "threshold" to
+    # what a search can find while `.split()` plus `isalnum()` drops the whole thing. In the window
+    # of 2026-09-07 that gap was eleven tokens. Splitting on non-word characters over-approximates
+    # the analyzer rather than reproducing it (which is unmeasured), and over-approximating is the
+    # safe direction: it can only reject a candidate, never admit a colliding one.
+    tokens = words | {t for title in titles for t in re.split(r"[\W_]+", title.lower()) if t}
 
     # Sorted by (-length, word) so a length tie breaks on the WORD, not on set-iteration order:
     # which depends on PYTHONHASHSEED and would make the chosen probe differ between runs of the
-    # same fixture, contradicting this file's own reproducibility promise.
-    probe = next((w for w in sorted(words, key=lambda w: (-len(w), w)) if len(w) >= 4), None)
+    # same fixture, contradicting this file's own reproducibility promise. The search does not stop
+    # at the longest word: giving up there turned a single collision into a skip, and a skip is
+    # indistinguishable from a pass in every report (tests/live_gate.py says so in its own words).
+    candidates = sorted(words, key=lambda w: (-len(w), w))
+    probe = next((w for w in candidates if len(w) >= 4 and w[:-1] not in tokens), None)
     if probe is None:
-        pytest.skip("no title word long enough to derive a fragment from")
+        pytest.skip(
+            "no title word in the window is long enough AND has a strict prefix that is not itself "
+            "a token there; either way the substring claim would not be decidable"
+        )
     fragment = probe[:-1]
-    if fragment in words:
-        pytest.skip("the derived fragment is itself a title word; cannot decide substring-ness")
 
     def hits(value: str) -> int:
-        return len(client.search_logbook(title=value, size=200)[0])
+        page, capped, _t = client.search_logbook(title=value, start=start, end=end, size=_PAGE)
+        assert not capped, f"title {value!r} outgrew the page inside the window"
+        return len(page)
 
     assert hits(probe), "positive control: the word must match"
     assert hits(probe.upper()) == hits(probe), "must be case-insensitive"
     assert hits("zzznosuchtitleword") == 0  # negative control
     assert hits(fragment) == 0, (
-        "a bare word FRAGMENT matched, title is not the whole-word matcher the tool description "
-        "promises (and is not the anchored substring glob of find_channels either); re-measure"
+        "a bare word FRAGMENT matched inside a window in which it is no title token at all; title "
+        "is not the whole-word matcher the tool description promises (and is not the anchored "
+        "substring glob of find_channels either); re-measure"
     )
     assert hits(f"{fragment}*") >= hits(probe), "the wildcard must find at least the word itself"
 
