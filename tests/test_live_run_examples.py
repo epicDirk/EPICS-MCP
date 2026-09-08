@@ -33,6 +33,13 @@ WHAT IS PROMISED, in four parts
   reason it is one. Their VALUE is nobody's promise; their EXISTENCE is. A new unscoped
   instruction goes red, and so does an inventory entry whose text has vanished, because a frozen
   entry nobody can find is a guard measuring a file that no longer says what it says.
+* **A snippet is repository TEXT, so it can collide with another text guard.** Paid for on
+  2026-09-08: the first version of this inventory copied a whole line out of
+  ``tests/test_guide.py``, including the retired env-var name that
+  ``test_no_epics_sandbox_fiction`` forbids everywhere except the one file owning that needle.
+  It stayed invisible until the commit made THIS file tracked, because that guard resolves its
+  population from ``git ls-files`` as well. Keep a snippet clear of tokens another guard forbids;
+  a shorter one always exists.
 * **Out of scope, stated rather than implied**: this module reads TEXT. It cannot know whether a
   command anybody actually typed was scoped, and it does not look at CI workflows for a run that
   builds its arguments dynamically. It also excludes exactly one file, its own, because a module
@@ -104,8 +111,8 @@ _DESCRIPTIONS: dict[tuple[str, str], str] = {
     ): "explains why two modules stay out of a default run",
     (
         "tests/test_guide.py",
-        "``EPICS_SANDBOX=1 uv run pytest -m live`` runs ZERO live tests",
-    ): "a statement about the sandbox posture, whose point is that it runs nothing",
+        "uv run pytest -m live`` runs ZERO live tests",
+    ): "a statement about a sandbox posture, whose point is that it runs nothing",
     (
         "tests/test_read_live.py",
         "so a bare ``pytest -m live`` falls back to the whole directory",
