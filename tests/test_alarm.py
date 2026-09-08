@@ -1,15 +1,18 @@
 """Offline tests for the Phoebus Alarm Logger client + tools (no network)."""
 
+from datetime import UTC, datetime
 from unittest.mock import Mock
 
 import pytest
 import requests
 
 from epics_mcp.config import EpicsConfig
+from epics_mcp.services import alarm_client
 from epics_mcp.services._time_window import TimeWindowFormatError
 from epics_mcp.services.alarm_client import AlarmClient
 from epics_mcp.services.alarm_exceptions import AlarmConnectionError, AlarmResponseError
 from epics_mcp.tools.alarm import _get_alarm_history, _is_alarm_configured
+from tests import test_alarm_live
 from tests.wire_tools import wire_tools
 
 
@@ -691,3 +694,124 @@ def test_get_alarm_history_command_capped_survives_config_filter(
     assert capped is True  # window truncated (3 > 2) though the filter left exactly 2 config docs
     assert len(events) == 2
     assert all(str(event["config"]).startswith("config:") for event in events)
+
+
+# --- GQ-288: the naive-ISO live probe, driven offline in BOTH directions ---
+#
+# The live module cannot prove its own red case, and that is a property of the code rather than an
+# omission: `normalize_alarm_time` turns a zone-less ISO into the same wire string as the zoned
+# one, so a fake server BELOW the normalisation sees one value twice and could never answer
+# differently, while a fake client ABOVE it would not exercise the normalisation at all. So the
+# regression is reproduced where it lived: with the normalisation taken out of the path the naive
+# form reaches the server raw, and the fake server below does what a real Alarm Logger was measured
+# doing on 2026-07-15, reading anything its parser cannot take as *now* and answering 200 with an
+# empty list rather than an error.
+
+#: Newest-first, as the server answers. Three events one second apart, so the probe's page has a
+#: distinct newest and a distinct oldest to anchor its window on.
+_ALARM_PAGE: list[dict[str, object]] = [
+    {
+        "config": f"state:/Accelerator/DEV/A{index}",
+        "pv": f"A{index}",
+        "message_time": f"2026-08-25T09:44:{2 - index:02d}.000Z",
+    }
+    for index in range(3)
+]
+
+
+class _ZoneSensitiveLogger:
+    """A stand-in Alarm Logger: an ABSOLUTE start without a zone is not read, it becomes *now*.
+
+    A relative amount ("7 days") is read fine, which is what the real parser does and what the
+    probe's anchor query depends on. Every start it was asked for is kept, so a test can assert
+    what went on the WIRE instead of what the caller believed it sent.
+    """
+
+    def __init__(self, page: list[dict[str, object]]) -> None:
+        self.page = page
+        self.starts: list[str] = []
+
+    def __call__(self, url: str, **kwargs: object) -> Mock:
+        params = kwargs["params"]
+        assert isinstance(params, dict)
+        start = str(params["start"])
+        self.starts.append(start)
+        zone_less = "T" in start and not (start.endswith("Z") or "+" in start)
+        return _resp([] if zone_less else self.page)
+
+
+def test_naive_iso_probe_is_green_while_the_client_normalises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direction one: with the normalisation in place both spellings reach the server IDENTICALLY.
+
+    That identity is the whole reason the live probe is green today, and it is asserted here
+    rather than assumed, because it is what makes the red direction below the only way this probe
+    can catch the regression.
+    """
+    client = AlarmClient("http://alarm")
+    logger = _ZoneSensitiveLogger(_ALARM_PAGE)
+    monkeypatch.setattr(client.session, "get", logger)
+
+    test_alarm_live.test_naive_iso_window_is_honoured(client, "A")
+
+    anchor, zoned, naive = logger.starts
+    assert anchor == "7 days", "the anchor query must stay relative, that is what stops it ageing"
+    assert zoned == naive, "the client is expected to normalise both spellings to one wire value"
+    assert zoned.endswith("Z")
+
+
+def test_naive_iso_probe_goes_red_when_the_normalisation_is_removed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direction two: THE regression, reproduced.
+
+    Without the normalisation the naive form reaches the server raw, the server takes it as *now*,
+    and its answer is empty while the zoned side is not. The probe has to notice, and it has to
+    notice AT THE COMPARISON: a failure at the reference or cap guard would mean the fixture was
+    wrong rather than the code, so both are ruled out by name.
+    """
+    client = AlarmClient("http://alarm")
+    logger = _ZoneSensitiveLogger(_ALARM_PAGE)
+    monkeypatch.setattr(client.session, "get", logger)
+    monkeypatch.setattr(alarm_client, "normalize_alarm_time", lambda value, *, param: value)
+
+    with pytest.raises(AssertionError) as raised:
+        test_alarm_live.test_naive_iso_window_is_honoured(client, "A")
+
+    message = str(raised.value)
+    assert "positive control not met" not in message, (
+        "the reference guard fired, not the comparison"
+    )
+    assert "the cap truncated" not in message, "the cap guard fired, not the comparison"
+    _anchor, zoned, naive = logger.starts
+    assert zoned.endswith("Z")
+    assert not naive.endswith("Z"), "the naive form was expected to reach the server unrepaired"
+
+
+def test_instant_of_reads_the_shape_the_logger_answers_with() -> None:
+    """Measured 2026-09-04 against a real ESS alarm logger: message_time is zone-explicit ISO."""
+    moment = test_alarm_live.instant_of("2026-08-25T09:44:16.935Z")
+    assert moment == datetime(2026, 8, 25, 9, 44, 16, 935000, tzinfo=UTC)
+
+
+def test_instant_of_reads_an_offset_form_as_the_same_moment() -> None:
+    """Why the naive spelling is cut from the NORMALISED rendering and never from the raw string:
+    an offset form names the same instant, and truncating it would name a different one."""
+    offset = test_alarm_live.instant_of("2026-08-25T11:44:16.935+02:00")
+    assert offset == test_alarm_live.instant_of("2026-08-25T09:44:16.935Z")
+
+
+def test_instant_of_refuses_epoch_milliseconds_loudly() -> None:
+    """The offline fixtures in this module use that shape; the measured logger does not. It is
+    refused rather than parsed, so the probe never grows a second way of reading a timestamp."""
+    with pytest.raises(TimeWindowFormatError, match="not a time this service can read"):
+        test_alarm_live.instant_of(1746093720000)
+
+
+def test_the_two_spellings_name_one_instant() -> None:
+    """The property the whole comparison rests on."""
+    moment = test_alarm_live.instant_of("2026-08-25T09:44:16.935Z")
+    zoned, naive = test_alarm_live.spellings_of(moment)
+    assert (zoned, naive) == ("2026-08-25T09:44:16.935Z", "2026-08-25T09:44:16.935")
+    assert test_alarm_live.instant_of(naive) == test_alarm_live.instant_of(zoned)

@@ -21,10 +21,15 @@ entirely.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta
 
 import pytest
 
-from epics_mcp.services._time_window import TimeWindowFormatError
+from epics_mcp.services._time_window import (
+    TimeWindowFormatError,
+    classify_time_value,
+    format_iso_z,
+)
 from epics_mcp.services.alarm_client import AlarmClient
 from tests.live_gate import assert_live_available, live_demanded
 
@@ -82,6 +87,24 @@ def alarm_tree() -> str:
 #: compares, raising alone would relocate the blindness, not remove it.
 _MAX_EVENTS = 5
 
+#: The anchor probe's page size, and with it the width of the comparison window below. That
+#: window is derived from this page instead of from a date, so it stays one page wide whatever
+#: the facility's event rate happens to be.
+_ANCHOR_PAGE = 20
+
+#: The comparison probe's OWN cap, ten times the page. The window is bounded by construction but
+#: not exactly: every event sharing a boundary timestamp comes along, and this logger emits
+#: repeats (measured 2026-09-04 against a real ESS alarm logger: 94 events over 27 distinct
+#: message_time values). The MAXIMUM multiplicity is not measured, so this factor is margin and
+#: not proof, which is why the cap guard below stays the thing that says so out loud.
+_COMPARISON_MAX_EVENTS = _ANCHOR_PAGE * 10
+
+#: How far outside the page's own timestamps the window boundaries sit. Whether this logger
+#: reads its range inclusively is NOT measured here (only the client's docstring says
+#: ``[start, end]``), so the probe stops depending on it. One millisecond is the smallest amount
+#: the wire format can express, so that independence costs the least the format allows.
+_EDGE = timedelta(milliseconds=1)
+
 #: The message for a failed positive control. It must NOT claim "your data is stale": an empty
 #: reference also comes from auth, a wrong URL, a client regression or a changed payload. Naming a
 #: single cause would be the same overclaim this file exists to catch.
@@ -92,7 +115,12 @@ _NO_REFERENCE = (
 
 
 def _events(
-    client: AlarmClient, pv: str, start: str, end: str = "now"
+    client: AlarmClient,
+    pv: str,
+    start: str,
+    end: str = "now",
+    *,
+    max_events: int = _MAX_EVENTS,
 ) -> tuple[list[dict[str, object]], bool]:
     """Return ``(events, capped)``, the cap flag is returned, never swallowed.
 
@@ -100,8 +128,12 @@ def _events(
     only ``len(...)`` compares ``min(n, cap)`` on both sides: two windows that differ ONLY in their
     older tail then present the identical newest page and read as equal. The flag is the signal
     that says the answer is the cap rather than the window.
+
+    *max_events* is a parameter rather than the constant it defaults to because exactly ONE probe
+    needs a different cap, and it states its reason at its own call site. Every other caller keeps
+    ``_MAX_EVENTS``.
     """
-    events, capped = client.get_alarm_history(pv, start=start, end=end, max_events=_MAX_EVENTS)
+    events, capped = client.get_alarm_history(pv, start=start, end=end, max_events=max_events)
     return events, capped
 
 
@@ -118,6 +150,38 @@ def _identities(events: list[dict[str, object]]) -> list[tuple[str, str]]:
     return sorted((str(e.get("message_time")), str(e.get("pv"))) for e in events)
 
 
+def instant_of(message_time: object) -> datetime:
+    """The UTC instant an event's ``message_time`` names, or a LOUD failure.
+
+    Read through the client's own classifier rather than a second time parser: a probe that
+    invented its own way of reading a timestamp could disagree with the code it exists to test,
+    and nothing would show it. One consequence is deliberate rather than accidental: a raw epoch
+    number is REFUSED, because ``classify_time_value`` refuses it. The offline fixture in
+    ``tests/test_alarm.py`` uses that shape; the real logger measured on 2026-09-04 answers with
+    zone-explicit ISO (``2026-08-25T09:44:16.935Z``), and an epoch parser sitting next to the
+    client's would be a second time-reading truth in one repository.
+
+    Shared with ``tests/test_alarm.py``, which drives this probe offline in both directions.
+    """
+    moment = classify_time_value(str(message_time), param="message_time")
+    assert moment is not None, (
+        f"message_time={message_time!r} classified as a relative amount, which no timestamp is"
+    )
+    return moment
+
+
+def spellings_of(moment: datetime) -> tuple[str, str]:
+    """One instant in the two ISO spellings this probe compares: with the zone, and without it.
+
+    The naive form is cut from the ALREADY normalised UTC rendering, never from the raw server
+    string. That ``message_time`` always carries ``Z`` is pinned nowhere in this repository, and
+    truncating an offset form (``+02:00``) would name a DIFFERENT instant and turn the comparison
+    red for a reason that is not the regression it watches.
+    """
+    zoned = format_iso_z(moment)
+    return zoned, zoned.removesuffix("Z")
+
+
 def test_relative_window_finds_events(client: AlarmClient, pv: str) -> None:
     """The baseline, without events the probes below would prove nothing."""
     assert _count(client, pv, "7 days"), f"no alarm history for {pv!r}: pick a PV that has some"
@@ -126,19 +190,50 @@ def test_relative_window_finds_events(client: AlarmClient, pv: str) -> None:
 def test_naive_iso_window_is_honoured(client: AlarmClient, pv: str) -> None:
     """THE regression: a zone-less ISO returned 0 for a window that held 20+ WHEN IT WAS MEASURED.
 
-    That 20-vs-0 is the historical measurement, not what this test sees, it compares the two
+    That 20-vs-0 is the historical measurement, not what this test sees; it compares the two
     forms against whatever the fixture holds now. Both guards below are load-bearing and were
-    missing: without the reference guard an aged-out window makes this ``0 == 0``, green, and
-    silently no longer a test (measured: it was exactly that for the twelve days a sandbox window
-    held no events). Without the cap guard both sides read as the cap.
+    missing once: without the reference guard an aged-out window makes this ``0 == 0``, green,
+    and silently no longer a test (measured: it was exactly that for the twelve days a sandbox
+    window held no events). Without the cap guard both sides read as the cap.
+
+    THE WINDOW IS DERIVED AND CLOSED, and both halves of that are repairs (GQ-288, 2026-09-08):
+
+    * DERIVED. It used to start at a FIXED July timestamp and to demand at most five events
+      since, while three other probes demand activity in the last seven days from the same
+      value. Nothing satisfied both any more: measured 2026-09-04, across the two alarm trees a
+      999-capped week query could see through, not one of 19 PVs met the pair, and the fixed
+      start moved the bar further every day. The anchor now comes from the newest page itself,
+      so the window is one page wide whatever the rate is, and the only thing the fixture still
+      has to be is the thing the baseline probe above already asks of it.
+    * CLOSED. Both queries used to end at ``now``, and the second ``now`` is later than the
+      first: an event arriving between them shows up on one side only and the comparison goes
+      red without a defect. A fixed end cannot race.
+
+    What this probe does NOT prove, because the client normalises before sending: today both
+    spellings reach the server as the same string, so a green run says the normalisation is
+    THERE and effective end to end, not that the server reads a naive form. Take the
+    normalisation out and the naive form goes out raw, the server takes it as *now*, the answer
+    is empty, and this comparison is what notices. ``tests/test_alarm.py`` drives exactly that
+    offline, in both directions.
     """
-    with_zone, zone_capped = _events(client, pv, "2026-07-08T12:45:58Z")
-    naive, naive_capped = _events(client, pv, "2026-07-08T12:45:58")
+    page, _ = _events(client, pv, "7 days", max_events=_ANCHOR_PAGE)
+    assert page, _NO_REFERENCE
+
+    newest, oldest = instant_of(page[0]["message_time"]), instant_of(page[-1]["message_time"])
+    zoned_start, naive_start = spellings_of(oldest - _EDGE)
+    end = format_iso_z(newest + _EDGE)
+
+    with_zone, zone_capped = _events(
+        client, pv, zoned_start, end, max_events=_COMPARISON_MAX_EVENTS
+    )
+    naive, naive_capped = _events(client, pv, naive_start, end, max_events=_COMPARISON_MAX_EVENTS)
 
     assert with_zone, _NO_REFERENCE
     assert not (zone_capped or naive_capped), (
-        f"the cap truncated the comparison (max_events={_MAX_EVENTS}): a difference beyond the "
-        "newest page would be invisible. Narrow EPICS_MCP_LIVE_ALARM_PV to a single PV."
+        f"the cap truncated the comparison (max_events={_COMPARISON_MAX_EVENTS}): a difference "
+        "beyond the newest page would be invisible. The window spans one page of "
+        f"{_ANCHOR_PAGE} events, so this means more than {_COMPARISON_MAX_EVENTS} of them share "
+        "its boundary timestamps; narrow EPICS_MCP_LIVE_ALARM_PV to a single PV."
     )
     assert _identities(naive) == _identities(with_zone)
 
