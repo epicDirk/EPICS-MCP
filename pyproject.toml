@@ -322,13 +322,18 @@ testpaths = ["tests"]
 pythonpath = ["tests"]
 asyncio_mode = "auto"
 # `live` = tests that need a running local EPICS test stack. Opt-in: set the target plane's
-# `EPICS_MCP_*` vars, then `uv run pytest -m live`. Each live module gates itself at SETUP time
+# `EPICS_MCP_*` vars, then `uv run pytest tests/<module>_live.py -m live`. NAMING THE MODULE IS
+# PART OF THE COMMAND: `testpaths` below plus the absent `addopts` mean a run that names no path
+# selects EVERY live module, four of which write real entries into a logbook with no delete (see
+# CONTRIBUTING.md, "Live / sandbox tests"). Each live module gates itself at SETUP time
 # via tests/live_gate.py (assert_live_available): with the plane vars unset it SKIPS, so the
 # default run and CI stay green, but a DEMANDED live run (EPICS_MCP_REQUIRE_LIVE=1) turns a
 # missing prerequisite into a LOUD failure instead of a silent skip (S30; previously
 # `pytest -m live` in an empty env exited 0 with everything skipped, indistinguishable from a
-# fulfilled live run). The demand applies to the SELECTED set: scope a partial live run with
-# `-m live -k <plane>`; data-dependent skips INSIDE a running probe stay skips. Deliberately NO
+# fulfilled live run). The demand applies to the SELECTED set: scope a partial live run by
+# NAMING the module, never with `-k`, which filters on a name SUBSTRING and is therefore safe
+# or lethal depending on the value (CONTRIBUTING.md carries the measurement). Data-dependent
+# skips INSIDE a running probe stay skips. Deliberately NO
 # `addopts = -m "not live"` (would change default pytest for everyone and is brittle).
 # A live module that WRITES to Olog carries a SECOND setup-time gate from the same file,
 # assert_write_target_is_local, and that one FAILS instead of skipping: a target outside loopback

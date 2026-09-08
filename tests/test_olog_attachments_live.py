@@ -1,6 +1,8 @@
 """Live round-trip for Olog ATTACHMENTS (OA1), the differential a mock cannot carry.
 
-Opt-in: ``pytest -m live`` against a WRITABLE loopback Olog sandbox.
+Opt-in: ``pytest tests/test_olog_attachments_live.py -m live`` against a WRITABLE loopback
+Olog sandbox. This module WRITES, so the module path is not decoration: an unscoped run also
+selects the other three writing modules.
 Uploads a real PNG + a non-image file via multipart, downloads each back (by name AND by GridFS
 id), and asserts the bytes are BYTE-IDENTICAL, the one thing that proves the real server's
 multipart parsing, filename↔metadata pairing, GridFS storage and streaming download all agree with

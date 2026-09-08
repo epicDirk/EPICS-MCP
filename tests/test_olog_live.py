@@ -1,6 +1,7 @@
 """Live probes for the Olog search time window, the class of bug a mock CANNOT catch.
 
-Opt-in: ``pytest -m live`` with ``EPICS_MCP_OLOG_URL`` pointing at a reachable Olog.
+Opt-in: ``pytest tests/test_olog_live.py -m live`` with ``EPICS_MCP_OLOG_URL`` pointing at a
+reachable Olog.
 
 WHY THESE EXIST
 ---------------

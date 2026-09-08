@@ -1,11 +1,12 @@
 """Live probes for the doctor's archiver INGEST check (QA-35), against a real appliance.
 
-Opt-in: ``pytest -m live`` with ``EPICS_MCP_ARCHIVER_URL`` and ``EPICS_MCP_LIVE_DOCTOR_INGEST=1``
-set. The second one is test-only and deliberately absent from ``EpicsConfig`` and the operator
-guide (``test_guide_matches_code`` checks every ``EPICS_MCP_*`` token in the guide against the
-config and would go red). It exists so this probe fires only on an environment somebody DECLARED
-for it: the plain ``EPICS_MCP_ARCHIVER_URL`` also names production archivers, and a read against
-one of those should be asked for, not inherited from a shell that happened to have it set.
+Opt-in: ``pytest tests/test_doctor_live.py -m live`` with ``EPICS_MCP_ARCHIVER_URL`` and
+``EPICS_MCP_LIVE_DOCTOR_INGEST=1`` set. The second one is test-only and deliberately absent
+from ``EpicsConfig`` and the operator guide (``test_guide_matches_code`` checks every
+``EPICS_MCP_*`` token in the guide against the config and would go red). It exists so this
+probe fires only on an environment somebody DECLARED for it: the plain
+``EPICS_MCP_ARCHIVER_URL`` also names production archivers, and a read against one of those
+should be asked for, not inherited from a shell that happened to have it set.
 
 WHY THESE EXIST
 ---------------

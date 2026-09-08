@@ -1,9 +1,10 @@
 """Live probes for the Archiver time window + the getPVsForThisAppliance filter premise.
 
-Opt-in: ``pytest -m live`` with ``EPICS_MCP_ARCHIVER_URL``, ``EPICS_MCP_LIVE_ARCHIVER_PV`` and
-``EPICS_MCP_LIVE_ARCHIVER_GLOB`` set. Those last two are test-only and deliberately absent from
-``EpicsConfig`` and the operator guide, ``test_guide_matches_code`` checks every ``EPICS_MCP_*``
-token in the guide against the config and would go red.
+Opt-in: ``pytest tests/test_archiver_live.py -m live`` with ``EPICS_MCP_ARCHIVER_URL``,
+``EPICS_MCP_LIVE_ARCHIVER_PV`` and ``EPICS_MCP_LIVE_ARCHIVER_GLOB`` set. Those last two are
+test-only and deliberately absent from ``EpicsConfig`` and the operator guide,
+``test_guide_matches_code`` checks every ``EPICS_MCP_*`` token in the guide against the config
+and would go red.
 
 WHY THESE EXIST
 ---------------

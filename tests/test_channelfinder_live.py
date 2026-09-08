@@ -1,6 +1,7 @@
 """Live probes for the ChannelFinder name glob, semantics only the server knows.
 
-Opt-in: ``pytest -m live`` with ``EPICS_MCP_CHANNELFINDER_URL`` and ``EPICS_MCP_LIVE_CF_GLOB`` set.
+Opt-in: ``pytest tests/test_channelfinder_live.py -m live`` with
+``EPICS_MCP_CHANNELFINDER_URL`` and ``EPICS_MCP_LIVE_CF_GLOB`` set.
 
 WHY THESE EXIST
 ---------------

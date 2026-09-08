@@ -14,9 +14,12 @@ prove a probe RAN, see CLAUDE.md, "Server-decided parameters"). Instead: whoever
 explicitly DEMANDS a live run gets red instead of a skip when a prerequisite is missing.
 
 Demanded via the env var ``EPICS_MCP_REQUIRE_LIVE=1``. The demand applies to the SELECTED
-test set: scope a partial live run with ``-m live -k <plane>`` (a deselected test never
-reaches its gate); every selected probe whose prerequisite is missing goes red. Data-
-dependent skips INSIDE a running live probe (e.g. "fixture carries only one level") are a
+test set: scope a partial live run by NAMING the module,
+``pytest tests/<module>_live.py -m live`` (a deselected test never reaches its gate); every
+selected probe whose prerequisite is missing goes red. Never scope with ``-k``: it filters on a
+name SUBSTRING, so whether it keeps a writing module out depends on the value, which is not a
+property a rule can rest on (CONTRIBUTING.md, "Live / sandbox tests", carries the measurement).
+Data-dependent skips INSIDE a running live probe (e.g. "fixture carries only one level") are a
 separate class and stay skips.
 
 The ``live`` marker (declared in ``pyproject.toml``) stays orthogonal: it SELECTS

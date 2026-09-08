@@ -1,8 +1,9 @@
 """Live probes for an ESS-style Naming Service, the S11 schema anchors a mock cannot carry.
 
-Opt-in: ``pytest -m live`` with ``EPICS_MCP_NAMING_URL`` pointing at a reachable Naming Service
-and ``EPICS_MCP_LIVE_NAMING_DEVICE`` naming a REGISTERED device. No facility value is committed:
-both come from the environment; the negative-control name is synthetic.
+Opt-in: ``pytest tests/test_naming_live.py -m live`` with ``EPICS_MCP_NAMING_URL`` pointing at
+a reachable Naming Service and ``EPICS_MCP_LIVE_NAMING_DEVICE`` naming a REGISTERED device. No
+facility value is committed: both come from the environment; the negative-control name is
+synthetic.
 
 WHY THESE EXIST
 ---------------

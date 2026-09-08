@@ -1,10 +1,10 @@
 """Live write + readback verification (O3), the class of correctness a mock CANNOT show.
 
-Opt-in: ``pytest -m live`` with ``EPICS_MCP_ALLOW_PV_WRITE=true``, a loopback EPICS search env, and
-``EPICS_MCP_LIVE_WRITE_PV`` pointing at a WRITABLE numeric PV inside the write allowlist. Optional
-``EPICS_MCP_LIVE_WRITE_VALUE`` supplies a safe, in-range value DIFFERENT from the current one for
-the strong "the readback reflects the NEW value" probe (that probe skips if it is unset). Both
-tests restore the PV's original value.
+Opt-in: ``pytest tests/test_write_live.py -m live`` with ``EPICS_MCP_ALLOW_PV_WRITE=true``, a
+loopback EPICS search env, and ``EPICS_MCP_LIVE_WRITE_PV`` pointing at a WRITABLE numeric PV
+inside the write allowlist. Optional ``EPICS_MCP_LIVE_WRITE_VALUE`` supplies a safe, in-range
+value DIFFERENT from the current one for the strong "the readback reflects the NEW value"
+probe (that probe skips if it is unset). Both tests restore the PV's original value.
 
 WHY THIS EXISTS
 ---------------

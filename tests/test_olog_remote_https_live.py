@@ -22,9 +22,11 @@ in-memory test in this repository.
   self-signed certificate is not in the system trust store. The CA, not the URL alone, is what
   makes the write succeed.
 
-Opt-in: ``pytest -m live`` with the proxy and certificate wired through the environment (see the
-gate fixture below), plus ``OA1C_PROXY_IS_LOCAL`` repeating ``OA1C_PROXY_URL`` verbatim, which is
-how the operator declares that the proxy is their local rig rather than a real service.
+Opt-in: ``pytest tests/test_olog_remote_https_live.py -m live`` with the proxy and certificate
+wired through the environment (see the gate fixture below), plus ``OA1C_PROXY_IS_LOCAL``
+repeating ``OA1C_PROXY_URL`` verbatim, which is how the operator declares that the proxy is
+their local rig rather than a real service. This module WRITES, so the module path is not
+decoration: an unscoped run also selects the other three writing modules.
 
 The rig is deliberately EXTERNAL rather than built here, and that is a
 decision rather than an omission: building the certificate in-process would need a cryptography
