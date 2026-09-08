@@ -323,7 +323,7 @@ pythonpath = ["tests"]
 asyncio_mode = "auto"
 # `live` = tests that need a running local EPICS test stack. Opt-in: set the target plane's
 # `EPICS_MCP_*` vars, then `uv run pytest tests/<module>_live.py -m live`. NAMING THE MODULE IS
-# PART OF THE COMMAND: `testpaths` below plus the absent `addopts` mean a run that names no path
+# PART OF THE COMMAND: `testpaths` above plus the absent `addopts` mean a run that names no path
 # selects EVERY live module, four of which write real entries into a logbook with no delete (see
 # CONTRIBUTING.md, "Live / sandbox tests"). Each live module gates itself at SETUP time
 # via tests/live_gate.py (assert_live_available): with the plane vars unset it SKIPS, so the

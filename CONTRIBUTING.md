@@ -386,13 +386,17 @@ four that write real logbook entries into a service with no delete
 `test_write_gate_live.py`). Scoping with `-k` is NOT the same thing and is not allowed here:
 `-k` filters on a name SUBSTRING, so what it keeps out depends on the value. Measured
 2026-09-08, `-k alarm` selects one module and none that writes, while `-k olog` selects four
-and three that write; a rule cannot rest on that. No instruction in this repository shows an
-unscoped run any more. What remains are DESCRIPTIONS of the bare form, in `pyproject.toml`,
-`tests/live_gate.py`, `tests/test_read_live.py`, `tests/test_guide.py`,
-`tests/test_epics_address_ports_pinned.py` and this section; their holder is a test rather
-than this paragraph. `tests/test_live_run_examples.py` inventories every `-m live` in the
-tracked tree and goes red on a new unscoped instruction OR on an inventory entry that has
-vanished.
+and three that write; a rule cannot rest on that.
+
+The rule's holder is a test rather than this paragraph, which is the repair the clause that
+used to stand here needed: it exempted "the examples in this file and in `pyproject.toml`" and
+measurably did not contain ten of the places it was excusing.
+`tests/test_live_run_examples.py` inventories every `-m live` in the tracked tree, its own file
+excepted, and goes red on an instruction that names no module, on one scoped with `-k`, on a
+module path that does not exist, and on an inventory entry whose text has vanished. What it
+cannot decide is the JUDGEMENT that a mention DESCRIBES the bare form rather than instructing
+anybody to use it: that judgement is written by hand into its `_DESCRIPTIONS`, each entry with
+its reason, and that dict is the list of what remains, not a sentence here.
 
 ⭐ **Since 2026-09-07 the forgotten path is no longer the only guard.** Every live module that
 mutates Olog calls `assert_write_target_is_local` (`tests/live_gate.py`) from an autouse fixture,

@@ -88,8 +88,8 @@ def alarm_tree() -> str:
 _MAX_EVENTS = 5
 
 #: The anchor probe's page size, and with it the width of the comparison window below. That
-#: window is derived from this page instead of from a date, so it stays one page wide whatever
-#: the facility's event rate happens to be.
+#: window is derived from this page instead of from a date, so it is AT MOST one page wide
+#: whatever the facility's event rate happens to be (fewer, when the week holds fewer).
 _ANCHOR_PAGE = 20
 
 #: The comparison probe's OWN cap, ten times the page. The window is bounded by construction but
@@ -99,10 +99,14 @@ _ANCHOR_PAGE = 20
 #: not proof, which is why the cap guard below stays the thing that says so out loud.
 _COMPARISON_MAX_EVENTS = _ANCHOR_PAGE * 10
 
-#: How far outside the page's own timestamps the window boundaries sit. Whether this logger
-#: reads its range inclusively is NOT measured here (only the client's docstring says
-#: ``[start, end]``), so the probe stops depending on it. One millisecond is the smallest amount
-#: the wire format can express, so that independence costs the least the format allows.
+#: How far outside the page's own timestamps the window boundaries sit, so the probe does not
+#: depend on whether this logger reads its range inclusively; that is NOT measured here, only
+#: the client's docstring says ``[start, end]``. TWO server properties are traded for one: the
+#: shift only buys the independence if the server compares its range to the MILLISECOND, which
+#: is equally unmeasured. It fails in the safe direction either way, because both queries carry
+#: the same shifted bounds: a coarser server loses the same events on both sides and the
+#: comparison stays valid, at worst the reference guard fires. One millisecond is what the wire
+#: format can express, ``format_iso_z`` renders exactly three fractional digits.
 _EDGE = timedelta(milliseconds=1)
 
 #: The message for a failed positive control. It must NOT claim "your data is stale": an empty
@@ -156,10 +160,12 @@ def instant_of(message_time: object) -> datetime:
     Read through the client's own classifier rather than a second time parser: a probe that
     invented its own way of reading a timestamp could disagree with the code it exists to test,
     and nothing would show it. One consequence is deliberate rather than accidental: a raw epoch
-    number is REFUSED, because ``classify_time_value`` refuses it. The offline fixture in
-    ``tests/test_alarm.py`` uses that shape; the real logger measured on 2026-09-04 answers with
-    zone-explicit ISO (``2026-08-25T09:44:16.935Z``), and an epoch parser sitting next to the
-    client's would be a second time-reading truth in one repository.
+    number is REFUSED, because ``classify_time_value`` refuses it. One fixture in
+    ``tests/test_alarm.py`` carries that shape, though on a config document rather than on a
+    history event this function ever sees; the real logger measured on 2026-09-04 answers with
+    zone-explicit ISO (``2026-08-25T09:44:16.935Z``). The refusal follows from reusing the
+    client's classifier, and an epoch parser beside it would be a second time-reading truth in
+    one repository.
 
     Shared with ``tests/test_alarm.py``, which drives this probe offline in both directions.
     """
@@ -203,25 +209,31 @@ def test_naive_iso_window_is_honoured(client: AlarmClient, pv: str) -> None:
       value. Nothing satisfied both any more: measured 2026-09-04, across the two alarm trees a
       999-capped week query could see through, not one of 19 PVs met the pair, and the fixed
       start moved the bar further every day. The anchor now comes from the newest page itself,
-      so the window is one page wide whatever the rate is, and the only thing the fixture still
-      has to be is the thing the baseline probe above already asks of it.
+      so the window is at most one page wide whatever the rate is, and the only thing the
+      fixture still has to be is the thing the baseline probe above already asks of it.
     * CLOSED. Both queries used to end at ``now``, and the second ``now`` is later than the
       first: an event arriving between them shows up on one side only and the comparison goes
       red without a defect. A fixed end cannot race.
 
-    What this probe does NOT prove, because the client normalises before sending: today both
-    spellings reach the server as the same string, so a green run says the normalisation is
-    THERE and effective end to end, not that the server reads a naive form. Take the
-    normalisation out and the naive form goes out raw, the server takes it as *now*, the answer
-    is empty, and this comparison is what notices. ``tests/test_alarm.py`` drives exactly that
-    offline, in both directions.
+    What a green run does and does NOT say, because the client normalises before sending: both
+    spellings reach the server as ONE string today, so a green run says the two spellings
+    produce the same answer. THAT the normalisation is what makes them identical is held by
+    ``tests/test_alarm.py``, which asserts it on the recorded wire values; this probe cannot
+    tell that apart from a server reading a naive form correctly. Take the normalisation out
+    and the naive form goes out raw, the server takes it as *now*, the answer is empty, and
+    this comparison is what notices, which the same offline module drives in both directions.
     """
     page, _ = _events(client, pv, "7 days", max_events=_ANCHOR_PAGE)
     assert page, _NO_REFERENCE
 
-    newest, oldest = instant_of(page[0]["message_time"]), instant_of(page[-1]["message_time"])
-    zoned_start, naive_start = spellings_of(oldest - _EDGE)
-    end = format_iso_z(newest + _EDGE)
+    # min/max rather than page[0]/page[-1]: newest-first is a property of the SERVER (the
+    # client neither sorts nor asks for a sort order), and an inverted window would report a
+    # missing positive control instead of an ordering change. `.get` rather than `[...]` for
+    # the same reason: the projection allowlist makes message_time optional, and instant_of
+    # exists to say so loudly rather than to be overtaken by a KeyError at the call site.
+    moments = [instant_of(event.get("message_time")) for event in page]
+    zoned_start, naive_start = spellings_of(min(moments) - _EDGE)
+    end = format_iso_z(max(moments) + _EDGE)
 
     with_zone, zone_capped = _events(
         client, pv, zoned_start, end, max_events=_COMPARISON_MAX_EVENTS

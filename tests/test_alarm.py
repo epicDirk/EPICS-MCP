@@ -723,21 +723,26 @@ class _ZoneSensitiveLogger:
     """A stand-in Alarm Logger: an ABSOLUTE start without a zone is not read, it becomes *now*.
 
     A relative amount ("7 days") is read fine, which is what the real parser does and what the
-    probe's anchor query depends on. Every start it was asked for is kept, so a test can assert
-    what went on the WIRE instead of what the caller believed it sent.
+    probe's anchor query depends on. Every QUERY it was asked is kept, not only the start: the
+    second half of the [GQ-288] repair is the closed window, and a fake that forgets ``end``
+    cannot hold it. A test asserts what went on the WIRE instead of what the caller believed.
     """
 
     def __init__(self, page: list[dict[str, object]]) -> None:
         self.page = page
-        self.starts: list[str] = []
+        self.calls: list[dict[str, str]] = []
 
     def __call__(self, url: str, **kwargs: object) -> Mock:
         params = kwargs["params"]
         assert isinstance(params, dict)
+        self.calls.append({str(key): str(value) for key, value in params.items()})
         start = str(params["start"])
-        self.starts.append(start)
         zone_less = "T" in start and not (start.endswith("Z") or "+" in start)
         return _resp([] if zone_less else self.page)
+
+    @property
+    def starts(self) -> list[str]:
+        return [call["start"] for call in self.calls]
 
 
 def test_naive_iso_probe_is_green_while_the_client_normalises(
@@ -759,6 +764,31 @@ def test_naive_iso_probe_is_green_while_the_client_normalises(
     assert anchor == "7 days", "the anchor query must stay relative, that is what stops it ageing"
     assert zoned == naive, "the client is expected to normalise both spellings to one wire value"
     assert zoned.endswith("Z")
+
+
+def test_the_compared_window_is_closed_and_carries_its_own_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The OTHER half of the [GQ-288] repair, which the two direction tests do not touch.
+
+    Both comparison queries must ask the SAME absolute end. With ``end="now"`` the second query
+    asks a wider window than the first, and an event arriving between them lands on one side
+    only: red without a defect. And the comparison must ask for its own cap rather than the five
+    the other probes use, or the window it just widened would be truncated again.
+    """
+    client = AlarmClient("http://alarm")
+    logger = _ZoneSensitiveLogger(_ALARM_PAGE)
+    monkeypatch.setattr(client.session, "get", logger)
+
+    test_alarm_live.test_naive_iso_window_is_honoured(client, "A")
+
+    anchor_call, first, second = logger.calls
+    assert first["end"] == second["end"], "the two compared queries must span ONE window"
+    assert first["end"].endswith("Z"), f"the end must be absolute, got {first['end']!r}"
+    # The client over-fetches by one so `capped` can be an honest `fetched > max_events`.
+    assert anchor_call["size"] == str(test_alarm_live._ANCHOR_PAGE + 1)
+    expected_size = str(test_alarm_live._COMPARISON_MAX_EVENTS + 1)
+    assert first["size"] == second["size"] == expected_size
 
 
 def test_naive_iso_probe_goes_red_when_the_normalisation_is_removed(
@@ -803,7 +833,8 @@ def test_instant_of_reads_an_offset_form_as_the_same_moment() -> None:
 
 
 def test_instant_of_refuses_epoch_milliseconds_loudly() -> None:
-    """The offline fixtures in this module use that shape; the measured logger does not. It is
+    """One fixture in this module carries that shape, on a config document rather than on a
+    history event instant_of ever sees; the measured logger answers zone-explicit ISO. It is
     refused rather than parsed, so the probe never grows a second way of reading a timestamp."""
     with pytest.raises(TimeWindowFormatError, match="not a time this service can read"):
         test_alarm_live.instant_of(1746093720000)
