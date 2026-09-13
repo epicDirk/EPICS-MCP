@@ -274,7 +274,8 @@ async def _blank_config_report() -> DoctorReport:
     ⚠️ That distinction was measured, and the first version of this docstring got it wrong: it said
     "hermetic by construction" while constructing ``EpicsConfig()`` with no arguments at all.
     ``EpicsConfig`` is a ``BaseSettings`` with ``env_prefix="EPICS_MCP_"``, so a bare instantiation
-    reads the PROCESS ENVIRONMENT, and ``conftest.py`` deliberately leaves those variables alone.
+    reads the PROCESS ENVIRONMENT, and when this was written ``conftest.py`` left those variables
+    alone (it strips them since GQ-399; the blanking stays as a layer that needs no conftest).
     Measured with two of them pointed at a discard port, this guard took 11.16 s instead of 0.03 s
     and issued real connects while staying green: the silent failure mode, on precisely the kind of
     machine where a facility is configured. The fields are derived from the model rather than

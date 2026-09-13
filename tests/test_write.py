@@ -53,28 +53,6 @@ def _reset_singletons() -> Iterator[None]:
     safety_module._safety = None
 
 
-@pytest.fixture(autouse=True)
-def _pin_write_path_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin the two config fields ``_set_pv_value`` reads through ``get_config()``.
-
-    Resetting the singleton above is not enough: the next ``get_config()`` rebuilds ``EpicsConfig``
-    from ``os.environ``, and ``EpicsConfig`` is a ``BaseSettings`` with ``env_prefix="EPICS_MCP_"``,
-    so a developer's shell decides what these tests measure. The autouse strip in ``conftest.py``
-    clears ``EPICS_PVA_*`` and ``EPICS_CA_*`` only.
-
-    MEASURED, not feared, and both directions were run on this tree before this fixture existed:
-    ``EPICS_MCP_MAX_WRITE_STEP=1`` turned FIVE tests in this module red, and
-    ``EPICS_MCP_READBACK_TOLERANCE=1000`` turned ONE red. The second is older than the step limit,
-    so this closes a leak that was already here rather than only the one that arrived with it.
-
-    Patched at ``tools.write``'s own name, the seam the code under test actually reads, rather than
-    at ``config``: the module binds ``get_config`` at import, so patching the source module would
-    leave this call site pointing at the original.
-    """
-    pinned = EpicsConfig(max_write_step=0.0, readback_tolerance=1e-6)
-    monkeypatch.setattr(write_module, "get_config", lambda: pinned)
-
-
 class TestSetPvValueSuccess:
     """Successful write with safety checks passing."""
 
@@ -679,8 +657,9 @@ class TestSetPvValueStep:
     """O2b: the SECOND post-admission refusal, off unless ``EPICS_MCP_MAX_WRITE_STEP`` is set.
 
     Bounds asks whether the value may BE there; this asks whether it may GET there in one write.
-    The autouse ``_pin_write_path_config`` fixture pins the limit to 0 for every OTHER test in this
-    module, so each test here arms it explicitly and nothing leaks between them.
+    Every OTHER test in this module reads the default, which is off: ``tests/conftest.py`` strips an
+    exported ``EPICS_MCP_MAX_WRITE_STEP`` (GQ-399), so each test here arms it explicitly and nothing
+    leaks between them.
     """
 
     @staticmethod

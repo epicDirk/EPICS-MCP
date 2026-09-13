@@ -123,9 +123,11 @@ def _plane(report: DoctorReport, name: str) -> PlaneCheck:
 
 
 #: EVERY EPICS_MCP_* field the write block reads, so a test that wants a DEFAULT posture gets one
-#: on any machine. ``tests/conftest.py`` strips the six EPICS search vars and deliberately not
-#: these, so without an explicit value a developer who exports one for their own sandbox sees this
-#: file go red for a reason that is not in it.
+#: on any machine. It was written when ``tests/conftest.py`` stripped only the six EPICS search
+#: vars, so a developer who exported one of these for their own sandbox saw this file go red for a
+#: reason that was not in it. conftest strips the ``EPICS_MCP_*`` settings since GQ-399, so this
+#: is now a second layer rather than the only one: kept because it does not depend on conftest,
+#: and its completeness guard below keeps the layer whole.
 #:
 #: ⚠️ The list has to be COMPLETE, and the first version was not: it omitted ``olog_url``, which the
 #: block reads three times. Measured with ``EPICS_MCP_OLOG_URL`` exported: three of these tests went
@@ -581,7 +583,7 @@ def test_identity_unreadable_2xx_body_stays_unverified(monkeypatch: pytest.Monke
     ``unverified``, NOT ``identity_probe_failed``. rest_get_json calls raise_for_status() BEFORE
     resp.json(), so reaching resp.json() means the status WAS 2xx; a non-JSON body surfaces as a
     ``JSONDecodeError`` (a ValueError subclass) chained via ``from exc``. The chained ValueError is
-    how ``_beacon_reached_but_unreadable`` tells "the service ANSWERED, just not nameably" (exit 0)
+    how ``beacon_reached_but_unreadable`` tells "the service ANSWERED, just not nameably" (exit 0)
     from "the probe FAILED" (exit 3).
 
     Red-proof: a mutant dropping the ValueError carve-out from ``_identity_fetch_failure`` makes
@@ -2071,7 +2073,7 @@ def test_no_plane_verdict_echoes_a_credential_its_exception_still_carries(
     ``rest_get_json``, whose ``except`` clause is ``RequestException`` only, so a bare ``OSError``
     walks out of it unwrapped with ``__cause__ is None``. Measured, ``requests`` raises exactly
     that for an unreadable ``EPICS_MCP_CA_BUNDLE``. A second unbarriered arrival is already written
-    down one function away, in ``_beacon_reached_but_unreadable``: on the ``requests>=2.25`` floor a
+    down in ``_http.beacon_reached_but_unreadable``: on the ``requests>=2.25`` floor a
     stdlib ``json.JSONDecodeError`` is not a ``RequestException`` and arrives raw.
     Both catch sites here are bare ``except Exception``, so the population is whatever those call
     trees can raise, now or after the next edit. Hence this test: it asserts the property on the
@@ -4735,7 +4737,7 @@ def test_the_write_gate_defaults_cover_every_field_the_block_reads() -> None:
     read = set().union(*per_source.values())
     assert read <= set(_WRITE_GATE_DEFAULTS), (
         f"the block reads {sorted(read - set(_WRITE_GATE_DEFAULTS))} but no default pins it, so "
-        "these tests would inherit that value from the machine they run on"
+        "these tests would take the model default for it instead of a value this file states"
     )
 
 

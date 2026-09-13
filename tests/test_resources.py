@@ -3,7 +3,6 @@
 import json
 import os
 import re
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -11,30 +10,6 @@ import pytest
 from epics_mcp import config as config_module
 from epics_mcp.config import EpicsConfig
 from epics_mcp.resources import get_epics_config, get_health
-
-
-@pytest.fixture(autouse=True)
-def _isolate_config_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Strip every ``EPICS_MCP_*`` variable so these assertions measure the code, not the machine.
-
-    ``EpicsConfig`` is a settings model, so a field left unset in a test is read from the PROCESS
-    ENVIRONMENT, and the autouse fixture in conftest strips only the EPICS SEARCH variables. This
-    repository has paid for that twice already: ``_WRITE_GATE_DEFAULTS`` exists because an unpinned
-    ``olog_url`` made the suite dial a real URL, and the guide-drift guard blanks the URL fields for
-    the same reason. Blanking by PREFIX rather than by field list, so a field added to the model
-    later is covered without anyone remembering to add it.
-
-    ⚠️ Stripping alone is not enough for the tests that do NOT call ``_with_config``: they go through
-    the cached ``get_config`` singleton, which a previous test may already have built from the
-    unstripped environment. So the cache is dropped on both sides of the test, the older of the two
-    patterns this suite uses.
-    """
-    for name in list(os.environ):
-        if name.startswith("EPICS_MCP_"):
-            monkeypatch.delenv(name, raising=False)
-    config_module._config = None
-    yield
-    config_module._config = None
 
 
 def _with_config(monkeypatch: pytest.MonkeyPatch, **kwargs: object) -> None:

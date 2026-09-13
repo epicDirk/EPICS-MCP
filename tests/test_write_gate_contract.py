@@ -251,14 +251,13 @@ def _olog_config(
     unless a test arms it deliberately: it is not a write gate, it is the one pre-gate refusal
     this module holds against contract point 4.
 
-    The two remote-lane fields are pinned CLOSED rather than left out, and that is not tidiness.
-    ``EpicsConfig`` is pydantic-settings with ``env_prefix="EPICS_MCP_"``, and ``tests/conftest.py``
-    deliberately strips only the ``EPICS_PVA_*``/``EPICS_CA_*`` families, so every field left unset
-    here is read from whoever runs pytest. Measured: with
-    ``EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST`` and ``EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true`` exported,
-    the URL-boundary rows stopped denying and went to the network instead (5.7s to 34.8s). A row
-    that silently changes its verdict with the developer's environment proves nothing on either
-    outcome.
+    The two remote-lane fields are written out CLOSED rather than left to their defaults, because
+    the rows that open the remote lane pass them, and a helper that names every field the gate
+    reads is the one place a row's full configuration can be read. They were first pinned for a
+    second reason that ``tests/conftest.py`` has carried since GQ-399: a field left unset used to be
+    read from whoever ran pytest. Measured then: with ``EPICS_MCP_OLOG_WRITE_URL_ALLOWLIST`` and
+    ``EPICS_MCP_OLOG_WRITE_ALLOW_REMOTE=true`` exported, the URL-boundary rows stopped denying and
+    went to the network instead (5.7s to 34.8s).
     """
     return EpicsConfig(
         olog_url=olog_url,
@@ -1574,7 +1573,8 @@ def _package_modules() -> list[Path]:
 
     Written here rather than borrowed, and the reason belongs beside it: none of this suite's
     shared helpers (``prose_numbers``, ``gate_lists``, ``conftest``, ``engine_gate``,
-    ``live_gate``) carries a walker, and the test modules that do have one cannot be imported from
+    ``live_gate``, ``env_isolation``, ``wire_tools``) carries a walker, and the test modules that
+    do have one cannot be imported from
     here without a cycle (``test_prose_counters`` and ``test_gate_lists`` both import THIS module).
 
     Recursive on purpose: ``_discover_gate_modules`` above globs the package root FLAT, which is

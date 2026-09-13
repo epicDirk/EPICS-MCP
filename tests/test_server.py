@@ -2138,15 +2138,16 @@ async def test_find_channels_structured_output_conforms_to_its_schema(
     silently shifting the S31 audit's recorded numbers with nothing going red. The price, named:
     one faked response cannot serve both enabled paths, the list route rejects a number and the
     count route rejects a list, so the response is swapped between calls, and because this fakes
-    the transport the call runs the real read throttle (the pre-existing repo-wide
-    ``EPICS_MCP_READ_RATE_LIMIT`` exposure the search_logbook payload test already documents).
+    the transport the call runs the real read throttle (an exported ``EPICS_MCP_READ_RATE_LIMIT``
+    used to reach it; the history, and where it was fixed, is in the search_logbook payload test).
 
     Both CF allowlists are passed EXPLICITLY rather than left to their defaults: the client
-    resolves them from the REAL config in its OWN module namespace, so an
-    ``EPICS_MCP_CHANNELFINDER_SAFE_PROPERTY_NAMES`` exported on the machine would otherwise decide
-    what this test sees (conftest isolates the ``EPICS_*`` search vars, NOT the ``EPICS_MCP_*``
-    ones). ``owner`` is deliberately an allowlisted account: the projection blanks a non-allowlisted
-    one, so a payload assertion on it would be about the redactor, not the schema.
+    resolves them from the config in its OWN module namespace, and the projection this test
+    validates depends on both, so the test states them instead of inheriting whatever the defaults
+    become. (An allowlist exported on the machine can no longer reach it: ``tests/conftest.py``
+    strips the ``EPICS_MCP_*`` settings since GQ-399.) ``owner`` is deliberately an allowlisted
+    account: the projection blanks a non-allowlisted one, so a payload assertion on it would be
+    about the redactor, not the schema.
 
     The STRONGEST assertion here is the per-path EXACT key set (see the comment at the ``paths``
     table): it is what makes all four rows load-bearing and what carries the mode disjointness,
@@ -2520,9 +2521,10 @@ async def test_every_typed_tool_conforms_to_its_schema_over_the_wire(
         f"{sorted(set(_ALWAYS_PRESENT_BY_TOOL) - _TYPED_OUTPUT_TOOLS)}"
     )
 
-    # EVERY plane empty in ONE config, so no tool's disabled path depends on what the environment
-    # happens to carry. conftest isolates the EPICS_* search vars but deliberately NOT the
-    # EPICS_MCP_* URLs, which is why the per-tool tests patch get_config instead of unsetting env.
+    # EVERY plane empty in ONE config, so no tool's disabled path depends on the defaults staying
+    # empty. The environment can no longer decide it (conftest strips EPICS_MCP_* since GQ-399);
+    # the explicit config is kept because the disabled path is what this loop asserts, and a test
+    # that names its precondition does not break when a default moves.
     # Each plane resolves get_config in its OWN module namespace, hence three patch targets.
     disabled = EpicsConfig(
         channelfinder_url="", archiver_url="", alarm_url="", naming_url="", olog_url=""
@@ -2812,16 +2814,14 @@ async def test_search_logbook_payload_path_is_guarded_below_the_client(
       only "is an object". The sharp one (``items: {type: string}``) lives on the sibling test's
       ``tags``; what this half really pins is ``total_matches``, below.
 
-    ENV NOTE, measured: because this fakes the TRANSPORT, the call runs the real read throttle
-    (services/_http.py). conftest resets that throttle but rebuilds it from the REAL config, and
-    ``EPICS_MCP_*`` is deliberately not isolated there, so a machine exporting
-    ``EPICS_MCP_READ_RATE_LIMIT`` fails this test. It is a pre-existing, repo-wide exposure:
-    measured 2026-07-25 under ``EPICS_MCP_READ_RATE_LIMIT=1``: 19 other tests fail the same way
-    (the figure named here was 15 and had already drifted by three before that measurement, which
-    is what an unasserted count does). The limit VALUE belongs in the claim: a test drawing two
-    tokens only trips at 1. Not something this test introduced; CI runs
-    with a clean env. Named here rather than worked around locally, because the fix belongs in
-    conftest, for all of them at once.
+    ENV NOTE, history: because this fakes the TRANSPORT, the call runs the real read throttle
+    (services/_http.py), rebuilt per test from the config. A machine exporting
+    ``EPICS_MCP_READ_RATE_LIMIT`` used to fail this test, and it was a repo-wide exposure, dated
+    rather than tracked: measured 2026-07-25 under ``EPICS_MCP_READ_RATE_LIMIT=1``: 19 other tests
+    failed the same way, and 46 in all on 2026-09-13 (``4240267``), which is what an unasserted
+    count does. The fix was left out of this test on purpose and landed where it belonged, for all
+    of them at once: ``tests/conftest.py`` strips the ``EPICS_MCP_*`` settings since GQ-399, and
+    ``tests/test_env_isolation.py`` pins that it does.
     * A ``hitCount`` of ``true``: JSON has no separate boolean-vs-integer question the way Python
       does not either (``bool`` IS an ``int``), so this value would flow straight into an
       ``integer | null`` field. The client-edge guard rejects it FIRST, with its own diagnosis
