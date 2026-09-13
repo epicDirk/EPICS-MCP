@@ -10,12 +10,10 @@ from epics_mcp.tools.discover import _discover_pvs
 
 
 async def test_discover_wildcard() -> None:
-    # ⚠️ This one drives the REAL ``query_channels`` (no double), so it measures the MACHINE: with
-    # EPICS_MCP_CHANNELFINDER_URL set it leaves the box and fails with EpicsConnectionError.
-    # Reproduced against a dead port. conftest.py strips the six EPICS_* search vars and, by its
-    # own comment, deliberately not the EPICS_MCP_* ones. Recorded here rather than only in a
-    # commit body: the fix is an autouse env strip that touches every test in the suite, which is
-    # its own piece of work, and a note nobody reads is not persistence.
+    # This one drives the REAL ``query_channels`` (no double), so it relies on ChannelFinder being
+    # unconfigured. Before GQ-399 that was the MACHINE's call: with EPICS_MCP_CHANNELFINDER_URL
+    # exported it left the box and failed with EpicsConnectionError (reproduced against a dead
+    # port). tests/conftest.py strips the EPICS_MCP_* settings now, so it measures the code.
     result = await _discover_pvs("TEST:*")
 
     assert result["total"] == 0
@@ -89,6 +87,34 @@ async def test_discover_concrete_connection_error_is_status_error() -> None:
 def _cf_result(channels: list[dict[str, object]], *, capped: bool = False) -> dict[str, object]:
     """A query_channels success payload (enabled) with the given projected channels."""
     return {"enabled": True, "channels": channels, "total": len(channels), "capped": capped}
+
+
+async def test_a_question_mark_alone_makes_the_pattern_a_wildcard() -> None:
+    """GQ-397: the tool promises ``* ?``, and until this test only ``*`` was ever driven.
+
+    The pattern carries ``?`` and nothing else a glob could be recognised by, so the routing
+    decision rests on that one character: it must reach ChannelFinder VERBATIM and never be tried
+    as a concrete PV name. What ``?`` then MEANS is the server's (measured live in
+    ``tests/test_channelfinder_live.py``: exactly one character). Red-proof: drop ``?`` from
+    ``_WILDCARD_CHARS`` in tools/discover.py and the ``pv_get`` double fires.
+    """
+    channels: list[dict[str, object]] = [
+        {"name": "SIM:PS-01:Cur-RB", "ioc_name": "sim-ioc", "host_name": "simhost"},
+    ]
+    query = AsyncMock(return_value=_cf_result(channels))
+    concrete = AsyncMock(side_effect=AssertionError("a '?' glob was tried as a concrete PV name"))
+    with (
+        patch("epics_mcp.tools.discover.query_channels", query),
+        patch("epics_mcp.tools.discover.pv_get", concrete),
+    ):
+        result = await _discover_pvs("SIM:PS-0?:Cur-RB")
+
+    assert query.await_args is not None
+    assert query.await_args.args[0] == "SIM:PS-0?:Cur-RB"
+    concrete.assert_not_awaited()
+    pvs = result["pvs"]
+    assert isinstance(pvs, list)
+    assert [pv["status"] for pv in pvs] == ["registered"]
 
 
 async def test_discover_wildcard_delegates_to_channelfinder() -> None:

@@ -122,6 +122,49 @@ def test_glob_is_anchored(client: ChannelFinderClient, glob: str) -> None:
     assert _names(client, f"*{inner}*"), f"'*{inner}*' matched nothing, inner is not a substring"
 
 
+def test_question_mark_matches_exactly_one_character(
+    client: ChannelFinderClient, glob: str
+) -> None:
+    """GQ-397: the tool descriptions promise ``?``, and this is the first probe that sends one.
+
+    Differential over ONE known name, so every assertion compares the same target spelled
+    differently. Positive controls: ``?`` in the last and in an inner position both still find the
+    name, which a server treating ``?`` as a literal would not (assumed: no channel name carries a
+    literal ``?``; a glob endpoint cannot measure that), and every hit of the last-position form
+    has the name's length. Two negative controls, one per wrong reading, and neither depends on
+    what else the registry holds: the name plus one ``?`` does NOT find the name (``?`` is not
+    "zero or more"), and the name with its last TWO characters replaced by one ``?`` does not find
+    it either (``?`` is not "one or more"). The ``*`` twin beside the first must find it, or that
+    negative would be about suffixing and not about ``?``. The length check is the same claim over
+    whatever neighbours the registry happens to hold, and holds vacuously without them.
+    First run 2026-09-13 against a facility registry, green; the names it used stay out of this
+    repository, which ``tests/test_guide.py`` enforces for every tracked text file.
+    """
+    names = _names(client, glob)
+    assert names, f"{glob!r} matched nothing, a differential over no name proves nothing"
+    exact = names[0]
+
+    last = _names(client, exact[:-1] + "?")
+    assert len(last) < _MAX_RESULTS, "the last-position form hits the cap, pick a narrower glob"
+    assert exact in last, f"{exact[:-1]}? did not find {exact!r}: '?' is not a wildcard here"
+    assert all(len(name) == len(exact) for name in last), (
+        f"{exact[:-1]}? matched a name of another length, '?' is not exactly one character: {last}"
+    )
+
+    middle = len(exact) // 2
+    assert exact in _names(client, exact[:middle] + "?" + exact[middle + 1 :]), (
+        f"'?' at position {middle} did not find {exact!r}"
+    )
+
+    assert exact in _names(client, exact + "*"), f"{exact}* did not find {exact!r}"
+    assert exact not in _names(client, exact + "?"), (
+        f"{exact}? found {exact!r}: '?' matched zero characters, it behaves like '*'"
+    )
+    assert exact not in _names(client, exact[:-2] + "?"), (
+        f"{exact[:-2]}? found {exact!r}: one '?' matched two characters, it behaves like '*'"
+    )
+
+
 # --- S11 schema anchor: the strict client schema, pinned against the REAL payload ---
 
 

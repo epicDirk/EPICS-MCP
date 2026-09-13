@@ -734,6 +734,40 @@ async def test_tool_count_disabled_makes_no_call(monkeypatch: pytest.MonkeyPatch
     assert set(result) == {"enabled", "match_count", "note"}
 
 
+@pytest.mark.parametrize(
+    ("count_only", "payload", "route"),
+    [(False, [], "/resources/channels"), (True, 0, "/resources/channels/count")],
+    ids=["list", "count"],
+)
+async def test_a_question_mark_glob_reaches_the_session_verbatim(
+    monkeypatch: pytest.MonkeyPatch, count_only: bool, payload: object, route: str
+) -> None:
+    """GQ-397: the tool description promises ``* and ?``, and no test had ever sent a ``?``.
+
+    Driven from the tool adapter down to the SESSION, not to a client double: the claim is that
+    nothing between the argument and ``~name`` escapes, rewrites or drops the character, and a
+    double of the client class would stand exactly where such a rewrite would sit. Both modes,
+    because they build their parameters on two separate calls. Below the session, ``requests``
+    percent-encodes the character on the wire and the server decodes it; that half, and what ``?``
+    then means, is the live probe's (``tests/test_channelfinder_live.py``: exactly one character).
+    Red-proof: rewrite ``?`` in ``_build_query_params`` and both rows go red at ``~name``.
+    """
+    cfg = EpicsConfig(channelfinder_url="http://cf:8080/ChannelFinder")
+    monkeypatch.setattr("epics_mcp.services.checkers.get_config", lambda: cfg)
+    monkeypatch.setattr("epics_mcp.services.channelfinder_client.get_config", lambda: cfg)
+    session = Mock()
+    session.get.return_value = _resp(payload)
+    monkeypatch.setattr(
+        "epics_mcp.services.channelfinder_client.get_shared_session", lambda **_kwargs: session
+    )
+
+    await _find_channels("SIM:PS-0?:Cur-RB", count_only=count_only)
+
+    assert session.get.call_count == 1
+    assert session.get.call_args.args[0] == f"http://cf:8080/ChannelFinder{route}"
+    assert session.get.call_args.kwargs["params"]["~name"] == "SIM:PS-0?:Cur-RB"
+
+
 # --- CF query surface: list_channel_vocabulary (property + tag NAME discovery) ---
 
 
