@@ -22,7 +22,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from epics_mcp.services._http import build_retrying_session, rest_get_json
+from epics_mcp.services._http import (
+    beacon_reached_but_unreadable,
+    build_retrying_session,
+    rest_get_json,
+)
 from epics_mcp.services.rest_exceptions import RestConnectionError, RestResponseError
 
 #: The Naming Service identifies itself in its swagger contract's ``info.title`` (measured live).
@@ -57,8 +61,9 @@ def probe_naming_identity(
     NEVER raises (``except Exception`` → ``probe_failed``): the S13 gate that calls this rides
     consumers whose NARROWEST catch is ``NamingServiceResponseError`` (crossplane), so a raw
     exception escaping here would crash a best-effort provenance report instead of withholding.
-    Classification mirrors ``epics-doctor``'s ``_beacon_reached_but_unreadable``
-    split so the two surfaces cannot drift; it returns a plain verdict, not a doctor ``PlaneCheck``.
+    Classification is ``epics-doctor``'s own, the SAME function
+    (:func:`~epics_mcp.services._http.beacon_reached_but_unreadable`), so the two surfaces cannot
+    drift; it returns a plain verdict, not a doctor ``PlaneCheck``.
     """
     url = f"{base_url.rstrip('/')}{NAMING_SWAGGER_PATH}"
     session = build_retrying_session(auth_header=auth_header)
@@ -76,9 +81,9 @@ def probe_naming_identity(
         # A REACHED-but-unreadable 2xx (a non-JSON body → a ``JSONDecodeError``, which is a
         # ``ValueError`` subclass, raw on the requests<2.27 floor or wrapped as ``__cause__`` on
         # modern requests) is honest ``unverified``; a served non-2xx / transport error / refused
-        # redirect never reached a 2xx body and is ``probe_failed``. This is exactly
-        # ``epics-doctor``'s ``_beacon_reached_but_unreadable`` predicate, kept in lockstep.
-        if isinstance(exc, ValueError) or isinstance(getattr(exc, "__cause__", None), ValueError):
+        # redirect never reached a 2xx body and is ``probe_failed``. The predicate is the one
+        # ``epics-doctor`` classifies every identity beacon with (GQ-397: this was a verbatim copy).
+        if beacon_reached_but_unreadable(exc):
             return "unverified"
         return "probe_failed"
     info = payload.get("info") if isinstance(payload, dict) else None

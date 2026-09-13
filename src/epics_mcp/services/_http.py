@@ -989,6 +989,29 @@ def is_http_404(exc: BaseException) -> bool:
     return http_status(exc) == 404
 
 
+def beacon_reached_but_unreadable(exc: BaseException) -> bool:
+    """True iff a failed identity fetch actually REACHED a 2xx response whose body was unreadable.
+
+    :func:`rest_get_json` calls ``raise_for_status()`` BEFORE ``resp.json()``, so the only way a
+    2xx is reached and the call still raises is a body that is not JSON, a ``JSONDecodeError`` (a
+    ``ValueError`` subclass). On ``requests>=2.27`` that is a ``requests`` ``JSONDecodeError``,
+    wrapped by :func:`rest_get_json` and read here as the ``__cause__``; on the older
+    ``requests>=2.25`` floor it is the STDLIB ``json.JSONDecodeError``: a ``ValueError`` but NOT a
+    ``RequestException``, so :func:`rest_get_json` does not wrap it and it arrives raw (hence the
+    exception ITSELF is checked too). A served non-2xx chains an ``HTTPError``, a transport failure
+    a ``ConnectionError``, a refused redirect chains nothing, none is a ``ValueError``. So this
+    cleanly separates "answered 2xx, just not nameably" (honest ``unverified``, e.g. a 200 HTML
+    login page) from "the probe FAILED". Null-safe.
+
+    ONE home, and that is why it lives here rather than beside either caller: ``epics-doctor``
+    classifies every plane's identity beacon with it, and the Naming client's S13 gate classifies
+    the swagger probe with it (``services.naming_identity``). Until GQ-397 the gate carried a
+    verbatim inline copy "kept in lockstep", which nothing enforced. It reads the raise contract of
+    :func:`rest_get_json`, so it sits beside the other classifiers of that contract.
+    """
+    return isinstance(exc, ValueError) or isinstance(getattr(exc, "__cause__", None), ValueError)
+
+
 def is_http_400(exc: BaseException) -> bool:
     """True iff *exc* wraps an HTTP 400 response.
 

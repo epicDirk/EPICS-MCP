@@ -59,6 +59,7 @@ from epics_mcp.epics_address import (
 )
 from epics_mcp.errors import EpicsError
 from epics_mcp.services._http import (
+    beacon_reached_but_unreadable,
     build_retrying_session,
     get_read_throttle,
     http_status,
@@ -796,23 +797,6 @@ def _backend_down(plane: str, detail: str) -> PlaneCheck:
     )
 
 
-def _beacon_reached_but_unreadable(exc: BaseException) -> bool:
-    """True iff a failed identity fetch actually REACHED a 2xx response whose body was unreadable.
-
-    :func:`~epics_mcp.services._http.rest_get_json` calls ``raise_for_status()`` BEFORE
-    ``resp.json()``, so the only way a 2xx is reached and the call still raises is a body that is
-    not JSON, a ``JSONDecodeError`` (a ``ValueError`` subclass). On ``requests>=2.27`` that is a
-    ``requests`` ``JSONDecodeError``, wrapped by ``rest_get_json`` and read here as the
-    ``__cause__``; on the older ``requests>=2.25`` floor it is the STDLIB ``json.JSONDecodeError``:
-    a ``ValueError`` but NOT a ``RequestException``, so ``rest_get_json`` does not wrap it and it
-    arrives raw (hence we check the exception ITSELF too). A served non-2xx chains an ``HTTPError``,
-    a transport failure a ``ConnectionError``, a refused redirect chains nothing, none is a
-    ``ValueError``. So this cleanly separates "answered 2xx, just not nameably" (honest
-    ``unverified``, e.g. a 200 HTML login page) from "the probe FAILED" (``identity_probe_failed``).
-    Null-safe."""
-    return isinstance(exc, ValueError) or isinstance(getattr(exc, "__cause__", None), ValueError)
-
-
 def _identity_fetch_failure(plane: str, exc: BaseException) -> PlaneCheck:
     """Map a FAILED identity fetch to a verdict, shared by every identity probe so the split cannot
     drift. THREE ways out, tested in this order: a refusal by this command's own read throttle is
@@ -832,7 +816,7 @@ def _identity_fetch_failure(plane: str, exc: BaseException) -> PlaneCheck:
             "transport reachable, but the identity probe was NOT SENT: this command's own read "
             "throttle refused it, so this plane's identity is unmeasured rather than in doubt.",
         )
-    if _beacon_reached_but_unreadable(exc):
+    if beacon_reached_but_unreadable(exc):
         return _unverified(
             plane,
             "transport reachable; the endpoint answered 2xx but its body was not readable JSON, so "

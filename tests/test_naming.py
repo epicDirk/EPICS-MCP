@@ -271,7 +271,7 @@ def test_probe_unverified_on_2xx_without_matching_title(
 def test_probe_unverified_on_unreadable_2xx_body(monkeypatch: pytest.MonkeyPatch) -> None:
     """A REACHED-but-unreadable 2xx (a non-JSON body → a ValueError/JSONDecodeError wrapped as
     ``__cause__`` on modern requests) is ``unverified``, epics-doctor's
-    _beacon_reached_but_unreadable split, kept in lockstep."""
+    beacon_reached_but_unreadable split, the same function since GQ-397."""
     wrapped = RestResponseError("unreadable body")
     wrapped.__cause__ = requests.exceptions.JSONDecodeError("Expecting value", "", 0)
     _probe_seam(monkeypatch, raises=wrapped)
