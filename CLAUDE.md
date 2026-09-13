@@ -76,7 +76,7 @@ Any insight worth keeping must land in a **durable, co-distributed** carrier, no
 transcript or a commit body, which future sessions won't find. Three tiers, by the nature of the fact:
 
 1. **Code + tests**: when the insight is a concrete behaviour. Put it in the tool/service code, its
-   docstring / tool-description (the always-on surface an assistant sees without pulling a resource),
+   tool docstring, which becomes the tool description (the always-on surface an assistant sees without pulling a resource; the docstring of a return shape is not that surface, see `src/epics_mcp/wire_schema.py`),
    and a regression test. This is the most reliable tier: it runs in CI and cannot be forgotten.
 2. **Operational cookbook**: when the insight is a service/operational/IOC recipe, an endpoint, or an
    error signature. Its home is **`src/epics_mcp/operator_guide.md`** (→ `epics://guide`). This is

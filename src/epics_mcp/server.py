@@ -276,7 +276,8 @@ mcp = FastMCP(
     # strings, more consistent with the redaction posture but leaving no detail on a bug.
     mask_error_details=False,
     # Return-shape docstrings stay for the human reader and leave the listed outputSchema:
-    # measured at the client, that field never reached a model (see wire_schema.py).
+    # measured at the client on 2026-08-30, the host does not deliver that field (one host, a
+    # second is unmeasured; see wire_schema.py).
     transforms=[OutputSchemaProseStrip()],
 )
 

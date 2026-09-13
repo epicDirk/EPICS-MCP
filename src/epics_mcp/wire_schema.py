@@ -2,11 +2,12 @@
 
 FastMCP derives each typed tool's ``outputSchema`` from its return annotation, and pydantic writes
 the docstring of every TypedDict it meets there into that schema as ``description``: here that is
-the one-line docstring of ``provenance.Reach``, repeated on every tool whose answer carries a
-``reach`` field. Measured at the client on 2026-08-30 (three windows, positive control over the
-``inputSchema``), the host hands a model the name, the description and the parameters of a tool
-and drops the ``outputSchema`` wholesale, so that prose reached no model. What a caller has to act
-on belongs in the tool description or in the server instructions, which arrive.
+the one-line docstring of ``provenance.Reach``, repeated on every TYPED tool whose answer
+carries a ``reach`` field. Measured at the client on 2026-08-30 (one host, three windows, positive
+control over the ``inputSchema``), the host hands a model the name, the description and the
+parameters of a tool and drops the ``outputSchema`` wholesale, so on that host the prose reached no
+model; a second host is unmeasured. What a caller has to act on belongs in the tool description or
+in the server instructions, which arrive.
 
 The docstrings stay in the code for the human reading it; only the listed schema loses them. The
 structure stays whole, because the SDK validates ``structuredContent`` against it over the wire,
@@ -26,15 +27,19 @@ if TYPE_CHECKING:
     from fastmcp.tools import Tool
 
 # Keywords whose value maps a NAME to a sub-schema. The names are data: a field may well be called
-# ``description`` (a log entry has one), and stripping it would drop the field with its
-# ``required`` entry.
+# ``description``, and stripping it would drop the field with its ``required`` entry.
+# ``dependencies`` is the draft-7 form; its values are a schema or a list of names.
 _NAMED_SUBSCHEMAS = frozenset(
-    {"properties", "patternProperties", "$defs", "definitions", "dependentSchemas"}
+    {"properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies"}
 )
 
-# Keywords whose value is literal data, never a schema: a ``default`` shaped like
-# ``{"description": ...}`` is a value and stays as it is.
-_LITERALS = frozenset({"default", "const", "enum", "examples"})
+# Keywords whose value is data, never a schema, so nothing inside them is stripped: a ``default``
+# shaped like ``{"description": ...}`` is a value, and ``dependentRequired`` and ``discriminator``
+# map NAMES to lists and references, where losing a key would change what validates. Vendor
+# keywords (``x-...``) are kept as they are for the same reason.
+_LITERALS = frozenset(
+    {"default", "const", "enum", "examples", "dependentRequired", "discriminator"}
+)
 
 
 def strip_schema_prose(schema: dict[str, Any]) -> dict[str, Any]:
@@ -52,7 +57,7 @@ def _strip_node(node: dict[str, Any]) -> dict[str, Any]:
     for key, value in node.items():
         if key == "description":
             continue
-        if key in _LITERALS:
+        if key in _LITERALS or key.startswith("x-"):
             stripped[key] = value
         elif key in _NAMED_SUBSCHEMAS and isinstance(value, dict):
             stripped[key] = {name: _strip_value(sub) for name, sub in value.items()}

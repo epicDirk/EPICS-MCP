@@ -56,8 +56,8 @@ needs.
   `olog_safety.py` (the two write gates plus audit), `errors.py` (machine-readable error
   hierarchy), `tool_errors.py` (the error to ToolError decorator), `paths.py` (path boundary),
   `wire_schema.py` (strips the docstrings of return shapes from every listed `outputSchema`,
-  which measurably does not reach a model; a sentence a caller acts on goes into the tool
-  description or the server instructions).
+  which the host measured at the client on 2026-08-30 does not deliver; a sentence a caller acts
+  on goes into the tool description or the server instructions).
 
 ## The planes
 

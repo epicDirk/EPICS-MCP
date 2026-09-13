@@ -3089,12 +3089,13 @@ def _prose_keys_anywhere(node: object, path: str = "root") -> list[str]:
 @pytest.mark.asyncio
 async def test_no_listed_output_schema_carries_prose() -> None:
     """GQ-224: no outputSchema on the wire carries prose. Measured at the client on 2026-08-30,
-    the host drops the outputSchema before a model sees it, so the docstring FastMCP writes there
-    reached nobody; ``OutputSchemaProseStrip`` removes it from the listing. Every listed tool is
-    walked through ``outputSchema or {}``, typed or not, and no typed-set membership is asserted
-    here, so the red proof documented on ``test_output_schema_typed_only_for_typed_tools`` keeps
-    tripping the count it names. A property NAMED ``description`` would read as a find; none
-    exists today, and whoever adds one decides consciously."""
+    the host drops the outputSchema before a model sees it, so on that host the docstring FastMCP
+    writes there reached nobody; ``OutputSchemaProseStrip`` removes it from the listing. Every
+    listed tool is walked through ``outputSchema or {}``, typed or not, and no typed-set
+    membership is asserted here, so the red proof documented on
+    ``test_output_schema_typed_only_for_typed_tools`` keeps tripping the count it names. A
+    property NAMED ``description`` would read as a find; none exists today, and whoever adds one
+    decides consciously."""
 
     offenders = {
         tool.name: found
@@ -3102,8 +3103,8 @@ async def test_no_listed_output_schema_carries_prose() -> None:
         if (found := _prose_keys_anywhere(tool.outputSchema or {}))
     }
     assert not offenders, (
-        f"prose on a listed outputSchema: {offenders}. The field does not reach a model "
-        "(measured at the client on 2026-08-30): a sentence a caller acts on goes into the tool "
+        f"prose on a listed outputSchema: {offenders}. The measured host does not deliver the "
+        "field (at the client, 2026-08-30): a sentence a caller acts on goes into the tool "
         "description or the server instructions. A description here means OutputSchemaProseStrip "
         "is no longer registered on the server; a title or examples means FastMCP started "
         "emitting them."
@@ -3235,7 +3236,8 @@ async def test_field_descriptions_survive_the_strip() -> None:
     """MA-Q1: whatever suppresses the ``title`` ANNOTATIONS must not touch field ``description``s
     of the INPUT schema: the point-of-need semantics the repo DoD requires. Spot-check a
     distinctive, anchored one. The OUTPUT schema is the other case since GQ-224: its descriptions
-    are stripped on purpose, because that field measurably does not reach a model."""
+    are stripped on purpose, because the host measured at the client on 2026-08-30 does not
+    deliver that field."""
 
     tools = await wire_tools_by_name()
     name_pattern = tools["find_channels"].inputSchema["properties"]["name_pattern"]
@@ -3332,14 +3334,14 @@ async def test_stripped_tool_still_returns_structured_content(
 # one tool per session. It was raised to 200_000: typed output-schema bytes make tool RESULTS
 # machine-readable (the core value of S29) and were then reckoned at ~1% more context per agent
 # turn, so the tools we need anyway may be typed freely. ⚠️ That reckoning assumed the schema
-# reaches the agent; measured at the client on 2026-08-30 it does not, the host drops the
-# outputSchema, and since GQ-224 its prose is stripped from the listing too. The guard is now a
+# reaches the agent; on the host measured at the client on 2026-08-30 it does not, the host drops
+# the outputSchema, and since GQ-224 its prose is stripped from the listing too. The guard is now a
 # SOFT catastrophe-ceiling: it no longer bounds each tool's growth, only trips on an extreme
 # accidental blow-up. It stays RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-09-13
 # after GQ-224: the core lane is 76_740 and the full lane 90_825 (the docstring below splits the
 # steps). Measured 2026-09-05 after GQ-297 it was 78_361 / 92_446, +974 each against the pair
-# before it. Measured
-# THREE times, and the last one is the recorded one, which is the whole reason this comment says
+# before it. That GQ-297 figure was measured THREE times, and the last of those was the one recorded
+# then, which is the whole reason this comment says
 # "ANY change that can reach the wire" rather than "any code change": the post-build QA replaced
 # two sentences of that same description, one false at exactly ceiling-many hits and one that
 # undercounted the note producers, and each rewrite moved both lanes again. A figure taken before
@@ -3450,7 +3452,8 @@ async def test_tools_list_within_budget() -> None:
     the ``Reach`` docstring was cut to one line, which is the measurement that made the cut:
     FastMCP embeds a TypedDict's docstring into every schema carrying it, so rationale written
     there shipped once per tool. Since GQ-224 ``OutputSchemaProseStrip`` removes it from the
-    listing, because the outputSchema measurably does not reach a model.
+    listing, because the host measured at the client on 2026-08-30 does not deliver the
+    outputSchema.
 
     GP-15 moved core +3191 and full +3249, from 67_100 / 79_905, and the split of that figure is
     the honest half. Only 472 chars are the edit itself: the ``get_guide`` topic description gained

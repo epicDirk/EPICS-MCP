@@ -29,8 +29,8 @@ carry breaking changes).
 
 - **The `outputSchema` of a tool no longer carries prose.** `tools/list` repeated the one-line
   docstring of the `reach` shape as a `description` inside the `outputSchema` of every typed tool
-  that answers with it. Measured at the client, the host drops the `outputSchema` before a model
-  sees it, so that text reached nobody; the listed schemas now carry the structure only, and
+  that answers with it. Measured at the client on 2026-08-30, the host drops the `outputSchema`
+  before a model sees it, so on that host the text reached nobody (other hosts are unmeasured); the listed schemas now carry the structure only, and
   `structuredContent` is validated against exactly that structure as before. What a caller acts on
   was already in the server instructions ("Every read answer carries a reach field"). The
   description of `find_channels` no longer tells a caller to read the advertised `outputSchema`;
