@@ -88,12 +88,16 @@ Scope = Literal["not-configured", "loopback-only", "beyond-loopback"]
 REACH_KEY = "reach"
 
 
-# ⚠️ THE DOCSTRING BELOW IS ONE LINE, AND THAT IS A MEASURED CONSTRAINT RATHER THAN A STYLE.
+# ⚠️ THE DOCSTRING BELOW IS ONE LINE, AND THAT WAS A MEASURED CONSTRAINT RATHER THAN A STYLE.
 # FastMCP embeds a TypedDict's docstring into the outputSchema of every tool that returns a shape
-# carrying it, so this one ships EIGHTEEN times in ``tools/list``. Measured: the reasoning that
-# now stands in this comment cost 14 904 chars there, a 17.9 percent growth of the whole payload,
-# for text no caller needs at the point of use. A comment reaches the next author, which is who
-# it is for; a docstring reaches every client on every listing.
+# carrying it, and the Reach shape ships EIGHTEEN times in ``tools/list``. Measured: the reasoning
+# that now stands in this comment cost 14 904 chars there, a 17.9 percent growth of the whole
+# payload, for text no caller needs at the point of use.
+# ⚠️ Since GQ-224 (2026-09-13) its docstring no longer rides along: ``wire_schema`` strips every
+# ``description`` from a listed outputSchema, because measured at the client on 2026-08-30 the
+# host drops that field before a model sees it, so the text never reached one. What a caller acts
+# on stands in the server instructions ("Every read answer carries a reach field"). The line stays
+# short anyway: a comment reaches the next author, which is who the reasoning is for.
 # ⚠️ That count said TWELVE until the post-build review counted it: 14 904 / 18 is 828, the length
 # of the docstring it replaced, which is the arithmetic that settles it. Re-count rather than
 # trusting this line: the tools carrying the shape are the ones whose outputSchema has a

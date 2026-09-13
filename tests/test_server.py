@@ -3069,6 +3069,47 @@ async def test_output_schema_fields_carry_no_title_annotation() -> None:
         )
 
 
+def _prose_keys_anywhere(node: object, path: str = "root") -> list[str]:
+    """NAIVE walk: every ``description``, ``title`` or ``examples`` KEY wherever it stands, a
+    property of that name included. Deliberately not schema-aware, unlike the walker above, so it
+    shares no classification with ``wire_schema.strip_schema_prose`` and cannot inherit a mistake
+    from it."""
+    hits: list[str] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in {"description", "title", "examples"}:
+                hits.append(f"{path}.{key}")
+            hits += _prose_keys_anywhere(value, f"{path}.{key}")
+    elif isinstance(node, list):
+        for i, item in enumerate(node):
+            hits += _prose_keys_anywhere(item, f"{path}[{i}]")
+    return hits
+
+
+@pytest.mark.asyncio
+async def test_no_listed_output_schema_carries_prose() -> None:
+    """GQ-224: no outputSchema on the wire carries prose. Measured at the client on 2026-08-30,
+    the host drops the outputSchema before a model sees it, so the docstring FastMCP writes there
+    reached nobody; ``OutputSchemaProseStrip`` removes it from the listing. Every listed tool is
+    walked through ``outputSchema or {}``, typed or not, and no typed-set membership is asserted
+    here, so the red proof documented on ``test_output_schema_typed_only_for_typed_tools`` keeps
+    tripping the count it names. A property NAMED ``description`` would read as a find; none
+    exists today, and whoever adds one decides consciously."""
+
+    offenders = {
+        tool.name: found
+        for tool in await wire_tools()
+        if (found := _prose_keys_anywhere(tool.outputSchema or {}))
+    }
+    assert not offenders, (
+        f"prose on a listed outputSchema: {offenders}. The field does not reach a model "
+        "(measured at the client on 2026-08-30): a sentence a caller acts on goes into the tool "
+        "description or the server instructions. A description here means OutputSchemaProseStrip "
+        "is no longer registered on the server; a title or examples means FastMCP started "
+        "emitting them."
+    )
+
+
 @pytest.mark.asyncio
 async def test_output_schemas_carry_no_null_default() -> None:
     """MA-Q1 A3 (L1): NO typed-outputSchema node carries a ``default: null`` (the always-null
@@ -3191,8 +3232,10 @@ async def test_output_schema_typed_only_for_typed_tools() -> None:
 
 @pytest.mark.asyncio
 async def test_field_descriptions_survive_the_strip() -> None:
-    """MA-Q1: whatever suppresses the ``title`` ANNOTATIONS must not touch field ``description``s:
-    the point-of-need semantics the repo DoD requires. Spot-check a distinctive, anchored one."""
+    """MA-Q1: whatever suppresses the ``title`` ANNOTATIONS must not touch field ``description``s
+    of the INPUT schema: the point-of-need semantics the repo DoD requires. Spot-check a
+    distinctive, anchored one. The OUTPUT schema is the other case since GQ-224: its descriptions
+    are stripped on purpose, because that field measurably does not reach a model."""
 
     tools = await wire_tools_by_name()
     name_pattern = tools["find_channels"].inputSchema["properties"]["name_pattern"]
@@ -3287,12 +3330,15 @@ async def test_stripped_tool_still_returns_structured_content(
 # tools/list size-gate ceiling (chars of the compact ListToolsResult wire payload). Until
 # 2026-07-25 this was a TIGHT budget guard at 70_000 that forced S29 output-schema typing to land
 # one tool per session. It was raised to 200_000: typed output-schema bytes make tool RESULTS
-# machine-readable (the core value of S29) and cost only ~1% more context per agent turn, so the
-# tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
-# longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
-# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-09-13 after GQ-224: the core
-# lane is 78_360 and the full lane 92_445 (the docstring below splits the steps). Measured
-# 2026-09-05 after GQ-297 it was 78_361 / 92_446, +974 each against the pair before it. Measured
+# machine-readable (the core value of S29) and were then reckoned at ~1% more context per agent
+# turn, so the tools we need anyway may be typed freely. ⚠️ That reckoning assumed the schema
+# reaches the agent; measured at the client on 2026-08-30 it does not, the host drops the
+# outputSchema, and since GQ-224 its prose is stripped from the listing too. The guard is now a
+# SOFT catastrophe-ceiling: it no longer bounds each tool's growth, only trips on an extreme
+# accidental blow-up. It stays RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-09-13
+# after GQ-224: the core lane is 76_740 and the full lane 90_825 (the docstring below splits the
+# steps). Measured 2026-09-05 after GQ-297 it was 78_361 / 92_446, +974 each against the pair
+# before it. Measured
 # THREE times, and the last one is the recorded one, which is the whole reason this comment says
 # "ANY change that can reach the wire" rather than "any code change": the post-build QA replaced
 # two sentences of that same description, one false at exactly ceiling-many hits and one that
@@ -3345,12 +3391,14 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 78_360 and the full lane
-    92_445, re-measured 2026-09-13 on both lanes with the display-gated tools excluded for the core
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 76_740 and the full lane
+    90_825, re-measured 2026-09-13 on both lanes with the display-gated tools excluded for the core
     one, since a lane estimated rather than measured is the error the constant's comment records.
-    GQ-224 moved both lanes by -1 in its first step: the ``find_channels`` sentence that sent a
-    caller to the advertised output schema, which the host measurably does not deliver, now names
-    ``enabled`` and ``reach`` as present on every path instead.
+    GQ-224 moved both lanes in two steps, from 78_361 / 92_446. First -1 / -1: the
+    ``find_channels`` sentence that sent a caller to the advertised output schema, which the host
+    measurably does not deliver, now names ``enabled`` and ``reach`` as present on every path
+    instead. Then -1_620 / -1_620: ``OutputSchemaProseStrip`` removes the ``Reach`` docstring from
+    every listed output schema carrying it, all of them core, hence the identical delta.
     GQ-297 added +974 / +974, all of it on ``search_logbook`` and therefore on both lanes: the new
     ``total_matches_capped`` property plus the description paragraph explaining a saturated
     ``total_matches``. Before it, GQ-231 added +1 / +1 (a re-wrapped size sentence, one space
@@ -3401,7 +3449,8 @@ async def test_tools_list_within_budget() -> None:
     schema bytes and measured separately for that reason. The schema half was +14_904 before
     the ``Reach`` docstring was cut to one line, which is the measurement that made the cut:
     FastMCP embeds a TypedDict's docstring into every schema carrying it, so rationale written
-    there ships once per tool.
+    there shipped once per tool. Since GQ-224 ``OutputSchemaProseStrip`` removes it from the
+    listing, because the outputSchema measurably does not reach a model.
 
     GP-15 moved core +3191 and full +3249, from 67_100 / 79_905, and the split of that figure is
     the honest half. Only 472 chars are the edit itself: the ``get_guide`` topic description gained

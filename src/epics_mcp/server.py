@@ -90,6 +90,7 @@ from epics_mcp.tools.olog import (
 )
 from epics_mcp.tools.read import _get_pv_value, _get_pvs
 from epics_mcp.tools.write import _set_pv_value
+from epics_mcp.wire_schema import OutputSchemaProseStrip
 
 logger = logging.getLogger(__name__)
 
@@ -274,6 +275,9 @@ mcp = FastMCP(
     # and a deliberate operator choice, not ours to make: True would mask internal exception
     # strings, more consistent with the redaction posture but leaving no detail on a bug.
     mask_error_details=False,
+    # Return-shape docstrings stay for the human reader and leave the listed outputSchema:
+    # measured at the client, that field never reached a model (see wire_schema.py).
+    transforms=[OutputSchemaProseStrip()],
 )
 
 

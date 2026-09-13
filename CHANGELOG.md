@@ -27,6 +27,15 @@ carry breaking changes).
 
 ### Changed
 
+- **The `outputSchema` of a tool no longer carries prose.** `tools/list` repeated the one-line
+  docstring of the `reach` shape as a `description` inside the `outputSchema` of every typed tool
+  that answers with it. Measured at the client, the host drops the `outputSchema` before a model
+  sees it, so that text reached nobody; the listed schemas now carry the structure only, and
+  `structuredContent` is validated against exactly that structure as before. What a caller acts on
+  was already in the server instructions ("Every read answer carries a reach field"). The
+  description of `find_channels` no longer tells a caller to read the advertised `outputSchema`;
+  it names `enabled` and `reach` as the fields present on every path instead.
+
 - **BREAKING: `search_logbook` no longer presents `total_matches` as a total.** Olog takes its
   `hitCount` from Elasticsearch, which stops counting at a ceiling and marks the saturated value
   with a `relation` field that Olog then discards. Measured against a production logbook, the same
